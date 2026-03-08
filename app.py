@@ -38,6 +38,10 @@ device_locks_lock = threading.Lock()
 ssh_pool = queue.Queue(maxsize=5)
 ssh_lock = threading.Lock()
 
+# scrcpy投屏会话管理 - 跟踪设备投屏状态
+scrcpy_sessions = {}  # {device_id: {'session_id': xxx, 'start_time': xxx}}
+scrcpy_sessions_lock = threading.Lock()
+
 # ==================== 会话管理 ====================
 def get_session_id():
     """获取或创建会话ID"""
@@ -1300,17 +1304,23 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             }), 503
 
         # 5. Start x11vnc (matching GUI lines 2619-2631)
-        x11vnc_cmd = (
-            "export DISPLAY=:0 && "
-            f"export XAUTHORITY=/home/{ubuntu_user}/.Xauthority && "
-            "x11vnc -display :0 -forever -shared -rfbauth ~/.vnc/passwd -bg -o ~/logs/x11vnc.log"
-        )
+        # First check if x11vnc is already running on port 5900
+        check_x11_cmd = "pgrep -f 'x11vnc.*:0' && echo 'RUNNING' || echo 'NOT_RUNNING'"
+        check_output, _, _ = execute_ssh_command(ssh, check_x11_cmd, timeout=5)
+        x11vnc_running = 'RUNNING' in check_output
 
-        # Kill existing x11vnc first
-        execute_ssh_command(ssh, "pkill -f 'x11vnc.*:0'", timeout=5)
-        time.sleep(1)
+        if not x11vnc_running:
+            x11vnc_cmd = (
+                "export DISPLAY=:0 && "
+                f"export XAUTHORITY=/home/{ubuntu_user}/.Xauthority && "
+                "x11vnc -display :0 -forever -shared -rfbauth ~/.vnc/passwd -bg -o ~/logs/x11vnc.log"
+            )
 
-        x11_output, x11_error, x11_code = execute_ssh_command(ssh, x11vnc_cmd, timeout=15)
+            # Kill existing x11vnc first (to be safe)
+            execute_ssh_command(ssh, "pkill -f 'x11vnc.*:0'", timeout=5)
+            time.sleep(1)
+
+            x11_output, x11_error, x11_code = execute_ssh_command(ssh, x11vnc_cmd, timeout=15)
 
         # Wait and extract port from x11vnc output
         time.sleep(2)
@@ -1323,22 +1333,38 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             vnc_port = int(port_output.strip())
 
         # 6. Start noVNC websockify (matching GUI lines 2633-2639)
-        # Kill existing websockify first
-        execute_ssh_command(ssh, "pkill -f 'websockify.*6080'", timeout=5)
-        time.sleep(1)
+        # First check if websockify is already running on port 6080
+        check_websockify_cmd = "pgrep -f 'websockify.*6080' && echo 'RUNNING' || echo 'NOT_RUNNING'"
+        check_ws_output, _, _ = execute_ssh_command(ssh, check_websockify_cmd, timeout=5)
+        websockify_running = 'RUNNING' in check_ws_output
 
-        novnc_cmd = (
-            f"cd /opt/noVNC && "
-            f"nohup ./utils/websockify/run --web /opt/noVNC 6080 localhost:{vnc_port} "
-            f"> ~/logs/novnc.log 2>&1 &"
-        )
-        execute_ssh_command(ssh, novnc_cmd, timeout=10)
+        if not websockify_running:
+            # Kill existing websockify first (to be safe)
+            execute_ssh_command(ssh, "pkill -f 'websockify.*6080'", timeout=5)
+            time.sleep(1)
+
+            novnc_cmd = (
+                f"cd /opt/noVNC && "
+                f"nohup ./utils/websockify/run --web /opt/noVNC 6080 localhost:{vnc_port} "
+                f"> ~/logs/novnc.log 2>&1 &"
+            )
+            execute_ssh_command(ssh, novnc_cmd, timeout=10)
 
         return_ssh_connection(ssh)
 
+        # Build appropriate message
+        if x11vnc_running and websockify_running:
+            message = 'ℹ️ VNC服务已在运行'
+        elif x11vnc_running or websockify_running:
+            message = '✅ VNC服务已启动（部分服务已在运行）'
+        else:
+            message = '✅ VNC服务已启动'
+
         return jsonify({
             'success': True,
-            'message': '✅ VNC服务已启动',
+            'message': message,
+            'x11vnc_running': x11vnc_running,
+            'websockify_running': websockify_running,
             'vnc_port': vnc_port,
             'web_port': 6080,
             'url': f"http://{ubuntu_host}:6080/vnc.html?autoconnect=true",
@@ -2017,8 +2043,10 @@ def start_screen_mirroring():
         return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
 
     try:
+        session_id = get_session_id()
         results = []
         vnc_ports = []
+        already_running_devices = []
 
         # Check VNC service status first
         vnc_check_cmd = f"curl -s -o /dev/null -w '%{{http_code}}' http://{ubuntu_host}:6080 --connect-timeout 3"
@@ -2089,6 +2117,31 @@ def start_screen_mirroring():
             if y_offset + window_height > screen_height:
                 y_offset = max(0, screen_height - window_height - vertical_margin)
 
+            # Check if device is already being mirrored
+            with scrcpy_sessions_lock:
+                session_info = scrcpy_sessions.get(device_id)
+
+            # Verify if scrcpy process is actually running for this device
+            check_cmd = f"pgrep -f 'scrcpy.*-s {device_id}' && echo 'RUNNING' || echo 'NOT_RUNNING'"
+            check_output, _, _ = execute_ssh_command(ssh, check_cmd, timeout=5)
+            is_process_running = 'RUNNING' in check_output
+
+            if session_info and is_process_running:
+                # Device is already being mirrored, skip
+                already_running_devices.append(device_id)
+                results.append({
+                    'device': device_id,
+                    'success': True,
+                    'already_running': True,
+                    'message': '已在投屏'
+                })
+                vnc_ports.append({
+                    'device': device_id,
+                    'url': f"http://{ubuntu_host}:6080/vnc.html?autoconnect=true" if vnc_available else None,
+                    'message': 'VNC查看可用（已投屏）'
+                })
+                continue
+
             # Start scrcpy with window tiling if VNC available
             if vnc_available:
                 cmd = (
@@ -2117,29 +2170,65 @@ def start_screen_mirroring():
             import time
             time.sleep(0.2)
 
-            results.append({
-                'device': device_id,
-                'success': True,
-                'position': {'x': x_offset, 'y': y_offset, 'width': window_width, 'height': window_height}
-            })
+            # Verify scrcpy started successfully
+            check_cmd = f"pgrep -f 'scrcpy.*-s {device_id}' && echo 'RUNNING' || echo 'NOT_RUNNING'"
+            check_output, _, _ = execute_ssh_command(ssh, check_cmd, timeout=5)
+            is_started = 'RUNNING' in check_output
 
-            vnc_ports.append({
-                'device': device_id,
-                'url': f"http://{ubuntu_host}:6080/vnc.html?autoconnect=true" if vnc_available else None,
-                'message': 'VNC查看可用' if vnc_available else '仅本地显示'
-            })
+            if is_started:
+                # Record the scrcpy session
+                with scrcpy_sessions_lock:
+                    scrcpy_sessions[device_id] = {
+                        'session_id': session_id,
+                        'start_time': datetime.now().isoformat()
+                    }
+
+                results.append({
+                    'device': device_id,
+                    'success': True,
+                    'already_running': False,
+                    'position': {'x': x_offset, 'y': y_offset, 'width': window_width, 'height': window_height}
+                })
+
+                vnc_ports.append({
+                    'device': device_id,
+                    'url': f"http://{ubuntu_host}:6080/vnc.html?autoconnect=true" if vnc_available else None,
+                    'message': 'VNC查看可用' if vnc_available else '仅本地显示'
+                })
+            else:
+                # Failed to start scrcpy
+                results.append({
+                    'device': device_id,
+                    'success': False,
+                    'already_running': False,
+                    'error': 'Failed to start scrcpy'
+                })
 
         return_ssh_connection(ssh)
 
         # Build response with GUI-style messages (matching GUI lines 2223-2226)
-        successful_devices = [r['device'] for r in results]
-        message = f"✅ 已启动{len(results)}个投屏设备: {', '.join(successful_devices)}"
+        newly_started = [r['device'] for r in results if r.get('success') and not r.get('already_running')]
+        failed_devices = [r['device'] for r in results if not r.get('success')]
+
+        # Build message
+        message_parts = []
+        if newly_started:
+            message_parts.append(f"✅ 已启动{len(newly_started)}个投屏设备: {', '.join(newly_started)}")
+        if already_running_devices:
+            message_parts.append(f"ℹ️ {len(already_running_devices)}个设备已在投屏: {', '.join(already_running_devices)}")
+        if failed_devices:
+            message_parts.append(f"❌ {len(failed_devices)}个设备启动失败: {', '.join(failed_devices)}")
+
+        message = '\n'.join(message_parts) if message_parts else '没有处理任何设备'
 
         return jsonify({
-            'success': True,
+            'success': len(failed_devices) == 0,
             'results': results,
             'vnc_sessions': vnc_ports,
             'message': message,
+            'newly_started': newly_started,
+            'already_running': already_running_devices,
+            'failed': failed_devices,
             'desktop_url': f"/desktop",
             'note': '点击"主机桌面"查看屏幕' if vnc_available else 'VNC未启动，屏幕仅在本地显示'
         })

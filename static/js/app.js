@@ -775,7 +775,24 @@ async function showDeviceScreen() {
 
         // Display result message
         if (result.success) {
-            addLogEntry(result.message || `屏幕投屏已启动，共 ${result.results?.length || 0} 个设备`, 'success');
+            // Display the detailed message from backend
+            if (result.message) {
+                // Split multi-line message and log each part
+                const lines = result.message.split('\n');
+                lines.forEach(line => {
+                    if (line.includes('✅')) {
+                        addLogEntry(line, 'success');
+                    } else if (line.includes('ℹ️')) {
+                        addLogEntry(line, 'info');
+                    } else if (line.includes('❌')) {
+                        addLogEntry(line, 'error');
+                    } else {
+                        addLogEntry(line, 'success');
+                    }
+                });
+            } else {
+                addLogEntry(`屏幕投屏已启动，共 ${result.results?.length || 0} 个设备`, 'success');
+            }
 
             // Display device info
             if (result.vnc_sessions && result.vnc_sessions.length > 0) {
@@ -798,7 +815,16 @@ async function showDeviceScreen() {
                 }
             }, 500);
 
-            showToast('屏幕投屏已启动', 'success');
+            // Show appropriate toast message
+            if (result.already_running && result.already_running.length > 0) {
+                if (result.newly_started && result.newly_started.length > 0) {
+                    showToast(`已启动 ${result.newly_started.length} 个设备，${result.already_running.length} 个设备已在投屏`, 'success');
+                } else {
+                    showToast(`所有 ${result.already_running.length} 个设备已在投屏`, 'info');
+                }
+            } else {
+                showToast('屏幕投屏已启动', 'success');
+            }
         } else {
             // Screen casting failed - show errors
             addLogEntry(result.message || '屏幕投屏启动失败', 'error');
