@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>测试界面 - GMS 远程测试</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/xterm/xterm.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='vendor/xterm/xterm.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/xterm/xterm-addon-fit.min.js') }}"></script>
+    <style>
+        /* 页面切换样式 */
+        .page-content {
+            display: none;
+        }
+        .page-content.active {
+            display: block;
+        }
+        /* 终端页面样式 */
+        .terminal-main-container {
+            display: none;
+            flex-direction: column;
+            height: 100vh;
+            padding: 0;
+            gap: 0;
+            width: 100%;
+        }
+        .terminal-main-container.active {
+            display: flex;
+        }
+        .terminal-header-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: var(--light-bg);
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .terminal-title-section {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .terminal-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .connection-info {
+            font-size: 11px;
+            color: var(--text-secondary);
+            padding: 4px 8px;
+            background: var(--darker-bg);
+            border-radius: 4px;
+        }
+        .connection-info span {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        .terminal-status {
+            font-size: 10px;
+            padding: 4px 8px;
+            border-radius: 3px;
+            background: var(--darker-bg);
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        .terminal-status.connected {
+            background: rgba(76, 175, 80, 0.2);
+            color: var(--success-color);
+        }
+        .terminal-status.disconnected {
+            background: rgba(244, 67, 54, 0.2);
+            color: var(--danger-color);
+        }
+        .terminal-controls {
+            display: flex;
+            gap: 6px;
+        }
+        .btn-xs {
+            padding: 4px 10px;
+            font-size: 11px;
+            background: var(--light-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+        .btn-xs:hover {
+            background: var(--border-color);
+            transform: translateY(-1px);
+        }
+        .terminal-wrapper {
+            flex: 1;
+            background: #000;
+            border: none;
+            border-radius: 0;
+            overflow: hidden;
+            position: relative;
+            min-height: 0;
+        }
+        #terminal {
+            width: 100%;
+            height: 100%;
+        }
+        /* 桌面页面样式 */
+        .desktop-container {
+            display: none;
+            height: 100vh;
+            padding: 0;
+        }
+        .desktop-container.active {
+            display: block;
+        }
+        .vnc-canvas {
+            width: 100%;
+            height: 100vh;
+            background: #000;
+            position: relative;
+        }
+        .vnc-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- 左侧导航栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-brand">GMS 远程测试</div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="sidebar-item active" data-page="test" onclick="switchPage('test', event)">
+                    <span class="sidebar-icon">📱</span>
+                    <span class="sidebar-text">测试界面</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="desktop" onclick="switchPage('desktop', event)">
+                    <span class="sidebar-icon">🖥️</span>
+                    <span class="sidebar-text">主机桌面</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="terminal" onclick="switchPage('terminal', event)">
+                    <span class="sidebar-icon">🐧</span>
+                    <span class="sidebar-text">主机终端</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 右侧主内容区 -->
+        <!-- 测试界面页面 -->
+        <div class="container page-content active" id="page-test">
+            <!-- 参数设置区 -->
+            <div class="input-container">
+                <div class="section-title">参数设置</div>
+
+                <!-- 使用表格布局确保对齐 -->
+                <table class="input-table">
+                    <tr>
+                        <!-- 左部分：测试类型、测试模块、测试用例 -->
+                        <td class="input-cell">
+                            <div class="left-frame">
+                                <div class="form-row">
+                                    <label>测试类型:</label>
+                                    <select id="test-type" class="combo-box">
+                                        <option value="CTS" selected>CTS</option>
+                                        <option value="GSI">GSI</option>
+                                        <option value="GTS">GTS</option>
+                                        <option value="STS">STS</option>
+                                        <option value="VTS">VTS</option>
+                                        <option value="APTS">APTS</option>
+                                    </select>
+                                </div>
+                                <div class="form-row">
+                                    <label>测试模块:</label>
+                                    <input type="text" id="test-module" class="entry-field" />
+                                </div>
+                                <div class="form-row">
+                                    <label>测试用例:</label>
+                                    <input type="text" id="test-case" class="entry-field" />
+                                </div>
+                            </div>
+                        </td>
+
+                        <!-- 中间部分：测试脚本、测试套件、测试报告 -->
+                        <td class="input-cell">
+                            <div class="middle-frame">
+                                <div class="form-row">
+                                    <label>测试脚本:</label>
+                                    <input type="text" id="script-path" class="entry-field readonly" value="{{ config.script_path }}" readonly />
+                                </div>
+                                <div class="form-row">
+                                    <label>测试套件:</label>
+                                    <div class="input-with-btn">
+                                        <input type="text" id="suite-path" class="entry-field" value="{{ config.suites_path }}" />
+                                        <button class="btn-small" onclick="browseRemoteFile('suite')">📁 选择套件</button>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <label>测试报告:</label>
+                                    <div class="input-with-btn">
+                                        <input type="text" id="retry-result" class="entry-field" />
+                                        <button class="btn-small" onclick="browseRemoteFile('retry')">📁 选择报告</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+
+                        <!-- 右部分：测试主机、设备主机、本地主机 -->
+                        <td class="input-cell">
+                            <div class="right-frame">
+                                <div class="form-row">
+                                    <label>测试主机:</label>
+                                    <input type="text" id="ubuntu-host" class="entry-field readonly"
+                                           value="{{ config.ubuntu_user }}@{{ config.ubuntu_host }}" readonly />
+                                </div>
+                                <div class="form-row">
+                                    <label>设备主机:</label>
+                                    <input type="text" id="device-host" class="entry-field" value="{{ config.device_host }}" />
+                                </div>
+                                <div class="form-row">
+                                    <label>本地主机:</label>
+                                    <input type="text" id="local-server" class="entry-field" value="{{ config.local_server }}" />
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- ADB设备区 + 操作控制区 -->
+            <div class="middle-row">
+                <!-- ADB设备区 -->
+                <div class="adb-frame">
+                    <div class="section-title">ADB设备</div>
+                    <div class="device-list-container">
+                        <div class="device-canvas" id="device-canvas">
+                            <div class="device-column" id="device-list-left">
+                                <div class="empty-message">点击刷新按钮获取设备列表...</div>
+                            </div>
+                            <div class="device-column" id="device-list-right">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- ADB 控制按钮 -->
+                    <div class="adb-button-frame">
+                        <button class="btn-xxs" onclick="refreshDevices()">🔄 刷新设备</button>
+                        <button class="btn-xxs" onclick="selectAllDevices()">✅ 全选设备</button>
+                        <button class="btn-xxs" onclick="rebootDevices()">⏻ 重启设备</button>
+                        <button class="btn-xxs" onclick="remountDevices()">⏻ Remount</button>
+                        <button class="btn-xxs" onclick="connectWifi()">🛜 连接Wifi</button>
+                        <button class="btn-xxs" onclick="lockSelectedDevices('lock')">🔒 锁定设备</button>
+                        <button class="btn-xxs" onclick="lockSelectedDevices('unlock')">🔓 解锁设备</button>
+                        <button class="btn-xxs" onclick="checkDeviceLockStatus()">🔐 锁定状态</button>
+                        <button class="btn-xxs" onclick="collectDeviceInfo()">📋 设备信息</button>
+                    </div>
+                    <!-- VNC 控制按钮 -->
+                    <div class="vnc-button-frame">
+                        <button class="btn-xxs" onclick="burnFirmware()">🔥 烧写固件</button>
+                        <button class="btn-xxs" onclick="burnGsiImage()">🔥 烧写GSI</button>
+                        <button class="btn-xxs" onclick="burnSerialNumber()">🔥 烧写SN码</button>
+                        <button class="btn-xxs" onclick="initAndStartVnc()">🚀 启动VNC</button>
+                        <button class="btn-xxs" onclick="showDeviceScreen()">📺 显示屏幕</button>
+                        <button class="btn-xxs" id="adb-forward-btn" onclick="setupAdbPortForward()">🔌 端口转发</button>
+                        <button class="btn-xxs" id="usbip-btn" onclick="setupUsbipForward()">📱 本地设备</button>
+                    </div>
+                </div>
+
+                <!-- 操作控制区 -->
+                <div class="control-frame">
+                    <div class="section-title">操作控制</div>
+                    <!-- VPN 控制按钮 -->
+                    <div class="vpn-btn-frame">
+                        <button class="btn-xxs" onclick="checkSshd()">📡 检查SSHD</button>
+                        <button class="btn-xxs" onclick="checkRouting()">📡 检查路由</button>
+                        <button class="btn-xxs" id="vpn-connect-btn" onclick="connectVpn()">🔌 连接VPN</button>
+                        <button class="btn-xxs" onclick="checkVpnStatus()">📡 检查VPN</button>
+                        <span id="vpn-status-label" class="vpn-status-label">状态: 未知</span>
+                    </div>
+                    <!-- 文件上传区 -->
+                    <div class="upload-frame">
+                        <div class="form-row">
+                            <label>📁 本地文件:</label>
+                            <div id="drop-zone" class="drop-zone">
+                                <input type="file" id="local-file" class="file-input" style="display: none;" />
+                                <div class="drop-zone-text" id="drop-zone-text">
+                                    点击选择文件 或 拖拽文件到此处
+                                </div>
+                                <div class="drop-zone-filename" id="drop-zone-filename"></div>
+                            </div>
+                            <button class="btn-xs" onclick="handleUploadFile()">📤 上传到测试主机</button>
+                        </div>
+                        <!-- 上传进度 -->
+                        <div class="progress-container">
+                            <div class="progress-bar" id="upload-progress">
+                                <div class="progress-fill" id="upload-progress-fill"></div>
+                            </div>
+                            <div class="progress-info" id="progress-info"></div>
+                        </div>
+                    </div>
+                    <!-- 测试按钮 -->
+                    <div class="test-btn-frame">
+                        <button class="btn-primary btn-lg" id="test-toggle-btn" onclick="toggleTest()">▶ 开始测试</button>
+                        <button class="btn-xxs" onclick="setupSshKey()">🔑 SSH密钥</button>
+                        <button class="btn-xxs" onclick="cleanTest()">🧹 清除日志</button>
+                        <button class="btn-xxs" onclick="downloadTestLog()">📥 保存日志</button>
+                        <button class="btn-xxs" onclick="showConfig()">⚙️ 配置</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 日志区域 -->
+            <div class="log-frame">
+                <div class="section-title">测试日志</div>
+                <div class="log-text" id="log-output">
+                    <div class="log-entry">[系统] 等待开始测试...</div>
+                </div>
+            </div>
+        </div>
+        <!-- End of page-test -->
+
+        <!-- 桌面页面 -->
+        <div class="desktop-container" id="page-desktop">
+            <div class="vnc-canvas" id="vnc-canvas">
+                <iframe id="vnc-frame" class="vnc-iframe"
+                        src="http://{{ config.ubuntu_host }}:6080/vnc.html?autoconnect=true{% if config.vnc_password %}&password={{ config.vnc_password | urlencode }}{% endif %}"
+                        frameborder="0"
+                        allowfullscreen>
+                </iframe>
+            </div>
+        </div>
+
+        <!-- 终端页面 -->
+        <div class="terminal-main-container" id="page-terminal">
+            <!-- 终端头部 -->
+            <div class="terminal-header-section">
+                <div class="terminal-title-section">
+                    <div class="terminal-title">🐧 Ubuntu SSH 终端</div>
+                    <div class="connection-info">
+                        连接: <span>{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</span>
+                    </div>
+                    <div class="terminal-status" id="terminal-status">未连接</div>
+                </div>
+                <div class="terminal-controls">
+                    <button class="btn-xs" onclick="clearTerminal()">🧹 清空</button>
+                    <button class="btn-xs" onclick="reconnectTerminal()">🔄 重连</button>
+                </div>
+            </div>
+
+            <!-- 终端区域 -->
+            <div class="terminal-wrapper" id="terminal-wrapper">
+                <div id="terminal"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 弹框 -->
+    <div id="config-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">系统配置(config.json)</span>
+                <span class="modal-close" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body" id="config-modal-body">
+                <!-- 动态生成配置表单 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- WiFi配置弹框 -->
+    <div id="wifi-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">连接Wi-Fi</span>
+                <span class="modal-close" onclick="closeWifiModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row">
+                    <label>Wi-Fi 名称(SSID):</label>
+                    <input type="text" id="wifi-ssid" value="AndroidWifi" />
+                </div>
+                <div class="modal-form-row">
+                    <label>Wi-Fi 密码:</label>
+                    <input type="password" id="wifi-password" value="1234567890" />
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeWifiModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitWifiConfig()">连接</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 设备主机密码弹框 -->
+    <div id="device-password-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">设备主机SSH密码</span>
+                <span class="modal-close" onclick="closeDevicePasswordModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row">
+                    <label>设备主机:</label>
+                    <input type="text" id="device-host-display" />
+                </div>
+                <div class="modal-form-row">
+                    <label>SSH密码:</label>
+                    <input type="password" id="device-pswd" placeholder="请输入SSH密码" onkeypress="handleDevicePasswordKeyPress(event)" />
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeDevicePasswordModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitDevicePassword()">确定</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 烧写固件弹框 -->
+    <div id="firmware-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">烧写固件</span>
+                <span class="modal-close" onclick="closeFirmwareModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row">
+                    <label>System 镜像路径:</label>
+                        <div class="input-with-btn">
+                            <input type="text" id="firmware-system" placeholder="/path/to/system.img" />
+                            <button class="btn-small" onclick="browseRemoteFileForFirmware('firmware-system')">📁 浏览</button>
+                        </div>
+                </div>
+                <div class="modal-form-row">
+                    <label>Vendor Boot 镜像路径:</label>
+                        <div class="input-with-btn">
+                            <input type="text" id="firmware-vendor" placeholder="/path/to/vendor_boot.img (可选)" />
+                            <button class="btn-small" onclick="browseLocalFileForFirmware('firmware-vendor')">📁 本地</button>
+                            <button class="btn-small" onclick="browseRemoteFileForFirmware('firmware-vendor')">📁 远程</button>
+                        </div>
+                </div>
+                <div class="modal-form-row">
+                    <label>Misc 镜像路径:</label>
+                        <div class="input-with-btn">
+                            <input type="text" id="firmware-misc" placeholder="/path/to/misc.img" />
+                            <button class="btn-small" onclick="browseRemoteFileForFirmware('firmware-misc')">📁 浏览</button>
+                        </div>
+                </div>
+                <div class="modal-info-text">
+                    ⚠️ 注意：烧写固件会重启设备并进入 fastboot 模式，请确保已选择正确的设备。
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeFirmwareModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitFirmwareBurn()">开始烧写</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 烧写GSI弹框 -->
+    <div id="gsi-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">烧写GSI镜像</span>
+                <span class="modal-close" onclick="closeGsiModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row">
+                    <label>GSI烧写脚本:</label>
+                    <input type="text" id="gsi-script" class="readonly" placeholder="脚本路径" readonly />
+                </div>
+                <div class="modal-form-row">
+                    <label>System 镜像路径:</label>
+                    <div class="input-with-btn">
+                        <input type="text" id="gsi-system" placeholder="/path/to/system.img" />
+                        <button class="btn-small" onclick="browseRemoteFileForGsi()">📁 浏览</button>
+                    </div>
+                </div>
+                <div class="modal-form-row">
+                    <label>Vendor Boot 镜像:</label>
+                    <div class="input-with-btn">
+                        <input type="text" id="gsi-vendor" placeholder="/path/to/vendor_boot.img (可选)" />
+                        <button class="btn-small" onclick="browseLocalFileForVendor()">📁 浏览</button>
+                    </div>
+                </div>
+                <div class="modal-info-text">
+                    ℹ️ GSI烧写将使用 run_GSI_Burn.sh 脚本，该脚本会自动处理分区删除、镜像烧写和设备重启。
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeGsiModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitGsiBurn()">开始烧写</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 烧写SN码弹框 -->
+    <div id="sn-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">烧写SN码</span>
+                <span class="modal-close" onclick="closeSnModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row">
+                    <label>SN 码:</label>
+                    <input type="text" id="sn-code" placeholder="请输入SN码" />
+                </div>
+                <div class="modal-info-text">
+                    ⚠️ 该功能需要在 loader 模式下烧写 SN 码到设备。
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeSnModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitSnBurn()">开始烧写</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 文件浏览器弹框 -->
+    <div id="file-browser-modal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <span class="modal-title" id="file-browser-title">浏览文件</span>
+                <span class="modal-close" onclick="closeFileBrowserModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <button class="btn-xxs" onclick="navigateToParent()" title="上级目录">⬆️</button>
+                    <div class="file-browser-path" id="file-browser-current-path" style="flex: 1; cursor: pointer;" onclick="navigateToParent()" title="点击返回上级目录"></div>
+                </div>
+                <div class="file-browser-list" id="file-browser-list">
+                    <!-- 文件列表将动态生成 -->
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeFileBrowserModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="confirmFileSelection()">选择</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // ==================== 页面切换功能 ====================
+        let currentPage = 'test';
+        let terminalInitialized = false;
+        let terminal = null;
+        let terminalSocket = null;
+        let isTerminalConnected = false;
+
+        // 页面切换函数
+        function switchPage(pageName, event) {
+            if (event) {
+                event.preventDefault();
+            }
+
+            // 更新导航栏高亮
+            document.querySelectorAll('.sidebar-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            document.querySelector(`[data-page="${pageName}"]`).classList.add('active');
+
+            // 隐藏所有页面
+            document.getElementById('page-test').classList.remove('active');
+            document.getElementById('page-desktop').classList.remove('active');
+            document.getElementById('page-terminal').classList.remove('active');
+
+            // 显示目标页面
+            document.getElementById(`page-${pageName}`).classList.add('active');
+
+            currentPage = pageName;
+
+            // 动态更新页面标题
+            const titles = {
+                'test': '测试界面 - GMS 远程测试',
+                'terminal': '主机终端 - GMS 远程测试',
+                'desktop': '主机桌面 - GMS 远程测试'
+            };
+            document.title = titles[pageName] || 'GMS 远程测试';
+
+            // 如果切换到终端页面且未初始化，则初始化终端
+            if (pageName === 'terminal' && !terminalInitialized) {
+                initTerminal();
+            }
+
+            // 切换页面时重新fit终端（如果已初始化）
+            if (pageName === 'terminal' && terminalInitialized && terminal) {
+                setTimeout(() => {
+                    terminal.focus();
+                }, 100);
+            }
+
+            // 如果切换到桌面页面，确保iframe已加载（只加载一次）
+            if (pageName === 'desktop') {
+                const vncFrame = document.getElementById('vnc-frame');
+                if (vncFrame && !vncFrame.dataset.loaded) {
+                    vncFrame.dataset.loaded = 'true';
+                    console.log('[Desktop] VNC iframe loaded');
+                }
+            }
+        }
+
+        // ==================== 终端功能 ====================
+        const terminalConfig = {
+            ssh_host: '{{ config.ubuntu_host }}',
+            ssh_user: '{{ config.ubuntu_user }}',
+            ssh_password: '{{ config.ubuntu_pswd | default("", true) }}'
+        };
+
+        function updateTerminalStatus(connected) {
+            isTerminalConnected = connected;
+            const statusElement = document.getElementById('terminal-status');
+            if (statusElement) {
+                statusElement.textContent = connected ? '已连接' : '未连接';
+                statusElement.className = 'terminal-status ' + (connected ? 'connected' : 'disconnected');
+            }
+        }
+
+        function connectTerminalSocket() {
+            console.log('Connecting to terminal Socket.IO...');
+            updateTerminalStatus(false);
+
+            terminalSocket = io({
+                transports: ['websocket', 'polling']
+            });
+
+            terminalSocket.on('connect', () => {
+                console.log('Terminal Socket.IO connected');
+                updateTerminalStatus(true);
+
+                // 请求SSH连接
+                terminalSocket.emit('terminal_connect', {
+                    host: terminalConfig.ssh_host,
+                    user: terminalConfig.ssh_user,
+                    password: terminalConfig.ssh_password
+                });
+            });
+
+            terminalSocket.on('disconnect', () => {
+                console.log('Terminal Socket.IO disconnected');
+                updateTerminalStatus(false);
+                if (terminal) {
+                    terminal.writeln('\r\n\x1b[31m⚠️ 连接已断开\x1b[0m\r\n');
+                }
+            });
+
+            terminalSocket.on('terminal_data', (data) => {
+                if (terminal) {
+                    terminal.write(data);
+                }
+            });
+
+            terminalSocket.on('terminal_error', (data) => {
+                console.error('Terminal error:', data);
+                if (terminal) {
+                    terminal.writeln(`\r\n\x1b[31m❌ 错误: ${data.error}\x1b[0m\r\n`);
+                }
+                updateTerminalStatus(false);
+            });
+
+            terminalSocket.on('terminal_connected', () => {
+                console.log('SSH connected');
+                if (terminal) {
+                    terminal.clear();
+                    terminal.writeln('\x1b[32m✅ 已连接到 Ubuntu 主机\x1b[0m');
+                    terminal.writeln('\x1b[90m快捷键: Ctrl+L=清空\x1b[0m\r\n');
+                }
+                updateTerminalStatus(true);
+            });
+        }
+
+        function initTerminal() {
+            if (terminalInitialized) return;
+
+            console.log('Initializing terminal...');
+
+            if (typeof Terminal === 'undefined') {
+                console.error('Terminal is not defined!');
+                document.getElementById('terminal').innerHTML = `
+                    <div style="color:white;padding:40px;text-align:center;">
+                        <div style="font-size:48px;margin-bottom:20px;">❌</div>
+                        <div style="font-size:18px;margin-bottom:10px;">xterm.js 库加载失败</div>
+                        <div style="color:#aaa;font-size:14px;margin-bottom:20px;">
+                            可能原因：<br>
+                            1. 网络连接问题<br>
+                            2. CDN 访问受限<br>
+                            3. 防火墙阻止
+                        </div>
+                        <button onclick="location.reload()" style="padding:10px 20px;font-size:14px;cursor:pointer;background:#4CAF50;color:white;border:none;border-radius:4px;">
+                            🔄 刷新页面重试
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+
+            // 创建终端
+            terminal = new Terminal({
+                cursorBlink: true,
+                fontSize: 14,
+                fontFamily: 'Consolas, "Courier New", monospace',
+                theme: {
+                    background: '#000000',
+                    foreground: '#ffffff',
+                    cursor: '#ffffff',
+                    selection: 'rgba(255, 255, 255, 0.3)'
+                },
+                scrollback: 1000,
+                convertEol: true
+            });
+
+            // 加载FitAddon
+            try {
+                const fitAddon = new FitAddon.FitAddon();
+                terminal.loadAddon(fitAddon);
+
+                const container = document.getElementById('terminal');
+                terminal.open(container);
+                fitAddon.fit();
+
+                window.addEventListener('resize', () => {
+                    if (currentPage === 'terminal') {
+                        fitAddon.fit();
+                    }
+                });
+
+                console.log('FitAddon loaded');
+            } catch (e) {
+                console.error('FitAddon error:', e);
+                const container = document.getElementById('terminal');
+                terminal.open(container);
+            }
+
+            // 显示连接消息
+            terminal.writeln('\x1b[33m⏳ 正在连接到 Ubuntu 主机...\x1b[0m');
+            terminal.writeln(`\x1b[90m主机: ${terminalConfig.ssh_user}@${terminalConfig.ssh_host}\x1b[0m\r\n`);
+
+            // 设置数据处理器
+            terminal.onData((data) => {
+                if (isTerminalConnected && terminalSocket) {
+                    terminalSocket.emit('terminal_input', { data: data });
+                }
+            });
+
+            // 处理终端调整大小
+            terminal.onResize(({ cols, rows }) => {
+                if (terminalSocket && isTerminalConnected) {
+                    terminalSocket.emit('terminal_resize', { cols, rows });
+                }
+            });
+
+            // 聚焦终端
+            terminal.focus();
+
+            // 点击聚焦
+            document.getElementById('terminal-wrapper').addEventListener('click', () => {
+                terminal.focus();
+            });
+
+            // 连接Socket.IO
+            connectTerminalSocket();
+
+            terminalInitialized = true;
+            console.log('Terminal initialized');
+        }
+
+        // 终端控制函数
+        function clearTerminal() {
+            if (terminal) {
+                terminal.clear();
+            }
+        }
+
+        function reconnectTerminal() {
+            if (terminalSocket) {
+                terminalSocket.disconnect();
+            }
+            if (terminal) {
+                terminal.clear();
+                terminal.writeln('\x1b[33m🔄 正在重新连接...\x1b[0m\r\n');
+            }
+            connectTerminalSocket();
+        }
+
+        // 键盘快捷键
+        document.addEventListener('keydown', (e) => {
+            if (currentPage !== 'terminal') return;
+
+            if (e.ctrlKey && e.key === 'l') {
+                e.preventDefault();
+                clearTerminal();
+            }
+        });
+
+        // 页面加载完成后，如果是终端页面则初始化终端
+        window.addEventListener('load', () => {
+            const hash = window.location.hash.substring(1);
+            if (hash === 'desktop') {
+                switchPage('desktop');
+            } else if (hash === 'terminal') {
+                switchPage('terminal');
+            }
+        });
+    </script>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</div> <!-- End of main-container -->
+</body>
+</html>
