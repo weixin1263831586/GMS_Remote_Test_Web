@@ -100,7 +100,6 @@ def cleanup_old_sessions():
 
         for client_id in expired_sessions:
             del user_states[client_id]
-            print(f"[DEBUG] Cleaned up expired session: {client_id}")
 
 # 定期清理旧会话
 def cleanup_task():
@@ -138,7 +137,6 @@ def handle_connect():
     """客户端连接时加入个人房间"""
     client_id = get_client_id()
     join_room(client_id)
-    print(f"[DEBUG] Client connected: {client_id}")
     emit('connected', {'client_id': client_id})
 
 @socketio.on('disconnect')
@@ -156,11 +154,8 @@ def handle_disconnect():
         devices_to_release = [dev_id for dev_id, info in device_locks.items() if info.get('client_id') == client_id]
         for device_id in devices_to_release:
             # 如果测试正在运行，不要释放设备锁
-            if test_running:
-                print(f"[DEBUG] Keeping device {device_id} locked (test still running)")
-            else:
+            if not test_running:
                 del device_locks[device_id]
-                print(f"[DEBUG] Released device {device_id} for client {client_id}")
 
     # 清理该用户的终端SSH连接（如果存在）
     with terminal_lock:
@@ -172,7 +167,6 @@ def handle_disconnect():
                 print(f"[TERMINAL] Error closing SSH for socket {request.sid}: {e}")
             del terminal_ssh[request.sid]
 
-    print(f"[DEBUG] Client disconnected: {client_id}, test_running: {test_running}")
 
 # ==================== 设备锁定管理 ====================
 def try_lock_devices(client_id, devices, user_info=''):
@@ -207,7 +201,6 @@ def release_devices(client_id, devices):
         for device_id in devices:
             if device_id in device_locks and device_locks[device_id].get('client_id') == client_id:
                 del device_locks[device_id]
-                print(f"[DEBUG] Released device {device_id} for client {client_id}")
 
 def get_device_locks_status():
     """获取所有设备的锁定状态"""
@@ -302,7 +295,6 @@ def save_test_logs(test_type, client_id, exit_code=None):
         with user_states_lock:
             user_state['log_file'] = log_path
 
-        print(f"[DEBUG] 日志已保存到: {log_path}")
         return log_path
 
     except Exception as e:
@@ -316,12 +308,9 @@ def create_ssh_connection(config):
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-        print(f"[DEBUG] Attempting SSH connection to {config['ubuntu_host']} with user {config['ubuntu_user']}")
 
         if config.get('use_key_auth', False):
-            print("[DEBUG] Using key-based authentication")
             key_path = os.path.expanduser(config.get('private_key_path', '~/.ssh/id_rsa'))
-            print(f"[DEBUG] Key path: {key_path}")
             key = paramiko.RSAKey.from_private_key_file(key_path)
             ssh.connect(
                 config['ubuntu_host'],
@@ -330,7 +319,6 @@ def create_ssh_connection(config):
                 timeout=10
             )
         else:
-            print("[DEBUG] Using password authentication")
             password = config.get('ubuntu_pswd', '')
             if not password:
                 print("[ERROR] No SSH password configured in config.json")
@@ -342,7 +330,6 @@ def create_ssh_connection(config):
                 timeout=10
             )
 
-        print(f"[DEBUG] SSH connection established successfully")
         return ssh
     except Exception as e:
         print(f"[ERROR] SSH connection error: {e}")
@@ -393,7 +380,6 @@ def create_device_ssh_connection(config):
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(hostname=hostname, username=username, password=password, timeout=10)
-        print(f"[DEBUG] Connected to device host {hostname}")
         return ssh
     except Exception as e:
         print(f"[ERROR] Failed to connect to device host: {e}")
@@ -411,27 +397,22 @@ def is_windows_host(ssh):
 # ==================== Device Management ====================
 def get_connected_devices(config):
     """Get list of connected Android devices"""
-    print(f"[DEBUG] Getting connected devices...")
     ssh = get_ssh_connection(config)
     if not ssh:
         print("[ERROR] Failed to get SSH connection")
         return []
 
     try:
-        print("[DEBUG] Executing 'adb devices' command...")
         output, error, code = execute_ssh_command(ssh, "adb devices")
-        print(f"[DEBUG] ADB devices output (code={code}):\n{output}")
-        if error:
-            print(f"[DEBUG] ADB devices error:\n{error}")
+        if error and code != 0:
+            pass
 
         devices = []
         for line in output.split('\n')[1:]:
             if line.strip() and '\tdevice' in line:
                 device_id = line.split('\t')[0]
-                print(f"[DEBUG] Found device: {device_id}")
                 devices.append(device_id)
         return_ssh_connection(ssh)
-        print(f"[DEBUG] Returning {len(devices)} devices")
         return devices
     except Exception as e:
         print(f"[ERROR] Error getting devices: {e}")
@@ -445,11 +426,9 @@ def run_test_suite(config, test_params, client_id):
         print(f"[ERROR] Session {client_id} not found in run_test_suite")
         return
 
-    print(f"[DEBUG] run_test_suite() called with params: {test_params}, client_id: {client_id}")
 
     # 从 client_id 解析 device_host (格式: username@ip)
     config['device_host'] = client_id
-    print(f"[DEBUG] Using device_host from client_id: {config['device_host']}")
 
     user_state['running'] = True
     user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] Starting test suite...")
@@ -562,7 +541,6 @@ def run_test_suite(config, test_params, client_id):
         socketio.emit('log_update', {'log': f"🚀 执行命令: {command}"}, room=client_id)
 
         # Execute with real-time output (matching GUI.py logic)
-        print(f"[DEBUG] Executing command: {command}")
         stdin, stdout, stderr = ssh.exec_command(command, get_pty=True)
 
         # Real-time output reading loop (matching GUI lines 2420-2429)
@@ -591,7 +569,6 @@ def run_test_suite(config, test_params, client_id):
 
         # Get final exit status
         exit_status = stdout.channel.recv_exit_status()
-        print(f"[DEBUG] Exit status: {exit_status}")
         return_ssh_connection(ssh)
 
         if exit_status == 0:
@@ -840,18 +817,15 @@ def get_device_locks():
 @app.route('/api/test/start', methods=['POST'])
 def start_test():
     """Start test execution - matches GUI with full parameter support"""
-    print(f"[DEBUG] start_test() called")
 
     # 获取当前用户状态
     user_state = get_user_state()
     if user_state['running']:
-        print(f"[DEBUG] Test already running for this user")
         return jsonify({'success': False, 'error': '您已有测试正在运行'}), 400
 
     data = request.json
     devices = data.get('devices', [])
 
-    print(f"[DEBUG] Devices: {devices}")
     if not devices:
         return jsonify({'success': False, 'error': 'No devices selected'}), 400
 
@@ -887,21 +861,18 @@ def start_test():
         'client_id': client_id
     }
 
-    print(f"[DEBUG] test_params: {test_params}")
     config = load_config()
 
     # Save test_type for stop_test function
     update_user_state({'test_type': test_params['test_type']})
 
     # Start test in background thread with all parameters
-    print(f"[DEBUG] Starting test thread...")
     test_thread = threading.Thread(
         target=run_test_suite,
         args=(config, test_params, client_id)
     )
     test_thread.daemon = True
     test_thread.start()
-    print(f"[DEBUG] Test thread started")
 
     # Update user state to mark test as running and save devices
     update_user_state({'running': True, 'devices': devices})
@@ -2122,7 +2093,6 @@ def autocomplete_suite():
     test_type = data.get('test_type', 'CTS').lower()
     base_path = data.get('base_path', '')
 
-    print(f"[DEBUG] autocomplete_suite: test_type={test_type}, base_path={base_path}")
 
     config = load_config()
     ssh = get_ssh_connection(config)
@@ -2153,17 +2123,13 @@ def autocomplete_suite():
         binary = config_info['binary']
         candidate = f"{base_path}/{subdir}/tools"
 
-        print(f"[DEBUG] Checking candidate path: {candidate}/{binary}")
 
         # Check if binary exists in candidate path
         check_cmd = f"[ -x '{candidate}/{binary}' ] && echo '{candidate}' || echo ''"
-        print(f"[DEBUG] Check command: {check_cmd}")
         output, error, code = execute_ssh_command(ssh, check_cmd)
-        print(f"[DEBUG] Check result: output='{output.strip()}', code={code}")
 
         if output.strip():
             final_path = output.strip()
-            print(f"[DEBUG] Binary found! Path: {final_path}")
             return_ssh_connection(ssh)
             return jsonify({
                 'success': True,
@@ -2173,7 +2139,6 @@ def autocomplete_suite():
             })
 
         # If binary not found, return original path with warning (GUI behavior)
-        print(f"[DEBUG] Binary NOT found at {candidate}/{binary}")
         return_ssh_connection(ssh)
         return jsonify({
             'success': True,
@@ -2183,7 +2148,6 @@ def autocomplete_suite():
         })
 
     except Exception as e:
-        print(f"[DEBUG] Exception in autocomplete_suite: {e}")
         return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e)}), 500
 

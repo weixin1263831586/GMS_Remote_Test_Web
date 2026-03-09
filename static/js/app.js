@@ -18,6 +18,65 @@ const state = {
     }
 };
 
+// ==================== Helper Functions ====================
+function validateDeviceSelection() {
+    if (state.selectedDevices.size === 0) {
+        showToast('请先选择设备', 'warning');
+        return false;
+    }
+    return true;
+}
+
+async function callDeviceApi(endpoint, additionalData = {}) {
+    if (!validateDeviceSelection()) return;
+    try {
+        await apiCall(endpoint, 'POST', {
+            devices: Array.from(state.selectedDevices),
+            ...additionalData
+        });
+    } catch (error) {
+        addLogEntry(`操作失败: ${error.message}`, 'error');
+    }
+}
+
+async function executeBurnOperation(endpoint, data, operationName, modalCloseFn) {
+    if (!validateDeviceSelection()) return;
+
+    try {
+        // 立即关闭模态框，改善用户体验
+        if (modalCloseFn) modalCloseFn();
+
+        addLogEntry(`正在${operationName}到 ${state.selectedDevices.size} 台设备...`, 'info');
+        showToast(`正在${operationName}...`, 'info');
+
+        const result = await apiCall(endpoint, 'POST', {
+            devices: Array.from(state.selectedDevices),
+            ...data
+        });
+
+        if (result.success) {
+            const successCount = result.results.filter(r => r.success).length;
+            const failCount = result.results.length - successCount;
+
+            addLogEntry(`${operationName}完成: 成功 ${successCount} 台, 失败 ${failCount} 台`,
+                successCount === result.results.length ? 'success' : 'warning');
+
+            if (failCount > 0) {
+                result.results.forEach(r => {
+                    if (!r.success) {
+                        addLogEntry(`  ${r.device}: ${r.error || '未知错误'}`, 'error');
+                    }
+                });
+            }
+
+            showToast(`${operationName}完成 (成功: ${successCount}, 失败: ${failCount})`,
+                successCount === result.results.length ? 'success' : 'warning');
+        }
+    } catch (error) {
+        addLogEntry(`${operationName}失败: ${error.message}`, 'error');
+    }
+}
+
 // ==================== Initialization ====================
 document.addEventListener('DOMContentLoaded', async () => {
     initSocket();
@@ -371,14 +430,8 @@ function selectAllDevices() {
 }
 
 async function rebootDevices() {
-    if (state.selectedDevices.size === 0) {
-        showToast('请先选择要重启的设备', 'warning');
-        return;
-    }
-
-    if (!confirm(`确定要重启选中的 ${state.selectedDevices.size} 台设备吗？`)) {
-        return;
-    }
+    if (!validateDeviceSelection()) return;
+    if (!confirm(`确定要重启选中的 ${state.selectedDevices.size} 台设备吗？`)) return;
 
     try {
         await apiCall('/api/devices/reboot', 'POST', {
@@ -392,28 +445,12 @@ async function rebootDevices() {
 }
 
 async function remountDevices() {
-    if (state.selectedDevices.size === 0) {
-        showToast('请先选择设备', 'warning');
-        return;
-    }
-
-    try {
-        await apiCall('/api/devices/remount', 'POST', {
-            devices: Array.from(state.selectedDevices)
-        });
-        addLogEntry('正在执行 remount...', 'info');
-    } catch (error) {
-        addLogEntry('Remount 失败: ' + error.message, 'error');
-    }
+    await callDeviceApi('/api/devices/remount');
+    addLogEntry('正在执行 remount...', 'info');
 }
 
 async function connectWifi() {
-    if (state.selectedDevices.size === 0) {
-        showToast('请先选择设备', 'warning');
-        return;
-    }
-
-    // Show WiFi configuration modal
+    if (!validateDeviceSelection()) return;
     const modal = document.getElementById('wifi-modal');
     modal.classList.add('show');
 }
@@ -433,42 +470,31 @@ async function submitWifiConfig() {
     }
 
     try {
+        // 立即关闭模态框
+        closeWifiModal();
+
+        addLogEntry(`正在连接 Wi-Fi (${ssid})...`, 'info');
+        showToast('正在连接 Wi-Fi...', 'info');
+
         await apiCall('/api/devices/connect-wifi', 'POST', {
             devices: Array.from(state.selectedDevices),
             ssid: ssid,
             password: password
         });
-        addLogEntry(`正在连接 Wi-Fi (${ssid})...`, 'info');
-        showToast('正在连接 Wi-Fi...', 'info');
-        closeWifiModal();
+
+        addLogEntry(`Wi-Fi 连接命令已发送 (${ssid})`, 'success');
     } catch (error) {
         addLogEntry('连接 WiFi 失败: ' + error.message, 'error');
     }
 }
 
 async function lockSelectedDevices(action) {
-    if (state.selectedDevices.size === 0) {
-        showToast('请先选择设备', 'warning');
-        return;
-    }
-
-    try {
-        await apiCall('/api/devices/lock', 'POST', {
-            devices: Array.from(state.selectedDevices),
-            action: action
-        });
-        addLogEntry(`正在${action === 'lock' ? '锁定' : '解锁'}设备...`, 'info');
-    } catch (error) {
-        addLogEntry(`${action === 'lock' ? '锁定' : '解锁'}设备失败: ` + error.message, 'error');
-    }
+    await callDeviceApi('/api/devices/lock', { action });
+    addLogEntry(`正在${action === 'lock' ? '锁定' : '解锁'}设备...`, 'info');
 }
 
 async function checkDeviceLockStatus() {
-    if (state.selectedDevices.size === 0) {
-        showToast('请先选择设备', 'warning');
-        return;
-    }
-
+    if (!validateDeviceSelection()) return;
     try {
         const result = await apiCall('/api/devices/lock-status', 'POST', {
             devices: Array.from(state.selectedDevices)
@@ -480,11 +506,7 @@ async function checkDeviceLockStatus() {
 }
 
 async function collectDeviceInfo() {
-    if (state.selectedDevices.size === 0) {
-        showToast('请先选择设备', 'warning');
-        return;
-    }
-
+    if (!validateDeviceSelection()) return;
     try {
         const result = await apiCall('/api/devices/info', 'POST', {
             devices: Array.from(state.selectedDevices)
@@ -521,46 +543,16 @@ function closeFirmwareModal() {
 
 async function submitFirmwareBurn() {
     const systemImg = document.getElementById('firmware-system').value.trim();
-    const vendorImg = document.getElementById('firmware-vendor').value.trim();
-    const miscImg = document.getElementById('firmware-misc').value.trim();
-
     if (!systemImg) {
         showToast('System 镜像路径不能为空', 'error');
         return;
     }
 
-    try {
-        addLogEntry(`正在烧写固件到 ${state.selectedDevices.size} 台设备...`, 'info');
-        showToast('正在烧写固件...', 'info');
-
-        const result = await apiCall('/api/firmware/burn', 'POST', {
-            devices: Array.from(state.selectedDevices),
-            system_img: systemImg,
-            vendor_img: vendorImg,
-            misc_img: miscImg
-        });
-
-        if (result.success) {
-            const successCount = result.results.filter(r => r.success).length;
-            const failCount = result.results.length - successCount;
-
-            addLogEntry(`固件烧写完成: 成功 ${successCount} 台, 失败 ${failCount} 台`, successCount === result.results.length ? 'success' : 'warning');
-
-            if (failCount > 0) {
-                result.results.forEach(r => {
-                    if (!r.success) {
-                        addLogEntry(`  ${r.device}: ${r.error || '未知错误'}`, 'error');
-                    }
-                });
-            }
-
-            showToast(`固件烧写完成 (成功: ${successCount}, 失败: ${failCount})`, successCount === result.results.length ? 'success' : 'warning');
-        }
-
-        closeFirmwareModal();
-    } catch (error) {
-        addLogEntry('烧写固件失败: ' + error.message, 'error');
-    }
+    await executeBurnOperation('/api/firmware/burn', {
+        system_img: systemImg,
+        vendor_img: document.getElementById('firmware-vendor').value.trim(),
+        misc_img: document.getElementById('firmware-misc').value.trim()
+    }, '烧写固件', closeFirmwareModal);
 }
 
 async function burnGsiImage() {
@@ -662,47 +654,17 @@ function browseLocalFileForFirmware(targetInputId) {
 }
 
 async function submitGsiBurn() {
-    const scriptPath = document.getElementById('gsi-script').value.trim();
     const systemImg = document.getElementById('gsi-system').value.trim();
-    const vendorImg = document.getElementById('gsi-vendor').value.trim();
-
     if (!systemImg) {
         showToast('System 镜像路径不能为空', 'error');
         return;
     }
 
-    try {
-        addLogEntry(`正在烧写GSI到 ${state.selectedDevices.size} 台设备...`, 'info');
-        showToast('正在烧写GSI...', 'info');
-
-        const result = await apiCall('/api/gsi/burn', 'POST', {
-            devices: Array.from(state.selectedDevices),
-            system_img: systemImg,
-            vendor_img: vendorImg,
-            script_path: scriptPath
-        });
-
-        if (result.success) {
-            const successCount = result.results.filter(r => r.success).length;
-            const failCount = result.results.length - successCount;
-
-            addLogEntry(`GSI烧写完成: 成功 ${successCount} 台, 失败 ${failCount} 台`, successCount === result.results.length ? 'success' : 'warning');
-
-            if (failCount > 0) {
-                result.results.forEach(r => {
-                    if (!r.success) {
-                        addLogEntry(`  ${r.device}: ${r.error || '未知错误'}`, 'error');
-                    }
-                });
-            }
-
-            showToast(`GSI烧写完成 (成功: ${successCount}, 失败: ${failCount})`, successCount === result.results.length ? 'success' : 'warning');
-        }
-
-        closeGsiModal();
-    } catch (error) {
-        addLogEntry('烧写GSI失败: ' + error.message, 'error');
-    }
+    await executeBurnOperation('/api/gsi/burn', {
+        system_img: systemImg,
+        vendor_img: document.getElementById('gsi-vendor').value.trim(),
+        script_path: document.getElementById('gsi-script').value.trim()
+    }, '烧写GSI', closeGsiModal);
 }
 
 async function burnSerialNumber() {
@@ -723,42 +685,14 @@ function closeSnModal() {
 
 async function submitSnBurn() {
     const snCode = document.getElementById('sn-code').value.trim();
-
     if (!snCode) {
         showToast('SN码不能为空', 'error');
         return;
     }
 
-    try {
-        addLogEntry(`正在烧写SN码到 ${state.selectedDevices.size} 台设备...`, 'info');
-        showToast('正在烧写SN码...', 'info');
-
-        const result = await apiCall('/api/sn/burn', 'POST', {
-            devices: Array.from(state.selectedDevices),
-            sn_code: snCode
-        });
-
-        if (result.success) {
-            const successCount = result.results.filter(r => r.success).length;
-            const failCount = result.results.length - successCount;
-
-            addLogEntry(`SN码烧写完成: 成功 ${successCount} 台, 失败 ${failCount} 台`, successCount === result.results.length ? 'success' : 'warning');
-
-            if (failCount > 0) {
-                result.results.forEach(r => {
-                    if (!r.success) {
-                        addLogEntry(`  ${r.device}: ${r.error || '未知错误'}`, 'error');
-                    }
-                });
-            }
-
-            showToast(`SN码烧写完成 (成功: ${successCount}, 失败: ${failCount})`, successCount === result.results.length ? 'success' : 'warning');
-        }
-
-        closeSnModal();
-    } catch (error) {
-        addLogEntry('烧写SN码失败: ' + error.message, 'error');
-    }
+    await executeBurnOperation('/api/sn/burn', {
+        sn_code: snCode
+    }, '烧写SN码', closeSnModal);
 }
 
 async function initAndStartVnc() {
@@ -986,17 +920,27 @@ async function submitDevicePassword() {
     }
 
     try {
+        // 显示正在连接的提示
+        addLogEntry('正在连接 USB/IP...', 'info');
+        showToast('正在连接...', 'info');
+
+        // 立即关闭模态框
+        closeDevicePasswordModal();
+
         const result = await apiCall('/api/usbip/start', 'POST', {
             device_password: password
         });
+
         state.usbipConnected = true;
         document.getElementById('usbip-btn').textContent = '📱 断开设备';
         addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
-        closeDevicePasswordModal();
+        showToast('USB/IP 连接成功', 'success');
+
         // 刷新设备列表
         setTimeout(() => loadDevices(), 3500);
     } catch (error) {
         addLogEntry('启动 USB/IP 失败: ' + error.message, 'error');
+        showToast('连接失败: ' + error.message, 'error');
     }
 }
 
@@ -1592,14 +1536,21 @@ async function saveConfig() {
     }
 
     try {
+        addLogEntry('正在保存配置...', 'info');
+        showToast('正在保存配置...', 'info');
+
+        // 立即关闭模态框
+        closeModal();
+
         await apiCall('/api/config', 'POST', config);
         addLogEntry('配置已保存', 'success');
         showToast('配置保存成功', 'success');
-        closeModal();
+
         // Reload page to update config values
         setTimeout(() => location.reload(), 500);
     } catch (error) {
         addLogEntry('保存配置失败: ' + error.message, 'error');
+        showToast('保存失败: ' + error.message, 'error');
     }
 }
 
