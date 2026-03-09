@@ -26,12 +26,12 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'gms-auto-test-secret-key-2025'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', manage_session=False)
 
-# 多用户状态管理 - 使用 session_id 作为 key
+# 多用户状态管理 - 使用 username@ip 作为 key
 user_states = {}
 user_states_lock = threading.Lock()
 
 # 设备占用管理
-device_locks = {}  # {device_id: {'session_id': xxx, 'user': xxx, 'timestamp': xxx}}
+device_locks = {}  # {device_id: {'client_id': xxx, 'user': xxx, 'timestamp': xxx}}
 device_locks_lock = threading.Lock()
 
 # SSH 连接池（全局共享）
@@ -39,48 +39,52 @@ ssh_pool = queue.Queue(maxsize=5)
 ssh_lock = threading.Lock()
 
 # scrcpy投屏会话管理 - 跟踪设备投屏状态
-scrcpy_sessions = {}  # {device_id: {'session_id': xxx, 'start_time': xxx}}
+scrcpy_sessions = {}  # {device_id: {'client_id': xxx, 'start_time': xxx}}
 scrcpy_sessions_lock = threading.Lock()
 
-# ==================== 会话管理 ====================
-def get_session_id():
-    """获取或创建会话ID"""
-    if 'session_id' not in session:
-        session['session_id'] = str(uuid.uuid4())
-        session['created_at'] = datetime.now().isoformat()
-    return session['session_id']
+# ==================== 客户端标识管理 ====================
+def get_client_id():
+    """获取客户端标识符 (username@ip) - 动态生成不缓存"""
+    # 从请求中获取 IP
+    client_ip = request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or \
+                request.headers.get('X-Real-IP') or request.remote_addr
+    # 从 session 中获取用户名
+    client_username = session.get('client_username', 'unknown')
+
+    return f"{client_username}@{client_ip}"
 
 def get_user_state():
     """获取当前用户的状态"""
-    session_id = get_session_id()
+    client_id = get_client_id()
 
     with user_states_lock:
-        if session_id not in user_states:
-            user_states[session_id] = {
+        if client_id not in user_states:
+            user_states[client_id] = {
                 'running': False,
                 'devices': [],
                 'logs': [],
                 'ssh_connected': False,
                 'log_file': None,
                 'test_type': 'cts',
-                'created_at': datetime.now().isoformat()
+                'created_at': datetime.now().isoformat(),
+                'client_id': client_id
             }
-        return user_states[session_id]
+        return user_states[client_id]
 
 def update_user_state(updates):
     """更新当前用户状态"""
-    session_id = get_session_id()
+    client_id = get_client_id()
 
     with user_states_lock:
-        if session_id in user_states:
-            user_states[session_id].update(updates)
-            return user_states[session_id]
+        if client_id in user_states:
+            user_states[client_id].update(updates)
+            return user_states[client_id]
         return None
 
-def get_user_state_by_id(session_id):
-    """根据session_id获取用户状态（用于线程中调用）"""
+def get_user_state_by_id(client_id):
+    """根据client_id获取用户状态（用于线程中调用）"""
     with user_states_lock:
-        return user_states.get(session_id)
+        return user_states.get(client_id)
 
 def cleanup_old_sessions():
     """清理超过24小时的旧会话"""
@@ -88,15 +92,15 @@ def cleanup_old_sessions():
         now = datetime.now()
         expired_sessions = []
 
-        for session_id, state in user_states.items():
+        for client_id, state in user_states.items():
             if 'created_at' in state:
                 created_at = datetime.fromisoformat(state['created_at'])
                 if (now - created_at) > timedelta(hours=24):
-                    expired_sessions.append(session_id)
+                    expired_sessions.append(client_id)
 
-        for session_id in expired_sessions:
-            del user_states[session_id]
-            print(f"[DEBUG] Cleaned up expired session: {session_id}")
+        for client_id in expired_sessions:
+            del user_states[client_id]
+            print(f"[DEBUG] Cleaned up expired session: {client_id}")
 
 # 定期清理旧会话
 def cleanup_task():
@@ -108,23 +112,23 @@ cleanup_thread = threading.Thread(target=cleanup_task, daemon=True)
 cleanup_thread.start()
 
 # ==================== 多用户辅助函数 ====================
-def emit_to_user(session_id, event, data):
+def emit_to_user(client_id, event, data):
     """向特定用户发送 Socket.IO 消息"""
-    socketio.emit(event, data, room=session_id)
+    socketio.emit(event, data, room=client_id)
 
-def append_user_log(session_id, log_message):
+def append_user_log(client_id, log_message):
     """向用户日志添加消息"""
     with user_states_lock:
-        if session_id in user_states:
-            user_states[session_id]['logs'].append(log_message)
+        if client_id in user_states:
+            user_states[client_id]['logs'].append(log_message)
             return True
         return False
 
-def set_user_running(session_id, running):
+def set_user_running(client_id, running):
     """设置用户测试运行状态"""
     with user_states_lock:
-        if session_id in user_states:
-            user_states[session_id]['running'] = running
+        if client_id in user_states:
+            user_states[client_id]['running'] = running
             return True
         return False
 
@@ -132,31 +136,31 @@ def set_user_running(session_id, running):
 @socketio.on('connect')
 def handle_connect():
     """客户端连接时加入个人房间"""
-    session_id = get_session_id()
-    join_room(session_id)
-    print(f"[DEBUG] Client connected: {session_id}")
-    emit('connected', {'session_id': session_id})
+    client_id = get_client_id()
+    join_room(client_id)
+    print(f"[DEBUG] Client connected: {client_id}")
+    emit('connected', {'client_id': client_id})
 
 @socketio.on('disconnect')
 def handle_disconnect():
     """客户端断开时离开房间并释放占用的设备和终端SSH连接"""
-    session_id = get_session_id()
-    leave_room(session_id)
+    client_id = get_client_id()
+    leave_room(client_id)
 
     # 检查用户是否正在运行测试
-    user_state = get_user_state_by_id(session_id)
+    user_state = get_user_state_by_id(client_id)
     test_running = user_state and user_state.get('running', False) if user_state else False
 
     # 释放该用户占用的所有设备（除非测试正在运行）
     with device_locks_lock:
-        devices_to_release = [dev_id for dev_id, info in device_locks.items() if info.get('session_id') == session_id]
+        devices_to_release = [dev_id for dev_id, info in device_locks.items() if info.get('client_id') == client_id]
         for device_id in devices_to_release:
             # 如果测试正在运行，不要释放设备锁
             if test_running:
                 print(f"[DEBUG] Keeping device {device_id} locked (test still running)")
             else:
                 del device_locks[device_id]
-                print(f"[DEBUG] Released device {device_id} for session {session_id}")
+                print(f"[DEBUG] Released device {device_id} for client {client_id}")
 
     # 清理该用户的终端SSH连接（如果存在）
     with terminal_lock:
@@ -168,10 +172,10 @@ def handle_disconnect():
                 print(f"[TERMINAL] Error closing SSH for socket {request.sid}: {e}")
             del terminal_ssh[request.sid]
 
-    print(f"[DEBUG] Client disconnected: {session_id}, test_running: {test_running}")
+    print(f"[DEBUG] Client disconnected: {client_id}, test_running: {test_running}")
 
 # ==================== 设备锁定管理 ====================
-def try_lock_devices(session_id, devices, user_info=''):
+def try_lock_devices(client_id, devices, user_info=''):
     """尝试锁定设备，返回成功和失败的设备列表"""
     locked_devices = []
     failed_devices = []
@@ -181,7 +185,7 @@ def try_lock_devices(session_id, devices, user_info=''):
             if device_id not in device_locks:
                 # 设备未被占用，锁定它
                 device_locks[device_id] = {
-                    'session_id': session_id,
+                    'client_id': client_id,
                     'user': user_info,
                     'timestamp': datetime.now().isoformat()
                 }
@@ -197,13 +201,13 @@ def try_lock_devices(session_id, devices, user_info=''):
 
     return locked_devices, failed_devices
 
-def release_devices(session_id, devices):
+def release_devices(client_id, devices):
     """释放指定设备"""
     with device_locks_lock:
         for device_id in devices:
-            if device_id in device_locks and device_locks[device_id].get('session_id') == session_id:
+            if device_id in device_locks and device_locks[device_id].get('client_id') == client_id:
                 del device_locks[device_id]
-                print(f"[DEBUG] Released device {device_id} for session {session_id}")
+                print(f"[DEBUG] Released device {device_id} for client {client_id}")
 
 def get_device_locks_status():
     """获取所有设备的锁定状态"""
@@ -212,8 +216,11 @@ def get_device_locks_status():
 
 # ==================== Configuration ====================
 def load_config():
-    """Load configuration from config.json"""
-    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+    """Load configuration from config.json and config_dynamic.json"""
+    base_dir = os.path.dirname(__file__)
+
+    # 加载静态配置
+    config_path = os.path.join(base_dir, 'config.json')
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
@@ -222,10 +229,22 @@ def load_config():
             for key, value in config.items():
                 if isinstance(value, str) and '${ubuntu_user}' in value:
                     config[key] = value.replace('${ubuntu_user}', ubuntu_user)
-            return config
     except Exception as e:
         print(f"Error loading config: {e}")
-        return {}
+        config = {}
+
+    # 加载动态配置
+    dynamic_path = os.path.join(base_dir, 'config_dynamic.json')
+    try:
+        with open(dynamic_path, 'r', encoding='utf-8') as f:
+            dynamic_config = json.load(f)
+            config.update(dynamic_config)
+    except FileNotFoundError:
+        pass  # 动态配置文件不存在时使用默认值
+    except Exception as e:
+        print(f"Error loading dynamic config: {e}")
+
+    return config
 
 def save_config(config):
     """Save configuration to config.json"""
@@ -238,12 +257,23 @@ def save_config(config):
         print(f"Error saving config: {e}")
         return False
 
+def save_dynamic_config(dynamic_config):
+    """Save dynamic configuration to config_dynamic.json"""
+    dynamic_path = os.path.join(os.path.dirname(__file__), 'config_dynamic.json')
+    try:
+        with open(dynamic_path, 'w', encoding='utf-8') as f:
+            json.dump(dynamic_config, f, indent=4, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"Error saving dynamic config: {e}")
+        return False
+
 # ==================== Test Log Management ====================
-def save_test_logs(test_type, session_id, exit_code=None):
+def save_test_logs(test_type, client_id, exit_code=None):
     """保存测试日志到文件"""
-    user_state = get_user_state_by_id(session_id)
+    user_state = get_user_state_by_id(client_id)
     if not user_state:
-        print(f"[ERROR] Session {session_id} not found")
+        print(f"[ERROR] Session {client_id} not found")
         return None
 
     # 创建 logs 目录
@@ -252,7 +282,7 @@ def save_test_logs(test_type, session_id, exit_code=None):
 
     # 生成日志文件名（带时间戳和用户标识）
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    user_short_id = session_id[:8]
+    user_short_id = client_id[:8]
     log_filename = f"{test_type}_{timestamp}_{user_short_id}.log"
     log_path = os.path.join(logs_dir, log_filename)
 
@@ -408,17 +438,22 @@ def get_connected_devices(config):
         return []
 
 # ==================== Test Execution ====================
-def run_test_suite(config, test_params, session_id):
+def run_test_suite(config, test_params, client_id):
     """Run GMS test suite with full parameter support - matches GUI implementation"""
-    user_state = get_user_state_by_id(session_id)
+    user_state = get_user_state_by_id(client_id)
     if not user_state:
-        print(f"[ERROR] Session {session_id} not found in run_test_suite")
+        print(f"[ERROR] Session {client_id} not found in run_test_suite")
         return
 
-    print(f"[DEBUG] run_test_suite() called with params: {test_params}, session_id: {session_id}")
+    print(f"[DEBUG] run_test_suite() called with params: {test_params}, client_id: {client_id}")
+
+    # 从 client_id 解析 device_host (格式: username@ip)
+    config['device_host'] = client_id
+    print(f"[DEBUG] Using device_host from client_id: {config['device_host']}")
+
     user_state['running'] = True
     user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] Starting test suite...")
-    socketio.emit('log_update', {'log': 'Starting test suite...'}, room=session_id)
+    socketio.emit('log_update', {'log': 'Starting test suite...'}, room=client_id)
 
     try:
         ssh = get_ssh_connection(config)
@@ -441,7 +476,7 @@ def run_test_suite(config, test_params, session_id):
         script_size = os.path.getsize(local_script)
         size_kb = script_size / 1024
         user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 📤 上传文件: run_GMS_Test_Auto.sh → {remote_script} ({size_kb:.2f}KB)")
-        socketio.emit('log_update', {'log': f"📤 上传文件: run_GMS_Test_Auto.sh → {remote_script} ({size_kb:.2f}KB)"}, room=session_id)
+        socketio.emit('log_update', {'log': f"📤 上传文件: run_GMS_Test_Auto.sh → {remote_script} ({size_kb:.2f}KB)"}, room=client_id)
 
         try:
             sftp = ssh.open_sftp()
@@ -453,9 +488,9 @@ def run_test_suite(config, test_params, session_id):
             execute_ssh_command(ssh, chmod_cmd)
 
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🔐 已设置可执行权限: {remote_script}")
-            socketio.emit('log_update', {'log': f"🔐 已设置可执行权限: {remote_script}"}, room=session_id)
+            socketio.emit('log_update', {'log': f"🔐 已设置可执行权限: {remote_script}"}, room=client_id)
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 上传完成 ({size_kb:.2f}KB)")
-            socketio.emit('log_update', {'log': f"✅ 上传完成 ({size_kb:.2f}KB)"}, room=session_id)
+            socketio.emit('log_update', {'log': f"✅ 上传完成 ({size_kb:.2f}KB)"}, room=client_id)
 
         except Exception as e:
             user_state['logs'].append(f"[ERROR] Failed to upload script: {str(e)}")
@@ -464,7 +499,7 @@ def run_test_suite(config, test_params, session_id):
             return
 
         user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ SSH 连接成功")
-        socketio.emit('log_update', {'log': '✅ SSH 连接成功'}, room=session_id)
+        socketio.emit('log_update', {'log': '✅ SSH 连接成功'}, room=client_id)
 
         # Extract parameters
         test_type = test_params.get('test_type', 'cts')
@@ -509,20 +544,20 @@ def run_test_suite(config, test_params, session_id):
         if test_suite:
             cmd_parts.extend(["--test-suite", test_suite])
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 📂 测试套件: {test_suite}")
-            socketio.emit('log_update', {'log': f"📂 测试套件: {test_suite}"}, room=session_id)
+            socketio.emit('log_update', {'log': f"📂 测试套件: {test_suite}"}, room=client_id)
 
         # Add local server
         if local_server:
             cmd_parts.extend(["--local-server", local_server])
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🌐 本地主机: {local_server}")
-            socketio.emit('log_update', {'log': f"🌐 本地主机: {local_server}"}, room=session_id)
+            socketio.emit('log_update', {'log': f"🌐 本地主机: {local_server}"}, room=client_id)
 
         # Build final command
         command = ' '.join(shlex.quote(part) for part in cmd_parts)
         command = f"cd {os.path.dirname(remote_script)} && {command}"
 
         user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 执行命令: {command}")
-        socketio.emit('log_update', {'log': f"🚀 执行命令: {command}"}, room=session_id)
+        socketio.emit('log_update', {'log': f"🚀 执行命令: {command}"}, room=client_id)
 
         # Execute with real-time output (matching GUI.py logic)
         print(f"[DEBUG] Executing command: {command}")
@@ -537,7 +572,7 @@ def run_test_suite(config, test_params, session_id):
                         if line.strip():
                             log_line = line.strip()
                             # Send raw log line to frontend (without timestamp prefix)
-                            socketio.emit('log_update', {'log': log_line}, room=session_id)
+                            socketio.emit('log_update', {'log': log_line}, room=client_id)
                             # Store with timestamp for history
                             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] {log_line}")
 
@@ -547,7 +582,7 @@ def run_test_suite(config, test_params, session_id):
                     for line in error.splitlines():
                         if line.strip():
                             log_line = line.strip()
-                            socketio.emit('log_update', {'log': log_line}, room=session_id)
+                            socketio.emit('log_update', {'log': log_line}, room=client_id)
                             user_state['logs'].append(f"[STDERR] {log_line}")
 
             time.sleep(0.1)
@@ -559,37 +594,37 @@ def run_test_suite(config, test_params, session_id):
 
         if exit_status == 0:
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Test completed successfully")
-            socketio.emit('log_update', {'log': f"✅ Test completed successfully (exit code: {exit_status})"}, room=session_id)
+            socketio.emit('log_update', {'log': f"✅ Test completed successfully (exit code: {exit_status})"}, room=client_id)
         else:
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ Test failed with exit code {exit_status}")
-            socketio.emit('log_update', {'log': f"❌ Test failed with exit code {exit_status}"}, room=session_id)
+            socketio.emit('log_update', {'log': f"❌ Test failed with exit code {exit_status}"}, room=client_id)
 
         # 保存测试日志
-        log_file = save_test_logs(test_type, session_id, exit_status)
+        log_file = save_test_logs(test_type, client_id, exit_status)
         if log_file:
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 📁 日志已保存: {log_file}")
-            socketio.emit('log_update', {'log': f"📁 日志已保存: {log_file}"}, room=session_id)
+            socketio.emit('log_update', {'log': f"📁 日志已保存: {log_file}"}, room=client_id)
 
     except Exception as e:
         error_msg = f"[ERROR] {str(e)}"
         user_state['logs'].append(error_msg)
-        socketio.emit('log_update', {'log': error_msg}, room=session_id)
+        socketio.emit('log_update', {'log': error_msg}, room=client_id)
         # Print full traceback to server logs
         print(f"[ERROR] Exception in run_test_suite:")
         print(traceback.format_exc())
 
         # 异常时也保存日志
-        log_file = save_test_logs(test_type, session_id, None)
+        log_file = save_test_logs(test_type, client_id, None)
         if log_file:
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 📁 日志已保存: {log_file}")
-            socketio.emit('log_update', {'log': f"📁 日志已保存: {log_file}"}, room=session_id)
+            socketio.emit('log_update', {'log': f"📁 日志已保存: {log_file}"}, room=client_id)
 
     # Release devices when test completes
     devices_to_release = test_params.get('devices', [])
-    release_devices(session_id, devices_to_release)
+    release_devices(client_id, devices_to_release)
 
     user_state['running'] = False
-    socketio.emit('test_complete', {}, room=session_id)
+    socketio.emit('test_complete', {}, room=client_id)
 
 # ==================== Routes ====================
 @app.route('/')
@@ -615,6 +650,105 @@ def handle_config():
             return jsonify({'success': True})
         return jsonify({'success': False, 'error': 'Failed to save config'}), 500
 
+@app.route('/api/client-info', methods=['GET', 'POST'])
+def handle_client_info():
+    """获取客户端IP或记录客户端信息"""
+    # 获取客户端IP
+    client_ip = request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or \
+                request.headers.get('X-Real-IP') or request.remote_addr
+
+    if request.method == 'GET':
+        return jsonify({'ip': client_ip})
+
+    # POST: 记录客户端信息
+    data = request.json
+    client_username = data.get('username', 'unknown')
+
+    # 更新 session 中的用户名
+    session['client_username'] = client_username
+    session['client_ip'] = client_ip
+
+    user_state = get_user_state()
+    user_state.update({
+        'client_ip': client_ip,
+        'client_username': client_username,
+        'last_seen': datetime.now().isoformat()
+    })
+    print(f"[ClientInfo] IP: {client_ip} | Username: {client_username}")
+    return jsonify({'success': True, 'client_id': get_client_id()})
+
+@app.route('/api/client-info/detect', methods=['POST'])
+def detect_client():
+    """自动检测客户端用户名（支持手动SSH凭据）"""
+    data = request.json
+    client_ip = data.get('ip') or request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or request.remote_addr
+    config = load_config()
+
+    # 手动SSH凭据
+    if data.get('username') and data.get('password'):
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(client_ip, username=data['username'], password=data['password'], timeout=10)
+            username = ssh.exec_command('whoami')[1].read().decode().strip().split('\\')[-1]
+            ssh.close()
+            # 保存凭据到动态配置
+            config.setdefault('client_hosts', {})[client_ip] = username
+            creds = config.setdefault('client_ssh_credentials', [])
+            if not any(c.get('username') == data['username'] for c in creds):
+                creds.insert(0, {'username': data['username'], 'password': data['password']})
+            config['device_host'] = f'{username}@{client_ip}'
+            # 只保存动态配置
+            dynamic_config = {
+                'device_host': config['device_host'],
+                'device_pswd': config.get('device_pswd', ''),
+                'client_hosts': config['client_hosts'],
+                'client_ssh_credentials': config['client_ssh_credentials']
+            }
+            save_dynamic_config(dynamic_config)
+            print(f"[ClientInfo] Updated device_host: {config['device_host']}")
+            return jsonify({'success': True, 'username': username})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 401
+
+    # 检查已保存的映射
+    username = config.get('client_hosts', {}).get(client_ip)
+    if username:
+        config['device_host'] = f'{username}@{client_ip}'
+        dynamic_config = {
+            'device_host': config['device_host'],
+            'device_pswd': config.get('device_pswd', ''),
+            'client_hosts': config['client_hosts'],
+            'client_ssh_credentials': config['client_ssh_credentials']
+        }
+        save_dynamic_config(dynamic_config)
+        print(f"[ClientInfo] Updated device_host: {config['device_host']}")
+        return jsonify({'success': True, 'username': username})
+
+    # 尝试已保存的SSH凭据
+    for cred in config.get('client_ssh_credentials', []):
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(client_ip, username=cred['username'], password=cred['password'], timeout=5)
+            username = ssh.exec_command('whoami')[1].read().decode().strip().split('\\')[-1]
+            ssh.close()
+            config.setdefault('client_hosts', {})[client_ip] = username
+            config['device_host'] = f'{username}@{client_ip}'
+            dynamic_config = {
+                'device_host': config['device_host'],
+                'device_pswd': config.get('device_pswd', ''),
+                'client_hosts': config['client_hosts'],
+                'client_ssh_credentials': config['client_ssh_credentials']
+            }
+            save_dynamic_config(dynamic_config)
+            print(f"[ClientInfo] Updated device_host: {config['device_host']}")
+            return jsonify({'success': True, 'username': username})
+        except: pass
+
+    return jsonify({'success': False, 'error': '请提供SSH凭据'})
+
+
 @app.route('/api/devices')
 def list_devices():
     """Get list of connected devices with lock status"""
@@ -622,7 +756,7 @@ def list_devices():
     devices = get_connected_devices(config)
 
     # 获取当前会话ID和设备锁定状态
-    session_id = get_session_id()
+    client_id = get_client_id()
     locks = get_device_locks_status()
 
     # 为每个设备添加锁定状态信息
@@ -642,7 +776,7 @@ def list_devices():
             **device_dict,
             'locked': device_id in locks,
             'locked_by': lock_info.get('user', ''),
-            'locked_by_self': lock_info.get('session_id') == session_id if device_id in locks else False
+            'locked_by_self': lock_info.get('client_id') == client_id if device_id in locks else False
         }
         devices_with_status.append(device_with_status)
 
@@ -683,9 +817,9 @@ def start_test():
         return jsonify({'success': False, 'error': 'No devices selected'}), 400
 
     # 检查设备锁定状态
-    session_id = get_session_id()
-    user_info = f"用户{session_id[:8]}"  # 简短的用户标识
-    locked_devices, failed_devices = try_lock_devices(session_id, devices, user_info)
+    client_id = get_client_id()
+    user_info = f"用户{client_id[:8]}"  # 简短的用户标识
+    locked_devices, failed_devices = try_lock_devices(client_id, devices, user_info)
 
     if failed_devices:
         # 有设备被占用，返回错误信息
@@ -694,7 +828,7 @@ def start_test():
             error_msg += f"- {fail['device_id']} (被 {fail['locked_by']} 占用)\n"
 
         # 释放已锁定的设备
-        release_devices(session_id, locked_devices)
+        release_devices(client_id, locked_devices)
 
         return jsonify({
             'success': False,
@@ -711,7 +845,7 @@ def start_test():
         'test_suite': data.get('test_suite', ''),
         'local_server': data.get('local_server', ''),
         'devices': devices,
-        'session_id': session_id
+        'client_id': client_id
     }
 
     print(f"[DEBUG] test_params: {test_params}")
@@ -724,7 +858,7 @@ def start_test():
     print(f"[DEBUG] Starting test thread...")
     test_thread = threading.Thread(
         target=run_test_suite,
-        args=(config, test_params, session_id)
+        args=(config, test_params, client_id)
     )
     test_thread.daemon = True
     test_thread.start()
@@ -738,15 +872,15 @@ def start_test():
 def stop_test():
     """Stop test execution - matches GUI by actually killing tradefed processes"""
     user_state = get_user_state()
-    session_id = get_session_id()
+    client_id = get_client_id()
 
     user_state['running'] = False
     user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ⏹️ 用户请求停止测试...")
-    socketio.emit('log_update', {'log': '⏹️ 用户请求停止测试...'}, room=session_id)
+    socketio.emit('log_update', {'log': '⏹️ 用户请求停止测试...'}, room=client_id)
 
     # Release devices when stopping test
     devices_to_release = user_state.get('devices', [])
-    release_devices(session_id, devices_to_release)
+    release_devices(client_id, devices_to_release)
 
     config = load_config()
     ssh = get_ssh_connection(config)
@@ -770,17 +904,17 @@ def stop_test():
         kill_cmd = f"pkill -f '[./]?{tradefed_bin}.*run commandAndExit'"
 
         user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🧹 正在终止 {test_type.upper()} 测试进程...")
-        socketio.emit('log_update', {'log': f"🧹 正在终止 {test_type.upper()} 测试进程..."}, room=session_id)
+        socketio.emit('log_update', {'log': f"🧹 正在终止 {test_type.upper()} 测试进程..."}, room=client_id)
         output, error, code = execute_ssh_command(ssh, kill_cmd)
 
         return_ssh_connection(ssh)
 
         if code == 0:
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ {test_type.upper()} tradefed 进程已成功终止")
-            socketio.emit('log_update', {'log': f"✅ {test_type.upper()} tradefed 进程已成功终止"}, room=session_id)
+            socketio.emit('log_update', {'log': f"✅ {test_type.upper()} tradefed 进程已成功终止"}, room=client_id)
         else:
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ 未找到运行中的测试进程或终止失败")
-            socketio.emit('log_update', {'log': '⚠️ 未找到运行中的测试进程或终止失败'}, room=session_id)
+            socketio.emit('log_update', {'log': '⚠️ 未找到运行中的测试进程或终止失败'}, room=client_id)
 
         return jsonify({
             'success': True,
@@ -789,7 +923,7 @@ def stop_test():
     except Exception as e:
         return_ssh_connection(ssh)
         user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ 停止测试时出错: {str(e)}")
-        socketio.emit('log_update', {'log': f"❌ 停止测试时出错: {str(e)}"}, room=session_id)
+        socketio.emit('log_update', {'log': f"❌ 停止测试时出错: {str(e)}"}, room=client_id)
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/test/clean', methods=['POST'])
@@ -827,7 +961,7 @@ def download_logs():
 def save_current_logs():
     """立即保存当前测试日志（从前端获取实际日志内容）"""
     user_state = get_user_state()
-    session_id = get_session_id()
+    client_id = get_client_id()
 
     try:
         # 从前端获取日志内容和测试类型
@@ -844,7 +978,7 @@ def save_current_logs():
 
         # 生成日志文件名（带时间戳和用户标识）
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        user_short_id = session_id[:8]
+        user_short_id = client_id[:8]
         log_filename = f"{test_type}_{timestamp}_{user_short_id}.log"
         log_path = os.path.join(logs_dir, log_filename)
 
@@ -1636,12 +1770,16 @@ def show_device_screen():
 def start_adb_forward():
     """Start ADB port forwarding - matches GUI with sshpass and device host ADB server"""
     config = load_config()
+
+    # 使用当前客户端的 device_host
+    device_host = get_client_id()
+    config['device_host'] = device_host
+
     ssh = get_ssh_connection(config)
     if not ssh:
         return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
 
     try:
-        device_host = config.get('device_host', '')
         device_password = config.get('device_password', '')
 
         # Detect if Windows host (matching GUI lines 946-954)
@@ -1728,10 +1866,10 @@ def start_usbip():
     """Start USBIP forwarding - Windows (usbipd) to Ubuntu (usbip)"""
     import time
     config = load_config()
-    device_host = config.get('device_host', '')
 
-    if not device_host:
-        return jsonify({'success': False, 'error': '设备主机未配置'}), 400
+    # 使用当前客户端的 device_host
+    device_host = get_client_id()
+    config['device_host'] = device_host
 
     # Get device password from request or config
     request_data = request.get_json() or {}
@@ -1853,10 +1991,10 @@ def stop_usbip():
     """Stop USBIP forwarding - unbind all on Windows"""
     import time
     config = load_config()
-    device_host = config.get('device_host', '')
 
-    if not device_host:
-        return jsonify({'success': False, 'error': '设备主机未配置'}), 400
+    # 使用当前客户端的 device_host
+    device_host = get_client_id()
+    config['device_host'] = device_host
 
     # Connect to Windows device host
     win_ssh = create_device_ssh_connection(config)
@@ -2043,7 +2181,7 @@ def start_screen_mirroring():
         return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
 
     try:
-        session_id = get_session_id()
+        client_id = get_client_id()
         results = []
         vnc_ports = []
         already_running_devices = []
@@ -2179,7 +2317,7 @@ def start_screen_mirroring():
                 # Record the scrcpy session
                 with scrcpy_sessions_lock:
                     scrcpy_sessions[device_id] = {
-                        'session_id': session_id,
+                        'client_id': client_id,
                         'start_time': datetime.now().isoformat()
                     }
 
@@ -3056,17 +3194,17 @@ def handle_terminal_input(data):
 @socketio.on('terminal_resize')
 def handle_terminal_resize(data):
     """Handle terminal resize request"""
-    session_id = get_session_id()
+    client_id = get_client_id()
 
     with terminal_lock:
-        if session_id in terminal_ssh:
+        if client_id in terminal_ssh:
             try:
                 cols = data.get('cols', 120)
                 rows = data.get('rows', 30)
-                terminal_ssh[session_id]['channel'].resize_pty(width=cols, height=rows)
-                print(f"[TERMINAL] Terminal resized for session {session_id}: {cols}x{rows}")
+                terminal_ssh[client_id]['channel'].resize_pty(width=cols, height=rows)
+                print(f"[TERMINAL] Terminal resized for session {client_id}: {cols}x{rows}")
             except Exception as e:
-                print(f"[TERMINAL] Resize error for session {session_id}: {e}")
+                print(f"[TERMINAL] Resize error for session {client_id}: {e}")
 
 # ==================== Main ====================
 if __name__ == '__main__':

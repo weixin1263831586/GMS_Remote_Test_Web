@@ -150,6 +150,16 @@
                     <span class="sidebar-text">主机终端</span>
                 </a>
             </nav>
+
+            <!-- 客户端信息区 -->
+            <div style="padding: 8px 10px; margin-top: auto; border-top: 1px solid var(--border-color); background: var(--light-bg);">
+                <div style="font-size: 9px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600;">
+                    👤 访问者
+                </div>
+                <div style="font-size: 10px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    <span id="client-identity" style="color: var(--success-color); font-family: monospace;">检测中...</span>
+                </div>
+            </div>
         </aside>
 
         <!-- 右侧主内容区 -->
@@ -221,7 +231,7 @@
                                 </div>
                                 <div class="form-row">
                                     <label>设备主机:</label>
-                                    <input type="text" id="device-host" class="entry-field" value="{{ config.device_host }}" />
+                                    <input type="text" id="device-host" class="entry-field" value="" placeholder="自动检测中..." />
                                 </div>
                                 <div class="form-row">
                                     <label>本地主机:</label>
@@ -340,7 +350,7 @@
             <!-- 终端头部 -->
             <div class="terminal-header-section">
                 <div class="terminal-title-section">
-                    <div class="terminal-title">🐧 Ubuntu SSH 终端</div>
+                    <div class="terminal-title">Ubuntu主机终端</div>
                     <div class="connection-info">
                         连接: <span>{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</span>
                     </div>
@@ -547,7 +557,173 @@
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
 
+    <!-- SSH密码输入弹框 -->
+    <div id="ssh-password-modal" class="modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center;">
+        <div class="modal-content" style="max-width: 400px; width: 90%;">
+            <div class="modal-header">
+                <span class="modal-title">🔑 输入SSH密码</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-text" style="margin-bottom: 15px;">
+                    检测到新客户端,请输入SSH密码以自动获取用户名
+                </div>
+                <div class="modal-form-row">
+                    <label>客户端IP:</label>
+                    <input type="text" id="ssh-client-ip" readonly style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--darker-bg);" />
+                </div>
+                <div class="modal-form-row">
+                    <label>SSH用户:</label>
+                    <input type="text" id="ssh-username" placeholder="例如: hcq, root" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;" />
+                </div>
+                <div class="modal-form-row">
+                    <label>SSH密码:</label>
+                    <input type="password" id="ssh-password" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;" onkeypress="handleSshKeyPress(event)" />
+                </div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 8px;">
+                    💡 密码将被加密保存,下次访问自动使用
+                </div>
+                <div class="modal-buttons" style="margin-top: 20px;">
+                    <button class="btn-xxs" onclick="closeSshModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitSsh()">连接</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
+        // ==================== 客户端信息 ====================
+        let clientInfo = { ip: 'unknown', username: 'unknown' };
+
+        // 更新客户端显示
+        function updateClientDisplay() {
+            const identityEl = document.getElementById('client-identity');
+            const deviceHostInput = document.getElementById('device-host');
+
+            if (!identityEl) return;
+
+            // 只有当用户名有效时才显示 username@ip
+            if (clientInfo.username && clientInfo.username !== 'unknown') {
+                const display = `${clientInfo.username}@${clientInfo.ip}`;
+                identityEl.textContent = display;
+
+                // 更新设备主机输入框
+                if (deviceHostInput) {
+                    deviceHostInput.value = display;
+                    deviceHostInput.placeholder = "设备主机";
+                }
+            } else {
+                // 只显示IP
+                identityEl.textContent = clientInfo.ip || '检测中...';
+                // 设备主机保持为空或显示占位符
+                if (deviceHostInput) {
+                    deviceHostInput.value = '';
+                    deviceHostInput.placeholder = '等待客户端识别...';
+                }
+            }
+        }
+
+        // 初始化客户端信息
+        async function initClientInfo() {
+            try {
+                // 获取IP
+                const ipResp = await fetch('/api/client-info');
+                const ipData = await ipResp.json();
+                clientInfo.ip = ipData.ip;
+                updateClientDisplay();
+
+                // 检测用户名
+                const savedUser = localStorage.getItem('gms_username');
+                if (savedUser && savedUser !== 'guest' && savedUser !== 'unknown') {
+                    clientInfo.username = savedUser;
+                } else {
+                    const detectResp = await fetch('/api/client-info/detect', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ip: clientInfo.ip })
+                    });
+                    const detectData = await detectResp.json();
+                    if (detectData.success) {
+                        clientInfo.username = detectData.username;
+                        localStorage.setItem('gms_username', detectData.username);
+                    } else {
+                        showSshModal();
+                        return;
+                    }
+                }
+
+                updateClientDisplay();
+
+                // 记录到服务器
+                const recordResp = await fetch('/api/client-info', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(clientInfo)
+                });
+                await recordResp.json();
+
+            } catch (e) {
+                console.error('[ClientInfo]', e);
+            }
+        }
+
+        // 显示SSH凭据输入框
+        function showSshModal() {
+            const modal = document.getElementById('ssh-password-modal');
+            modal.style.display = 'flex';
+            document.getElementById('ssh-client-ip').value = clientInfo.ip;
+            document.getElementById('ssh-username').value = '';
+            document.getElementById('ssh-password').value = '';
+        }
+
+        function closeSshModal() {
+            document.getElementById('ssh-password-modal').style.display = 'none';
+        }
+
+        function handleSshKeyPress(e) {
+            if (e.key === 'Enter') submitSsh();
+        }
+
+        // 提交SSH凭据
+        async function submitSsh() {
+            const username = document.getElementById('ssh-username').value.trim();
+            const password = document.getElementById('ssh-password').value;
+
+            if (!username || !password) {
+                showToast('请输入用户名和密码', 'error');
+                return;
+            }
+
+            showToast('正在连接...', 'info');
+
+            try {
+                const resp = await fetch('/api/client-info/detect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: clientInfo.ip, username, password })
+                });
+                const data = await resp.json();
+
+                if (data.success) {
+                    clientInfo.username = data.username;
+                    localStorage.setItem('gms_username', data.username);
+                    updateClientDisplay();
+                    closeSshModal();
+                    showToast(`已识别: ${data.username}`, 'success');
+
+                    // 记录到服务器
+                    await fetch('/api/client-info', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(clientInfo)
+                    });
+                } else {
+                    showToast(data.error || '连接失败', 'error');
+                }
+            } catch (e) {
+                showToast('连接失败', 'error');
+            }
+        }
+
         // ==================== 页面切换功能 ====================
         let currentPage = 'test';
         let terminalInitialized = false;
@@ -801,6 +977,9 @@
 
         // 页面加载完成后，如果是终端页面则初始化终端
         window.addEventListener('load', () => {
+            // 初始化客户端信息
+            initClientInfo();
+
             const hash = window.location.hash.substring(1);
             if (hash === 'desktop') {
                 switchPage('desktop');

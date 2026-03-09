@@ -918,8 +918,12 @@ async function setupUsbipForward() {
             setTimeout(() => loadDevices(), 3500);
         } catch (error) {
             // 检查是否需要密码
-            if (error.needPassword && error.deviceHost) {
-                showDevicePasswordModal(error.deviceHost);
+            if (error.needPassword) {
+                // 使用当前客户端信息而不是后端返回的deviceHost
+                const deviceHost = (typeof clientInfo !== 'undefined' && clientInfo.username && clientInfo.username !== 'unknown')
+                    ? `${clientInfo.username}@${clientInfo.ip}`
+                    : error.deviceHost || '';
+                showDevicePasswordModal(deviceHost);
                 return;
             }
             addLogEntry('启动 USB/IP 失败: ' + error.message, 'error');
