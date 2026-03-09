@@ -462,9 +462,9 @@ def run_test_suite(config, test_params, client_id):
             user_state['running'] = False
             return
 
-        # Step 1: Upload script to remote server (matching GUI lines 2356-2361)
-        # Script is in parent directory
-        local_script = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'run_GMS_Test_Auto.sh')
+        # Step 1: Upload script to remote server
+        # Script is in tools directory
+        local_script = os.path.join(os.path.dirname(__file__), 'tools', 'run_GMS_Test_Auto.sh')
         remote_script = config.get('script_path', '')
 
         if not os.path.exists(local_script):
@@ -2897,7 +2897,7 @@ def burn_gsi():
 
     # Load config first to get ubuntu_user
     config = load_config()
-    script_path = data.get('script_path', f"/home/{config['ubuntu_user']}/GMS-Suite/run_GSI_Burn.sh")
+    script_path = data.get('script_path', config.get('gsi_scripts', f"/home/{config['ubuntu_user']}/GMS-Suite/run_GSI_Burn.sh"))
 
     if not devices:
         return jsonify({'success': False, 'error': 'No devices selected'}), 400

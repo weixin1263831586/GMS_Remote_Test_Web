@@ -9,10 +9,10 @@
     "vpn_target": [
         "www.google.com"
     ],
-    "suites_path": "/home/hcq/GMS-Suite",
-    "script_path": "/home/hcq/GMS-Suite/run_GMS_Test_Auto.sh",
-    "gsi_scripts": "/home/hcq/GMS-Suite/run_GSI_Burn.sh",
-    "scrcpy_path": "/home/hcq/Software/scrcpy-linux-x86_64-v3.3.4/scrcpy",
+    "suites_path": "/home/${ubuntu_user}/GMS-Suite",
+    "script_path": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/run_GMS_Test_Auto.sh",
+    "gsi_scripts": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/run_GSI_Burn.sh",
+    "scrcpy_path": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/scrcpy-linux-x86_64-v3.3.4/scrcpy",
     "device_host": "cp2-share@172.16.14.65",
     "device_pswd": "Rockchip@2025",
     "client_hosts": {
