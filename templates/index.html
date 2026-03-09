@@ -153,6 +153,10 @@
                     <span class="sidebar-icon">👥</span>
                     <span class="sidebar-text">用户管理</span>
                 </a>
+                <a href="#" class="sidebar-item" data-page="devices" onclick="switchPage('devices', event)">
+                    <span class="sidebar-icon">📱</span>
+                    <span class="sidebar-text">设备管理</span>
+                </a>
             </nav>
 
             <!-- 客户端信息区 -->
@@ -408,6 +412,65 @@
                     <tbody id="users-table-body">
                         <tr>
                             <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 设备管理页面 -->
+        <div class="container page-content" id="page-devices">
+            <div class="section-title">📱 设备管理</div>
+
+            <!-- 设备统计卡片 -->
+            <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-devices-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">总设备数</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="local-devices-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">测试主机设备</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="usbip-devices-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">USB/IP设备</div>
+                </div>
+            </div>
+
+            <!-- 设备列表 -->
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('serial_no')">
+                                设备序列号 <span id="sort-serial_no">↕</span>
+                            </th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('model')">
+                                设备型号 <span id="sort-model">↕</span>
+                            </th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('source_type')">
+                                来源类型 <span id="sort-source_type">↕</span>
+                            </th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('source_host')">
+                                来源主机 <span id="sort-source_host">↕</span>
+                            </th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('android_version')">
+                                Android版本 <span id="sort-android_version">↕</span>
+                            </th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('status')">
+                                状态 <span id="sort-status">↕</span>
+                            </th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('locked_by')">
+                                占用用户 <span id="sort-locked_by">↕</span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="devices-table-body">
+                        <tr>
+                            <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
                             </td>
                         </tr>
@@ -887,6 +950,132 @@
             }
         }
 
+        // ==================== 设备管理功能 ====================
+        let devicesRefreshInterval = null;
+        let allDevices = [];  // 存储所有设备数据用于排序
+        let currentSort = { field: null, direction: 'asc' };
+
+        async function loadDevicesManagement() {
+            try {
+                const resp = await fetch('/api/devices/management');
+                const data = await resp.json();
+
+                if (data.devices) {
+                    allDevices = data.devices;
+                    displayDevicesManagement(allDevices);
+                }
+
+                // 启动自动刷新（每10秒）
+                if (!devicesRefreshInterval) {
+                    devicesRefreshInterval = setInterval(() => {
+                        if (currentPage === 'devices') {
+                            loadDevicesManagement();
+                        }
+                    }, 10000);
+                }
+            } catch (e) {
+                console.error('[Devices] Error loading devices:', e);
+            }
+        }
+
+        function sortDevices(field) {
+            // 切换排序方向
+            if (currentSort.field === field) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.field = field;
+                currentSort.direction = 'asc';
+            }
+
+            // 更新排序指示器
+            document.querySelectorAll('[id^="sort-"]').forEach(el => {
+                el.textContent = '↕';
+            });
+            document.getElementById(`sort-${field}`).textContent = currentSort.direction === 'asc' ? '↑' : '↓';
+
+            // 排序设备列表
+            const sortedDevices = [...allDevices].sort((a, b) => {
+                let aVal = a[field] || '';
+                let bVal = b[field] || '';
+
+                // 特殊处理source_type和status
+                if (field === 'source_type') {
+                    aVal = a.source_type === 'local' ? '0' : '1';
+                    bVal = b.source_type === 'local' ? '0' : '1';
+                } else if (field === 'status') {
+                    aVal = a.status === 'online' ? '0' : '1';
+                    bVal = b.status === 'online' ? '0' : '1';
+                }
+
+                const result = aVal.localeCompare(bVal, undefined, { numeric: true });
+                return currentSort.direction === 'asc' ? result : -result;
+            });
+
+            displayDevicesManagement(sortedDevices);
+        }
+
+        function displayDevicesManagement(devices) {
+            const tbody = document.getElementById('devices-table-body');
+            if (!tbody) return;
+
+            // 更新统计数据
+            const totalCount = allDevices.length;
+            const localCount = allDevices.filter(d => d.source_type === 'local').length;
+            const usbipCount = allDevices.filter(d => d.source_type === 'usbip').length;
+
+            document.getElementById('total-devices-count').textContent = totalCount;
+            document.getElementById('local-devices-count').textContent = localCount;
+            document.getElementById('usbip-devices-count').textContent = usbipCount;
+
+            if (devices.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            暂无设备
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            // 渲染设备列表
+            tbody.innerHTML = devices.map(device => {
+                const sourceTypeBadge = device.source_type === 'local'
+                    ? '<span style="background: rgba(76, 175, 80, 0.2); color: var(--success-color); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">测试主机</span>'
+                    : '<span style="background: rgba(255, 152, 0, 0.2); color: var(--warning-color); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">USB/IP</span>';
+
+                const statusBadge = device.status === 'online'
+                    ? '<span style="color: var(--success-color); font-weight: 600; font-size: 11px;">● 在线</span>'
+                    : '<span style="color: var(--text-secondary); font-weight: 600; font-size: 11px;">○ 离线</span>';
+
+                return `
+                    <tr style="border-bottom: 1px solid var(--border-color);">
+                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                            ${device.serial_no || '-'}
+                        </td>
+                        <td style="padding: 12px; font-size: 11px;">
+                            ${device.model || '-'}
+                        </td>
+                        <td style="padding: 12px;">
+                            ${sourceTypeBadge}
+                        </td>
+                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                            ${device.source_host || '-'}
+                        </td>
+                        <td style="padding: 12px; font-size: 11px;">
+                            ${device.android_version || '-'}
+                        </td>
+                        <td style="padding: 12px;">
+                            ${statusBadge}
+                        </td>
+                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                            ${device.locked_by || '-'}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
         // ==================== 页面切换功能 ====================
         let currentPage = 'test';
         let terminalInitialized = false;
@@ -911,6 +1100,7 @@
             document.getElementById('page-desktop').classList.remove('active');
             document.getElementById('page-terminal').classList.remove('active');
             document.getElementById('page-users').classList.remove('active');
+            document.getElementById('page-devices').classList.remove('active');
 
             // 显示目标页面
             document.getElementById(`page-${pageName}`).classList.add('active');
@@ -925,7 +1115,8 @@
                 'test': '测试界面 - GMS 远程测试',
                 'terminal': '主机终端 - GMS 远程测试',
                 'desktop': '主机桌面 - GMS 远程测试',
-                'users': '用户管理 - GMS 远程测试'
+                'users': '用户管理 - GMS 远程测试',
+                'devices': '设备管理 - GMS 远程测试'
             };
             document.title = titles[pageName] || 'GMS 远程测试';
 
@@ -937,6 +1128,11 @@
             // 如果切换到用户管理页面，加载用户列表
             if (pageName === 'users') {
                 loadUsersList();
+            }
+
+            // 如果切换到设备管理页面，加载设备列表
+            if (pageName === 'devices') {
+                loadDevicesManagement();
             }
 
             // 切换页面时重新fit终端（如果已初始化）

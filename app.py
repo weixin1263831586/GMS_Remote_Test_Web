@@ -1384,6 +1384,106 @@ def get_device_info():
         return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# ==================== Device Management ====================
+@app.route('/api/devices/management')
+def get_devices_management():
+    """Get devices management info with source type and host info"""
+    config = load_config()
+
+    # Get all connected devices from test host
+    ssh = get_ssh_connection(config)
+    if not ssh:
+        return jsonify({'devices': []})
+
+    try:
+        # Get basic device list
+        output, _, _ = execute_ssh_command(ssh, "adb devices", timeout=5)
+        device_ids = []
+        for line in output.split('\n')[1:]:
+            if line.strip() and '\tdevice' in line:
+                device_id = line.split('\t')[0]
+                device_ids.append(device_id)
+
+        if not device_ids:
+            return_ssh_connection(ssh)
+            return jsonify({'devices': []})
+
+        # Get device lock status
+        locks = get_device_locks_status()
+        client_id = get_client_id()
+
+        # Batch fetch all device properties in ONE command (optimized)
+        device_props_cmd = " && ".join([
+            f"adb -s {device_id} shell 'echo \"===DEVICE:{device_id}===\" && getprop ro.serialno && getprop ro.product.model && getprop ro.build.version.release'"
+            for device_id in device_ids
+        ])
+
+        props_output, _, _ = execute_ssh_command(ssh, device_props_cmd, timeout=15)
+
+        # Parse the batch output
+        device_data = {}
+        current_device = None
+
+        for line in props_output.split('\n'):
+            line = line.strip()
+            if line.startswith('===DEVICE:'):
+                current_device = line.split('===DEVICE:')[1].split('===')[0]
+                device_data[current_device] = {'serial_no': '', 'model': '', 'android_version': ''}
+            elif current_device and line:
+                if not device_data[current_device]['serial_no']:
+                    device_data[current_device]['serial_no'] = line
+                elif not device_data[current_device]['model']:
+                    device_data[current_device]['model'] = line
+                elif not device_data[current_device]['android_version']:
+                    device_data[current_device]['android_version'] = line
+
+        return_ssh_connection(ssh)
+
+        # Build response (no more SSH commands needed)
+        devices_info = []
+        ubuntu_host = config.get("ubuntu_host", "")
+        ubuntu_user = config.get("ubuntu_user", "")
+
+        for device_id in device_ids:
+            is_network_device = ':' in device_id and device_id.split(':')[-1].isdigit()
+            data = device_data.get(device_id, {})
+
+            # Determine device source type by checking connection method
+            source_type = 'usbip' if is_network_device else 'local'
+            if is_network_device:
+                device_ip = device_id.split(':')[0]
+                source_host = f'{device_ip} (USB/IP)'
+            else:
+                source_host = f'{ubuntu_user}@{ubuntu_host}'
+
+            device_info = {
+                'device_id': device_id,
+                'serial_no': data.get('serial_no', ''),
+                'model': data.get('model', ''),
+                'android_version': data.get('android_version', ''),
+                'source_type': source_type,
+                'source_host': source_host,
+                'status': 'online',
+                'locked_by': '',
+                'locked_by_self': False
+            }
+
+            # Check lock status
+            lock_info = locks.get(device_id, {})
+            if lock_info:
+                device_info['locked_by'] = lock_info.get('user', '')
+                device_info['locked_by_self'] = lock_info.get('client_id') == client_id
+
+            devices_info.append(device_info)
+
+        return jsonify({'devices': devices_info})
+
+    except Exception as e:
+        print(f"[ERROR] Error in get_devices_management: {e}")
+        if ssh:
+            return_ssh_connection(ssh)
+        return jsonify({'devices': []})
+
 # ==================== VNC ====================
 @app.route('/api/vnc/start', methods=['POST'])
 def start_vnc():
