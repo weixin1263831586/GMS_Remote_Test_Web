@@ -1915,8 +1915,8 @@ def start_usbip():
         # Kill adb.exe on Windows
         execute_ssh_command(win_ssh, 'taskkill /F /IM adb.exe /T', timeout=10)
 
-        # Find Android ADB Interface devices
-        find_busid_cmd = r'powershell -Command "usbipd list | Select-String \"Android ADB Interface\" | ForEach-Object { ($_ -split \"\s+\")[0] }"'
+        # Find Android ADB Interface devices (by name or VID:PID 2207:0006)
+        find_busid_cmd = r'powershell -Command "usbipd list | Select-String -Pattern \"Android ADB Interface|2207:0006\" | ForEach-Object { ($_ -split \"\s+\")[0] }"'
         output, error, code = execute_ssh_command(win_ssh, find_busid_cmd, timeout=10)
         busid_list = output.strip().splitlines()
 
@@ -2303,8 +2303,19 @@ def start_screen_mirroring():
             check_output, _, _ = execute_ssh_command(ssh, check_cmd, timeout=5)
             is_process_running = 'RUNNING' in check_output
 
-            if session_info and is_process_running:
-                # Device is already being mirrored, skip
+            # Check if scrcpy window actually exists (not just the process)
+            # When window is closed, process may still run, but window is gone
+            has_window = False
+            try:
+                window_check_cmd = f"wmctrl -l | grep '{device_id}' && echo 'HAS_WINDOW' || echo 'NO_WINDOW'"
+                window_output, _, _ = execute_ssh_command(ssh, window_check_cmd, timeout=5)
+                has_window = 'HAS_WINDOW' in window_output
+            except Exception:
+                # wmctrl not available, fall back to process-only check
+                has_window = is_process_running
+
+            if session_info and is_process_running and has_window:
+                # Device is already being mirrored with active window, skip
                 already_running_devices.append(device_id)
                 results.append({
                     'device': device_id,
@@ -2318,6 +2329,12 @@ def start_screen_mirroring():
                     'message': 'VNC查看可用（已投屏）'
                 })
                 continue
+
+            # If process exists but window is closed, clean it up
+            if is_process_running and not has_window:
+                # Old scrcpy process exists but window is closed, clean it up
+                execute_ssh_command(ssh, f"pkill -f 'scrcpy.*-s {device_id}'", timeout=5)
+                time.sleep(1)
 
             # Start scrcpy with window tiling if VNC available
             if vnc_available:
@@ -2344,7 +2361,6 @@ def start_screen_mirroring():
                 )
 
             execute_ssh_command(ssh, cmd, timeout=10)
-            import time
             time.sleep(0.2)
 
             # Verify scrcpy started successfully
