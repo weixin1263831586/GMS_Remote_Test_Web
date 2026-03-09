@@ -749,6 +749,42 @@ def detect_client():
     return jsonify({'success': False, 'error': '请提供SSH凭据'})
 
 
+@app.route('/api/users')
+def list_users():
+    """获取所有在线用户列表"""
+    with user_states_lock:
+        users = []
+        now = datetime.now()
+
+        for client_id, state in user_states.items():
+            # 检查会话是否活跃（最近24小时内有活动）
+            if 'last_seen' in state:
+                last_seen = datetime.fromisoformat(state['last_seen'])
+                if (now - last_seen) > timedelta(hours=24):
+                    continue
+
+            # 解析client_id (username@ip)
+            parts = client_id.split('@')
+            username = parts[0] if len(parts) > 0 else 'unknown'
+            ip = parts[1] if len(parts) > 1 else 'unknown'
+
+            user_info = {
+                'client_id': client_id,
+                'username': username,
+                'ip': ip,
+                'running': state.get('running', False),
+                'devices': state.get('devices', []),
+                'last_seen': state.get('last_seen', ''),
+                'created_at': state.get('created_at', '')
+            }
+            users.append(user_info)
+
+        return jsonify({
+            'total': len(users),
+            'users': users
+        })
+
+
 @app.route('/api/devices')
 def list_devices():
     """Get list of connected devices with lock status"""

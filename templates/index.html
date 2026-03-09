@@ -149,6 +149,10 @@
                     <span class="sidebar-icon">🐧</span>
                     <span class="sidebar-text">主机终端</span>
                 </a>
+                <a href="#" class="sidebar-item" data-page="users" onclick="switchPage('users', event)">
+                    <span class="sidebar-icon">👥</span>
+                    <span class="sidebar-text">用户管理</span>
+                </a>
             </nav>
 
             <!-- 客户端信息区 -->
@@ -365,6 +369,50 @@
             <!-- 终端区域 -->
             <div class="terminal-wrapper" id="terminal-wrapper">
                 <div id="terminal"></div>
+            </div>
+        </div>
+
+        <!-- 用户管理页面 -->
+        <div class="container page-content" id="page-users">
+            <div class="section-title">👥 在线用户管理</div>
+
+            <!-- 用户统计卡片 -->
+            <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-users-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">在线用户数</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="active-users-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">活跃用户数</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="testing-users-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">测试中用户</div>
+                </div>
+            </div>
+
+            <!-- 用户列表 -->
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">用户标识</th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">IP地址</th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">状态</th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">占用设备</th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">最后活跃</th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">连接时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-table-body">
+                        <tr>
+                            <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -724,6 +772,121 @@
             }
         }
 
+        // ==================== 用户管理功能 ====================
+        let usersRefreshInterval = null;
+
+        async function loadUsersList() {
+            try {
+                const resp = await fetch('/api/users');
+                const data = await resp.json();
+
+                if (data.users) {
+                    displayUsersList(data.users);
+                }
+
+                // 启动自动刷新（每10秒）
+                if (!usersRefreshInterval) {
+                    usersRefreshInterval = setInterval(() => {
+                        if (currentPage === 'users') {
+                            loadUsersList();
+                        }
+                    }, 10000);
+                }
+            } catch (e) {
+                console.error('[Users] Error loading users:', e);
+            }
+        }
+
+        function displayUsersList(users) {
+            const tbody = document.getElementById('users-table-body');
+            if (!tbody) return;
+
+            // 更新统计数据
+            const totalCount = users.length;
+            const activeCount = users.filter(u => !u.running && u.last_seen).length;
+            const testingCount = users.filter(u => u.running).length;
+
+            document.getElementById('total-users-count').textContent = totalCount;
+            document.getElementById('active-users-count').textContent = activeCount;
+            document.getElementById('testing-users-count').textContent = testingCount;
+
+            if (users.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            暂无在线用户
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            // 渲染用户列表
+            tbody.innerHTML = users.map(user => {
+                const isTesting = user.running;
+                const statusClass = isTesting ? 'status-testing' : 'status-online';
+                const statusText = isTesting ? '测试中' : '在线';
+                const statusColor = isTesting ? 'var(--warning-color)' : 'var(--success-color)';
+
+                const lastSeen = user.last_seen ? formatTime(user.last_seen) : '-';
+                const createdAt = user.created_at ? formatTime(user.created_at) : '-';
+                const devices = user.devices && user.devices.length > 0 ? user.devices.join(', ') : '-';
+
+                return `
+                    <tr style="border-bottom: 1px solid var(--border-color);">
+                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                            ${user.client_id}
+                        </td>
+                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                            ${user.ip}
+                        </td>
+                        <td style="padding: 12px;">
+                            <span style="color: ${statusColor}; font-weight: 600; font-size: 11px;">●</span>
+                            <span style="margin-left: 6px; font-size: 11px;">${statusText}</span>
+                        </td>
+                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                            ${devices}
+                        </td>
+                        <td style="padding: 12px; font-size: 11px;">
+                            ${lastSeen}
+                        </td>
+                        <td style="padding: 12px; font-size: 11px;">
+                            ${createdAt}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function formatTime(isoString) {
+            if (!isoString || isoString === '-') return '-';
+
+            try {
+                const date = new Date(isoString);
+                const now = new Date();
+                const diff = now - date;
+
+                if (diff < 60000) { // 小于1分钟
+                    return '刚刚';
+                } else if (diff < 3600000) { // 小于1小时
+                    const minutes = Math.floor(diff / 60000);
+                    return `${minutes}分钟前`;
+                } else if (diff < 86400000) { // 小于24小时
+                    const hours = Math.floor(diff / 3600000);
+                    return `${hours}小时前`;
+                } else {
+                    return date.toLocaleString('zh-CN', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                }
+            } catch (e) {
+                return '-';
+            }
+        }
+
         // ==================== 页面切换功能 ====================
         let currentPage = 'test';
         let terminalInitialized = false;
@@ -747,6 +910,7 @@
             document.getElementById('page-test').classList.remove('active');
             document.getElementById('page-desktop').classList.remove('active');
             document.getElementById('page-terminal').classList.remove('active');
+            document.getElementById('page-users').classList.remove('active');
 
             // 显示目标页面
             document.getElementById(`page-${pageName}`).classList.add('active');
@@ -757,13 +921,19 @@
             const titles = {
                 'test': '测试界面 - GMS 远程测试',
                 'terminal': '主机终端 - GMS 远程测试',
-                'desktop': '主机桌面 - GMS 远程测试'
+                'desktop': '主机桌面 - GMS 远程测试',
+                'users': '用户管理 - GMS 远程测试'
             };
             document.title = titles[pageName] || 'GMS 远程测试';
 
             // 如果切换到终端页面且未初始化，则初始化终端
             if (pageName === 'terminal' && !terminalInitialized) {
                 initTerminal();
+            }
+
+            // 如果切换到用户管理页面，加载用户列表
+            if (pageName === 'users') {
+                loadUsersList();
             }
 
             // 切换页面时重新fit终端（如果已初始化）
