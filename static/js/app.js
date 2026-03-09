@@ -803,23 +803,6 @@ async function showDeviceScreen() {
     }
 }
 
-// ==================== SSH Key Setup ====================
-async function setupSshKey() {
-    try {
-        addLogEntry('正在设置 SSH 密钥认证...', 'info');
-        const result = await apiCall('/api/ssh/setup-key', 'POST');
-
-        if (result.success) {
-            addLogEntry('SSH 密钥认证已设置成功', 'success');
-            addLogEntry(`公钥: ${result.public_key}`, 'info');
-            addLogEntry(`密钥路径: ${result.key_path}`, 'info');
-            showToast('SSH 密钥认证设置成功', 'success');
-        }
-    } catch (error) {
-        addLogEntry('设置 SSH 密钥失败: ' + error.message, 'error');
-    }
-}
-
 async function setupAdbPortForward() {
     const btn = document.getElementById('adb-forward-btn');
     if (state.adbForwardRunning) {

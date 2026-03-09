@@ -2251,57 +2251,6 @@ def autocomplete_suite():
         return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# ==================== SSH Key Authentication ====================
-@app.route('/api/ssh/setup-key', methods=['POST'])
-def setup_ssh_key():
-    """Setup SSH key-based authentication"""
-    data = request.json
-    config = load_config()
-    ssh = get_ssh_connection(config)
-    if not ssh:
-        return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
-
-    try:
-        # Generate SSH key pair if not exists
-        user = config.get('ubuntu_user', 'hcq')
-        key_path = f"/home/{user}/.ssh/id_rsa"
-
-        # Generate key
-        gen_cmd = f"ssh-keygen -t rsa -f '{key_path}' -N '' -q 2>/dev/null || true"
-        execute_ssh_command(ssh, gen_cmd)
-
-        # Read public key
-        cat_cmd = f"cat '{key_path}.pub' 2>/dev/null || echo ''"
-        output, error, code = execute_ssh_command(ssh, cat_cmd)
-
-        if not output.strip():
-            return_ssh_connection(ssh)
-            return jsonify({'success': False, 'error': 'Failed to generate SSH key'}), 500
-
-        # Add to authorized_keys
-        auth_keys = f"/home/{user}/.ssh/authorized_keys"
-        mkdir_cmd = f"mkdir -p ~/.ssh && chmod 700 ~/.ssh"
-        execute_ssh_command(ssh, mkdir_cmd)
-
-        # Check if key already exists
-        check_cmd = f"grep -F '{output.strip()}' '{auth_keys}' 2>/dev/null || true"
-        check_output, _, _ = execute_ssh_command(ssh, check_cmd)
-
-        if not check_output.strip():
-            # Add key to authorized_keys
-            append_cmd = f"echo '{output.strip()}' >> '{auth_keys}' && chmod 600 '{auth_keys}'"
-            execute_ssh_command(ssh, append_cmd)
-
-        return_ssh_connection(ssh)
-        return jsonify({
-            'success': True,
-            'public_key': output.strip(),
-            'key_path': key_path
-        })
-    except Exception as e:
-        return_ssh_connection(ssh)
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 # ==================== Advanced Screen Mirroring ====================
 @app.route('/api/screen/start', methods=['POST'])
 def start_screen_mirroring():
