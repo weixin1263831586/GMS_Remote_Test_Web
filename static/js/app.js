@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadConfig();
     loadDevices();
     initDragDrop();
+    await checkInitialTestStatus();
     startStatusPolling();
     checkVpnStatus();
 });
@@ -218,7 +219,8 @@ async function apiCall(url, method = 'GET', data = null) {
             }
         };
 
-        if (data) {
+        // Only add body for POST/PUT/PATCH/DELETE methods (not GET/HEAD)
+        if (data && !['GET', 'HEAD'].includes(method.toUpperCase())) {
             options.body = JSON.stringify(data);
         }
 
@@ -254,6 +256,18 @@ async function loadDevices() {
         state.devices = devices;
         renderDevices();
         addLogEntry(`已刷新设备列表，找到 ${devices.length} 台设备`, 'info');
+
+        // 检查 USB/IP 连接状态
+        try {
+            const status = await apiCall('/api/usbip/status', 'GET');
+            const usbipBtn = document.getElementById('usbip-btn');
+            if (usbipBtn) {
+                state.usbipConnected = status.connected;
+                usbipBtn.textContent = status.connected ? '📱 断开设备' : '📱 本地设备';
+            }
+        } catch (error) {
+            console.error('Failed to check USB/IP status:', error);
+        }
     } catch (error) {
         addLogEntry('加载设备列表失败: ' + error.message, 'error');
     }
@@ -1610,10 +1624,10 @@ function startStatusPolling() {
 
             if (status.running && !state.testing) {
                 state.testing = true;
-                updateTestUI();
+                updateTestToggleButton(true);
             } else if (!status.running && state.testing) {
                 state.testing = false;
-                updateTestUI();
+                updateTestToggleButton(false);
             }
 
             // Update VPN status
@@ -1634,6 +1648,25 @@ function startStatusPolling() {
             console.error('Status polling error:', error);
         }
     }, 2000);
+}
+
+async function checkInitialTestStatus() {
+    try {
+        const status = await apiCall('/api/status');
+        state.testing = status.running;
+        updateTestToggleButton(status.running);
+
+        // Load existing logs if available
+        if (status.logs && status.logs.length > 0) {
+            const logOutput = document.getElementById('log-output');
+            logOutput.innerHTML = '';
+            status.logs.forEach(log => {
+                addLogEntry(log.message || log, log.type || 'info');
+            });
+        }
+    } catch (error) {
+        console.error('Failed to check initial test status:', error);
+    }
 }
 
 // ==================== UI Helpers ====================

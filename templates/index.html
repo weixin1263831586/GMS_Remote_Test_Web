@@ -917,6 +917,9 @@
 
             currentPage = pageName;
 
+            // 保存当前页面到 localStorage
+            localStorage.setItem('gms_current_page', pageName);
+
             // 动态更新页面标题
             const titles = {
                 'test': '测试界面 - GMS 远程测试',
@@ -1151,10 +1154,18 @@
             initClientInfo();
 
             const hash = window.location.hash.substring(1);
+
+            // 优先使用 hash，否则从 localStorage 恢复，默认显示测试页面
             if (hash === 'desktop') {
                 switchPage('desktop');
             } else if (hash === 'terminal') {
                 switchPage('terminal');
+            } else if (hash === 'users') {
+                switchPage('users');
+            } else {
+                // 从 localStorage 恢复上次访问的页面
+                const savedPage = localStorage.getItem('gms_current_page') || 'test';
+                switchPage(savedPage);
             }
         });
     </script>

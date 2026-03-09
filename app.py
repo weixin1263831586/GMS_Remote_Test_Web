@@ -465,7 +465,9 @@ def run_test_suite(config, test_params, client_id):
         # Step 1: Upload script to remote server
         # Script is in tools directory
         local_script = os.path.join(os.path.dirname(__file__), 'tools', 'run_GMS_Test_Auto.sh')
-        remote_script = config.get('script_path', '')
+        # Upload to GMS-Suite directory on remote server
+        suites_path = config.get('suites_path', '').replace('${ubuntu_user}', config['ubuntu_user'])
+        remote_script = os.path.join(suites_path, 'run_GMS_Test_Auto.sh')
 
         if not os.path.exists(local_script):
             user_state['logs'].append(f"[ERROR] Local script not found: {local_script}")
@@ -624,6 +626,7 @@ def run_test_suite(config, test_params, client_id):
     release_devices(client_id, devices_to_release)
 
     user_state['running'] = False
+    user_state['devices'] = []
     socketio.emit('test_complete', {}, room=client_id)
 
 # ==================== Routes ====================
@@ -900,8 +903,8 @@ def start_test():
     test_thread.start()
     print(f"[DEBUG] Test thread started")
 
-    # Update user state to mark test as running
-    update_user_state({'running': True})
+    # Update user state to mark test as running and save devices
+    update_user_state({'running': True, 'devices': devices})
     return jsonify({'success': True, 'message': 'Test started'})
 
 @app.route('/api/test/stop', methods=['POST'])
@@ -917,6 +920,7 @@ def stop_test():
     # Release devices when stopping test
     devices_to_release = user_state.get('devices', [])
     release_devices(client_id, devices_to_release)
+    user_state['devices'] = []
 
     config = load_config()
     ssh = get_ssh_connection(config)
@@ -2054,6 +2058,41 @@ def stop_usbip():
     except Exception as e:
         win_ssh.close()
         return jsonify({'success': False, 'error': f'本地设备断开失败: {str(e)}'}), 500
+
+@app.route('/api/usbip/status', methods=['GET'])
+def get_usbip_status():
+    """Get USB/IP connection status"""
+    config = load_config()
+
+    # 使用当前客户端的 device_host
+    device_host = get_client_id()
+    config['device_host'] = device_host
+
+    # Connect to Windows device host
+    win_ssh = create_device_ssh_connection(config)
+    if not win_ssh:
+        return jsonify({'connected': False, 'error': '无法连接 Windows 设备主机'})
+
+    try:
+        # Check if any devices are attached (usbipd list shows attached state)
+        output, error, code = execute_ssh_command(win_ssh, 'usbipd list', timeout=10)
+
+        win_ssh.close()
+
+        # Parse output to check if any device is attached
+        # Look for lines with "Attached" indicating active connections
+        is_connected = 'Attached' in output
+
+        # Count attached devices
+        attached_count = output.count('Attached')
+
+        return jsonify({
+            'connected': is_connected,
+            'attached_count': attached_count
+        })
+    except Exception as e:
+        win_ssh.close()
+        return jsonify({'connected': False, 'error': str(e)})
 
 # ==================== Advanced Test Features ====================
 @app.route('/api/test/kill-tradefed', methods=['POST'])
