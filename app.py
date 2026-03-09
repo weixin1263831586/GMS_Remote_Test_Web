@@ -2218,25 +2218,52 @@ def autocomplete_suite():
             return_ssh_connection(ssh)
             return jsonify({'success': False, 'error': f'不支持的测试类型: {test_type}'}), 400
 
-        # Simply construct candidate path: {base_path}/{subdir}/tools (strict GUI logic)
         subdir = config_info['subdir']
         binary = config_info['binary']
-        candidate = f"{base_path}/{subdir}/tools"
 
+        # Try multiple path patterns to find the test suite
+        candidates = []
 
-        # Check if binary exists in candidate path
-        check_cmd = f"[ -x '{candidate}/{binary}' ] && echo '{candidate}' || echo ''"
-        output, error, code = execute_ssh_command(ssh, check_cmd)
+        # Pattern 1: {base_path}/{subdir}/tools (standard structure)
+        candidates.append(f"{base_path}/{subdir}/tools")
 
-        if output.strip():
-            final_path = output.strip()
+        # Pattern 2: Search for {subdir} in subdirectories of base_path
+        # This handles structures like: base_path/android-gts-13.1-R1/android-gts/tools
+        find_cmd = f"find '{base_path}' -maxdepth 3 -type d -name '{subdir}' 2>/dev/null | head -5"
+        find_output, _, _ = execute_ssh_command(ssh, find_cmd, timeout=10)
+
+        if find_output.strip():
+            for line in find_output.strip().split('\n'):
+                # Add tools subdirectory to each found subdir
+                candidates.append(f"{line}/tools")
+
+        # Pattern 3: Check if base_path itself is already the tools directory
+        # Check for binary directly in base_path
+        check_direct = f"[ -x '{base_path}/{binary}' ] && echo '{base_path}' || echo ''"
+        direct_output, _, _ = execute_ssh_command(ssh, check_direct)
+        if direct_output.strip():
             return_ssh_connection(ssh)
             return jsonify({
                 'success': True,
-                'path': final_path,
+                'path': base_path,
                 'binary': binary,
                 'autocompleted': True
             })
+
+        # Try each candidate path
+        for candidate in candidates:
+            check_cmd = f"[ -x '{candidate}/{binary}' ] && echo '{candidate}' || echo ''"
+            output, error, code = execute_ssh_command(ssh, check_cmd)
+
+            if output.strip():
+                final_path = output.strip()
+                return_ssh_connection(ssh)
+                return jsonify({
+                    'success': True,
+                    'path': final_path,
+                    'binary': binary,
+                    'autocompleted': True
+                })
 
         # If binary not found, return original path with warning (GUI behavior)
         return_ssh_connection(ssh)

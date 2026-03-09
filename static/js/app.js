@@ -1211,18 +1211,24 @@ function closeFileBrowserModal() {
 }
 
 function confirmFileSelection() {
+    const targetInput = document.getElementById(state.fileBrowser.targetInputId);
+
+    // For suite path selection, use current directory (not file selection)
+    if (state.fileBrowser.mode === 'suite') {
+        // Use current directory path as base for auto-completion
+        autoCompleteSuitePath(state.fileBrowser.currentPath);
+        return;
+    }
+
+    // For other modes, require file selection
     if (!state.fileBrowser.selectedFile) {
         showToast('请先选择一个文件', 'warning');
         return;
     }
 
     const fullPath = `${state.fileBrowser.currentPath}/${state.fileBrowser.selectedFile}`;
-    const targetInput = document.getElementById(state.fileBrowser.targetInputId);
 
-    // For suite path selection, use auto-completion
-    if (state.fileBrowser.mode === 'suite') {
-        autoCompleteSuitePath(fullPath);
-    } else if (state.fileBrowser.mode === 'retry') {
+    if (state.fileBrowser.mode === 'retry') {
         // For retry result, use the selected path directly
         if (targetInput) {
             targetInput.value = fullPath;
@@ -1239,7 +1245,7 @@ function confirmFileSelection() {
     } else {
         if (targetInput) {
             targetInput.value = fullPath;
-            addLogEntry(`已选择${state.fileBrowser.mode === 'suite' ? '测试套件' : '文件'}: ${fullPath}`, 'info');
+            addLogEntry(`已选择文件: ${fullPath}`, 'info');
         }
         closeFileBrowserModal();
     }
