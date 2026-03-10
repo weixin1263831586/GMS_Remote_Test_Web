@@ -41,6 +41,10 @@ scrcpy_sessions_lock = threading.Lock()
 device_cache = {'devices': [], 'timestamp': 0, 'lock': threading.Lock()}
 DEVICE_CACHE_TTL = 3
 
+# USB/IP 连接状态
+usbip_states = {}  # {client_id: {'connected': bool, 'timestamp': float}}
+usbip_states_lock = threading.Lock()
+
 # API 响应工具类
 class ApiResponse:
     """统一的 API 响应格式"""
@@ -464,6 +468,22 @@ def is_windows_host(ssh):
         return 'microsoft' in output or 'windows' in output
     except:
         return False
+
+def find_device_host_password(config, device_host):
+    """从 client_ssh_credentials 中查找对应 device_host 的密码"""
+    if '@' not in device_host:
+        return None
+
+    username, hostname = device_host.split('@', 1)
+
+    # 从 client_ssh_credentials 中查找匹配的凭据
+    for cred in config.get('client_ssh_credentials', []):
+        if cred.get('username') == username:
+            print(f"[USB/IP] Found SSH credential for username={username}")
+            return cred.get('password')
+
+    print(f"[USB/IP] No SSH credential found for {device_host}")
+    return None
 
 # ==================== Device Management ====================
 def get_connected_devices(config, force_refresh=False):
@@ -2080,127 +2100,208 @@ def stop_adb_forward():
         return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# ==================== USBIP ====================
+# ==================== USB/IP 管理类 ====================
+class USBIPManager:
+    """USB/IP 设备管理器 - 处理 Windows 到 Ubuntu 的 USB 设备转发"""
+
+    @staticmethod
+    def find_android_devices(ssh, config=None):
+        """查找 Android 设备的 BUSID"""
+        output, _, _ = execute_ssh_command(ssh, 'usbipd list', timeout=10)
+        print(f"[USB/IP] Scanning devices:\n{output}")
+
+        # 从配置中获取 VID:PID
+        vid_pid = config.get('usbip_vid_pid') if config else None
+
+        print(f"[USB/IP] Using VID:PID pattern: {vid_pid}")
+
+        devices = []
+        in_connected = False
+
+        for line in output.split('\n'):
+            if 'Connected:' in line:
+                in_connected = True
+            elif 'Persisted:' in line:
+                break
+            elif in_connected and ('Android ADB Interface' in line or (vid_pid and vid_pid in line)):
+                parts = line.strip().split()
+                if parts and '-' in parts[0]:
+                    devices.append(parts[0])
+
+        print(f"[USB/IP] Found devices: {devices}")
+        return devices
+
+    @staticmethod
+    def bind_device(ssh, busid):
+        """绑定单个设备到 USB/IP"""
+        output, _, _ = execute_ssh_command(ssh, f'usbipd list | findstr {busid}', timeout=5)
+
+        if 'Shared' in output:
+            print(f"[USB/IP] Device {busid} already shared")
+            return True
+        elif 'Attached' in output:
+            print(f"[USB/IP] Detaching {busid}...")
+            execute_ssh_command(ssh, f'usbipd detach --busid {busid}', timeout=15)
+            time.sleep(1)
+
+        print(f"[USB/IP] Binding {busid}...")
+        execute_ssh_command(ssh, f'usbipd bind --busid {busid}', timeout=15)
+        time.sleep(2)
+        print(f"[USB/IP] Device {busid} bound")
+        return True
+
+    @staticmethod
+    def bind_devices(ssh, busids):
+        """绑定所有设备"""
+        return [busid for busid in busids if USBIPManager.bind_device(ssh, busid)]
+
+    @staticmethod
+    def attach_device(ssh, device_ip, busid):
+        """在 Ubuntu 上 attach 设备"""
+        cmd = f'sudo usbip attach -r {device_ip} -b {busid}'
+        print(f"[USB/IP] Attaching {busid} from {device_ip}...")
+        execute_ssh_command(ssh, cmd, timeout=10)
+        time.sleep(2)
+        print(f"[USB/IP] Device {busid} attached")
+        return True
+
+    @staticmethod
+    def attach_devices(ssh, device_ip, busids):
+        """在 Ubuntu 上 attach 所有设备"""
+        attached = [busid for busid in busids if USBIPManager.attach_device(ssh, device_ip, busid)]
+
+        # 等待设备稳定
+        time.sleep(3)
+        execute_ssh_command(ssh, 'sudo udevadm trigger', timeout=10)
+        execute_ssh_command(ssh, 'sudo udevadm settle', timeout=10)
+
+        # 检查实际设备列表
+        output, _, _ = execute_ssh_command(ssh, 'adb devices', timeout=10)
+        device_list = [line.split('\t')[0] for line in output.split('\n')[1:] if '\tdevice' in line]
+        print(f"[USB/IP] Final device list: {device_list}")
+
+        return attached, device_list
+
+    @staticmethod
+    def ensure_vhci_driver(ssh):
+        """确保 vhci_hcd 驱动已加载"""
+        output, _, _ = execute_ssh_command(ssh, 'lsmod | grep vhci_hcd')
+        if not output.strip():
+            print("[USB/IP] Loading vhci_hcd driver...")
+            execute_ssh_command(ssh, 'sudo modprobe vhci_hcd', timeout=10)
+            time.sleep(1)
+
+
 @app.route('/api/usbip/start', methods=['POST'])
 def start_usbip():
-    """Start USBIP forwarding - Windows (usbipd) to Ubuntu (usbip)"""
-    import time
+    """启动 USB/IP 转发"""
     config = load_config()
-
-    # 使用当前客户端的 device_host
     device_host = get_client_id()
     config['device_host'] = device_host
 
-    # Get device password from request or config
+    # 自动从 client_ssh_credentials 中查找密码
     request_data = request.get_json() or {}
-    device_password = request_data.get('device_password', config.get('device_pswd', ''))
+    device_password = request_data.get('device_password')
 
-    # Update config with device password temporarily
-    temp_config = config.copy()
-    temp_config['device_pswd'] = device_password
+    # 如果请求中没有提供密码，从已保存的凭据中查找
+    if not device_password:
+        device_password = find_device_host_password(config, device_host)
 
-    # Connect to Windows device host
-    win_ssh = create_device_ssh_connection(temp_config)
-    if not win_ssh:
+    # 如果仍然没有密码，才尝试使用旧的 device_pswd
+    if not device_password:
+        device_password = config.get('device_pswd', '')
+
+    if not device_password:
+        print(f"[USB/IP] No password found for {device_host}")
         return jsonify({
             'success': False,
-            'error': f'SSH连接设备主机失败，请检查密码',
-            'need_password': True,
-            'device_host': device_host
+            'error': f'未找到 {device_host} 的SSH凭据，请先在登录页面输入SSH密码'
+        }), 401
+
+    temp_config = {**config, 'device_pswd': device_password}
+
+    # 连接 Windows 主机
+    print(f"[USB/IP] Connecting to {device_host}...")
+    win_ssh = create_device_ssh_connection(temp_config)
+    if not win_ssh:
+        print(f"[USB/IP] Failed to connect to {device_host}")
+        return jsonify({
+            'success': False,
+            'error': f'SSH连接失败，请检查 {device_host} 的SSH凭据'
         }), 401
 
     try:
-        # Check if Windows host
+        # 检查系统类型
         if not is_windows_host(win_ssh):
             win_ssh.close()
-            return jsonify({'success': False, 'error': 'USB/IP 本地设备目前只支持 Windows 系统'}), 400
+            return jsonify({'success': False, 'error': 'USB/IP 仅支持 Windows 主机'}), 400
 
-        # Check usbipd installation
-        output, error, code = execute_ssh_command(win_ssh, 'usbipd --version', timeout=5)
+        # 检查 usbipd
+        output, error, _ = execute_ssh_command(win_ssh, 'usbipd --version', timeout=5)
         if error or not output:
             win_ssh.close()
-            return jsonify({'success': False, 'error': 'usbipd未安装，请在Windows以管理员身份运行: winget install dorssel.usbipd-win --source winget'}), 400
+            install_guide = (
+                "Windows 设备主机未安装 usbipd 工具\n\n"
+                "请在 Windows 电脑上以【管理员身份】运行 PowerShell，执行以下命令安装：\n\n"
+                "winget install dorssel.usbipd-win --source winget\n\n"
+                "安装完成后，验证安装：\n"
+                "usbipd --version"
+            )
+            return jsonify({
+                'success': False,
+                'error': 'usbipd 未安装',
+                'install_guide': install_guide
+            }), 400
 
-        # Kill adb.exe on Windows
+        # 终止 ADB
         execute_ssh_command(win_ssh, 'taskkill /F /IM adb.exe /T', timeout=10)
 
-        # Find Android ADB Interface devices (by name or VID:PID 2207:0006)
-        find_busid_cmd = r'powershell -Command "usbipd list | Select-String -Pattern \"Android ADB Interface|2207:0006\" | ForEach-Object { ($_ -split \"\s+\")[0] }"'
-        output, error, code = execute_ssh_command(win_ssh, find_busid_cmd, timeout=10)
-        busid_list = output.strip().splitlines()
-
-        if not busid_list or not busid_list[0]:
+        # 查找设备
+        busids = USBIPManager.find_android_devices(win_ssh, config)
+        if not busids:
             win_ssh.close()
-            return jsonify({'success': False, 'error': '未找到 Android ADB Interface 设备，请检查adb设备或手动重启adb设备'}), 400
+            return jsonify({'success': False, 'error': '未找到 Android 设备'}), 400
 
-        all_busids = [busid.strip() for busid in busid_list]
-
-        # Bind devices on Windows
-        bound_devices = []
-        for busid in all_busids:
-            output, error, code = execute_ssh_command(win_ssh, f'usbipd list | findstr {busid}', timeout=5)
-            state_info = output
-
-            if 'Shared' in state_info:
-                bound_devices.append(busid)
-                continue
-            elif 'Attached' in state_info:
-                execute_ssh_command(win_ssh, f'usbipd detach --busid {busid}', timeout=15)
-                time.sleep(1)
-                execute_ssh_command(win_ssh, f'usbipd bind --busid {busid}', timeout=15)
-                time.sleep(1)
-                bound_devices.append(busid)
-                continue
-            else:
-                execute_ssh_command(win_ssh, f'usbipd bind --busid {busid}', timeout=15)
-                time.sleep(2)
-                bound_devices.append(busid)
-
-        if not bound_devices:
-            win_ssh.close()
-            return jsonify({'success': False, 'error': '没有设备成功绑定'}), 500
-
+        # 绑定设备
+        bound = USBIPManager.bind_devices(win_ssh, busids)
         win_ssh.close()
 
-        # Connect to Ubuntu host
+        if not bound:
+            return jsonify({'success': False, 'error': '设备绑定失败'}), 500
+
+        # 连接 Ubuntu 并 attach 设备
         ubuntu_ssh = get_ssh_connection(config)
         if not ubuntu_ssh:
             return jsonify({'success': False, 'error': '无法连接 Ubuntu 主机'}), 500
 
-        # Check vhci_hcd driver
-        output, error, code = execute_ssh_command(ubuntu_ssh, 'lsmod | grep vhci_hcd')
-        if not output.strip():
-            execute_ssh_command(ubuntu_ssh, 'sudo modprobe vhci_hcd', timeout=10)
-            time.sleep(1)
+        try:
+            USBIPManager.ensure_vhci_driver(ubuntu_ssh)
 
-        # Attach devices on Ubuntu
-        device_ip = device_host.split('@')[1] if '@' in device_host else device_host
-        attached_devices = []
+            device_ip = device_host.split('@')[1] if '@' in device_host else device_host
+            attached, device_list = USBIPManager.attach_devices(ubuntu_ssh, device_ip, busids)
 
-        for busid in all_busids:
-            attach_cmd = f'sudo usbip attach -r {device_ip} -b {busid}'
-            execute_ssh_command(ubuntu_ssh, attach_cmd, timeout=10)
-            time.sleep(2)
-            attached_devices.append(busid)
+            return_ssh_connection(ubuntu_ssh)
 
-        # Wait for devices to stabilize
-        time.sleep(3)
-        execute_ssh_command(ubuntu_ssh, 'sudo udevadm trigger', timeout=10)
-        execute_ssh_command(ubuntu_ssh, 'sudo udevadm settle', timeout=10)
+            # 保存密码
+            if device_password and device_password != config.get('device_pswd', ''):
+                config['device_pswd'] = device_password
+                save_config(config)
 
-        return_ssh_connection(ubuntu_ssh)
+            # 更新 USB/IP 连接状态
+            client_id = get_client_id()
+            with usbip_states_lock:
+                usbip_states[client_id] = {'connected': True, 'timestamp': time.time()}
+            print(f"[USB/IP Start] Set connected=True for client_id={client_id}")
 
-        # Save password to config if provided via modal
-        if device_password and device_password != config.get('device_pswd', ''):
-            config['device_pswd'] = device_password
-            save_config(config)
-
-        return jsonify({
-            'success': True,
-            'message': f'成功连接 {len(attached_devices)} 个设备',
-            'devices': attached_devices,
-            'details': f'Windows: 已绑定设备 {", ".join(bound_devices)} -> Ubuntu: 已attach设备'
-        })
+            return jsonify({
+                'success': True,
+                'message': f'成功连接 {len(attached)} 个设备: {", ".join(attached)}',
+                'devices': attached,
+                'device_list': device_list
+            })
+        except Exception as e:
+            ubuntu_ssh.close()
+            return jsonify({'success': False, 'error': str(e)}), 500
 
     except Exception as e:
         win_ssh.close()
@@ -2208,71 +2309,57 @@ def start_usbip():
 
 @app.route('/api/usbip/stop', methods=['POST'])
 def stop_usbip():
-    """Stop USBIP forwarding - unbind all on Windows"""
-    import time
+    """停止 USB/IP 转发"""
     config = load_config()
-
-    # 使用当前客户端的 device_host
     device_host = get_client_id()
     config['device_host'] = device_host
+    client_id = get_client_id()
 
-    # Connect to Windows device host
+    # 自动从 client_ssh_credentials 中查找密码
+    device_password = find_device_host_password(config, device_host)
+    if not device_password:
+        device_password = config.get('device_pswd', '')
+
+    if device_password:
+        config['device_pswd'] = device_password
+
     win_ssh = create_device_ssh_connection(config)
     if not win_ssh:
-        return jsonify({'success': False, 'error': '无法连接 Windows 设备主机'}), 500
+        # 无法连接到 Windows，清除状态并返回成功
+        with usbip_states_lock:
+            usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
+        return jsonify({'success': True, 'message': '本地设备已断开'})
 
     try:
-        # Unbind all USB/IP devices on Windows
-        output, error, code = execute_ssh_command(win_ssh, 'usbipd unbind --all', timeout=10)
-
+        execute_ssh_command(win_ssh, 'usbipd unbind --all', timeout=10)
         win_ssh.close()
-
-        # Wait and refresh devices
         time.sleep(2)
+
+        # 更新 USB/IP 连接状态
+        with usbip_states_lock:
+            usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
 
         return jsonify({
             'success': True,
-            'message': '本地设备已断开',
-            'details': f'已解除所有 USB/IP 绑定'
+            'message': '本地设备已断开'
         })
     except Exception as e:
         win_ssh.close()
-        return jsonify({'success': False, 'error': f'本地设备断开失败: {str(e)}'}), 500
+        # 即使失败也清除状态
+        with usbip_states_lock:
+            usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
+        return jsonify({'success': True, 'message': '本地设备已断开'})
+
 
 @app.route('/api/usbip/status', methods=['GET'])
 def get_usbip_status():
-    """Get USB/IP connection status"""
-    config = load_config()
+    """获取 USB/IP 状态"""
+    client_id = get_client_id()
+    with usbip_states_lock:
+        state_info = usbip_states.get(client_id, {'connected': False, 'timestamp': 0})
+    print(f"[USB/IP Status] client_id={client_id}, connected={state_info['connected']}, all_states={list(usbip_states.keys())}")
+    return jsonify({'connected': state_info['connected']})
 
-    # 使用当前客户端的 device_host
-    device_host = get_client_id()
-    config['device_host'] = device_host
-
-    # Connect to Windows device host
-    win_ssh = create_device_ssh_connection(config)
-    if not win_ssh:
-        return jsonify({'connected': False, 'error': '无法连接 Windows 设备主机'})
-
-    try:
-        # Check if any devices are attached (usbipd list shows attached state)
-        output, error, code = execute_ssh_command(win_ssh, 'usbipd list', timeout=10)
-
-        win_ssh.close()
-
-        # Parse output to check if any device is attached
-        # Look for lines with "Attached" indicating active connections
-        is_connected = 'Attached' in output
-
-        # Count attached devices
-        attached_count = output.count('Attached')
-
-        return jsonify({
-            'connected': is_connected,
-            'attached_count': attached_count
-        })
-    except Exception as e:
-        win_ssh.close()
-        return jsonify({'connected': False, 'error': str(e)})
 
 # ==================== Advanced Test Features ====================
 @app.route('/api/test/kill-tradefed', methods=['POST'])

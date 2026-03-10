@@ -358,6 +358,7 @@ async function apiCall(url, method = 'GET', data = null) {
                 error.suppressToast = true; // Don't show toast for password prompt
             }
             if (result.device_host) error.deviceHost = result.device_host;
+            if (result.install_guide) error.installGuide = result.install_guide;
             throw error;
         }
 
@@ -389,17 +390,8 @@ async function loadDevices(forceRefresh = false) {
         renderDevices();
         addLogEntry(`已刷新设备列表，找到 ${devices.length} 台设备`, 'info');
 
-        // 检查 USB/IP 连接状态
-        try {
-            const status = await apiCall('/api/usbip/status', 'GET');
-            const usbipBtn = $('usbip-btn');
-            if (usbipBtn) {
-                state.usbipConnected = status.connected;
-                usbipBtn.textContent = status.connected ? '📱 断开设备' : '📱 本地设备';
-            }
-        } catch (error) {
-            console.error('Failed to check USB/IP status:', error);
-        }
+        // 不再自动检查 USB/IP 状态，避免覆盖连接状态
+        // USB/IP 状态只在连接/断开操作时更新
     } catch (error) {
         addLogEntry('加载设备列表失败: ' + error.message, 'error');
     } finally {
@@ -932,35 +924,68 @@ async function setupAdbPortForward() {
 }
 
 async function setupUsbipForward() {
-    const btn = document.getElementById('usbip-btn');
+    const btn = $('usbip-btn');
+    if (!btn) return;
+
+    // 防止并发操作
+    if (btn.disabled) return;
+
+    console.log('[setupUsbipForward] Called, state.usbipConnected =', state.usbipConnected);
+
     if (state.usbipConnected) {
+        // 断开连接
+        console.log('[setupUsbipForward] Disconnecting...');
         try {
+            btn.textContent = '📱 断开中...';
+            btn.disabled = true;
+
             const result = await apiCall('/api/usbip/stop', 'POST', {});
             state.usbipConnected = false;
             btn.textContent = '📱 本地设备';
+            btn.disabled = false;
             addLogEntry(result.message || '本地设备已断开', 'success');
-            // 刷新设备列表（使用防抖版本）
             setTimeout(() => debouncedRefreshDevices(), 2500);
         } catch (error) {
+            btn.textContent = '📱 断开设备';
+            btn.disabled = false;
             addLogEntry('停止 USB/IP 失败: ' + error.message, 'error');
         }
     } else {
+        // 连接
+        console.log('[setupUsbipForward] Connecting...');
         try {
+            btn.textContent = '📱 连接中...';
+            btn.disabled = true;
+
             const result = await apiCall('/api/usbip/start', 'POST', {});
-            state.usbipConnected = true;
-            btn.textContent = '📱 断开设备';
-            addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
-            // 刷新设备列表（使用防抖版本）
-            setTimeout(() => debouncedRefreshDevices(), 3500);
+
+            // 只有确认成功后才设置状态
+            if (result.success || result.devices) {
+                state.usbipConnected = true;
+                btn.textContent = '📱 断开设备';
+                btn.disabled = false;
+                addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
+                setTimeout(() => debouncedRefreshDevices(), 3500);
+            } else {
+                btn.textContent = '📱 本地设备';
+                btn.disabled = false;
+
+                // 检查是否有安装指南
+                if (result.install_guide) {
+                    // 显示友好的安装指南弹窗
+                    showInstallGuide('usbipd 安装指南', result.install_guide);
+                    addLogEntry('启动 USB/IP 失败: ' + (result.error || '未知错误'), 'error');
+                } else {
+                    addLogEntry('启动 USB/IP 失败: ' + (result.error || result.message || '未知错误'), 'error');
+                }
+            }
         } catch (error) {
-            // 检查是否需要密码
-            if (error.needPassword) {
-                // 使用当前客户端信息而不是后端返回的deviceHost
-                const deviceHost = (typeof clientInfo !== 'undefined' && clientInfo.username && clientInfo.username !== 'unknown')
-                    ? `${clientInfo.username}@${clientInfo.ip}`
-                    : error.deviceHost || '';
-                showDevicePasswordModal(deviceHost);
-                return;
+            btn.textContent = '📱 本地设备';
+            btn.disabled = false;
+
+            // 检查错误对象中是否有安装指南
+            if (error.installGuide) {
+                showInstallGuide('usbipd 安装指南', error.installGuide);
             }
             addLogEntry('启动 USB/IP 失败: ' + error.message, 'error');
         }
@@ -1019,16 +1044,30 @@ async function submitDevicePassword() {
             device_password: password
         });
 
-        state.usbipConnected = true;
-        $('usbip-btn').textContent = '📱 断开设备';
+        // 不在这里设置状态，让主按钮处理
         addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
         showToast('USB/IP 连接成功', 'success');
 
         // 刷新设备列表（使用防抖版本）
         setTimeout(() => debouncedRefreshDevices(), 3500);
+
+        // 手动更新按钮状态（因为主函数已经返回了）
+        const btn = $('usbip-btn');
+        if (btn) {
+            state.usbipConnected = true;
+            btn.textContent = '📱 断开设备';
+            btn.disabled = false;
+        }
     } catch (error) {
         addLogEntry('启动 USB/IP 失败: ' + error.message, 'error');
         showToast('连接失败: ' + error.message, 'error');
+
+        // 确保按钮状态正确
+        const btn = $('usbip-btn');
+        if (btn) {
+            btn.textContent = '📱 本地设备';
+            btn.disabled = false;
+        }
     }
 }
 
@@ -1586,6 +1625,10 @@ async function showConfig() {
             <input type="text" id="config-local-server" value="${config.local_server || ''}" />
         </div>
         <div class="modal-form-row">
+            <label>USB设备VID:PID:</label>
+            <input type="text" id="config-usbip-vid-pid" value="${config.usbip_vid_pid || ''}" placeholder="例如: 2207:0006" />
+        </div>
+        <div class="modal-form-row">
             <label>测试脚本路径:</label>
             <input type="text" id="config-script-path" class="readonly" value="${config.script_path || ''}" readonly />
         </div>
@@ -1615,7 +1658,8 @@ async function saveConfig() {
         ubuntu_host: document.getElementById('config-ubuntu-host').value,
         device_host: document.getElementById('config-device-host').value,
         local_server: document.getElementById('config-local-server').value,
-        suites_path: document.getElementById('config-suites-path').value
+        suites_path: document.getElementById('config-suites-path').value,
+        usbip_vid_pid: document.getElementById('config-usbip-vid-pid').value
     };
 
     // Only include passwords if they are not empty
@@ -1956,5 +2000,55 @@ async function viewReportFile(filePath, fileName) {
     } catch (e) {
         console.error('[Reports] Error viewing file:', e);
         showToast('查看文件失败: ' + e.message, 'error');
+    }
+}
+
+// ==================== 安装指南弹窗 ====================
+function showInstallGuide(title, guide) {
+    // 创建或获取弹窗元素
+    let modal = document.getElementById('install-guide-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'install-guide-modal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h2 id="install-guide-title">安装指南</h2>
+                    <button class="close-btn" onclick="closeInstallGuide()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <pre id="install-guide-content" style="white-space: pre-wrap; word-wrap: break-word; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; line-height: 1.6; color: #333;"></pre>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" onclick="closeInstallGuide()">知道了</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+
+    // 设置标题和内容
+    document.getElementById('install-guide-title').textContent = title;
+    document.getElementById('install-guide-content').textContent = guide;
+
+    // 显示弹窗
+    modal.classList.add('show');
+
+    // 添加 ESC 键监听
+    document.addEventListener('keydown', handleInstallGuideEsc);
+}
+
+function closeInstallGuide() {
+    const modal = document.getElementById('install-guide-modal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+    document.removeEventListener('keydown', handleInstallGuideEsc);
+}
+
+function handleInstallGuideEsc(event) {
+    if (event.key === 'Escape') {
+        closeInstallGuide();
     }
 }

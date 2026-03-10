@@ -4,6 +4,7 @@
     "ubuntu_pswd": "rockchip",
     "local_server": "hcq@10.10.10.206",
     "use_key_auth": false,
+    "usbip_vid_pid": "2207:0006",
     "private_key_path": "~/.ssh/id_rsa",
     "vnc_password": "rockchip",
     "vpn_target": [
