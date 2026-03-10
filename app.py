@@ -41,9 +41,16 @@ scrcpy_sessions_lock = threading.Lock()
 device_cache = {'devices': [], 'timestamp': 0, 'lock': threading.Lock()}
 DEVICE_CACHE_TTL = 3
 
-# USB/IP 连接状态
+# ==================== USB/IP 状态管理 ====================
+# USB/IP 连接状态（按客户端隔离）
 usbip_states = {}  # {client_id: {'connected': bool, 'timestamp': float}}
 usbip_states_lock = threading.Lock()
+
+# USB/IP 设备来源记录（全局共享，支持多用户）
+# 记录每个设备的来源主机，用于在设备管理界面区分 USB/IP 设备和本地直连设备
+# {device_id: {'source': device_host, 'timestamp': float}}
+usbip_devices_source = {}
+usbip_devices_lock = threading.Lock()
 
 # API 响应工具类
 class ApiResponse:
@@ -1573,16 +1580,34 @@ def get_devices_management():
         ubuntu_host = config.get("ubuntu_host", "")
         ubuntu_user = config.get("ubuntu_user", "")
 
+        # 获取 USB/IP 设备来源记录（全局共享，支持多用户）
+        with usbip_devices_lock:
+            usbip_devices_source_copy = usbip_devices_source.copy()
+
+            # 清理已不存在的设备来源记录
+            # 如果设备已不在当前设备列表中，说明设备已断开/移除，应该清除其来源记录
+            current_device_set = set(device_ids)
+            devices_to_remove = [
+                dev_id for dev_id in usbip_devices_source.keys()
+                if dev_id not in current_device_set
+            ]
+            if devices_to_remove:
+                print(f"[Device Management] Cleaning up removed devices: {devices_to_remove}")
+                for dev_id in devices_to_remove:
+                    del usbip_devices_source[dev_id]
+
         for device_id in device_ids:
-            is_network_device = ':' in device_id and device_id.split(':')[-1].isdigit()
             data = device_data.get(device_id, {})
 
-            # Determine device source type by checking connection method
-            source_type = 'usbip' if is_network_device else 'local'
-            if is_network_device:
-                device_ip = device_id.split(':')[0]
-                source_host = f'{device_ip} (USB/IP)'
+            # 判断设备来源类型
+            # 通过检查全局 USB/IP 设备来源记录，区分 USB/IP 设备和本地直连设备
+            if device_id in usbip_devices_source_copy:
+                # 设备在 USB/IP 记录中 -> 通过 USB/IP 添加的设备
+                source_type = 'usbip'
+                source_host = usbip_devices_source_copy[device_id].get('source', 'Unknown')
             else:
+                # 设备不在 USB/IP 记录中 -> 本地直连设备
+                source_type = 'local'
                 source_host = f'{ubuntu_user}@{ubuntu_host}'
 
             device_info = {
@@ -2167,7 +2192,28 @@ class USBIPManager:
 
     @staticmethod
     def attach_devices(ssh, device_ip, busids):
-        """在 Ubuntu 上 attach 所有设备"""
+        """
+        在 Ubuntu 上 attach 所有设备，并返回实际通过 USB/IP 添加的设备列表
+
+        通过比较 attach 前后的设备列表差异，准确识别通过 USB/IP 新添加的设备，
+        避免将测试主机直连的设备误标记为 USB/IP 设备。
+
+        Args:
+            ssh: SSH 连接对象
+            device_ip: Windows 设备主机 IP
+            busids: 要 attach 的设备 BUSID 列表
+
+        Returns:
+            tuple: (attached_busids, new_device_ids)
+                - attached_busids: 成功 attach 的设备 BUSID 列表
+                - new_device_ids: 通过 USB/IP 新添加的设备 ID 列表
+        """
+        # 获取 attach 之前的设备列表
+        output_before, _, _ = execute_ssh_command(ssh, 'adb devices', timeout=10)
+        devices_before = set(line.split('\t')[0] for line in output_before.split('\n')[1:] if '\tdevice' in line)
+        print(f"[USB/IP] Devices before attach: {devices_before}")
+
+        # 执行 attach 操作
         attached = [busid for busid in busids if USBIPManager.attach_device(ssh, device_ip, busid)]
 
         # 等待设备稳定
@@ -2175,12 +2221,16 @@ class USBIPManager:
         execute_ssh_command(ssh, 'sudo udevadm trigger', timeout=10)
         execute_ssh_command(ssh, 'sudo udevadm settle', timeout=10)
 
-        # 检查实际设备列表
+        # 检查 attach 之后的设备列表
         output, _, _ = execute_ssh_command(ssh, 'adb devices', timeout=10)
-        device_list = [line.split('\t')[0] for line in output.split('\n')[1:] if '\tdevice' in line]
-        print(f"[USB/IP] Final device list: {device_list}")
+        devices_after = set(line.split('\t')[0] for line in output.split('\n')[1:] if '\tdevice' in line)
+        print(f"[USB/IP] Devices after attach: {devices_after}")
 
-        return attached, device_list
+        # 计算新增的设备（通过 USB/IP 添加的设备）
+        new_devices = list(devices_after - devices_before)
+        print(f"[USB/IP] New devices added via USB/IP: {new_devices}")
+
+        return attached, new_devices
 
     @staticmethod
     def ensure_vhci_driver(ssh):
@@ -2197,6 +2247,8 @@ def start_usbip():
     """启动 USB/IP 转发"""
     config = load_config()
     device_host = get_client_id()
+    # 保存原始 Windows 设备主机地址，用于记录设备来源
+    windows_device_host = device_host
     config['device_host'] = device_host
 
     # 自动从 client_ssh_credentials 中查找密码
@@ -2280,8 +2332,6 @@ def start_usbip():
             device_ip = device_host.split('@')[1] if '@' in device_host else device_host
             attached, device_list = USBIPManager.attach_devices(ubuntu_ssh, device_ip, busids)
 
-            return_ssh_connection(ubuntu_ssh)
-
             # 保存密码
             if device_password and device_password != config.get('device_pswd', ''):
                 config['device_pswd'] = device_password
@@ -2292,6 +2342,20 @@ def start_usbip():
             with usbip_states_lock:
                 usbip_states[client_id] = {'connected': True, 'timestamp': time.time()}
             print(f"[USB/IP Start] Set connected=True for client_id={client_id}")
+
+            # 记录 USB/IP 设备来源（全局记录，支持多用户场景）
+            # 将通过 USB/IP 添加的设备及其来源主机记录到全局字典中
+            # 所有用户都可以看到这些设备的来源信息
+            with usbip_devices_lock:
+                for device_id in device_list:
+                    usbip_devices_source[device_id] = {
+                        'source': windows_device_host,
+                        'timestamp': time.time()
+                    }
+                print(f"[USB/IP Start] Recorded device source: {windows_device_host} for devices: {device_list}")
+
+            # 归还 SSH 连接（在所有状态更新完成后）
+            return_ssh_connection(ubuntu_ssh)
 
             return jsonify({
                 'success': True,
@@ -2325,9 +2389,11 @@ def stop_usbip():
 
     win_ssh = create_device_ssh_connection(config)
     if not win_ssh:
-        # 无法连接到 Windows，清除状态并返回成功
+        # 无法连接到 Windows，只清除连接状态
+        # 注意：不清除设备来源记录，因为设备仍然在测试主机上
         with usbip_states_lock:
             usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
+        print(f"[USB/IP Stop] Connection cleared (device source preserved)")
         return jsonify({'success': True, 'message': '本地设备已断开'})
 
     try:
@@ -2335,9 +2401,12 @@ def stop_usbip():
         win_ssh.close()
         time.sleep(2)
 
-        # 更新 USB/IP 连接状态
+        # 只更新 USB/IP 连接状态，不清除设备来源记录
+        # 设备仍然在测试主机上，来源信息应该保留
         with usbip_states_lock:
             usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
+
+        print(f"[USB/IP Stop] Connection cleared (device source preserved)")
 
         return jsonify({
             'success': True,
@@ -2345,20 +2414,40 @@ def stop_usbip():
         })
     except Exception as e:
         win_ssh.close()
-        # 即使失败也清除状态
+        # 即使失败也清除连接状态，但保留设备来源记录
         with usbip_states_lock:
             usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
+        print(f"[USB/IP Stop] Connection cleared on error (device source preserved)")
         return jsonify({'success': True, 'message': '本地设备已断开'})
 
 
 @app.route('/api/usbip/status', methods=['GET'])
 def get_usbip_status():
-    """获取 USB/IP 状态"""
+    """
+    获取 USB/IP 状态
+
+    通过检查多个维度来判断 USB/IP 连接状态：
+    1. 检查当前客户端的连接状态记录
+    2. 检查全局 USB/IP 设备来源记录（支持刷新页面后恢复状态）
+    """
     client_id = get_client_id()
+
+    # 方法1：检查当前客户端的连接状态
     with usbip_states_lock:
         state_info = usbip_states.get(client_id, {'connected': False, 'timestamp': 0})
-    print(f"[USB/IP Status] client_id={client_id}, connected={state_info['connected']}, all_states={list(usbip_states.keys())}")
-    return jsonify({'connected': state_info['connected']})
+        connected = state_info['connected']
+
+    # 方法2：如果当前客户端没有记录，检查是否有全局 USB/IP 设备记录
+    # 这样可以支持刷新页面后恢复按钮状态
+    if not connected:
+        with usbip_devices_lock:
+            # 如果有任何 USB/IP 设备记录，说明有 USB/IP 连接
+            has_usbip_devices = len(usbip_devices_source) > 0
+            if has_usbip_devices:
+                connected = True
+
+    print(f"[USB/IP Status] client_id={client_id}, connected={connected}, all_states={list(usbip_states.keys())}, device_count={len(usbip_devices_source)}")
+    return jsonify({'connected': connected})
 
 
 # ==================== Advanced Test Features ====================

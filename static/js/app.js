@@ -144,12 +144,18 @@ async function callDeviceApi(endpoint, additionalData = {}) {
 document.addEventListener('DOMContentLoaded', async () => {
     initSocket();
     initEventListeners();
+
+    // 立即检查USB/IP和VPN状态，避免按钮显示错误
+    await Promise.all([
+        checkUsbipStatus(),
+        checkVpnStatus()
+    ]);
+
     await loadConfig();
     loadDevices();
     initDragDrop();
     await checkInitialTestStatus();
     startStatusPolling();
-    checkVpnStatus();
 });
 
 // ==================== Configuration ====================
@@ -1134,6 +1140,29 @@ function updateVpnStatus(connected) {
         label.className = 'vpn-status-label disconnected';
         btn.textContent = '🔌 连接VPN';
         state.vpnConnected = false;
+    }
+}
+
+// ==================== USB/IP Status Check ====================
+async function checkUsbipStatus() {
+    try {
+        const result = await apiCall('/api/usbip/status', 'GET');
+        updateUsbipButtonStatus(result.connected);
+    } catch (error) {
+        console.error('Failed to check USB/IP status:', error);
+    }
+}
+
+function updateUsbipButtonStatus(connected) {
+    const btn = $('usbip-btn');
+    if (!btn) return;
+
+    if (connected) {
+        btn.textContent = '📱 断开设备';
+        state.usbipConnected = true;
+    } else {
+        btn.textContent = '📱 本地设备';
+        state.usbipConnected = false;
     }
 }
 
