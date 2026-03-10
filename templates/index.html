@@ -157,6 +157,10 @@
                     <span class="sidebar-icon">📱</span>
                     <span class="sidebar-text">设备管理</span>
                 </a>
+                <a href="#" class="sidebar-item" data-page="reports" onclick="switchPage('reports', event)">
+                    <span class="sidebar-icon">📊</span>
+                    <span class="sidebar-text">测试报告</span>
+                </a>
             </nav>
 
             <!-- 客户端信息区 -->
@@ -470,6 +474,34 @@
                     <tbody id="devices-table-body">
                         <tr>
                             <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 测试报告页面 -->
+        <div class="container page-content" id="page-reports">
+            <div class="section-title">📊 测试报告</div>
+
+            <!-- 报告列表 -->
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">时间戳</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">通过</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">失败</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">总计</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">通过率</th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reports-table-body">
+                        <tr>
+                            <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
                             </td>
                         </tr>
@@ -1100,6 +1132,7 @@
             document.getElementById('page-terminal').classList.remove('active');
             document.getElementById('page-users').classList.remove('active');
             document.getElementById('page-devices').classList.remove('active');
+            document.getElementById('page-reports').classList.remove('active');
 
             // 显示目标页面
             document.getElementById(`page-${pageName}`).classList.add('active');
@@ -1115,7 +1148,8 @@
                 'terminal': '主机终端 - GMS 远程测试',
                 'desktop': '主机桌面 - GMS 远程测试',
                 'users': '用户管理 - GMS 远程测试',
-                'devices': '设备管理 - GMS 远程测试'
+                'devices': '设备管理 - GMS 远程测试',
+                'reports': '测试报告 - GMS 远程测试'
             };
             document.title = titles[pageName] || 'GMS 远程测试';
 
@@ -1132,6 +1166,11 @@
             // 如果切换到设备管理页面，加载设备列表
             if (pageName === 'devices') {
                 loadDevicesManagement();
+            }
+
+            // 如果切换到测试报告页面，加载报告列表
+            if (pageName === 'reports') {
+                loadTestReports();
             }
 
             // 切换页面时重新fit终端（如果已初始化）

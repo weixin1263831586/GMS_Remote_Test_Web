@@ -2278,6 +2278,158 @@ def autocomplete_suite():
         return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# ==================== Test Reports ====================
+@app.route('/api/reports/list')
+def list_test_reports():
+    """List all test report directories with summary information"""
+    config = load_config()
+    ssh = get_ssh_connection(config)
+    if not ssh:
+        return jsonify({'reports': []})
+
+    try:
+        ubuntu_user = config.get('ubuntu_user', 'hcq')
+        results_base = f"/home/{ubuntu_user}/gms_test_results"
+
+        # Check if results directory exists
+        check_cmd = f"[ -d '{results_base}' ] && echo 'exists' || echo 'not_found'"
+        output, _, _ = execute_ssh_command(ssh, check_cmd, timeout=5)
+
+        if output.strip() != 'exists':
+            return_ssh_connection(ssh)
+            return jsonify({'reports': []})
+
+        # List all timestamp directories, sorted by newest first
+        list_cmd = f"find '{results_base}' -maxdepth 1 -type d -name '[0-9]*' -printf '%T@ %p\\n' 2>/dev/null | sort -rn | head -20"
+        list_output, _, _ = execute_ssh_command(ssh, list_cmd, timeout=10)
+
+        reports = []
+        for line in list_output.strip().split('\n'):
+            if not line.strip():
+                continue
+
+            parts = line.strip().split(' ', 1)
+            if len(parts) < 2:
+                continue
+
+            result_dir = parts[1]
+            timestamp = os.path.basename(result_dir)
+
+            # Get test_result.xml info
+            result_xml = f"{result_dir}/test_result.xml"
+            check_xml = f"[ -f '{result_xml}' ] && echo 'exists' || echo 'not_found'"
+            xml_exists, _, _ = execute_ssh_command(ssh, check_xml, timeout=3)
+
+            report_info = {
+                'timestamp': timestamp,
+                'path': result_dir,
+                'has_xml': xml_exists.strip() == 'exists'
+            }
+
+            # Parse test_result.xml if exists
+            if report_info['has_xml']:
+                # Get pass and fail counts
+                pass_cmd = f"grep -o 'pass=\"[0-9]*\"' '{result_xml}' 2>/dev/null | head -1 | sed 's/pass=\"//; s/\"//' || echo 0"
+                fail_cmd = f"grep -o 'failed=\"[0-9]*\"' '{result_xml}' 2>/dev/null | head -1 | sed 's/failed=\"//; s/\"//' || echo 0"
+
+                pass_output, _, _ = execute_ssh_command(ssh, pass_cmd, timeout=3)
+                fail_output, _, _ = execute_ssh_command(ssh, fail_cmd, timeout=3)
+
+                report_info['pass'] = int(pass_output.strip() or 0)
+                report_info['fail'] = int(fail_output.strip() or 0)
+                report_info['total'] = report_info['pass'] + report_info['fail']
+
+            reports.append(report_info)
+
+        return_ssh_connection(ssh)
+        return jsonify({'reports': reports})
+
+    except Exception as e:
+        print(f"[ERROR] Error listing test reports: {e}")
+        if ssh:
+            return_ssh_connection(ssh)
+        return jsonify({'reports': []})
+
+@app.route('/api/reports/<path:report_timestamp>/files')
+def list_report_files(report_timestamp):
+    """List files in a specific test report directory"""
+    config = load_config()
+    ssh = get_ssh_connection(config)
+    if not ssh:
+        return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
+
+    try:
+        ubuntu_user = config.get('ubuntu_user', 'hcq')
+        report_dir = f"/home/{ubuntu_user}/gms_test_results/{report_timestamp}"
+
+        # List files recursively
+        list_cmd = f"find '{report_dir}' -type f 2>/dev/null | head -50"
+        list_output, _, _ = execute_ssh_command(ssh, list_cmd, timeout=10)
+
+        files = []
+        for line in list_output.strip().split('\n'):
+            if not line.strip():
+                continue
+
+            # Get relative path from report_dir
+            rel_path = line.replace(report_dir + '/', '')
+            file_size_cmd = f"stat -c%s '{line}' 2>/dev/null || echo 0"
+            size_output, _, _ = execute_ssh_command(ssh, file_size_cmd, timeout=3)
+
+            files.append({
+                'name': os.path.basename(line),
+                'path': line,
+                'relative_path': rel_path,
+                'size': int(size_output.strip() or 0)
+            })
+
+        return_ssh_connection(ssh)
+        return jsonify({'success': True, 'files': files})
+
+    except Exception as e:
+        return_ssh_connection(ssh)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/reports/view')
+def view_report_file():
+    """View a test report file content"""
+    file_path = request.args.get('path')
+    if not file_path:
+        return jsonify({'success': False, 'error': 'File path is required'}), 400
+
+    config = load_config()
+    ssh = get_ssh_connection(config)
+    if not ssh:
+        return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
+
+    try:
+        # Read file content
+        cat_cmd = f"cat '{file_path}' 2>/dev/null"
+        output, error, code = execute_ssh_command(ssh, cat_cmd, timeout=30)
+
+        return_ssh_connection(ssh)
+
+        # Determine content type based on file extension
+        file_ext = os.path.splitext(file_path)[1].lower()
+        if file_ext in ['.xml', '.html']:
+            content_type = 'text/html'
+        elif file_ext == '.json':
+            content_type = 'application/json'
+        elif file_ext in ['.log', '.txt']:
+            content_type = 'text/plain'
+        else:
+            content_type = 'text/plain'
+
+        return jsonify({
+            'success': True,
+            'content': output,
+            'content_type': content_type
+        })
+
+    except Exception as e:
+        return_ssh_connection(ssh)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # ==================== Advanced Screen Mirroring ====================
 @app.route('/api/screen/start', methods=['POST'])
 def start_screen_mirroring():

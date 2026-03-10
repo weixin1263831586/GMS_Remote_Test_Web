@@ -947,12 +947,10 @@ async function checkRouting() {
 }
 
 async function connectVpn() {
-    const btn = document.getElementById('vpn-connect-btn');
     if (state.vpnConnected) {
         try {
             await apiCall('/api/vpn/disconnect', 'POST');
-            state.vpnConnected = false;
-            btn.textContent = '🔌 连接VPN';
+            updateVpnStatus(false);
             addLogEntry('VPN 已断开', 'info');
         } catch (error) {
             addLogEntry('断开 VPN 失败: ' + error.message, 'error');
@@ -960,8 +958,7 @@ async function connectVpn() {
     } else {
         try {
             await apiCall('/api/vpn/connect', 'POST');
-            state.vpnConnected = true;
-            btn.textContent = '🔌 断开VPN';
+            updateVpnStatus(true);
             addLogEntry('VPN 已连接', 'success');
         } catch (error) {
             addLogEntry('连接 VPN 失败: ' + error.message, 'error');
@@ -1656,5 +1653,193 @@ window.onclick = function(event) {
     }
     if (event.target === snModal) {
         closeSnModal();
+    }
+}
+
+// ==================== Test Reports ====================
+let reportsRefreshInterval = null;
+
+async function loadTestReports() {
+    try {
+        const resp = await fetch('/api/reports/list');
+        const data = await resp.json();
+
+        if (data.reports) {
+            displayTestReports(data.reports);
+        }
+
+        // 启动自动刷新（每15秒）
+        if (!reportsRefreshInterval) {
+            reportsRefreshInterval = setInterval(() => {
+                if (currentPage === 'reports') {
+                    loadTestReports();
+                }
+            }, 15000);
+        }
+    } catch (e) {
+        console.error('[Reports] Error loading reports:', e);
+        const tbody = document.getElementById('reports-table-body');
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                        加载失败
+                    </td>
+                </tr>
+            `;
+        }
+    }
+}
+
+function displayTestReports(reports) {
+    const tbody = document.getElementById('reports-table-body');
+    if (!tbody) return;
+
+    if (reports.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                    暂无测试报告
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = reports.map(report => {
+        const passCount = report.pass !== undefined ? report.pass : '-';
+        const failCount = report.fail !== undefined ? report.fail : '-';
+        const totalCount = report.total !== undefined ? report.total : '-';
+        const passRate = report.total > 0 ? ((report.pass / report.total) * 100).toFixed(1) + '%' : '-';
+
+        const passRateStyle = report.total > 0 ? (report.pass / report.total >= 0.9 ? 'color: var(--success-color);' : 'color: var(--warning-color);') : '';
+
+        return `
+            <tr style="border-bottom: 1px solid var(--border-color);">
+                <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                    ${report.timestamp}
+                </td>
+                <td style="padding: 12px; text-align: center; color: var(--success-color); font-weight: 600; font-size: 12px;">
+                    ${passCount}
+                </td>
+                <td style="padding: 12px; text-align: center; color: var(--danger-color); font-weight: 600; font-size: 12px;">
+                    ${failCount}
+                </td>
+                <td style="padding: 12px; text-align: center; font-weight: 600; font-size: 12px;">
+                    ${totalCount}
+                </td>
+                <td style="padding: 12px; text-align: center; font-weight: 600; font-size: 12px; ${passRateStyle}">
+                    ${passRate}
+                </td>
+                <td style="padding: 12px;">
+                    <button class="btn-xxs" onclick="viewReportDetails('${report.timestamp}')">📄 查看详情</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function viewReportDetails(timestamp) {
+    try {
+        const resp = await fetch(`/api/reports/${timestamp}/files`);
+        const data = await resp.json();
+
+        if (!data.success) {
+            showToast('加载报告文件失败: ' + data.error, 'error');
+            return;
+        }
+
+        // Show report details modal
+        showReportDetailsModal(timestamp, data.files);
+    } catch (e) {
+        console.error('[Reports] Error loading report details:', e);
+        showToast('加载报告详情失败: ' + e.message, 'error');
+    }
+}
+
+function showReportDetailsModal(timestamp, files) {
+    // Create modal if not exists
+    let modal = document.getElementById('report-details-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'report-details-modal';
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 700px; width: 90%; max-height: 80vh; overflow: hidden;">
+                <div class="modal-header">
+                    <span class="modal-title">测试报告详情</span>
+                    <span class="modal-close" onclick="closeReportDetailsModal()">&times;</span>
+                </div>
+                <div class="modal-body" style="overflow-y: auto; max-height: calc(80vh - 120px);">
+                    <div style="margin-bottom: 15px;">
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">时间戳</div>
+                        <div id="report-timestamp" style="font-family: monospace; font-size: 13px; color: var(--text-primary);"></div>
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">报告文件</div>
+                        <div id="report-files-list" style="max-height: 300px; overflow-y: auto;"></div>
+                    </div>
+                    <div id="report-file-preview" style="display: none;">
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">文件预览</div>
+                        <pre id="report-file-content" style="background: var(--darker-bg); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 11px; max-height: 300px; overflow-y: auto;"></pre>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+
+    document.getElementById('report-timestamp').textContent = timestamp;
+
+    const filesList = document.getElementById('report-files-list');
+    filesList.innerHTML = files.map(file => {
+        const sizeKB = (file.size / 1024).toFixed(1);
+        return `
+            <div style="display: flex; align-items: center; padding: 8px; border-bottom: 1px solid var(--border-color); cursor: pointer; hover:background: var(--light-bg);" onclick="viewReportFile('${file.path}', '${file.name}')">
+                <span style="flex: 1; font-family: monospace; font-size: 11px; color: var(--text-primary);">${file.relative_path}</span>
+                <span style="font-size: 10px; color: var(--text-secondary); margin-right: 10px;">${sizeKB} KB</span>
+                <button class="btn-xxs" onclick="event.stopPropagation(); viewReportFile('${file.path}', '${file.name}')">📄 查看</button>
+            </div>
+        `;
+    }).join('');
+
+    modal.classList.add('show');
+}
+
+function closeReportDetailsModal() {
+    const modal = document.getElementById('report-details-modal');
+    if (modal) {
+        modal.classList.remove('show');
+        document.getElementById('report-file-preview').style.display = 'none';
+    }
+}
+
+async function viewReportFile(filePath, fileName) {
+    try {
+        const resp = await fetch(`/api/reports/view?path=${encodeURIComponent(filePath)}`);
+        const data = await resp.json();
+
+        if (!data.success) {
+            showToast('读取文件失败: ' + data.error, 'error');
+            return;
+        }
+
+        // Show file preview
+        const preview = document.getElementById('report-file-preview');
+        const content = document.getElementById('report-file-content');
+
+        preview.style.display = 'block';
+        content.textContent = data.content.substring(0, 10000); // Limit to first 10KB
+
+        if (data.content.length > 10000) {
+            content.textContent += '\n\n... (文件过大，仅显示前 10KB)';
+        }
+
+        // Scroll to preview
+        preview.scrollIntoView({ behavior: 'smooth' });
+    } catch (e) {
+        console.error('[Reports] Error viewing file:', e);
+        showToast('查看文件失败: ' + e.message, 'error');
     }
 }
