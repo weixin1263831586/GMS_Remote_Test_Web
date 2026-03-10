@@ -1,4 +1,4 @@
-// ==================== Global State ====================
+// 全局状态
 const state = {
     connected: false,
     testing: false,
@@ -9,23 +9,124 @@ const state = {
     vpnConnected: false,
     adbForwardRunning: false,
     usbipConnected: false,
-    config: null,  // Will store configuration from server
-    fileBrowser: {
-        currentPath: '',
-        selectedFile: null,
-        targetInputId: null,  // 'suite-path' or 'retry-result' or 'gsi-system'
-        mode: null  // 'suite' or 'retry' or 'gsi'
-    }
+    config: null,
+    fileBrowser: { currentPath: '', selectedFile: null, targetInputId: null, mode: null },
+    // 性能优化
+    domCache: {},
+    lastLogCount: 0,
+    pendingDeviceRefresh: null,
+    isRefreshingDevices: false
 };
 
-// ==================== Helper Functions ====================
+// 辅助函数
 function validateDeviceSelection() {
     if (state.selectedDevices.size === 0) {
         showToast('请先选择设备', 'warning');
         return false;
     }
-    return true;
+    return true
 }
+
+// 性能优化工具
+function $(id) {
+    if (!state.domCache[id]) {
+        state.domCache[id] = document.getElementById(id);
+    }
+    return state.domCache[id];
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func(...args), wait);
+    };
+}
+
+function throttle(func, limit) {
+    let inThrottle;
+    return function(...args) {
+        if (!inThrottle) {
+            func.apply(this, args);
+            inThrottle = true;
+            setTimeout(() => inThrottle = false, limit);
+        }
+    };
+}
+
+// 模态框管理器
+const ModalManager = {
+    open(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) modal.classList.add('show');
+    },
+
+    close(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) modal.classList.remove('show');
+    },
+
+    closeAll() {
+        document.querySelectorAll('.modal.show').forEach(m => m.classList.remove('show'));
+    },
+
+    toggle(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) modal.classList.toggle('show');
+    },
+
+    isOpen(modalId) {
+        const modal = document.getElementById(modalId);
+        return modal ? modal.classList.contains('show') : false;
+    }
+};
+
+// 设备操作管理器
+const DeviceOperation = {
+    async execute(endpoint, operationName, data = {}, modalCloseFn = null) {
+        if (!validateDeviceSelection()) return;
+
+        try {
+            if (modalCloseFn) modalCloseFn();
+            addLogEntry(`正在${operationName}到 ${state.selectedDevices.size} 台设备...`, 'info');
+            showToast(`正在${operationName}...`, 'info');
+
+            const result = await apiCall(endpoint, 'POST', {
+                devices: Array.from(state.selectedDevices),
+                ...data
+            });
+
+            if (result.success) {
+                this.handleResult(result, operationName);
+            } else {
+                addLogEntry(`${operationName}失败: ${result.error || '未知错误'}`, 'error');
+                showToast(`${operationName}失败`, 'error');
+            }
+        } catch (error) {
+            addLogEntry(`${operationName}失败: ${error.message}`, 'error');
+            showToast(`${operationName}失败`, 'error');
+        }
+    },
+
+    handleResult(result, operationName) {
+        const results = result.results || [];
+        const successCount = results.filter(r => r.success).length;
+        const failCount = results.length - successCount;
+
+        const logType = successCount === results.length ? 'success' : 'warning';
+        addLogEntry(`${operationName}完成: 成功 ${successCount} 台, 失败 ${failCount} 台`, logType);
+
+        if (failCount > 0) {
+            results.forEach(r => {
+                if (!r.success) {
+                    addLogEntry(`  ${r.device}: ${r.error || '未知错误'}`, 'error');
+                }
+            });
+        }
+
+        showToast(`${operationName}完成 (成功: ${successCount}, 失败: ${failCount})`, logType);
+    }
+};
 
 async function callDeviceApi(endpoint, additionalData = {}) {
     if (!validateDeviceSelection()) return;
@@ -36,44 +137,6 @@ async function callDeviceApi(endpoint, additionalData = {}) {
         });
     } catch (error) {
         addLogEntry(`操作失败: ${error.message}`, 'error');
-    }
-}
-
-async function executeBurnOperation(endpoint, data, operationName, modalCloseFn) {
-    if (!validateDeviceSelection()) return;
-
-    try {
-        // 立即关闭模态框，改善用户体验
-        if (modalCloseFn) modalCloseFn();
-
-        addLogEntry(`正在${operationName}到 ${state.selectedDevices.size} 台设备...`, 'info');
-        showToast(`正在${operationName}...`, 'info');
-
-        const result = await apiCall(endpoint, 'POST', {
-            devices: Array.from(state.selectedDevices),
-            ...data
-        });
-
-        if (result.success) {
-            const successCount = result.results.filter(r => r.success).length;
-            const failCount = result.results.length - successCount;
-
-            addLogEntry(`${operationName}完成: 成功 ${successCount} 台, 失败 ${failCount} 台`,
-                successCount === result.results.length ? 'success' : 'warning');
-
-            if (failCount > 0) {
-                result.results.forEach(r => {
-                    if (!r.success) {
-                        addLogEntry(`  ${r.device}: ${r.error || '未知错误'}`, 'error');
-                    }
-                });
-            }
-
-            showToast(`${operationName}完成 (成功: ${successCount}, 失败: ${failCount})`,
-                successCount === result.results.length ? 'success' : 'warning');
-        }
-    } catch (error) {
-        addLogEntry(`${operationName}失败: ${error.message}`, 'error');
     }
 }
 
@@ -154,18 +217,19 @@ function initSocket() {
 // ==================== Event Listeners ====================
 function initEventListeners() {
     // Test type change
-    document.getElementById('test-type').addEventListener('change', onTestTypeChange);
+    $('test-type').addEventListener('change', onTestTypeChange);
 
-    // Test module/case input
-    document.getElementById('test-module').addEventListener('input', onInputChange);
-    document.getElementById('test-case').addEventListener('input', onInputChange);
-    document.getElementById('retry-result').addEventListener('input', onInputChange);
+    // Test module/case input - 使用防抖优化
+    const debouncedInputChange = debounce(onInputChange, 300);
+    $('test-module').addEventListener('input', debouncedInputChange);
+    $('test-case').addEventListener('input', debouncedInputChange);
+    $('retry-result').addEventListener('input', debouncedInputChange);
 
     // Device host and local server confirm on Enter
-    document.getElementById('device-host').addEventListener('keypress', (e) => {
+    $('device-host').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') onDeviceHostConfirm();
     });
-    document.getElementById('local-server').addEventListener('keypress', (e) => {
+    $('local-server').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') onLocalServerConfirm();
     });
 }
@@ -173,28 +237,28 @@ function initEventListeners() {
 // ==================== Input Change Handlers ====================
 function onInputChange() {
     // Handle mutual exclusivity between test module, test case, and retry report
-    const testModule = document.getElementById('test-module').value.trim();
-    const testCase = document.getElementById('test-case').value.trim();
-    const retryResult = document.getElementById('retry-result').value.trim();
+    const testModule = $('test-module').value.trim();
+    const testCase = $('test-case').value.trim();
+    const retryResult = $('retry-result').value.trim();
 
     // If typing in retry-result, clear module and case
     if (document.activeElement.id === 'retry-result' && retryResult) {
-        document.getElementById('test-module').value = '';
-        document.getElementById('test-case').value = '';
+        $('test-module').value = '';
+        $('test-case').value = '';
     }
     // If typing in module or case, clear retry-result
     else if ((document.activeElement.id === 'test-module' || document.activeElement.id === 'test-case') && (testModule || testCase)) {
-        document.getElementById('retry-result').value = '';
+        $('retry-result').value = '';
     }
 }
 
 function onTestTypeChange() {
-    const testType = document.getElementById('test-type').value;
+    const testType = $('test-type').value;
     addLogEntry(`测试类型已更改为: ${testType}`, 'info');
 }
 
 function onDeviceHostConfirm() {
-    const deviceHost = document.getElementById('device-host').value.trim();
+    const deviceHost = $('device-host').value.trim();
     addLogEntry(`设备主机地址已更新: ${deviceHost}`, 'info');
     showToast('设备主机地址已更新', 'success');
     // Save to backend
@@ -202,7 +266,7 @@ function onDeviceHostConfirm() {
 }
 
 function onLocalServerConfirm() {
-    const localServer = document.getElementById('local-server').value.trim();
+    const localServer = $('local-server').value.trim();
     addLogEntry(`本地主机地址已更新: ${localServer}`, 'info');
     showToast('本地主机地址已更新', 'success');
     // Save to backend
@@ -309,9 +373,18 @@ async function apiCall(url, method = 'GET', data = null) {
 }
 
 // ==================== Device Management ====================
-async function loadDevices() {
+async function loadDevices(forceRefresh = false) {
+    // 防止重复刷新
+    if (state.isRefreshingDevices) {
+        return;
+    }
+
+    state.isRefreshingDevices = true;
+
     try {
-        const devices = await apiCall('/api/devices');
+        // 添加 force_refresh 参数来强制绕过缓存
+        const url = forceRefresh ? '/api/devices?force_refresh=1' : '/api/devices';
+        const devices = await apiCall(url);
         state.devices = devices;
         renderDevices();
         addLogEntry(`已刷新设备列表，找到 ${devices.length} 台设备`, 'info');
@@ -319,7 +392,7 @@ async function loadDevices() {
         // 检查 USB/IP 连接状态
         try {
             const status = await apiCall('/api/usbip/status', 'GET');
-            const usbipBtn = document.getElementById('usbip-btn');
+            const usbipBtn = $('usbip-btn');
             if (usbipBtn) {
                 state.usbipConnected = status.connected;
                 usbipBtn.textContent = status.connected ? '📱 断开设备' : '📱 本地设备';
@@ -329,12 +402,17 @@ async function loadDevices() {
         }
     } catch (error) {
         addLogEntry('加载设备列表失败: ' + error.message, 'error');
+    } finally {
+        state.isRefreshingDevices = false;
     }
 }
 
+// 防抖版本的刷新函数
+const debouncedRefreshDevices = debounce(() => loadDevices(false), 500);
+
 function renderDevices() {
-    const leftContainer = document.getElementById('device-list-left');
-    const rightContainer = document.getElementById('device-list-right');
+    const leftContainer = $('device-list-left');
+    const rightContainer = $('device-list-right');
 
     if (state.devices.length === 0) {
         leftContainer.innerHTML = '<div class="empty-message">点击刷新按钮获取设备列表...</div>';
@@ -358,45 +436,71 @@ function renderDevices() {
         }
     });
 
+    // 使用DocumentFragment优化DOM操作
+    const renderDeviceItem = ({ deviceId, isLocked, lockedBy }) => {
+        const div = document.createElement('div');
+        const isSelected = state.selectedDevices.has(deviceId);
+        div.className = `device-item ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`;
+        div.dataset.deviceId = deviceId;
+
+        if (!isLocked) {
+            div.onclick = () => toggleDevice(deviceId);
+        }
+        div.title = isLocked ? `已被 ${lockedBy} 占用` : '点击选择设备';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'device-checkbox';
+        checkbox.checked = isSelected;
+        if (isLocked) checkbox.disabled = true;
+        if (!isLocked) {
+            checkbox.onclick = (e) => {
+                e.stopPropagation();
+                toggleDevice(deviceId);
+            };
+        }
+
+        const info = document.createElement('div');
+        info.className = 'device-info';
+
+        const idDiv = document.createElement('div');
+        idDiv.className = 'device-id';
+        idDiv.textContent = deviceId;
+        info.appendChild(idDiv);
+
+        if (isLocked) {
+            const lockStatus = document.createElement('div');
+            lockStatus.className = 'lock-status';
+            lockStatus.textContent = `🔒 ${lockedBy}`;
+            info.appendChild(lockStatus);
+        }
+
+        const status = document.createElement('span');
+        status.className = 'device-status';
+        status.textContent = isLocked ? 'Allocated' : 'Available';
+
+        div.appendChild(checkbox);
+        div.appendChild(info);
+        div.appendChild(status);
+
+        return div;
+    };
+
     // 渲染左侧栏
-    leftContainer.innerHTML = leftDevices.map(({ deviceId, isLocked, lockedBy }) => `
-        <div class="device-item ${state.selectedDevices.has(deviceId) ? 'selected' : ''} ${isLocked ? 'locked' : ''}"
-             onclick="${isLocked ? '' : `toggleDevice('${deviceId}')`}"
-             title="${isLocked ? `已被 ${lockedBy} 占用` : '点击选择设备'}">
-            <input type="checkbox"
-                   class="device-checkbox"
-                   ${state.selectedDevices.has(deviceId) ? 'checked' : ''}
-                   ${isLocked ? 'disabled' : ''}
-                   onclick="event.stopPropagation(); ${isLocked ? '' : `toggleDevice('${deviceId}')`}">
-            <div class="device-info">
-                <div class="device-id">${deviceId}</div>
-                ${isLocked ? `<div class="lock-status">🔒 ${lockedBy}</div>` : ''}
-            </div>
-            <span class="device-status">${isLocked ? 'Allocated' : 'Available'}</span>
-        </div>
-    `).join('');
+    const leftFragment = document.createDocumentFragment();
+    leftDevices.forEach(deviceInfo => {
+        leftFragment.appendChild(renderDeviceItem(deviceInfo));
+    });
+    leftContainer.innerHTML = '';
+    leftContainer.appendChild(leftFragment);
 
     // 渲染右侧栏
-    if (rightDevices.length > 0) {
-        rightContainer.innerHTML = rightDevices.map(({ deviceId, isLocked, lockedBy }) => `
-            <div class="device-item ${state.selectedDevices.has(deviceId) ? 'selected' : ''} ${isLocked ? 'locked' : ''}"
-                 onclick="${isLocked ? '' : `toggleDevice('${deviceId}')`}"
-                 title="${isLocked ? `已被 ${lockedBy} 占用` : '点击选择设备'}">
-                <input type="checkbox"
-                       class="device-checkbox"
-                       ${state.selectedDevices.has(deviceId) ? 'checked' : ''}
-                       ${isLocked ? 'disabled' : ''}
-                       onclick="event.stopPropagation(); ${isLocked ? '' : `toggleDevice('${deviceId}')`}">
-                <div class="device-info">
-                    <div class="device-id">${deviceId}</div>
-                    ${isLocked ? `<div class="lock-status">🔒 ${lockedBy}</div>` : ''}
-                </div>
-                <span class="device-status">${isLocked ? 'Allocated' : 'Available'}</span>
-            </div>
-        `).join('');
-    } else {
-        rightContainer.innerHTML = '';
-    }
+    const rightFragment = document.createDocumentFragment();
+    rightDevices.forEach(deviceInfo => {
+        rightFragment.appendChild(renderDeviceItem(deviceInfo));
+    });
+    rightContainer.innerHTML = '';
+    rightContainer.appendChild(rightFragment);
 }
 
 function toggleDevice(deviceId) {
@@ -409,7 +513,8 @@ function toggleDevice(deviceId) {
 }
 
 async function refreshDevices() {
-    await loadDevices();
+    // 手动刷新时强制绕过缓存
+    await loadDevices(true);
     showToast('正在刷新设备列表...', 'info');
 }
 
@@ -834,8 +939,8 @@ async function setupUsbipForward() {
             state.usbipConnected = false;
             btn.textContent = '📱 本地设备';
             addLogEntry(result.message || '本地设备已断开', 'success');
-            // 刷新设备列表
-            setTimeout(() => loadDevices(), 2500);
+            // 刷新设备列表（使用防抖版本）
+            setTimeout(() => debouncedRefreshDevices(), 2500);
         } catch (error) {
             addLogEntry('停止 USB/IP 失败: ' + error.message, 'error');
         }
@@ -845,8 +950,8 @@ async function setupUsbipForward() {
             state.usbipConnected = true;
             btn.textContent = '📱 断开设备';
             addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
-            // 刷新设备列表
-            setTimeout(() => loadDevices(), 3500);
+            // 刷新设备列表（使用防抖版本）
+            setTimeout(() => debouncedRefreshDevices(), 3500);
         } catch (error) {
             // 检查是否需要密码
             if (error.needPassword) {
@@ -915,12 +1020,12 @@ async function submitDevicePassword() {
         });
 
         state.usbipConnected = true;
-        document.getElementById('usbip-btn').textContent = '📱 断开设备';
+        $('usbip-btn').textContent = '📱 断开设备';
         addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
         showToast('USB/IP 连接成功', 'success');
 
-        // 刷新设备列表
-        setTimeout(() => loadDevices(), 3500);
+        // 刷新设备列表（使用防抖版本）
+        setTimeout(() => debouncedRefreshDevices(), 3500);
     } catch (error) {
         addLogEntry('启动 USB/IP 失败: ' + error.message, 'error');
         showToast('连接失败: ' + error.message, 'error');
@@ -1074,12 +1179,21 @@ async function handleUploadFile() {
     }
 }
 
-function formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
+function formatBytes(bytes, hideIfZero = false) {
+    /**
+     * 格式化字节大小为人类可读格式
+     * @param {number|string} bytes - 字节数
+     * @param {boolean} hideIfZero - 如果为true，0值返回空字符串
+     * @returns {string} 格式化后的大小字符串
+     */
+    if (hideIfZero && (!bytes || bytes === '0')) return '';
+    const numBytes = parseInt(bytes) || 0;
+    if (numBytes === 0) return '0 B';
+
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    const i = Math.floor(Math.log(numBytes) / Math.log(k));
+    return parseFloat((numBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 // ==================== Browse Remote File ====================
@@ -1133,7 +1247,7 @@ function renderFileList(files) {
 
     listContainer.innerHTML = files.map(file => {
         const icon = file.type === 'directory' ? '📁' : '📄';
-        const sizeInfo = file.type === 'file' ? formatFileSize(file.size) : '';
+        const sizeInfo = file.type === 'file' ? formatBytes(file.size, true) : '';
 
         return `
             <div class="file-browser-item"
@@ -1145,15 +1259,6 @@ function renderFileList(files) {
             </div>
         `;
     }).join('');
-}
-
-function formatFileSize(bytes) {
-    if (!bytes || bytes === '0') return '';
-    const size = parseInt(bytes);
-    if (size < 1024) return size + ' B';
-    if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB';
-    if (size < 1024 * 1024 * 1024) return (size / (1024 * 1024)).toFixed(1) + ' MB';
-    return (size / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
 }
 
 function selectFileForSelection(name, type) {
@@ -1370,15 +1475,15 @@ async function stopTest() {
         addLogEntry('测试已停止', 'warning');
         showToast('测试已停止', 'warning');
 
-        // Refresh devices
-        await refreshDevices();
+        // Refresh devices (强制刷新以获取最新状态)
+        await loadDevices(true);
     } catch (error) {
         addLogEntry('停止测试失败: ' + error.message, 'error');
     }
 }
 
 function updateTestToggleButton(isTesting) {
-    const btn = document.getElementById('test-toggle-btn');
+    const btn = $('test-toggle-btn');
     if (!btn) return;
 
     if (isTesting) {
@@ -1542,7 +1647,7 @@ async function saveConfig() {
 
 // ==================== Logging ====================
 function addLogEntry(message, type = 'info') {
-    const logOutput = document.getElementById('log-output');
+    const logOutput = $('log-output');
     const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
 
     const logEntry = document.createElement('div');
@@ -1551,12 +1656,20 @@ function addLogEntry(message, type = 'info') {
 
     logOutput.appendChild(logEntry);
     logOutput.scrollTop = logOutput.scrollHeight;
+
+    // 限制日志条目数量，防止内存溢出
+    const maxLogs = 500;
+    while (logOutput.children.length > maxLogs) {
+        logOutput.removeChild(logOutput.firstChild);
+    }
 }
 
 // ==================== Status Polling ====================
 function startStatusPolling() {
+    // 优化：从2秒改为5秒，减少服务器压力
     setInterval(async () => {
         try {
+            // 只在必要时获取完整状态
             const status = await apiCall('/api/status');
 
             if (status.running && !state.testing) {
@@ -1572,19 +1685,19 @@ function startStatusPolling() {
                 updateVpnStatus(status.vpn_connected);
             }
 
-            // Update logs if there are new ones
+            // 优化：使用状态中已有的日志数量而不是查询DOM
             if (status.logs && status.logs.length > 0) {
-                const currentLogCount = document.querySelectorAll('.log-entry').length;
-                if (status.logs.length > currentLogCount) {
-                    status.logs.slice(currentLogCount).forEach(log => {
+                if (status.logs.length > state.lastLogCount) {
+                    status.logs.slice(state.lastLogCount).forEach(log => {
                         addLogEntry(log.message || log, log.type || 'info');
                     });
+                    state.lastLogCount = status.logs.length;
                 }
             }
         } catch (error) {
             console.error('Status polling error:', error);
         }
-    }, 2000);
+    }, 5000); // 从2000ms改为5000ms
 }
 
 async function checkInitialTestStatus() {
@@ -1595,11 +1708,13 @@ async function checkInitialTestStatus() {
 
         // Load existing logs if available
         if (status.logs && status.logs.length > 0) {
-            const logOutput = document.getElementById('log-output');
+            const logOutput = $('log-output');
             logOutput.innerHTML = '';
             status.logs.forEach(log => {
                 addLogEntry(log.message || log, log.type || 'info');
             });
+            // 初始化日志计数
+            state.lastLogCount = status.logs.length;
         }
     } catch (error) {
         console.error('Failed to check initial test status:', error);

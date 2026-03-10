@@ -9,6 +9,39 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <script src="{{ url_for('static', filename='vendor/xterm/xterm.min.js') }}"></script>
     <script src="{{ url_for('static', filename='vendor/xterm/xterm-addon-fit.min.js') }}"></script>
+    <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
+    <script>
+        (function() {
+            // 确定要显示的页面（在页面渲染前）
+            const hash = window.location.hash.substring(1);
+            const savedPage = localStorage.getItem('gms_current_page') || 'test';
+
+            // 优先使用 hash，否则使用保存的页面
+            let targetPage;
+            if (hash && ['desktop', 'terminal', 'users', 'devices', 'reports'].includes(hash)) {
+                targetPage = hash;
+            } else {
+                targetPage = savedPage;
+            }
+
+            // 保存目标页面供后续使用
+            window.__targetPage = targetPage;
+
+            // 添加内联样式来立即显示正确的页面和导航栏选中状态
+            var style = document.createElement('style');
+            style.id = 'page-init-style';
+            style.textContent =
+                // 隐藏所有页面内容
+                '.page-content { display: none !important; } ' +
+                // 显示目标页面
+                '#page-' + targetPage + ' { display: block !important; } ' +
+                // 移除所有导航项的选中状态
+                '.sidebar-item { background: transparent !important; color: var(--text-secondary) !important; } ' +
+                // 设置目标导航项的选中状态
+                '[data-page="' + targetPage + '"] { background: var(--active-bg) !important; color: var(--primary-color) !important; }';
+            document.head.appendChild(style);
+        })();
+    </script>
     <style>
         /* 页面切换样式 */
         .page-content {
@@ -137,7 +170,7 @@
                 <div class="sidebar-brand">GMS 远程测试</div>
             </div>
             <nav class="sidebar-nav">
-                <a href="#" class="sidebar-item active" data-page="test" onclick="switchPage('test', event)">
+                <a href="#" class="sidebar-item" data-page="test" onclick="switchPage('test', event)">
                     <span class="sidebar-icon">📱</span>
                     <span class="sidebar-text">测试界面</span>
                 </a>
@@ -176,7 +209,7 @@
 
         <!-- 右侧主内容区 -->
         <!-- 测试界面页面 -->
-        <div class="container page-content active" id="page-test">
+        <div class="container page-content" id="page-test" data-default-page="true">
             <!-- 参数设置区 -->
             <div class="input-container">
                 <div class="section-title">参数设置</div>
@@ -1113,6 +1146,7 @@
         let terminal = null;
         let terminalSocket = null;
         let isTerminalConnected = false;
+        let pageInitialized = false; // 防止重复初始化
 
         // 页面切换函数
         function switchPage(pageName, event) {
@@ -1124,7 +1158,10 @@
             document.querySelectorAll('.sidebar-item').forEach(item => {
                 item.classList.remove('active');
             });
-            document.querySelector(`[data-page="${pageName}"]`).classList.add('active');
+            const activeItem = document.querySelector(`[data-page="${pageName}"]`);
+            if (activeItem) {
+                activeItem.classList.add('active');
+            }
 
             // 隐藏所有页面
             document.getElementById('page-test').classList.remove('active');
@@ -1384,22 +1421,51 @@
 
         // 页面加载完成后，如果是终端页面则初始化终端
         window.addEventListener('load', () => {
+            // 获取页面加载前确定的目标页面
+            const targetPage = window.__targetPage || localStorage.getItem('gms_current_page') || 'test';
+
+            // 保存初始页面状态到 localStorage（确保首次访问后刷新能保持）
+            localStorage.setItem('gms_current_page', targetPage);
+
+            // 移除临时内联样式
+            const initStyle = document.getElementById('page-init-style');
+            if (initStyle) {
+                initStyle.remove();
+            }
+
             // 初始化客户端信息
             initClientInfo();
 
-            const hash = window.location.hash.substring(1);
+            // 先设置导航栏高亮（在显示页面前）
+            document.querySelectorAll('.sidebar-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            const activeItem = document.querySelector(`[data-page="${targetPage}"]`);
+            if (activeItem) {
+                activeItem.classList.add('active');
+            }
 
-            // 优先使用 hash，否则从 localStorage 恢复，默认显示测试页面
-            if (hash === 'desktop') {
-                switchPage('desktop');
-            } else if (hash === 'terminal') {
-                switchPage('terminal');
-            } else if (hash === 'users') {
-                switchPage('users');
-            } else {
-                // 从 localStorage 恢复上次访问的页面
-                const savedPage = localStorage.getItem('gms_current_page') || 'test';
-                switchPage(savedPage);
+            // 使用正常的类系统显示目标页面
+            document.querySelectorAll('.page-content').forEach(page => {
+                page.classList.remove('active');
+            });
+            document.getElementById(`page-${targetPage}`).classList.add('active');
+
+            currentPage = targetPage;
+            pageInitialized = true;
+
+            // 执行页面特定的初始化逻辑
+            if (targetPage === 'terminal' && !terminalInitialized) {
+                initTerminal();
+            }
+            if (targetPage === 'users') {
+                loadUsersList();
+            }
+            if (targetPage === 'devices') {
+                loadDevicesManagement();
+            }
+            if (targetPage === 'reports') {
+                loadTestReports();
             }
         });
     </script>

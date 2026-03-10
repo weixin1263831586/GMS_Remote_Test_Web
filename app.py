@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""
-GMS Auto Test Web Application
-Flask backend for web-based GMS testing interface
-支持多用户并发访问
-"""
+"""GMS Auto Test Web Application - Flask 后端服务"""
 
 import json
 import os
@@ -19,109 +15,184 @@ import uuid
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, Response, session
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
+from functools import wraps
 import paramiko
 from paramiko import AuthenticationException, SSHException
 
+# Flask 应用
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'gms-auto-test-secret-key-2025'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', manage_session=False)
 
-# 多用户状态管理 - 使用 username@ip 作为 key
-user_states = {}
+# 全局状态
+user_states = {}           # {client_id: {running, devices, logs, ...}}
 user_states_lock = threading.Lock()
 
-# 设备占用管理
-device_locks = {}  # {device_id: {'client_id': xxx, 'user': xxx, 'timestamp': xxx}}
+device_locks = {}          # {device_id: {client_id, user, timestamp}}
 device_locks_lock = threading.Lock()
 
-# SSH 连接池（全局共享）
-ssh_pool = queue.Queue(maxsize=5)
+ssh_pool = queue.Queue(maxsize=5)  # SSH 连接池
 ssh_lock = threading.Lock()
 
-# scrcpy投屏会话管理 - 跟踪设备投屏状态
-scrcpy_sessions = {}  # {device_id: {'client_id': xxx, 'start_time': xxx}}
+scrcpy_sessions = {}       # {device_id: {client_id, start_time}}
 scrcpy_sessions_lock = threading.Lock()
 
-# ==================== 客户端标识管理 ====================
+# 设备列表缓存（3秒 TTL）
+device_cache = {'devices': [], 'timestamp': 0, 'lock': threading.Lock()}
+DEVICE_CACHE_TTL = 3
+
+# API 响应工具类
+class ApiResponse:
+    """统一的 API 响应格式"""
+
+    @staticmethod
+    def success(data=None, message="操作成功"):
+        """成功响应"""
+        response = {'success': True}
+        if data is not None:
+            response['data'] = data
+        if message:
+            response['message'] = message
+        return jsonify(response)
+
+    @staticmethod
+    def error(error_message, status_code=500):
+        """错误响应"""
+        return jsonify({'success': False, 'error': error_message}), status_code
+
+    @staticmethod
+    def device_results(results, operation_name):
+        """设备批量操作结果"""
+        success_count = sum(1 for r in results if r.get('success', False))
+        fail_count = len(results) - success_count
+        return ApiResponse.success({
+            'results': results,
+            'summary': {'total': len(results), 'success': success_count, 'failed': fail_count}
+        }, f"{operation_name}完成: 成功 {success_count} 台, 失败 {fail_count} 台")
+
+
+# 错误处理装饰器
+def handle_errors(operation_name="操作"):
+    """统一错误处理"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            try:
+                return f(*args, **kwargs)
+            except SSHException as e:
+                return ApiResponse.error(f"SSH连接失败: {str(e)}", 500)
+            except AuthenticationException as e:
+                return ApiResponse.error(f"认证失败: {str(e)}", 401)
+            except ValueError as e:
+                return ApiResponse.error(f"参数错误: {str(e)}", 400)
+            except Exception as e:
+                print(f"Error in {operation_name}: {str(e)}")
+                traceback.print_exc()
+                return ApiResponse.error(f"{operation_name}失败: {str(e)}", 500)
+        return decorated_function
+    return decorator
+
+
+def handle_device_operation(operation_name="操作"):
+    """设备操作错误处理"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            try:
+                return f(*args, **kwargs)
+            except SSHException as e:
+                return ApiResponse.error(f"SSH连接失败: {str(e)}", 500)
+            except AuthenticationException as e:
+                return ApiResponse.error(f"认证失败: {str(e)}", 401)
+            except ValueError as e:
+                return ApiResponse.error(f"参数错误: {str(e)}", 400)
+            except Exception as e:
+                print(f"Error in {operation_name}: {str(e)}")
+                traceback.print_exc()
+                return ApiResponse.error(f"{operation_name}失败: {str(e)}", 500)
+        return decorated_function
+    return decorator
+
+
+def execute_device_operation(devices, operation_func, operation_name):
+    """批量执行设备操作"""
+    results = []
+    for device_id in devices:
+        try:
+            operation_result = operation_func(device_id)
+            results.append({'device': device_id, 'success': True, 'data': operation_result})
+        except Exception as e:
+            results.append({'device': device_id, 'success': False, 'error': str(e)})
+    return results
+
+
+# 客户端标识管理
 def get_client_id():
-    """获取客户端标识符 (username@ip) - 动态生成不缓存"""
-    # 从请求中获取 IP
+    """获取客户端标识 (username@ip)"""
     client_ip = request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or \
                 request.headers.get('X-Real-IP') or request.remote_addr
-    # 从 session 中获取用户名
     client_username = session.get('client_username', 'unknown')
-
     return f"{client_username}@{client_ip}"
 
 def get_user_state():
-    """获取当前用户的状态"""
+    """获取当前用户状态"""
     client_id = get_client_id()
-
     with user_states_lock:
         if client_id not in user_states:
             user_states[client_id] = {
-                'running': False,
-                'devices': [],
-                'logs': [],
-                'ssh_connected': False,
-                'log_file': None,
-                'test_type': 'cts',
-                'created_at': datetime.now().isoformat(),
+                'running': False, 'devices': [], 'logs': [],
+                'ssh_connected': False, 'log_file': None,
+                'test_type': 'cts', 'created_at': datetime.now().isoformat(),
                 'client_id': client_id
             }
         return user_states[client_id]
 
 def update_user_state(updates):
-    """更新当前用户状态"""
+    """更新用户状态"""
     client_id = get_client_id()
-
     with user_states_lock:
         if client_id in user_states:
             user_states[client_id].update(updates)
             return user_states[client_id]
-        return None
+    return None
 
 def get_user_state_by_id(client_id):
-    """根据client_id获取用户状态（用于线程中调用）"""
+    """根据 ID 获取用户状态"""
     with user_states_lock:
         return user_states.get(client_id)
 
 def cleanup_old_sessions():
-    """清理超过24小时的旧会话"""
+    """清理超过 24 小时的旧会话"""
     with user_states_lock:
         now = datetime.now()
-        expired_sessions = []
+        expired_sessions = [
+            cid for cid, state in user_states.items()
+            if 'created_at' in state and
+            (now - datetime.fromisoformat(state['created_at'])) > timedelta(hours=24)
+        ]
+        for cid in expired_sessions:
+            del user_states[cid]
 
-        for client_id, state in user_states.items():
-            if 'created_at' in state:
-                created_at = datetime.fromisoformat(state['created_at'])
-                if (now - created_at) > timedelta(hours=24):
-                    expired_sessions.append(client_id)
-
-        for client_id in expired_sessions:
-            del user_states[client_id]
-
-# 定期清理旧会话
+# 后台清理任务（每小时）
 def cleanup_task():
     while True:
-        time.sleep(3600)  # 每小时清理一次
+        time.sleep(3600)
         cleanup_old_sessions()
 
-cleanup_thread = threading.Thread(target=cleanup_task, daemon=True)
-cleanup_thread.start()
+threading.Thread(target=cleanup_task, daemon=True).start()
 
-# ==================== 多用户辅助函数 ====================
+# 多用户辅助函数
 def emit_to_user(client_id, event, data):
-    """向特定用户发送 Socket.IO 消息"""
+    """向指定用户发送 Socket.IO 消息"""
     socketio.emit(event, data, room=client_id)
 
 def append_user_log(client_id, log_message):
-    """向用户日志添加消息"""
+    """添加用户日志"""
     with user_states_lock:
         if client_id in user_states:
             user_states[client_id]['logs'].append(log_message)
             return True
-        return False
+    return False
 
 def set_user_running(client_id, running):
     """设置用户测试运行状态"""
@@ -129,12 +200,12 @@ def set_user_running(client_id, running):
         if client_id in user_states:
             user_states[client_id]['running'] = running
             return True
-        return False
+    return False
 
-# ==================== Socket.IO 事件处理 ====================
+# Socket.IO 事件处理
 @socketio.on('connect')
 def handle_connect():
-    """客户端连接时加入个人房间"""
+    """客户端连接"""
     client_id = get_client_id()
     join_room(client_id)
     emit('connected', {'client_id': client_id})
@@ -395,8 +466,19 @@ def is_windows_host(ssh):
         return False
 
 # ==================== Device Management ====================
-def get_connected_devices(config):
-    """Get list of connected Android devices"""
+def get_connected_devices(config, force_refresh=False):
+    """
+    Get list of connected Android devices
+    使用缓存来减少SSH调用次数
+    """
+    current_time = time.time()
+
+    # 检查缓存是否有效
+    with device_cache['lock']:
+        if not force_refresh and (current_time - device_cache['timestamp']) < DEVICE_CACHE_TTL:
+            return device_cache['devices']
+
+    # 缓存失效，重新获取设备列表
     ssh = get_ssh_connection(config)
     if not ssh:
         print("[ERROR] Failed to get SSH connection")
@@ -413,6 +495,12 @@ def get_connected_devices(config):
                 device_id = line.split('\t')[0]
                 devices.append(device_id)
         return_ssh_connection(ssh)
+
+        # 更新缓存
+        with device_cache['lock']:
+            device_cache['devices'] = devices
+            device_cache['timestamp'] = current_time
+
         return devices
     except Exception as e:
         print(f"[ERROR] Error getting devices: {e}")
@@ -769,7 +857,10 @@ def list_users():
 def list_devices():
     """Get list of connected devices with lock status"""
     config = load_config()
-    devices = get_connected_devices(config)
+
+    # 检查是否需要强制刷新（绕过缓存）
+    force_refresh = request.args.get('force_refresh', '0') == '1'
+    devices = get_connected_devices(config, force_refresh=force_refresh)
 
     # 获取当前会话ID和设备锁定状态
     client_id = get_client_id()
@@ -1040,13 +1131,31 @@ def list_logs():
 
 @app.route('/api/status')
 def get_status():
-    """Get current test status"""
+    """Get current test status - 优化版本，减少数据传输"""
     user_state = get_user_state()
-    return jsonify({
+
+    # 获取请求参数，只返回需要的数据
+    since = request.args.get('since', type=int)
+    include_logs = request.args.get('logs', 'true').lower() == 'true'
+
+    response = {
         'running': user_state['running'],
         'devices': user_state['devices'],
-        'logs': user_state['logs'][-100:]  # Return last 100 logs
-    })
+    }
+
+    # 只在需要时返回日志，并且基于since参数返回增量日志
+    if include_logs:
+        logs = user_state['logs']
+        if since is not None and 0 <= since < len(logs):
+            # 只返回新日志（增量）
+            response['logs'] = logs[since:]
+            response['log_count'] = len(logs)
+        else:
+            # 返回最近50条日志（从100减少到50）
+            response['logs'] = logs[-50:]
+            response['log_count'] = len(logs)
+
+    return jsonify(response)
 
 @app.route('/api/devices/reboot', methods=['POST'])
 def reboot_devices():
@@ -2431,6 +2540,179 @@ def view_report_file():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== Advanced Screen Mirroring ====================
+def calculate_window_positions(devices, screen_width=1920, screen_height=1080):
+    """
+    计算投屏窗口的位置和大小
+
+    Args:
+        devices: 设备ID列表
+        screen_width: 屏幕宽度
+        screen_height: 屏幕高度
+
+    Returns:
+        dict: 包含窗口大小和起始位置的字典
+    """
+    devices = sorted(devices)
+    total_devices = len(devices)
+
+    horizontal_gap = 20
+    vertical_margin = 50
+
+    max_available_width = screen_width - (horizontal_gap * (total_devices + 1))
+    window_width = min(600, max_available_width // total_devices)
+    window_height = int(window_width * 16 / 9)  # 16:9 aspect ratio
+
+    max_height = int(screen_height * 0.7)
+    if window_height > max_height:
+        window_height = max_height
+        window_width = int(window_height * 9 / 16)
+
+    # Center the windows
+    total_width = total_devices * window_width + (total_devices - 1) * horizontal_gap
+    start_x = max(horizontal_gap, (screen_width - total_width) // 2)
+    start_y = max(vertical_margin, (screen_height - window_height) // 2)
+
+    return {
+        'window_width': window_width,
+        'window_height': window_height,
+        'start_x': start_x,
+        'start_y': start_y,
+        'horizontal_gap': horizontal_gap
+    }
+
+
+def check_vnc_service(ssh, ubuntu_host):
+    """检查VNC服务是否可用"""
+    vnc_check_cmd = f"curl -s -o /dev/null -w '%{{http_code}}' http://{ubuntu_host}:6080 --connect-timeout 3"
+    vnc_output, _, _ = execute_ssh_command(ssh, vnc_check_cmd, timeout=5)
+    return vnc_output.strip() == '200'
+
+
+def check_scrcpy_availability(ssh, config, ubuntu_user):
+    """
+    检查scrcpy是否可用
+
+    Returns:
+        tuple: (scrcpy_path, error_response) 如果失败则返回错误响应
+    """
+    scrcpy_path = config.get("scrcpy_path", "")
+
+    if scrcpy_path:
+        # Substitute ubuntu_user in path
+        scrcpy_path = scrcpy_path.replace('${ubuntu_user}', ubuntu_user)
+        scrcpy_check_cmd = f"test -f '{scrcpy_path}' && echo 'exists' || echo 'not_found'"
+        scrcpy_output, _, scrcpy_code = execute_ssh_command(ssh, scrcpy_check_cmd)
+
+        if "not_found" in scrcpy_output:
+            return None, {
+                'success': False,
+                'error': f'scrcpy未找到: {scrcpy_path}',
+                'instructions': '请检查配置文件中的 scrcpy_path 路径'
+            }
+    else:
+        # Fallback to checking PATH
+        scrcpy_check_cmd = "which scrcpy"
+        scrcpy_output, _, scrcpy_code = execute_ssh_command(ssh, scrcpy_check_cmd)
+
+        if scrcpy_code != 0:
+            return None, {
+                'success': False,
+                'error': 'scrcpy未安装',
+                'instructions': 'sudo apt-get install -y scrcpy'
+            }
+        scrcpy_path = "scrcpy"  # Use command from PATH
+
+    return scrcpy_path, None
+
+
+def is_device_mirroring(ssh, device_id):
+    """
+    检查设备是否正在投屏
+
+    Returns:
+        tuple: (is_process_running, has_window)
+    """
+    check_cmd = f"pgrep -f 'scrcpy.*-s {device_id}' && echo 'RUNNING' || echo 'NOT_RUNNING'"
+    check_output, _, _ = execute_ssh_command(ssh, check_cmd, timeout=5)
+    is_process_running = 'RUNNING' in check_output
+
+    # Check if scrcpy window actually exists
+    has_window = False
+    try:
+        window_check_cmd = f"wmctrl -l | grep '{device_id}' && echo 'HAS_WINDOW' || echo 'NO_WINDOW'"
+        window_output, _, _ = execute_ssh_command(ssh, window_check_cmd, timeout=5)
+        has_window = 'HAS_WINDOW' in window_output
+    except Exception:
+        # wmctrl not available, fall back to process-only check
+        has_window = is_process_running
+
+    return is_process_running, has_window
+
+
+def start_device_mirroring(ssh, device_id, position, scrcpy_path, ubuntu_user, vnc_available):
+    """
+    启动单个设备的投屏
+
+    Args:
+        ssh: SSH连接
+        device_id: 设备ID
+        position: 窗口位置字典
+        scrcpy_path: scrcpy可执行文件路径
+        ubuntu_user: Ubuntu用户名
+        vnc_available: VNC是否可用
+
+    Returns:
+        dict: 操作结果
+    """
+    x_offset = position['x']
+    y_offset = position['y']
+    window_width = position['width']
+    window_height = position['height']
+    horizontal_gap = position['gap']
+
+    # Boundary checks
+    screen_width = 1920
+    screen_height = 1080
+    vertical_margin = 50
+
+    if x_offset + window_width > screen_width:
+        x_offset = max(0, screen_width - window_width - horizontal_gap)
+    if y_offset + window_height > screen_height:
+        y_offset = max(0, screen_height - window_height - vertical_margin)
+
+    if vnc_available:
+        cmd = (
+            f"export DISPLAY=:0 && "
+            f"export XAUTHORITY=/home/{ubuntu_user}/.Xauthority && "
+            f"{scrcpy_path} -s {device_id} "
+            f"--max-size 800 "
+            f"--stay-awake "
+            f"--window-title '{device_id}' "
+            f"--window-x {x_offset} "
+            f"--window-y {y_offset} "
+            f"--window-width {window_width} "
+            f"--window-height {window_height} "
+            f"> /tmp/scrcpy_{device_id}.log 2>&1 &"
+        )
+    else:
+        cmd = (
+            f"export DISPLAY=:0 && "
+            f"export XAUTHORITY=/home/{ubuntu_user}/.Xauthority && "
+            f"{scrcpy_path} -s {device_id} "
+            f"> /tmp/scrcpy_{device_id}.log 2>&1 &"
+        )
+
+    execute_ssh_command(ssh, cmd, timeout=10)
+    time.sleep(0.2)
+
+    # Verify scrcpy started successfully
+    check_cmd = f"pgrep -f 'scrcpy.*-s {device_id}' && echo 'RUNNING' || echo 'NOT_RUNNING'"
+    check_output, _, _ = execute_ssh_command(ssh, check_cmd, timeout=5)
+    is_started = 'RUNNING' in check_output
+
+    return is_started
+
+
 @app.route('/api/screen/start', methods=['POST'])
 def start_screen_mirroring():
     """Start scrcpy with VNC for screen mirroring - Redirects to desktop page for VNC viewing"""
@@ -2453,94 +2735,25 @@ def start_screen_mirroring():
         vnc_ports = []
         already_running_devices = []
 
-        # Check VNC service status first
-        vnc_check_cmd = f"curl -s -o /dev/null -w '%{{http_code}}' http://{ubuntu_host}:6080 --connect-timeout 3"
-        vnc_output, _, _ = execute_ssh_command(ssh, vnc_check_cmd, timeout=5)
-        vnc_available = vnc_output.strip() == '200'
+        # Check VNC service status
+        vnc_available = check_vnc_service(ssh, ubuntu_host)
 
         # Check scrcpy availability
-        # Use configured path or fallback to 'which'
-        scrcpy_path = config.get("scrcpy_path", "")
-        if scrcpy_path:
-            # Substitute ubuntu_user in path
-            scrcpy_path = scrcpy_path.replace('${ubuntu_user}', ubuntu_user)
-            scrcpy_check_cmd = f"test -f '{scrcpy_path}' && echo 'exists' || echo 'not_found'"
-            scrcpy_output, _, scrcpy_code = execute_ssh_command(ssh, scrcpy_check_cmd)
+        scrcpy_path, error_response = check_scrcpy_availability(ssh, config, ubuntu_user)
+        if error_response:
+            return_ssh_connection(ssh)
+            return jsonify(error_response), 404
 
-            if "not_found" in scrcpy_output:
-                return_ssh_connection(ssh)
-                return jsonify({
-                    'success': False,
-                    'error': f'scrcpy未找到: {scrcpy_path}',
-                    'instructions': '请检查配置文件中的 scrcpy_path 路径'
-                }), 404
-        else:
-            # Fallback to checking PATH
-            scrcpy_check_cmd = "which scrcpy"
-            scrcpy_output, _, scrcpy_code = execute_ssh_command(ssh, scrcpy_check_cmd)
+        # Calculate window positions
+        positions = calculate_window_positions(devices)
 
-            if scrcpy_code != 0:
-                return_ssh_connection(ssh)
-                return jsonify({
-                    'success': False,
-                    'error': 'scrcpy未安装',
-                    'instructions': 'sudo apt-get install -y scrcpy'
-                }), 404
-            scrcpy_path = "scrcpy"  # Use command from PATH
-
-        # Sort devices and calculate window positions (matching GUI logic)
-        devices = sorted(devices)
-        total_devices = len(devices)
-
-        # Calculate window dimensions with GUI logic (matching GUI lines 2240-2259)
-        screen_width = 1920
-        screen_height = 1080
-        horizontal_gap = 20
-        vertical_margin = 50
-
-        max_available_width = screen_width - (horizontal_gap * (total_devices + 1))
-        window_width = min(600, max_available_width // total_devices)
-        window_height = int(window_width * 16 / 9)  # 16:9 aspect ratio
-        max_height = int(screen_height * 0.7)
-        if window_height > max_height:
-            window_height = max_height
-            window_width = int(window_height * 9 / 16)
-
-        # Center the windows (GUI logic)
-        total_width = total_devices * window_width + (total_devices - 1) * horizontal_gap
-        start_x = max(horizontal_gap, (screen_width - total_width) // 2)
-        start_y = max(vertical_margin, (screen_height - window_height) // 2)
-
-        for idx, device_id in enumerate(devices):
-            # Calculate position using current index (GUI line 2198)
-            x_offset = start_x + idx * (window_width + horizontal_gap)
-            y_offset = start_y
-
-            # Boundary checks (GUI lines 2255-2258)
-            if x_offset + window_width > screen_width:
-                x_offset = max(0, screen_width - window_width - horizontal_gap)
-            if y_offset + window_height > screen_height:
-                y_offset = max(0, screen_height - window_height - vertical_margin)
-
-            # Check if device is already being mirrored
+        # Process each device
+        for idx, device_id in enumerate(sorted(devices)):
             with scrcpy_sessions_lock:
                 session_info = scrcpy_sessions.get(device_id)
 
-            # Verify if scrcpy process is actually running for this device
-            check_cmd = f"pgrep -f 'scrcpy.*-s {device_id}' && echo 'RUNNING' || echo 'NOT_RUNNING'"
-            check_output, _, _ = execute_ssh_command(ssh, check_cmd, timeout=5)
-            is_process_running = 'RUNNING' in check_output
-
-            # Check if scrcpy window actually exists (not just the process)
-            # When window is closed, process may still run, but window is gone
-            has_window = False
-            try:
-                window_check_cmd = f"wmctrl -l | grep '{device_id}' && echo 'HAS_WINDOW' || echo 'NO_WINDOW'"
-                window_output, _, _ = execute_ssh_command(ssh, window_check_cmd, timeout=5)
-                has_window = 'HAS_WINDOW' in window_output
-            except Exception:
-                # wmctrl not available, fall back to process-only check
-                has_window = is_process_running
+            # Check if device is already being mirrored
+            is_process_running, has_window = is_device_mirroring(ssh, device_id)
 
             if session_info and is_process_running and has_window:
                 # Device is already being mirrored with active window, skip
@@ -2560,41 +2773,25 @@ def start_screen_mirroring():
 
             # If process exists but window is closed, clean it up
             if is_process_running and not has_window:
-                # Old scrcpy process exists but window is closed, clean it up
                 execute_ssh_command(ssh, f"pkill -f 'scrcpy.*-s {device_id}'", timeout=5)
                 time.sleep(1)
 
-            # Start scrcpy with window tiling if VNC available
-            if vnc_available:
-                cmd = (
-                    f"export DISPLAY=:0 && "
-                    f"export XAUTHORITY=/home/{ubuntu_user}/.Xauthority && "
-                    f"{scrcpy_path} -s {device_id} "
-                    f"--max-size 800 "
-                    f"--stay-awake "
-                    f"--window-title '{device_id}' "
-                    f"--window-x {x_offset} "
-                    f"--window-y {y_offset} "
-                    f"--window-width {window_width} "
-                    f"--window-height {window_height} "
-                    f"> /tmp/scrcpy_{device_id}.log 2>&1 &"
-                )
-            else:
-                # Fallback to simple scrcpy
-                cmd = (
-                    f"export DISPLAY=:0 && "
-                    f"export XAUTHORITY=/home/{ubuntu_user}/.Xauthority && "
-                    f"{scrcpy_path} -s {device_id} "
-                    f"> /tmp/scrcpy_{device_id}.log 2>&1 &"
-                )
+            # Calculate position for this device
+            x_offset = positions['start_x'] + idx * (positions['window_width'] + positions['horizontal_gap'])
+            y_offset = positions['start_y']
 
-            execute_ssh_command(ssh, cmd, timeout=10)
-            time.sleep(0.2)
+            position = {
+                'x': x_offset,
+                'y': y_offset,
+                'width': positions['window_width'],
+                'height': positions['window_height'],
+                'gap': positions['horizontal_gap']
+            }
 
-            # Verify scrcpy started successfully
-            check_cmd = f"pgrep -f 'scrcpy.*-s {device_id}' && echo 'RUNNING' || echo 'NOT_RUNNING'"
-            check_output, _, _ = execute_ssh_command(ssh, check_cmd, timeout=5)
-            is_started = 'RUNNING' in check_output
+            # Start mirroring
+            is_started = start_device_mirroring(
+                ssh, device_id, position, scrcpy_path, ubuntu_user, vnc_available
+            )
 
             if is_started:
                 # Record the scrcpy session
@@ -2608,7 +2805,7 @@ def start_screen_mirroring():
                     'device': device_id,
                     'success': True,
                     'already_running': False,
-                    'position': {'x': x_offset, 'y': y_offset, 'width': window_width, 'height': window_height}
+                    'position': {'x': x_offset, 'y': y_offset, 'width': positions['window_width'], 'height': positions['window_height']}
                 })
 
                 vnc_ports.append({
@@ -2627,7 +2824,7 @@ def start_screen_mirroring():
 
         return_ssh_connection(ssh)
 
-        # Build response with GUI-style messages (matching GUI lines 2223-2226)
+        # Build response
         newly_started = [r['device'] for r in results if r.get('success') and not r.get('already_running')]
         failed_devices = [r['device'] for r in results if not r.get('success')]
 
