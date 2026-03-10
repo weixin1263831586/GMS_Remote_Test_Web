@@ -1147,6 +1147,39 @@
         let terminalSocket = null;
         let isTerminalConnected = false;
         let pageInitialized = false; // 防止重复初始化
+        let vncChecked = false; // 防止重复检查VNC
+
+        // 确保VNC服务已启动
+        async function ensureVNCStarted() {
+            if (vncChecked) {
+                return; // 已经检查过,不再重复
+            }
+
+            try {
+                const response = await fetch('/api/vnc/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    console.log('[VNC] VNC service status:', result.message);
+                    vncChecked = true;
+
+                    // 等待VNC服务完全启动
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } else {
+                    console.warn('[VNC] Failed to start:', result.error);
+                    // 不显示错误提示,避免干扰用户
+                }
+            } catch (error) {
+                console.warn('[VNC] Error checking VNC status:', error);
+                // 静默失败,不影响用户体验
+            }
+        }
 
         // 页面切换函数
         function switchPage(pageName, event) {
@@ -1219,6 +1252,13 @@
 
             // 如果切换到桌面页面，确保iframe已加载（只加载一次）
             if (pageName === 'desktop') {
+                // 先自动启动 VNC 服务(如果未运行)
+                ensureVNCStarted().then(() => {
+                    console.log('[Desktop] VNC service ensured');
+                }).catch(err => {
+                    console.warn('[Desktop] Failed to ensure VNC:', err);
+                });
+
                 const vncFrame = document.getElementById('vnc-frame');
                 if (vncFrame && !vncFrame.dataset.loaded) {
                     vncFrame.dataset.loaded = 'true';
