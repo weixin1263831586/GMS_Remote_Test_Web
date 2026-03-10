@@ -1641,15 +1641,86 @@ def get_devices_management():
 # ==================== VNC ====================
 @app.route('/api/vnc/start', methods=['POST'])
 def start_vnc():
-    """Start VNC with x11vnc and noVNC - matches GUI implementation"""
+    """Start VNC with x11vnc and noVNC - 自动检测本地或远程"""
+    import time
     config = load_config()
+    ubuntu_host = config.get("ubuntu_host", "")
+    ubuntu_user = config.get("ubuntu_user", "hcq")
+
+    # 检查是否是本地主机
+    local_hosts = ['localhost', '127.0.0.1', '::1', socket.gethostname()]
+    try:
+        local_ip = socket.gethostbyname(socket.gethostname())
+        local_hosts.append(local_ip)
+    except:
+        pass
+
+    is_local = ubuntu_host in local_hosts
+
+    if is_local:
+        # 本地主机的 VNC 启动
+        try:
+            print("[VNC] Starting local VNC services...")
+
+            # 调用本地 VNC 启动函数
+            ensure_local_vnc_services()
+
+            # 等待服务启动
+            time.sleep(2)
+
+            # 验证服务是否运行
+            result = subprocess.run(
+                ['pgrep', '-f', 'x11vnc.*:0'],
+                capture_output=True,
+                text=True
+            )
+            x11vnc_running = result.returncode == 0
+
+            result = subprocess.run(
+                ['pgrep', '-f', 'websockify.*6080'],
+                capture_output=True,
+                text=True
+            )
+            websockify_running = result.returncode == 0
+
+            if x11vnc_running and websockify_running:
+                return jsonify({
+                    'success': True,
+                    'message': '✅ VNC服务已启动(本地)',
+                    'x11vnc_running': True,
+                    'websockify_running': True,
+                    'vnc_port': 5900,
+                    'web_port': 6080,
+                    'url': f"http://{ubuntu_host}:6080/vnc.html?autoconnect=true",
+                    'local': True
+                })
+            elif x11vnc_running or websockify_running:
+                return jsonify({
+                    'success': True,
+                    'message': '⚠ VNC服务部分运行(本地)',
+                    'x11vnc_running': x11vnc_running,
+                    'websockify_running': websockify_running,
+                    'vnc_port': 5900,
+                    'web_port': 6080,
+                    'url': f"http://{ubuntu_host}:6080/vnc.html?autoconnect=true",
+                    'local': True
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'VNC服务启动失败'
+                }), 500
+
+        except Exception as e:
+            print(f"[VNC] Local VNC start error: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    # 远程主机的 VNC 启动 (原有逻辑)
     ssh = get_ssh_connection(config)
     if not ssh:
         return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
 
     try:
-        ubuntu_user = config.get("ubuntu_user", "hcq")
-        ubuntu_host = config.get("ubuntu_host", "")
 
         # 1. Check VNC password file (matching GUI lines 2587-2592)
         check_passwd_cmd = "[ -f ~/.vnc/passwd ] && echo 'exists' || echo 'missing'"
@@ -1684,7 +1755,6 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
         execute_ssh_command(ssh, chmod_cmd)
 
         # 4. Wait for display ready (matching GUI lines 2610-2617)
-        import time
         display_ready = False
         for _ in range(60):
             display_cmd = "export DISPLAY=:0 && xprop -root &>/dev/null && echo 'ready'"
@@ -3862,8 +3932,80 @@ def handle_terminal_resize(data):
             except Exception as e:
                 print(f"[TERMINAL] Resize error for session {client_id}: {e}")
 
+# ==================== Local VNC Auto-Start ====================
+def ensure_local_vnc_services():
+    """确保本地 VNC 服务(x11vnc 和 noVNC)在应用启动时自动运行"""
+    import os
+    import subprocess
+    import time
+
+    home = os.path.expanduser('~')
+    os.makedirs(f'{home}/logs', exist_ok=True)
+
+    # 0. 检查图形桌面
+    print("\n[0/3] 检查图形桌面就绪...")
+    for _ in range(60):
+        try:
+            if subprocess.run(['xprop', '-root'], capture_output=True, timeout=2,
+                            env={**os.environ, 'DISPLAY': ':0'}).returncode == 0:
+                print("✓ 图形桌面已就绪")
+                break
+        except:
+            pass
+        time.sleep(1)
+
+    # 1. 启动 x11vnc
+    print("\n[1/3] 检查 x11vnc 服务...")
+    if subprocess.run(['pgrep', '-f', 'x11vnc.*:0'], capture_output=True).returncode != 0:
+        vnc_passwd = f'{home}/.vnc/passwd'
+        if os.path.exists(vnc_passwd):
+            env = {**os.environ, 'DISPLAY': ':0', 'XAUTHORITY': f'{home}/.Xauthority'}
+            subprocess.run(['x11vnc', '-display', ':0', '-forever', '-shared',
+                          '-rfbauth', vnc_passwd, '-bg', '-o', f'{home}/logs/x11vnc.log'],
+                         env=env, capture_output=True)
+            print("✓ x11vnc 启动成功")
+        else:
+            print("⚠ VNC密码文件不存在, 跳过x11vnc启动")
+    else:
+        print("✓ x11vnc 已在运行")
+
+    # 2. 启动 websockify
+    print("\n[2/3] 检查 noVNC websockify 服务...")
+    if subprocess.run(['pgrep', '-f', 'websockify.*6080'], capture_output=True).returncode != 0:
+        websockify_run = '/opt/noVNC/utils/websockify/run'
+        if os.path.exists(websockify_run):
+            subprocess.run(['chmod', '+x', websockify_run], capture_output=True)
+            subprocess.run(f'cd /opt/noVNC && nohup {websockify_run} --web /opt/noVNC 6080 localhost:5900 '
+                         f'> {home}/logs/novnc.log 2>&1 &', shell=True, capture_output=True)
+            print("✓ noVNC websockify 启动成功")
+        else:
+            print("⚠ websockify未找到, 请确保noVNC已安装在/opt/noVNC")
+    else:
+        print("✓ noVNC websockify 已在运行")
+
+    # 3. 验证状态
+    print("\n[3/3] 验证服务状态...")
+    time.sleep(2)
+    x11vnc_ok = subprocess.run(['pgrep', '-f', 'x11vnc.*:0'], capture_output=True).returncode == 0
+    websockify_ok = subprocess.run(['pgrep', '-f', 'websockify.*6080'], capture_output=True).returncode == 0
+    print(f"  x11vnc: {'✓ 运行中' if x11vnc_ok else '✗ 未运行'}")
+    print(f"  websockify: {'✓ 运行中' if websockify_ok else '✗ 未运行'}")
+
+    print("\n" + "=" * 60)
+    print("VNC 服务检查完成 | x11vnc:5900 | noVNC:6080")
+    print("=" * 60 + "\n")
+
+
 # ==================== Main ====================
 if __name__ == '__main__':
     print("Starting GMS Auto Test Web Application...")
     print("Access the application at: http://localhost:5000")
+
+    # 自动启动本地 VNC 服务
+    try:
+        ensure_local_vnc_services()
+    except Exception as e:
+        print(f"警告: VNC 服务自动启动失败: {str(e)}")
+        print("你可以稍后通过 Web 界面的「启动VNC」按钮手动启动")
+
     socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
