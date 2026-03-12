@@ -394,7 +394,17 @@ async function loadDevices(forceRefresh = false) {
         const devices = await apiCall(url);
         state.devices = devices;
         renderDevices();
-        addLogEntry(`已刷新设备列表，找到 ${devices.length} 台设备`, 'info');
+
+        // 显示设备信息，包含序列号
+        let deviceInfo = `已刷新设备列表，找到 ${devices.length} 台设备`;
+        if (devices.length > 0) {
+            // 支持 device_id 和 serial 两种字段名
+            const serials = devices.map(d => d.device_id || d.serial || '未知').filter(s => s).join(' ');
+            if (serials) {
+                deviceInfo += ` (${serials})`;
+            }
+        }
+        addLogEntry(deviceInfo, 'info');
 
         // 不再自动检查 USB/IP 状态，避免覆盖连接状态
         // USB/IP 状态只在连接/断开操作时更新
@@ -1674,9 +1684,12 @@ async function showConfig() {
     modal.classList.add('show');
 }
 
-function closeModal() {
-    const modal = document.getElementById('config-modal');
-    modal.classList.remove('show');
+function closeModal(modalId) {
+    const id = modalId || 'config-modal';
+    const modal = document.getElementById(id);
+    if (modal) {
+        modal.remove();
+    }
 }
 
 async function saveConfig() {
@@ -1920,11 +1933,241 @@ function displayTestReports(reports) {
                     ${passRate}
                 </td>
                 <td style="padding: 12px;">
-                    <button class="btn-xxs" onclick="viewReportDetails('${report.timestamp}')">📄 查看详情</button>
+                    <button class="btn-xxs" onclick="analyzeReport('${report.timestamp}')">🔍 分析</button>
+                    <button class="btn-xxs" onclick="viewReportDetails('${report.timestamp}')">📄 文件</button>
                 </td>
             </tr>
         `;
     }).join('');
+}
+
+async function analyzeReport(timestamp) {
+    try {
+        showToast('正在分析报告...', 'info');
+
+        const resp = await fetch(`/api/reports/${timestamp}/analyze`);
+        const data = await resp.json();
+
+        if (!data.success) {
+            showToast('分析失败: ' + (data.error || '未知错误'), 'error');
+            return;
+        }
+
+        displayReportAnalysis(data.data, timestamp);
+    } catch (e) {
+        console.error('[Reports] Error analyzing report:', e);
+        showToast('分析失败: ' + e.message, 'error');
+    }
+}
+
+function displayReportAnalysis(data, timestamp) {
+    // 创建分析结果弹窗
+    const modalId = 'report-analysis-modal-' + Date.now();
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';
+    modal.style.cssText = 'display: block; z-index: 10000;';
+
+    let html = `
+        <div class="modal-content" style="max-width: 900px; max-height: 80vh; overflow-y: auto;">
+            <div class="modal-header">
+                <span class="modal-title">📊 报告分析 - ${timestamp}</span>
+                <span class="modal-close" onclick="closeReportAnalysisModal('${modalId}')">&times;</span>
+            </div>
+            <div class="modal-body">
+    `;
+
+    // 摘要信息
+    if (data.summary) {
+        html += `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px;">
+                <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">总用例</div>
+                    <div style="font-size: 24px; font-weight: 700; color: var(--primary-color);">${data.summary.total || 0}</div>
+                </div>
+                <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">通过</div>
+                    <div style="font-size: 24px; font-weight: 700; color: var(--success-color);">${data.summary.pass || 0}</div>
+                </div>
+                <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">失败</div>
+                    <div style="font-size: 24px; font-weight: 700; color: var(--danger-color);">${data.summary.fail || 0}</div>
+                </div>
+                <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">通过率</div>
+                    <div style="font-size: 24px; font-weight: 700; color: var(--info-color);">${data.summary.pass_rate || '0%'}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    // 设备信息
+    if (data.device_info) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📱 设备信息</div>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 12px;">
+                    ${data.device_info.device ? `<div><strong>设备:</strong> ${data.device_info.device}</div>` : ''}
+                    ${data.device_info.manufacturer ? `<div><strong>厂商:</strong> ${data.device_info.manufacturer}</div>` : ''}
+                    ${data.device_info.model ? `<div><strong>型号:</strong> ${data.device_info.model}</div>` : ''}
+                    ${data.device_info.android_version ? `<div><strong>Android:</strong> ${data.device_info.android_version}</div>` : ''}
+                    ${data.device_info.build_id ? `<div><strong>Build:</strong> ${data.device_info.build_id}</div>` : ''}
+                    ${data.device_info.build_type ? `<div><strong>类型:</strong> ${data.device_info.build_type}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    // 测试信息
+    if (data.test_info) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">🧪 测试信息</div>
+                <div style="font-size: 12px;">
+                    ${data.test_info.suite_name ? `<div style="margin-bottom: 4px;"><strong>套件:</strong> ${data.test_info.suite_name}</div>` : ''}
+                    ${data.test_info.suite_version ? `<div style="margin-bottom: 4px;"><strong>版本:</strong> ${data.test_info.suite_version}</div>` : ''}
+                    ${data.test_info.start_time ? `<div style="margin-bottom: 4px;"><strong>开始:</strong> ${data.test_info.start_time}</div>` : ''}
+                    ${data.test_info.end_time ? `<div style="margin-bottom: 4px;"><strong>结束:</strong> ${data.test_info.end_time}</div>` : ''}
+                    ${data.test_info.duration ? `<div><strong>耗时:</strong> ${data.test_info.duration}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    // 失败用例
+    if (data.failures && data.failures.length > 0) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div style="font-size: 14px; font-weight: 600;">❌ 失败用例 (${data.total_failures || data.failures.length})</div>
+                    <div style="display: flex; gap: 6px;">
+                        ${data.failures.length > 0 ? `
+                            <button onclick="analyzeSourceCode('${(data.failures[0].test_name || '').replace(/'/g, "\\'")}', '${(data.failures[0].message || '').replace(/'/g, "\\'").replace(/\n/g, '\\n')}')" style="font-size: 10px; padding: 4px 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                🔍 源码分析
+                            </button>
+                            <button onclick="aiAnalyzeFailure('${(data.failures[0].test_name || '').replace(/'/g, "\\'")}', '${(data.failures[0].message || '').replace(/'/g, "\\'").replace(/\n/g, '\\n')}', '${(data.failures[0].module || '').replace(/'/g, "\\'")}')" style="font-size: 10px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                🤖 AI分析
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    ${data.failures.map((f, idx) => `
+                        <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 10px; margin-bottom: 8px;">
+                            ${f.module ? `<div style="font-size: 11px; color: var(--warning-color); margin-bottom: 4px; font-weight: 600;">📦 模块: ${f.module}</div>` : ''}
+                            <div style="font-weight: 600; font-size: 12px; margin-bottom: 6px; color: var(--danger-color);">🧪 ${f.test_name || f.test}</div>
+                            ${f.message ? `
+                                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
+                                    <div style="margin-bottom: 4px; font-weight: 600;">💬 失败原因:</div>
+                                    <div class="log-content" data-full-text="${f.message.replace(/"/g, '&quot;').replace(/'/g, '&#39;')}" style="background: rgba(255,0,0,0.05); padding: 8px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden;">${f.message}</div>
+                                    ${f.message.length > 200 ? `<button class="expand-btn" style="margin-top: 4px; font-size: 10px; padding: 2px 8px; background: var(--primary-color); color: white; border: none; border-radius: 4px; cursor: pointer;">展开完整信息</button>` : ''}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // 主机日志错误
+    if (data.host_log_errors && data.host_log_errors.errors.length > 0) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">💻 主机日志错误 (${data.host_log_errors.total_errors})</div>
+                <div style="max-height: 250px; overflow-y: auto;">
+                    ${data.host_log_errors.errors.map((e, idx) => `
+                        <div style="background: var(--darker-bg); border-radius: 4px; padding: 8px; margin-bottom: 6px; font-size: 10px; font-family: monospace; color: var(--danger-color); white-space: pre-wrap; word-break: break-word;">
+                            <div class="log-content" style="max-height: 80px; overflow: hidden;">${e}</div>
+                            ${e.length > 300 ? `<button class="expand-btn" style="margin-top: 4px; font-size: 9px; padding: 2px 6px; background: var(--primary-color); color: white; border: none; border-radius: 4px; cursor: pointer;">展开</button>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // 特殊块信息（新增 - 借鉴自 GMS Failure Extractor）
+    if (data.host_log_errors && data.host_log_errors.special_blocks && data.host_log_errors.special_blocks.length > 0) {
+        html += `
+            <div style="background: linear-gradient(135deg, rgba(245, 87, 108, 0.05) 0%, rgba(255, 154, 158, 0.05) 100%); border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid rgba(245, 87, 108, 0.2);">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">⚠️ 关键失败块 (${data.host_log_errors.special_blocks.length})</div>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    ${data.host_log_errors.special_blocks.map(block => `
+                        <div style="background: var(--darker-bg); border-radius: 6px; padding: 12px; margin-bottom: 10px;">
+                            <div style="font-size: 11px; font-weight: 600; margin-bottom: 8px; color: var(--danger-color);">
+                                ${block.type === 'ModuleListener' ? '🔴 ModuleListener FAILURE' : ''}
+                                ${block.type === 'TestRunner' ? '🟠 TestRunner Exception' : ''}
+                                ${block.type === 'WATCHDOG' ? '⚫ WATCHDOG Kill' : ''}
+                            </div>
+                            <div style="font-size: 10px; font-family: monospace; color: var(--text-color); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;">${block.content}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // 设备日志错误
+    if (data.device_log_errors && data.device_log_errors.errors.length > 0) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📱 设备日志错误 (${data.device_log_errors.total_errors})</div>
+                <div style="max-height: 250px; overflow-y: auto;">
+                    ${data.device_log_errors.errors.map((e, idx) => `
+                        <div style="background: var(--darker-bg); border-radius: 4px; padding: 8px; margin-bottom: 6px; font-size: 10px; font-family: monospace; color: var(--danger-color); white-space: pre-wrap; word-break: break-word;">
+                            <div class="log-content" style="max-height: 80px; overflow: hidden;">${e}</div>
+                            ${e.length > 300 ? `<button class="expand-btn" style="margin-top: 4px; font-size: 9px; padding: 2px 6px; background: var(--primary-color); color: white; border: none; border-radius: 4px; cursor: pointer;">展开</button>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    html += `
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-xs" onclick="closeReportAnalysisModal('${modalId}')">关闭</button>
+            </div>
+        </div>
+    `;
+
+    modal.innerHTML = html;
+    document.body.appendChild(modal);
+
+    // 添加展开按钮事件监听
+    const expandButtons = modal.querySelectorAll('.expand-btn');
+    expandButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const contentDiv = this.previousElementSibling;
+            if (contentDiv.style.maxHeight === 'none') {
+                // 收起
+                contentDiv.style.maxHeight = contentDiv.classList.contains('log-content') ? '60px' : '80px';
+                contentDiv.style.overflow = 'hidden';
+                this.textContent = contentDiv.parentElement.querySelector('.log-content') ? '展开完整信息' : '展开';
+            } else {
+                // 展开
+                contentDiv.style.maxHeight = 'none';
+                contentDiv.style.overflow = 'auto';
+                this.textContent = '收起';
+            }
+        });
+    });
+
+    // 点击外部关闭
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeReportAnalysisModal(modalId);
+        }
+    });
+}
+
+function closeReportAnalysisModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.remove();
+    }
 }
 
 async function viewReportDetails(timestamp) {
@@ -2080,4 +2323,679 @@ function handleInstallGuideEsc(event) {
     if (event.key === 'Escape') {
         closeInstallGuide();
     }
+}
+
+// ==================== Report Analysis ====================
+
+function initReportAnalysis() {
+    const uploadZone = $('report-upload-zone');
+    const fileInput = $('report-file-input');
+
+    if (!uploadZone || !fileInput) return;
+
+    // 拖拽事件
+    uploadZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadZone.classList.add('drag-over');
+    });
+
+    uploadZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        uploadZone.classList.remove('drag-over');
+    });
+
+    uploadZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadZone.classList.remove('drag-over');
+
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            handleReportFile(files[0]);
+        }
+    });
+
+    // 文件选择事件
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleReportFile(e.target.files[0]);
+        }
+    });
+}
+
+async function handleReportFile(file) {
+    const uploadZone = $('report-upload-zone');
+    const content = uploadZone?.querySelector('.report-upload-content');
+    const progress = $('report-upload-progress');
+    const progressFill = $('report-progress-fill');
+
+    if (!progress || !progressFill) return;
+
+    // 显示进度
+    if (content) content.style.opacity = '0.5';
+    progress.style.opacity = '1';
+    progressFill.style.width = '0%';
+
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        progressFill.style.width = '50%';
+
+        const response = await fetch('/api/report/analyze', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        progressFill.style.width = '100%';
+
+        if (result.success) {
+            setTimeout(() => {
+                if (progress) progress.style.opacity = '0';
+                if (content) content.style.opacity = '1';
+                displayReportAnalysis(result.data);
+            }, 300);
+        } else {
+            showToast('分析失败: ' + (result.error || '未知错误'), 'error');
+            setTimeout(() => {
+                if (progress) progress.style.opacity = '0';
+                if (content) content.style.opacity = '1';
+            }, 1000);
+        }
+    } catch (error) {
+        console.error('Report analysis error:', error);
+        showToast('分析失败: ' + error.message, 'error');
+        if (progress) progress.style.opacity = '0';
+        if (content) content.style.opacity = '1';
+    }
+}
+
+function displayReportAnalysis(data) {
+    const resultDiv = $('report-analysis-result');
+    const summaryDiv = $('report-summary');
+    const detailsDiv = $('report-details');
+    const failuresDiv = $('report-failures');
+    const failureList = $('report-failure-list');
+
+    if (!resultDiv) return;
+
+    // 显示结果区域
+    resultDiv.style.display = 'block';
+
+    // 生成摘要
+    if (summaryDiv && data.summary) {
+        const summary = data.summary;
+        summaryDiv.innerHTML = `
+            ${data.details && data.details.test_type ? `
+                <div>
+                    <span class="summary-label">测试类型：</span>
+                    <span class="summary-value">${data.details.test_type}</span>
+                </div>
+            ` : ''}
+            ${data.details && data.details.android_version ? `
+                <div>
+                    <span class="summary-label">套件版本：</span>
+                    <span class="summary-value">${data.details.android_version}</span>
+                </div>
+            ` : ''}
+            <div>
+                <span class="summary-label">总用例数：</span>
+                <span class="summary-value">${summary.total || 0}</span>
+            </div>
+            <div>
+                <span class="summary-label">通过：</span>
+                <span class="summary-value pass">${summary.pass || 0}</span>
+            </div>
+            <div>
+                <span class="summary-label">失败：</span>
+                <span class="summary-value fail">${summary.fail || 0}</span>
+            </div>
+            <div>
+                <span class="summary-label">通过率：</span>
+                <span class="summary-value rate">${summary.pass_rate || '0%'}</span>
+            </div>
+        `;
+    }
+
+    // 显示详细信息
+    if (detailsDiv && data.details) {
+        detailsDiv.innerHTML = ``;
+    }
+
+    // 显示失败用例
+    if (failuresDiv && failureList && data.failures && data.failures.length > 0) {
+        failuresDiv.style.display = 'block';
+
+        // 在标题行添加按钮
+        const actionsDiv = $('report-failure-actions');
+        if (actionsDiv && data.failures.length > 0) {
+            const firstFailure = data.failures[0];
+            const testClass = firstFailure.name || '未知用例';
+            const reasonText = firstFailure.reason || '无失败原因';
+
+            // 创建按钮元素
+            const sourceBtn = document.createElement('button');
+            sourceBtn.textContent = '🔍 源码分析';
+            sourceBtn.style.cssText = 'font-size: 10px; padding: 4px 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer;';
+            sourceBtn.onclick = () => analyzeFailureSource(testClass, reasonText.substring(0, 200));
+
+            const aiBtn = document.createElement('button');
+            aiBtn.textContent = '🤖 AI分析';
+            aiBtn.style.cssText = 'font-size: 10px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer;';
+            aiBtn.onclick = () => aiAnalyzeFailureReport(testClass, reasonText.substring(0, 500));
+
+            actionsDiv.innerHTML = '';
+            actionsDiv.appendChild(sourceBtn);
+            actionsDiv.appendChild(aiBtn);
+        }
+
+        failureList.innerHTML = data.failures.map((failure, idx) => {
+            // 解析失败信息
+            const reasonText = failure.reason || '无失败原因';
+
+            // 使用后端返回的模块名，如果没有则使用默认值
+            const moduleName = failure.module || '未知模块';
+
+            // 使用后端返回的测试用例名
+            const testCaseName = failure.name || '未知用例';
+
+            // 格式化完整堆栈信息，保留换行和缩进
+            const formattedStackTrace = reasonText
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br>')
+                .replace(/ /g, '&nbsp;');
+
+            return `
+                <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 12px; margin-bottom: 12px;">
+                    <div style="margin-bottom: 8px;">
+                        <div style="font-size: 12px; color: var(--text-secondary);">测试模块: <span style="font-weight: 600; color: var(--text-primary);">${moduleName}</span></div>
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <div style="font-size: 12px; color: var(--text-secondary);">测试用例: <span style="font-family: 'Courier New', monospace; color: var(--primary-color); word-break: break-all;">${testCaseName}</span></div>
+                    </div>
+                    <div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">失败详情</div>
+                        <div class="failure-reason" id="failure-reason-${idx}" style="font-size: 11px; font-family: 'Courier New', monospace; white-space: pre-wrap; word-wrap: break-word;">${formattedStackTrace}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } else if (failuresDiv) {
+        failuresDiv.style.display = 'none';
+        const actionsDiv = $('report-failure-actions');
+        if (actionsDiv) actionsDiv.innerHTML = '';
+    }
+}
+
+// AI分析失败用例
+async function aiAnalyzeFailureReport(testName, errorMessage) {
+    const modalId = 'ai-analysis-modal-' + Date.now();
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';
+    modal.style.cssText = 'display: block; z-index: 10000;';
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 700px; max-height: 80vh; overflow-y: auto;">
+            <div class="modal-header">
+                <span class="modal-title">🤖 AI 分析中...</span>
+                <span class="modal-close" onclick="closeModal('${modalId}')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; padding: 40px;">
+                    <div style="font-size: 48px; margin-bottom: 20px;">🤖</div>
+                    <div style="color: var(--text-secondary);">正在分析失败原因，请稍候...</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    try {
+        const response = await fetch('/api/test/ai-analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ test_name: testName, error_message: errorMessage })
+        });
+
+        const result = await response.json();
+
+        // 更新模态框内容
+        modal.querySelector('.modal-title').textContent = '🤖 AI 分析结果';
+        modal.querySelector('.modal-body').innerHTML = result.success ?
+            `<div style="white-space: pre-wrap; font-family: monospace; font-size: 12px; line-height: 1.6;">${result.data.analysis || '分析完成'}</div>` :
+            `<div style="color: var(--danger-color);">分析失败: ${result.error}</div>`;
+
+    } catch (error) {
+        modal.querySelector('.modal-title').textContent = '❌ 分析失败';
+        modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color);">请求失败: ${error.message}</div>`;
+    }
+}
+
+// 源码分析失败用例
+async function analyzeFailureSource(testName, errorMessage) {
+    const modalId = 'source-analysis-modal-' + Date.now();
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';
+    modal.style.cssText = 'display: block; z-index: 10000;';
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 700px; max-height: 80vh; overflow-y: auto;">
+            <div class="modal-header">
+                <span class="modal-title">🔍 源码分析中...</span>
+                <span class="modal-close" onclick="closeModal('${modalId}')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; padding: 40px;">
+                    <div style="font-size: 48px; margin-bottom: 20px;">🔍</div>
+                    <div style="color: var(--text-secondary);">正在查找源码，请稍候...</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    try {
+        const response = await fetch('/api/test/analyze-source', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ test_name: testName, error_message: errorMessage })
+        });
+
+        const result = await response.json();
+
+        // 更新模态框内容
+        modal.querySelector('.modal-title').textContent = '🔍 源码分析结果';
+        modal.querySelector('.modal-body').innerHTML = result.success ?
+            `<div style="white-space: pre-wrap; font-size: 12px; line-height: 1.6;">${result.data.result || '分析完成'}</div>` :
+            `<div style="color: var(--danger-color);">分析失败: ${result.error}</div>`;
+
+    } catch (error) {
+        modal.querySelector('.modal-title').textContent = '❌ 分析失败';
+        modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color);">请求失败: ${error.message}</div>`;
+    }
+}
+
+function resetReportAnalysis() {
+    const resultDiv = $('report-analysis-result');
+    const uploadZone = $('report-upload-zone');
+    const fileInput = $('report-file-input');
+
+    if (resultDiv) resultDiv.style.display = 'none';
+    if (fileInput) fileInput.value = '';
+
+    showToast('已清除分析结果', 'success');
+}
+
+// 页面加载时初始化
+document.addEventListener('DOMContentLoaded', () => {
+    initReportAnalysis();
+});
+
+// ==================== Android Source Code Analysis ====================
+
+/**
+ * 分析测试失败的源码
+ * @param {string} testName - 测试用例名称
+ * @param {string} errorMessage - 错误消息
+ */
+async function analyzeSourceCode(testName, errorMessage) {
+    try {
+        // 显示加载提示
+        showToast('正在分析源码...', 'info');
+
+        const response = await fetch('/api/test/analyze-source', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                test_name: testName,
+                error_message: errorMessage
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            displaySourceAnalysis(result.data);
+        } else {
+            showToast('源码分析失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        console.error('源码分析错误:', error);
+        showToast('源码分析请求失败', 'error');
+    }
+}
+
+/**
+ * 显示源码分析结果
+ * @param {object} data - 分析数据
+ */
+function displaySourceAnalysis(data) {
+    const modalId = 'source-analysis-modal-' + Date.now();
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';
+    modal.style.cssText = `
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        background: rgba(0, 0, 0, 0.7) !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        z-index: 10000 !important;
+    `;
+
+    let html = `
+        <div style="background: var(--bg-color); border-radius: 12px; padding: 24px; max-width: 800px; max-height: 85vh; overflow-y: auto; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); margin: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; font-size: 18px; font-weight: 600;">🔍 Android源码分析</h2>
+                <button onclick="closeSourceAnalysisModal('${modalId}')" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
+            </div>
+    `;
+
+    // 测试信息
+    if (data.test_info) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📋 测试信息</div>
+                <div style="font-size: 12px;">
+                    ${data.test_info.class ? `<div style="margin-bottom: 4px;"><strong>类名:</strong> <span style="color: var(--primary-color);">${data.test_info.class}</span></div>` : ''}
+                    ${data.test_info.method ? `<div style="margin-bottom: 4px;"><strong>方法:</strong> ${data.test_info.method}</div>` : ''}
+                    ${data.test_info.package ? `<div style="margin-bottom: 4px;"><strong>包名:</strong> ${data.test_info.package}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    // 错误信息
+    if (data.error_info) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">❌ 错误信息</div>
+                <div style="font-size: 12px;">
+                    ${data.error_info.type ? `<div style="margin-bottom: 4px;"><strong>错误类型:</strong> <span style="color: var(--danger-color);">${data.error_info.type}</span></div>` : ''}
+                    ${data.error_info.message ? `<div style="margin-bottom: 4px;"><strong>错误消息:</strong> ${data.error_info.message.substring(0, 200)}${data.error_info.message.length > 200 ? '...' : ''}</div>` : ''}
+                    ${data.error_info.keywords && data.error_info.keywords.length > 0 ? `
+                        <div style="margin-top: 8px;">
+                            <strong>关键词:</strong>
+                            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
+                                ${data.error_info.keywords.map(kw => `<span style="background: var(--warning-color); color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px;">${kw}</span>`).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    // 分析结果
+    if (data.analysis) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">🔬 分析结果</div>
+                <div style="font-size: 12px;">
+                    ${data.analysis.test_type && data.analysis.test_type !== 'unknown' ? `
+                        <div style="margin-bottom: 8px;">
+                            <strong>测试类型:</strong> <span style="color: var(--info-color); font-weight: 600;">${data.analysis.test_type}</span>
+                        </div>
+                    ` : ''}
+                    ${data.analysis.possible_causes && data.analysis.possible_causes.length > 0 ? `
+                        <div style="margin-bottom: 8px;">
+                            <strong>可能原因:</strong>
+                            <ul style="margin: 4px 0; padding-left: 20px;">
+                                ${data.analysis.possible_causes.map(cause => `<li style="color: var(--text-secondary);">${cause}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                    ${data.analysis.suggestions && data.analysis.suggestions.length > 0 ? `
+                        <div style="margin-bottom: 8px;">
+                            <strong>修复建议:</strong>
+                            <ul style="margin: 4px 0; padding-left: 20px;">
+                                ${data.analysis.suggestions.map(suggestion => `<li style="color: var(--success-color);">${suggestion}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    // 源码搜索链接
+    if (data.search_links && data.search_links.length > 0) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">🔗 源码搜索链接</div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    ${data.search_links.map(link => `
+                        <a href="${link.url}" target="_blank" style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: var(--darker-bg); border-radius: 6px; text-decoration: none; color: var(--text-color); transition: all 0.2s;">
+                            <span style="font-size: 12px;">${link.title}</span>
+                            <span style="font-size: 10px; color: var(--primary-color);">🔗 打开</span>
+                        </a>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    html += `
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button onclick="closeSourceAnalysisModal('${modalId}')" class="btn-xs">关闭</button>
+            </div>
+        </div>
+    `;
+
+    modal.innerHTML = html;
+    document.body.appendChild(modal);
+
+    // 点击外部关闭
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeSourceAnalysisModal(modalId);
+        }
+    });
+}
+
+/**
+ * 关闭源码分析模态框
+ * @param {string} modalId - 模态框ID
+ */
+function closeSourceAnalysisModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.remove();
+    }
+}
+
+/**
+ * 使用AI分析测试失败
+ * @param {string} testName - 测试用例名称
+ * @param {string} errorMessage - 错误消息
+ * @param {string} module - 测试模块
+ */
+async function aiAnalyzeFailure(testName, errorMessage, module = '') {
+    try {
+        // 显示加载提示
+        showToast('🤖 AI正在分析...', 'info');
+
+        const response = await fetch('/api/test/ai-analyze', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                test_name: testName,
+                error_message: errorMessage,
+                module: module
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            displayAIAnalysis(result.data, testName);
+        } else {
+            showToast('AI分析失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        console.error('AI分析错误:', error);
+        showToast('AI分析请求失败', 'error');
+    }
+}
+
+/**
+ * 显示AI分析结果
+ * @param {object} data - AI分析数据
+ * @param {string} testName - 测试用例名称
+ */
+function displayAIAnalysis(data, testName) {
+    const modalId = 'ai-analysis-modal-' + Date.now();
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';
+    modal.style.cssText = `
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        background: rgba(0, 0, 0, 0.7) !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        z-index: 10000 !important;
+    `;
+
+    let html = `
+        <div style="background: var(--bg-color); border-radius: 12px; padding: 24px; max-width: 900px; max-height: 85vh; overflow-y: auto; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); margin: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; font-size: 18px; font-weight: 600;">🤖 AI分析报告</h2>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    ${data.ai_enabled === false ? '<span style="font-size: 10px; background: var(--warning-color); color: white; padding: 2px 8px; border-radius: 4px;">规则分析</span>' : '<span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2px 8px; border-radius: 4px;">AI增强</span>'}
+                    <button onclick="closeAIAnalysisModal('${modalId}')" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
+                </div>
+            </div>
+    `;
+
+    // 根本原因
+    if (data.root_cause) {
+        html += `
+            <div style="background: linear-gradient(135deg, rgba(245, 87, 108, 0.1) 0%, rgba(250, 177, 160, 0.1) 100%); border-left: 4px solid #f5576c; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #f5576c;">🎯 根本原因</div>
+                <div style="font-size: 13px; color: var(--text-color); line-height: 1.6;">${data.root_cause}</div>
+            </div>
+        `;
+    }
+
+    // 详细分析
+    if (data.analysis) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📊 详细分析</div>
+                <div style="font-size: 12px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;">${data.analysis}</div>
+            </div>
+        `;
+    }
+
+    // 解决建议
+    if (data.suggestions && data.suggestions.length > 0) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">💡 解决建议</div>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    ${data.suggestions.map((suggestion, idx) => `
+                        <div style="display: flex; gap: 10px; align-items: flex-start;">
+                            <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0;">${idx + 1}</span>
+                            <span style="font-size: 12px; line-height: 1.6; color: var(--text-color);">${suggestion}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // 相关文档
+    if (data.related_docs && data.related_docs.length > 0) {
+        html += `
+            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📚 相关文档</div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    ${data.related_docs.map(doc => `
+                        <a href="${doc.url}" target="_blank" style="display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--darker-bg); border-radius: 6px; text-decoration: none; color: var(--text-color); transition: all 0.2s;">
+                            <span style="font-size: 16px;">📖</span>
+                            <span style="font-size: 12px; flex: 1;">${doc.title}</span>
+                            <span style="font-size: 10px; color: var(--primary-color);">查看 →</span>
+                        </a>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    html += `
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button onclick="closeAIAnalysisModal('${modalId}')" class="btn-xs">关闭</button>
+                <button onclick="copyAIAnalysis('${modalId}')" class="btn-xs" style="background: var(--success-color);">📋 复制分析报告</button>
+            </div>
+        </div>
+    `;
+
+    modal.innerHTML = html;
+    document.body.appendChild(modal);
+
+    // 点击外部关闭
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeAIAnalysisModal(modalId);
+        }
+    });
+}
+
+/**
+ * 关闭AI分析模态框
+ * @param {string} modalId - 模态框ID
+ */
+function closeAIAnalysisModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.remove();
+    }
+}
+
+/**
+ * 复制AI分析报告
+ * @param {string} modalId - 模态框ID
+ */
+function copyAIAnalysis(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+
+    // 提取文本内容
+    const textElements = modal.querySelectorAll('div[style*="font-size"]');
+    let text = 'CTS测试失败AI分析报告\n';
+    text += '=' .repeat(40) + '\n\n';
+
+    textElements.forEach(el => {
+        const content = el.textContent.trim();
+        if (content && !content.startsWith('复制') && !content.startsWith('关闭')) {
+            text += content + '\n\n';
+        }
+    });
+
+    // 复制到剪贴板
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('✓ 分析报告已复制', 'success');
+    }).catch(() => {
+        showToast('复制失败', 'error');
+    });
 }

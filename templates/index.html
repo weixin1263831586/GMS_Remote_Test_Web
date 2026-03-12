@@ -18,7 +18,7 @@
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hash && ['desktop', 'terminal', 'users', 'devices', 'reports'].includes(hash)) {
+            if (hash && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis'].includes(hash)) {
                 targetPage = hash;
             } else {
                 targetPage = savedPage;
@@ -182,24 +182,28 @@
                     <span class="sidebar-icon">🐧</span>
                     <span class="sidebar-text">主机终端</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="users" onclick="switchPage('users', event)">
-                    <span class="sidebar-icon">👥</span>
-                    <span class="sidebar-text">用户管理</span>
-                </a>
                 <a href="#" class="sidebar-item" data-page="devices" onclick="switchPage('devices', event)">
                     <span class="sidebar-icon">📱</span>
                     <span class="sidebar-text">设备管理</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="users" onclick="switchPage('users', event)">
+                    <span class="sidebar-icon">👥</span>
+                    <span class="sidebar-text">用户管理</span>
                 </a>
                 <a href="#" class="sidebar-item" data-page="reports" onclick="switchPage('reports', event)">
                     <span class="sidebar-icon">📊</span>
                     <span class="sidebar-text">测试报告</span>
                 </a>
+                <a href="#" class="sidebar-item" data-page="report-analysis" onclick="switchPage('report-analysis', event)">
+                    <span class="sidebar-icon">📈</span>
+                    <span class="sidebar-text">报告分析</span>
+                </a>
             </nav>
 
             <!-- 客户端信息区 -->
-            <div style="padding: 8px 10px; margin-top: auto; border-top: 1px solid var(--border-color); background: var(--light-bg);">
-                <div style="font-size: 9px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600;">
-                    👤 访问者
+            <div style="padding: 10px 10px; margin-top: auto; border-top: 1px solid var(--border-color); background: var(--light-bg);">
+                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600;">
+                    👤 客户端
                 </div>
                 <div style="font-size: 10px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                     <span id="client-identity" style="color: var(--success-color); font-family: monospace;">检测中...</span>
@@ -540,6 +544,62 @@
                         </tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- 报告分析页面 -->
+        <div class="container page-content" id="page-report-analysis">
+            <div class="section-title">📈 报告分析</div>
+
+            <!-- 拖拽上传区域 -->
+            <div style="margin-bottom: 20px;">
+                <div id="report-upload-zone" class="report-upload-zone">
+                    <input type="file" id="report-file-input" accept=".xml,.zip,.tar,.tar.gz" style="display: none;" />
+                    <div class="report-upload-content">
+                        <div>📁</div>
+                        <div>
+                            <div style="font-size: 11px; font-weight: 600; white-space: nowrap;">拖拽测试报告到此处</div>
+                            <div style="font-size: 9px; color: var(--text-secondary);">支持 .xml, .zip, .tar.gz</div>
+                        </div>
+                        <button class="btn-xs" onclick="document.getElementById('report-file-input').click()">选择文件</button>
+                    </div>
+                    <div class="report-upload-progress" id="report-upload-progress">
+                        <div class="report-upload-progress-bar" id="report-progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 分析结果区域 -->
+            <div id="report-analysis-result" style="display: none;">
+                <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <div style="font-size: 16px; font-weight: 600;">📊 分析结果</div>
+                        <button class="btn-xs" onclick="resetReportAnalysis()">清除</button>
+                    </div>
+
+                    <!-- 总体统计 -->
+                    <div id="report-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px;">
+                        <!-- 动态生成 -->
+                    </div>
+
+                    <!-- 详细信息 -->
+                    <div id="report-details" style="font-size: 12px; color: var(--text-primary);">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
+
+                <!-- 失败用例列表 -->
+                <div id="report-failures" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="font-size: 14px; font-weight: 600;">❌ 失败用例</div>
+                        <div id="report-failure-actions" style="display: flex; gap: 6px;">
+                            <!-- 动态生成按钮 -->
+                        </div>
+                    </div>
+                    <div id="report-failure-list" style="max-height: 580px; overflow-y: auto;">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1203,6 +1263,7 @@
             document.getElementById('page-users').classList.remove('active');
             document.getElementById('page-devices').classList.remove('active');
             document.getElementById('page-reports').classList.remove('active');
+            document.getElementById('page-report-analysis').classList.remove('active');
 
             // 显示目标页面
             document.getElementById(`page-${pageName}`).classList.add('active');
@@ -1215,11 +1276,12 @@
             // 动态更新页面标题
             const titles = {
                 'test': '测试界面 - GMS 远程测试',
-                'terminal': '主机终端 - GMS 远程测试',
                 'desktop': '主机桌面 - GMS 远程测试',
-                'users': '用户管理 - GMS 远程测试',
+                'terminal': '主机终端 - GMS 远程测试',
                 'devices': '设备管理 - GMS 远程测试',
-                'reports': '测试报告 - GMS 远程测试'
+                'users': '用户管理 - GMS 远程测试',
+                'reports': '测试报告 - GMS 远程测试',
+                'report-analysis': '报告分析 - GMS 远程测试'
             };
             document.title = titles[pageName] || 'GMS 远程测试';
 
@@ -1507,6 +1569,17 @@
             if (targetPage === 'reports') {
                 loadTestReports();
             }
+
+            // 更新页面标题
+            const titles = {
+                'test': '测试界面 - GMS 远程测试',
+                'desktop': '主机桌面 - GMS 远程测试',
+                'terminal': '主机终端 - GMS 远程测试',
+                'devices': '设备管理 - GMS 远程测试',
+                'users': '用户管理 - GMS 远程测试',
+                'reports': '测试报告 - GMS 远程测试'
+            };
+            document.title = titles[targetPage] || 'GMS 远程测试';
         });
     </script>
 
