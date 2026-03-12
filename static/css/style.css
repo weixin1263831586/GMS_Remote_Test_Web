@@ -1369,3 +1369,175 @@ log-system { color: var(--info-color); }
         flex-wrap: wrap;
     }
 }
+
+/* ==================== Report Analysis Page ==================== */
+#report-analysis-result > div:first-child {
+    padding: 12px !important;
+    margin-bottom: 12px !important;
+}
+
+#report-analysis-result > div:first-child > div:first-child {
+    margin-bottom: 8px !important;
+}
+
+#report-summary {
+    margin-bottom: 12px !important;
+}
+
+#report-failures {
+    padding: 12px !important;
+}
+
+#report-failures > div:first-child {
+    margin-bottom: 8px !important;
+}
+
+.report-upload-zone {
+    background: var(--light-bg);
+    border: 2px dashed var(--border-color);
+    border-radius: 10px;
+    padding: 8px 12px;
+    text-align: center;
+    transition: var(--transition-normal);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    min-height: 50px;
+    max-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.report-upload-zone:hover {
+    border-color: var(--primary-color);
+    background: var(--lighter-bg);
+}
+
+.report-upload-zone.drag-over {
+    border-color: var(--success-color);
+    background: rgba(16, 185, 129, 0.1);
+    transform: scale(1.02);
+}
+
+.report-upload-content {
+    transition: var(--transition-normal);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    justify-content: center;
+}
+
+.report-upload-content > div:first-child {
+    font-size: 20px;
+    margin-bottom: 0;
+    flex-shrink: 0;
+}
+
+.report-upload-content > div:nth-child(2) {
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 0;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+}
+
+.report-upload-content > div:nth-child(3) {
+    font-size: 9px;
+    color: var(--text-secondary);
+    margin-bottom: 0;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+
+.report-upload-content button {
+    margin-left: 6px;
+    padding: 4px 10px;
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+.report-upload-zone.drag-over .report-upload-content {
+    opacity: 0.5;
+}
+
+.report-upload-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: rgba(16, 185, 129, 0.2);
+    overflow: hidden;
+}
+
+.report-upload-progress-bar {
+    height: 100%;
+    background: var(--success-color);
+    transition: width 0.3s ease;
+}
+
+#report-summary > div {
+    background: var(--darker-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 6px 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#report-summary .summary-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 0;
+}
+
+#report-summary .summary-value {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+#report-summary .summary-value.pass {
+    color: var(--success-color);
+}
+
+#report-summary .summary-value.fail {
+    color: var(--danger-color);
+}
+
+#report-summary .summary-value.rate {
+    color: var(--info-color);
+}
+
+#report-failure-list > div {
+    background: var(--darker-bg);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--danger-color);
+    border-radius: 4px;
+    padding: 8px;
+    margin-bottom: 8px;
+}
+
+#report-failure-list .failure-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+#report-failure-list .failure-reason {
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--darker-bg);
+    padding: 6px;
+    border-radius: 4px;
+    margin-top: 8px;
+}

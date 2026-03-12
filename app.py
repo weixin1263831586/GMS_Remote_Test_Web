@@ -19,6 +19,9 @@ from functools import wraps
 import paramiko
 from paramiko import AuthenticationException, SSHException
 
+# 导入新的报告分析器模块
+from report_analyzer import ReportAnalyzer
+
 # Flask 应用
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'gms-auto-test-secret-key-2025'
@@ -2784,6 +2787,1783 @@ def view_report_file():
     except Exception as e:
         return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/reports/<path:report_timestamp>/analyze', methods=['GET'])
+def analyze_remote_report(report_timestamp):
+    """Analyze a remote test report directory"""
+    config = load_config()
+    ssh = get_ssh_connection(config)
+    if not ssh:
+        return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
+
+    try:
+        ubuntu_user = config.get('ubuntu_user', 'hcq')
+        result_dir = f"/home/{ubuntu_user}/gms_test_results/{report_timestamp}"
+
+        # Check if directory exists
+        check_cmd = f"[ -d '{result_dir}' ] && echo 'exists' || echo 'not_found'"
+        output, _, _ = execute_ssh_command(ssh, check_cmd, timeout=5)
+
+        if output.strip() != 'exists':
+            return_ssh_connection(ssh)
+            return jsonify({'success': False, 'error': 'Report directory not found'}), 404
+
+        # Find test_result.xml
+        result_xml = f"{result_dir}/test_result.xml"
+        check_xml = f"[ -f '{result_xml}' ] && echo 'exists' || echo 'not_found'"
+        xml_exists, _, _ = execute_ssh_command(ssh, check_xml, timeout=3)
+
+        if xml_exists.strip() != 'exists':
+            return_ssh_connection(ssh)
+            return jsonify({'success': False, 'error': 'test_result.xml not found'}), 404
+
+        # Download and parse XML
+        cat_cmd = f"cat '{result_xml}'"
+        xml_content, _, _ = execute_ssh_command(ssh, cat_cmd, timeout=10)
+
+        # Parse XML content
+        analysis = parse_test_result_xml_content(xml_content)
+
+        # Find and parse failures HTML
+        failures_html = f"{result_dir}/test_result_failures_suite.html"
+        check_failures = f"[ -f '{failures_html}' ] && echo 'exists' || echo 'not_found'"
+        failures_exists, _, _ = execute_ssh_command(ssh, check_failures, timeout=3)
+
+        if failures_exists.strip() == 'exists':
+            failures_content, _, _ = execute_ssh_command(ssh, f"cat '{failures_html}'", timeout=10)
+            analysis['failures_html'] = parse_failures_html_content(failures_content)
+
+        # Find log files in invocation directories
+        inv_cmd = f"find '{result_dir}' -type d -name 'inv_*' | head -1"
+        inv_output, _, _ = execute_ssh_command(ssh, inv_cmd, timeout=5)
+
+        if inv_output.strip():
+            inv_dir = inv_output.strip().split('\n')[0]
+
+            # Find host_log
+            host_log_cmd = f"find '{inv_dir}' -name 'host_log*.txt' | head -1"
+            host_log_output, _, _ = execute_ssh_command(ssh, host_log_cmd, timeout=5)
+
+            if host_log_output.strip():
+                host_log_path = host_log_output.strip().split('\n')[0]
+                host_log_content, _, _ = execute_ssh_command(ssh, f"cat '{host_log_path}'", timeout=10)
+                analysis['host_log_errors'] = extract_log_errors(host_log_content, 'host')
+
+            # Find device_logcat_test
+            device_log_cmd = f"find '{inv_dir}' -name 'device_logcat_test*.txt' | head -1"
+            device_log_output, _, _ = execute_ssh_command(ssh, device_log_cmd, timeout=5)
+
+            if device_log_output.strip():
+                device_log_path = device_log_output.strip().split('\n')[0]
+                device_log_content, _, _ = execute_ssh_command(ssh, f"cat '{device_log_path}'", timeout=10)
+                analysis['device_log_errors'] = extract_log_errors(device_log_content, 'device')
+
+        return_ssh_connection(ssh)
+        return jsonify({'success': True, 'data': analysis})
+
+    except Exception as e:
+        import traceback
+        if ssh:
+            return_ssh_connection(ssh)
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()[:500]}), 500
+
+def parse_test_result_xml_content(xml_content):
+    """Parse test_result.xml content string"""
+    try:
+        root = ET.fromstring(xml_content)
+
+        # Get summary
+        summary = root.find('Summary')
+        if summary is not None:
+            pass_attr = summary.get('pass', '0')
+            fail_attr = summary.get('fail', '0')
+            total = int(pass_attr) + int(fail_attr)
+            pass_count = int(pass_attr)
+            fail_count = int(fail_attr)
+            pass_rate = f"{(pass_count / total * 100):.2f}%" if total > 0 else "0%"
+        else:
+            total = pass_count = fail_count = 0
+            pass_rate = "0%"
+
+        # Get build info
+        build = root.find('Build')
+        device_info = {}
+        if build is not None:
+            device_info = {
+                'device': build.get('build_device', 'Unknown'),
+                'manufacturer': build.get('build_manufacturer', 'Unknown'),
+                'model': build.get('build_model', 'Unknown'),
+                'android_version': build.get('build_version_release', 'Unknown'),
+                'build_id': build.get('build_id', 'Unknown'),
+                'build_type': build.get('build_type', 'Unknown'),
+                'fingerprint': build.get('build_fingerprint', 'Unknown')[:50]
+            }
+
+        # Get test info from Result tag
+        test_info = {
+            'suite_name': root.get('suite_name', 'Unknown'),
+            'suite_version': root.get('suite_version', 'Unknown'),
+            'start_time': root.get('start_display', 'Unknown'),
+            'end_time': root.get('end_display', 'Unknown'),
+            'duration': f"{(int(root.get('end', 0)) - int(root.get('start', 0))) / 1000:.1f}s" if root.get('start') and root.get('end') else 'Unknown'
+        }
+
+        # Collect failed test cases
+        failures = []
+        for module in root.findall('.//Module'):
+            module_name = module.get('name', 'Unknown')
+            for test_case in module.findall('.//TestCase'):
+                result = test_case.get('result', 'pass')
+                if result.lower() == 'fail':
+                    test = test_case.find('Test')
+                    if test is not None:
+                        test_name = test.get('name', 'Unknown')
+                        failure = test.find('Failure')
+                        if failure is not None:
+                            failures.append({
+                                'module': module_name,
+                                'test_case': test_case.get('name', 'Unknown'),
+                                'test_name': test_name,
+                                'message': failure.get('message', 'No message')
+                            })
+
+        # Limit failures to display
+        if len(failures) > 50:
+            displayed_failures = failures[:50]
+            displayed_failures.append({
+                'module': '...',
+                'test_case': '...',
+                'test_name': f'还有 {len(failures) - 50} 个失败用例未显示',
+                'message': '...'
+            })
+        else:
+            displayed_failures = failures
+
+        return {
+            'summary': {
+                'total': total,
+                'pass': pass_count,
+                'fail': fail_count,
+                'pass_rate': pass_rate
+            },
+            'device_info': device_info,
+            'test_info': test_info,
+            'failures': displayed_failures,
+            'total_failures': len(failures)
+        }
+
+    except ET.ParseError as e:
+        return {'error': f'XML解析失败: {str(e)}'}
+    except Exception as e:
+        return {'error': f'解析错误: {str(e)}'}
+
+def parse_failures_html_content(html_content):
+    """Parse test_result_failures_suite.html content"""
+    try:
+        import re
+
+        failures = []
+        current_module = None
+
+        # Extract module names and their test counts from testsummary table
+        # Pattern: <td><a href="#arm64-v8a&nbsp;GtsGmscoreHostTestCases">arm64-v8a&nbsp;GtsGmscoreHostTestCases</a></td>
+        module_summary_pattern = r'<a[^>]*href="([^"]*)"[^>]*>([^<]+)</a>'
+        module_links = re.findall(module_summary_pattern, html_content)
+
+        # Create a mapping of anchor to module name
+        module_map = {}
+        for anchor, module_name in module_links:
+            # Clean up module name
+            clean_name = module_name.replace('&nbsp;', ' ').replace('\xc2\xa0', ' ').strip()
+            module_map[anchor] = clean_name
+
+        # Find module sections in testdetails table
+        # Pattern: <td class="module" colspan="3"><a name="arm64-v8a&nbsp;GtsGmscoreHostTestCases">
+        module_section_pattern = r'<td class="module"[^>]*>.*?<a name="([^"]*)"[^>]*>([^<]+)</a>'
+        module_sections = re.findall(module_section_pattern, html_content)
+
+        # Build ordered list of modules
+        modules_order = [name.replace('&nbsp;', ' ').replace('\xc2\xa0', ' ').strip()
+                        for _, name in module_sections]
+
+        # Extract test details from testdetails table
+        # Match each test with its module section
+        lines = html_content.split('\n')
+        current_idx = 0
+        current_module_idx = 0
+
+        for i, line in enumerate(lines):
+            # Check if this is a module header line
+            if '<td class="module"' in line:
+                match = re.search(r'<a name="([^"]*)"[^>]*>([^<]+)</a>', line)
+                if match:
+                    current_module = match.group(2).replace('&nbsp;', ' ').replace('\xc2\xa0', ' ').strip()
+                    current_module_idx += 1
+                continue
+
+            # Check if this is a test result line
+            if '<td class="testname">' in line:
+                # Extract test name from this line or nearby
+                test_name_match = re.search(r'<td class="testname">([^<]+)</td>', line)
+                if not test_name_match:
+                    # Test name might be on the next line
+                    if i + 1 < len(lines):
+                        test_name_match = re.search(r'<td class="testname">([^<]+)</td>', lines[i + 1])
+
+                if test_name_match:
+                    test_name = test_name_match.group(1).strip()
+
+                    # Look for result and failure details in nearby lines
+                    result = 'unknown'
+                    failure_msg = ''
+
+                    # Check next few lines for result and failure details
+                    for j in range(i, min(i + 5, len(lines))):
+                        if 'class="failed"' in lines[j]:
+                            result = 'failed'
+                            # Extract failure message
+                            failure_match = re.search(r'<div class="details">([^<]*(?:<[^>]+>[^<]*</[^>]+>[^<]*)*)</div>', lines[j], re.DOTALL)
+                            if not failure_match and j + 1 < len(lines):
+                                failure_match = re.search(r'<div class="details">([^<]*(?:<[^>]+>[^<]*</[^>]+>[^<]*)*)</div>', lines[j + 1], re.DOTALL)
+
+                            if failure_match:
+                                failure_msg = failure_match.group(1)
+                                # Clean up HTML entities and extra whitespace
+                                failure_msg = re.sub(r'<[^>]+>', '', failure_msg)
+                                failure_msg = failure_msg.replace('&nbsp;', ' ').replace('&#39;', "'").replace('&quot;', '"')
+                                failure_msg = ' '.join(failure_msg.split())
+                            break
+                        elif 'class="passed"' in lines[j]:
+                            result = 'passed'
+                            break
+
+                    if result.lower() == 'failed':
+                        failures.append({
+                            'module': current_module or modules_order[current_module_idx - 1] if current_module_idx > 0 else 'Unknown',
+                            'test_case': test_name,
+                            'test_name': test_name,
+                            'message': failure_msg
+                        })
+
+        return {'failures': failures}
+
+    except Exception as e:
+        import traceback
+        return {'error': str(e), 'traceback': traceback.format_exc()[:500]}
+
+def extract_log_errors(log_content, log_type):
+    """
+    Extract errors from log files
+    借鉴 GMS Failure Extractor 的块提取方法
+    """
+    import re
+    errors = []
+    stack_traces = []
+    special_blocks = []
+
+    if log_type == 'host':
+        # 1. Extract ModuleListener FAILURE blocks (完整块)
+        module_listener_blocks = re.findall(
+            r'(\d{2}-\d{2} \d{2}:\d{2}:\d{2}) I/ModuleListener:.*?FAILURE:.*?(?=\n\d{2}-\d{2} \d{2}:\d{2}:\d{2}|$)',
+            log_content,
+            re.MULTILINE | re.DOTALL
+        )
+        special_blocks.extend([('ModuleListener', block) for block in module_listener_blocks[:5]])
+
+        # 2. Extract TestRunner failed blocks (新增 - 借鉴自 Extractor)
+        testrunner_blocks = re.findall(
+            r'(TestRunner: failed:.*?TestRunner: ----- end exception -----)',
+            log_content,
+            re.DOTALL
+        )
+        special_blocks.extend([('TestRunner', block) for block in testrunner_blocks[:3]])
+
+        # 3. Extract WATCHDOG blocks (新增 - 借鉴自 Extractor)
+        watchdog_blocks = re.findall(
+            r'(\*\*\* WATCHDOG KILLING SYSTEM PROCESS:.*?\*\*\* GOODBYE!)',
+            log_content,
+            re.DOTALL
+        )
+        special_blocks.extend([('WATCHDOG', block) for block in watchdog_blocks[:2]])
+
+        # 4. Extract ConsoleReporter failures
+        console_reporter_pattern = r'(\d{2}-\d{2} \d{2}:\d{2}:\d{2}) I/ConsoleReporter:.*?fail:.*?(?:\n\s+at\s+.*?)*?(?=\n\d{2}-\d{2} \d{2}:\d{2}:\d{2}|$)'
+        matches = re.findall(console_reporter_pattern, log_content, re.MULTILINE)
+        stack_traces.extend(matches)
+
+        # 5. Extract InstrumentationResultParser failures
+        instrumentation_pattern = r'(\d{2}-\d{2} \d{2}:\d{2}:\d{2}) I/InstrumentationResultParser: (test run failed.*?)(?=\n\d{2}-\d{2} \d{2}:\d{2}:\d{2}|$)'
+        matches = re.findall(instrumentation_pattern, log_content)
+        for match in matches:
+            errors.append(f"{match[0]} {match[1]}")
+
+        # 6. Extract individual error lines
+        patterns = [
+            (r'(\d{2}-\d{2} \d{2}:\d{2}:\d{2}) E/(\w+):\s+(.+)', 3),
+            (r'(\d{2}-\d{2} \d{2}:\d{2}:\d{2}) W/(\w+):\s+.*[Ff]ail+.+', 2),
+            (r'(\d{2}-\d{2} \d{2}:\d{2}:\d{2}) W/.*?:\s+(.*[Ee]rror.+)', 2),
+            (r'(Process crashed|Instrumentation run failed)', 1),
+        ]
+        for pattern, limit in patterns:
+            matches = re.findall(pattern, log_content)
+            for match in matches[:limit]:
+                if isinstance(match, tuple):
+                    errors.append(' '.join(str(m) for m in match))
+                else:
+                    errors.append(str(match))
+
+        # 7. Add stack traces (clean up formatting)
+        for trace in stack_traces[:5]:
+            cleaned = re.sub(r'[ \t]+', ' ', trace).strip()
+            cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+            if cleaned and len(cleaned) > 100:
+                errors.append(cleaned[:800])
+
+    else:
+        # Device logcat patterns
+        patterns = [
+            (r'(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)\s+F/(\w+):\s+(.+)', 3),
+            (r'(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+).*?AndroidRuntime:\s+FATAL EXCEPTION.*?(?=\n\d{2}-\d{2} \d{2}:\d{2}:\d{2}|$)', 1),
+            (r'Process .*? exited due to signal (\d+)', 1),
+        ]
+
+        for pattern, limit in patterns:
+            matches = re.findall(pattern, log_content, re.DOTALL)
+            for match in matches[:limit]:
+                if isinstance(match, tuple):
+                    errors.append(' '.join(str(m) for m in match))
+                else:
+                    errors.append(str(match))
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_errors = []
+    for error in errors:
+        error_key = re.sub(r'\s+', ' ', error).strip()
+        if error_key not in seen and len(unique_errors) < 50:
+            seen.add(error_key)
+            unique_errors.append(error)
+
+    result = {
+        'errors': unique_errors,
+        'total_errors': len(unique_errors)
+    }
+
+    # 添加特殊块信息（新增）
+    if special_blocks:
+        result['special_blocks'] = [
+            {'type': block_type, 'content': block[:1000]}  # 限制长度
+            for block_type, block in special_blocks
+        ]
+
+    return result
+
+# ==================== Report Analysis ====================
+import xml.etree.ElementTree as ET
+import tempfile
+import zipfile
+import tarfile
+import shutil
+
+# 递归解压辅助函数（借鉴自 GMS Failure Extractor）
+def extract_archive_recursive(archive_path, extract_dir, processed_archives=None):
+    """
+    递归解压压缩包（支持嵌套压缩包）
+    使用队列避免重复遍历目录树
+    """
+    import collections
+
+    if processed_archives is None:
+        processed_archives = set()
+
+    # 避免重复处理同一个文件
+    archive_path = os.path.abspath(archive_path)
+    if archive_path in processed_archives:
+        return
+    processed_archives.add(archive_path)
+
+    # 使用队列处理嵌套压缩包
+    queue = collections.deque([archive_path])
+    archive_extensions = ('.zip', '.jar', '.tar.gz', '.tgz')
+
+    while queue:
+        current_archive = queue.popleft()
+
+        try:
+            if current_archive.endswith('.zip') or current_archive.endswith('.jar'):
+                with zipfile.ZipFile(current_archive, 'r') as zip_ref:
+                    # 先提取文件列表，找出嵌套的压缩包
+                    nested_archives = []
+                    for name in zip_ref.namelist():
+                        name_lower = name.lower()
+                        if any(name_lower.endswith(ext) for ext in archive_extensions):
+                            nested_archives.append(name)
+
+                    # 解压所有文件
+                    zip_ref.extractall(extract_dir)
+
+                    # 将嵌套压缩包加入队列
+                    for name in nested_archives:
+                        nested_path = os.path.join(extract_dir, name)
+                        if os.path.abspath(nested_path) not in processed_archives:
+                            queue.append(nested_path)
+                            processed_archives.add(os.path.abspath(nested_path))
+
+                # 删除已处理的压缩包以节省空间
+                try:
+                    if current_archive != archive_path:  # 保留原始上传的文件
+                        os.remove(current_archive)
+                except:
+                    pass
+
+            elif current_archive.endswith(('.tar.gz', '.tgz')):
+                with tarfile.open(current_archive, 'r:gz') as tar_ref:
+                    # 提取所有文件
+                    tar_ref.extractall(extract_dir)
+
+                    # 检查是否有嵌套压缩包（需要再次扫描目录）
+                    # 这种情况较少见，为了性能我们只在必要时处理
+                    try:
+                        os.remove(current_archive)
+                    except:
+                        pass
+
+        except Exception as e:
+            # 跳过解压失败的文件
+            pass
+
+def extract_nested_archives(directory):
+    """
+    递归检查并解压目录中的嵌套压缩包
+    优化版本：单次遍历 + 队列处理
+    """
+    import collections
+
+    archive_extensions = ('.zip', '.jar', '.tar.gz', '.tgz')
+    processed_archives = set()
+    queue = collections.deque()
+
+    # 第一次遍历：收集所有压缩包
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            file_path = os.path.join(root, file)
+            file_lower = file.lower()
+
+            if any(file_lower.endswith(ext) for ext in archive_extensions):
+                abs_path = os.path.abspath(file_path)
+                if abs_path not in processed_archives:
+                    queue.append(file_path)
+                    processed_archives.add(abs_path)
+
+    # 处理所有压缩包（包括嵌套的）
+    while queue:
+        archive_path = queue.popleft()
+
+        try:
+            if archive_path.endswith('.zip') or archive_path.endswith('.jar'):
+                extract_dir = os.path.dirname(archive_path)
+                with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                    # 收集嵌套压缩包
+                    nested_archives = []
+                    for name in zip_ref.namelist():
+                        name_lower = name.lower()
+                        if any(name_lower.endswith(ext) for ext in archive_extensions):
+                            nested_path = os.path.join(extract_dir, name)
+                            nested_archives.append(nested_path)
+
+                    # 解压
+                    zip_ref.extractall(extract_dir)
+
+                    # 将新发现的压缩包加入队列
+                    for nested_path in nested_archives:
+                        abs_path = os.path.abspath(nested_path)
+                        if abs_path not in processed_archives:
+                            queue.append(nested_path)
+                            processed_archives.add(abs_path)
+
+                # 删除已处理的压缩包
+                try:
+                    os.remove(archive_path)
+                except:
+                    pass
+
+            elif archive_path.endswith(('.tar.gz', '.tgz')):
+                extract_dir = os.path.dirname(archive_path)
+                with tarfile.open(archive_path, 'r:gz') as tar_ref:
+                    tar_ref.extractall(extract_dir)
+
+                try:
+                    os.remove(archive_path)
+                except:
+                    pass
+
+        except Exception:
+            # 跳过解压失败的文件
+            pass
+
+def extract_nested_archive(tar_path, extract_dir):
+    """解压tar.gz/tgz压缩包"""
+    try:
+        with tarfile.open(tar_path, 'r:gz') as tar_ref:
+            tar_ref.extractall(extract_dir)
+    except Exception as e:
+        pass
+
+def find_xml_file(directory):
+    """
+    在目录中查找test_result.xml文件（单次遍历，找到即返回）
+    优先查找test_result.xml，其次查找以result.xml结尾的文件
+    """
+    # 先尝试精确匹配
+    for root, dirs, files in os.walk(directory):
+        for f in files:
+            if f.lower() == 'test_result.xml':
+                return os.path.join(root, f)
+
+    # 如果没找到，尝试模糊匹配
+    for root, dirs, files in os.walk(directory):
+        for f in files:
+            if f.lower().endswith('result.xml'):
+                return os.path.join(root, f)
+
+    return None
+
+@app.route('/api/report/analyze', methods=['POST'])
+def analyze_report():
+    """
+    分析上传的测试报告文件（使用新的简化分析器模块）
+
+    Request: multipart/form-data with 'file' field
+    Response:
+        {
+            "success": true,
+            "data": {
+                "test_type": "GTS",
+                "device": "device_serial",
+                "android_version": "15",
+                "start_time": "2025-12-02 09:35:01",
+                "total": 100,
+                "pass_count": 95,
+                "fail_count": 5,
+                "pass_rate": "95.00%",
+                "failures": [
+                    {
+                        "name": "com.example.Test#testMethod",
+                        "reason": "Failure reason...",
+                        "module": "ModuleName"
+                    }
+                ]
+            }
+        }
+    """
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': '没有上传文件'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': '文件名为空'}), 400
+
+    try:
+        # 保存上传文件到临时位置
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_file_path = os.path.join(temp_dir, file.filename)
+            file.save(temp_file_path)
+
+            # 使用新的 ReportAnalyzer 分析报告
+            analyzer = ReportAnalyzer(temp_dir=temp_dir)
+            result = analyzer.analyze_file(temp_file_path)
+
+            if result:
+                return jsonify({'success': True, 'data': result})
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': '无法解析报告文件',
+                    'message': '请确保文件是有效的XML或压缩包格式'
+                }), 400
+
+    except Exception as e:
+        logger.error(f"报告分析失败: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'分析失败: {str(e)}'
+        }), 500
+
+
+# ==================== 旧版解析函数保留用于参考 ====================
+# 以下函数已被 ReportAnalyzer 模块替代，但暂时保留以备参考
+
+def parse_directory_fallback(directory_path):
+    """Fallback parser: scan directory for log files when test_result.xml is not found"""
+    import os
+    import re
+
+    try:
+        print(f"[Fallback解析] Scanning directory: {directory_path}")
+
+        # 收集所有文件
+        all_files = []
+        for root, dirs, files in os.walk(directory_path):
+            for file in files:
+                filepath = os.path.join(root, file)
+                all_files.append(filepath)
+
+        print(f"[Fallback解析] Found {len(all_files)} files")
+
+        # 优先查找日志文件
+        log_files = []
+        for filepath in all_files:
+            fname = os.path.basename(filepath).lower()
+            # 查找常见的日志文件
+            if any(pattern in fname for pattern in ['log', 'test', 'result', 'error', 'fail']):
+                log_files.append(filepath)
+
+        print(f"[Fallback解析] Found {len(log_files)} potential log files")
+
+        # 如果没有找到日志文件，尝试解析所有文本文件
+        if not log_files:
+            for filepath in all_files:
+                try:
+                    # 尝试读取文件前100字节判断是否为文本文件
+                    with open(filepath, 'rb') as f:
+                        header = f.read(100)
+                        if b'\x00' not in header:  # 简单判断是否为文本文件
+                            log_files.append(filepath)
+                except:
+                    pass
+
+        # 解析日志文件，提取失败信息
+        failures = []
+        total_tests = 0
+        fail_count = 0
+        pass_count = 0
+
+        # 常见的失败模式
+        failure_patterns = [
+            r'FAILED\s+([^\s]+)',  # FAILED test.class.name
+            r'fail:\s*([^\s]+)',  # fail: test.class.name
+            r'Error:\s*([^\s]+)',  # Error: test.class.name
+            r'Failure\s+in\s+([^\s]+)',  # Failure in test.class.name
+            r'([a-zA-Z0-9_.]+#test[A-Z][a-zA-Z0-9]*)\s+failed',  # testClass#testMethod failed
+            r'([a-zA-Z0-9_.]+\.[a-zA-Z0-9_]+)\s*:\s*.*?(?:FAILED|failed|error|Error|FAILURE)',  # package.Class: FAILED
+            r' junit\.framework\.AssertionFailedError:\s*([^\s]+)',  # AssertionFailedError: testClass.testMethod
+            r'java\.lang\.AssertionError:\s*([^\s]+)',  # AssertionError: testClass.testMethod
+            r'java\.lang\.\w+Exception:\s*([^\s]+)',  # Any Java exception
+        ]
+
+        # 提取堆栈跟踪
+        stack_patterns = [
+            r'(?:at\s+)?([a-zA-Z0-9_.]+\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\(.*?\)[\r\n]{1,2}(?:\s+at\s+[^\r\n]+)*)',
+            r'Exception:[\r\n]+((?:\s+at\s+[^\r\n]+[\r\n]+)+)',
+            r'Caused by:[\r\n]+((?:\s+at\s+[^\r\n]+[\r\n]+)+)',
+        ]
+
+        seen_failures = set()  # 避免重复
+
+        for log_file in log_files:
+            try:
+                with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+
+                # 查找失败模式
+                for pattern in failure_patterns:
+                    matches = re.finditer(pattern, content, re.MULTILINE)
+                    for match in matches:
+                        test_name = match.group(1).strip()
+
+                        # 避免重复
+                        if test_name in seen_failures:
+                            continue
+                        seen_failures.add(test_name)
+
+                        # 提取失败原因（匹配位置前后500字符）
+                        start_pos = max(0, match.start() - 200)
+                        end_pos = min(len(content), match.end() + 500)
+                        context = content[start_pos:end_pos]
+
+                        # 清理上下文
+                        context = re.sub(r'[\r\n]+', '\n', context)
+                        context = context.strip()
+
+                        failures.append({
+                            'name': test_name,
+                            'reason': context if context else '未知失败原因'
+                        })
+                        fail_count += 1
+
+                        # 限制失败数量
+                        if len(failures) >= 100:
+                            break
+                    if len(failures) >= 100:
+                        break
+
+                if len(failures) >= 100:
+                    break
+
+            except Exception as e:
+                print(f"[Fallback解析] Error reading {log_file}: {str(e)}")
+                continue
+
+        # 尝试统计总数
+        total_pattern = r'(?:Tests run|tests?\s+run|total):\s*(\d+)'
+        for log_file in log_files:
+            try:
+                with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+
+                matches = re.findall(total_pattern, content, re.IGNORECASE)
+                for match in matches:
+                    try:
+                        count = int(match)
+                        if count > total_tests:
+                            total_tests = count
+                    except:
+                        pass
+            except:
+                pass
+
+        # 如果没有找到总数，估算总数
+        if total_tests == 0 and fail_count > 0:
+            total_tests = fail_count + 1  # 至少有1个通过的
+
+        pass_count = max(0, total_tests - fail_count)
+        pass_rate = f"{(pass_count / total_tests * 100):.2f}%" if total_tests > 0 else "0%"
+
+        print(f"[Fallback解析] Extracted: total={total_tests}, pass={pass_count}, fail={fail_count}, failures={len(failures)}")
+
+        # 如果没有找到任何失败，返回None
+        if not failures and total_tests == 0:
+            print("[Fallback解析] No test information found")
+            return None
+
+        return {
+            'summary': {
+                'total': total_tests,
+                'pass': pass_count,
+                'fail': fail_count,
+                'pass_rate': pass_rate
+            },
+            'details': {
+                'test_type': '未知',
+                'device': '未知',
+                'android_version': '未知',
+                'start_time': '未知'
+            },
+            'failures': failures
+        }
+
+    except Exception as e:
+        import traceback
+        print(f"[Fallback解析] Error: {str(e)}\n{traceback.format_exc()}")
+        return None
+
+def parse_test_result_xml(xml_path):
+    """Parse test_result.xml and extract test information"""
+    import logging
+
+    # 配置日志输出到控制台
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+    logger = logging.getLogger(__name__)
+
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+
+        # 调试：输出XML根节点信息
+        print(f"[XML解析] Root tag: {root.tag}, attrib: {root.attrib}")
+        logger.info(f"XML Root tag: {root.tag}, attrib: {root.attrib}")
+
+        # 获取摘要信息 - 支持多种格式
+        pass_count = fail_count = total = 0
+
+        # 尝试1: 从Summary节点获取（可能是属性或子节点）
+        summary = root.find('Summary')
+        if summary is not None:
+            print(f"[XML解析] Summary node found, checking format...")
+
+            # 尝试从Summary的属性获取
+            pass_attr = summary.get('pass', summary.get('Pass', '0'))
+            fail_attr = summary.get('fail', summary.get('Fail', '0'))
+
+            # 如果属性为0，尝试从子节点获取
+            if pass_attr == '0' and fail_attr == '0':
+                pass_elem = summary.find('Pass')
+                if pass_elem is not None and pass_elem.text:
+                    pass_attr = pass_elem.text
+                fail_elem = summary.find('Fail')
+                if fail_elem is not None and fail_elem.text:
+                    fail_attr = fail_elem.text
+
+            pass_count = int(pass_attr) if str(pass_attr).isdigit() else 0
+            fail_count = int(fail_attr) if str(fail_attr).isdigit() else 0
+            total = pass_count + fail_count
+            print(f"[XML解析] Summary found: pass={pass_count}, fail={fail_count}, total={total}")
+        else:
+            # 尝试2: 从根节点属性获取
+            print(f"[XML解析] No Summary node, trying root attributes...")
+            for attr_name in ['passed', 'Passed', 'pass', 'Pass', 'tests_passed']:
+                if root.get(attr_name):
+                    pass_count = int(root.get(attr_name))
+                    print(f"[XML解析] Found pass count from '{attr_name}': {pass_count}")
+                    break
+            for attr_name in ['failed', 'Failed', 'fail', 'Fail', 'tests_failed']:
+                if root.get(attr_name):
+                    fail_count = int(root.get(attr_name))
+                    print(f"[XML解析] Found fail count from '{attr_name}': {fail_count}")
+                    break
+            total = pass_count + fail_count
+
+        # 尝试3: 从总数和失败数计算
+        if total == 0:
+            print(f"[XML解析] Still 0, trying total tests...")
+            for attr_name in ['tests', 'Tests', 'total', 'Total']:
+                if root.get(attr_name) and root.get(attr_name).isdigit():
+                    total = int(root.get(attr_name))
+                    print(f"[XML解析] Found total from '{attr_name}': {total}")
+                    if fail_count > 0:
+                        pass_count = total - fail_count
+                    break
+
+        pass_rate = f"{(pass_count / total * 100):.2f}%" if total > 0 else "0%"
+        print(f"[XML解析] Final: pass={pass_count}, fail={fail_count}, total={total}, rate={pass_rate}")
+
+        # 获取测试类型
+        test_type = '未知'
+        for attr_name in ['test_type', 'TestType', 'suite', 'Suite', 'suite_name', 'suite_variant', 'suite_plan', 'testname', 'TestName']:
+            if root.get(attr_name):
+                test_type = root.get(attr_name)
+                print(f"[XML解析] Found test_type from '{attr_name}': {test_type}")
+                break
+
+        # 尝试从子节点获取测试类型
+        if test_type == '未知':
+            test_type_elem = root.find('.//TestType')
+            if test_type_elem is not None and test_type_elem.text:
+                test_type = test_type_elem.text
+                print(f"[XML解析] Found test_type from TestType element: {test_type}")
+
+        # 获取设备信息
+        device = '未知'
+        for attr_name in ['devices', 'device', 'Device', 'build_device', 'BuildDevice', 'model', 'Model']:
+            if root.get(attr_name):
+                device = root.get(attr_name)
+                print(f"[XML解析] Found device from '{attr_name}': {device}")
+                break
+
+        # 尝试从BuildInfo节点获取
+        if device == '未知':
+            build_info = root.find('.//BuildInfo')
+            if build_info is not None:
+                device = build_info.get('device', build_info.get('model', '未知'))
+                print(f"[XML解析] Found device from BuildInfo: {device}")
+
+        # 获取Android版本 (GTS报告使用suite_version)
+        android_version = '未知'
+        for attr_name in ['android_version', 'AndroidVersion', 'build_version', 'BuildVersion', 'suite_version', 'version', 'Version']:
+            if root.get(attr_name):
+                android_version = root.get(attr_name)
+                print(f"[XML解析] Found android_version from '{attr_name}': {android_version}")
+                break
+
+        # 尝试从BuildInfo节点获取
+        if android_version == '未知':
+            build_info = root.find('.//BuildInfo')
+            if build_info is not None:
+                android_version = build_info.get('version', build_info.get('sdk', '未知'))
+                print(f"[XML解析] Found android_version from BuildInfo: {android_version}")
+
+        # 获取开始时间 (GTS报告使用start_display)
+        start_time = '未知'
+        for attr_name in ['start_display', 'end_display', 'start_time', 'StartTime', 'timestamp', 'Timestamp', 'time', 'Time', 'start', 'end']:
+            if root.get(attr_name):
+                start_time = root.get(attr_name)
+                print(f"[XML解析] Found start_time from '{attr_name}': {start_time}")
+                break
+
+        print(f"[XML解析] Details: type={test_type}, device={device}, version={android_version}, time={start_time}")
+
+        # 收集失败用例 - 只处理Test节点（TestCase只是容器，没有result属性）
+        failures = []
+        test_cases = root.findall('.//Test') + root.findall('.//test')
+        print(f"[XML解析] Found {len(test_cases)} Test nodes (excluding TestCase containers)")
+
+        # 统计通过和失败的数量
+        pass_count_actual = 0
+        fail_count_actual = 0
+
+        # 构建父节点映射表（用于向上查找 Module）
+        parent_map = {c: p for p in root.iter() for c in p}
+
+        for test_case in test_cases:
+            # 获取所属模块名（向上遍历查找 Module 祖先节点）
+            module_name = '未知模块'
+
+            # 使用 parent_map 向上查找 Module 节点
+            current = test_case
+            while current is not None:
+                if current in parent_map:
+                    current = parent_map[current]
+                    if current is not None and current.tag == 'Module':
+                        module_name = current.get('name', current.get('Name', '未知模块'))
+                        break
+                else:
+                    break
+
+            result_attr = test_case.get('result', test_case.get('Result', 'pass'))
+            outcome = test_case.get('outcome', test_case.get('Outcome', ''))
+
+            if result_attr.lower() == 'fail' or outcome.lower() == 'fail':
+                # 获取测试用例名称
+                # 如果当前节点是 Test，尝试从父节点 TestCase 获取完整类名
+                test_name = test_case.get('name', test_case.get('Name', test_case.get('testname', '未知用例')))
+
+                # 如果当前节点是 Test 且父节点是 TestCase，组合成完整格式
+                if test_case.tag == 'Test':
+                    parent_testcase = test_case.find('..')
+                    if parent_testcase is not None and parent_testcase.tag == 'TestCase':
+                        class_name = parent_testcase.get('name', parent_testcase.get('Name', ''))
+                        if class_name and test_name:
+                            # 组合成 "com.example.Class#method" 格式
+                            test_name = f"{class_name}#{test_name}"
+
+                name = test_name
+                fail_count_actual += 1
+
+                # 尝试从多个位置获取失败原因和堆栈
+                reason = ''
+                stack_trace = ''
+
+                # 1. 从Test/TestCase节点属性获取
+                reason = test_case.get('failure', test_case.get('Failure', ''))
+                if not reason:
+                    reason = test_case.get('error', test_case.get('Error', ''))
+                if not reason:
+                    reason = test_case.get('message', test_case.get('Message', ''))
+
+                # 2. 从Failure/Error子节点获取（包含堆栈）
+                failure_elem = test_case.find('Failure')
+                if failure_elem is not None:
+                    # 获取失败消息
+                    if not reason:
+                        reason = failure_elem.get('message', failure_elem.get('Message', ''))
+
+                    # 获取堆栈跟踪
+                    stack_trace = failure_elem.get('stack', failure_elem.get('stackTrace', failure_elem.get('trace', '')))
+
+                    # 如果没有stack属性，尝试从text获取
+                    if not stack_trace and failure_elem.text:
+                        stack_trace = failure_elem.text.strip()
+
+                error_elem = test_case.find('Error')
+                if error_elem is not None:
+                    # 获取错误消息
+                    if not reason:
+                        reason = error_elem.get('message', error_elem.get('Message', ''))
+
+                    # 获取堆栈跟踪
+                    if not stack_trace:
+                        stack_trace = error_elem.get('stack', error_elem.get('stackTrace', error_elem.get('trace', '')))
+
+                    # 如果没有stack属性，尝试从text获取
+                    if not stack_trace and error_elem.text:
+                        stack_trace = error_elem.text.strip()
+
+                # 3. 尝试查找StackTrace子节点
+                if not stack_trace:
+                    stack_elem = test_case.find('.//StackTrace')
+                    if stack_elem is not None and stack_elem.text:
+                        stack_trace = stack_elem.text.strip()
+
+                # 组合失败信息（消息 + 堆栈）
+                if not reason:
+                    reason = '无失败原因'
+
+                if stack_trace:
+                    # 检查堆栈信息的第一行是否已经包含了reason
+                    # 如果堆栈以reason开头，说明reason已经包含在stack_trace中，不需要重复
+                    stack_lines = stack_trace.strip().split('\n')
+                    if stack_lines and stack_lines[0].strip() == reason.strip():
+                        # 堆栈第一行就是reason，直接使用堆栈信息
+                        reason = stack_trace
+                    elif reason not in stack_trace:
+                        # reason不在堆栈中，组合显示
+                        full_reason = reason + '\n\n' + stack_trace
+                        # 限制长度，避免太长
+                        if len(full_reason) > 5000:
+                            full_reason = full_reason[:5000] + '\n\n...(堆栈信息过长，已截断)'
+                        reason = full_reason
+                    else:
+                        # reason已经在堆栈中，直接使用堆栈
+                        reason = stack_trace
+
+                print(f"[XML解析] Failed test: {name[:50]}... - Reason length: {len(reason)}, Stack: {bool(stack_trace)}, Module: {module_name}")
+
+                failures.append({
+                    'name': name,
+                    'reason': reason,
+                    'module': module_name
+                })
+            elif result_attr.lower() == 'pass' or outcome.lower() == 'pass':
+                pass_count_actual += 1
+
+        print(f"[XML解析] Total failures found: {len(failures)}")
+
+        # 如果Summary没有找到或数据为0，使用实际统计的数量
+        if total == 0 and (pass_count_actual > 0 or fail_count_actual > 0):
+            pass_count = pass_count_actual
+            fail_count = fail_count_actual
+            total = pass_count + fail_count
+            pass_rate = f"{(pass_count / total * 100):.2f}%" if total > 0 else "0%"
+            print(f"[XML解析] Using actual count: pass={pass_count}, fail={fail_count}, total={total}")
+
+        # 限制失败用例显示数量（最多显示100个）
+        if len(failures) > 100:
+            failures = failures[:100]
+            failures.append({
+                'name': '...',
+                'reason': f'还有 {len(failures) - 100} 个失败用例未显示'
+            })
+
+        return {
+            'summary': {
+                'total': total,
+                'pass': pass_count,
+                'fail': fail_count,
+                'pass_rate': pass_rate
+            },
+            'details': {
+                'test_type': test_type,
+                'device': device,
+                'android_version': android_version,
+                'start_time': start_time
+            },
+            'failures': failures
+        }
+
+    except Exception as e:
+        import traceback
+        logger.error(f"XML parsing error: {str(e)}\n{traceback.format_exc()}")
+        raise Exception(f"解析XML失败: {str(e)}")
+
+# ==================== Android Source Code Analysis ====================
+import urllib.parse
+import urllib.request
+import json as json_module
+import re
+from html.parser import HTMLParser
+
+def parse_cts_failure_info(test_name, error_message):
+    """
+    解析CTS失败信息，提取关键信息
+
+    Args:
+        test_name: 测试用例名称，如 com.google.android.gts.multiuser.RestrictedProfileHostTest#testUserIsRestricted
+        error_message: 错误消息
+
+    Returns:
+        dict: 包含解析后的信息
+    """
+    result = {
+        'class_name': None,
+        'method_name': None,
+        'package': None,
+        'error_type': None,
+        'error_keywords': []
+    }
+
+    # 解析测试名称
+    if test_name and '#' in test_name:
+        class_part, method_part = test_name.split('#', 1)
+        result['class_name'] = class_part.strip()
+        result['method_name'] = method_part.strip()
+
+        # 提取包名
+        if '.' in result['class_name']:
+            parts = result['class_name'].split('.')
+            result['package'] = '.'.join(parts[:-1])  # 去掉最后的类名
+
+    # 解析错误类型
+    if error_message:
+        error_patterns = [
+            r'(java\.lang\.(\w+Exception))',
+            r'(java\.lang\.(\w+Error))',
+            r'(android\.view\.(\w+Exception))',
+            r'(android\.util\.(\w+Exception))',
+        ]
+
+        for pattern in error_patterns:
+            match = re.search(pattern, error_message)
+            if match:
+                result['error_type'] = match.group(1)
+                break
+
+        # 提取错误关键词
+        keyword_patterns = [
+            r'Process crashed',
+            r'Instrumentation run failed',
+            r'Permission denied',
+            r'SecurityException',
+            r'NullPointerException',
+            r'IllegalArgumentException',
+            r'package not found',
+            r'Unable to resolve',
+            r'Connection refused',
+        ]
+
+        for pattern in keyword_patterns:
+            if re.search(pattern, error_message, re.IGNORECASE):
+                result['error_keywords'].append(pattern)
+
+    return result
+
+
+def construct_source_search_url(search_term, search_type='code'):
+    """
+    构造Android源码搜索URL
+
+    Args:
+        search_term: 搜索词
+        search_type: 搜索类型 (code, symbol, file)
+
+    Returns:
+        str: 完整的搜索URL
+    """
+    import urllib.parse
+    base_url = "https://cs.android.com/android/platform/superproject"
+    encoded_term = urllib.parse.quote(search_term)
+
+    if search_type == 'symbol':
+        return f"{base_url}/+/refs/heads/main:qd/?q={encoded_term}"
+    else:
+        return f"{base_url}/+/refs/heads/main:qd/?q={encoded_term}&ss=android%2Fplatform%2Fsuperproject"
+
+
+def analyze_test_failure_class(class_name, error_type=None):
+    """
+    分析测试失败的类，提供可能的源码位置和修复建议
+
+    Args:
+        class_name: 类名（如 com.google.android.gts.multiuser.RestrictedProfileHostTest）
+        error_type: 错误类型（如 java.lang.AssertionError）
+
+    Returns:
+        dict: 分析结果
+    """
+    analysis = {
+        'test_type': 'unknown',
+        'possible_causes': [],
+        'source_links': [],
+        'suggestions': []
+    }
+
+    # 判断测试类型
+    if class_name:
+        if 'GmsCore' in class_name or 'gmscore' in class_name.lower():
+            analysis['test_type'] = 'GMS Core测试'
+            analysis['possible_causes'].append('GMS Core相关功能缺失或配置错误')
+            analysis['source_links'].append({
+                'title': 'GMS Core源码',
+                'url': construct_source_search_url('GmsCore')
+            })
+        elif 'Multiuser' in class_name or 'multiuser' in class_name.lower():
+            analysis['test_type'] = '多用户测试'
+            analysis['possible_causes'].append('多用户功能实现不完整')
+            analysis['source_links'].append({
+                'title': '多用户管理源码',
+                'url': 'https://cs.android.com/android/platform/superproject/+/refs/heads/main:frameworks/base/services/core/java/com/android/server/pm/UserManagerService.java'
+            })
+        elif 'Permission' in class_name or 'permission' in class_name.lower():
+            analysis['test_type'] = '权限测试'
+            analysis['possible_causes'].append('权限配置缺失或不正确')
+            analysis['source_links'].append({
+                'title': '权限管理源码',
+                'url': construct_source_search_url('PermissionManager')
+            })
+
+    # 根据错误类型添加建议
+    if error_type:
+        if 'AssertionError' in error_type:
+            analysis['suggestions'].append('检查测试条件是否符合预期')
+            analysis['suggestions'].append('验证相关功能的实现是否正确')
+        elif 'SecurityException' in error_type:
+            analysis['suggestions'].append('检查权限声明')
+            analysis['suggestions'].append('验证签名和证书配置')
+        elif 'NullPointerException' in error_type:
+            analysis['suggestions'].append('检查空指针引用')
+            analysis['suggestions'].append('验证初始化流程')
+
+    # 如果没有特定建议，添加通用建议
+    if not analysis['suggestions']:
+        analysis['suggestions'].extend([
+            '检查相关功能的完整实现',
+            '验证系统配置是否符合要求',
+            '查看CTS测试文档了解详细要求'
+        ])
+
+    return analysis
+
+
+def get_source_code_suggestions(test_name, error_message, stack_trace=None):
+    """
+    根据测试失败信息获取源码查询链接和分析建议
+
+    Args:
+        test_name: 测试用例名称
+        error_message: 错误消息
+        stack_trace: 堆栈跟踪（可选）
+
+    Returns:
+        dict: 包含搜索链接和分析建议
+    """
+    # 解析失败信息
+    failure_info = parse_cts_failure_info(test_name, error_message)
+
+    # 分析测试失败
+    analysis = analyze_test_failure_class(
+        failure_info.get('class_name', ''),
+        failure_info.get('error_type')
+    )
+
+    result = {
+        'test_info': {
+            'name': test_name,
+            'class': failure_info.get('class_name'),
+            'method': failure_info.get('method_name'),
+            'package': failure_info.get('package')
+        },
+        'error_info': {
+            'type': failure_info.get('error_type'),
+            'message': error_message[:500] if error_message else '',
+            'keywords': failure_info.get('error_keywords', [])
+        },
+        'analysis': analysis,
+        'search_links': []
+    }
+
+    # 生成搜索链接
+    if failure_info.get('class_name'):
+        # 搜索测试类
+        result['search_links'].append({
+            'title': f'搜索测试类: {failure_info["class_name"]}',
+            'url': construct_source_search_url(failure_info["class_name"])
+        })
+
+    # 搜索错误类型
+    if failure_info.get('error_type'):
+        result['search_links'].append({
+            'title': f'搜索错误类型: {failure_info["error_type"]}',
+            'url': construct_source_search_url(failure_info["error_type"])
+        })
+
+    # 如果有堆栈跟踪，提取相关类
+    if stack_trace:
+        # 提取at行中的类名
+        at_pattern = r'at\s+([a-zA-Z0-9.$_]+)\.'
+        classes_found = set(re.findall(at_pattern, stack_trace))
+
+        for cls in list(classes_found)[:3]:  # 最多3个
+            if not cls.startswith(failure_info.get('package', '')):
+                result['search_links'].append({
+                    'title': f'搜索相关类: {cls}',
+                    'url': construct_source_search_url(cls)
+                })
+
+    # 添加通用搜索链接
+    if failure_info.get('error_keywords'):
+        keyword = failure_info['error_keywords'][0]
+        result['search_links'].append({
+            'title': f'搜索问题: {keyword}',
+            'url': construct_source_search_url(keyword)
+        })
+
+    return result
+
+
+@app.route('/api/test/analyze-source', methods=['POST'])
+def analyze_test_source():
+    """
+    分析测试失败并提供Android源码查询链接
+
+    Request body:
+        {
+            "test_name": "com.google.android.gts.multiuser.RestrictedProfileHostTest#testUserIsRestricted",
+            "error_message": "java.lang.AssertionError: ...",
+            "stack_trace": "..."  // 可选
+        }
+
+    Response:
+        {
+            "success": true,
+            "data": {
+                "test_info": {...},
+                "error_info": {...},
+                "analysis": {...},
+                "search_links": [...]
+            }
+        }
+    """
+    try:
+        data = request.get_json()
+
+        if not data:
+            return jsonify({'success': False, 'error': '请求数据为空'}), 400
+
+        test_name = data.get('test_name', '')
+        error_message = data.get('error_message', '')
+        stack_trace = data.get('stack_trace', '')
+
+        if not test_name:
+            return jsonify({'success': False, 'error': '缺少test_name参数'}), 400
+
+        # 获取源码建议
+        result = get_source_code_suggestions(test_name, error_message, stack_trace)
+
+        return jsonify({'success': True, 'data': result})
+
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()[:500]
+        }), 500
+
+
+@app.route('/api/test/ai-analyze', methods=['POST'])
+def ai_analyze_test_failure():
+    """
+    使用大模型分析测试失败并给出解决建议
+
+    Request body:
+        {
+            "test_name": "com.google.android.gts.multiuser.RestrictedProfileHostTest#testUserIsRestricted",
+            "error_message": "java.lang.AssertionError: ...",
+            "stack_trace": "...",  // 可选
+            "module": "GtsGmscoreHostTestCases"  // 可选
+        }
+
+    Response:
+        {
+            "success": true,
+            "data": {
+                "analysis": "...",  // AI分析结果
+                "suggestions": [...],  // 解决建议
+                "root_cause": "...",  // 根本原因
+                "related_docs": [...]  // 相关文档链接
+            }
+        }
+    """
+    try:
+        data = request.get_json()
+
+        if not data:
+            return jsonify({'success': False, 'error': '请求数据为空'}), 400
+
+        test_name = data.get('test_name', '')
+        error_message = data.get('error_message', '')
+        stack_trace = data.get('stack_trace', '')
+        module = data.get('module', '')
+
+        if not test_name:
+            return jsonify({'success': False, 'error': '缺少test_name参数'}), 400
+
+        # 调用AI分析
+        result = analyze_with_ai(test_name, error_message, stack_trace, module)
+
+        return jsonify({'success': True, 'data': result})
+
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()[:500]
+        }), 500
+
+
+def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
+    """
+    调用大模型API分析测试失败
+
+    Args:
+        test_name: 测试用例名称
+        error_message: 错误消息
+        stack_trace: 堆栈跟踪
+        module: 测试模块名称
+
+    Returns:
+        dict: AI分析结果
+    """
+    import subprocess
+    import json
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # 构建分析提示词
+    prompt = f"""请分析以下CTS测试失败信息，给出详细的原因分析和解决方案：
+
+测试用例: {test_name}
+测试模块: {module if module else '未知'}
+错误信息: {error_message}
+
+{f'''堆栈跟踪:
+{stack_trace}
+''' if stack_trace else ''}
+
+请提供：
+1. 问题根本原因分析
+2. 具体的解决方案和修复步骤
+3. 需要检查的系统配置或代码位置
+4. 相关的Android源码模块或类
+
+请用中文回答，格式清晰，包含具体的操作步骤。"""
+
+    try:
+        # 尝试调用本地安装的AI模型（如通过ollama）
+        # 首先检查配置中是否有AI API设置
+        config = load_config()
+        ai_api_key = config.get('ai_api_key', '')
+        ai_api_url = config.get('ai_api_url', '')
+        ai_model = config.get('ai_model', '')
+
+        logger.info(f"AI配置检查: api_url={ai_api_url}, api_key_set={bool(ai_api_key)}, model={ai_model}")
+
+        # 如果配置了API，使用API调用
+        if ai_api_url and ai_api_key:
+            logger.info("使用AI API进行分析")
+            return call_ai_api(ai_api_url, ai_api_key, ai_model, prompt)
+        else:
+            # 尝试使用本地ollama
+            logger.info("尝试使用本地ollama进行分析")
+            return call_ollama(prompt)
+    except Exception as e:
+        # 如果AI调用失败，返回基于规则的分析
+        logger.warning(f"AI调用失败，使用基于规则的分析: {str(e)}")
+        try:
+            return rule_based_analysis(test_name, error_message, stack_trace, module)
+        except Exception as rule_error:
+            logger.error(f"规则分析也失败: {str(rule_error)}")
+            # 最后的兜底响应
+            return {
+                'analysis': f'测试分析遇到错误: {str(e)}',
+                'suggestions': ['检查服务器日志了解详细错误信息'],
+                'root_cause': '分析服务异常',
+                'related_docs': [],
+                'ai_enabled': False
+            }
+
+
+def call_ai_api(api_url, api_key, model, prompt):
+    """调用AI API进行分析"""
+    import urllib.request
+
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {api_key}'
+    }
+
+    # 根据不同的API提供商构建请求体
+    if 'openai' in api_url.lower():
+        data = {
+            'model': model or 'gpt-3.5-turbo',
+            'messages': [
+                {'role': 'system', 'content': '你是一个专业的Android测试分析专家，精通CTS/GTS测试和Android系统开发。'},
+                {'role': 'user', 'content': prompt}
+            ],
+            'temperature': 0.7
+        }
+    elif 'anthropic' in api_url.lower():
+        data = {
+            'model': model or 'claude-3-sonnet-20240229',
+            'max_tokens': 2000,
+            'messages': [
+                {'role': 'user', 'content': prompt}
+            ]
+        }
+    else:
+        # 通用格式
+        data = {
+            'model': model,
+            'prompt': prompt,
+            'max_tokens': 2000
+        }
+
+    req = urllib.request.Request(
+        api_url,
+        data=json.dumps(data).encode('utf-8'),
+        headers=headers,
+        method='POST'
+    )
+
+    with urllib.request.urlopen(req, timeout=30) as response:
+        result = json.loads(response.read().decode('utf-8'))
+
+    # 解析返回结果
+    if 'choices' in result:  # OpenAI格式
+        ai_response = result['choices'][0]['message']['content']
+    elif 'completion' in result:  # 其他格式
+        ai_response = result['completion']
+    else:
+        ai_response = str(result)
+
+    return parse_ai_response(ai_response)
+
+
+def call_ollama(prompt):
+    """
+    调用本地ollama模型进行分析
+    """
+    import subprocess
+    import json
+    import logging
+    import urllib.request
+    import urllib.error
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        # 检查ollama是否安装
+        check_cmd = ['which', 'ollama']
+        result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=5)
+
+        if result.returncode != 0:
+            logger.info("Ollama未安装")
+            raise Exception('Ollama未安装')
+
+        # 使用ollama API（默认运行在localhost:11434）
+        data = {
+            'model': 'llama2',  # 默认模型
+            'prompt': prompt,
+            'stream': False
+        }
+
+        req = urllib.request.Request(
+            'http://localhost:11434/api/generate',
+            data=json.dumps(data).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            ai_response = result.get('response', '')
+
+        return parse_ai_response(ai_response)
+
+    except subprocess.TimeoutExpired:
+        logger.warning("Ollama检查超时")
+        raise Exception('Ollama检查超时')
+    except FileNotFoundError:
+        logger.info("Ollama命令未找到")
+        raise Exception('Ollama未安装')
+    except urllib.error.URLError as e:
+        logger.warning(f"Ollama服务连接失败: {str(e)}")
+        raise Exception(f'Ollama服务不可用: {str(e)}')
+    except Exception as e:
+        logger.warning(f"Ollama调用失败: {str(e)}")
+        raise Exception(f'Ollama调用失败: {str(e)}')
+
+
+def parse_ai_response(ai_response):
+    """
+    解析AI的响应，结构化返回
+
+    Args:
+        ai_response: AI返回的文本
+
+    Returns:
+        dict: 结构化的分析结果
+    """
+    result = {
+        'raw_response': ai_response,
+        'analysis': '',
+        'suggestions': [],
+        'root_cause': '',
+        'related_docs': []
+    }
+
+    # 尝试从AI响应中提取结构化信息
+    lines = ai_response.split('\n')
+    current_section = None
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # 识别章节
+        if '根本原因' in line or '问题分析' in line:
+            current_section = 'root_cause'
+            result['root_cause'] = line.split(':', 1)[1].strip() if ':' in line else ''
+        elif '解决' in line or '修复' in line or '方案' in line:
+            current_section = 'suggestions'
+        elif '分析' in line and '根本原因' not in line:
+            current_section = 'analysis'
+        elif line.startswith(('-', '*', '•')) or line[0].isdigit() and '.' in line:
+            # 列表项
+            item = line.lstrip('-*•0123456789. ').strip()
+            if current_section == 'suggestions' and item:
+                result['suggestions'].append(item)
+            elif current_section == 'root_cause' and item:
+                result['root_cause'] += ' ' + item
+            elif current_section == 'analysis' and item:
+                result['analysis'] += ' ' + item
+        else:
+            # 普通文本
+            if current_section == 'analysis':
+                result['analysis'] += line + '\n'
+            elif current_section == 'root_cause':
+                result['root_cause'] += line + '\n'
+            else:
+                result['analysis'] += line + '\n'
+
+    # 如果没有提取到结构化信息，将整个响应作为分析
+    if not result['analysis'] and not result['root_cause']:
+        result['analysis'] = ai_response
+
+    # 如果没有建议，从分析中提取
+    if not result['suggestions']:
+        result['suggestions'] = extract_suggestions_from_text(ai_response)
+
+    return result
+
+
+def extract_suggestions_from_text(text):
+    """从文本中提取建议"""
+    suggestions = []
+    lines = text.split('\n')
+
+    for i, line in enumerate(lines):
+        line = line.strip()
+        # 查找包含建议关键词的行
+        if any(keyword in line for keyword in ['建议', '应该', '需要', '可以', '解决', '修复', '检查']):
+            suggestions.append(line)
+            # 包含后续几行（如果它们是详细的说明）
+            for j in range(i + 1, min(i + 3, len(lines))):
+                next_line = lines[j].strip()
+                if next_line and (next_line.startswith(' ') or next_line.startswith('\t')):
+                    suggestions[-1] += ' ' + next_line
+                elif next_line:
+                    break
+
+    return suggestions[:5]  # 最多返回5条建议
+
+
+def rule_based_analysis(test_name, error_message, stack_trace, module):
+    """
+    基于规则的分析（当AI不可用时）
+
+    Args:
+        test_name: 测试用例名称
+        error_message: 错误消息
+        stack_trace: 堆栈跟踪
+        module: 测试模块
+
+    Returns:
+        dict: 分析结果
+    """
+    # 解析失败信息
+    failure_info = parse_cts_failure_info(test_name, error_message)
+
+    analysis_parts = []
+    suggestions = []
+    root_cause = ""
+    related_docs = []
+
+    # 根据错误类型分析
+    if 'Process crashed' in error_message or 'Instrumentation run failed' in error_message:
+        root_cause = "测试进程崩溃，可能是由于目标应用或服务异常退出导致"
+        analysis_parts.append("测试执行过程中进程异常终止")
+        suggestions.extend([
+            "检查设备日志（logcat）查找崩溃原因",
+            "验证被测试的应用是否正常安装和运行",
+            "检查设备内存是否充足",
+            "查看系统日志中是否有ANR或FC信息"
+        ])
+        related_docs.append({
+            'title': 'Android调试指南',
+            'url': 'https://source.android.com/docs/core/debug'
+        })
+
+    elif 'Permission' in error_message or 'SecurityException' in error_message:
+        root_cause = "权限相关错误，缺少必要的权限声明或配置"
+        analysis_parts.append("测试用例需要特定权限但未获得授权")
+        suggestions.extend([
+            "检查AndroidManifest.xml中的权限声明",
+            "验证runtime permission是否正确请求",
+            "检查签名是否匹配",
+            "确认premission-level是否正确"
+        ])
+        related_docs.append({
+            'title': 'Android权限文档',
+            'url': 'https://developer.android.com/guide/topics/permissions/overview'
+        })
+
+    elif 'AssertionError' in error_message:
+        root_cause = "断言失败，测试条件不满足"
+        analysis_parts.append("测试断言检查失败")
+
+        if 'multiuser' in test_name.lower():
+            analysis_parts.append("多用户功能测试失败")
+            suggestions.extend([
+                "检查UserManager服务是否正常",
+                "验证多用户配置是否正确",
+                "确认restricted profile功能已实现",
+                "检查用户切换相关API"
+            ])
+            related_docs.append({
+                'title': 'Android多用户文档',
+                'url': 'https://source.android.com/docs/core/architecture/configuration/multi-user'
+            })
+
+        if 'GmsCore' in test_name or 'gmscore' in test_name.lower():
+            analysis_parts.append("GMS Core相关测试失败")
+            suggestions.extend([
+                "检查GMS Core包是否正确安装",
+                "验证GMS服务权限配置",
+                "检查Google Play Services版本",
+                "确认GMS证书配置正确"
+            ])
+            related_docs.append({
+                'title': 'GMS Core文档',
+                'url': 'https://developer.android.com/google/play/services'
+            })
+
+    elif 'package not found' in error_message.lower():
+        root_cause = "目标包未找到或未安装"
+        suggestions.extend([
+            "确认目标应用已正确安装",
+            "检查包名是否正确",
+            "验证应用是否与当前Android版本兼容"
+        ])
+
+    # 通用建议
+    if not suggestions:
+        suggestions = [
+            "查看完整的测试日志了解详细错误信息",
+            "检查设备状态是否正常",
+            "验证测试环境配置",
+            "查阅CTS/GTS测试文档了解测试要求"
+        ]
+
+    # 组合分析结果
+    analysis = "\n".join(analysis_parts) if analysis_parts else "测试执行失败，请查看详细错误信息"
+
+    # 如果没有根本原因，从错误消息中推断
+    if not root_cause:
+        if failure_info.get('error_type'):
+            root_cause = f"错误类型: {failure_info['error_type']}"
+        else:
+            root_cause = "测试执行过程中出现异常"
+
+    return {
+        'analysis': analysis,
+        'suggestions': suggestions[:8],  # 最多8条建议
+        'root_cause': root_cause,
+        'related_docs': related_docs,
+        'ai_enabled': False  # 标记这不是AI分析
+    }
 
 # ==================== Advanced Screen Mirroring ====================
 def calculate_window_positions(devices, screen_width=1920, screen_height=1080):
