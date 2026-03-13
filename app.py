@@ -2077,6 +2077,277 @@ def vnc_status():
         return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# ==================== Desktop Multi-Host Management ====================
+@app.route('/api/desktop/vnc-start', methods=['POST'])
+def desktop_vnc_start():
+    """Start VNC for a specific host - 支持多主机VNC连接和免密登录"""
+    import time
+    data = request.json
+    host_connection = data.get('host', '')  # 格式: user@ip
+    password = data.get('password', '')  # SSH密码
+    vnc_password = data.get('vnc_password', '')  # VNC密码
+
+    if not host_connection or '@' not in host_connection:
+        return jsonify({'success': False, 'error': '无效的主机格式，请使用: 用户名@IP地址'}), 400
+
+    # 解析主机信息
+    try:
+        user, ip = host_connection.split('@', 1)
+    except ValueError:
+        return jsonify({'success': False, 'error': '主机格式错误'}), 400
+
+    # 检查是否是本地主机
+    local_hosts = ['localhost', '127.0.0.1', '::1']
+    try:
+        local_ip = socket.gethostbyname(socket.gethostname())
+        local_hosts.append(local_ip)
+    except:
+        local_ip = None
+
+    is_local = ip in local_hosts
+
+    if is_local:
+        # 本地主机的 VNC 启动
+        try:
+            print(f"[Desktop] Starting local VNC for {host_connection}...")
+            ensure_local_vnc_services()
+            time.sleep(2)
+
+            # 验证服务
+            result = subprocess.run(
+                ['pgrep', '-f', 'x11vnc.*:0'],
+                capture_output=True,
+                text=True
+            )
+            x11vnc_running = result.returncode == 0
+
+            result = subprocess.run(
+                ['pgrep', '-f', 'websockify.*6080'],
+                capture_output=True,
+                text=True
+            )
+            websockify_running = result.returncode == 0
+
+            if x11vnc_running and websockify_running:
+                # 使用实际IP而不是localhost，以便客户端能够访问
+                vnc_host = local_ip if local_ip else request.host.split(':')[0]
+                vnc_url = f"http://{vnc_host}:6080/vnc.html?autoconnect=true"
+                if vnc_password:
+                    from urllib.parse import quote
+                    vnc_url += f"&password={quote(vnc_password)}"
+                return jsonify({
+                    'success': True,
+                    'message': f'✅ VNC服务已启动(本地): {host_connection}',
+                    'url': vnc_url,
+                    'local': True
+                })
+            else:
+                return jsonify({'success': False, 'error': 'VNC服务启动失败'}), 500
+        except Exception as e:
+            print(f"[Desktop] Local VNC error: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    # 远程主机的 VNC 启动
+    try:
+        # 创建SSH连接
+        import paramiko
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        # 如果提供了密码，使用密码连接
+        if password:
+            ssh.connect(ip, username=user, password=password, timeout=10)
+        else:
+            # 尝试使用密钥
+            ssh.connect(ip, username=user, timeout=10)
+
+        print(f"[Desktop] Connected to {host_connection}, starting VNC...")
+
+        # 检查noVNC
+        check_novnc_cmd = "[ -d /opt/noVNC ] && echo 'exists' || echo 'missing'"
+        stdin, stdout, stderr = ssh.exec_command(check_novnc_cmd)
+        novnc_output = stdout.read().decode()
+
+        if "missing" in novnc_output:
+            ssh.close()
+            return jsonify({
+                'success': False,
+                'error': 'noVNC未安装'
+            }), 404
+
+        # 等待显示就绪
+        display_ready = False
+        for _ in range(30):
+            display_cmd = "export DISPLAY=:0 && xprop -root &>/dev/null && echo 'ready'"
+            stdin, stdout, stderr = ssh.exec_command(display_cmd)
+            disp_output = stdout.read().decode()
+            if "ready" in disp_output:
+                display_ready = True
+                break
+            time.sleep(1)
+
+        if not display_ready:
+            ssh.close()
+            return jsonify({
+                'success': False,
+                'error': 'DISPLAY未就绪'
+            }), 503
+
+        # 检查并启动x11vnc - 支持免密或密码模式
+        check_x11_cmd = "pgrep -f 'x11vnc.*:0' && echo 'RUNNING' || echo 'NOT_RUNNING'"
+        stdin, stdout, stderr = ssh.exec_command(check_x11_cmd)
+        check_output = stdout.read().decode()
+        x11vnc_running = 'RUNNING' in check_output
+
+        if not x11vnc_running:
+            if vnc_password:
+                # 使用密码模式：需要创建密码文件
+                x11vnc_cmd = (
+                    "export DISPLAY=:0 && "
+                    f"echo '{vnc_password}' | x11vnc -display :0 -forever -shared -rfbport 5900 "
+                    "-storepasswd ~/.vnc/passwd && "
+                    "nohup x11vnc -display :0 -forever -shared -rfbport 5900 "
+                    "-rfbauth ~/.vnc/passwd -o /tmp/x11vnc.log > /dev/null 2>&1 &"
+                )
+            else:
+                # 免密模式：不使用 -rfbauth 参数
+                x11vnc_cmd = (
+                    "export DISPLAY=:0 && "
+                    "nohup x11vnc -display :0 -forever -shared -rfbport 5900 "
+                    "-nopw -o /tmp/x11vnc.log > /dev/null 2>&1 &"
+                )
+            ssh.exec_command(x11vnc_cmd)
+            time.sleep(2)
+
+        # 检查并启动websockify
+        check_web_cmd = "pgrep -f 'websockify.*6080' && echo 'RUNNING' || echo 'NOT_RUNNING'"
+        stdin, stdout, stderr = ssh.exec_command(check_web_cmd)
+        web_output = stdout.read().decode()
+        websockify_running = 'RUNNING' in web_output
+
+        if not websockify_running:
+            websockify_cmd = (
+                "cd /opt/noVNC && "
+                "nohup python3 utils/novnc_proxy --vnc localhost:5900 --listen 6080 "
+                "> /tmp/websockify.log 2>&1 &"
+            )
+            ssh.exec_command(websockify_cmd)
+            time.sleep(2)
+
+        ssh.close()
+
+        # 等待VNC服务就绪
+        time.sleep(2)
+
+        # 构建VNC URL，如果提供了密码则添加到URL中
+        vnc_url = f"http://{ip}:6080/vnc.html?autoconnect=true"
+        if vnc_password:
+            from urllib.parse import quote
+            vnc_url += f"&password={quote(vnc_password)}"
+
+        return jsonify({
+            'success': True,
+            'message': f'✅ VNC服务已启动: {host_connection}',
+            'url': vnc_url,
+            'local': False
+        })
+
+    except paramiko.AuthenticationException:
+        return jsonify({
+            'success': False,
+            'error': 'SSH认证失败',
+            'needs_password': True
+        }), 401
+    except Exception as e:
+        print(f"[Desktop] Remote VNC error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/desktop/validate-host', methods=['POST'])
+def desktop_validate_host():
+    """验证主机连接并检查VNC服务"""
+    data = request.json
+    host_connection = data.get('host', '')
+    password = data.get('password', '')
+
+    if not host_connection or '@' not in host_connection:
+        return jsonify({'success': False, 'error': '无效的主机格式'}), 400
+
+    try:
+        user, ip = host_connection.split('@', 1)
+    except ValueError:
+        return jsonify({'success': False, 'error': '主机格式错误'}), 400
+
+    # 检查是否是本地主机
+    local_hosts = ['localhost', '127.0.0.1', '::1']
+    try:
+        local_ip = socket.gethostbyname(socket.gethostname())
+        local_hosts.append(local_ip)
+    except:
+        pass
+
+    is_local = ip in local_hosts
+
+    if is_local:
+        # 本地主机直接验证成功
+        return jsonify({
+            'success': True,
+            'message': '本地主机验证成功',
+            'needs_password': False,
+            'local': True
+        })
+
+    # 远程主机验证
+    try:
+        import paramiko
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        if password:
+            ssh.connect(ip, username=user, password=password, timeout=10)
+        else:
+            # 尝试无密码连接（密钥认证）
+            try:
+                ssh.connect(ip, username=user, timeout=10)
+            except paramiko.AuthenticationException:
+                # 需要密码
+                return jsonify({
+                    'success': False,
+                    'error': '需要SSH密码',
+                    'needs_password': True
+                }), 401
+
+        # 检查VNC密码文件
+        check_passwd_cmd = "[ -f ~/.vnc/passwd ] && echo 'exists' || echo 'missing'"
+        stdin, stdout, stderr = ssh.exec_command(check_passwd_cmd)
+        passwd_output = stdout.read().decode()
+
+        ssh.close()
+
+        if "missing" in passwd_output:
+            return jsonify({
+                'success': False,
+                'error': 'VNC密码文件不存在',
+                'needs_password': True
+            }), 404
+
+        return jsonify({
+            'success': True,
+            'message': '主机验证成功',
+            'needs_password': False,
+            'password': password if password else ''
+        })
+
+    except paramiko.AuthenticationException:
+        return jsonify({
+            'success': False,
+            'error': 'SSH认证失败',
+            'needs_password': True
+        }), 401
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/devices/screen', methods=['POST'])
 def show_device_screen():
     """Show device screen via scrcpy with tiled layout support - matches GUI implementation"""
