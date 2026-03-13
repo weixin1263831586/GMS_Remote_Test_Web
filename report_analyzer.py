@@ -367,7 +367,8 @@ class ReportAnalyzer:
                 {
                     'name': f.name,
                     'reason': f.reason,
-                    'module': f.module
+                    'module': f.module,
+                    'stack_trace': f.stack_trace
                 }
                 for f in report.failures
             ]

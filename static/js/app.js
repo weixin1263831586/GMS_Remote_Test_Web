@@ -142,6 +142,27 @@ async function callDeviceApi(endpoint, additionalData = {}) {
 
 // ==================== Initialization ====================
 document.addEventListener('DOMContentLoaded', async () => {
+    // 先设置 client username,再初始化 Socket.IO
+    try {
+        // 检测客户端用户名
+        const detectResponse = await fetch('/api/client-info/detect', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        if (detectResponse.ok) {
+            const detectData = await detectResponse.json();
+            console.log('[Init] Detected client username:', detectData.username);
+            // 更新 session 中的用户名
+            await fetch('/api/client-info', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: detectData.username})
+            });
+        }
+    } catch (error) {
+        console.warn('[Init] Failed to detect client username:', error);
+    }
+
     initSocket();
     initEventListeners();
 
@@ -183,7 +204,12 @@ function initSocket() {
         updateConnectionStatus(false);
     });
 
+    state.socket.on('connected', (data) => {
+        console.log('[Socket.IO] Server confirmed connection, client_id:', data.client_id);
+    });
+
     state.socket.on('log_update', (data) => {
+        console.log('[Socket.IO] Received log_update:', data);
         addLogEntry(data.log, data.type || 'info');
     });
 
@@ -1515,6 +1541,13 @@ async function startTest() {
     }
 
     try {
+        // 清空日志输出并重置计数
+        const logOutput = $('log-output');
+        if (logOutput) {
+            logOutput.innerHTML = '';
+        }
+        state.lastLogCount = 0;
+
         await apiCall('/api/test/start', 'POST', {
             devices: Array.from(state.selectedDevices),
             test_type: testType,
@@ -1543,8 +1576,8 @@ async function stopTest() {
     try {
         addLogEntry('⏹ 用户请求停止测试...', 'info');
 
-        // Kill tradefed processes
-        await apiCall('/api/test/kill-tradefed', 'POST');
+        // 使用新的 stop 接口（支持多用户隔离）
+        await apiCall('/api/test/stop', 'POST');
 
         // Update test state
         state.testing = false;
@@ -1744,7 +1777,7 @@ function addLogEntry(message, type = 'info') {
     logOutput.scrollTop = logOutput.scrollHeight;
 
     // 限制日志条目数量，防止内存溢出
-    const maxLogs = 500;
+    const maxLogs = 5000;
     while (logOutput.children.length > maxLogs) {
         logOutput.removeChild(logOutput.firstChild);
     }
@@ -1755,8 +1788,8 @@ function startStatusPolling() {
     // 优化：从2秒改为5秒，减少服务器压力
     setInterval(async () => {
         try {
-            // 只在必要时获取完整状态
-            const status = await apiCall('/api/status');
+            // 使用增量日志获取，只请求新的日志
+            const status = await apiCall(`/api/status?since=${state.lastLogCount}`);
 
             if (status.running && !state.testing) {
                 state.testing = true;
@@ -1771,13 +1804,19 @@ function startStatusPolling() {
                 updateVpnStatus(status.vpn_connected);
             }
 
-            // 优化：使用状态中已有的日志数量而不是查询DOM
+            // 处理增量日志
             if (status.logs && status.logs.length > 0) {
-                if (status.logs.length > state.lastLogCount) {
-                    status.logs.slice(state.lastLogCount).forEach(log => {
-                        addLogEntry(log.message || log, log.type || 'info');
-                    });
-                    state.lastLogCount = status.logs.length;
+                status.logs.forEach(log => {
+                    // 日志可能是字符串或对象
+                    if (typeof log === 'string') {
+                        addLogEntry(log, 'info');
+                    } else if (typeof log === 'object') {
+                        addLogEntry(log.message || log.log || log, log.type || 'info');
+                    }
+                });
+                // 更新日志计数
+                if (status.log_count !== undefined) {
+                    state.lastLogCount = status.log_count;
                 }
             }
         } catch (error) {
@@ -1797,13 +1836,23 @@ async function checkInitialTestStatus() {
             const logOutput = $('log-output');
             logOutput.innerHTML = '';
             status.logs.forEach(log => {
-                addLogEntry(log.message || log, log.type || 'info');
+                // 日志可能是字符串或对象
+                if (typeof log === 'string') {
+                    addLogEntry(log, 'info');
+                } else if (typeof log === 'object') {
+                    addLogEntry(log.message || log.log || log, log.type || 'info');
+                }
             });
-            // 初始化日志计数
-            state.lastLogCount = status.logs.length;
+            // 初始化日志计数，优先使用 total_count
+            state.lastLogCount = status.log_count || status.logs.length;
+        } else {
+            // 如果没有日志，初始化为0
+            state.lastLogCount = 0;
         }
     } catch (error) {
         console.error('Failed to check initial test status:', error);
+        // 确保初始化日志计数
+        state.lastLogCount = 0;
     }
 }
 
@@ -1899,7 +1948,7 @@ function displayTestReports(reports) {
     if (reports.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                     暂无测试报告
                 </td>
             </tr>
@@ -1908,15 +1957,36 @@ function displayTestReports(reports) {
     }
 
     tbody.innerHTML = reports.map(report => {
+        const testType = report.test_type || '-';
+        // 显示完整的 client_id 格式（例如：hcq@172.16.14.233）
+        const displayClient = report.client_id || report.user || '-';
         const passCount = report.pass !== undefined ? report.pass : '-';
         const failCount = report.fail !== undefined ? report.fail : '-';
         const totalCount = report.total !== undefined ? report.total : '-';
         const passRate = report.total > 0 ? ((report.pass / report.total) * 100).toFixed(1) + '%' : '-';
+        // 使用 result_dir 或 path 作为报告路径
+        const reportPath = report.result_dir || report.path || '';
 
         const passRateStyle = report.total > 0 ? (report.pass / report.total >= 0.9 ? 'color: var(--success-color);' : 'color: var(--warning-color);') : '';
 
+        // 测试类型颜色
+        const typeColors = {
+            'CTS': 'color: #3B82F6;',  // 蓝色
+            'GTS': 'color: #10B981;',  // 绿色
+            'STS': 'color: #F59E0B;',  // 黄色
+            'VTS': 'color: #8B5CF6;',  // 紫色
+            'XTS': 'color: #EC4899;',  // 粉色
+        };
+        const typeStyle = typeColors[testType] || 'color: var(--text-secondary);';
+
         return `
             <tr style="border-bottom: 1px solid var(--border-color);">
+                <td style="padding: 12px; text-align: center; font-weight: 700; font-size: 12px; ${typeStyle}">
+                    ${testType}
+                </td>
+                <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                    ${displayClient}
+                </td>
                 <td style="padding: 12px; font-family: monospace; font-size: 11px;">
                     ${report.timestamp}
                 </td>
@@ -1933,242 +2003,56 @@ function displayTestReports(reports) {
                     ${passRate}
                 </td>
                 <td style="padding: 12px;">
-                    <button class="btn-xxs" onclick="analyzeReport('${report.timestamp}')">🔍 分析</button>
-                    <button class="btn-xxs" onclick="viewReportDetails('${report.timestamp}')">📄 文件</button>
+                    <button class="btn-xxs" onclick="event.stopPropagation(); analyzeReport('${report.timestamp}')">📈 报告分析</button>
+                    <button class="btn-xxs" onclick="event.stopPropagation(); viewReportDetails('${report.timestamp}')">📄 查看文件</button>
                 </td>
             </tr>
         `;
     }).join('');
 }
 
+function openReportAnalysis(timestamp) {
+    // 切换到报告分析页面
+    const sidebarItem = document.querySelector('[data-page="report-analysis"]');
+    if (sidebarItem) {
+        sidebarItem.click();
+    }
+
+    // 等待页面切换完成后，自动加载并分析报告
+    setTimeout(() => {
+        analyzeReport(timestamp);
+    }, 300);
+}
+
 async function analyzeReport(timestamp) {
     try {
-        showToast('正在分析报告...', 'info');
-
-        const resp = await fetch(`/api/reports/${timestamp}/analyze`);
-        const data = await resp.json();
-
-        if (!data.success) {
-            showToast('分析失败: ' + (data.error || '未知错误'), 'error');
-            return;
+        // 切换到报告分析页面
+        const sidebarItem = document.querySelector('[data-page="report-analysis"]');
+        if (sidebarItem) {
+            sidebarItem.click();
         }
 
-        displayReportAnalysis(data.data, timestamp);
+        // 等待页面切换完成后，自动加载并分析报告
+        setTimeout(async () => {
+            showToast('正在分析报告...', 'info');
+
+            const resp = await fetch(`/api/reports/${timestamp}/analyze`);
+            const data = await resp.json();
+
+            if (!data.success) {
+                showToast('分析失败: ' + (data.error || '未知错误'), 'error');
+                return;
+            }
+
+            // 使用与手动上传相同的显示函数，保持布局一致
+            displayReportAnalysis(data.data);
+        }, 300);
     } catch (e) {
         console.error('[Reports] Error analyzing report:', e);
         showToast('分析失败: ' + e.message, 'error');
     }
 }
 
-function displayReportAnalysis(data, timestamp) {
-    // 创建分析结果弹窗
-    const modalId = 'report-analysis-modal-' + Date.now();
-    const modal = document.createElement('div');
-    modal.id = modalId;
-    modal.className = 'modal';
-    modal.style.cssText = 'display: block; z-index: 10000;';
-
-    let html = `
-        <div class="modal-content" style="max-width: 900px; max-height: 80vh; overflow-y: auto;">
-            <div class="modal-header">
-                <span class="modal-title">📊 报告分析 - ${timestamp}</span>
-                <span class="modal-close" onclick="closeReportAnalysisModal('${modalId}')">&times;</span>
-            </div>
-            <div class="modal-body">
-    `;
-
-    // 摘要信息
-    if (data.summary) {
-        html += `
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px;">
-                <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">总用例</div>
-                    <div style="font-size: 24px; font-weight: 700; color: var(--primary-color);">${data.summary.total || 0}</div>
-                </div>
-                <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">通过</div>
-                    <div style="font-size: 24px; font-weight: 700; color: var(--success-color);">${data.summary.pass || 0}</div>
-                </div>
-                <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">失败</div>
-                    <div style="font-size: 24px; font-weight: 700; color: var(--danger-color);">${data.summary.fail || 0}</div>
-                </div>
-                <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">通过率</div>
-                    <div style="font-size: 24px; font-weight: 700; color: var(--info-color);">${data.summary.pass_rate || '0%'}</div>
-                </div>
-            </div>
-        `;
-    }
-
-    // 设备信息
-    if (data.device_info) {
-        html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📱 设备信息</div>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 12px;">
-                    ${data.device_info.device ? `<div><strong>设备:</strong> ${data.device_info.device}</div>` : ''}
-                    ${data.device_info.manufacturer ? `<div><strong>厂商:</strong> ${data.device_info.manufacturer}</div>` : ''}
-                    ${data.device_info.model ? `<div><strong>型号:</strong> ${data.device_info.model}</div>` : ''}
-                    ${data.device_info.android_version ? `<div><strong>Android:</strong> ${data.device_info.android_version}</div>` : ''}
-                    ${data.device_info.build_id ? `<div><strong>Build:</strong> ${data.device_info.build_id}</div>` : ''}
-                    ${data.device_info.build_type ? `<div><strong>类型:</strong> ${data.device_info.build_type}</div>` : ''}
-                </div>
-            </div>
-        `;
-    }
-
-    // 测试信息
-    if (data.test_info) {
-        html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">🧪 测试信息</div>
-                <div style="font-size: 12px;">
-                    ${data.test_info.suite_name ? `<div style="margin-bottom: 4px;"><strong>套件:</strong> ${data.test_info.suite_name}</div>` : ''}
-                    ${data.test_info.suite_version ? `<div style="margin-bottom: 4px;"><strong>版本:</strong> ${data.test_info.suite_version}</div>` : ''}
-                    ${data.test_info.start_time ? `<div style="margin-bottom: 4px;"><strong>开始:</strong> ${data.test_info.start_time}</div>` : ''}
-                    ${data.test_info.end_time ? `<div style="margin-bottom: 4px;"><strong>结束:</strong> ${data.test_info.end_time}</div>` : ''}
-                    ${data.test_info.duration ? `<div><strong>耗时:</strong> ${data.test_info.duration}</div>` : ''}
-                </div>
-            </div>
-        `;
-    }
-
-    // 失败用例
-    if (data.failures && data.failures.length > 0) {
-        html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <div style="font-size: 14px; font-weight: 600;">❌ 失败用例 (${data.total_failures || data.failures.length})</div>
-                    <div style="display: flex; gap: 6px;">
-                        ${data.failures.length > 0 ? `
-                            <button onclick="analyzeSourceCode('${(data.failures[0].test_name || '').replace(/'/g, "\\'")}', '${(data.failures[0].message || '').replace(/'/g, "\\'").replace(/\n/g, '\\n')}')" style="font-size: 10px; padding: 4px 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer;">
-                                🔍 源码分析
-                            </button>
-                            <button onclick="aiAnalyzeFailure('${(data.failures[0].test_name || '').replace(/'/g, "\\'")}', '${(data.failures[0].message || '').replace(/'/g, "\\'").replace(/\n/g, '\\n')}', '${(data.failures[0].module || '').replace(/'/g, "\\'")}')" style="font-size: 10px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer;">
-                                🤖 AI分析
-                            </button>
-                        ` : ''}
-                    </div>
-                </div>
-                <div style="max-height: 400px; overflow-y: auto;">
-                    ${data.failures.map((f, idx) => `
-                        <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 10px; margin-bottom: 8px;">
-                            ${f.module ? `<div style="font-size: 11px; color: var(--warning-color); margin-bottom: 4px; font-weight: 600;">📦 模块: ${f.module}</div>` : ''}
-                            <div style="font-weight: 600; font-size: 12px; margin-bottom: 6px; color: var(--danger-color);">🧪 ${f.test_name || f.test}</div>
-                            ${f.message ? `
-                                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
-                                    <div style="margin-bottom: 4px; font-weight: 600;">💬 失败原因:</div>
-                                    <div class="log-content" data-full-text="${f.message.replace(/"/g, '&quot;').replace(/'/g, '&#39;')}" style="background: rgba(255,0,0,0.05); padding: 8px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden;">${f.message}</div>
-                                    ${f.message.length > 200 ? `<button class="expand-btn" style="margin-top: 4px; font-size: 10px; padding: 2px 8px; background: var(--primary-color); color: white; border: none; border-radius: 4px; cursor: pointer;">展开完整信息</button>` : ''}
-                                </div>
-                            ` : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-    }
-
-    // 主机日志错误
-    if (data.host_log_errors && data.host_log_errors.errors.length > 0) {
-        html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">💻 主机日志错误 (${data.host_log_errors.total_errors})</div>
-                <div style="max-height: 250px; overflow-y: auto;">
-                    ${data.host_log_errors.errors.map((e, idx) => `
-                        <div style="background: var(--darker-bg); border-radius: 4px; padding: 8px; margin-bottom: 6px; font-size: 10px; font-family: monospace; color: var(--danger-color); white-space: pre-wrap; word-break: break-word;">
-                            <div class="log-content" style="max-height: 80px; overflow: hidden;">${e}</div>
-                            ${e.length > 300 ? `<button class="expand-btn" style="margin-top: 4px; font-size: 9px; padding: 2px 6px; background: var(--primary-color); color: white; border: none; border-radius: 4px; cursor: pointer;">展开</button>` : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-    }
-
-    // 特殊块信息（新增 - 借鉴自 GMS Failure Extractor）
-    if (data.host_log_errors && data.host_log_errors.special_blocks && data.host_log_errors.special_blocks.length > 0) {
-        html += `
-            <div style="background: linear-gradient(135deg, rgba(245, 87, 108, 0.05) 0%, rgba(255, 154, 158, 0.05) 100%); border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid rgba(245, 87, 108, 0.2);">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">⚠️ 关键失败块 (${data.host_log_errors.special_blocks.length})</div>
-                <div style="max-height: 400px; overflow-y: auto;">
-                    ${data.host_log_errors.special_blocks.map(block => `
-                        <div style="background: var(--darker-bg); border-radius: 6px; padding: 12px; margin-bottom: 10px;">
-                            <div style="font-size: 11px; font-weight: 600; margin-bottom: 8px; color: var(--danger-color);">
-                                ${block.type === 'ModuleListener' ? '🔴 ModuleListener FAILURE' : ''}
-                                ${block.type === 'TestRunner' ? '🟠 TestRunner Exception' : ''}
-                                ${block.type === 'WATCHDOG' ? '⚫ WATCHDOG Kill' : ''}
-                            </div>
-                            <div style="font-size: 10px; font-family: monospace; color: var(--text-color); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;">${block.content}</div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-    }
-
-    // 设备日志错误
-    if (data.device_log_errors && data.device_log_errors.errors.length > 0) {
-        html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📱 设备日志错误 (${data.device_log_errors.total_errors})</div>
-                <div style="max-height: 250px; overflow-y: auto;">
-                    ${data.device_log_errors.errors.map((e, idx) => `
-                        <div style="background: var(--darker-bg); border-radius: 4px; padding: 8px; margin-bottom: 6px; font-size: 10px; font-family: monospace; color: var(--danger-color); white-space: pre-wrap; word-break: break-word;">
-                            <div class="log-content" style="max-height: 80px; overflow: hidden;">${e}</div>
-                            ${e.length > 300 ? `<button class="expand-btn" style="margin-top: 4px; font-size: 9px; padding: 2px 6px; background: var(--primary-color); color: white; border: none; border-radius: 4px; cursor: pointer;">展开</button>` : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-    }
-
-    html += `
-            </div>
-            <div class="modal-buttons">
-                <button class="btn-xs" onclick="closeReportAnalysisModal('${modalId}')">关闭</button>
-            </div>
-        </div>
-    `;
-
-    modal.innerHTML = html;
-    document.body.appendChild(modal);
-
-    // 添加展开按钮事件监听
-    const expandButtons = modal.querySelectorAll('.expand-btn');
-    expandButtons.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const contentDiv = this.previousElementSibling;
-            if (contentDiv.style.maxHeight === 'none') {
-                // 收起
-                contentDiv.style.maxHeight = contentDiv.classList.contains('log-content') ? '60px' : '80px';
-                contentDiv.style.overflow = 'hidden';
-                this.textContent = contentDiv.parentElement.querySelector('.log-content') ? '展开完整信息' : '展开';
-            } else {
-                // 展开
-                contentDiv.style.maxHeight = 'none';
-                contentDiv.style.overflow = 'auto';
-                this.textContent = '收起';
-            }
-        });
-    });
-
-    // 点击外部关闭
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            closeReportAnalysisModal(modalId);
-        }
-    });
-}
-
-function closeReportAnalysisModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) {
-        modal.remove();
-    }
-}
 
 async function viewReportDetails(timestamp) {
     try {
@@ -2327,11 +2211,69 @@ function handleInstallGuideEsc(event) {
 
 // ==================== Report Analysis ====================
 
+function selectReportSource() {
+    // 创建选择对话框
+    const modal = document.createElement('div');
+    modal.id = 'report-source-modal';
+    modal.className = 'modal';
+    modal.style.cssText = 'display: block; z-index: 10000;';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <span class="modal-title">选择上传方式</span>
+                <span class="modal-close" onclick="closeReportSourceModal()">&times;</span>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <button class="btn-md" onclick="selectReportFile()" style="width: 100%; justify-content: center;">
+                        📄 上传文件
+                    </button>
+                    <div style="font-size: 10px; color: var(--text-secondary); text-align: center;">
+                        支持 .xml, .zip, .tar.gz
+                    </div>
+                    <button class="btn-md" onclick="selectReportFolder()" style="width: 100%; justify-content: center;">
+                        📁 上传文件夹
+                    </button>
+                    <div style="font-size: 10px; color: var(--text-secondary); text-align: center;">
+                        选择包含 test_result.xml 的文件夹
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // 点击背景关闭
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeReportSourceModal();
+        }
+    });
+}
+
+function closeReportSourceModal() {
+    const modal = document.getElementById('report-source-modal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function selectReportFile() {
+    closeReportSourceModal();
+    document.getElementById('report-file-input').click();
+}
+
+function selectReportFolder() {
+    closeReportSourceModal();
+    document.getElementById('report-folder-input').click();
+}
+
 function initReportAnalysis() {
     const uploadZone = $('report-upload-zone');
     const fileInput = $('report-file-input');
+    const folderInput = $('report-folder-input');
 
-    if (!uploadZone || !fileInput) return;
+    if (!uploadZone || !fileInput || !folderInput) return;
 
     // 拖拽事件
     uploadZone.addEventListener('dragover', (e) => {
@@ -2344,13 +2286,89 @@ function initReportAnalysis() {
         uploadZone.classList.remove('drag-over');
     });
 
-    uploadZone.addEventListener('drop', (e) => {
+    uploadZone.addEventListener('drop', async (e) => {
         e.preventDefault();
         uploadZone.classList.remove('drag-over');
 
+        const items = e.dataTransfer.items;
+
+        // 如果有 items，尝试使用 DataTransferItem API（支持文件夹）
+        if (items && items.length > 0) {
+            const files = [];
+
+            // 递归读取文件夹中的所有文件
+            const readFileEntries = async (entries) => {
+                for (const entry of entries) {
+                    if (entry.isFile) {
+                        await new Promise((resolve) => {
+                            entry.file((file) => {
+                                // 保留相对路径
+                                Object.defineProperty(file, 'webkitRelativePath', {
+                                    value: entry.fullPath.replace(/^\//, ''),
+                                    writable: false
+                                });
+                                files.push(file);
+                                resolve();
+                            });
+                        });
+                    } else if (entry.isDirectory) {
+                        const reader = entry.createReader();
+                        // readEntries 可能需要多次调用才能读取所有条目
+                        let allEntries = [];
+                        const readBatch = async () => {
+                            const batch = await new Promise((resolve) => {
+                                reader.readEntries(resolve);
+                            });
+                            if (batch.length > 0) {
+                                allEntries = allEntries.concat(batch);
+                                await readBatch(); // 继续读取下一批
+                            }
+                        };
+                        await readBatch();
+                        await readFileEntries(allEntries);
+                    }
+                }
+            };
+
+            // 处理所有 items
+            const itemEntries = [];
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.kind === 'file') {
+                    const entry = item.webkitGetAsEntry();
+                    if (entry) {
+                        itemEntries.push(entry);
+                    }
+                }
+            }
+
+            if (itemEntries.length > 0) {
+                await readFileEntries(itemEntries);
+
+                if (files.length === 0) {
+                    showToast('未找到可上传的文件', 'warning');
+                    return;
+                }
+
+                if (files.length === 1 && !files[0].webkitRelativePath.includes('/')) {
+                    // 单文件
+                    handleReportFile(files[0]);
+                } else {
+                    // 文件夹或多文件
+                    handleReportFolder(files);
+                }
+                return;
+            }
+        }
+
+        // 回退到使用 files 属性（单文件或旧浏览器）
         const files = e.dataTransfer.files;
         if (files.length > 0) {
-            handleReportFile(files[0]);
+            if (files.length === 1) {
+                handleReportFile(files[0]);
+            } else {
+                handleReportFolder(files);
+            }
         }
     });
 
@@ -2358,6 +2376,13 @@ function initReportAnalysis() {
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
             handleReportFile(e.target.files[0]);
+        }
+    });
+
+    // 文件夹选择事件
+    folderInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleReportFolder(e.target.files);
         }
     });
 }
@@ -2411,22 +2436,109 @@ async function handleReportFile(file) {
     }
 }
 
+async function handleReportFolder(files) {
+    const uploadZone = $('report-upload-zone');
+    const content = uploadZone?.querySelector('.report-upload-content');
+    const progress = $('report-upload-progress');
+    const progressFill = $('report-progress-fill');
+
+    if (!progress || !progressFill) return;
+
+    // 显示进度
+    if (content) content.style.opacity = '0.5';
+    progress.style.opacity = '1';
+    progressFill.style.width = '0%';
+
+    try {
+        const formData = new FormData();
+
+        // 添加所有文件到 FormData，保持文件夹结构
+        let fileCount = 0;
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+
+            // 使用 webkitRelativePath 或文件名
+            const filename = file.webkitRelativePath || file.name;
+
+            // 创建新的 File 对象，确保文件名正确
+            const fileWithPath = new File([file], filename, {
+                type: file.type,
+                lastModified: file.lastModified
+            });
+
+            formData.append('files[]', fileWithPath);
+            fileCount++;
+        }
+
+        console.log(`Uploading ${fileCount} files...`);
+        progressFill.style.width = '30%';
+
+        const response = await fetch('/api/report/analyze', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        progressFill.style.width = '100%';
+
+        if (result.success) {
+            setTimeout(() => {
+                if (progress) progress.style.opacity = '0';
+                if (content) content.style.opacity = '1';
+                displayReportAnalysis(result.data);
+                showToast(`成功分析 ${fileCount} 个文件`, 'success');
+            }, 300);
+        } else {
+            showToast('分析失败: ' + (result.error || '未知错误'), 'error');
+            if (result.message) {
+                console.error('Analysis error details:', result.message);
+            }
+            setTimeout(() => {
+                if (progress) progress.style.opacity = '0';
+                if (content) content.style.opacity = '1';
+            }, 1000);
+        }
+    } catch (error) {
+        console.error('Report folder analysis error:', error);
+        showToast('分析失败: ' + error.message, 'error');
+        if (progress) progress.style.opacity = '0';
+        if (content) content.style.opacity = '1';
+    }
+}
+
 function displayReportAnalysis(data) {
+    console.log('[displayReportAnalysis] Called with data:', data);
+
     const resultDiv = $('report-analysis-result');
     const summaryDiv = $('report-summary');
     const detailsDiv = $('report-details');
     const failuresDiv = $('report-failures');
     const failureList = $('report-failure-list');
 
-    if (!resultDiv) return;
+    console.log('[displayReportAnalysis] Elements:', {
+        resultDiv,
+        summaryDiv,
+        detailsDiv,
+        failuresDiv,
+        failureList
+    });
+
+    if (!resultDiv) {
+        console.error('[displayReportAnalysis] resultDiv not found!');
+        return;
+    }
 
     // 显示结果区域
     resultDiv.style.display = 'block';
+    console.log('[displayReportAnalysis] resultDiv display set to block');
 
     // 生成摘要
     if (summaryDiv && data.summary) {
         const summary = data.summary;
-        summaryDiv.innerHTML = `
+        console.log('[displayReportAnalysis] Generating summary with:', summary);
+
+        const summaryHTML = `
             ${data.details && data.details.test_type ? `
                 <div>
                     <span class="summary-label">测试类型：</span>
@@ -2456,6 +2568,12 @@ function displayReportAnalysis(data) {
                 <span class="summary-value rate">${summary.pass_rate || '0%'}</span>
             </div>
         `;
+
+        summaryDiv.innerHTML = summaryHTML;
+        console.log('[displayReportAnalysis] Summary HTML set, length:', summaryHTML.length);
+        console.log('[displayReportAnalysis] Summary div content after setting:', summaryDiv.innerHTML.substring(0, 200));
+    } else {
+        console.error('[displayReportAnalysis] Summary not generated. summaryDiv:', summaryDiv, 'data.summary:', data.summary);
     }
 
     // 显示详细信息
@@ -2626,9 +2744,11 @@ function resetReportAnalysis() {
     const resultDiv = $('report-analysis-result');
     const uploadZone = $('report-upload-zone');
     const fileInput = $('report-file-input');
+    const folderInput = $('report-folder-input');
 
     if (resultDiv) resultDiv.style.display = 'none';
     if (fileInput) fileInput.value = '';
+    if (folderInput) folderInput.value = '';
 
     showToast('已清除分析结果', 'success');
 }
