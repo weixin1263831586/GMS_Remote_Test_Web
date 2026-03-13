@@ -528,6 +528,8 @@
                 <table style="width: 100%; border-collapse: collapse;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">类型</th>
+                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">客户端</th>
                             <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">时间戳</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">通过</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">失败</th>
@@ -538,7 +540,7 @@
                     </thead>
                     <tbody id="reports-table-body">
                         <tr>
-                            <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
                             </td>
                         </tr>
@@ -555,13 +557,13 @@
             <div style="margin-bottom: 20px;">
                 <div id="report-upload-zone" class="report-upload-zone">
                     <input type="file" id="report-file-input" accept=".xml,.zip,.tar,.tar.gz" style="display: none;" />
+                    <input type="file" id="report-folder-input" webkitdirectory directory style="display: none;" />
                     <div class="report-upload-content">
                         <div>📁</div>
                         <div>
-                            <div style="font-size: 11px; font-weight: 600; white-space: nowrap;">拖拽测试报告到此处</div>
-                            <div style="font-size: 9px; color: var(--text-secondary);">支持 .xml, .zip, .tar.gz</div>
+                            <div style="font-size: 14px; font-weight: 600; white-space: nowrap;">拖拽测试报告到此处</div>
                         </div>
-                        <button class="btn-xs" onclick="document.getElementById('report-file-input').click()">选择文件</button>
+                        <button class="btn-xs" onclick="selectReportSource()" style="font-size: 12px; padding: 10px 20px;">上传报告</button>
                     </div>
                     <div class="report-upload-progress" id="report-upload-progress">
                         <div class="report-upload-progress-bar" id="report-progress-fill" style="width: 0%"></div>

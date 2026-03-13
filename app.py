@@ -16,11 +16,14 @@ from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, Response, session
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 from functools import wraps
+from flask import request as flask_request
 import paramiko
 from paramiko import AuthenticationException, SSHException
 
 # 导入新的报告分析器模块
 from report_analyzer import ReportAnalyzer
+# 导入测试报告数据库模块
+from test_report_db import test_report_db
 
 # Flask 应用
 app = Flask(__name__)
@@ -143,10 +146,18 @@ def execute_device_operation(devices, operation_func, operation_name):
 # 客户端标识管理
 def get_client_id():
     """获取客户端标识 (username@ip)"""
-    client_ip = request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or \
-                request.headers.get('X-Real-IP') or request.remote_addr
+    # 在普通 Flask 请求上下文中使用 request
+    try:
+        from flask import request as flask_req
+        client_ip = flask_req.headers.get('X-Forwarded-For', '').split(',')[0].strip() or \
+                    flask_req.headers.get('X-Real-IP') or flask_req.remote_addr
+    except (RuntimeError, ImportError):
+        # 在后台线程中,返回 None 以便调用者处理
+        client_ip = None
     client_username = session.get('client_username', 'unknown')
-    return f"{client_username}@{client_ip}"
+    if client_ip:
+        return f"{client_username}@{client_ip}"
+    return None
 
 def get_user_state():
     """获取当前用户状态"""
@@ -157,7 +168,8 @@ def get_user_state():
                 'running': False, 'devices': [], 'logs': [],
                 'ssh_connected': False, 'log_file': None,
                 'test_type': 'cts', 'created_at': datetime.now().isoformat(),
-                'client_id': client_id
+                'client_id': client_id,
+                'process_group_id': None  # 进程组ID，用于多用户隔离
             }
         return user_states[client_id]
 
@@ -222,12 +234,14 @@ def handle_connect():
     """客户端连接"""
     client_id = get_client_id()
     join_room(client_id)
+    print(f"[Socket.IO] Client connected: {client_id}, room joined")
     emit('connected', {'client_id': client_id})
 
 @socketio.on('disconnect')
 def handle_disconnect():
     """客户端断开时离开房间并释放占用的设备和终端SSH连接"""
     client_id = get_client_id()
+    print(f"[Socket.IO] Client disconnected: {client_id}, leaving room")
     leave_room(client_id)
 
     # 检查用户是否正在运行测试
@@ -386,6 +400,90 @@ def save_test_logs(test_type, client_id, exit_code=None):
         print(f"[ERROR] 保存日志失败: {e}")
         return None
 
+
+def save_test_report_to_db(client_id, config, test_params, user_logs):
+    """
+    从测试日志中提取 RESULT DIRECTORY 并记录测试报告到数据库
+
+    Args:
+        client_id: 客户端ID
+        config: 配置字典
+        test_params: 测试参数
+        user_logs: 用户日志列表
+    """
+    try:
+        # 从日志中提取 RESULT DIRECTORY
+        result_dir = None
+        for log in reversed(user_logs):
+            log_str = str(log)
+            if 'RESULT DIRECTORY' in log_str:
+                # 提取 RESULT DIRECTORY 后面的路径
+                # 格式可能是: "[时间戳] RESULT DIRECTORY: /path/to/result"
+                # 或者: "RESULT DIRECTORY: /path/to/result"
+                import re
+                match = re.search(r'RESULT DIRECTORY\s*:\s*(/[^\s]+)', log_str)
+                if match:
+                    result_dir = match.group(1).strip()
+                    print(f"[ReportDB] 找到 RESULT DIRECTORY: {result_dir}")
+                    break
+
+        if not result_dir or not os.path.exists(result_dir):
+            print(f"[ReportDB] 未找到 RESULT DIRECTORY 或目录不存在: {result_dir}")
+            return None
+
+        # 提取时间戳
+        timestamp = os.path.basename(result_dir)
+
+        # 检查是否已记录
+        existing = test_report_db.get_report_by_timestamp(timestamp)
+        if existing:
+            print(f"[ReportDB] 报告已存在: {timestamp}")
+            return timestamp
+
+        # 解析 test_result.xml
+        xml_path = os.path.join(result_dir, 'test_result.xml')
+        report_info = {
+            'timestamp': timestamp,
+            'test_type': test_params.get('test_type', 'UNKNOWN').upper(),
+            'client_id': client_id,
+            'devices': test_params.get('devices', []),
+            'result_dir': result_dir,
+            'suite_path': test_params.get('test_suite', ''),
+            'status': 'completed'
+        }
+
+        # 提取用户名
+        if '@' in client_id:
+            report_info['user'] = client_id.split('@')[0]
+
+        if os.path.exists(xml_path):
+            try:
+                result = analyzer.analyze_file(xml_path)
+                if result:
+                    report_info.update({
+                        'pass': result['summary']['pass'],
+                        'fail': result['summary']['fail'],
+                        'total': result['summary']['total'],
+                        'pass_rate': result['summary']['pass_rate'],
+                        'device': result['details']['device'],
+                        'start_time': result['details']['start_time']
+                    })
+            except Exception as e:
+                print(f"[ReportDB] 解析 XML 失败: {e}")
+
+        # 添加到数据库
+        if test_report_db.add_report(report_info):
+            print(f"[ReportDB] 报告已记录: {timestamp}")
+            return timestamp
+
+        return None
+
+    except Exception as e:
+        print(f"[ERROR] 保存报告到数据库失败: {e}")
+        traceback.print_exc()
+        return None
+
+
 # ==================== SSH Connection Management ====================
 def create_ssh_connection(config):
     """Create and return a new SSH connection"""
@@ -537,8 +635,21 @@ def get_connected_devices(config, force_refresh=False):
         return []
 
 # ==================== Test Execution ====================
+def emit_log_update(client_id, log_message, log_type='info'):
+    """在子线程中安全地发送日志更新"""
+    try:
+        with app.app_context():
+            socketio.emit('log_update', {'log': log_message, 'type': log_type}, room=client_id)
+            print(f"[Socket.IO] Emitted log_update to {client_id}: {log_message[:50]}")
+    except Exception as e:
+        print(f"[ERROR] Failed to emit log_update: {e}")
+        # 即使 Socket.IO 发送失败，也要确保日志被保存到 user_state
+        append_user_log(client_id, f"[{datetime.now().strftime('%H:%M:%S')}] {log_message}")
+
 def run_test_suite(config, test_params, client_id):
     """Run GMS test suite with full parameter support - matches GUI implementation"""
+    print(f"[Test Suite] Starting test for client: {client_id}")
+    print(f"[Test Suite] Emitting to room: {client_id}")
     user_state = get_user_state_by_id(client_id)
     if not user_state:
         print(f"[ERROR] Session {client_id} not found in run_test_suite")
@@ -548,9 +659,13 @@ def run_test_suite(config, test_params, client_id):
     # 从 client_id 解析 device_host (格式: username@ip)
     config['device_host'] = client_id
 
+    # 生成唯一的进程组ID（用于多用户隔离）
+    process_group_id = f"gms_test_{client_id.replace('@', '_')}_{int(time.time() * 1000)}"
+    user_state['process_group_id'] = process_group_id
     user_state['running'] = True
     user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] Starting test suite...")
-    socketio.emit('log_update', {'log': 'Starting test suite...'}, room=client_id)
+    user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🔖 进程组ID: {process_group_id}")
+    emit_log_update(client_id, 'Starting test suite...')
 
     try:
         ssh = get_ssh_connection(config)
@@ -575,7 +690,7 @@ def run_test_suite(config, test_params, client_id):
         script_size = os.path.getsize(local_script)
         size_kb = script_size / 1024
         user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 📤 上传文件: run_GMS_Test_Auto.sh → {remote_script} ({size_kb:.2f}KB)")
-        socketio.emit('log_update', {'log': f"📤 上传文件: run_GMS_Test_Auto.sh → {remote_script} ({size_kb:.2f}KB)"}, room=client_id)
+        emit_log_update(client_id, f"📤 上传文件: run_GMS_Test_Auto.sh → {remote_script} ({size_kb:.2f}KB)")
 
         try:
             sftp = ssh.open_sftp()
@@ -587,9 +702,9 @@ def run_test_suite(config, test_params, client_id):
             execute_ssh_command(ssh, chmod_cmd)
 
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🔐 已设置可执行权限: {remote_script}")
-            socketio.emit('log_update', {'log': f"🔐 已设置可执行权限: {remote_script}"}, room=client_id)
+            emit_log_update(client_id, f"🔐 已设置可执行权限: {remote_script}")
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 上传完成 ({size_kb:.2f}KB)")
-            socketio.emit('log_update', {'log': f"✅ 上传完成 ({size_kb:.2f}KB)"}, room=client_id)
+            emit_log_update(client_id, f"✅ 上传完成 ({size_kb:.2f}KB)")
 
         except Exception as e:
             user_state['logs'].append(f"[ERROR] Failed to upload script: {str(e)}")
@@ -598,7 +713,7 @@ def run_test_suite(config, test_params, client_id):
             return
 
         user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ SSH 连接成功")
-        socketio.emit('log_update', {'log': '✅ SSH 连接成功'}, room=client_id)
+        emit_log_update(client_id, '✅ SSH 连接成功')
 
         # Extract parameters
         test_type = test_params.get('test_type', 'cts')
@@ -643,47 +758,58 @@ def run_test_suite(config, test_params, client_id):
         if test_suite:
             cmd_parts.extend(["--test-suite", test_suite])
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 📂 测试套件: {test_suite}")
-            socketio.emit('log_update', {'log': f"📂 测试套件: {test_suite}"}, room=client_id)
+            emit_log_update(client_id, f"📂 测试套件: {test_suite}")
 
         # Add local server
         if local_server:
             cmd_parts.extend(["--local-server", local_server])
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🌐 本地主机: {local_server}")
-            socketio.emit('log_update', {'log': f"🌐 本地主机: {local_server}"}, room=client_id)
+            emit_log_update(client_id, f"🌐 本地主机: {local_server}")
 
         # Build final command
         command = ' '.join(shlex.quote(part) for part in cmd_parts)
-        command = f"cd {os.path.dirname(remote_script)} && {command}"
+        # 直接执行命令，不使用 script 包装
+        command_full = f"cd {os.path.dirname(remote_script)} && {command}"
 
         user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 执行命令: {command}")
-        socketio.emit('log_update', {'log': f"🚀 执行命令: {command}"}, room=client_id)
+        emit_log_update(client_id, f"🚀 执行命令 (进程组: {process_group_id})")
 
-        # Execute with real-time output (matching GUI.py logic)
-        stdin, stdout, stderr = ssh.exec_command(command, get_pty=True)
+        # Execute with real-time output (using PTY for unbuffered output)
+        stdin, stdout, stderr = ssh.exec_command(command_full, get_pty=True)
 
-        # Real-time output reading loop (matching GUI lines 2420-2429)
+        # Real-time output reading loop with larger buffer
         while not stdout.channel.exit_status_ready() and user_state['running']:
+            # Use a non-blocking read with larger buffer
             if stdout.channel.recv_ready():
-                data = stdout.channel.recv(4096).decode('utf-8', errors='replace')
-                if data:
-                    for line in data.splitlines():
-                        if line.strip():
-                            log_line = line.strip()
-                            # Send raw log line to frontend (without timestamp prefix)
-                            socketio.emit('log_update', {'log': log_line}, room=client_id)
-                            # Store with timestamp for history
-                            user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] {log_line}")
+                try:
+                    data = stdout.channel.recv(65536).decode('utf-8', errors='replace')
+                    if data:
+                        # Split into lines and process each line
+                        lines = data.split('\n')
+                        for line in lines:
+                            if line.strip():
+                                # Send all non-empty lines to frontend
+                                clean_line = line.strip()
+                                print(f"[Log Update] Sending to room {client_id}: {clean_line[:100]}")
+                                emit_log_update(client_id, clean_line)
+                                # Store with timestamp for history
+                                user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] {clean_line}")
+                except Exception as e:
+                    print(f"[ERROR] Error reading stdout: {e}")
 
             if stderr.channel.recv_stderr_ready():
-                error = stderr.channel.recv_stderr(4096).decode('utf-8', errors='replace')
-                if error:
-                    for line in error.splitlines():
-                        if line.strip():
-                            log_line = line.strip()
-                            socketio.emit('log_update', {'log': log_line}, room=client_id)
-                            user_state['logs'].append(f"[STDERR] {log_line}")
+                try:
+                    error = stderr.channel.recv_stderr(65536).decode('utf-8', errors='replace')
+                    if error:
+                        lines = error.split('\n')
+                        for line in lines:
+                            if line.strip():
+                                emit_log_update(client_id, line.strip(), 'error')
+                                user_state['logs'].append(f"[STDERR] {line.strip()}")
+                except Exception as e:
+                    print(f"[ERROR] Error reading stderr: {e}")
 
-            time.sleep(0.1)
+            time.sleep(0.05)  # Reduced sleep for faster response
 
         # Get final exit status
         exit_status = stdout.channel.recv_exit_status()
@@ -691,21 +817,27 @@ def run_test_suite(config, test_params, client_id):
 
         if exit_status == 0:
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Test completed successfully")
-            socketio.emit('log_update', {'log': f"✅ Test completed successfully (exit code: {exit_status})"}, room=client_id)
+            emit_log_update(client_id, f"✅ Test completed successfully (exit code: {exit_status})", 'success')
         else:
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ Test failed with exit code {exit_status}")
-            socketio.emit('log_update', {'log': f"❌ Test failed with exit code {exit_status}"}, room=client_id)
+            emit_log_update(client_id, f"❌ Test failed with exit code {exit_status}", 'error')
 
         # 保存测试日志
         log_file = save_test_logs(test_type, client_id, exit_status)
         if log_file:
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 📁 日志已保存: {log_file}")
-            socketio.emit('log_update', {'log': f"📁 日志已保存: {log_file}"}, room=client_id)
+            emit_log_update(client_id, f"📁 日志已保存: {log_file}")
+
+        # 记录测试报告到数据库（从 RESULT DIRECTORY 获取）
+        report_timestamp = save_test_report_to_db(client_id, config, test_params, user_state['logs'])
+        if report_timestamp:
+            user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 📊 测试报告已记录: {report_timestamp}")
+            emit_log_update(client_id, f"📊 测试报告已记录: {report_timestamp}")
 
     except Exception as e:
         error_msg = f"[ERROR] {str(e)}"
         user_state['logs'].append(error_msg)
-        socketio.emit('log_update', {'log': error_msg}, room=client_id)
+        emit_log_update(client_id, error_msg, 'error')
         # Print full traceback to server logs
         print(f"[ERROR] Exception in run_test_suite:")
         print(traceback.format_exc())
@@ -714,7 +846,7 @@ def run_test_suite(config, test_params, client_id):
         log_file = save_test_logs(test_type, client_id, None)
         if log_file:
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 📁 日志已保存: {log_file}")
-            socketio.emit('log_update', {'log': f"📁 日志已保存: {log_file}"}, room=client_id)
+            emit_log_update(client_id, f"📁 日志已保存: {log_file}")
 
     # Release devices when test completes
     devices_to_release = test_params.get('devices', [])
@@ -722,7 +854,8 @@ def run_test_suite(config, test_params, client_id):
 
     user_state['running'] = False
     user_state['devices'] = []
-    socketio.emit('test_complete', {}, room=client_id)
+    with app.app_context():
+        socketio.emit('test_complete', {}, room=client_id)
 
 # ==================== Routes ====================
 @app.route('/')
@@ -952,7 +1085,7 @@ def start_test():
 
     # 检查设备锁定状态
     client_id = get_client_id()
-    user_info = f"用户{client_id[:8]}"  # 简短的用户标识
+    user_info = f"客户端{client_id}"  # 完整的用户标识
     locked_devices, failed_devices = try_lock_devices(client_id, devices, user_info)
 
     if failed_devices:
@@ -1001,9 +1134,10 @@ def start_test():
 
 @app.route('/api/test/stop', methods=['POST'])
 def stop_test():
-    """Stop test execution - matches GUI by actually killing tradefed processes"""
+    """Stop test execution - 使用进程组ID进行多用户隔离"""
     user_state = get_user_state()
     client_id = get_client_id()
+    process_group_id = user_state.get('process_group_id')
 
     user_state['running'] = False
     user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ⏹️ 用户请求停止测试...")
@@ -1020,33 +1154,81 @@ def stop_test():
         return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
 
     try:
-        # Kill tradefed processes (matching GUI lines 2444-2483)
-        test_type = user_state.get('test_type', 'cts')
+        # 优先使用进程组ID杀死进程（多用户隔离）
+        if process_group_id:
+            # 通过环境变量 GMS_TEST_PGID 来查找和杀死相关进程
+            # 使用 ps 查找包含该环境变量标记的进程
+            find_cmd = f"ps eww -e | grep 'GMS_TEST_PGID={process_group_id}' | grep -v grep | awk '{{print $1}}'"
+            user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🧹 正在终止测试进程组: {process_group_id}...")
+            socketio.emit('log_update', {'log': f"🧹 正在终止测试进程组..."}, room=client_id)
 
-        # Map test type to binary name
-        binary_map = {
-            'cts': 'cts-tradefed',
-            'gsi': 'cts-tradefed',
-            'gts': 'gts-tradefed',
-            'sts': 'sts-tradefed',
-            'xts': 'xts-tradefed'
-        }
+            # 获取进程ID并杀死
+            output, error, code = execute_ssh_command(ssh, find_cmd)
+            if output.strip():
+                pids = output.strip().split('\n')
+                killed_count = 0
+                for pid in pids:
+                    if pid.strip():
+                        execute_ssh_command(ssh, f"kill -9 {pid.strip()} 2>/dev/null")
+                        # 同时杀死该进程的子进程
+                        execute_ssh_command(ssh, f"pkill -9 -P {pid.strip()} 2>/dev/null")
+                        killed_count += 1
 
-        tradefed_bin = binary_map.get(test_type, 'tradefed')
-        kill_cmd = f"pkill -f '[./]?{tradefed_bin}.*run commandAndExit'"
+                # 等待进程终止
+                time.sleep(1)
 
-        user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🧹 正在终止 {test_type.upper()} 测试进程...")
-        socketio.emit('log_update', {'log': f"🧹 正在终止 {test_type.upper()} 测试进程..."}, room=client_id)
-        output, error, code = execute_ssh_command(ssh, kill_cmd)
+                return_ssh_connection(ssh)
+                user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 已终止 {killed_count} 个测试进程")
+                socketio.emit('log_update', {'log': f"✅ 已终止 {killed_count} 个测试进程"}, room=client_id)
+            else:
+                # 如果找不到环境变量标记，尝试通过命令行参数查找
+                fallback_cmd = f"ps aux | grep -- '--pgid {process_group_id}' | grep -v grep | awk '{{print $2}}'"
+                output2, error2, code2 = execute_ssh_command(ssh, fallback_cmd)
+                if output2.strip():
+                    pids = output2.strip().split('\n')
+                    killed_count = 0
+                    for pid in pids:
+                        if pid.strip():
+                            execute_ssh_command(ssh, f"kill -9 {pid.strip()} 2>/dev/null")
+                            execute_ssh_command(ssh, f"pkill -9 -P {pid.strip()} 2>/dev/null")
+                            killed_count += 1
 
-        return_ssh_connection(ssh)
-
-        if code == 0:
-            user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ {test_type.upper()} tradefed 进程已成功终止")
-            socketio.emit('log_update', {'log': f"✅ {test_type.upper()} tradefed 进程已成功终止"}, room=client_id)
+                    time.sleep(1)
+                    return_ssh_connection(ssh)
+                    user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 已终止 {killed_count} 个测试进程（命令行匹配）")
+                    socketio.emit('log_update', {'log': f"✅ 已终止 {killed_count} 个测试进程"}, room=client_id)
+                else:
+                    return_ssh_connection(ssh)
+                    user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ 进程组已终止或未找到运行中的进程")
+                    socketio.emit('log_update', {'log': '⚠️ 进程组已终止或未找到运行中的进程'}, room=client_id)
         else:
-            user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ 未找到运行中的测试进程或终止失败")
-            socketio.emit('log_update', {'log': '⚠️ 未找到运行中的测试进程或终止失败'}, room=client_id)
+            # 回退方案: 如果没有进程组ID（旧版本测试），使用原来的方法
+            test_type = user_state.get('test_type', 'cts')
+            binary_map = {
+                'cts': 'cts-tradefed',
+                'gsi': 'cts-tradefed',
+                'gts': 'gts-tradefed',
+                'sts': 'sts-tradefed',
+                'xts': 'xts-tradefed'
+            }
+            tradefed_bin = binary_map.get(test_type, 'tradefed')
+            kill_cmd = f"pkill -f '[./]?{tradefed_bin}.*run commandAndExit'"
+
+            user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🧹 正在终止 {test_type.upper()} 测试进程（兼容模式）...")
+            socketio.emit('log_update', {'log': f"🧹 正在终止 {test_type.upper()} 测试进程..."}, room=client_id)
+            output, error, code = execute_ssh_command(ssh, kill_cmd)
+
+            return_ssh_connection(ssh)
+
+            if code == 0:
+                user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ {test_type.upper()} tradefed 进程已成功终止")
+                socketio.emit('log_update', {'log': f"✅ {test_type.upper()} tradefed 进程已成功终止"}, room=client_id)
+            else:
+                user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ 未找到运行中的测试进程或终止失败")
+                socketio.emit('log_update', {'log': '⚠️ 未找到运行中的测试进程或终止失败'}, room=client_id)
+
+        # 清除进程组ID
+        user_state['process_group_id'] = None
 
         return jsonify({
             'success': True,
@@ -1054,6 +1236,7 @@ def stop_test():
         })
     except Exception as e:
         return_ssh_connection(ssh)
+        user_state['process_group_id'] = None
         user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ 停止测试时出错: {str(e)}")
         socketio.emit('log_update', {'log': f"❌ 停止测试时出错: {str(e)}"}, room=client_id)
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2524,26 +2707,6 @@ def get_usbip_status():
 
 
 # ==================== Advanced Test Features ====================
-@app.route('/api/test/kill-tradefed', methods=['POST'])
-def kill_tradefed():
-    """Kill running tradefed processes"""
-    config = load_config()
-    ssh = get_ssh_connection(config)
-    if not ssh:
-        return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
-
-    try:
-        # Kill all tradefed processes
-        output, error, code = execute_ssh_command(ssh, "pkill -9 -f tradefed")
-        # Also kill any java test processes
-        output2, error2, code2 = execute_ssh_command(ssh, "pkill -9 -f 'java.*test'")
-
-        return_ssh_connection(ssh)
-        return jsonify({'success': True, 'killed_tradefed': code == 0, 'killed_test': code2 == 0})
-    except Exception as e:
-        return_ssh_connection(ssh)
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 @app.route('/api/test/autocomplete-suite', methods=['POST'])
 def autocomplete_suite():
     """Auto-complete test suite path with tools subdirectory"""
@@ -2639,113 +2802,70 @@ def autocomplete_suite():
 # ==================== Test Reports ====================
 @app.route('/api/reports/list')
 def list_test_reports():
-    """List all test report directories with summary information"""
-    config = load_config()
-    ssh = get_ssh_connection(config)
-    if not ssh:
-        return jsonify({'reports': []})
-
+    """从数据库获取测试报告列表（只显示当前用户的报告）"""
     try:
-        ubuntu_user = config.get('ubuntu_user', 'hcq')
-        results_base = f"/home/{ubuntu_user}/gms_test_results"
-
-        # Check if results directory exists
-        check_cmd = f"[ -d '{results_base}' ] && echo 'exists' || echo 'not_found'"
-        output, _, _ = execute_ssh_command(ssh, check_cmd, timeout=5)
-
-        if output.strip() != 'exists':
-            return_ssh_connection(ssh)
+        # 获取当前用户ID
+        client_id = get_client_id()
+        if not client_id:
             return jsonify({'reports': []})
 
-        # List all timestamp directories, sorted by newest first
-        list_cmd = f"find '{results_base}' -maxdepth 1 -type d -name '[0-9]*' -printf '%T@ %p\\n' 2>/dev/null | sort -rn | head -20"
-        list_output, _, _ = execute_ssh_command(ssh, list_cmd, timeout=10)
+        # 从数据库获取报告
+        all_reports = test_report_db.get_reports(limit=100)
 
-        reports = []
-        for line in list_output.strip().split('\n'):
-            if not line.strip():
-                continue
+        # 过滤当前用户的报告
+        user_reports = [r for r in all_reports if r.get('client_id') == client_id]
 
-            parts = line.strip().split(' ', 1)
-            if len(parts) < 2:
-                continue
-
-            result_dir = parts[1]
-            timestamp = os.path.basename(result_dir)
-
-            # Get test_result.xml info
-            result_xml = f"{result_dir}/test_result.xml"
-            check_xml = f"[ -f '{result_xml}' ] && echo 'exists' || echo 'not_found'"
-            xml_exists, _, _ = execute_ssh_command(ssh, check_xml, timeout=3)
-
-            report_info = {
-                'timestamp': timestamp,
-                'path': result_dir,
-                'has_xml': xml_exists.strip() == 'exists'
-            }
-
-            # Parse test_result.xml if exists
-            if report_info['has_xml']:
-                # Get pass and fail counts
-                pass_cmd = f"grep -o 'pass=\"[0-9]*\"' '{result_xml}' 2>/dev/null | head -1 | sed 's/pass=\"//; s/\"//' || echo 0"
-                fail_cmd = f"grep -o 'failed=\"[0-9]*\"' '{result_xml}' 2>/dev/null | head -1 | sed 's/failed=\"//; s/\"//' || echo 0"
-
-                pass_output, _, _ = execute_ssh_command(ssh, pass_cmd, timeout=3)
-                fail_output, _, _ = execute_ssh_command(ssh, fail_cmd, timeout=3)
-
-                report_info['pass'] = int(pass_output.strip() or 0)
-                report_info['fail'] = int(fail_output.strip() or 0)
-                report_info['total'] = report_info['pass'] + report_info['fail']
-
-            reports.append(report_info)
-
-        return_ssh_connection(ssh)
-        return jsonify({'reports': reports})
+        return jsonify({'reports': user_reports})
 
     except Exception as e:
-        print(f"[ERROR] Error listing test reports: {e}")
-        if ssh:
-            return_ssh_connection(ssh)
+        print(f"[ERROR] 获取报告列表失败: {e}")
         return jsonify({'reports': []})
 
 @app.route('/api/reports/<path:report_timestamp>/files')
 def list_report_files(report_timestamp):
-    """List files in a specific test report directory"""
-    config = load_config()
-    ssh = get_ssh_connection(config)
-    if not ssh:
-        return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
-
+    """从数据库获取报告目录并列出文件"""
     try:
-        ubuntu_user = config.get('ubuntu_user', 'hcq')
-        report_dir = f"/home/{ubuntu_user}/gms_test_results/{report_timestamp}"
+        # 从数据库获取报告信息
+        report = test_report_db.get_report_by_timestamp(report_timestamp)
 
-        # List files recursively
-        list_cmd = f"find '{report_dir}' -type f 2>/dev/null | head -50"
-        list_output, _, _ = execute_ssh_command(ssh, list_cmd, timeout=10)
+        if not report:
+            return jsonify({'success': False, 'error': '报告不存在'}), 404
 
+        # 获取 result_dir 路径
+        report_dir = report.get('result_dir')
+        if not report_dir or not os.path.exists(report_dir):
+            return jsonify({'success': False, 'error': '报告目录不存在'}), 404
+
+        # 列出文件
         files = []
-        for line in list_output.strip().split('\n'):
-            if not line.strip():
-                continue
+        for root, dirs, filenames in os.walk(report_dir):
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
+                rel_path = os.path.relpath(file_path, report_dir)
 
-            # Get relative path from report_dir
-            rel_path = line.replace(report_dir + '/', '')
-            file_size_cmd = f"stat -c%s '{line}' 2>/dev/null || echo 0"
-            size_output, _, _ = execute_ssh_command(ssh, file_size_cmd, timeout=3)
+                # 获取文件大小
+                try:
+                    file_size = os.path.getsize(file_path)
+                except:
+                    file_size = 0
 
-            files.append({
-                'name': os.path.basename(line),
-                'path': line,
-                'relative_path': rel_path,
-                'size': int(size_output.strip() or 0)
-            })
+                files.append({
+                    'name': filename,
+                    'path': file_path,
+                    'relative_path': rel_path,
+                    'size': file_size
+                })
 
-        return_ssh_connection(ssh)
+                # 限制返回数量
+                if len(files) >= 50:
+                    break
+
+            if len(files) >= 50:
+                break
+
         return jsonify({'success': True, 'files': files})
 
     except Exception as e:
-        return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/reports/view')
@@ -2790,81 +2910,76 @@ def view_report_file():
 
 @app.route('/api/reports/<path:report_timestamp>/analyze', methods=['GET'])
 def analyze_remote_report(report_timestamp):
-    """Analyze a remote test report directory"""
-    config = load_config()
-    ssh = get_ssh_connection(config)
-    if not ssh:
-        return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
-
+    """从数据库分析测试报告"""
     try:
-        ubuntu_user = config.get('ubuntu_user', 'hcq')
-        result_dir = f"/home/{ubuntu_user}/gms_test_results/{report_timestamp}"
+        # 从数据库获取报告信息
+        report = test_report_db.get_report_by_timestamp(report_timestamp)
 
-        # Check if directory exists
-        check_cmd = f"[ -d '{result_dir}' ] && echo 'exists' || echo 'not_found'"
-        output, _, _ = execute_ssh_command(ssh, check_cmd, timeout=5)
+        if not report:
+            return jsonify({'success': False, 'error': '报告不存在'}), 404
 
-        if output.strip() != 'exists':
-            return_ssh_connection(ssh)
-            return jsonify({'success': False, 'error': 'Report directory not found'}), 404
+        # 获取 result_dir 路径
+        result_dir = report.get('result_dir')
+        if not result_dir or not os.path.exists(result_dir):
+            return jsonify({'success': False, 'error': '报告目录不存在'}), 404
 
-        # Find test_result.xml
-        result_xml = f"{result_dir}/test_result.xml"
-        check_xml = f"[ -f '{result_xml}' ] && echo 'exists' || echo 'not_found'"
-        xml_exists, _, _ = execute_ssh_command(ssh, check_xml, timeout=3)
+        # 查找 test_result.xml
+        result_xml = os.path.join(result_dir, 'test_result.xml')
+        if not os.path.exists(result_xml):
+            return jsonify({'success': False, 'error': 'test_result.xml 不存在'}), 404
 
-        if xml_exists.strip() != 'exists':
-            return_ssh_connection(ssh)
-            return jsonify({'success': False, 'error': 'test_result.xml not found'}), 404
+        # 使用新的 ReportAnalyzer 解析 XML
+        analyzer = ReportAnalyzer()
+        result = analyzer.analyze_file(result_xml)
 
-        # Download and parse XML
-        cat_cmd = f"cat '{result_xml}'"
-        xml_content, _, _ = execute_ssh_command(ssh, cat_cmd, timeout=10)
+        if not result:
+            return jsonify({'success': False, 'error': '解析 XML 失败'}), 500
 
-        # Parse XML content
-        analysis = parse_test_result_xml_content(xml_content)
+        # 转换为前端需要的格式
+        analysis = {
+            'summary': result['summary'],
+            'device_info': {
+                'device': result['details']['device'],
+                'android_version': result['details']['android_version']
+            },
+            'test_info': {
+                'start_time': result['details']['start_time'],
+                'test_type': result['details']['test_type']
+            },
+            'failures': result['failures']
+        }
 
-        # Find and parse failures HTML
-        failures_html = f"{result_dir}/test_result_failures_suite.html"
-        check_failures = f"[ -f '{failures_html}' ] && echo 'exists' || echo 'not_found'"
-        failures_exists, _, _ = execute_ssh_command(ssh, check_failures, timeout=3)
-
-        if failures_exists.strip() == 'exists':
-            failures_content, _, _ = execute_ssh_command(ssh, f"cat '{failures_html}'", timeout=10)
+        # 查找并解析失败 HTML
+        failures_html = os.path.join(result_dir, 'test_result_failures_suite.html')
+        if os.path.exists(failures_html):
+            with open(failures_html, 'r', encoding='utf-8') as f:
+                failures_content = f.read()
             analysis['failures_html'] = parse_failures_html_content(failures_content)
 
-        # Find log files in invocation directories
-        inv_cmd = f"find '{result_dir}' -type d -name 'inv_*' | head -1"
-        inv_output, _, _ = execute_ssh_command(ssh, inv_cmd, timeout=5)
+        # 查找 invocation 目录中的日志文件
+        import glob
+        inv_dirs = glob.glob(os.path.join(result_dir, 'inv_*'))
+        if inv_dirs:
+            inv_dir = inv_dirs[0]
 
-        if inv_output.strip():
-            inv_dir = inv_output.strip().split('\n')[0]
-
-            # Find host_log
-            host_log_cmd = f"find '{inv_dir}' -name 'host_log*.txt' | head -1"
-            host_log_output, _, _ = execute_ssh_command(ssh, host_log_cmd, timeout=5)
-
-            if host_log_output.strip():
-                host_log_path = host_log_output.strip().split('\n')[0]
-                host_log_content, _, _ = execute_ssh_command(ssh, f"cat '{host_log_path}'", timeout=10)
+            # 查找 host_log
+            host_logs = glob.glob(os.path.join(inv_dir, 'host_log*.txt'))
+            if host_logs:
+                with open(host_logs[0], 'r', encoding='utf-8') as f:
+                    host_log_content = f.read()
                 analysis['host_log_errors'] = extract_log_errors(host_log_content, 'host')
 
-            # Find device_logcat_test
-            device_log_cmd = f"find '{inv_dir}' -name 'device_logcat_test*.txt' | head -1"
-            device_log_output, _, _ = execute_ssh_command(ssh, device_log_cmd, timeout=5)
-
-            if device_log_output.strip():
-                device_log_path = device_log_output.strip().split('\n')[0]
-                device_log_content, _, _ = execute_ssh_command(ssh, f"cat '{device_log_path}'", timeout=10)
+            # 查找 device_logcat_test
+            device_logs = glob.glob(os.path.join(inv_dir, 'device_logcat_test*.txt'))
+            if device_logs:
+                with open(device_logs[0], 'r', encoding='utf-8') as f:
+                    device_log_content = f.read()
                 analysis['device_log_errors'] = extract_log_errors(device_log_content, 'device')
 
-        return_ssh_connection(ssh)
         return jsonify({'success': True, 'data': analysis})
 
     except Exception as e:
         import traceback
-        if ssh:
-            return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()[:500]}), 500
 
 def parse_test_result_xml_content(xml_content):
@@ -2876,7 +2991,7 @@ def parse_test_result_xml_content(xml_content):
         summary = root.find('Summary')
         if summary is not None:
             pass_attr = summary.get('pass', '0')
-            fail_attr = summary.get('fail', '0')
+            fail_attr = summary.get('failed', '0')
             total = int(pass_attr) + int(fail_attr)
             pass_count = int(pass_attr)
             fail_count = int(fail_attr)
@@ -2912,19 +3027,35 @@ def parse_test_result_xml_content(xml_content):
         failures = []
         for module in root.findall('.//Module'):
             module_name = module.get('name', 'Unknown')
+            abi = module.get('abi', '')
+            display_module = f"{abi} {module_name}" if abi else module_name
             for test_case in module.findall('.//TestCase'):
-                result = test_case.get('result', 'pass')
-                if result.lower() == 'fail':
-                    test = test_case.find('Test')
-                    if test is not None:
+                test = test_case.find('Test')
+                if test is not None:
+                    result = test.get('result', 'pass')
+                    if result.lower() == 'fail':
                         test_name = test.get('name', 'Unknown')
                         failure = test.find('Failure')
                         if failure is not None:
+                            # Get stack trace
+                            stack_trace_elem = failure.find('StackTrace')
+                            stack_trace = stack_trace_elem.text if stack_trace_elem is not None else ''
+
                             failures.append({
-                                'module': module_name,
+                                'module': display_module,
                                 'test_case': test_case.get('name', 'Unknown'),
                                 'test_name': test_name,
-                                'message': failure.get('message', 'No message')
+                                'message': failure.get('message', 'No message'),
+                                'stack_trace': stack_trace
+                            })
+                        else:
+                            # No Failure element, but test failed
+                            failures.append({
+                                'module': display_module,
+                                'test_case': test_case.get('name', 'Unknown'),
+                                'test_name': test_name,
+                                'message': 'Test failed without failure details',
+                                'stack_trace': ''
                             })
 
         # Limit failures to display
@@ -3331,9 +3462,13 @@ def find_xml_file(directory):
 @app.route('/api/report/analyze', methods=['POST'])
 def analyze_report():
     """
-    分析上传的测试报告文件（使用新的简化分析器模块）
+    分析上传的测试报告文件或文件夹（使用新的简化分析器模块）
 
-    Request: multipart/form-data with 'file' field
+    Request: multipart/form-data
+        - 'file': 单个文件上传（XML、ZIP、TAR.GZ）
+        - 'files[]': 多文件上传（文件夹模式）
+        - 'folder': 文件夹上传
+
     Response:
         {
             "success": true,
@@ -3356,31 +3491,74 @@ def analyze_report():
             }
         }
     """
-    if 'file' not in request.files:
+    # 检查是否有文件上传
+    files = request.files.getlist('file')
+    folder_files = request.files.getlist('files[]')
+
+    # 支持多种上传方式
+    all_files = files if files else folder_files
+
+    if not all_files or len(all_files) == 0:
         return jsonify({'success': False, 'error': '没有上传文件'}), 400
 
-    file = request.files['file']
-    if file.filename == '':
+    if len(all_files) == 1 and all_files[0].filename == '':
         return jsonify({'success': False, 'error': '文件名为空'}), 400
 
     try:
         # 保存上传文件到临时位置
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_file_path = os.path.join(temp_dir, file.filename)
-            file.save(temp_file_path)
+            # 如果是单文件（XML、ZIP、TAR.GZ）
+            if len(all_files) == 1:
+                file = all_files[0]
+                temp_file_path = os.path.join(temp_dir, file.filename)
+                file.save(temp_file_path)
 
-            # 使用新的 ReportAnalyzer 分析报告
-            analyzer = ReportAnalyzer(temp_dir=temp_dir)
-            result = analyzer.analyze_file(temp_file_path)
+                # 使用 ReportAnalyzer 分析报告
+                analyzer = ReportAnalyzer(temp_dir=temp_dir)
+                result = analyzer.analyze_file(temp_file_path)
 
-            if result:
-                return jsonify({'success': True, 'data': result})
+                if result:
+                    return jsonify({'success': True, 'data': result})
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': '无法解析报告文件',
+                        'message': '请确保文件是有效的XML或压缩包格式'
+                    }), 400
+
+            # 如果是多文件（文件夹上传）
             else:
-                return jsonify({
-                    'success': False,
-                    'error': '无法解析报告文件',
-                    'message': '请确保文件是有效的XML或压缩包格式'
-                }), 400
+                # 保存所有文件到临时目录
+                for file in all_files:
+                    if file.filename:
+                        # 保持相对路径结构
+                        file_path = os.path.join(temp_dir, file.filename)
+                        # 确保目录存在
+                        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                        file.save(file_path)
+
+                # 查找 test_result.xml
+                analyzer = ReportAnalyzer(temp_dir=temp_dir)
+                xml_path = analyzer.file_handler.find_xml_file()
+
+                if not xml_path:
+                    return jsonify({
+                        'success': False,
+                        'error': '未找到 test_result.xml 文件',
+                        'message': f'已接收 {len(all_files)} 个文件，但在文件夹中未找到 test_result.xml'
+                    }), 400
+
+                # 分析报告（使用 analyze_file 方法来获得正确的字典格式）
+                result = analyzer.analyze_file(xml_path)
+
+                if result:
+                    return jsonify({'success': True, 'data': result})
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': '无法解析报告文件',
+                        'message': 'test_result.xml 文件格式无效或损坏'
+                    }), 400
 
     except Exception as e:
         logger.error(f"报告分析失败: {e}")

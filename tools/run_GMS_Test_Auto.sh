@@ -1,9 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-export PATH="$HOME/Software/sdk_tools_new/sdk_tools:$PATH"
+# 禁用输出缓冲，确保实时输出
+export PYTHONUNBUFFERED=1
+export SCRIPT_LOG_FILE="/tmp/gms_test_$(date +%Y%m%d_%H%M%S).log"
 
-LOG_FILE="/tmp/gms_test_$(date +%Y%m%d_%H%M%S).log"
+# 使用 unbuffered tee 或者直接输出
+LOG_FILE="$SCRIPT_LOG_FILE"
+
+export PATH="$HOME/Software/sdk_tools_new/sdk_tools:$PATH"
 
 # 运行状态
 REMOTE_HOST=""
@@ -18,6 +23,7 @@ FAIL_COUNT=0
 RESULT_TIMESTAMP=""
 RETRY_FAIL="true"
 COPY_TO_REMOTE="false"
+PROCESS_GROUP_ID=""  # 进程组ID，用于多用户隔离
 
 # 工具函数
 log() { echo -e "$*" | tee -a "$LOG_FILE"; }
@@ -36,7 +42,8 @@ cat <<EOF
 可选参数:
   --device-args ARGS        设备参数, 格式：[-s DEVICE1] 或 [--shard-count 2 -s DEVICE1 -s DEVICE2...]
   --no-retry                禁用失败自动重试
-  --copy-remote             测试结果拷贝到远端 
+  --copy-remote             测试结果拷贝到远端
+  --pgid ID                 进程组ID，用于多用户隔离（内部使用）
   --help                    显示帮助
 
 示例:
@@ -110,6 +117,15 @@ parse_args() {
             --copy-remote)
                 COPY_TO_REMOTE="true"
                 log "✅ 启用结果拷贝到远程"
+                shift
+                ;;
+            --pgid)
+                shift
+                if [[ $# -eq 0 ]]; then
+                    die "--pgid 缺少ID参数"
+                fi
+                PROCESS_GROUP_ID="$1"
+                log "🏷️ 进程组ID: $PROCESS_GROUP_ID"
                 shift
                 ;;
             -*)
@@ -206,8 +222,18 @@ run_tradefed() {
 
     log "📋 测试命令: $command"
     log "⏱️ 开始时间: $(date)"
+
+    # 如果设置了进程组ID，将其导出为环境变量，便于进程识别和管理
+    if [[ -n "$PROCESS_GROUP_ID" ]]; then
+        export GMS_TEST_PGID="$PROCESS_GROUP_ID"
+        log "🔖 进程组标记已设置: GMS_TEST_PGID=$PROCESS_GROUP_ID"
+    fi
+
+    # 执行命令并实时输出
+    # 同时记录到日志文件（追加模式）
     eval "$command" 2>&1 | tee -a "$LOG_FILE"
     local exit_code=${PIPESTATUS[0]}
+
     log "⏱️ 结束时间: $(date)"
     log "📊 退出代码: $exit_code"
     return $exit_code
