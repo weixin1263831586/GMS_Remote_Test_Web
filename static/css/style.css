@@ -71,7 +71,7 @@ body {
 
 /* ==================== Sidebar ==================== */
 .sidebar {
-    width: 150px;
+    width: 130px;
     background: linear-gradient(180deg, var(--light-bg) 0%, var(--darker-bg) 100%);
     border-right: 1px solid var(--border-color);
     display: flex;
@@ -1402,8 +1402,8 @@ log-system { color: var(--info-color); }
     cursor: pointer;
     position: relative;
     overflow: hidden;
-    min-height: 50px;
-    max-height: 50px;
+    min-height: 80px;
+    max-height: 80px;
     display: flex;
     align-items: center;
     justify-content: center;
