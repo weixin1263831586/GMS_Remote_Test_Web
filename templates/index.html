@@ -143,11 +143,12 @@
         /* 桌面页面样式 */
         .desktop-container {
             display: none;
+            flex-direction: column;
             height: 100vh;
             padding: 0;
         }
         .desktop-container.active {
-            display: block;
+            display: flex;
         }
         .vnc-canvas {
             width: 100%;
@@ -159,6 +160,77 @@
             width: 100%;
             height: 100%;
             border: none;
+        }
+        /* 桌面页面头部样式 */
+        .desktop-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 16px;
+            background: var(--light-bg);
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .desktop-title-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .desktop-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .host-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .host-select {
+            padding: 6px 10px;
+            font-size: 13px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--darker-bg);
+            color: var(--text-primary);
+            min-width: 200px;
+            cursor: pointer;
+        }
+        .host-select:hover {
+            border-color: var(--primary-color);
+        }
+        .host-controls {
+            display: flex;
+            gap: 6px;
+        }
+        .desktop-canvas {
+            flex: 1;
+            background: #000;
+            position: relative;
+            min-height: 0;
+        }
+        /* 主机管理弹框 */
+        .host-input-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .host-input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--darker-bg);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: monospace;
+        }
+        .host-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+        .host-input::placeholder {
+            color: var(--text-secondary);
         }
     </style>
 </head>
@@ -384,7 +456,23 @@
 
         <!-- 桌面页面 -->
         <div class="desktop-container" id="page-desktop">
-            <div class="vnc-canvas" id="vnc-canvas">
+            <!-- 桌面页面头部 -->
+            <div class="desktop-header">
+                <div class="desktop-title-section">
+                    <div class="desktop-title">🖥️ 主机桌面</div>
+                    <div class="host-selector">
+                        <select id="host-select" class="host-select" onchange="switchHost()">
+                            <option value="">加载中...</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="host-controls">
+                    <button class="btn-xs" onclick="refreshVNC()">🔄 刷新</button>
+                    <button class="btn-xs" onclick="showAddHostModal()">➕ 添加主机</button>
+                </div>
+            </div>
+            <!-- VNC 画布 -->
+            <div class="desktop-canvas" id="desktop-canvas">
                 <iframe id="vnc-frame" class="vnc-iframe"
                         src="http://{{ config.ubuntu_host }}:6080/vnc.html?autoconnect=true{% if config.vnc_password %}&password={{ config.vnc_password | urlencode }}{% endif %}"
                         frameborder="0"
@@ -794,6 +882,63 @@
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
 
+    <!-- 添加主机弹框 -->
+    <div id="add-host-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <span class="modal-title">➕ 添加VNC主机</span>
+                <span class="modal-close" onclick="closeAddHostModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-text" style="margin-bottom: 15px;">
+                    请输入远程主机连接信息（默认主机已存在于列表中，可快速打开）
+                </div>
+                <div class="modal-form-row">
+                    <label>主机连接:</label>
+                    <input type="text" id="new-host-input" class="host-input" placeholder="例如: wlq@172.16.14.246" onkeypress="handleAddHostKeyPress(event)" />
+                </div>
+                <div class="modal-form-row" style="margin-top: 12px;">
+                    <label>VNC密码:</label>
+                    <input type="password" id="new-host-vnc-password" class="host-input" placeholder="请输入该主机的VNC密码（将自动保存）" />
+                </div>
+                <div class="modal-info-text" style="margin-top: 10px;">
+                    💡 添加新主机需要输入VNC密码，系统将自动保存<br>
+                    🔑 下次连接该主机时无需再次输入密码
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeAddHostModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="addNewHost()">添加并连接</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主机密码输入弹框 -->
+    <div id="host-password-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <span class="modal-title">🔑 输入SSH密码</span>
+                <span class="modal-close" onclick="closeHostPasswordModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-text" style="margin-bottom: 15px;">
+                    请输入 <span id="host-password-host" style="font-family: monospace; font-weight: 600;"></span> 的SSH密码
+                </div>
+                <div class="modal-form-row">
+                    <label>SSH密码:</label>
+                    <input type="password" id="host-password-input" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--darker-bg);" onkeypress="handleHostPasswordKeyPress(event)" />
+                </div>
+                <div class="modal-info-text" style="margin-top: 10px;">
+                    💡 密码将被加密保存供下次使用
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeHostPasswordModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitHostPassword()">连接</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- SSH密码输入弹框 -->
     <div id="ssh-password-modal" class="modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center;">
         <div class="modal-content" style="max-width: 400px; width: 90%;">
@@ -959,6 +1104,343 @@
             } catch (e) {
                 showToast('连接失败', 'error');
             }
+        }
+
+        // ==================== 主机管理功能 ====================
+        let desktopHosts = [];
+        let currentHost = null;
+        let pendingHostConnection = null;
+
+        // 初始化主机列表
+        function initDesktopHosts() {
+            // 从 localStorage 加载主机列表
+            const savedHosts = localStorage.getItem('gms_desktop_hosts');
+            if (savedHosts) {
+                try {
+                    desktopHosts = JSON.parse(savedHosts);
+                } catch (e) {
+                    console.error('[Hosts] Failed to parse hosts:', e);
+                    desktopHosts = [];
+                }
+            }
+
+            // 确保默认主机（测试主机）始终存在且在列表首位
+            const defaultHost = '{{ config.ubuntu_user }}@{{ config.ubuntu_host }}';
+            const defaultIndex = desktopHosts.findIndex(h => h.id === 'default');
+
+            if (defaultIndex === -1) {
+                // 不存在默认主机，添加到首位
+                desktopHosts.unshift({
+                    id: 'default',
+                    name: defaultHost,
+                    connection: defaultHost,
+                    password: '{{ config.ubuntu_pswd | default("", true) }}',
+                    vnc_password: ''  // 默认主机不需要VNC密码
+                });
+            } else if (defaultIndex !== 0) {
+                // 默认主机存在但不在首位，移到首位
+                const defaultHostObj = desktopHosts.splice(defaultIndex, 1)[0];
+                desktopHosts.unshift(defaultHostObj);
+            }
+
+            // 加载上次选择的主机
+            const savedHostId = localStorage.getItem('gms_current_host');
+            if (savedHostId) {
+                const saved = desktopHosts.find(h => h.id === savedHostId);
+                if (saved) {
+                    currentHost = saved;
+                } else {
+                    currentHost = desktopHosts[0];
+                }
+            } else {
+                // 默认选择第一个主机（通常是测试主机）
+                currentHost = desktopHosts[0];
+            }
+
+            updateHostSelector();
+            saveHostsToStorage();
+        }
+
+        // 更新主机选择器
+        function updateHostSelector() {
+            const select = document.getElementById('host-select');
+            if (!select) return;
+
+            select.innerHTML = desktopHosts.map(host =>
+                `<option value="${host.id}" ${currentHost && currentHost.id === host.id ? 'selected' : ''}>${host.name}</option>`
+            ).join('');
+        }
+
+        // 保存主机列表到 localStorage
+        function saveHostsToStorage() {
+            localStorage.setItem('gms_desktop_hosts', JSON.stringify(desktopHosts));
+            if (currentHost) {
+                localStorage.setItem('gms_current_host', currentHost.id);
+            }
+        }
+
+        // 切换主机
+        async function switchHost() {
+            const select = document.getElementById('host-select');
+            if (!select) return;
+
+            const hostId = select.value;
+            const host = desktopHosts.find(h => h.id === hostId);
+            if (!host) return;
+
+            currentHost = host;
+            saveHostsToStorage();
+
+            // 刷新 VNC 连接
+            await loadVNCConnection();
+        }
+
+        // 加载 VNC 连接
+        async function loadVNCConnection() {
+            if (!currentHost) return;
+
+            const vncFrame = document.getElementById('vnc-frame');
+            if (!vncFrame) return;
+
+            const defaultHost = '{{ config.ubuntu_user }}@{{ config.ubuntu_host }}';
+            const defaultUrl = `http://{{ config.ubuntu_host }}:6080/vnc.html?autoconnect=true`;
+
+            // 如果是默认主机
+            if (currentHost.id === 'default') {
+                // 检查 iframe 是否已经是默认主机的 URL
+                if (vncFrame.src.includes(defaultUrl) || vncFrame.src.includes('{{ config.ubuntu_host }}')) {
+                    console.log('[Desktop] Already on default host');
+                    return;  // 已经是默认主机，无需切换
+                }
+                // 需要切换回默认主机，直接设置URL
+                console.log('[Desktop] Switching back to default host');
+                vncFrame.src = defaultUrl;
+                return;
+            }
+
+            // 切换到其他主机时，需要调用API
+            try {
+                showToast(`正在连接到 ${currentHost.name}...`, 'info');
+                const response = await fetch('/api/desktop/vnc-start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        host: currentHost.connection,
+                        password: currentHost.password,
+                        vnc_password: currentHost.vnc_password || ''  // 传递VNC密码
+                    })
+                });
+                const result = await response.json();
+
+                if (!result.success) {
+                    showToast(`连接失败: ${result.error}`, 'error');
+                    return;
+                }
+
+                // 使用后端返回的URL（可能包含密码）
+                vncFrame.src = result.url;
+
+                console.log('[Desktop] Switched to host:', currentHost.name);
+            } catch (e) {
+                console.error('[VNC] Failed to start:', e);
+                showToast('VNC 启动失败', 'error');
+                return;
+            }
+        }
+
+        // 刷新 VNC
+        function refreshVNC() {
+            const vncFrame = document.getElementById('vnc-frame');
+            if (!vncFrame || !vncFrame.src) return;
+
+            // 强制重新加载 iframe
+            const currentSrc = vncFrame.src;
+            vncFrame.src = 'about:blank';
+            setTimeout(() => {
+                vncFrame.src = currentSrc;
+            }, 10);
+
+            console.log('[Desktop] VNC refreshed');
+        }
+
+        // 显示添加主机弹框
+        function showAddHostModal() {
+            const modal = document.getElementById('add-host-modal');
+            modal.style.display = 'flex';
+            document.getElementById('new-host-input').value = '';
+            document.getElementById('new-host-input').focus();
+        }
+
+        function closeAddHostModal() {
+            document.getElementById('add-host-modal').style.display = 'none';
+            document.getElementById('new-host-vnc-password').value = '';  // 清空VNC密码
+        }
+
+        function handleAddHostKeyPress(e) {
+            if (e.key === 'Enter') addNewHost();
+        }
+
+        // 添加新主机
+        async function addNewHost() {
+            const input = document.getElementById('new-host-input');
+            const vncPasswordInput = document.getElementById('new-host-vnc-password');
+            const hostString = input.value.trim();
+            const vncPassword = vncPasswordInput.value.trim();
+
+            if (!hostString) {
+                showToast('请输入主机连接信息', 'error');
+                return;
+            }
+
+            // 验证格式
+            const match = hostString.match(/^([^@]+)@([^@]+)$/);
+            if (!match) {
+                showToast('格式错误，请使用: 用户名@主机地址', 'error');
+                return;
+            }
+
+            const [_, user, ip] = match;
+
+            // 检查是否已存在
+            const exists = desktopHosts.find(h => h.connection === hostString);
+            if (exists) {
+                showToast('该主机已存在', 'warning');
+                currentHost = exists;
+                updateHostSelector();
+                closeAddHostModal();
+                await switchHost();
+                return;
+            }
+
+            pendingHostConnection = {
+                id: 'host_' + Date.now(),
+                name: hostString,
+                connection: hostString,
+                user: user,
+                ip: ip,
+                password: '',
+                vnc_password: vncPassword  // 保存VNC密码
+            };
+
+            // 尝试连接验证
+            await validateHostConnection();
+        }
+
+        // 验证主机连接
+        async function validateHostConnection() {
+            if (!pendingHostConnection) return;
+
+            showToast(`正在验证 ${pendingHostConnection.name}...`, 'info');
+
+            try {
+                const response = await fetch('/api/desktop/validate-host', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        host: pendingHostConnection.connection
+                    })
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    // 需要密码
+                    if (result.needs_password) {
+                        closeAddHostModal();
+                        showHostPasswordModal();
+                        return;
+                    }
+                    // 连接成功
+                    pendingHostConnection.password = result.password || '';
+                    finishAddHost();
+                } else {
+                    showToast(`验证失败: ${result.error}`, 'error');
+                }
+            } catch (e) {
+                console.error('[Host] Validation error:', e);
+                showToast('连接验证失败', 'error');
+            }
+        }
+
+        // 显示主机密码弹框
+        function showHostPasswordModal() {
+            if (!pendingHostConnection) return;
+            const modal = document.getElementById('host-password-modal');
+            modal.style.display = 'flex';
+            document.getElementById('host-password-host').textContent = pendingHostConnection.name;
+            document.getElementById('host-password-input').value = '';
+            document.getElementById('host-password-input').focus();
+        }
+
+        function closeHostPasswordModal() {
+            document.getElementById('host-password-modal').style.display = 'none';
+            pendingHostConnection = null;
+        }
+
+        function handleHostPasswordKeyPress(e) {
+            if (e.key === 'Enter') submitHostPassword();
+        }
+
+        // 提交主机密码
+        async function submitHostPassword() {
+            const password = document.getElementById('host-password-input').value;
+            if (!password) {
+                showToast('请输入密码', 'error');
+                return;
+            }
+
+            if (!pendingHostConnection) return;
+
+            try {
+                const response = await fetch('/api/desktop/validate-host', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        host: pendingHostConnection.connection,
+                        password: password
+                    })
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    pendingHostConnection.password = password;
+                    closeHostPasswordModal();
+                    finishAddHost();
+                } else {
+                    showToast(`验证失败: ${result.error}`, 'error');
+                }
+            } catch (e) {
+                console.error('[Host] Password validation error:', e);
+                showToast('密码验证失败', 'error');
+            }
+        }
+
+        // 完成添加主机
+        async function finishAddHost() {
+            if (!pendingHostConnection) return;
+
+            // 检查是否已存在（避免重复）
+            const exists = desktopHosts.find(h => h.connection === pendingHostConnection.connection);
+            if (exists) {
+                showToast('该主机已存在', 'warning');
+                currentHost = exists;
+            } else {
+                // 新主机添加到默认主机之后（索引1的位置）
+                if (desktopHosts.length > 0 && desktopHosts[0].id === 'default') {
+                    desktopHosts.splice(1, 0, pendingHostConnection);
+                } else {
+                    desktopHosts.push(pendingHostConnection);
+                }
+                currentHost = pendingHostConnection;
+            }
+
+            pendingHostConnection = null;
+
+            saveHostsToStorage();
+            updateHostSelector();
+            closeAddHostModal();
+
+            showToast('主机添加成功', 'success');
+            await loadVNCConnection();
         }
 
         // ==================== 用户管理功能 ====================
@@ -1314,19 +1796,13 @@
                 }, 100);
             }
 
-            // 如果切换到桌面页面，确保iframe已加载（只加载一次）
+            // 如果切换到桌面页面，初始化主机列表（仅首次）
             if (pageName === 'desktop') {
-                // 先自动启动 VNC 服务(如果未运行)
-                ensureVNCStarted().then(() => {
-                    console.log('[Desktop] VNC service ensured');
-                }).catch(err => {
-                    console.warn('[Desktop] Failed to ensure VNC:', err);
-                });
-
-                const vncFrame = document.getElementById('vnc-frame');
-                if (vncFrame && !vncFrame.dataset.loaded) {
-                    vncFrame.dataset.loaded = 'true';
-                    console.log('[Desktop] VNC iframe loaded');
+                if (!window.desktopHostsInitialized) {
+                    initDesktopHosts();
+                    window.desktopHostsInitialized = true;
+                    // 默认主机的VNC已在HTML中直接加载，无需调用API
+                    console.log('[Desktop] Default host ready');
                 }
             }
         }
@@ -1570,6 +2046,25 @@
             }
             if (targetPage === 'reports') {
                 loadTestReports();
+            }
+            if (targetPage === 'desktop') {
+                // 初始化主机列表（仅首次）
+                if (!window.desktopHostsInitialized) {
+                    initDesktopHosts();
+                    window.desktopHostsInitialized = true;
+                    console.log('[Desktop] Hosts initialized');
+
+                    // 检查是否需要切换VNC连接
+                    const defaultHost = '{{ config.ubuntu_user }}@{{ config.ubuntu_host }}';
+                    if (currentHost && currentHost.connection !== defaultHost) {
+                        // 当前主机不是默认主机，需要切换VNC连接
+                        console.log('[Desktop] Switching to saved host:', currentHost.name);
+                        // 延迟执行，确保DOM已加载
+                        setTimeout(() => {
+                            loadVNCConnection();
+                        }, 100);
+                    }
+                }
             }
 
             // 更新页面标题
