@@ -3109,9 +3109,11 @@ def list_report_files(report_timestamp):
 
         # 列出文件
         files = []
+
         for root, dirs, filenames in os.walk(report_dir):
             for filename in filenames:
                 file_path = os.path.join(root, filename)
+                # 相对于报告目录的路径，不包括时间戳目录名
                 rel_path = os.path.relpath(file_path, report_dir)
 
                 # 获取文件大小
