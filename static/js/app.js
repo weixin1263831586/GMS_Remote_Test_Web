@@ -206,11 +206,29 @@ function initSocket() {
 
     state.socket.on('connected', (data) => {
         console.log('[Socket.IO] Server confirmed connection, client_id:', data.client_id);
+        // 在日志区域显示连接信息
+        setTimeout(() => {
+            const logOutput = document.getElementById('log-output');
+            if (logOutput) {
+                const entry = document.createElement('div');
+                entry.className = 'log-entry log-success';
+                entry.textContent = `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}] [Socket.IO] 已连接, Client ID: ${data.client_id}`;
+                entry.style.fontWeight = 'bold';
+                entry.style.color = 'green';
+                logOutput.appendChild(entry);
+            }
+        }, 100);
     });
 
     state.socket.on('log_update', (data) => {
         console.log('[Socket.IO] Received log_update:', data);
-        addLogEntry(data.log, data.type || 'info');
+        // 直接添加日志
+        const logOutput = document.getElementById('log-output');
+        if (logOutput) {
+            addLogEntry(data.log, data.type || 'info');
+        } else {
+            console.warn('[Socket.IO] log-output element not found!');
+        }
     });
 
     state.socket.on('devices_updated', (devices) => {
@@ -1766,7 +1784,13 @@ async function saveConfig() {
 
 // ==================== Logging ====================
 function addLogEntry(message, type = 'info') {
-    const logOutput = $('log-output');
+    // 不使用缓存的$函数，直接获取元素（避免缓存null的问题）
+    const logOutput = document.getElementById('log-output');
+    if (!logOutput) {
+        console.warn('[Log] log-output element not found, message:', message);
+        return;
+    }
+
     const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
 
     const logEntry = document.createElement('div');
@@ -1776,20 +1800,24 @@ function addLogEntry(message, type = 'info') {
     logOutput.appendChild(logEntry);
     logOutput.scrollTop = logOutput.scrollHeight;
 
-    // 限制日志条目数量，防止内存溢出
-    const maxLogs = 5000;
-    while (logOutput.children.length > maxLogs) {
-        logOutput.removeChild(logOutput.firstChild);
+    // 限制日志条目数量（500条足够），防止内存溢出和卡顿
+    const maxLogs = 500;
+    if (logOutput.children.length > maxLogs) {
+        // 批量删除旧日志，减少DOM操作
+        const removeCount = logOutput.children.length - maxLogs;
+        for (let i = 0; i < removeCount; i++) {
+            logOutput.removeChild(logOutput.firstChild);
+        }
     }
 }
 
 // ==================== Status Polling ====================
 function startStatusPolling() {
-    // 优化：从2秒改为5秒，减少服务器压力
+    // 只轮询状态，不处理日志（日志通过WebSocket实时推送）
     setInterval(async () => {
         try {
-            // 使用增量日志获取，只请求新的日志
-            const status = await apiCall(`/api/status?since=${state.lastLogCount}`);
+            // 只获取状态，不获取日志（避免重复）
+            const status = await apiCall('/api/status?logs=false');
 
             if (status.running && !state.testing) {
                 state.testing = true;
@@ -1804,25 +1832,11 @@ function startStatusPolling() {
                 updateVpnStatus(status.vpn_connected);
             }
 
-            // 处理增量日志
-            if (status.logs && status.logs.length > 0) {
-                status.logs.forEach(log => {
-                    // 日志可能是字符串或对象
-                    if (typeof log === 'string') {
-                        addLogEntry(log, 'info');
-                    } else if (typeof log === 'object') {
-                        addLogEntry(log.message || log.log || log, log.type || 'info');
-                    }
-                });
-                // 更新日志计数
-                if (status.log_count !== undefined) {
-                    state.lastLogCount = status.log_count;
-                }
-            }
+            // 不再处理日志 - 通过WebSocket实时推送
         } catch (error) {
             console.error('Status polling error:', error);
         }
-    }, 5000); // 从2000ms改为5000ms
+    }, 5000);
 }
 
 async function checkInitialTestStatus() {
@@ -1831,27 +1845,42 @@ async function checkInitialTestStatus() {
         state.testing = status.running;
         updateTestToggleButton(status.running);
 
-        // Load existing logs if available
+        // 页面刷新时加载历史日志（限制最近100条，避免卡顿）
         if (status.logs && status.logs.length > 0) {
-            const logOutput = $('log-output');
+            // 直接获取元素，不使用缓存
+            const logOutput = document.getElementById('log-output');
+            if (!logOutput) {
+                console.warn('[Init] log-output element not found');
+                return;
+            }
+
             logOutput.innerHTML = '';
-            status.logs.forEach(log => {
-                // 日志可能是字符串或对象
-                if (typeof log === 'string') {
-                    addLogEntry(log, 'info');
-                } else if (typeof log === 'object') {
-                    addLogEntry(log.message || log.log || log, log.type || 'info');
-                }
+
+            // 只显示最近100条历史日志，避免卡顿
+            const recentLogs = status.logs.slice(-100);
+
+            // 使用DocumentFragment批量添加，减少DOM操作
+            const fragment = document.createDocumentFragment();
+            recentLogs.forEach(log => {
+                const logEntry = document.createElement('div');
+                const message = typeof log === 'string' ? log : (log.message || log.log || log);
+                const type = typeof log === 'object' ? (log.type || 'info') : 'info';
+                const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+
+                logEntry.className = `log-entry log-${type}`;
+                logEntry.textContent = `[${timestamp}] ${message}`;
+                fragment.appendChild(logEntry);
             });
-            // 初始化日志计数，优先使用 total_count
+
+            logOutput.appendChild(fragment);
+            logOutput.scrollTop = logOutput.scrollHeight;
+
             state.lastLogCount = status.log_count || status.logs.length;
         } else {
-            // 如果没有日志，初始化为0
             state.lastLogCount = 0;
         }
     } catch (error) {
         console.error('Failed to check initial test status:', error);
-        // 确保初始化日志计数
         state.lastLogCount = 0;
     }
 }
@@ -2003,8 +2032,8 @@ function displayTestReports(reports) {
                     ${passRate}
                 </td>
                 <td style="padding: 12px;">
-                    <button class="btn-xxs" onclick="event.stopPropagation(); analyzeReport('${report.timestamp}')">📈 报告分析</button>
-                    <button class="btn-xxs" onclick="event.stopPropagation(); viewReportDetails('${report.timestamp}')">📄 查看文件</button>
+                    <button class="btn-xxs" onclick="event.stopPropagation(); analyzeReport('${report.timestamp}')">📈 分析报告</button>
+                    <button class="btn-xxs" onclick="event.stopPropagation(); viewReportDetails('${report.timestamp}')">📄 查看报告</button>
                 </td>
             </tr>
         `;
@@ -2079,7 +2108,6 @@ function showReportDetailsModal(timestamp, files) {
         modal = document.createElement('div');
         modal.id = 'report-details-modal';
         modal.className = 'modal';
-        modal.style.display = 'flex';
         modal.innerHTML = `
             <div class="modal-content" style="max-width: 700px; width: 90%; max-height: 80vh; overflow: hidden;">
                 <div class="modal-header">
@@ -2119,6 +2147,7 @@ function showReportDetailsModal(timestamp, files) {
         `;
     }).join('');
 
+    // 使用show类来显示modal，不要直接设置style.display
     modal.classList.add('show');
 }
 
