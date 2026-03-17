@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS 远程测试</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/xterm/xterm.css') }}">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
-    <script src="{{ url_for('static', filename='vendor/xterm/xterm.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='vendor/xterm/xterm-addon-fit.min.js') }}"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
+    <!-- Socket.IO not used in FastAPI version, using native WebSocket -->
+    <script src="/static/vendor/xterm/xterm.min.js"></script>
+    <script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
@@ -615,13 +615,13 @@
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">类型</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">客户端</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">时间戳</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">客户端</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">时间戳</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">通过</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">失败</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">总计</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">通过率</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">操作</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
                         </tr>
                     </thead>
                     <tbody id="reports-table-body">
@@ -1571,6 +1571,10 @@
                 if (data.devices) {
                     allDevices = data.devices;
                     displayDevicesManagement(allDevices);
+                } else if (data.data) {
+                    // 兼容旧格式
+                    allDevices = data.data;
+                    displayDevicesManagement(allDevices);
                 }
 
                 // 启动自动刷新（每10秒）
@@ -1824,56 +1828,69 @@
         }
 
         function connectTerminalSocket() {
-            console.log('Connecting to terminal Socket.IO...');
+            console.log('Connecting to terminal WebSocket...');
             updateTerminalStatus(false);
 
-            terminalSocket = io({
-                transports: ['websocket', 'polling']
-            });
+            // 生成唯一的client_id
+            const clientId = 'terminal_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 
-            terminalSocket.on('connect', () => {
-                console.log('Terminal Socket.IO connected');
+            // 创建WebSocket连接
+            const wsUrl = `ws://${window.location.host}/ws/${clientId}`;
+            terminalSocket = new WebSocket(wsUrl);
+
+            terminalSocket.onopen = () => {
+                console.log('Terminal WebSocket connected');
                 updateTerminalStatus(true);
 
                 // 请求SSH连接
-                terminalSocket.emit('terminal_connect', {
+                terminalSocket.send(JSON.stringify({
+                    type: 'terminal_connect',
                     host: terminalConfig.ssh_host,
                     user: terminalConfig.ssh_user,
                     password: terminalConfig.ssh_password
-                });
-            });
+                }));
+            };
 
-            terminalSocket.on('disconnect', () => {
-                console.log('Terminal Socket.IO disconnected');
+            terminalSocket.onclose = () => {
+                console.log('Terminal WebSocket disconnected');
                 updateTerminalStatus(false);
                 if (terminal) {
                     terminal.writeln('\r\n\x1b[31m⚠️ 连接已断开\x1b[0m\r\n');
                 }
-            });
+            };
 
-            terminalSocket.on('terminal_data', (data) => {
-                if (terminal) {
-                    terminal.write(data);
-                }
-            });
-
-            terminalSocket.on('terminal_error', (data) => {
-                console.error('Terminal error:', data);
-                if (terminal) {
-                    terminal.writeln(`\r\n\x1b[31m❌ 错误: ${data.error}\x1b[0m\r\n`);
-                }
+            terminalSocket.onerror = (error) => {
+                console.error('WebSocket error:', error);
                 updateTerminalStatus(false);
-            });
+            };
 
-            terminalSocket.on('terminal_connected', () => {
-                console.log('SSH connected');
-                if (terminal) {
-                    terminal.clear();
-                    terminal.writeln('\x1b[32m✅ 已连接到 Ubuntu 主机\x1b[0m');
-                    terminal.writeln('\x1b[90m快捷键: Ctrl+L=清空\x1b[0m\r\n');
+            terminalSocket.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+
+                    if (msg.type === 'terminal_data') {
+                        if (terminal) {
+                            terminal.write(msg.data);
+                        }
+                    } else if (msg.type === 'terminal_error') {
+                        console.error('Terminal error:', msg.error);
+                        if (terminal) {
+                            terminal.writeln(`\r\n\x1b[31m❌ 错误: ${msg.error}\x1b[0m\r\n`);
+                        }
+                        updateTerminalStatus(false);
+                    } else if (msg.type === 'terminal_connected') {
+                        console.log('SSH connected');
+                        if (terminal) {
+                            terminal.clear();
+                            terminal.writeln('\x1b[32m✅ 已连接到 Ubuntu 主机\x1b[0m');
+                            terminal.writeln('\x1b[90m快捷键: Ctrl+L=清空\x1b[0m\r\n');
+                        }
+                        updateTerminalStatus(true);
+                    }
+                } catch (e) {
+                    console.error('Error parsing WebSocket message:', e);
                 }
-                updateTerminalStatus(true);
-            });
+            };
         }
 
         function initTerminal() {
@@ -1944,15 +1961,22 @@
 
             // 设置数据处理器
             terminal.onData((data) => {
-                if (isTerminalConnected && terminalSocket) {
-                    terminalSocket.emit('terminal_input', { data: data });
+                if (isTerminalConnected && terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+                    terminalSocket.send(JSON.stringify({
+                        type: 'terminal_input',
+                        input: data
+                    }));
                 }
             });
 
             // 处理终端调整大小
             terminal.onResize(({ cols, rows }) => {
-                if (terminalSocket && isTerminalConnected) {
-                    terminalSocket.emit('terminal_resize', { cols, rows });
+                if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+                    terminalSocket.send(JSON.stringify({
+                        type: 'terminal_resize',
+                        cols: cols,
+                        rows: rows
+                    }));
                 }
             });
 
@@ -1980,7 +2004,7 @@
 
         function reconnectTerminal() {
             if (terminalSocket) {
-                terminalSocket.disconnect();
+                terminalSocket.close();
             }
             if (terminal) {
                 terminal.clear();
@@ -2081,7 +2105,7 @@
         });
     </script>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="/static/js/app.js"></script>
 </div> <!-- End of main-container -->
 </body>
 </html>

@@ -98,8 +98,8 @@ class XMLReportParser:
 
     def _get_test_type(self, root: ET.Element) -> str:
         """获取测试类型"""
-        # 从Result属性获取
-        for attr in ['test_type', 'testType', 'type', 'Type']:
+        # 从Result属性获取（优先检查suite_name）
+        for attr in ['suite_name', 'suite', 'test_type', 'testType', 'type', 'Type']:
             if root.get(attr):
                 return root.get(attr)
 

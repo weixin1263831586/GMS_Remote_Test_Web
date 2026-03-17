@@ -190,8 +190,104 @@ async function loadConfig() {
     }
 }
 
-// ==================== Socket.IO Connection ====================
+// ==================== WebSocket Connection (FastAPI) ====================
+function initWebSocket() {
+    // 获取客户端ID
+    apiCall('/api/client-info', 'GET').then(data => {
+        const clientId = data.client_id || 'unknown';
+        state.clientId = clientId;
+
+        // 建立WebSocket连接
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/${clientId}`;
+
+        console.log(`[WebSocket] Connecting to: ${wsUrl}`);
+        state.websocket = new WebSocket(wsUrl);
+
+        state.websocket.onopen = () => {
+            console.log('[WebSocket] Connected');
+            updateConnectionStatus(true);
+            addLogEntry(`WebSocket已连接 (Client ID: ${clientId})`, 'success');
+        };
+
+        state.websocket.onclose = () => {
+            console.log('[WebSocket] Disconnected');
+            updateConnectionStatus(false);
+            addLogEntry('WebSocket连接已断开', 'warning');
+            // 5秒后重连
+            setTimeout(() => {
+                if (typeof io === 'undefined') {
+                    console.log('[WebSocket] Attempting to reconnect...');
+                    initWebSocket();
+                }
+            }, 5000);
+        };
+
+        state.websocket.onerror = (error) => {
+            console.error('[WebSocket] Error:', error);
+        };
+
+        state.websocket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                const messageType = data.type;
+
+                switch (messageType) {
+                    case 'log_update':
+                        console.log('[WebSocket] log_update:', data.log);
+                        addLogEntry(data.log, data.log_type || 'info');
+                        break;
+
+                    case 'test_complete':
+                        state.testing = false;
+                        updateTestToggleButton(false);
+                        addLogEntry('测试完成', 'success');
+                        showToast('测试完成', 'success');
+                        break;
+
+                    case 'devices_updated':
+                        state.devices = data.devices;
+                        renderDevices();
+                        break;
+
+                    case 'vpn_status_update':
+                        updateVpnStatus(data.connected);
+                        break;
+
+                    case 'ping':
+                        // 响应心跳
+                        if (state.websocket.readyState === WebSocket.OPEN) {
+                            state.websocket.send(JSON.stringify({ type: 'pong' }));
+                        }
+                        break;
+
+                    default:
+                        console.log('[WebSocket] Unknown message type:', messageType, data);
+                }
+            } catch (error) {
+                console.error('[WebSocket] Error parsing message:', error);
+            }
+        };
+    }).catch(error => {
+        console.error('[WebSocket] Failed to get client ID:', error);
+        // 3秒后重试
+        setTimeout(() => {
+            if (typeof io === 'undefined') {
+                initWebSocket();
+            }
+        }, 3000);
+    });
+}
+
+// ==================== Socket.IO Connection (Flask) ====================
 function initSocket() {
+    // 检查Socket.IO是否可用（FastAPI版本使用WebSocket）
+    if (typeof io === 'undefined') {
+        console.warn('[Socket.IO] Not available, using WebSocket instead (FastAPI)');
+        initWebSocket();
+        return;
+    }
+
     state.socket = io();
 
     state.socket.on('connect', () => {
@@ -850,6 +946,57 @@ async function submitSnBurn() {
     await executeBurnOperation('/api/sn/burn', {
         sn_code: snCode
     }, '烧写SN码', closeSnModal);
+}
+
+// ==================== 烧写操作辅助函数 ====================
+async function executeBurnOperation(endpoint, data, operationName, closeModalFunc) {
+    if (state.selectedDevices.size === 0) {
+        showToast('请先选择要操作的设备', 'warning');
+        return;
+    }
+
+    try {
+        // 立即关闭模态框
+        if (closeModalFunc) {
+            closeModalFunc();
+        }
+
+        // 显示正在操作的提示
+        addLogEntry(`正在${operationName}...`, 'info');
+        showToast(`正在${operationName}...`, 'info');
+
+        // 准备请求数据
+        const requestData = {
+            ...data,
+            devices: Array.from(state.selectedDevices)
+        };
+
+        // 调用API
+        const result = await apiCall(endpoint, 'POST', requestData);
+
+        // 处理结果
+        if (result.success) {
+            addLogEntry(`${operationName}完成`, 'success');
+            showToast(`${operationName}完成`, 'success');
+
+            // 显示详细结果
+            if (result.results && result.results.length > 0) {
+                result.results.forEach(item => {
+                    if (item.success) {
+                        addLogEntry(`  设备 ${item.device}: 成功`, 'success');
+                    } else {
+                        addLogEntry(`  设备 ${item.device}: 失败 - ${item.error || item.output}`, 'error');
+                    }
+                });
+            }
+        } else {
+            addLogEntry(`${operationName}失败: ${result.error || '未知错误'}`, 'error');
+            showToast(`${operationName}失败: ${result.error || '未知错误'}`, 'error');
+        }
+    } catch (error) {
+        addLogEntry(`${operationName}失败: ${error.message}`, 'error');
+        showToast(`${operationName}失败: ${error.message}`, 'error');
+    }
 }
 
 async function initAndStartVnc() {
@@ -1576,10 +1723,14 @@ async function startTest() {
             local_server: state.config?.local_server || ''
         });
 
+        console.log('[startTest] API call successful, setting testing = true');
         state.testing = true;
         updateTestToggleButton(true);
         addLogEntry('测试已启动', 'success');
         showToast('测试已启动', 'success');
+
+        // 刷新设备列表以更新锁定状态
+        await refreshDevices();
     } catch (error) {
         addLogEntry('启动测试失败: ' + error.message, 'error');
     }
@@ -1739,7 +1890,19 @@ function closeModal(modalId) {
     const id = modalId || 'config-modal';
     const modal = document.getElementById(id);
     if (modal) {
-        modal.remove();
+        // 对于动态创建的模态框（直接移除）
+        if (id.startsWith('source-analysis-modal-') || id.startsWith('ai-analysis-modal-')) {
+            modal.style.display = 'none';
+            // 延迟删除，确保动画完成
+            setTimeout(() => {
+                if (modal && modal.parentNode) {
+                    modal.parentNode.removeChild(modal);
+                }
+            }, 300);
+        } else {
+            // 对于静态模态框（使用class控制）
+            modal.classList.remove('show');
+        }
     }
 }
 
@@ -1813,16 +1976,28 @@ function addLogEntry(message, type = 'info') {
 
 // ==================== Status Polling ====================
 function startStatusPolling() {
-    // 只轮询状态，不处理日志（日志通过WebSocket实时推送）
+    // 轮询状态和日志（同时支持Socket.IO和WebSocket）
     setInterval(async () => {
         try {
-            // 只获取状态，不获取日志（避免重复）
-            const status = await apiCall('/api/status?logs=false');
+            // 检查是否有实时连接（Socket.IO 或 WebSocket）
+            const hasRealtimeConnection = (state.socket && typeof io !== 'undefined') ||
+                                        (state.websocket && state.websocket.readyState === WebSocket.OPEN);
 
+            console.log('[Poll] hasRealtimeConnection:', hasRealtimeConnection,
+                       'Socket.IO:', !!state.socket,
+                       'WebSocket:', state.websocket ? state.websocket.readyState : 'none');
+
+            // 如果没有实时连接，获取日志；否则只获取状态
+            const status = await apiCall(hasRealtimeConnection ? '/api/status?logs=false' : '/api/status');
+
+            // 更新测试状态按钮
+            console.log('[Poll] Status:', status.running, 'State.testing:', state.testing);
             if (status.running && !state.testing) {
+                console.log('[Poll] Setting testing = TRUE');
                 state.testing = true;
                 updateTestToggleButton(true);
             } else if (!status.running && state.testing) {
+                console.log('[Poll] Setting testing = FALSE');
                 state.testing = false;
                 updateTestToggleButton(false);
             }
@@ -1832,11 +2007,39 @@ function startStatusPolling() {
                 updateVpnStatus(status.vpn_connected);
             }
 
-            // 不再处理日志 - 通过WebSocket实时推送
+            // 如果没有实时连接，处理日志更新
+            if (!hasRealtimeConnection && status.logs && status.logs.length > 0) {
+                const logOutput = document.getElementById('log-output');
+                if (logOutput && status.logs.length > state.lastLogCount) {
+                    // 显示新增的日志
+                    const newLogs = status.logs.slice(state.lastLogCount);
+                    newLogs.forEach(log => {
+                        // 日志已经是字符串格式（包含时间戳），直接显示
+                        if (typeof log === 'string') {
+                            // 移除时间戳（因为addLogEntry会再次添加）
+                            const message = log.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '');
+                            // 提取原始日志类型（如果有）
+                            let logType = 'info';
+                            if (message.includes('✅') || message.includes('Test completed')) {
+                                logType = 'success';
+                            } else if (message.includes('❌') || message.includes('ERROR') || message.includes('[STDERR]')) {
+                                logType = 'error';
+                            } else if (message.includes('⚠️') || message.includes('WARNING')) {
+                                logType = 'warning';
+                            }
+                            addLogEntry(message, logType);
+                        } else {
+                            // 兼容对象格式
+                            addLogEntry(log.message || log.log || '', log.type || log.log_type || 'info');
+                        }
+                    });
+                    state.lastLogCount = status.logs.length;
+                }
+            }
         } catch (error) {
             console.error('Status polling error:', error);
         }
-    }, 5000);
+    }, 2000);  // FastAPI版本使用更短的轮询间隔（2秒）
 }
 
 async function checkInitialTestStatus() {
@@ -2013,10 +2216,10 @@ function displayTestReports(reports) {
                 <td style="padding: 12px; text-align: center; font-weight: 700; font-size: 12px; ${typeStyle}">
                     ${testType}
                 </td>
-                <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                     ${displayClient}
                 </td>
-                <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                     ${report.timestamp}
                 </td>
                 <td style="padding: 12px; text-align: center; color: var(--success-color); font-weight: 600; font-size: 12px;">
@@ -2031,13 +2234,39 @@ function displayTestReports(reports) {
                 <td style="padding: 12px; text-align: center; font-weight: 600; font-size: 12px; ${passRateStyle}">
                     ${passRate}
                 </td>
-                <td style="padding: 12px;">
+                <td style="padding: 12px; text-align: center;">
                     <button class="btn-xxs" onclick="event.stopPropagation(); analyzeReport('${report.timestamp}')">📈 分析报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); viewReportDetails('${report.timestamp}')">📄 查看报告</button>
+                    <button class="btn-xxs" onclick="event.stopPropagation(); deleteReport('${report.timestamp}')" style="background: var(--danger-color);">🗑️ 删除报告</button>
                 </td>
             </tr>
         `;
     }).join('');
+}
+
+async function deleteReport(timestamp) {
+    if (!confirm(`确定要删除报告 ${timestamp} 吗？此操作不可恢复。`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/reports/delete?timestamp=${encodeURIComponent(timestamp)}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('报告已删除', 'success');
+            // 刷新报告列表
+            await loadTestReports();
+        } else {
+            showToast('删除失败: ' + (result.error || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('Delete report error:', error);
+        showToast('删除失败: ' + error.message, 'error');
+    }
 }
 
 function openReportAnalysis(timestamp) {
@@ -2304,6 +2533,9 @@ function initReportAnalysis() {
 
     if (!uploadZone || !fileInput || !folderInput) return;
 
+    // 初始化时添加上传空状态类（占满屏幕）
+    uploadZone.classList.add('upload-empty');
+
     // 拖拽事件
     uploadZone.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -2540,10 +2772,14 @@ function displayReportAnalysis(data) {
     console.log('[displayReportAnalysis] Called with data:', data);
 
     const resultDiv = $('report-analysis-result');
+    const uploadZone = $('report-upload-zone');
     const summaryDiv = $('report-summary');
     const detailsDiv = $('report-details');
     const failuresDiv = $('report-failures');
     const failureList = $('report-failure-list');
+
+    // 移除上传空状态类（缩小到固定高度）
+    if (uploadZone) uploadZone.classList.remove('upload-empty');
 
     console.log('[displayReportAnalysis] Elements:', {
         resultDiv,
@@ -2614,28 +2850,9 @@ function displayReportAnalysis(data) {
     if (failuresDiv && failureList && data.failures && data.failures.length > 0) {
         failuresDiv.style.display = 'block';
 
-        // 在标题行添加按钮
+        // 清空标题行按钮区域（改为在每个用例显示）
         const actionsDiv = $('report-failure-actions');
-        if (actionsDiv && data.failures.length > 0) {
-            const firstFailure = data.failures[0];
-            const testClass = firstFailure.name || '未知用例';
-            const reasonText = firstFailure.reason || '无失败原因';
-
-            // 创建按钮元素
-            const sourceBtn = document.createElement('button');
-            sourceBtn.textContent = '🔍 源码分析';
-            sourceBtn.style.cssText = 'font-size: 10px; padding: 4px 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer;';
-            sourceBtn.onclick = () => analyzeFailureSource(testClass, reasonText.substring(0, 200));
-
-            const aiBtn = document.createElement('button');
-            aiBtn.textContent = '🤖 AI分析';
-            aiBtn.style.cssText = 'font-size: 10px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer;';
-            aiBtn.onclick = () => aiAnalyzeFailureReport(testClass, reasonText.substring(0, 500));
-
-            actionsDiv.innerHTML = '';
-            actionsDiv.appendChild(sourceBtn);
-            actionsDiv.appendChild(aiBtn);
-        }
+        if (actionsDiv) actionsDiv.innerHTML = '';
 
         failureList.innerHTML = data.failures.map((failure, idx) => {
             // 解析失败信息
@@ -2656,14 +2873,20 @@ function displayReportAnalysis(data) {
                 .replace(/ /g, '&nbsp;');
 
             return `
-                <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 12px; margin-bottom: 12px;">
-                    <div style="margin-bottom: 8px;">
+                <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 12px; margin-bottom: 12px; position: relative;">
+                    <!-- 右上角按钮 -->
+                    <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
+                        <button onclick="analyzeFailureSource('${testCaseName}', \`${reasonText.substring(0, 200).replace(/`/g, '\\`')}\`)" style="font-size: 10px; padding: 3px 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">🔍 源码分析</button>
+                        <button onclick="aiAnalyzeFailureReport('${testCaseName}', \`${reasonText.substring(0, 500).replace(/`/g, '\\`')}\`)" style="font-size: 10px; padding: 3px 8px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">🤖 AI分析</button>
+                    </div>
+
+                    <div style="margin-bottom: 8px; padding-right: 150px;">
                         <div style="font-size: 12px; color: var(--text-secondary);">测试模块: <span style="font-weight: 600; color: var(--text-primary);">${moduleName}</span></div>
                     </div>
-                    <div style="margin-bottom: 8px;">
+                    <div style="margin-bottom: 8px; padding-right: 150px;">
                         <div style="font-size: 12px; color: var(--text-secondary);">测试用例: <span style="font-family: 'Courier New', monospace; color: var(--primary-color); word-break: break-all;">${testCaseName}</span></div>
                     </div>
-                    <div>
+                    <div style="padding-right: 150px;">
                         <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">失败详情</div>
                         <div class="failure-reason" id="failure-reason-${idx}" style="font-size: 11px; font-family: 'Courier New', monospace; white-space: pre-wrap; word-wrap: break-word;">${formattedStackTrace}</div>
                     </div>
@@ -2682,8 +2905,8 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
     const modalId = 'ai-analysis-modal-' + Date.now();
     const modal = document.createElement('div');
     modal.id = modalId;
-    modal.className = 'modal';
-    modal.style.cssText = 'display: block; z-index: 10000;';
+    modal.className = 'modal show';
+    modal.style.cssText = 'display: flex; z-index: 10000;';
 
     modal.innerHTML = `
         <div class="modal-content" style="max-width: 700px; max-height: 80vh; overflow-y: auto;">
@@ -2713,9 +2936,60 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
 
         // 更新模态框内容
         modal.querySelector('.modal-title').textContent = '🤖 AI 分析结果';
-        modal.querySelector('.modal-body').innerHTML = result.success ?
-            `<div style="white-space: pre-wrap; font-family: monospace; font-size: 12px; line-height: 1.6;">${result.data.analysis || '分析完成'}</div>` :
-            `<div style="color: var(--danger-color);">分析失败: ${result.error}</div>`;
+
+        if (result.success) {
+            const data = result.data;
+            let content = '';
+
+            // 根本原因
+            if (data.root_cause) {
+                content += '<div style="margin-bottom: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px; border-left: 3px solid var(--warning-color);">';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--warning-color);">🎯 根本原因</div>';
+                content += `<div style="font-size: 13px; line-height: 1.6;">${data.root_cause}</div>`;
+                content += '</div>';
+            }
+
+            // 详细分析
+            if (data.analysis) {
+                content += '<div style="margin-bottom: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--primary-color);">📊 详细分析</div>';
+                content += `<div style="font-size: 13px; line-height: 1.6; white-space: pre-wrap;">${data.analysis}</div>`;
+                content += '</div>';
+            }
+
+            // 解决建议
+            if (data.suggestions && data.suggestions.length > 0) {
+                content += '<div style="margin-bottom: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--success-color);">✅ 解决建议</div>';
+                content += '<ol style="margin: 4px 0; padding-left: 20px; font-size: 13px; line-height: 1.8;">';
+                data.suggestions.forEach((suggestion, index) => {
+                    content += `<li style="margin-bottom: 6px;">${suggestion}</li>`;
+                });
+                content += '</ol></div>';
+            }
+
+            // 相关文档
+            if (data.related_docs && data.related_docs.length > 0) {
+                content += '<div style="padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--info-color);">📚 相关文档</div>';
+                content += '<div style="display: flex; flex-direction: column; gap: 8px;">';
+                data.related_docs.forEach(doc => {
+                    content += `<a href="${doc.url}" target="_blank" style="display: block; padding: 8px 12px; background: var(--info-color); color: white; text-decoration: none; border-radius: 4px; font-size: 12px; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">${doc.title} ↗</a>`;
+                });
+                content += '</div></div>';
+            }
+
+            // AI标记
+            if (data.ai_enabled === false) {
+                content += '<div style="margin-top: 12px; padding: 8px; background: rgba(255, 193, 7, 0.1); border-radius: 4px; text-align: center;">';
+                content += '<div style="font-size: 11px; color: var(--text-secondary);">💡 基于规则的分析（AI未配置或不可用）</div>';
+                content += '</div>';
+            }
+
+            modal.querySelector('.modal-body').innerHTML = content;
+        } else {
+            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color);">分析失败: ${result.error}</div>`;
+        }
 
     } catch (error) {
         modal.querySelector('.modal-title').textContent = '❌ 分析失败';
@@ -2728,8 +3002,8 @@ async function analyzeFailureSource(testName, errorMessage) {
     const modalId = 'source-analysis-modal-' + Date.now();
     const modal = document.createElement('div');
     modal.id = modalId;
-    modal.className = 'modal';
-    modal.style.cssText = 'display: block; z-index: 10000;';
+    modal.className = 'modal show';
+    modal.style.cssText = 'display: flex; z-index: 10000;';
 
     modal.innerHTML = `
         <div class="modal-content" style="max-width: 700px; max-height: 80vh; overflow-y: auto;">
@@ -2759,9 +3033,68 @@ async function analyzeFailureSource(testName, errorMessage) {
 
         // 更新模态框内容
         modal.querySelector('.modal-title').textContent = '🔍 源码分析结果';
-        modal.querySelector('.modal-body').innerHTML = result.success ?
-            `<div style="white-space: pre-wrap; font-size: 12px; line-height: 1.6;">${result.data.result || '分析完成'}</div>` :
-            `<div style="color: var(--danger-color);">分析失败: ${result.error}</div>`;
+
+        if (result.success) {
+            const data = result.data;
+            let content = '';
+
+            // 测试信息
+            if (data.test_info) {
+                content += '<div style="margin-bottom: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--primary-color);">📋 测试信息</div>';
+                if (data.test_info.class) {
+                    content += `<div style="font-size: 12px; margin-bottom: 4px;"><strong>类名:</strong> ${data.test_info.class}</div>`;
+                }
+                if (data.test_info.method) {
+                    content += `<div style="font-size: 12px; margin-bottom: 4px;"><strong>方法:</strong> ${data.test_info.method}</div>`;
+                }
+                if (data.test_info.package) {
+                    content += `<div style="font-size: 12px;"><strong>包名:</strong> ${data.test_info.package}</div>`;
+                }
+                content += '</div>';
+            }
+
+            // 分析结果
+            if (data.analysis) {
+                content += '<div style="margin-bottom: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--primary-color);">🔬 分析结果</div>';
+                if (data.analysis.test_type && data.analysis.test_type !== 'unknown') {
+                    content += `<div style="font-size: 12px; margin-bottom: 8px;"><strong>测试类型:</strong> ${data.analysis.test_type}</div>`;
+                }
+                if (data.analysis.possible_causes && data.analysis.possible_causes.length > 0) {
+                    content += '<div style="font-size: 12px; margin-bottom: 8px;"><strong>可能原因:</strong></div>';
+                    content += '<ul style="margin: 4px 0; padding-left: 20px; font-size: 12px;">';
+                    data.analysis.possible_causes.forEach(cause => {
+                        content += `<li>${cause}</li>`;
+                    });
+                    content += '</ul>';
+                }
+                if (data.analysis.suggestions && data.analysis.suggestions.length > 0) {
+                    content += '<div style="font-size: 12px; margin-bottom: 8px;"><strong>建议:</strong></div>';
+                    content += '<ul style="margin: 4px 0; padding-left: 20px; font-size: 12px;">';
+                    data.analysis.suggestions.forEach(suggestion => {
+                        content += `<li>${suggestion}</li>`;
+                    });
+                    content += '</ul>';
+                }
+                content += '</div>';
+            }
+
+            // 搜索链接
+            if (data.search_links && data.search_links.length > 0) {
+                content += '<div style="padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--primary-color);">🔗 源码搜索链接</div>';
+                content += '<div style="display: flex; flex-direction: column; gap: 8px;">';
+                data.search_links.forEach(link => {
+                    content += `<a href="${link.url}" target="_blank" style="display: block; padding: 8px 12px; background: var(--primary-color); color: white; text-decoration: none; border-radius: 4px; font-size: 12px; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">${link.title} ↗</a>`;
+                });
+                content += '</div></div>';
+            }
+
+            modal.querySelector('.modal-body').innerHTML = content;
+        } else {
+            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color);">分析失败: ${result.error}</div>`;
+        }
 
     } catch (error) {
         modal.querySelector('.modal-title').textContent = '❌ 分析失败';
@@ -2778,6 +3111,9 @@ function resetReportAnalysis() {
     if (resultDiv) resultDiv.style.display = 'none';
     if (fileInput) fileInput.value = '';
     if (folderInput) folderInput.value = '';
+
+    // 重新添加上传空状态类（恢复占满屏幕）
+    if (uploadZone) uploadZone.classList.add('upload-empty');
 
     showToast('已清除分析结果', 'success');
 }
