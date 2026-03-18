@@ -57,20 +57,22 @@ class UniversalAIAnalyzer:
         method_name: Optional[str],
         error_message: str,
         stack_trace: Optional[str] = None,
-        source_code: Optional[str] = None
+        source_code: Optional[str] = None,
+        auto_fetch_source: bool = True
     ) -> Dict:
         """
-        使用AI模型分析测试失败
+        使用AI模型分析测试失败（自动获取源码）
 
         Args:
             class_name: 测试类名
             method_name: 测试方法名
             error_message: 错误信息
             stack_trace: 堆栈跟踪
-            source_code: 源码（如果有）
+            source_code: 源码（可选，如果为空且auto_fetch_source=True则自动获取）
+            auto_fetch_source: 是否自动从 https://cs.android.com/android/platform/superproject 获取源码
 
         Returns:
-            dict: 分析结果
+            dict: 分析结果，包含源码信息
         """
         result = {
             'success': False,
@@ -78,10 +80,19 @@ class UniversalAIAnalyzer:
             'analysis': None,
             'suggestions': [],
             'solution': None,
-            'provider': None
+            'provider': None,
+            'source_info': None  # 新增：源码信息
         }
 
         try:
+            # 自动获取源码（如果需要）
+            if auto_fetch_source and not source_code:
+                source_info = self._fetch_source_code_android(class_name)
+                if source_info and source_info.get('content'):
+                    source_code = source_info['content']
+                    result['source_info'] = source_info
+                    logger.info(f"成功获取源码: {source_info.get('file_path', 'unknown')}")
+
             # 获取启用的提供商
             provider_name = self.get_primary_provider()
 
@@ -388,6 +399,33 @@ class UniversalAIAnalyzer:
                 'fix_strategy': 'manual_review'
             }
         }
+
+    def _fetch_source_code_android(self, class_name: str) -> Optional[Dict]:
+        """
+        从 https://cs.android.com/android/platform/superproject 获取Android源码
+
+        Args:
+            class_name: 测试类名（如 com.android.angleallowlists.vts.AngleAllowlistTraceTest）
+
+        Returns:
+            dict: 包含源码信息，如果失败返回None
+        """
+        try:
+            from core.source_analyzer import source_analyzer
+            # 提取简单类名
+            simple_class_name = class_name.split('.')[-1]
+            # 获取源码
+            source_info = source_analyzer.fetch_source_code(simple_class_name)
+
+            if source_info:
+                logger.info(f"成功获取源码: {source_info.get('file_path', 'unknown')}")
+                return source_info
+
+            return None
+
+        except Exception as e:
+            logger.warning(f"获取源码失败: {e}")
+            return None
 
 
 # 全局实例

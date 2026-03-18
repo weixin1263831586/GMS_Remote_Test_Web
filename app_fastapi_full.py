@@ -996,9 +996,9 @@ async def devices_management():
             client_id = client_manager.get_client_id(client_ip)
             locks = device_lock_manager.get_all_locks()
 
-            # 批量获取设备属性
+            # 批量获取设备属性（包括电池电量）
             device_props_cmd = " && ".join([
-                f"adb -s {device_id} shell 'echo \"===DEVICE:{device_id}===\" && getprop ro.serialno && getprop ro.product.model && getprop ro.build.version.release'"
+                f"adb -s {device_id} shell 'echo \"===DEVICE:{device_id}===\" && getprop ro.serialno && getprop ro.product.model && getprop ro.build.version.release && dumpsys battery | grep level | cut -d: -f2 | tr -d \" \"'"
                 for device_id in device_ids
             ])
 
@@ -1012,7 +1012,7 @@ async def devices_management():
                 line = line.strip()
                 if line.startswith('===DEVICE:'):
                     current_device = line.split('===DEVICE:')[1].split('===')[0]
-                    device_data[current_device] = {'serial_no': '', 'model': '', 'android_version': ''}
+                    device_data[current_device] = {'serial_no': '', 'model': '', 'android_version': '', 'battery_level': ''}
                 elif current_device and line:
                     if not device_data[current_device]['serial_no']:
                         device_data[current_device]['serial_no'] = line
@@ -1020,6 +1020,8 @@ async def devices_management():
                         device_data[current_device]['model'] = line
                     elif not device_data[current_device]['android_version']:
                         device_data[current_device]['android_version'] = line
+                    elif not device_data[current_device]['battery_level']:
+                        device_data[current_device]['battery_level'] = line
 
             ssh_manager.return_connection(ssh)
 
@@ -1053,6 +1055,7 @@ async def devices_management():
                     'serial_no': props.get('serial_no', device_id),
                     'model': props.get('model', ''),
                     'android_version': props.get('android_version', ''),
+                    'battery_level': props.get('battery_level', ''),
                     'source_type': source_type,
                     'source_host': source_host,
                     'status': 'online',
@@ -2273,19 +2276,31 @@ async def analyze_test_report(
                             content = await uploaded_file.read()
                             f.write(content)
 
-                # 查找 test_result.xml
+                # 查找 test_result.xml 或 host_log（支持两种模式）
                 analyzer = ReportAnalyzer(temp_dir=temp_dir)
                 xml_path = analyzer.file_handler.find_xml_file()
 
+                # 如果没有 test_result.xml，尝试使用日志分析器
                 if not xml_path:
-                    return JSONResponse(
-                        status_code=400,
-                        content={
-                            'success': False,
-                            'error': '未找到 test_result.xml 文件',
-                            'message': f'已接收 {len(all_files)} 个文件，但在文件夹中未找到 test_result.xml'
-                        }
-                    )
+                    logger.info(f"未找到 test_result.xml，尝试使用HostLog日志分析器")
+                    result = analyzer.analyze_log_dir(temp_dir)
+
+                    if not result:
+                        return JSONResponse(
+                            status_code=400,
+                            content={
+                                'success': False,
+                                'error': '未找到 test_result.xml 或 host_log 文件',
+                                'message': f'已接收 {len(all_files)} 个文件，但文件夹中既不包含 test_result.xml 也不包含 host_log'
+                            }
+                        )
+
+                    # 标记为日志分析结果
+                    result['report_type'] = 'log'
+                    return JSONResponse(content={
+                        'success': True,
+                        'data': result
+                    })
 
                 # 分析报告（使用 analyze_file 方法来获得正确的字典格式）
                 result = analyzer.analyze_file(xml_path)
@@ -2776,7 +2791,7 @@ def rule_based_analysis(test_name, error_message, stack_trace, module):
 
 def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
     """
-    调用大模型API分析测试失败（支持多个AI提供商）
+    调用大模型API分析测试失败（支持多个AI提供商，自动获取源码）
 
     Args:
         test_name: 测试用例名称
@@ -2785,7 +2800,7 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
         module: 测试模块名称
 
     Returns:
-        dict: AI分析结果
+        dict: AI分析结果（包含源码分析）
     """
     logger = logging.getLogger(__name__)
 
@@ -2799,13 +2814,13 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
         # 解析测试信息
         failure_info = parse_cts_failure_info(test_name, error_message)
 
-        # 调用AI分析
+        # 调用AI分析（自动获取源码）
         result = ai_analyzer.analyze_test_failure(
             class_name=failure_info.get('class_name', ''),
             method_name=failure_info.get('method_name'),
             error_message=error_message,
             stack_trace=stack_trace,
-            source_code=None
+            auto_fetch_source=True  # 启用自动源码获取
         )
 
         if result['success']:
@@ -2818,7 +2833,7 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
                 'anthropic': 'Claude (Anthropic)'
             }.get(provider_name, provider_name)
 
-            return {
+            response = {
                 'analysis': result.get('analysis', ''),
                 'suggestions': result.get('suggestions', []),
                 'root_cause': result.get('solution', {}).get('problem_description', ''),
@@ -2827,6 +2842,16 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
                 'ai_model': provider_display,
                 'ai_provider': provider_name
             }
+
+            # 添加源码信息
+            if result.get('source_info'):
+                source_info = result['source_info']
+                response['source_code_fetched'] = True
+                response['source_url'] = source_info.get('source_url', '')
+                response['source_file_path'] = source_info.get('file_path', '')
+                logger.info(f"分析包含源码: {source_info.get('file_path', 'unknown')}")
+
+            return response
         else:
             logger.warning(f"AI分析失败: {result.get('error')}")
             raise Exception(result.get('error', 'AI分析失败'))
@@ -3061,7 +3086,12 @@ async def analyze_test_source(req: dict):
 @app.post("/api/test/ai-analyze")
 async def ai_analyze_failure(req: dict):
     """
-    使用大模型分析测试失败并给出解决建议
+    使用AI分析测试失败（自动获取源码并分析）
+
+    功能说明：
+    - 自动从 https://cs.android.com/android/platform/superproject 获取测试用例源码
+    - 结合源码、错误信息和测试逻辑进行综合分析
+    - 提供诊断结果和修复建议
 
     Request body:
         {
@@ -3075,10 +3105,14 @@ async def ai_analyze_failure(req: dict):
         {
             "success": true,
             "data": {
-                "analysis": "...",  // AI分析结果
+                "analysis": "...",  // AI分析结果（包含源码分析）
                 "suggestions": [...],  // 解决建议
                 "root_cause": "...",  // 根本原因
-                "related_docs": [...]  // 相关文档链接
+                "source_code_fetched": true,  // 是否成功获取源码
+                "source_url": "...",  // 源码链接（如果获取成功）
+                "source_file_path": "...",  // 源码文件路径
+                "ai_model": "GLM-4 (智谱AI)",  // 使用的AI模型
+                "related_docs": [...]
             }
         }
     """

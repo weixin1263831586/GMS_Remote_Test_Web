@@ -17,7 +17,7 @@ class AndroidSourceAnalyzer:
     """Android源码分析器"""
 
     def __init__(self):
-        self.base_url = "https://cs.android.com"
+        self.base_url = "https://cs.android.com/android/platform/superproject"
         self.timeout = 15
 
     def fetch_source_code(self, class_name: str, package: Optional[str] = None) -> Optional[Dict]:
