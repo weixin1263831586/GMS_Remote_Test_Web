@@ -2876,11 +2876,10 @@ function displayReportAnalysis(data) {
                 <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 12px; margin-bottom: 12px; position: relative;">
                     <!-- 右上角按钮 -->
                     <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
-                        <button onclick="analyzeFailureSource('${testCaseName}', \`${reasonText.substring(0, 200).replace(/`/g, '\\`')}\`)" style="font-size: 10px; padding: 3px 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">🔍 源码分析</button>
-                        <button onclick="aiAnalyzeFailureReport('${testCaseName}', \`${reasonText.substring(0, 500).replace(/`/g, '\\`')}\`)" style="font-size: 10px; padding: 3px 8px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">🤖 AI分析</button>
+                        <button onclick="aiAnalyzeFailureReport('${testCaseName}', \`${reasonText.substring(0, 500).replace(/`/g, '\\`')}\`)" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);">🤖 AI+源码分析</button>
                     </div>
 
-                    <div style="margin-bottom: 8px; padding-right: 150px;">
+                    <div style="margin-bottom: 8px; padding-right: 140px;">
                         <div style="font-size: 12px; color: var(--text-secondary);">测试模块: <span style="font-weight: 600; color: var(--text-primary);">${moduleName}</span></div>
                     </div>
                     <div style="margin-bottom: 8px; padding-right: 150px;">
@@ -3463,7 +3462,7 @@ async function aiAnalyzeFailure(testName, errorMessage, module = '') {
         const result = await response.json();
 
         if (result.success) {
-            displayAIAnalysis(result.data, testName);
+            displayAIAnalysis(result.data, testName, errorMessage);
         } else {
             showToast('AI分析失败: ' + result.error, 'error');
         }
@@ -3477,8 +3476,9 @@ async function aiAnalyzeFailure(testName, errorMessage, module = '') {
  * 显示AI分析结果
  * @param {object} data - AI分析数据
  * @param {string} testName - 测试用例名称
+ * @param {string} errorMessage - 错误消息
  */
-function displayAIAnalysis(data, testName) {
+function displayAIAnalysis(data, testName, errorMessage = '') {
     const modalId = 'ai-analysis-modal-' + Date.now();
     const modal = document.createElement('div');
     modal.id = modalId;
@@ -3499,13 +3499,32 @@ function displayAIAnalysis(data, testName) {
     let html = `
         <div style="background: var(--bg-color); border-radius: 12px; padding: 24px; max-width: 900px; max-height: 85vh; overflow-y: auto; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); margin: auto;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; font-size: 18px; font-weight: 600;">🤖 AI分析报告</h2>
+                <h2 style="margin: 0; font-size: 18px; font-weight: 600;">🤖 AI+源码分析报告</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
+                    ${data.source_code_fetched ? '<span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 3px 10px; border-radius: 4px;">✓ 源码已获取</span>' : ''}
                     ${data.ai_enabled === false ? '<span style="font-size: 10px; background: var(--warning-color); color: white; padding: 2px 8px; border-radius: 4px;">规则分析</span>' : '<span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2px 8px; border-radius: 4px;">AI增强</span>'}
+                    ${data.ai_model ? `<span style="font-size: 10px; background: var(--success-color); color: white; padding: 2px 8px; border-radius: 4px;">${data.ai_model}</span>` : ''}
                     <button onclick="closeAIAnalysisModal('${modalId}')" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
                 </div>
             </div>
     `;
+
+    // 源码信息
+    if (data.source_code_fetched && data.source_url) {
+        html += `
+            <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); border-left: 4px solid #667eea; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #667eea;">💻 源码信息</div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">文件路径: ${data.source_file_path || 'N/A'}</div>
+                <a href="${data.source_url}" target="_blank" style="font-size: 11px; color: #667eea; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                    🔗 查看源码
+                    <svg style="width: 12px; height: 12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                    </svg>
+                </a>
+            </div>
+        `;
+    }
+
 
     // 根本原因
     if (data.root_cause) {
@@ -3561,6 +3580,21 @@ function displayAIAnalysis(data, testName) {
             </div>
         `;
     }
+
+    // 深度源码分析按钮区域
+    html += `
+            <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%); border: 1px dashed #667eea; border-radius: 8px; padding: 16px; margin-top: 20px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                    <div style="flex: 1;">
+                        <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #667eea;">💻 深度源码分析</div>
+                        <div style="font-size: 11px; color: var(--text-secondary);">从 Android 源码仓库获取完整测试用例代码，进行深入的规则分析</div>
+                    </div>
+                    <button onclick="closeAIAnalysisModal('${modalId}'); analyzeFailureSource('${testName.replace(/'/g, "\\'")}', '${(data.error_message || '').replace(/'/g, "\\'")}')" class="btn-xs" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); white-space: nowrap; padding: 8px 16px;">
+                        🔍 开始深度分析
+                    </button>
+                </div>
+            </div>
+    `;
 
     html += `
             <div style="display: flex; gap: 10px; margin-top: 20px;">
