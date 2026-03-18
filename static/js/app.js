@@ -3006,7 +3006,7 @@ async function analyzeFailureSource(testName, errorMessage) {
     modal.style.cssText = 'display: flex; z-index: 10000;';
 
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 700px; max-height: 80vh; overflow-y: auto;">
+        <div class="modal-content" style="max-width: 800px; max-height: 80vh;">
             <div class="modal-header">
                 <span class="modal-title">🔍 源码分析中...</span>
                 <span class="modal-close" onclick="closeModal('${modalId}')">&times;</span>
@@ -3033,6 +3033,31 @@ async function analyzeFailureSource(testName, errorMessage) {
 
         // 更新模态框内容
         modal.querySelector('.modal-title').textContent = '🔍 源码分析结果';
+
+        // 确保modal-content使用正确的flex布局（使header固定）
+        const modalContent = modal.querySelector('.modal-content');
+        if (modalContent) {
+            modalContent.style.display = 'flex';
+            modalContent.style.flexDirection = 'column';
+            modalContent.style.overflow = 'hidden';
+        }
+
+        // 确保modal-header固定
+        const modalHeader = modal.querySelector('.modal-header');
+        if (modalHeader) {
+            modalHeader.style.flexShrink = '0';
+            modalHeader.style.position = 'relative';
+            modalHeader.style.zIndex = '10';
+        }
+
+        // 确保modal-body可滚动
+        const modalBody = modal.querySelector('.modal-body');
+        if (modalBody) {
+            modalBody.style.overflowY = 'auto';
+            modalBody.style.overflowX = 'hidden';
+            modalBody.style.flex = '1';
+            modalBody.style.minHeight = '0';
+        }
 
         if (result.success) {
             const data = result.data;
@@ -3077,6 +3102,116 @@ async function analyzeFailureSource(testName, errorMessage) {
                     });
                     content += '</ul>';
                 }
+                content += '</div>';
+            }
+
+            // 源码分析结果
+            if (data.source_analysis) {
+                const sourceAnalysis = data.source_analysis;
+                content += '<div style="margin-bottom: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
+                content += '<div style="font-weight: 600; margin-bottom: 12px; color: var(--primary-color);">💻 智能源码分析</div>';
+
+                if (sourceAnalysis.source_found) {
+                    content += `<div style="font-size: 12px; margin-bottom: 8px; color: var(--success-color);">✓ 已成功获取并分析源码</div>`;
+
+                    // 显示源码路径
+                    if (sourceAnalysis.file_path) {
+                        content += `<div style="font-size: 12px; margin-bottom: 8px;"><strong>📁 文件路径:</strong> <span style="color: var(--primary-color);">${sourceAnalysis.file_path}</span></div>`;
+                    }
+
+                    // 解决方案部分（最重要）
+                    if (sourceAnalysis.solution) {
+                        const solution = sourceAnalysis.solution;
+                        content += '<div style="margin: 12px 0; padding: 10px; background: rgba(76, 175, 80, 0.1); border-left: 3px solid var(--success-color); border-radius: 4px;">';
+                        content += '<div style="font-size: 13px; margin-bottom: 8px; font-weight: 600; color: var(--success-color);">🎯 问题诊断</div>';
+                        if (solution.problem_description) {
+                            content += `<div style="font-size: 12px; margin-bottom: 8px; line-height: 1.5;">${solution.problem_description.replace(/\n/g, '<br>')}</div>`;
+                        }
+                        if (solution.error_type) {
+                            content += `<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">错误类型: <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px;">${solution.error_type}</code></div>`;
+                        }
+                        if (solution.fix_strategy) {
+                            const strategyNames = {
+                                'verify_expectations': '验证预期值',
+                                'add_null_checks': '添加空值检查',
+                                'verify_state': '验证状态',
+                                'adjust_timeout': '调整超时',
+                                'generic': '通用修复'
+                            };
+                            const strategyName = strategyNames[solution.fix_strategy] || solution.fix_strategy;
+                            content += `<div style="font-size: 11px; color: var(--text-secondary);">修复策略: <span style="color: var(--primary-color);">${strategyName}</span></div>`;
+                        }
+                        content += '</div>';
+                    }
+
+                    // 显示相关代码片段
+                    if (sourceAnalysis.relevant_code && sourceAnalysis.relevant_code.length > 0) {
+                        content += '<div style="margin: 12px 0;">';
+                        content += '<div style="font-size: 12px; margin-bottom: 8px; font-weight: 600;">📝 相关代码片段:</div>';
+                        sourceAnalysis.relevant_code.slice(0, 2).forEach(code => {
+                            const displayName = code.name || code.keyword || '代码片段';
+                            content += '<div style="margin: 8px 0; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 4px; font-family: monospace; font-size: 11px; overflow-x: auto; white-space: pre-wrap; border-left: 2px solid var(--primary-color);">';
+                            content += `<div style="color: var(--primary-color); margin-bottom: 6px; font-size: 10px; text-transform: uppercase;">// ${code.type}: ${displayName}</div>`;
+                            const codeText = code.code.substring(0, 800);
+                            content += codeText + (code.code.length > 800 ? '\n... (代码已截断)' : '');
+                            content += '</div>';
+                        });
+                        content += '</div>';
+                    }
+
+                    // 具体的修改建议
+                    if (sourceAnalysis.suggestions && sourceAnalysis.suggestions.length > 0) {
+                        content += '<div style="margin: 12px 0; padding: 10px; background: rgba(33, 150, 243, 0.1); border-radius: 4px;">';
+                        content += '<div style="font-size: 12px; margin-bottom: 8px; font-weight: 600; color: var(--primary-color);">💡 修复建议</div>';
+                        sourceAnalysis.suggestions.forEach((suggestion, index) => {
+                            content += `<div style="font-size: 12px; margin: 6px 0; padding-left: 16px; position: relative;">`;
+                            content += `<span style="position: absolute; left: 0; color: var(--primary-color); font-weight: bold;">${index + 1}.</span> ${suggestion}`;
+                            content += `</div>`;
+                        });
+                        content += '</div>';
+                    }
+
+                    // 显示额外的分析结果
+                    if (sourceAnalysis.analysis && sourceAnalysis.analysis.length > 0) {
+                        content += '<div style="margin: 8px 0;">';
+                        content += '<div style="font-size: 12px; margin-bottom: 4px; font-weight: 600;">🔍 详细分析:</div>';
+                        sourceAnalysis.analysis.forEach(analysis => {
+                            content += `<div style="font-size: 12px; margin: 4px 0; color: var(--text-secondary);">• ${analysis}</div>`;
+                        });
+                        content += '</div>';
+                    }
+
+                } else {
+                    // 未找到源码时的错误模式分析
+                    content += `<div style="font-size: 12px; color: var(--warning-color); margin-bottom: 8px;">⚠ 无法自动获取源码，基于错误模式进行分析</div>`;
+
+                    // 显示基于错误模式的分析结果
+                    if (sourceAnalysis.solution) {
+                        const solution = sourceAnalysis.solution;
+                        content += '<div style="margin: 12px 0; padding: 10px; background: rgba(255, 152, 0, 0.1); border-left: 3px solid var(--warning-color); border-radius: 4px;">';
+                        content += '<div style="font-size: 13px; margin-bottom: 8px; font-weight: 600; color: var(--warning-color);">🎯 问题诊断</div>';
+                        if (solution.problem_description) {
+                            content += `<div style="font-size: 12px; margin-bottom: 8px;">${solution.problem_description}</div>`;
+                        }
+                        content += '</div>';
+                    }
+
+                    if (sourceAnalysis.suggestions && sourceAnalysis.suggestions.length > 0) {
+                        content += '<div style="margin: 12px 0; padding: 10px; background: rgba(33, 150, 243, 0.1); border-radius: 4px;">';
+                        content += '<div style="font-size: 12px; margin-bottom: 8px; font-weight: 600; color: var(--primary-color);">💡 修复建议</div>';
+                        sourceAnalysis.suggestions.forEach((suggestion, index) => {
+                            content += `<div style="font-size: 12px; margin: 6px 0; padding-left: 16px; position: relative;">`;
+                            content += `<span style="position: absolute; left: 0; color: var(--primary-color); font-weight: bold;">${index + 1}.</span> ${suggestion}`;
+                            content += `</div>`;
+                        });
+                        content += '</div>';
+                    }
+
+                    if (sourceAnalysis.error) {
+                        content += `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 8px;">技术详情: ${sourceAnalysis.error}</div>`;
+                    }
+                }
+
                 content += '</div>';
             }
 

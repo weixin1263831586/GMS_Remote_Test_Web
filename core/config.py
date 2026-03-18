@@ -43,7 +43,11 @@ class ConfigManager:
         # 加载动态配置并合并
         dynamic_config = self._load_dynamic_config()
         if dynamic_config:
+            # AI配置优先使用静态配置（config.json），防止被动态配置覆盖
+            ai_config = config.get('ai_models', {})
             config.update(dynamic_config)
+            if ai_config:
+                config['ai_models'] = ai_config
 
         return config
 

@@ -4373,7 +4373,7 @@ def construct_source_search_url(search_term, search_type='code'):
     构造Android源码搜索URL
 
     Args:
-        search_term: 搜索词
+        search_term: 搜索词（通常是类名）
         search_type: 搜索类型 (code, symbol, file)
 
     Returns:
@@ -4386,7 +4386,9 @@ def construct_source_search_url(search_term, search_type='code'):
     if search_type == 'symbol':
         return f"{base_url}/+/refs/heads/main:qd/?q={encoded_term}"
     else:
-        return f"{base_url}/+/refs/heads/main:qd/?q={encoded_term}&ss=android%2Fplatform%2Fsuperproject"
+        # 使用文件名搜索（添加.java扩展名），这样更容易找到源文件
+        # 例如: AngleAllowlistTraceTest -> AngleAllowlistTraceTest.java
+        return f"{base_url}/+/android-latest-release:qd/?q={encoded_term}.java&ss=android%2Fplatform%2Fsuperproject"
 
 
 def analyze_test_failure_class(class_name, error_type=None):
@@ -4493,10 +4495,13 @@ def get_source_code_suggestions(test_name, error_message, stack_trace=None):
 
     # 生成搜索链接
     if failure_info.get('class_name'):
-        # 搜索测试类
+        # 只搜索类名（不含包名）
+        class_name = failure_info["class_name"]
+        simple_class_name = class_name.split('.')[-1]  # 提取简单类名
+
         result['search_links'].append({
-            'title': f'搜索测试类: {failure_info["class_name"]}',
-            'url': construct_source_search_url(failure_info["class_name"])
+            'title': f'搜索测试类: {simple_class_name}',
+            'url': construct_source_search_url(simple_class_name)
         })
 
     # 搜索错误类型
