@@ -29,5 +29,20 @@
             "username": "cp2-share",
             "password": "Rockchip@2025"
         }
-    ]
+    ],
+    "ai_models": {
+        "enabled": true,
+        "primary_provider": "zhipu",
+        "providers": {
+            "zhipu": {
+                "name": "智谱GLM-4.7",
+                "enabled": true,
+                "api_key": "e77094ad6bfa49a6958380b9652ab38a.K2ZM71vpl2gHHeDW",
+                "model": "glm-4",
+                "base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                "temperature": 0.3,
+                "max_tokens": 2000
+            }
+        }
+    }
 }

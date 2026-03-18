@@ -1085,7 +1085,9 @@ log-system { color: var(--info-color); }
     width: 90%;
     max-width: 500px;
     max-height: 80vh;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* 防止整个modal-content滚动 */
 }
 
 .modal-header {
@@ -1094,6 +1096,10 @@ log-system { color: var(--info-color); }
     align-items: center;
     padding: 15px 20px;
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0; /* 防止header被压缩 */
+    position: relative; /* 相对定位，固定在顶部 */
+    background: var(--light-bg);
+    z-index: 10;
 }
 
 .modal-title {
@@ -1116,6 +1122,10 @@ log-system { color: var(--info-color); }
 
 .modal-body {
     padding: 20px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 1; /* 占据剩余空间 */
+    min-height: 0; /* 允许flex子元素正确收缩 */
 }
 
 /* ==================== Modal Form ==================== */

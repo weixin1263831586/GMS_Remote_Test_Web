@@ -2388,7 +2388,7 @@ def construct_source_search_url(search_term, search_type='code'):
     构造Android源码搜索URL
 
     Args:
-        search_term: 搜索词
+        search_term: 搜索词（通常是类名）
         search_type: 搜索类型 (code, symbol, file)
 
     Returns:
@@ -2400,7 +2400,9 @@ def construct_source_search_url(search_term, search_type='code'):
     if search_type == 'symbol':
         return f"{base_url}/+/refs/heads/main:qd/?q={encoded_term}"
     else:
-        return f"{base_url}/+/refs/heads/main:qd/?q={encoded_term}&ss=android%2Fplatform%2Fsuperproject"
+        # 使用文件名搜索（添加.java扩展名），这样更容易找到源文件
+        # 例如: AngleAllowlistTraceTest -> AngleAllowlistTraceTest.java
+        return f"{base_url}/+/android-latest-release:qd/?q={encoded_term}.java&ss=android%2Fplatform%2Fsuperproject"
 
 
 def analyze_test_failure_class(class_name, error_type=None):
@@ -2774,7 +2776,7 @@ def rule_based_analysis(test_name, error_message, stack_trace, module):
 
 def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
     """
-    调用大模型API分析测试失败
+    调用大模型API分析测试失败（支持多个AI提供商）
 
     Args:
         test_name: 测试用例名称
@@ -2787,8 +2789,57 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
     """
     logger = logging.getLogger(__name__)
 
-    # 构建分析提示词
-    prompt = f"""请分析以下CTS测试失败信息，给出详细的原因分析和解决方案：
+    # 优先使用通用AI分析器
+    try:
+        from core.universal_ai import get_universal_analyzer
+
+        # 获取通用AI分析器
+        ai_analyzer = get_universal_analyzer()
+
+        # 解析测试信息
+        failure_info = parse_cts_failure_info(test_name, error_message)
+
+        # 调用AI分析
+        result = ai_analyzer.analyze_test_failure(
+            class_name=failure_info.get('class_name', ''),
+            method_name=failure_info.get('method_name'),
+            error_message=error_message,
+            stack_trace=stack_trace,
+            source_code=None
+        )
+
+        if result['success']:
+            # 转换为旧格式以保持兼容性
+            provider_name = result.get('provider', 'unknown')
+            provider_display = {
+                'zhipu': 'GLM-4 (智谱AI)',
+                'ollama': 'Ollama本地模型',
+                'openai': 'GPT-4 (OpenAI)',
+                'anthropic': 'Claude (Anthropic)'
+            }.get(provider_name, provider_name)
+
+            return {
+                'analysis': result.get('analysis', ''),
+                'suggestions': result.get('suggestions', []),
+                'root_cause': result.get('solution', {}).get('problem_description', ''),
+                'related_docs': [],
+                'ai_enabled': True,
+                'ai_model': provider_display,
+                'ai_provider': provider_name
+            }
+        else:
+            logger.warning(f"AI分析失败: {result.get('error')}")
+            raise Exception(result.get('error', 'AI分析失败'))
+
+    except ImportError:
+        logger.info("通用AI分析器未安装")
+    except Exception as e:
+        logger.warning(f"通用AI分析失败: {str(e)}")
+
+    # 回退到旧的AI分析方法
+    try:
+        # 构建分析提示词
+        prompt = f"""请分析以下CTS测试失败信息，给出详细的原因分析和解决方案：
 
 测试用例: {test_name}
 测试模块: {module if module else '未知'}
@@ -2806,7 +2857,6 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
 
 请用中文回答，格式清晰，包含具体的操作步骤。"""
 
-    try:
         # 尝试调用本地安装的AI模型（如通过ollama）
         # 首先检查配置中是否有AI API设置
         config = config_manager.load_config()
@@ -2875,15 +2925,60 @@ def get_source_code_suggestions(test_name, error_message, stack_trace=None):
             'keywords': failure_info.get('error_keywords', [])
         },
         'analysis': analysis,
-        'search_links': []
+        'search_links': [],
+        'source_analysis': None  # 新增：源码分析结果
     }
+
+    # 尝试进行源码分析（异步，不阻塞主流程）
+    try:
+        from core.source_analyzer import source_analyzer
+
+        class_name = failure_info.get('class_name', '')
+        if class_name:
+            # 提取简单类名
+            simple_class_name = class_name.split('.')[-1]
+
+            # 执行源码分析
+            source_analysis_result = source_analyzer.analyze_failure_with_source(
+                class_name=simple_class_name,
+                method_name=failure_info.get('method_name'),
+                error_message=error_message,
+                stack_trace=stack_trace
+            )
+
+            result['source_analysis'] = source_analysis_result
+
+            # 如果找到了源码，添加分析结果和建议
+            if source_analysis_result.get('source_found'):
+                # 合并源码分析的结果到主分析中
+                if source_analysis_result.get('analysis'):
+                    analysis['possible_causes'].extend(source_analysis_result['analysis'])
+                if source_analysis_result.get('suggestions'):
+                    analysis['suggestions'].extend(source_analysis_result['suggestions'])
+
+                # 添加源码链接
+                if source_analysis_result.get('source_url'):
+                    result['search_links'].insert(0, {
+                        'title': f'查看源码: {simple_class_name}.java',
+                        'url': source_analysis_result['source_url']
+                    })
+
+    except Exception as e:
+        logger.warning(f"源码分析失败: {e}")
+        result['source_analysis'] = {
+            'source_found': False,
+            'error': str(e)
+        }
 
     # 生成搜索链接
     if failure_info.get('class_name'):
-        # 搜索测试类
+        # 只搜索类名（不含包名）
+        class_name = failure_info["class_name"]
+        simple_class_name = class_name.split('.')[-1]  # 提取简单类名
+
         result['search_links'].append({
-            'title': f'搜索测试类: {failure_info["class_name"]}',
-            'url': construct_source_search_url(failure_info["class_name"])
+            'title': f'搜索测试类: {simple_class_name}',
+            'url': construct_source_search_url(simple_class_name)
         })
 
     # 搜索错误类型
