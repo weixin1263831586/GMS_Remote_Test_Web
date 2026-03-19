@@ -2310,6 +2310,113 @@ async def delete_report(request: Request, timestamp: str = Query(..., descriptio
             status_code=500
         )
 
+@app.get("/api/reports/{report_timestamp}/download")
+async def download_report(request: Request, report_timestamp: str):
+    """下载测试报告（打包为ZIP文件）"""
+    import io
+    import zipfile
+    from fastapi.responses import Response
+
+    try:
+        logger.info(f"[DOWNLOAD] 请求下载报告: timestamp='{report_timestamp}'")
+
+        # 获取当前用户ID
+        client_id = get_client_id_from_request(request)
+        logger.info(f"[DOWNLOAD] 当前用户 client_id: '{client_id}'")
+
+        # 从数据库获取报告信息
+        report = test_report_db.get_report_by_timestamp(report_timestamp)
+        logger.info(f"[DOWNLOAD] 查询报告结果: {report is not None}")
+
+        if not report:
+            logger.error(f"[DOWNLOAD] 报告不存在: {report_timestamp}")
+            # 尝试列出所有报告以供调试
+            all_reports = test_report_db.get_reports(limit=10)
+            logger.info(f"[DOWNLOAD] 数据库中的报告列表: {[r['timestamp'] for r in all_reports]}")
+            return JSONResponse(
+                content={'success': False, 'error': f'报告不存在: {report_timestamp}'},
+                status_code=404
+            )
+
+        # 构建可能的client_id列表（与list_reports逻辑一致）
+        config = config_manager.load_config()
+        configured_ip = config.get('client_ip', '')
+        username = config.get('client_username', 'unknown')
+
+        possible_client_ids = [client_id]
+        if configured_ip:
+            # 如果当前是本地访问，添加配置文件IP对应的client_id
+            if '@127.0.0.1' in client_id or '@::1' in client_id or '@localhost' in client_id:
+                possible_client_ids.append(f"{username}@{configured_ip}")
+
+        # 检查权限：只能下载自己的报告
+        report_client_id = report.get('client_id')
+        logger.info(f"[DOWNLOAD] 报告的 client_id: '{report_client_id}'")
+        logger.info(f"[DOWNLOAD] 可能的 client_id 列表: {possible_client_ids}")
+
+        if report_client_id not in possible_client_ids:
+            logger.error(f"[DOWNLOAD] 权限不足: 报告client_id='{report_client_id}', 当前可能的client_ids={possible_client_ids}")
+            return JSONResponse(
+                content={'success': False, 'error': '无权下载此报告'},
+                status_code=403
+            )
+
+        # 获取 result_dir 路径
+        report_dir = report.get('result_dir')
+        logger.info(f"[DOWNLOAD] 报告目录: {report_dir}, 存在: {os.path.exists(report_dir) if report_dir else False}")
+
+        if not report_dir or not os.path.exists(report_dir):
+            logger.error(f"[DOWNLOAD] 报告目录不存在: {report_dir}")
+            return JSONResponse(
+                content={'success': False, 'error': f'报告目录不存在: {report_dir}'},
+                status_code=404
+            )
+
+        # 创建ZIP文件到内存
+        zip_buffer = io.BytesIO()
+        zip_filename = f"report_{report_timestamp}.zip"
+        file_count = 0
+
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for root, dirs, filenames in os.walk(report_dir):
+                for filename in filenames:
+                    file_path = os.path.join(root, filename)
+                    # 计算相对路径，保持目录结构
+                    arcname = os.path.relpath(file_path, os.path.dirname(report_dir))
+
+                    try:
+                        zip_file.write(file_path, arcname)
+                        file_count += 1
+                    except Exception as e:
+                        logger.warning(f"无法添加文件到ZIP: {file_path}, 错误: {e}")
+
+        logger.info(f"创建ZIP文件: {zip_filename}, 包含 {file_count} 个文件")
+
+        # 获取ZIP数据
+        zip_data = zip_buffer.getvalue()
+
+        if len(zip_data) == 0:
+            return JSONResponse(
+                content={'success': False, 'error': 'ZIP文件创建失败'},
+                status_code=500
+            )
+
+        # 返回ZIP文件
+        return Response(
+            content=zip_data,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{zip_filename}\""
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error downloading report: {e}", exc_info=True)
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+
 @app.post("/api/report/analyze")
 async def analyze_test_report(
     file: Optional[UploadFile] = File(default=None),

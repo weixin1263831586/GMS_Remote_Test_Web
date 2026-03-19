@@ -2270,6 +2270,7 @@ function displayTestReports(reports) {
                 <td style="padding: 12px; text-align: center;">
                     <button class="btn-xxs" onclick="event.stopPropagation(); analyzeReport('${report.timestamp}')">📈 分析报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); viewReportDetails('${report.timestamp}')">📄 查看报告</button>
+                    <button class="btn-xxs" onclick="event.stopPropagation(); downloadReport('${report.timestamp}')" style="background: var(--success-color);">⬇️ 下载报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); deleteReport('${report.timestamp}')" style="background: var(--danger-color);">🗑️ 删除报告</button>
                 </td>
             </tr>
@@ -2299,6 +2300,80 @@ async function deleteReport(timestamp) {
     } catch (error) {
         console.error('Delete report error:', error);
         showToast('删除失败: ' + error.message, 'error');
+    }
+}
+
+async function downloadReport(timestamp) {
+    try {
+        showToast('正在下载报告...', 'info');
+
+        const response = await fetch(`/api/reports/${timestamp}/download`);
+
+        // 检查响应状态
+        if (!response.ok) {
+            let errorMsg = `HTTP ${response.status}`;
+            try {
+                const errorData = await response.json();
+                errorMsg = errorData.error || errorMsg;
+            } catch (e) {
+                // 如果无法解析JSON，使用默认错误消息
+            }
+            console.error('Download failed:', response.status, errorMsg);
+            showToast('下载失败: ' + errorMsg, 'error');
+            return;
+        }
+
+        // 检查Content-Type
+        const contentType = response.headers.get('Content-Type');
+        console.log('Response Content-Type:', contentType);
+
+        if (contentType && contentType.includes('application/json')) {
+            // 如果返回的是JSON而不是文件，说明有错误
+            const errorData = await response.json();
+            console.error('Server returned error:', errorData);
+            showToast('下载失败: ' + (errorData.error || '服务器错误'), 'error');
+            return;
+        }
+
+        // 获取文件名
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `report_${timestamp}.zip`;
+
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+            if (filenameMatch && filenameMatch[1]) {
+                filename = filenameMatch[1].replace(/['"]/g, '');
+            }
+        }
+        console.log('Downloading file as:', filename);
+
+        // 下载文件
+        const blob = await response.blob();
+        console.log('Blob size:', blob.size, 'bytes');
+
+        if (blob.size === 0) {
+            showToast('下载失败: 文件为空', 'error');
+            return;
+        }
+
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+
+        // 延迟清理
+        setTimeout(() => {
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }, 100);
+
+        showToast('报告下载成功', 'success');
+    } catch (error) {
+        console.error('Download report error:', error);
+        showToast('下载失败: ' + error.message, 'error');
     }
 }
 
