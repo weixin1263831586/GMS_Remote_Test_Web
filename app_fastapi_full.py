@@ -1262,6 +1262,58 @@ async def connect_wifi(req: WifiConnectRequest):
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
 
+class DeviceShellRequest(BaseModel):
+    """设备Shell请求"""
+    serial_no: str = Field(..., description="设备序列号")
+
+@app.post("/api/device/shell")
+async def open_device_shell(req: DeviceShellRequest, request: Request):
+    """打开设备ADB Shell - 为终端页面准备设备连接"""
+    try:
+        config = config_manager.load_config()
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return JSONResponse(
+                content={"success": False, "message": "SSH连接失败"},
+                status_code=500
+            )
+
+        # 验证设备是否在线
+        check_cmd = f"adb -s {req.serial_no} shell echo 'ready'"
+        output, error, code = ssh_manager.execute_command(ssh, check_cmd)
+
+        ssh_manager.return_connection(ssh)
+
+        if code == 0 and 'ready' in output:
+            # 将设备信息保存到会话中,供WebSocket终端使用
+            client_id = get_client_id_from_request(request)
+
+            # 保存到全局状态
+            if not hasattr(global_state, 'device_shells'):
+                global_state.device_shells = {}
+
+            global_state.device_shells[client_id] = {
+                'serial_no': req.serial_no,
+                'connected_at': datetime.now().isoformat()
+            }
+
+            return JSONResponse(content={
+                "success": True,
+                "message": f"设备 {req.serial_no} 已准备就绪",
+                "serial_no": req.serial_no
+            })
+        else:
+            return JSONResponse(
+                content={"success": False, "message": f"设备 {req.serial_no} 不在线或无响应"},
+                status_code=400
+            )
+    except Exception as e:
+        logger.error(f"Error opening device shell: {e}")
+        return JSONResponse(
+            content={"success": False, "message": f"打开Shell失败: {str(e)}"},
+            status_code=500
+        )
+
 # ==================== 测试管理 ====================
 
 @app.post("/api/test/start")
@@ -4964,11 +5016,23 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         # 清理终端SSH会话（如果存在）
         with global_state.terminal_lock:
             if client_id in global_state.terminal_ssh_sessions:
+                session_info = global_state.terminal_ssh_sessions[client_id]
                 try:
-                    global_state.terminal_ssh_sessions[client_id]['ssh'].close()
-                    logger.info(f"[TERMINAL] Closed SSH connection for {client_id}")
+                    # 只有SSH模式才关闭SSH连接,ADB模式使用的是共享连接
+                    if session_info.get('mode') != 'adb':
+                        session_info['ssh'].close()
+                        logger.info(f"[TERMINAL] Closed SSH connection for {client_id}")
+                    else:
+                        # ADB模式:只关闭channel,不关闭SSH连接
+                        try:
+                            session_info['channel'].close()
+                            logger.info(f"[TERMINAL] Closed ADB channel for {client_id}")
+                        except:
+                            pass
+                        # 归还SSH连接到连接池
+                        ssh_manager.return_connection(session_info['ssh'])
                 except Exception as e:
-                    logger.error(f"[TERMINAL] Error closing SSH for {client_id}: {e}")
+                    logger.error(f"[TERMINAL] Error closing session for {client_id}: {e}")
                 del global_state.terminal_ssh_sessions[client_id]
 
 async def refresh_devices_websocket(client_id: str, websocket: WebSocket):
@@ -5019,6 +5083,137 @@ async def refresh_devices_websocket(client_id: str, websocket: WebSocket):
             'message': str(e)
         })
 
+async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_no: str, config: dict):
+    """处理ADB Shell连接 - 通过SSH执行adb shell命令"""
+    try:
+        # 先连接到SSH
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            await websocket.send_json({
+                'type': 'terminal_error',
+                'error': 'SSH连接失败'
+            })
+            return
+
+        # 创建shell通道
+        channel = ssh.invoke_shell(term='xterm-256color')
+        channel.setblocking(0)
+
+        # 设置初始终端大小
+        channel.resize_pty(width=120, height=30)
+
+        # 发送清屏和adb shell命令
+        # 使用多个换行和clear命令来清除banner
+        channel.send('\n\n\n')  # 发送换行跳过banner
+        channel.send('clear\n')  # 清屏
+        channel.send(f'adb -s {serial_no} shell\n')  # 执行 adb shell
+
+        # 保存会话
+        loop = asyncio.get_event_loop()
+        session_id = client_id
+
+        with global_state.terminal_lock:
+            # 关闭旧连接（如果存在）
+            if session_id in global_state.terminal_ssh_sessions:
+                try:
+                    old_session = global_state.terminal_ssh_sessions[session_id]
+                    # 只有SSH模式才关闭SSH连接
+                    if old_session.get('mode') != 'adb':
+                        old_session['ssh'].close()
+                    else:
+                        # ADB模式:只关闭channel
+                        try:
+                            old_session['channel'].close()
+                        except:
+                            pass
+                        ssh_manager.return_connection(old_session['ssh'])
+                except:
+                    pass
+
+            global_state.terminal_ssh_sessions[session_id] = {
+                'ssh': ssh,  # 这里保存的是SSH连接对象
+                'channel': channel,
+                'host': config.get('ubuntu_host'),
+                'user': config.get('ubuntu_user'),
+                'mode': 'adb',
+                'serial_no': serial_no,
+                'connected_at': time.time(),
+                'websocket': websocket,
+                'event_loop': loop
+            }
+
+        logger.info(f"[TERMINAL] ADB Shell session created for device {serial_no}")
+        await websocket.send_json({
+            'type': 'terminal_connected',
+            'mode': 'adb',
+            'serial_no': serial_no
+        })
+
+        # 启动后台读取线程
+        def read_output():
+            """后台线程持续读取终端输出"""
+            try:
+                while True:
+                    # 检查会话是否仍然存在
+                    if session_id not in global_state.terminal_ssh_sessions:
+                        logger.info(f"[TERMINAL] ADB Session {session_id} no longer exists")
+                        break
+
+                    try:
+                        # 读取数据
+                        data_chunk = global_state.terminal_ssh_sessions[session_id]['channel'].recv(1024)
+                        if not data_chunk:
+                            logger.info(f"[TERMINAL] No data received, ADB connection closed")
+                            break
+
+                        # 解码并发送
+                        try:
+                            text = data_chunk.decode('utf-8')
+                        except UnicodeDecodeError:
+                            text = data_chunk.decode('utf-8', errors='ignore')
+
+                        # 使用保存的事件循环通过WebSocket发送
+                        try:
+                            future = asyncio.run_coroutine_threadsafe(
+                                websocket.send_json({
+                                    'type': 'terminal_data',
+                                    'data': text
+                                }),
+                                loop
+                            )
+                            # 等待发送完成
+                            future.result(timeout=5)
+                        except Exception as e:
+                            logger.error(f"[TERMINAL] Error sending ADB data: {e}")
+                            break
+
+                    except socket.timeout:
+                        continue
+                    except Exception as e:
+                        logger.error(f"[TERMINAL] ADB read error: {e}")
+                        break
+
+                    time.sleep(0.01)  # 防止CPU占用过高
+
+            except Exception as e:
+                logger.error(f"[TERMINAL] ADB read thread error: {e}")
+            finally:
+                # 清理连接
+                logger.info(f"[TERMINAL] ADB read thread exiting for {session_id}")
+
+        # 在后台线程中启动读取
+        thread = threading.Thread(target=read_output, daemon=True)
+        thread.start()
+
+        logger.info(f"[TERMINAL] ADB Shell connected for device {serial_no}")
+
+    except Exception as e:
+        logger.error(f"[TERMINAL] ADB Shell connection error: {e}")
+        await websocket.send_json({
+            'type': 'terminal_error',
+            'error': f'ADB Shell连接失败: {str(e)}'
+        })
+
 async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: dict):
     """处理终端SSH连接"""
     try:
@@ -5026,11 +5221,19 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
         host = data.get('host', config.get('ubuntu_host'))
         user = data.get('user', config.get('ubuntu_user'))
         password = data.get('password', config.get('ubuntu_pswd', ''))
+        mode = data.get('mode', 'ssh')  # 'ssh' 或 'adb'
+        serial_no = data.get('serial_no', '')
 
         # 使用client_id作为会话ID（每个WebSocket连接独立）
         session_id = client_id
 
-        logger.info(f"[TERMINAL] Connection request from {session_id} to {user}@{host}")
+        # ADB Shell 模式
+        if mode == 'adb':
+            logger.info(f"[TERMINAL] ADB Shell connection request for device {serial_no}")
+            await handle_adb_shell_connect(client_id, websocket, serial_no, config)
+            return
+
+        logger.info(f"[TERMINAL] SSH Connection request from {session_id} to {user}@{host}")
 
         # 创建SSH客户端
         ssh = paramiko.SSHClient()

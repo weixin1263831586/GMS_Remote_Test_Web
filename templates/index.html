@@ -524,15 +524,15 @@
 
             <!-- 用户列表 -->
             <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
-                <table style="width: 100%; border-collapse: collapse;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">用户标识</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">IP地址</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">状态</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">占用设备</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">最后活跃</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">连接时间</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 150px;">用户标识</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 140px;">IP地址</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 80px;">状态</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 120px;">占用设备</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 160px;">最后活跃</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">连接时间</th>
                         </tr>
                     </thead>
                     <tbody id="users-table-body">
@@ -568,35 +568,39 @@
 
             <!-- 设备列表 -->
             <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
-                <table style="width: 100%; border-collapse: collapse;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('serial_no')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('serial_no')">
                                 设备序列号 <span id="sort-serial_no">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('model')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('model')">
                                 设备型号 <span id="sort-model">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('source_type')">
-                                来源类型 <span id="sort-source_type">↕</span>
-                            </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('source_host')">
-                                来源主机 <span id="sort-source_host">↕</span>
-                            </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('android_version')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('android_version')">
                                 Android版本 <span id="sort-android_version">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('status')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('battery_level')">
+                                电池电量 <span id="sort-battery_level">↕</span>
+                            </th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('status')">
                                 状态 <span id="sort-status">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('locked_by')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('source_type')">
+                                来源类型 <span id="sort-source_type">↕</span>
+                            </th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('source_host')">
+                                来源主机 <span id="sort-source_host">↕</span>
+                            </th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('locked_by')">
                                 占用用户 <span id="sort-locked_by">↕</span>
                             </th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
                         </tr>
                     </thead>
                     <tbody id="devices-table-body">
                         <tr>
-                            <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
                             </td>
                         </tr>
@@ -611,17 +615,17 @@
 
             <!-- 报告列表 -->
             <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
-                <table style="width: 100%; border-collapse: collapse;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">类型</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">客户端</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">时间戳</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">通过</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">失败</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">总计</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">通过率</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">操作</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 60px;">类型</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 150px;">客户端</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 160px;">时间戳</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 60px;">通过</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 60px;">失败</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 60px;">总计</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 70px;">通过率</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
                         </tr>
                     </thead>
                     <tbody id="reports-table-body">
@@ -1505,23 +1509,23 @@
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${user.client_id}
                         </td>
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${user.ip}
                         </td>
-                        <td style="padding: 12px;">
+                        <td style="padding: 12px; text-align: center;">
                             <span style="color: ${statusColor}; font-weight: 600; font-size: 11px;">●</span>
                             <span style="margin-left: 6px; font-size: 11px;">${statusText}</span>
                         </td>
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${devices}
                         </td>
-                        <td style="padding: 12px; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-size: 11px;">
                             ${lastSeen}
                         </td>
-                        <td style="padding: 12px; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-size: 11px;">
                             ${createdAt}
                         </td>
                     </tr>
@@ -1656,32 +1660,88 @@
                     ? '<span style="color: var(--success-color); font-weight: 600; font-size: 11px;">● 在线</span>'
                     : '<span style="color: var(--text-secondary); font-weight: 600; font-size: 11px;">○ 离线</span>';
 
+                // 电池电量显示
+                let batteryDisplay = '-';
+                if (device.battery_level) {
+                    const level = parseInt(device.battery_level);
+                    if (!isNaN(level)) {
+                        let batteryColor = 'var(--success-color)';
+                        let batteryIcon = '🔋';
+                        if (level < 20) {
+                            batteryColor = 'var(--danger-color)';
+                            batteryIcon = '🪫';
+                        } else if (level < 50) {
+                            batteryColor = 'var(--warning-color)';
+                        }
+                        batteryDisplay = `<span style="color: ${batteryColor}; font-weight: 600; font-size: 11px;">${batteryIcon} ${level}%</span>`;
+                    }
+                }
+
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${device.serial_no || '-'}
                         </td>
-                        <td style="padding: 12px; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-size: 11px;">
                             ${device.model || '-'}
                         </td>
-                        <td style="padding: 12px;">
-                            ${sourceTypeBadge}
-                        </td>
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
-                            ${device.source_host || '-'}
-                        </td>
-                        <td style="padding: 12px; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-size: 11px;">
                             ${device.android_version || '-'}
                         </td>
-                        <td style="padding: 12px;">
+                        <td style="padding: 12px; text-align: center;">
+                            ${batteryDisplay}
+                        </td>
+                        <td style="padding: 12px; text-align: center;">
                             ${statusBadge}
                         </td>
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center;">
+                            ${sourceTypeBadge}
+                        </td>
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
+                            ${device.source_host || '-'}
+                        </td>
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${device.locked_by || '-'}
+                        </td>
+                        <td style="padding: 12px; text-align: center;">
+                            <button class="btn-xxs" onclick="openDeviceShell('${device.serial_no}')" style="background: var(--primary-color);">🐧 Shell</button>
                         </td>
                     </tr>
                 `;
             }).join('');
+        }
+
+        // 打开设备ADB Shell
+        async function openDeviceShell(serialNo) {
+            try {
+                showToast(`正在打开设备 ${serialNo} 的 Shell...`, 'info');
+
+                const response = await fetch('/api/device/shell', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        serial_no: serialNo
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(`已打开设备 ${serialNo} 的 Shell 会话`, 'success');
+                    // 切换到终端页面
+                    const terminalItem = document.querySelector('[data-page="terminal"]');
+                    if (terminalItem) {
+                        terminalItem.click();
+                    }
+                } else {
+                    showToast(`打开 Shell 失败: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('打开 Shell 失败:', error);
+                showToast(`打开 Shell 失败: ${error.message}`, 'error');
+            }
         }
 
         // ==================== 页面切换功能 ====================

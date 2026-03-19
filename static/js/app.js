@@ -254,10 +254,26 @@ function initWebSocket() {
                         // USB设备插拔事件，自动刷新设备列表
                         console.log('[WebSocket] devices_changed:', data.devices);
                         addLogEntry(`检测到USB设备变化，当前设备: ${data.devices.length || 0} 台`, 'info');
-                        showToast('检测到USB设备变化，正在刷新...', 'info');
+                        // 移除"正在刷新"提示,避免弹框叠加
+                        // showToast('检测到USB设备变化，正在刷新...', 'info');
+                        // 保存旧设备列表用于比较
+                        const oldDevices = new Set(state.devices.map(d => typeof d === 'string' ? d : d.device_id));
                         // 自动刷新设备列表
                         loadDevices(true).then(() => {
-                            showToast(`设备列表已更新，找到 ${state.devices.length} 台设备`, 'success');
+                            const newDevices = new Set(state.devices.map(d => typeof d === 'string' ? d : d.device_id));
+                            // 找出连接的设备（在新列表中但不在旧列表中）
+                            const connected = [...newDevices].filter(d => !oldDevices.has(d));
+                            // 找出断开的设备（在旧列表中但不在新列表中）
+                            const disconnected = [...oldDevices].filter(d => !newDevices.has(d));
+
+                            let message = '设备列表已更新';
+                            if (connected.length > 0) {
+                                message += `，连接: ${connected.join(' ')}`;
+                            }
+                            if (disconnected.length > 0) {
+                                message += `，断开: ${disconnected.join(' ')}`;
+                            }
+                            showToast(message, 'success');
                         }).catch(err => {
                             console.error('Failed to refresh devices:', err);
                         });
@@ -2197,7 +2213,7 @@ async function loadTestReports() {
         if (tbody) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                    <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                         加载失败
                     </td>
                 </tr>
@@ -2213,7 +2229,7 @@ function displayTestReports(reports) {
     if (reports.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                     暂无测试报告
                 </td>
             </tr>

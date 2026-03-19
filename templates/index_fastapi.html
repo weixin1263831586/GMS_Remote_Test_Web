@@ -524,15 +524,15 @@
 
             <!-- 用户列表 -->
             <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
-                <table style="width: 100%; border-collapse: collapse;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">用户标识</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">IP地址</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">状态</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">占用设备</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">最后活跃</th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary);">连接时间</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">用户标识</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">IP地址</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">状态</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">占用设备</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">最后活跃</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">连接时间</th>
                         </tr>
                     </thead>
                     <tbody id="users-table-body">
@@ -568,38 +568,39 @@
 
             <!-- 设备列表 -->
             <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
-                <table style="width: 100%; border-collapse: collapse;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('serial_no')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('serial_no')">
                                 设备序列号 <span id="sort-serial_no">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('model')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('model')">
                                 设备型号 <span id="sort-model">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('android_version')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('android_version')">
                                 Android版本 <span id="sort-android_version">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('battery_level')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('battery_level')">
                                 电池电量 <span id="sort-battery_level">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('status')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('status')">
                                 状态 <span id="sort-status">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('source_type')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('source_type')">
                                 来源类型 <span id="sort-source_type">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('source_host')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('source_host')">
                                 来源主机 <span id="sort-source_host">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: left; font-size: 12px; color: var(--text-secondary); cursor: pointer;" onclick="sortDevices('locked_by')">
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('locked_by')">
                                 占用用户 <span id="sort-locked_by">↕</span>
                             </th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
                         </tr>
                     </thead>
                     <tbody id="devices-table-body">
                         <tr>
-                            <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
                             </td>
                         </tr>
@@ -614,16 +615,16 @@
 
             <!-- 报告列表 -->
             <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
-                <table style="width: 100%; border-collapse: collapse;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">类型</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">客户端</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">时间戳</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">通过</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">失败</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">总计</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">通过率</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">类型</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">客户端</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">时间戳</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">通过</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">失败</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">总计</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">通过率</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
                         </tr>
                     </thead>
@@ -1508,23 +1509,23 @@
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${user.client_id}
                         </td>
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${user.ip}
                         </td>
-                        <td style="padding: 12px;">
+                        <td style="padding: 12px; text-align: center;">
                             <span style="color: ${statusColor}; font-weight: 600; font-size: 11px;">●</span>
                             <span style="margin-left: 6px; font-size: 11px;">${statusText}</span>
                         </td>
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${devices}
                         </td>
-                        <td style="padding: 12px; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-size: 11px;">
                             ${lastSeen}
                         </td>
-                        <td style="padding: 12px; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-size: 11px;">
                             ${createdAt}
                         </td>
                     </tr>
@@ -1688,33 +1689,73 @@
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${device.serial_no || '-'}
                         </td>
-                        <td style="padding: 12px; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-size: 11px;">
                             ${device.model || '-'}
                         </td>
-                        <td style="padding: 12px; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-size: 11px;">
                             ${device.android_version || '-'}
                         </td>
-                        <td style="padding: 12px;">
+                        <td style="padding: 12px; text-align: center;">
                             ${batteryDisplay}
                         </td>
-                        <td style="padding: 12px;">
+                        <td style="padding: 12px; text-align: center;">
                             ${statusBadge}
                         </td>
-                        <td style="padding: 12px;">
+                        <td style="padding: 12px; text-align: center;">
                             ${sourceTypeBadge}
                         </td>
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${device.source_host || '-'}
                         </td>
-                        <td style="padding: 12px; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${device.locked_by || '-'}
+                        </td>
+                        <td style="padding: 12px; text-align: center;">
+                            <button class="btn-xxs" onclick="openDeviceShell('${device.serial_no}')" style="background: var(--primary-color);">🐧 adb shell</button>
                         </td>
                     </tr>
                 `;
             }).join('');
+        }
+
+        // 打开设备ADB Shell
+        let pendingAdbDevice = null; // 保存待连接的设备序列号
+
+        async function openDeviceShell(serialNo) {
+            try {
+                showToast(`正在打开设备 ${serialNo} 的 Shell...`, 'info');
+
+                const response = await fetch('/api/device/shell', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        serial_no: serialNo
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(`已打开设备 ${serialNo} 的 Shell 会话`, 'success');
+                    // 保存设备序列号,供终端初始化时使用
+                    pendingAdbDevice = serialNo;
+                    // 切换到终端页面
+                    const terminalItem = document.querySelector('[data-page="terminal"]');
+                    if (terminalItem) {
+                        terminalItem.click();
+                    }
+                } else {
+                    showToast(`打开 Shell 失败: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('打开 Shell 失败:', error);
+                showToast(`打开 Shell 失败: ${error.message}`, 'error');
+            }
         }
 
         // ==================== 页面切换功能 ====================
@@ -1803,8 +1844,29 @@
             document.title = titles[pageName] || 'GMS 远程测试';
 
             // 如果切换到终端页面且未初始化，则初始化终端
-            if (pageName === 'terminal' && !terminalInitialized) {
-                initTerminal();
+            // 如果是ADB模式(pendingAdbDevice存在),强制重新初始化
+            if (pageName === 'terminal') {
+                if (!terminalInitialized || pendingAdbDevice) {
+                    // ADB模式需要重新初始化,先清理旧连接
+                    if (pendingAdbDevice && terminalInitialized) {
+                        console.log('ADB mode: forcing terminal re-initialization');
+                        isReconnecting = true;  // 标记为重新连接,隐藏断开消息
+                        if (terminalSocket) {
+                            terminalSocket.close();
+                            terminalSocket = null;
+                        }
+                        if (terminal) {
+                            terminal.dispose();
+                            terminal = null;
+                        }
+                        terminalInitialized = false;
+                        // 延迟重置标志,确保onclose事件已经处理完毕
+                        setTimeout(() => {
+                            isReconnecting = false;
+                        }, 100);
+                    }
+                    initTerminal();
+                }
             }
 
             // 如果切换到用户管理页面，加载用户列表
@@ -1847,6 +1909,11 @@
             ssh_password: '{{ config.ubuntu_pswd | default("", true) }}'
         };
 
+        // ADB shell 模式下的静默处理
+        let adbSilentMode = false;  // 是否在静默模式(ADB启动中)
+        let adbBuffer = [];  // 静默模式下的输出缓冲区
+        let isReconnecting = false;  // 是否正在重新连接(用于隐藏断开消息)
+
         function updateTerminalStatus(connected) {
             isTerminalConnected = connected;
             const statusElement = document.getElementById('terminal-status');
@@ -1871,19 +1938,40 @@
                 console.log('Terminal WebSocket connected');
                 updateTerminalStatus(true);
 
-                // 请求SSH连接
-                terminalSocket.send(JSON.stringify({
-                    type: 'terminal_connect',
-                    host: terminalConfig.ssh_host,
-                    user: terminalConfig.ssh_user,
-                    password: terminalConfig.ssh_password
-                }));
+                // 检查是否为ADB shell模式
+                if (pendingAdbDevice) {
+                    console.log('Opening ADB shell for device:', pendingAdbDevice);
+                    // 启用静默模式
+                    adbSilentMode = true;
+                    adbBuffer = [];
+                    // 请求ADB shell连接
+                    terminalSocket.send(JSON.stringify({
+                        type: 'terminal_connect',
+                        mode: 'adb',
+                        serial_no: pendingAdbDevice,
+                        host: terminalConfig.ssh_host,
+                        user: terminalConfig.ssh_user,
+                        password: terminalConfig.ssh_password
+                    }));
+                    // 清除pending标志
+                    pendingAdbDevice = null;
+                } else {
+                    // 请求SSH连接
+                    terminalSocket.send(JSON.stringify({
+                        type: 'terminal_connect',
+                        mode: 'ssh',
+                        host: terminalConfig.ssh_host,
+                        user: terminalConfig.ssh_user,
+                        password: terminalConfig.ssh_password
+                    }));
+                }
             };
 
             terminalSocket.onclose = () => {
                 console.log('Terminal WebSocket disconnected');
                 updateTerminalStatus(false);
-                if (terminal) {
+                // 只有在非重新连接时才显示断开消息
+                if (terminal && !isReconnecting) {
                     terminal.writeln('\r\n\x1b[31m⚠️ 连接已断开\x1b[0m\r\n');
                 }
             };
@@ -1899,7 +1987,26 @@
 
                     if (msg.type === 'terminal_data') {
                         if (terminal) {
-                            terminal.write(msg.data);
+                            // 静默模式:缓冲输出,等待ADB shell提示符
+                            if (adbSilentMode) {
+                                adbBuffer.push(msg.data);
+
+                                // 检测ADB shell提示符(如: generic_arm64:/ $, rk3572cai:/ # 等)
+                                const text = adbBuffer.join('');
+                                // 匹配常见的Android shell提示符模式
+                                if (/:\/ [$#]/.test(text) || /\w+:\S+ [$#]/.test(text)) {
+                                    console.log('ADB shell prompt detected, flushing buffer');
+                                    adbSilentMode = false;
+
+                                    // 只显示最后的部分(包含提示符)
+                                    const lines = text.split('\r\n');
+                                    const lastLines = lines.slice(-3).join('\r\n');  // 只保留最后3行
+                                    terminal.write(lastLines);
+                                }
+                            } else {
+                                // 正常模式:直接显示
+                                terminal.write(msg.data);
+                            }
                         }
                     } else if (msg.type === 'terminal_error') {
                         console.error('Terminal error:', msg.error);
@@ -1907,13 +2014,18 @@
                             terminal.writeln(`\r\n\x1b[31m❌ 错误: ${msg.error}\x1b[0m\r\n`);
                         }
                         updateTerminalStatus(false);
+                        adbSilentMode = false;  // 出错时退出静默模式
                     } else if (msg.type === 'terminal_connected') {
-                        console.log('SSH connected');
-                        if (terminal) {
-                            terminal.clear();
-                            terminal.writeln('\x1b[32m✅ 已连接到 Ubuntu 主机\x1b[0m');
-                            terminal.writeln('\x1b[90m快捷键: Ctrl+C=复制/中断 Ctrl+L=清屏\x1b[0m\r\n');
+                        console.log('Terminal connected, mode:', msg.mode);
+                        // ADB模式:不显示连接消息,让adb shell的输出直接显示
+                        if (msg.mode !== 'adb') {
+                            if (terminal) {
+                                terminal.clear();
+                                terminal.writeln('\x1b[32m✅ 已连接到 Ubuntu 主机\x1b[0m');
+                                terminal.writeln('\x1b[90m快捷键: Ctrl+C=复制/中断 Ctrl+L=清屏\x1b[0m\r\n');
+                            }
                         }
+                        // ADB模式:保持静默模式,等待检测到提示符
                         updateTerminalStatus(true);
                     }
                 } catch (e) {
