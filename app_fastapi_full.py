@@ -1656,36 +1656,44 @@ async def clean_test_logs():
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
 
+# 存储最后保存的日志文件路径（用于GET下载）
+last_saved_log_file = {}
+
 @app.get("/api/test/logs/download")
 async def download_current_log(request: Request):
-    """下载当前测试日志文件（与Flask版本兼容 - 单个文件）"""
+    """下载当前测试日志"""
+    global last_saved_log_file
+
     try:
-        # 获取客户端ID
         client_id = get_client_id_from_request(request)
-        
-        # 获取用户状态
-        user_state = get_or_create_user_state(client_id)
-        
-        # 获取当前日志文件路径
-        log_file = user_state.get('log_file')
+        log_file = last_saved_log_file.get(client_id)
+
+        if not log_file or not os.path.exists(log_file):
+            from pathlib import Path
+            logs_dir = Path(os.path.join(os.path.dirname(__file__), 'logs'))
+            if logs_dir.exists():
+                existing_files = [(f, f.stat().st_mtime)
+                                 for f in logs_dir.glob('*.log')
+                                 if f.exists()]
+                if existing_files:
+                    log_file = str(max(existing_files, key=lambda x: x[1])[0])
+
+        if not log_file or not os.path.exists(log_file):
+            user_state = get_or_create_user_state(client_id)
+            log_file = user_state.get('log_file')
+
         if not log_file or not os.path.exists(log_file):
             raise HTTPException(status_code=404, detail="No log file available")
-        
-        # 读取日志内容
-        with open(log_file, 'r', encoding='utf-8') as f:
-            log_content = f.read()
-        
+
+        from fastapi.responses import FileResponse as FastAPIFileResponse
         filename = os.path.basename(log_file)
-        
-        # 返回文件响应
-        from fastapi.responses import Response
-        return Response(
-            content=log_content,
+
+        return FastAPIFileResponse(
+            log_file,
             media_type='text/plain',
-            headers={
-                'Content-Disposition': f'attachment; filename="{filename}"'
-            }
+            filename=filename
         )
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1725,22 +1733,62 @@ async def download_test_logs(req: dict):
 @app.post("/api/test/logs/save-current")
 async def save_current_log(req: dict):
     """保存当前日志"""
+    global last_saved_log_file
+
+    log_content = req.get('content', '')
+    client_id = req.get('client_id', 'test_client')
+    test_type = req.get('test_type', '').strip()
+
+    if not log_content:
+        raise HTTPException(status_code=400, detail='No log content provided')
+
     try:
-        log_content = req.get('content', '')
-        client_id = req.get('client_id', 'test_client')
+        logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+        os.makedirs(logs_dir, exist_ok=True)
 
-        result = test_logs_manager.save_current_log(log_content, client_id)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        config = config_manager.load_config()
 
-        if result['success']:
-            return JSONResponse(content=result)
+        display_test_type = "MANUAL" if not test_type or test_type.lower() == 'unknown' else test_type.upper()
+
+        if client_id == 'test_client':
+            user_id = config.get('ubuntu_user', 'hcq')
         else:
-            raise HTTPException(status_code=500, detail=result['error'])
+            user_id = client_id.split('@')[0] if '@' in client_id else client_id
+
+        log_filename = f"{user_id}_{display_test_type}_{timestamp}.log"
+        log_path = os.path.join(logs_dir, log_filename)
+
+        from pathlib import Path
+        log_file = Path(log_path)
+
+        log_file.write_text(
+            f"GMS 测试日志 - {display_test_type}\n"
+            f"保存时间: {timestamp}\n"
+            f"用户标识: {user_id}\n"
+            f"完整Client ID: {client_id}\n"
+            f"{'=' * 80}\n\n"
+            f"{log_content}",
+            encoding='utf-8'
+        )
+
+        last_saved_log_file[client_id] = str(log_file)
+
+        return JSONResponse(content={
+            'success': True,
+            'log_file': str(log_file),
+            'filename': log_filename,
+            'message': f'日志已保存: {log_filename}'
+        })
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error saving log: {e}")
         raise HTTPException(
-                status_code=500,
-                detail=f"{str(e)}. 请检查配置和参数是否正确。"
-            )
+            status_code=500,
+            detail=f"{str(e)}. 请检查配置和参数是否正确。"
+        )
 
 @app.get("/api/test/logs/list")
 async def list_test_logs():
