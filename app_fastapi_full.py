@@ -26,6 +26,73 @@ from contextlib import asynccontextmanager
 import asyncio
 
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Body, Query
+
+# ==================== Lifespan 事件处理 ====================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    # 启动时执行
+    logger.info("=" * 60)
+    logger.info("Application startup")
+    logger.info("=" * 60)
+
+    # 初始化USB监控
+    try:
+        # 创建一个队列用于跨线程通信
+        import queue
+        if not hasattr(app.state, 'usb_event_queue'):
+            app.state.usb_event_queue = queue.Queue()
+
+        def get_devices():
+            """获取当前设备列表"""
+            try:
+                return device_manager.get_connected_devices()
+            except Exception as e:
+                logger.error(f"Error getting devices for USB monitor: {e}")
+                return []
+
+        def on_usb_devices_changed(devices):
+            """USB设备变化回调"""
+            logger.info(f"USB devices changed: {devices}")
+
+            # 将事件放入队列，让后台任务处理
+            try:
+                app.state.usb_event_queue.put({
+                    'type': 'devices_changed',
+                    'devices': devices,
+                    'timestamp': datetime.now().isoformat()
+                })
+                logger.info(f"USB device change event queued, current devices: {devices}")
+            except Exception as e:
+                logger.error(f"Error queuing device change event: {e}")
+
+        # 初始化并启动USB监控
+        init_usb_monitor(
+            device_getter=get_devices,
+            on_devices_changed=on_usb_devices_changed,
+            check_interval=2.0,
+            use_udev=True
+        )
+        start_usb_monitor()
+        logger.info("USB monitor started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start USB monitor: {e}")
+
+    yield
+
+    # 关闭时执行
+    logger.info("Application shutdown")
+
+    # 停止USB监控
+    try:
+        stop_usb_monitor()
+        logger.info("USB monitor stopped")
+    except Exception as e:
+        logger.error(f"Error stopping USB monitor: {e}")
+
+    logger.info("=" * 60)
+
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -53,6 +120,9 @@ from modules.client_manager import client_manager
 from modules.device_lock_manager import device_lock_manager
 from modules.test_logs_manager import test_logs_manager
 
+# 导入USB监控模块
+from core.usb_monitor import init_usb_monitor, start_usb_monitor, stop_usb_monitor
+
 # 日志配置
 logging.basicConfig(
     level=logging.INFO,
@@ -65,7 +135,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="GMS Auto Test - FastAPI Server (Port 5001)",
     description="完整的测试管理服务（替代Flask版本）",
-    version="4.0.0"
+    version="4.0.0",
+    lifespan=lifespan
 )
 
 # CORS中间件
@@ -1905,6 +1976,22 @@ async def autocomplete_suite(req: AutocompleteSuiteRequest):
 async def get_status(request: Request):
     """获取测试状态 - 优化版本，减少数据传输"""
     try:
+        # 处理USB事件队列（如果有）
+        if hasattr(app.state, 'usb_event_queue'):
+            import queue
+            try:
+                while True:
+                    event = app.state.usb_event_queue.get_nowait()
+                    # 向所有连接的WebSocket客户端发送设备变化通知
+                    for client_id, ws in list(global_state.websocket_connections.items()):
+                        try:
+                            await ws.send_json(event)
+                            logger.info(f"Sent USB event to client {client_id}: {event.get('type')}")
+                        except Exception as e:
+                            logger.error(f"Error sending USB event to client {client_id}: {e}")
+            except queue.Empty:
+                pass  # 队列为空，正常情况
+
         # 跟踪用户访问
         client_id = get_client_id_from_request(request)
         user_state = get_or_create_user_state(client_id)
@@ -1919,6 +2006,16 @@ async def get_status(request: Request):
             'running': user_state.get('running', False),
             'devices': user_state.get('devices', []),
         }
+
+        # 添加 USB 监控器状态信息
+        from core.usb_monitor import get_usb_monitor
+        usb_monitor = get_usb_monitor()
+        if usb_monitor:
+            response['usb_monitor'] = {
+                'mode': usb_monitor.mode,
+                'running': usb_monitor.is_running,
+                'pyudev_available': usb_monitor.pyudev_available
+            }
 
         # 只在需要时返回日志
         if include_logs:
