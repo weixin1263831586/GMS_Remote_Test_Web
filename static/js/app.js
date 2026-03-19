@@ -250,6 +250,19 @@ function initWebSocket() {
                         renderDevices();
                         break;
 
+                    case 'devices_changed':
+                        // USB设备插拔事件，自动刷新设备列表
+                        console.log('[WebSocket] devices_changed:', data.devices);
+                        addLogEntry(`检测到USB设备变化，当前设备: ${data.devices.length || 0} 台`, 'info');
+                        showToast('检测到USB设备变化，正在刷新...', 'info');
+                        // 自动刷新设备列表
+                        loadDevices(true).then(() => {
+                            showToast(`设备列表已更新，找到 ${state.devices.length} 台设备`, 'success');
+                        }).catch(err => {
+                            console.error('Failed to refresh devices:', err);
+                        });
+                        break;
+
                     case 'vpn_status_update':
                         updateVpnStatus(data.connected);
                         break;
@@ -1977,6 +1990,8 @@ function addLogEntry(message, type = 'info') {
 // ==================== Status Polling ====================
 function startStatusPolling() {
     // 轮询状态和日志（同时支持Socket.IO和WebSocket）
+    let shownPyudevWarning = false;  // 标记是否已显示过 pyudev 警告
+
     setInterval(async () => {
         try {
             // 检查是否有实时连接（Socket.IO 或 WebSocket）
@@ -1989,6 +2004,24 @@ function startStatusPolling() {
 
             // 如果没有实时连接，获取日志；否则只获取状态
             const status = await apiCall(hasRealtimeConnection ? '/api/status?logs=false' : '/api/status');
+
+            // 检查 USB 监控器状态并提示（仅显示一次）
+            if (!shownPyudevWarning && status.usb_monitor) {
+                const { mode, running, pyudev_available } = status.usb_monitor;
+                if (running && mode === 'polling' && !pyudev_available) {
+                    shownPyudevWarning = true;
+                    const message = '💡 提示：安装 pyudev 可获得更好的USB监控性能（实时响应，低CPU占用）\n' +
+                                   '安装命令：pip install pyudev\n' +
+                                   '当前使用轮询模式（2秒检查间隔）';
+                    addLogEntry(message, 'warning');
+
+                    // 也可以在页面显示一次提示
+                    if (!localStorage.getItem('pyudev_warning_shown')) {
+                        showToast('建议安装 pyudev 以提升性能', 'info');
+                        localStorage.setItem('pyudev_warning_shown', 'true');
+                    }
+                }
+            }
 
             // 更新测试状态按钮
             console.log('[Poll] Status:', status.running, 'State.testing:', state.testing);
