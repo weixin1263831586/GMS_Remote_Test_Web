@@ -705,8 +705,8 @@ body {
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 12px;
     line-height: 1.7;
-    min-height: 420px;
-    max-height: 420px;
+    min-height: 400px;
+    max-height: 400px;
     color: #e8e8f0;
     word-wrap: break-word;
     white-space: pre-wrap;

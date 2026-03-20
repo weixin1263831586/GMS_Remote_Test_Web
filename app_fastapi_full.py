@@ -17,6 +17,7 @@ import threading
 import time
 import re
 import json
+import shlex
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -4430,231 +4431,493 @@ async def get_upload_progress(req: dict):
 # ==================== 固件管理 ====================
 
 @app.post("/api/firmware/burn")
-async def burn_firmware(req: FirmwareBurnRequest, request: Request):
+async def burn_firmware(request: Request):
     """
-    固件烧录 - 与Flask版本完全一致
+    固件烧写 - 支持文件上传
 
-    使用fastboot烧写固件到选定的设备
+    使用 upgrade_tool 烧写固件到选定的设备
     """
     try:
         # 获取客户端ID
         client_id = get_client_id_from_request(request)
 
-        devices = req.devices
-        devices = req.devices
-        system_img = req.system_img
-        vendor_img = req.vendor_img or ""
-        misc_img = req.misc_img or ""
+        # 解析表单数据（支持文件上传）
+        form = await request.form()
+        devices_str = form.get('devices')
+        devices = devices_str.split(',') if devices_str else []
+
+        # 检查是否有上传的文件
+        firmware_file = form.get('firmware_file')
+        firmware_path = form.get('firmware_path', '').strip()
 
         # 检查设备
         if not devices:
             return JSONResponse(
-                content={'success': False, 'error': 'No devices selected'},
-                status_code=400
+                content={'success': False, 'error': 'No devices selected'}
             )
 
-        # 检查system镜像
-        if not system_img:
+        # 检查固件来源
+        if not firmware_file and not firmware_path:
             return JSONResponse(
-                content={'success': False, 'error': 'System image path is required'},
-                status_code=400
+                content={'success': False, 'error': 'Please upload a firmware file or provide a firmware path'}
             )
 
         config = config_manager.load_config()
         ssh = ssh_manager.get_connection(config)
         if not ssh:
             return JSONResponse(
-                content={'success': False, 'error': 'SSH connection failed'},
-                status_code=500
+                content={'success': False, 'error': 'SSH connection failed'}
             )
 
         try:
-            results = []
+            # 1. 上传 upgrade_tool 到测试主机
+            logger.info("[Firmware Burn] Uploading upgrade_tool...")
+            local_tool = os.path.join(os.path.dirname(__file__), "tools", "upgrade_tool")
+            remote_tool = f"/home/{config['ubuntu_user']}/GMS-Suite/upgrade_tool"
 
-            # 对每个设备执行烧录
-            for device_id in devices:
-                # 检查system镜像是否存在
-                check_cmd = f"test -f '{system_img}' && echo 'exists' || echo 'not_found'"
-                output, error, code = ssh_manager.execute_command(ssh, check_cmd)
+            if not os.path.exists(local_tool):
+                logger.error(f"[Firmware Burn] upgrade_tool not found: {local_tool}")
+                ssh_manager.return_connection(ssh)
+                return JSONResponse(
+                    content={'success': False, 'error': f'upgrade_tool not found: {local_tool}'}
+                )
 
-                if 'not_found' in output:
-                    results.append({
-                        'device': device_id,
-                        'success': False,
-                        'error': f'System image not found: {system_img}'
-                    })
-                    continue
+            # 使用 SCP 上传 upgrade_tool
+            import scp
+            scp_client = scp.SCPClient(ssh.get_transport())
+            scp_client.put(local_tool, remote_tool)
+            scp_client.close()
+            logger.info("[Firmware Burn] upgrade_tool uploaded successfully")
 
-                # 构建烧录命令（与Flask版本一致）
-                burn_cmd = f"cd /home/{config['ubuntu_user']} && "
-                burn_cmd += f"adb -s {device_id} reboot bootloader && "
-                burn_cmd += "sleep 5 && "
-                burn_cmd += f"fastboot -s {device_id} oem at-unlock-vboot && "
-                burn_cmd += f"fastboot -s {device_id} reboot fastboot && "
-                burn_cmd += "sleep 3 && "
-                burn_cmd += f"fastboot -s {device_id} delete-logical-partition product && "
-                burn_cmd += f"fastboot -s {device_id} delete-logical-partition product_a && "
-                burn_cmd += f"fastboot -s {device_id} delete-logical-partition product_b && "
-                burn_cmd += f"fastboot -s {device_id} flash system '{system_img}' && "
+            # 2. 处理固件文件
+            import tempfile
 
-                # 烧写misc镜像（如果提供）
-                if misc_img:
-                    burn_cmd += f"fastboot -s {device_id} flash misc '{misc_img}' && "
+            if firmware_file:
+                # 用户上传了文件
+                logger.info(f"[Firmware Burn] Processing uploaded file: {firmware_file.filename}")
 
-                # 烧写vendor_boot镜像（如果提供）
-                if vendor_img:
-                    check_vendor = f"test -f '{vendor_img}' && echo 'exists' || echo 'not_found'"
-                    v_output, _, _ = ssh_manager.execute_command(ssh, check_vendor)
-                    if 'exists' in v_output:
-                        burn_cmd += f"fastboot -s {device_id} flash vendor_boot '{vendor_img}' && "
+                # 保存上传的文件到临时目录
+                temp_dir = tempfile.mkdtemp()
+                temp_firmware_path = os.path.join(temp_dir, firmware_file.filename)
 
-                burn_cmd += f"fastboot -s {device_id} reboot"
+                with open(temp_firmware_path, 'wb') as f:
+                    content = await firmware_file.read()
+                    f.write(content)
 
-                # 执行烧录命令
-                output, error, code = ssh_manager.execute_command(ssh, burn_cmd, timeout=300)
+                logger.info(f"[Firmware Burn] File saved to: {temp_firmware_path}")
+                firmware_path = temp_firmware_path
 
-                results.append({
-                    'device': device_id,
-                    'success': code == 0,
-                    'output': output[-500:] if output else error  # 最后500字符
-                })
+            # 现在处理固件文件（无论是上传的还是远程路径）
+            logger.info(f"[Firmware Burn] Processing firmware: {firmware_path}")
+            firmware_name = os.path.basename(firmware_path)
+            remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_name}"
 
-                # 通过WebSocket发送日志
+            # 判断是本地文件还是远程文件
+            if os.path.exists(firmware_path):
+                # 本地文件，需要上传
+                file_size = os.path.getsize(firmware_path)
+                logger.info(f"[Firmware Burn] Uploading local file: {firmware_path} ({file_size} bytes)")
+
+                # 用于存储上传进度的全局变量（供回调访问）
+                upload_progress_data = {'current_percentage': 0}
+
+                # 自定义SCP进度回调
+                def upload_progress(filename, size, sent):
+                    percentage = (sent / size) * 100 if size > 0 else 0
+                    upload_progress_data['current_percentage'] = percentage
+                    logger.info(f"[Firmware Burn] Upload progress: {percentage:.2f}%")
+
+                # 使用线程执行SCP上传，这样可以避免阻塞
+                import threading
+                upload_complete = threading.Event()
+                upload_error = [None]
+
+                def upload_file_thread():
+                    try:
+                        scp_client = scp.SCPClient(ssh.get_transport(), progress=upload_progress)
+                        scp_client.put(firmware_path, remote_firmware)
+                        scp_client.close()
+                        logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_firmware}")
+                    except Exception as e:
+                        logger.error(f"[Firmware Burn] Upload error: {e}")
+                        upload_error[0] = str(e)
+                    finally:
+                        upload_complete.set()
+
+                # 发送上传开始消息
                 if client_id in global_state.websocket_connections:
                     try:
                         await global_state.websocket_connections[client_id].send_json({
                             'type': 'log_update',
-                            'log': f"Firmware burn for {device_id}: {'Success' if code == 0 else 'Failed'}",
-                            'log_type': 'success' if code == 0 else 'error'
+                            'log': f'📤 开始上传固件文件 ({file_size / 1024 / 1024:.2f} MB)...',
+                            'log_type': 'info'
+                        })
+                        await global_state.websocket_connections[client_id].send_json({
+                            'type': 'file_upload_progress',
+                            'filename': firmware_name,
+                            'percentage': 0,
+                            'total_size': file_size,
+                            'uploaded_size': 0
                         })
                     except:
                         pass
 
-            ssh_manager.return_connection(ssh)
-            return JSONResponse(content={'success': True, 'results': results})
+                # 启动上传线程
+                upload_thread = threading.Thread(target=upload_file_thread)
+                upload_thread.start()
+
+                # 定期更新进度到前端
+                last_percentage = 0
+                while not upload_complete.is_set():
+                    await asyncio.sleep(0.5)
+                    current_percentage = upload_progress_data.get('current_percentage', 0)
+
+                    # 只有当百分比变化时才发送更新
+                    if abs(current_percentage - last_percentage) > 0.1:
+                        if client_id in global_state.websocket_connections:
+                            try:
+                                sent_size = int((current_percentage / 100) * file_size)
+                                await global_state.websocket_connections[client_id].send_json({
+                                    'type': 'file_upload_progress',
+                                    'filename': firmware_name,
+                                    'percentage': round(current_percentage, 2),
+                                    'total_size': file_size,
+                                    'uploaded_size': sent_size
+                                })
+                            except:
+                                pass
+                        last_percentage = current_percentage
+
+                # 等待线程完成
+                upload_thread.join(timeout=5)
+
+                # 检查上传是否成功
+                if upload_error[0]:
+                    ssh_manager.return_connection(ssh)
+                    return JSONResponse(
+                        content={'success': False, 'error': f'Upload failed: {upload_error[0]}'}
+                    )
+
+                # 发送上传完成消息
+                if client_id in global_state.websocket_connections:
+                    try:
+                        await global_state.websocket_connections[client_id].send_json({
+                            'type': 'file_upload_progress',
+                            'filename': firmware_name,
+                            'percentage': 100,
+                            'total_size': file_size,
+                            'uploaded_size': file_size
+                        })
+                        await global_state.websocket_connections[client_id].send_json({
+                            'type': 'log_update',
+                            'log': '✅ 固件文件上传完成',
+                            'log_type': 'success'
+                        })
+                    except:
+                        pass
+
+                logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_firmware}")
+            elif firmware_path.startswith('/') or firmware_path.startswith('./'):
+                # 远程文件路径
+                logger.info(f"[Firmware Burn] Using remote file: {firmware_path}")
+                remote_firmware = firmware_path
+            else:
+                # 可能只是文件名，尝试在 GMS-Suite 目录中查找
+                logger.info(f"[Firmware Burn] Searching for file in GMS-Suite: {firmware_path}")
+                check_cmd = f"ls /home/{config['ubuntu_user']}/GMS-Suite/{firmware_path} 2>/dev/null && echo 'found' || echo 'not_found'"
+                output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
+
+                if 'found' in output:
+                    remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_path}"
+                    logger.info(f"[Firmware Burn] File found: {remote_firmware}")
+                else:
+                    ssh_manager.return_connection(ssh)
+                    if 'temp_dir' in locals():
+                        import shutil
+                        shutil.rmtree(temp_dir)
+                    return JSONResponse(
+                        content={'success': False, 'error': f'Firmware file not found: {firmware_path}. Please use a full path or upload the file first.'}
+                    )
+
+            # 3. 让设备进入 Loader 模式
+            logger.info("[Firmware Burn] Entering Loader mode...")
+            for device in devices:
+                cmd = f"adb -s {device} reboot loader"
+                ssh_manager.execute_command(ssh, cmd, timeout=5)
+                logger.info(f"[Firmware Burn] Device {device} sent to Loader mode")
+
+            logger.info("[Firmware Burn] Waiting for devices to enter Loader mode...")
+            await asyncio.sleep(8)
+
+            # 4. 检查 Loader 设备
+            gms_suite_dir = f"/home/{config['ubuntu_user']}/GMS-Suite"
+            check_cmd = f"cd {gms_suite_dir} && ./upgrade_tool ld"
+            output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
+
+            if "List of rockusb connected" not in output:
+                ssh_manager.return_connection(ssh)
+                return JSONResponse(
+                    content={'success': False, 'error': 'No Loader devices detected'}
+                )
+
+            logger.info(f"[Firmware Burn] Loader devices detected:\n{output}")
+
+            # 5. 烧写固件（upgrade_tool 会自动处理所有设备）
+            logger.info("[Firmware Burn] Starting firmware burning...")
+            burn_cmd = f"cd {gms_suite_dir} && ./upgrade_tool uf {shlex.quote(firmware_name)}"
+
+            # 发送开始消息
+            if client_id in global_state.websocket_connections:
+                try:
+                    await global_state.websocket_connections[client_id].send_json({
+                        'type': 'log_update',
+                        'log': '🔥 开始烧写固件...',
+                        'log_type': 'info'
+                    })
+                except:
+                    pass
+
+            # 执行烧写并获取实时输出
+            stdin, stdout, stderr = ssh.exec_command(burn_cmd, get_pty=True, timeout=300)
+
+            # ANSI转义码过滤函数
+            def strip_ansi_codes(text):
+                """移除ANSI转义码"""
+                import re
+                # 移除ANSI转义序列
+                ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+                return ansi_escape.sub('', text)
+
+            # 实时读取输出并发送到前端
+            import select
+            output_buffer = []
+
+            while not stdout.channel.exit_status_ready():
+                if stdout.channel.recv_ready():
+                    chunk = stdout.channel.recv(1024).decode('utf-8', errors='ignore')
+                    output_buffer.append(chunk)
+
+                    # 清理ANSI转义码
+                    clean_chunk = strip_ansi_codes(chunk)
+
+                    # 发送进度更新到前端
+                    if client_id in global_state.websocket_connections:
+                        try:
+                            # 解析进度（upgrade_tool 输出包含进度信息）
+                            progress_match = None
+                            for line in clean_chunk.split('\n'):
+                                line = line.strip()
+                                if '%' in line:
+                                    progress_match = line
+                                elif 'Download' in line or 'Writing' in line or 'Erase' in line:
+                                    progress_match = line
+
+                            if progress_match:
+                                await global_state.websocket_connections[client_id].send_json({
+                                    'type': 'log_update',
+                                    'log': progress_match,
+                                    'log_type': 'info'
+                                })
+                        except:
+                            pass
+                else:
+                    await asyncio.sleep(0.5)
+
+            # 获取最终输出
+            final_output = ''.join(output_buffer)
+            exit_status = stdout.channel.recv_exit_status()
+
+            if exit_status == 0:
+                logger.info(f"[Firmware Burn] Success:\n{final_output}")
+                ssh_manager.return_connection(ssh)
+
+                # 发送完成消息
+                if client_id in global_state.websocket_connections:
+                    try:
+                        await global_state.websocket_connections[client_id].send_json({
+                            'type': 'log_update',
+                            'log': '✅ 固件烧写完成！',
+                            'log_type': 'success'
+                        })
+                    except:
+                        pass
+
+                return JSONResponse(
+                    content={'success': True, 'message': 'Firmware burn completed successfully'}
+                )
+            else:
+                logger.error(f"[Firmware Burn] Failed with exit code {exit_status}")
+                error_output = stderr.read().decode('utf-8', errors='ignore')
+                ssh_manager.return_connection(ssh)
+
+                # 发送失败消息
+                if client_id in global_state.websocket_connections:
+                    try:
+                        await global_state.websocket_connections[client_id].send_json({
+                            'type': 'log_update',
+                            'log': f'❌ 固件烧写失败: {error_output}',
+                            'log_type': 'error'
+                        })
+                    except:
+                        pass
+
+                return JSONResponse(
+                    content={'success': False, 'error': error_output or 'Firmware burn failed'}
+                )
+
         except Exception as e:
             ssh_manager.return_connection(ssh)
-            raise e
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error burning firmware: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=str(e)
+            logger.error(f"[Firmware Burn] Error: {e}")
+            return JSONResponse(
+                content={'success': False, 'error': str(e)}
             )
+
+    except Exception as e:
+        logger.error(f"Error in burn_firmware: {e}")
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
 
 @app.post("/api/gsi/burn")
-async def burn_gsi(req: GSIBurnRequest, request: Request):
+async def burn_gsi(request: Request):
     """
-    GSI烧录 - 与Flask版本完全一致
+    GSI 烧写 - 按照GUI版本实现
 
-    使用run_GSI_Burn.sh脚本烧写GSI镜像到选定的设备
+    使用 run_GSI_Burn.sh 脚本烧写GSI镜像到选定的设备
     """
     try:
         # 获取客户端ID
         client_id = get_client_id_from_request(request)
 
-        devices = req.devices
-        system_img = req.system_img
-        vendor_img = req.vendor_img or ""
-        script_path = req.script_path or ""
+        # 解析请求体
+        req_data = await request.json()
+        devices = req_data.get('devices', [])
+        script_path = req_data.get('script_path', '').strip()
+        system_img = req_data.get('system_img', '').strip()
+        vendor_img = req_data.get('vendor_img', '').strip()
 
         # 检查设备
         if not devices:
             return JSONResponse(
-                content={'success': False, 'error': 'No devices selected'},
-                status_code=400
+                content={'success': False, 'error': 'No devices selected'}
+            )
+
+        # 检查脚本路径
+        if not script_path:
+            return JSONResponse(
+                content={'success': False, 'error': 'Script path is required'}
             )
 
         # 检查system镜像
         if not system_img:
             return JSONResponse(
-                content={'success': False, 'error': 'System image path is required'},
-                status_code=400
+                content={'success': False, 'error': 'System image path is required'}
             )
 
         config = config_manager.load_config()
-
-        # 如果没有提供脚本路径，使用默认路径
-        if not script_path:
-            script_path = config.get(
-                'gsi_scripts',
-                f"/home/{config['ubuntu_user']}/GMS-Suite/run_GSI_Burn.sh"
-            )
-
         ssh = ssh_manager.get_connection(config)
         if not ssh:
             return JSONResponse(
-                content={'success': False, 'error': 'SSH connection failed'},
-                status_code=500
+                content={'success': False, 'error': 'SSH connection failed'}
             )
 
         try:
+            import scp
+
+            # 1. 上传必要文件到测试主机
+            logger.info("[GSI Burn] Uploading necessary files...")
+
+            # 上传脚本
+            local_script = os.path.join(os.path.dirname(__file__), "run_GSI_Burn.sh")
+            remote_script = f"/home/{config['ubuntu_user']}/GMS-Suite/run_GSI_Burn.sh"
+
+            if os.path.exists(local_script):
+                scp_client = scp.SCPClient(ssh.get_transport())
+                scp_client.put(local_script, remote_script)
+                scp_client.close()
+                # 设置可执行权限
+                ssh_manager.execute_command(ssh, f"chmod +x {remote_script}")
+
+            # 上传 misc.img
+            local_misc = os.path.join(os.path.dirname(__file__), "misc.img")
+            remote_misc = f"/home/{config['ubuntu_user']}/GMS-Suite/misc.img"
+
+            if os.path.exists(local_misc):
+                scp_client = scp.SCPClient(ssh.get_transport())
+                scp_client.put(local_misc, remote_misc)
+                scp_client.close()
+
+            # 2. 处理 vendor 镜像（如果提供）
+            remote_vendor = ""
+            if vendor_img:
+                if os.path.exists(vendor_img):
+                    # 本地文件，需要上传
+                    vendor_name = os.path.basename(vendor_img)
+                    remote_vendor = f"/home/{config['ubuntu_user']}/GMS-Suite/{vendor_name}"
+                    scp_client = scp.SCPClient(ssh.get_transport())
+                    scp_client.put(vendor_img, remote_vendor)
+                    scp_client.close()
+                else:
+                    # 远程文件，直接使用路径
+                    remote_vendor = vendor_img
+
+            # 3. 对每个设备执行烧写
+            logger.info("[GSI Burn] Starting GSI burning...")
             results = []
 
-            # 确保GMS-Suite目录存在
-            suite_dir = f"/home/{config['ubuntu_user']}/GMS-Suite"
-            mkdir_cmd = f"mkdir -p '{suite_dir}'"
-            ssh_manager.execute_command(ssh, mkdir_cmd)
+            for device in devices:
+                # 构建烧写命令
+                img_args = f"--system {system_img}"
+                if remote_vendor:
+                    img_args += f" --vendor {remote_vendor}"
 
-            for device_id in devices:
-                # 检查system镜像是否存在
-                check_cmd = f"test -f '{system_img}' && echo 'exists' || echo 'not_found'"
-                output, _, _ = ssh_manager.execute_command(ssh, check_cmd)
+                burn_cmd = f"{remote_script} {device} {img_args}"
 
-                if 'not_found' in output:
-                    results.append({
-                        'device': device_id,
-                        'success': False,
-                        'error': f'System image not found: {system_img}'
-                    })
-                    continue
+                logger.info(f"[GSI Burn] Executing for {device}: {burn_cmd}")
 
-                # 构建GSI烧录命令（使用脚本）
-                # 格式：run_GSI_Burn.sh <device> --system <system.img> [--vendor <vendor.img>]
-                burn_cmd = f"bash '{script_path}' '{device_id}' --system '{system_img}'"
-
-                # 添加vendor镜像（如果提供）
-                if vendor_img:
-                    v_check_cmd = f"test -f '{vendor_img}' && echo 'exists' || echo 'not_found'"
-                    v_output, _, _ = ssh_manager.execute_command(ssh, v_check_cmd)
-                    if 'exists' in v_output:
-                        burn_cmd += f" --vendor '{vendor_img}'"
-
-                # 执行GSI烧录命令
                 output, error, code = ssh_manager.execute_command(ssh, burn_cmd, timeout=600)
 
-                results.append({
-                    'device': device_id,
-                    'success': code == 0,
-                    'output': output[-1000:] if output else error  # 最后1000字符
-                })
-
-                # 通过WebSocket发送日志
-                if client_id in global_state.websocket_connections:
-                    try:
-                        await global_state.websocket_connections[client_id].send_json({
-                            'type': 'log_update',
-                            'log': f"GSI burn for {device_id}: {'Success' if code == 0 else 'Failed'}",
-                            'log_type': 'success' if code == 0 else 'error'
-                        })
-                    except:
-                        pass
+                if code == 0:
+                    logger.info(f"[GSI Burn] Success for {device}")
+                    results.append({
+                        'device': device,
+                        'success': True
+                    })
+                else:
+                    logger.error(f"[GSI Burn] Failed for {device}: {error}")
+                    results.append({
+                        'device': device,
+                        'success': False,
+                        'error': error
+                    })
 
             ssh_manager.return_connection(ssh)
-            return JSONResponse(content={'success': True, 'results': results})
+
+            # 检查是否全部成功
+            all_success = all(r['success'] for r in results)
+            if all_success:
+                return JSONResponse(
+                    content={'success': True, 'message': 'GSI burn completed successfully', 'results': results}
+                )
+            else:
+                return JSONResponse(
+                    content={'success': False, 'error': 'Some devices failed', 'results': results}
+                )
+
         except Exception as e:
             ssh_manager.return_connection(ssh)
-            raise e
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error burning GSI: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=str(e)
+            logger.error(f"[GSI Burn] Error: {e}")
+            return JSONResponse(
+                content={'success': False, 'error': str(e)}
             )
+
+    except Exception as e:
+        logger.error(f"Error in burn_gsi: {e}")
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
 
 @app.post("/api/sn/burn")
 async def burn_sn(req: SNBurnRequest):

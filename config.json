@@ -14,8 +14,8 @@
     "script_path": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/run_GMS_Test_Auto.sh",
     "gsi_scripts": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/run_GSI_Burn.sh",
     "scrcpy_path": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/scrcpy-linux-x86_64-v3.3.4/scrcpy",
-    "device_host": "cp2-share@172.16.14.65",
-    "device_pswd": "Rockchip@2025",
+    "device_host": "hcq@172.16.14.68",
+    "device_pswd": "20240120",
     "client_hosts": {
         "172.16.14.65": "cp2-share",
         "172.16.14.94": "hcq"
