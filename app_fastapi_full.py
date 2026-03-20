@@ -4493,30 +4493,22 @@ async def burn_firmware(request: Request):
             import tempfile
 
             if firmware_file:
-                # 用户上传了文件
+                # 用户上传了文件 - 直接在内存中处理，不写磁盘
                 logger.info(f"[Firmware Burn] Processing uploaded file: {firmware_file.filename}")
 
-                # 保存上传的文件到临时目录
-                temp_dir = tempfile.mkdtemp()
-                temp_firmware_path = os.path.join(temp_dir, firmware_file.filename)
+                # 使用BytesIO在内存中处理文件，避免写磁盘
+                import io
+                firmware_content = await firmware_file.read()
+                firmware_size = len(firmware_content)
+                firmware_bytes = io.BytesIO(firmware_content)
 
-                with open(temp_firmware_path, 'wb') as f:
-                    content = await firmware_file.read()
-                    f.write(content)
+                logger.info(f"[Firmware Burn] File loaded into memory: {firmware_size} bytes")
 
-                logger.info(f"[Firmware Burn] File saved to: {temp_firmware_path}")
-                firmware_path = temp_firmware_path
+                # 直接上传到测试主机
+                firmware_name = firmware_file.filename
+                remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_name}"
 
-            # 现在处理固件文件（无论是上传的还是远程路径）
-            logger.info(f"[Firmware Burn] Processing firmware: {firmware_path}")
-            firmware_name = os.path.basename(firmware_path)
-            remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_name}"
-
-            # 判断是本地文件还是远程文件
-            if os.path.exists(firmware_path):
-                # 本地文件，需要上传
-                file_size = os.path.getsize(firmware_path)
-                logger.info(f"[Firmware Burn] Uploading local file: {firmware_path} ({file_size} bytes)")
+                logger.info(f"[Firmware Burn] Directly uploading to test host: {remote_firmware}")
 
                 # 用于存储上传进度的全局变量（供回调访问）
                 upload_progress_data = {'current_percentage': 0}
@@ -4527,15 +4519,16 @@ async def burn_firmware(request: Request):
                     upload_progress_data['current_percentage'] = percentage
                     logger.info(f"[Firmware Burn] Upload progress: {percentage:.2f}%")
 
-                # 使用线程执行SCP上传，这样可以避免阻塞
+                # 使用线程执行SCP上传
                 import threading
                 upload_complete = threading.Event()
                 upload_error = [None]
 
                 def upload_file_thread():
                     try:
+                        # 使用SCP的putfo方法直接从内存上传
                         scp_client = scp.SCPClient(ssh.get_transport(), progress=upload_progress)
-                        scp_client.put(firmware_path, remote_firmware)
+                        scp_client.putfo(firmware_bytes, remote_firmware)
                         scp_client.close()
                         logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_firmware}")
                     except Exception as e:
@@ -4549,14 +4542,14 @@ async def burn_firmware(request: Request):
                     try:
                         await global_state.websocket_connections[client_id].send_json({
                             'type': 'log_update',
-                            'log': f'📤 开始上传固件文件 ({file_size / 1024 / 1024:.2f} MB)...',
+                            'log': f'📤 上传固件到测试主机 ({firmware_size / 1024 / 1024:.2f} MB)...',
                             'log_type': 'info'
                         })
                         await global_state.websocket_connections[client_id].send_json({
                             'type': 'file_upload_progress',
                             'filename': firmware_name,
                             'percentage': 0,
-                            'total_size': file_size,
+                            'total_size': firmware_size,
                             'uploaded_size': 0
                         })
                     except:
@@ -4576,12 +4569,12 @@ async def burn_firmware(request: Request):
                     if abs(current_percentage - last_percentage) > 0.1:
                         if client_id in global_state.websocket_connections:
                             try:
-                                sent_size = int((current_percentage / 100) * file_size)
+                                sent_size = int((current_percentage / 100) * firmware_size)
                                 await global_state.websocket_connections[client_id].send_json({
                                     'type': 'file_upload_progress',
                                     'filename': firmware_name,
                                     'percentage': round(current_percentage, 2),
-                                    'total_size': file_size,
+                                    'total_size': firmware_size,
                                     'uploaded_size': sent_size
                                 })
                             except:
@@ -4589,7 +4582,7 @@ async def burn_firmware(request: Request):
                         last_percentage = current_percentage
 
                 # 等待线程完成
-                upload_thread.join(timeout=5)
+                upload_thread.join(timeout=300)  # 5分钟超时
 
                 # 检查上传是否成功
                 if upload_error[0]:
@@ -4605,8 +4598,8 @@ async def burn_firmware(request: Request):
                             'type': 'file_upload_progress',
                             'filename': firmware_name,
                             'percentage': 100,
-                            'total_size': file_size,
-                            'uploaded_size': file_size
+                            'total_size': firmware_size,
+                            'uploaded_size': firmware_size
                         })
                         await global_state.websocket_connections[client_id].send_json({
                             'type': 'log_update',
@@ -4616,28 +4609,138 @@ async def burn_firmware(request: Request):
                     except:
                         pass
 
-                logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_firmware}")
-            elif firmware_path.startswith('/') or firmware_path.startswith('./'):
-                # 远程文件路径
-                logger.info(f"[Firmware Burn] Using remote file: {firmware_path}")
-                remote_firmware = firmware_path
-            else:
-                # 可能只是文件名，尝试在 GMS-Suite 目录中查找
-                logger.info(f"[Firmware Burn] Searching for file in GMS-Suite: {firmware_path}")
-                check_cmd = f"ls /home/{config['ubuntu_user']}/GMS-Suite/{firmware_path} 2>/dev/null && echo 'found' || echo 'not_found'"
-                output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
+                logger.info(f"[Firmware Burn] Firmware uploaded successfully, skipping local file check")
 
-                if 'found' in output:
-                    remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_path}"
-                    logger.info(f"[Firmware Burn] File found: {remote_firmware}")
+            # 如果没有上传文件，处理其他情况（远程文件或本地文件）
+            else:
+                # 现在处理固件文件（远程路径或本地文件）
+                logger.info(f"[Firmware Burn] Processing firmware: {firmware_path}")
+                firmware_name = os.path.basename(firmware_path)
+                remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_name}"
+
+                # 判断是本地文件还是远程文件
+                if os.path.exists(firmware_path):
+                    # 本地文件，需要上传
+                    file_size = os.path.getsize(firmware_path)
+                    logger.info(f"[Firmware Burn] Uploading local file: {firmware_path} ({file_size} bytes)")
+
+                    # 用于存储上传进度的全局变量（供回调访问）
+                    upload_progress_data = {'current_percentage': 0}
+
+                    # 自定义SCP进度回调
+                    def upload_progress(filename, size, sent):
+                        percentage = (sent / size) * 100 if size > 0 else 0
+                        upload_progress_data['current_percentage'] = percentage
+                        logger.info(f"[Firmware Burn] Upload progress: {percentage:.2f}%")
+
+                    # 使用线程执行SCP上传
+                    import threading
+                    upload_complete = threading.Event()
+                    upload_error = [None]
+
+                    def upload_file_thread():
+                        try:
+                            scp_client = scp.SCPClient(ssh.get_transport(), progress=upload_progress)
+                            scp_client.put(firmware_path, remote_firmware)
+                            scp_client.close()
+                            logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_firmware}")
+                        except Exception as e:
+                            logger.error(f"[Firmware Burn] Upload error: {e}")
+                            upload_error[0] = str(e)
+                        finally:
+                            upload_complete.set()
+
+                    # 发送上传开始消息
+                    if client_id in global_state.websocket_connections:
+                        try:
+                            await global_state.websocket_connections[client_id].send_json({
+                                'type': 'log_update',
+                                'log': f'📤 开始上传固件文件 ({file_size / 1024 / 1024:.2f} MB)...',
+                                'log_type': 'info'
+                            })
+                            await global_state.websocket_connections[client_id].send_json({
+                                'type': 'file_upload_progress',
+                                'filename': firmware_name,
+                                'percentage': 0,
+                                'total_size': file_size,
+                                'uploaded_size': 0
+                            })
+                        except:
+                            pass
+
+                    # 启动上传线程
+                    upload_thread = threading.Thread(target=upload_file_thread)
+                    upload_thread.start()
+
+                    # 定期更新进度到前端
+                    last_percentage = 0
+                    while not upload_complete.is_set():
+                        await asyncio.sleep(0.5)
+                        current_percentage = upload_progress_data.get('current_percentage', 0)
+
+                        # 只有当百分比变化时才发送更新
+                        if abs(current_percentage - last_percentage) > 0.1:
+                            if client_id in global_state.websocket_connections:
+                                try:
+                                    sent_size = int((current_percentage / 100) * file_size)
+                                    await global_state.websocket_connections[client_id].send_json({
+                                        'type': 'file_upload_progress',
+                                        'filename': firmware_name,
+                                        'percentage': round(current_percentage, 2),
+                                        'total_size': file_size,
+                                        'uploaded_size': sent_size
+                                    })
+                                except:
+                                    pass
+                            last_percentage = current_percentage
+
+                    # 等待线程完成
+                    upload_thread.join(timeout=300)
+
+                    # 检查上传是否成功
+                    if upload_error[0]:
+                        ssh_manager.return_connection(ssh)
+                        return JSONResponse(
+                            content={'success': False, 'error': f'Upload failed: {upload_error[0]}'}
+                        )
+
+                    # 发送上传完成消息
+                    if client_id in global_state.websocket_connections:
+                        try:
+                            await global_state.websocket_connections[client_id].send_json({
+                                'type': 'file_upload_progress',
+                                'filename': firmware_name,
+                                'percentage': 100,
+                                'total_size': file_size,
+                                'uploaded_size': file_size
+                            })
+                            await global_state.websocket_connections[client_id].send_json({
+                                'type': 'log_update',
+                                'log': '✅ 固件文件上传完成',
+                                'log_type': 'success'
+                            })
+                        except:
+                            pass
+
+                    logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_firmware}")
+                elif firmware_path.startswith('/') or firmware_path.startswith('./'):
+                    # 远程文件路径
+                    logger.info(f"[Firmware Burn] Using remote file: {firmware_path}")
+                    remote_firmware = firmware_path
                 else:
-                    ssh_manager.return_connection(ssh)
-                    if 'temp_dir' in locals():
-                        import shutil
-                        shutil.rmtree(temp_dir)
-                    return JSONResponse(
-                        content={'success': False, 'error': f'Firmware file not found: {firmware_path}. Please use a full path or upload the file first.'}
-                    )
+                    # 可能只是文件名，尝试在 GMS-Suite 目录中查找
+                    logger.info(f"[Firmware Burn] Searching for file in GMS-Suite: {firmware_path}")
+                    check_cmd = f"ls /home/{config['ubuntu_user']}/GMS-Suite/{firmware_path} 2>/dev/null && echo 'found' || echo 'not_found'"
+                    output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
+
+                    if 'found' in output:
+                        remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_path}"
+                        logger.info(f"[Firmware Burn] File found: {remote_firmware}")
+                    else:
+                        ssh_manager.return_connection(ssh)
+                        return JSONResponse(
+                            content={'success': False, 'error': f'Firmware file not found: {firmware_path}. Please use a full path or upload the file first.'}
+                        )
 
             # 3. 让设备进入 Loader 模式
             logger.info("[Firmware Burn] Entering Loader mode...")
