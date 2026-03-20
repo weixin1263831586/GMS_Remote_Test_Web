@@ -4931,25 +4931,37 @@ async def burn_gsi(request: Request):
             # 1. 上传必要文件到测试主机
             logger.info("[GSI Burn] Uploading necessary files...")
 
-            # 上传脚本
-            local_script = os.path.join(os.path.dirname(__file__), "run_GSI_Burn.sh")
+            # 上传脚本（从tools目录）
+            local_script = os.path.join(os.path.dirname(__file__), "tools", "run_GSI_Burn.sh")
             remote_script = f"/home/{config['ubuntu_user']}/GMS-Suite/run_GSI_Burn.sh"
 
             if os.path.exists(local_script):
+                logger.info(f"[GSI Burn] Uploading script from: {local_script}")
                 scp_client = scp.SCPClient(ssh.get_transport())
                 scp_client.put(local_script, remote_script)
                 scp_client.close()
                 # 设置可执行权限
                 ssh_manager.execute_command(ssh, f"chmod +x {remote_script}")
+                logger.info(f"[GSI Burn] Script uploaded to: {remote_script}")
+            else:
+                logger.error(f"[GSI Burn] Script not found: {local_script}")
+                ssh_manager.return_connection(ssh)
+                return JSONResponse(
+                    content={'success': False, 'error': f'GSI burn script not found: {local_script}'}
+                )
 
-            # 上传 misc.img
-            local_misc = os.path.join(os.path.dirname(__file__), "misc.img")
+            # 上传 misc.img（从tools目录）
+            local_misc = os.path.join(os.path.dirname(__file__), "tools", "misc.img")
             remote_misc = f"/home/{config['ubuntu_user']}/GMS-Suite/misc.img"
 
             if os.path.exists(local_misc):
+                logger.info(f"[GSI Burn] Uploading misc.img from: {local_misc}")
                 scp_client = scp.SCPClient(ssh.get_transport())
                 scp_client.put(local_misc, remote_misc)
                 scp_client.close()
+                logger.info(f"[GSI Burn] misc.img uploaded to: {remote_misc}")
+            else:
+                logger.warning(f"[GSI Burn] misc.img not found: {local_misc}, skipping...")
 
             # 2. 处理 vendor 镜像（如果提供）
             remote_vendor = ""
@@ -4969,6 +4981,17 @@ async def burn_gsi(request: Request):
             logger.info("[GSI Burn] Starting GSI burning...")
             results = []
 
+            # 发送开始消息
+            if client_id in global_state.websocket_connections:
+                try:
+                    await global_state.websocket_connections[client_id].send_json({
+                        'type': 'log_update',
+                        'log': f'🔥 开始烧写GSI镜像到 {len(devices)} 台设备...',
+                        'log_type': 'info'
+                    })
+                except:
+                    pass
+
             for device in devices:
                 # 构建烧写命令
                 img_args = f"--system {system_img}"
@@ -4979,21 +5002,105 @@ async def burn_gsi(request: Request):
 
                 logger.info(f"[GSI Burn] Executing for {device}: {burn_cmd}")
 
-                output, error, code = ssh_manager.execute_command(ssh, burn_cmd, timeout=600)
+                # 发送设备开始消息
+                if client_id in global_state.websocket_connections:
+                    try:
+                        await global_state.websocket_connections[client_id].send_json({
+                            'type': 'log_update',
+                            'log': f'📱 正在烧写设备: {device}',
+                            'log_type': 'info'
+                        })
+                    except:
+                        pass
 
-                if code == 0:
+                # 执行命令并实时读取输出
+                stdin, stdout, stderr = ssh.exec_command(burn_cmd, get_pty=True, timeout=600)
+
+                # ANSI转义码过滤函数
+                def strip_ansi_codes(text):
+                    """移除ANSI转义码"""
+                    import re
+                    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+                    return ansi_escape.sub('', text)
+
+                # 实时读取输出并发送到前端
+                output_buffer = []
+
+                while not stdout.channel.exit_status_ready():
+                    if stdout.channel.recv_ready():
+                        chunk = stdout.channel.recv(1024).decode('utf-8', errors='ignore')
+                        output_buffer.append(chunk)
+
+                        # 清理ANSI转义码
+                        clean_chunk = strip_ansi_codes(chunk)
+
+                        # 发送进度更新到前端（逐行显示）
+                        if client_id in global_state.websocket_connections:
+                            try:
+                                for line in clean_chunk.split('\n'):
+                                    line = line.strip()
+                                    if line and len(line) > 0:
+                                        await global_state.websocket_connections[client_id].send_json({
+                                            'type': 'log_update',
+                                            'log': line,
+                                            'log_type': 'info'
+                                        })
+                            except:
+                                pass
+                    else:
+                        await asyncio.sleep(0.5)
+
+                # 获取最终输出
+                final_output = ''.join(output_buffer)
+                exit_status = stdout.channel.recv_exit_status()
+
+                # 读取stderr
+                error_output = ''
+                if stderr.channel.recv_ready():
+                    error_output = stderr.read().decode('utf-8', errors='ignore')
+
+                logger.info(f"[GSI Burn] Device {device} - Exit code: {exit_status}")
+                logger.info(f"[GSI Burn] Device {device} - Output: {final_output[:500] if final_output else 'Empty'}")
+                if error_output:
+                    logger.error(f"[GSI Burn] Device {device} - Error: {error_output[:500]}")
+
+                if exit_status == 0:
                     logger.info(f"[GSI Burn] Success for {device}")
                     results.append({
                         'device': device,
-                        'success': True
+                        'success': True,
+                        'output': final_output
                     })
+
+                    # 发送成功消息
+                    if client_id in global_state.websocket_connections:
+                        try:
+                            await global_state.websocket_connections[client_id].send_json({
+                                'type': 'log_update',
+                                'log': f'✅ 设备 {device} GSI烧写完成',
+                                'log_type': 'success'
+                            })
+                        except:
+                            pass
                 else:
-                    logger.error(f"[GSI Burn] Failed for {device}: {error}")
+                    logger.error(f"[GSI Burn] Failed for {device}: {error_output}")
                     results.append({
                         'device': device,
                         'success': False,
-                        'error': error
+                        'error': error_output,
+                        'output': final_output
                     })
+
+                    # 发送失败消息
+                    if client_id in global_state.websocket_connections:
+                        try:
+                            await global_state.websocket_connections[client_id].send_json({
+                                'type': 'log_update',
+                                'log': f'❌ 设备 {device} GSI烧写失败: {error_output or "未知错误"}',
+                                'log_type': 'error'
+                            })
+                        except:
+                            pass
 
             ssh_manager.return_connection(ssh)
 

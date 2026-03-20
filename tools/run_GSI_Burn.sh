@@ -42,15 +42,31 @@ echo "🔄 重启设备 $DEVICE 进入 bootloader..."
 adb -s "$DEVICE" reboot bootloader
 sleep 5
 
-echo "🔓 解锁 vboot..."
-fastboot -s "$DEVICE" oem at-unlock-vboot
-fastboot -s "$DEVICE" reboot fastboot
-sleep 3
+echo "🔓 尝试解锁 vboot（如果已解锁会跳过）..."
+if fastboot -s "$DEVICE" oem at-unlock-vboot 2>/dev/null; then
+    echo "✅ vboot 解锁成功，等待设备重启..."
+    sleep 8  # 增加等待时间，让设备完全重启
+else
+    echo "⚠️ vboot 解锁失败或已解锁，继续执行"
+    sleep 2
+fi
 
-echo "🗑️ 删除 product 分区..."
-fastboot -s "$DEVICE" delete-logical-partition product
-fastboot -s "$DEVICE" delete-logical-partition product_a
-fastboot -s "$DEVICE" delete-logical-partition product_b
+# 确保设备在fastboot模式
+echo "📱 确保设备在fastboot模式..."
+if ! fastboot -s "$DEVICE" devices | grep -q "$DEVICE"; then
+    echo "⚠️ 设备未在fastboot模式，尝试重启..."
+    adb -s "$DEVICE" reboot bootloader
+    sleep 5
+fi
+
+echo "🗑️ 删除 product 分区（如果存在）..."
+for partition in product product_a product_b; do
+    if fastboot -s "$DEVICE" delete-logical-partition "$partition" 2>/dev/null; then
+        echo "✅ 已删除分区: $partition"
+    else
+        echo "⚠️ 分区 $partition 不存在或删除失败，跳过"
+    fi
+done
 
 echo "💾 烧写 system 镜像..."
 fastboot -s "$DEVICE" flash system "$SYSTEM_IMG"
