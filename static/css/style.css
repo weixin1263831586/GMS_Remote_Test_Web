@@ -392,7 +392,7 @@ body {
     font-size: 12px;
     font-weight: 700;
     color: var(--text-secondary);
-    margin-bottom: 12px;
+    margin-bottom: 6px;
     text-transform: uppercase;
     letter-spacing: 1px;
     display: flex;
@@ -414,11 +414,11 @@ body {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 8px;
-    padding: 12px;
+    padding: 6px;
     box-shadow: var(--shadow-sm);
     backdrop-filter: blur(10px);
     flex-shrink: 0;
-    margin-bottom: 10px;
+    margin-bottom: 6px;
 }
 
 .input-table {
@@ -467,8 +467,8 @@ body {
 .adb-frame {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 12px;
+    border-radius: 6px;
+    padding: 6px;
     display: flex;
     flex-direction: column;
     box-shadow: var(--shadow-sm);
@@ -683,8 +683,8 @@ body {
 .log-frame {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 10px;
+    border-radius: 6px;
+    padding: 6px;
     display: flex;
     flex-direction: column;
     flex: 1;
@@ -705,8 +705,8 @@ body {
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 12px;
     line-height: 1.7;
-    min-height: 400px;
-    max-height: 400px;
+    min-height: 450px;
+    max-height: 450px;
     color: #e8e8f0;
     word-wrap: break-word;
     white-space: pre-wrap;
