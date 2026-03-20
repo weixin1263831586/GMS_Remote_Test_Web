@@ -279,6 +279,25 @@ function initWebSocket() {
                         });
                         break;
 
+                    case 'firmware_progress':
+                        // 固件烧写进度更新
+                        console.log('[WebSocket] firmware_progress:', data.progress);
+                        if (data.progress) {
+                            addLogEntry(data.progress, 'info');
+                        }
+                        break;
+
+                    case 'file_upload_progress':
+                        // 文件上传进度更新（通用，用于固件上传等）
+                        console.log('[WebSocket] file_upload_progress:', data);
+                        updateUploadProgress(data.percentage, data.filename, data.uploaded_size, data.total_size);
+                        break;
+
+                    case 'upload_progress':
+                        // 固件上传进度更新（已弃用，保留以防兼容性）
+                        console.log('[WebSocket] upload_progress:', data);
+                        break;
+
                     case 'vpn_status_update':
                         updateVpnStatus(data.connected);
                         break;
@@ -818,20 +837,28 @@ function closeFirmwareModal() {
 
 // Browse local file for firmware (uses native file picker)
 function browseLocalFileForFirmware() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '*.img,*.bin,*.update';
-    input.onchange = (e) => {
+    // 创建隐藏的文件输入框
+    let fileInput = document.getElementById('firmware-file-input');
+    if (!fileInput) {
+        fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.id = 'firmware-file-input';
+        fileInput.accept = '*.img,*.bin,*.update';
+        fileInput.style.display = 'none';
+        document.body.appendChild(fileInput);
+    }
+
+    fileInput.onchange = (e) => {
         const file = e.target.files[0];
         if (file) {
             const target = document.getElementById('firmware-path');
             if (target) {
-                target.value = file.path || file.name;
+                target.value = file.name;  // 只显示文件名
                 showToast(`已选择固件文件: ${file.name}`, 'info');
             }
         }
     };
-    input.click();
+    fileInput.click();
 }
 
 async function submitFirmwareBurn() {
@@ -844,26 +871,35 @@ async function submitFirmwareBurn() {
     // Upload firmware file and burn
     const devices = Array.from(state.selectedDevices);
     try {
-        showToast('正在上传固件文件...', 'info');
+        // 立即关闭弹框
+        closeFirmwareModal();
+
+        showToast('正在烧写固件...', 'info');
         addLogEntry(`开始烧写固件: ${firmwarePath}`, 'info');
+
+        // 使用 FormData 上传文件
+        const formData = new FormData();
+        formData.append('devices', devices.join(','));
+        formData.append('firmware_path', firmwarePath);
+
+        // 如果有实际的文件（从文件输入获取），添加到 FormData
+        const fileInput = document.getElementById('firmware-file-input');
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+            formData.append('firmware_file', fileInput.files[0]);
+        }
 
         const response = await fetch('/api/firmware/burn', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                devices: devices,
-                firmware_path: firmwarePath
-            })
+            body: formData  // 不设置 Content-Type，让浏览器自动设置
         });
 
         const result = await response.json();
         if (result.success) {
             showToast('固件烧写任务已启动', 'success');
             addLogEntry(`固件烧写任务已启动，设备: ${devices.join(', ')}`, 'success');
-            closeFirmwareModal();
         } else {
-            showToast(`烧写失败: ${result.message}`, 'error');
-            addLogEntry(`固件烧写失败: ${result.message}`, 'error');
+            showToast(`烧写失败: ${result.error}`, 'error');
+            addLogEntry(`固件烧写失败: ${result.error}`, 'error');
         }
     } catch (error) {
         showToast(`烧写失败: ${error.message}`, 'error');
@@ -1518,6 +1554,38 @@ function formatBytes(bytes, hideIfZero = false) {
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(numBytes) / Math.log(k));
     return parseFloat((numBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// 通用上传进度更新函数（用于固件上传等）
+function updateUploadProgress(percentage, filename, uploadedSize, totalSize) {
+    console.log('[updateUploadProgress] Called with:', { percentage, filename, uploadedSize, totalSize });
+
+    const progressFill = document.getElementById('upload-progress-fill');
+    const progressInfo = document.getElementById('progress-info');
+
+    console.log('[updateUploadProgress] Elements:', { progressFill, progressInfo });
+
+    if (progressFill && progressInfo) {
+        progressFill.style.width = percentage + '%';
+
+        const transferred = formatBytes(uploadedSize);
+        const total = formatBytes(totalSize);
+
+        console.log('[updateUploadProgress] Updating UI:', { percentage, transferred, total });
+
+        if (percentage >= 100) {
+            progressInfo.textContent = `✅ ${filename} 上传完成 (${total})`;
+            // 3秒后重置进度条
+            setTimeout(() => {
+                progressFill.style.width = '0%';
+                progressInfo.textContent = '';
+            }, 3000);
+        } else {
+            progressInfo.textContent = `📤 ${filename} 上传中... ${percentage}% (${transferred}/${total})`;
+        }
+    } else {
+        console.error('[updateUploadProgress] Progress elements not found!');
+    }
 }
 
 // ==================== Browse Remote File ====================
