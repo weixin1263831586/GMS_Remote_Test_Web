@@ -611,7 +611,13 @@
 
         <!-- 报告管理页面 -->
         <div class="container page-content" id="page-reports">
-            <div class="section-title">📊 报告管理</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div class="section-title" style="margin: 0;">📊 报告管理</div>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary); cursor: pointer;">
+                    <input type="checkbox" id="filter-user-checkbox" onchange="toggleUserReports()" style="cursor: pointer;">
+                    查看本用户报告
+                </label>
+            </div>
 
             <!-- 报告列表 -->
             <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">

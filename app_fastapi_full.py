@@ -2136,36 +2136,42 @@ async def get_status(request: Request):
 # ==================== 报告管理 ====================
 
 @app.get("/api/reports/list")
-async def list_reports(request: Request):
-    """从数据库获取测试报告列表（只显示当前用户的报告）"""
-    try:
-        # 获取当前用户ID
-        client_id = get_client_id_from_request(request)
+async def list_reports(request: Request, user_only: bool = False):
+    """
+    从数据库获取测试报告列表
 
+    Args:
+        user_only: 是否只显示当前用户的报告，默认 False 显示所有用户的报告
+    """
+    try:
         # 从数据库获取报告
         all_reports = test_report_db.get_reports(limit=100)
 
-        # 对于本地访问（127.0.0.1或::1），也显示配置文件中client_ip对应的报告
-        # 这样可以确保本地开发时能看到测试报告
-        config = config_manager.load_config()
-        configured_ip = config.get('client_ip', '')
-        username = config.get('client_username', 'unknown')
+        # 如果要求只显示当前用户的报告，进行过滤
+        if user_only:
+            # 获取当前用户ID
+            client_id = get_client_id_from_request(request)
 
-        # 构建可能的client_id列表
-        possible_client_ids = [client_id]
-        if configured_ip:
-            # 如果当前是本地访问，添加配置文件IP对应的client_id
-            if '@127.0.0.1' in client_id or '@::1' in client_id or '@localhost' in client_id:
-                possible_client_ids.append(f"{username}@{configured_ip}")
+            # 对于本地访问（127.0.0.1或::1），也显示配置文件中client_ip对应的报告
+            config = config_manager.load_config()
+            configured_ip = config.get('client_ip', '')
+            username = config.get('client_username', 'unknown')
 
-        # 过滤当前用户的报告（支持多个可能的client_id）
-        user_reports = [
-            r for r in all_reports
-            if r.get('client_id') in possible_client_ids
-        ]
+            # 构建可能的client_id列表
+            possible_client_ids = [client_id]
+            if configured_ip:
+                # 如果当前是本地访问，添加配置文件IP对应的client_id
+                if '@127.0.0.1' in client_id or '@::1' in client_id or '@localhost' in client_id:
+                    possible_client_ids.append(f"{username}@{configured_ip}")
 
-        # 返回与Flask版本一致的格式
-        return JSONResponse(content={'reports': user_reports})
+            # 过滤当前用户的报告（支持多个可能的client_id）
+            all_reports = [
+                r for r in all_reports
+                if r.get('client_id') in possible_client_ids
+            ]
+
+        # 返回报告列表
+        return JSONResponse(content={'reports': all_reports})
 
     except Exception as e:
         logger.error(f"获取报告列表失败: {e}")
@@ -2347,9 +2353,9 @@ async def view_report_file(request: Request):
 
 @app.delete("/api/reports/delete")
 async def delete_report(request: Request, timestamp: str = Query(..., description="报告时间戳")):
-    """删除测试报告"""
+    """删除测试报告（仅限报告所有者）"""
     try:
-        # 获取当前用户ID
+        # 获取当前客户端信息
         client_id = get_client_id_from_request(request)
 
         # 从数据库获取报告
@@ -2361,10 +2367,12 @@ async def delete_report(request: Request, timestamp: str = Query(..., descriptio
                 status_code=404
             )
 
-        # 检查权限：只能删除自己的报告
-        if report.get('client_id') != client_id:
+        # 权限校验：只允许报告的所有者删除
+        report_client_id = report.get('client_id')
+        if report_client_id != client_id:
+            logger.warning(f"[DELETE] 权限拒绝: 客户端 {client_id} 尝试删除客户端 {report_client_id} 的报告")
             return JSONResponse(
-                content={'success': False, 'error': '无权删除此报告'},
+                content={'success': False, 'error': '您没有权限删除此报告'},
                 status_code=403
             )
 
@@ -2410,10 +2418,6 @@ async def download_report(request: Request, report_timestamp: str):
     try:
         logger.info(f"[DOWNLOAD] 请求下载报告: timestamp='{report_timestamp}'")
 
-        # 获取当前用户ID
-        client_id = get_client_id_from_request(request)
-        logger.info(f"[DOWNLOAD] 当前用户 client_id: '{client_id}'")
-
         # 从数据库获取报告信息
         report = test_report_db.get_report_by_timestamp(report_timestamp)
         logger.info(f"[DOWNLOAD] 查询报告结果: {report is not None}")
@@ -2426,29 +2430,6 @@ async def download_report(request: Request, report_timestamp: str):
             return JSONResponse(
                 content={'success': False, 'error': f'报告不存在: {report_timestamp}'},
                 status_code=404
-            )
-
-        # 构建可能的client_id列表（与list_reports逻辑一致）
-        config = config_manager.load_config()
-        configured_ip = config.get('client_ip', '')
-        username = config.get('client_username', 'unknown')
-
-        possible_client_ids = [client_id]
-        if configured_ip:
-            # 如果当前是本地访问，添加配置文件IP对应的client_id
-            if '@127.0.0.1' in client_id or '@::1' in client_id or '@localhost' in client_id:
-                possible_client_ids.append(f"{username}@{configured_ip}")
-
-        # 检查权限：只能下载自己的报告
-        report_client_id = report.get('client_id')
-        logger.info(f"[DOWNLOAD] 报告的 client_id: '{report_client_id}'")
-        logger.info(f"[DOWNLOAD] 可能的 client_id 列表: {possible_client_ids}")
-
-        if report_client_id not in possible_client_ids:
-            logger.error(f"[DOWNLOAD] 权限不足: 报告client_id='{report_client_id}', 当前可能的client_ids={possible_client_ids}")
-            return JSONResponse(
-                content={'success': False, 'error': '无权下载此报告'},
-                status_code=403
             )
 
         # 获取 result_dir 路径

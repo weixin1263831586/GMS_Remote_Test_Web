@@ -2305,10 +2305,12 @@ window.onclick = function(event) {
 
 // ==================== Test Reports ====================
 let reportsRefreshInterval = null;
+let currentUserFilter = false;  // 当前是否只显示本用户报告
 
-async function loadTestReports() {
+async function loadTestReports(userOnly = false) {
     try {
-        const resp = await fetch('/api/reports/list');
+        const url = userOnly ? '/api/reports/list?user_only=true' : '/api/reports/list';
+        const resp = await fetch(url);
         const data = await resp.json();
 
         if (data.reports) {
@@ -2319,7 +2321,7 @@ async function loadTestReports() {
         if (!reportsRefreshInterval) {
             reportsRefreshInterval = setInterval(() => {
                 if (currentPage === 'reports') {
-                    loadTestReports();
+                    loadTestReports(currentUserFilter);
                 }
             }, 15000);
         }
@@ -2336,6 +2338,14 @@ async function loadTestReports() {
             `;
         }
     }
+}
+
+function toggleUserReports() {
+    const checkbox = document.getElementById('filter-user-checkbox');
+    currentUserFilter = checkbox.checked;
+
+    // 重新加载报告列表
+    loadTestReports(currentUserFilter);
 }
 
 function displayTestReports(reports) {
