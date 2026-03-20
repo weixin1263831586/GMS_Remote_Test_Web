@@ -769,14 +769,28 @@ async def list_devices(request: Request):
 
         config = config_manager.load_config()
 
-        # 检查缓存
+        # 先刷新设备列表（需要最新状态来清理记录）
+        devices = device_manager.get_connected_devices()
+
+        # 清理已不存在的设备来源记录（与Flask版本一致）
+        # 如果设备已不在当前设备列表中，说明设备已断开/移除，应该清除其来源记录
+        current_device_set = set(devices)
+        devices_to_remove = [
+            dev_id for dev_id in global_state.usbip_devices_source.keys()
+            if dev_id not in current_device_set
+        ]
+        if devices_to_remove:
+            logger.info(f"[Devices API] Cleaning up removed devices: {devices_to_remove}")
+            with global_state.usbip_devices_source_lock:
+                for dev_id in devices_to_remove:
+                    del global_state.usbip_devices_source[dev_id]
+
+        # 检查缓存（清理后检查）
         now = datetime.now().timestamp()
         if now - global_state.device_cache['timestamp'] < DEVICE_CACHE_TTL:
             cached_devices = global_state.device_cache['devices']
             return JSONResponse(content=cached_devices)
 
-        # 刷新设备列表
-        devices = device_manager.get_connected_devices()
         devices_with_status = []
 
         for device_id in devices:
@@ -1106,6 +1120,29 @@ async def devices_management():
             all_usbip_sources.update(global_state.usbip_devices_source)
             all_usbip_sources.update(usbip_manager.device_sources)
             all_usbip_sources.update(persisted_usbip_sources)
+
+            # 清理已不存在的设备来源记录（与Flask版本一致）
+            # 如果设备已不在当前设备列表中，说明设备已断开/移除，应该清除其来源记录
+            current_device_set = set(device_ids)
+            devices_to_remove = [
+                dev_id for dev_id in all_usbip_sources.keys()
+                if dev_id not in current_device_set
+            ]
+            if devices_to_remove:
+                logger.info(f"[Device Management] Cleaning up removed devices: {devices_to_remove}")
+                # 从全局状态中清除
+                with global_state.usbip_devices_source_lock:
+                    for dev_id in devices_to_remove:
+                        if dev_id in global_state.usbip_devices_source:
+                            del global_state.usbip_devices_source[dev_id]
+                # 从usbip_manager中清除
+                for dev_id in devices_to_remove:
+                    if dev_id in usbip_manager.device_sources:
+                        del usbip_manager.device_sources[dev_id]
+                # 也要从合并后的字典中清除
+                for dev_id in devices_to_remove:
+                    if dev_id in all_usbip_sources:
+                        del all_usbip_sources[dev_id]
 
             for device_id in device_ids:
                 props = device_data.get(device_id, {})
