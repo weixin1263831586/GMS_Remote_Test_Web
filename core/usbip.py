@@ -237,10 +237,10 @@ winget install dorssel.usbipd-win --source winget
             logger.error(f"Error creating Windows SSH: {e}")
             return None
 
-    def _execute_ssh(self, ssh, command: str, timeout: int = 10) -> Tuple[str, str, int]:
+    def _execute_ssh(self, ssh, command: str, timeout: int = 10, get_pty: bool = False) -> Tuple[str, str, int]:
         """执行SSH命令"""
         try:
-            stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
+            stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout, get_pty=get_pty)
             stdout_text = stdout.read().decode('utf-8', errors='ignore')
             stderr_text = stderr.read().decode('utf-8', errors='ignore')
             exit_code = stdout.channel.recv_exit_status()
@@ -259,10 +259,16 @@ winget install dorssel.usbipd-win --source winget
     def _find_android_devices(self, ssh, config: Dict[str, Any]) -> List[str]:
         """查找Android设备的BUSID"""
         try:
-            stdout, stderr, code = self._execute_ssh(ssh, 'usbipd list')
+            # 使用 get_pty=True 获取完整的设备列表（需要交互式会话环境）
+            stdout, stderr, code = self._execute_ssh(
+                ssh,
+                'usbipd list',
+                timeout=15,
+                get_pty=True
+            )
+
             logger.info(f"USB/IP devices:\n{stdout}")
 
-            # 从配置获取VID:PID
             vid_pid = config.get('usbip_vid_pid')
 
             devices = []

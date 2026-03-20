@@ -264,7 +264,7 @@
                 </a>
                 <a href="#" class="sidebar-item" data-page="reports" onclick="switchPage('reports', event)">
                     <span class="sidebar-icon">📊</span>
-                    <span class="sidebar-text">测试报告</span>
+                    <span class="sidebar-text">报告管理</span>
                 </a>
                 <a href="#" class="sidebar-item" data-page="report-analysis" onclick="switchPage('report-analysis', event)">
                     <span class="sidebar-icon">📈</span>
@@ -609,9 +609,9 @@
             </div>
         </div>
 
-        <!-- 测试报告页面 -->
+        <!-- 报告管理页面 -->
         <div class="container page-content" id="page-reports">
-            <div class="section-title">📊 测试报告</div>
+            <div class="section-title">📊 报告管理</div>
 
             <!-- 报告列表 -->
             <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
@@ -1826,7 +1826,7 @@
                 'terminal': '主机终端 - GMS 远程测试',
                 'devices': '设备管理 - GMS 远程测试',
                 'users': '用户管理 - GMS 远程测试',
-                'reports': '测试报告 - GMS 远程测试',
+                'reports': '报告管理 - GMS 远程测试',
                 'report-analysis': '报告分析 - GMS 远程测试'
             };
             document.title = titles[pageName] || 'GMS 远程测试';
@@ -1867,7 +1867,7 @@
                 loadDevicesManagement();
             }
 
-            // 如果切换到测试报告页面，加载报告列表
+            // 如果切换到报告管理页面，加载报告列表
             if (pageName === 'reports') {
                 loadTestReports();
             }
@@ -2249,7 +2249,7 @@
                 'terminal': '主机终端 - GMS 远程测试',
                 'devices': '设备管理 - GMS 远程测试',
                 'users': '用户管理 - GMS 远程测试',
-                'reports': '测试报告 - GMS 远程测试',
+                'reports': '报告管理 - GMS 远程测试',
                 'report-analysis': '报告分析 - GMS 远程测试'
             };
             document.title = titles[targetPage] || 'GMS 远程测试';
