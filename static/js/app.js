@@ -806,13 +806,6 @@ async function burnFirmware() {
         return;
     }
 
-    // Set default paths based on config
-    const defaultUser = state.config?.ubuntu_user || 'hcq';
-    const miscInput = document.getElementById('firmware-misc');
-    if (miscInput && !miscInput.value) {
-        miscInput.value = `/home/${defaultUser}/GMS-Suite/misc.img`;
-    }
-
     // Show firmware configuration modal
     const modal = document.getElementById('firmware-modal');
     modal.classList.add('show');
@@ -823,18 +816,59 @@ function closeFirmwareModal() {
     modal.classList.remove('show');
 }
 
+// Browse local file for firmware (uses native file picker)
+function browseLocalFileForFirmware() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '*.img,*.bin,*.update';
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const target = document.getElementById('firmware-path');
+            if (target) {
+                target.value = file.path || file.name;
+                showToast(`已选择固件文件: ${file.name}`, 'info');
+            }
+        }
+    };
+    input.click();
+}
+
 async function submitFirmwareBurn() {
-    const systemImg = document.getElementById('firmware-system').value.trim();
-    if (!systemImg) {
-        showToast('System 镜像路径不能为空', 'error');
+    const firmwarePath = document.getElementById('firmware-path').value.trim();
+    if (!firmwarePath) {
+        showToast('请选择固件文件', 'error');
         return;
     }
 
-    await executeBurnOperation('/api/firmware/burn', {
-        system_img: systemImg,
-        vendor_img: document.getElementById('firmware-vendor').value.trim(),
-        misc_img: document.getElementById('firmware-misc').value.trim()
-    }, '烧写固件', closeFirmwareModal);
+    // Upload firmware file and burn
+    const devices = Array.from(state.selectedDevices);
+    try {
+        showToast('正在上传固件文件...', 'info');
+        addLogEntry(`开始烧写固件: ${firmwarePath}`, 'info');
+
+        const response = await fetch('/api/firmware/burn', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                devices: devices,
+                firmware_path: firmwarePath
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showToast('固件烧写任务已启动', 'success');
+            addLogEntry(`固件烧写任务已启动，设备: ${devices.join(', ')}`, 'success');
+            closeFirmwareModal();
+        } else {
+            showToast(`烧写失败: ${result.message}`, 'error');
+            addLogEntry(`固件烧写失败: ${result.message}`, 'error');
+        }
+    } catch (error) {
+        showToast(`烧写失败: ${error.message}`, 'error');
+        addLogEntry(`固件烧写异常: ${error.message}`, 'error');
+    }
 }
 
 async function burnGsiImage() {
@@ -843,7 +877,7 @@ async function burnGsiImage() {
         return;
     }
 
-    // Set default paths based on config
+    // Set default script path
     const defaultUser = state.config?.ubuntu_user || 'hcq';
     const scriptInput = document.getElementById('gsi-script');
     if (scriptInput && !scriptInput.value) {
@@ -860,13 +894,34 @@ function closeGsiModal() {
     modal.classList.remove('show');
 }
 
-async function browseRemoteFileForGsi() {
-    const targetInputId = 'gsi-system';
+// Browse remote file for GSI script
+async function browseLocalFileForGsiScript() {
+    const title = '选择GSI烧写脚本';
+
+    // Set file browser state
+    state.fileBrowser.mode = 'gsi-script';
+    state.fileBrowser.targetInputId = 'gsi-script';
+    state.fileBrowser.selectedFile = null;
+
+    // Update modal title
+    document.getElementById('file-browser-title').textContent = title;
+
+    // Show modal
+    const modal = document.getElementById('file-browser-modal');
+    modal.classList.add('show');
+
+    // Load initial directory (GMS-Suite)
+    const defaultUser = state.config?.ubuntu_user || 'hcq';
+    await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
+}
+
+// Browse remote file for GSI system image
+async function browseLocalFileForGsiSystem() {
     const title = '选择System镜像';
 
     // Set file browser state
-    state.fileBrowser.mode = 'gsi';
-    state.fileBrowser.targetInputId = targetInputId;
+    state.fileBrowser.mode = 'gsi-system';
+    state.fileBrowser.targetInputId = 'gsi-system';
     state.fileBrowser.selectedFile = null;
 
     // Update modal title
@@ -876,59 +931,23 @@ async function browseRemoteFileForGsi() {
     const modal = document.getElementById('file-browser-modal');
     modal.classList.add('show');
 
-    // Load initial directory (user home)
+    // Load initial directory (GMS-Suite)
     const defaultUser = state.config?.ubuntu_user || 'hcq';
-    await loadFileDirectory(`/home/${defaultUser}`);
+    await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
 }
 
-function browseLocalFileForVendor() {
-    // For vendor boot image, we can use a local file input
+// Browse local file for GSI vendor image (from local computer)
+function browseLocalFileForGsiVendor() {
     const input = document.createElement('input');
     input.type = 'file';
+    input.accept = '*.img';
     input.onchange = (e) => {
         const file = e.target.files[0];
         if (file) {
-            // For local files, we'll need to upload them first
-            document.getElementById('gsi-vendor').value = file.path || file.name;
-            showToast(`已选择: ${file.name}`, 'info');
-        }
-    };
-    input.click();
-}
-
-// Browse remote file for firmware inputs (uses remote file browser modal)
-async function browseRemoteFileForFirmware(targetInputId) {
-    const title = '选择镜像文件';
-
-    // Set file browser state
-    state.fileBrowser.mode = 'firmware';
-    state.fileBrowser.targetInputId = targetInputId;
-    state.fileBrowser.selectedFile = null;
-
-    // Update modal title
-    document.getElementById('file-browser-title').textContent = title;
-
-    // Show modal
-    const modal = document.getElementById('file-browser-modal');
-    modal.classList.add('show');
-
-    // Load initial directory (user home)
-    const defaultUser = state.config?.ubuntu_user || 'hcq';
-    await loadFileDirectory(`/home/${defaultUser}`);
-}
-
-// Browse local file for firmware inputs (uses native file picker)
-function browseLocalFileForFirmware(targetInputId) {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.onchange = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const target = document.getElementById(targetInputId);
+            const target = document.getElementById('gsi-vendor');
             if (target) {
-                // For local selection, set file name; actual upload handled elsewhere
                 target.value = file.path || file.name;
-                showToast(`已选择本地文件: ${file.name}`, 'info');
+                showToast(`已选择Vendor镜像: ${file.name}`, 'info');
             }
         }
     };
@@ -936,9 +955,16 @@ function browseLocalFileForFirmware(targetInputId) {
 }
 
 async function submitGsiBurn() {
+    const scriptPath = document.getElementById('gsi-script').value.trim();
     const systemImg = document.getElementById('gsi-system').value.trim();
+    const vendorImg = document.getElementById('gsi-vendor').value.trim();
+
+    if (!scriptPath) {
+        showToast('请选择GSI烧写脚本', 'error');
+        return;
+    }
     if (!systemImg) {
-        showToast('System 镜像路径不能为空', 'error');
+        showToast('请选择System镜像', 'error');
         return;
     }
 
@@ -1511,8 +1537,9 @@ async function browseRemoteFile(mode) {
     const modal = document.getElementById('file-browser-modal');
     modal.classList.add('show');
 
-    // Load initial directory - use GMS-Suite for suite selection
-    const defaultPath = mode === 'suite' ? `/home/${state.config?.ubuntu_user || 'hcq'}/GMS-Suite` : `/home/${state.config?.ubuntu_user || 'hcq'}`;
+    // Load initial directory - use GMS-Suite for both suite and retry
+    const defaultUser = state.config?.ubuntu_user || 'hcq';
+    const defaultPath = `/home/${defaultUser}/GMS-Suite`;
     await loadFileDirectory(defaultPath);
 }
 
@@ -1635,11 +1662,32 @@ function confirmFileSelection() {
             addLogEntry(`已选择测试报告: ${fullPath}`, 'info');
         }
         closeFileBrowserModal();
-    } else if (state.fileBrowser.mode === 'gsi') {
+    } else if (state.fileBrowser.mode === 'gsi' || state.fileBrowser.mode === 'gsi-system') {
         // For GSI system image, use the selected path directly
         if (targetInput) {
             targetInput.value = fullPath;
             addLogEntry(`已选择System镜像: ${fullPath}`, 'info');
+        }
+        closeFileBrowserModal();
+    } else if (state.fileBrowser.mode === 'gsi-script') {
+        // For GSI script, use the selected path directly
+        if (targetInput) {
+            targetInput.value = fullPath;
+            addLogEntry(`已选择GSI脚本: ${fullPath}`, 'info');
+        }
+        closeFileBrowserModal();
+    } else if (state.fileBrowser.mode === 'gsi-vendor') {
+        // For GSI vendor image, use the selected path directly
+        if (targetInput) {
+            targetInput.value = fullPath;
+            addLogEntry(`已选择Vendor镜像: ${fullPath}`, 'info');
+        }
+        closeFileBrowserModal();
+    } else if (state.fileBrowser.mode === 'firmware') {
+        // For firmware, use the selected path directly
+        if (targetInput) {
+            targetInput.value = fullPath;
+            addLogEntry(`已选择固件文件: ${fullPath}`, 'info');
         }
         closeFileBrowserModal();
     } else {

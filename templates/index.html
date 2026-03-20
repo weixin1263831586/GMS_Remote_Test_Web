@@ -768,26 +768,11 @@
             </div>
             <div class="modal-body">
                 <div class="modal-form-row">
-                    <label>System 镜像路径:</label>
-                        <div class="input-with-btn">
-                            <input type="text" id="firmware-system" placeholder="/path/to/system.img" />
-                            <button class="btn-small" onclick="browseRemoteFileForFirmware('firmware-system')">📁 浏览</button>
-                        </div>
-                </div>
-                <div class="modal-form-row">
-                    <label>Vendor Boot 镜像路径:</label>
-                        <div class="input-with-btn">
-                            <input type="text" id="firmware-vendor" placeholder="/path/to/vendor_boot.img (可选)" />
-                            <button class="btn-small" onclick="browseLocalFileForFirmware('firmware-vendor')">📁 本地</button>
-                            <button class="btn-small" onclick="browseRemoteFileForFirmware('firmware-vendor')">📁 远程</button>
-                        </div>
-                </div>
-                <div class="modal-form-row">
-                    <label>Misc 镜像路径:</label>
-                        <div class="input-with-btn">
-                            <input type="text" id="firmware-misc" placeholder="/path/to/misc.img" />
-                            <button class="btn-small" onclick="browseRemoteFileForFirmware('firmware-misc')">📁 浏览</button>
-                        </div>
+                    <label>固件文件:</label>
+                    <div class="input-with-btn">
+                        <input type="text" id="firmware-path" placeholder="请选择固件文件 (*.img, *.bin, *.update)" />
+                        <button class="btn-small" onclick="browseLocalFileForFirmware()">📁</button>
+                    </div>
                 </div>
                 <div class="modal-info-text">
                     ⚠️ 注意：烧写固件会重启设备并进入 fastboot 模式，请确保已选择正确的设备。
@@ -810,20 +795,23 @@
             <div class="modal-body">
                 <div class="modal-form-row">
                     <label>GSI烧写脚本:</label>
-                    <input type="text" id="gsi-script" class="readonly" placeholder="脚本路径" readonly />
-                </div>
-                <div class="modal-form-row">
-                    <label>System 镜像路径:</label>
                     <div class="input-with-btn">
-                        <input type="text" id="gsi-system" placeholder="/path/to/system.img" />
-                        <button class="btn-small" onclick="browseRemoteFileForGsi()">📁 浏览</button>
+                        <input type="text" id="gsi-script" placeholder="请选择GSI烧写脚本" />
+                        <button class="btn-small" onclick="browseLocalFileForGsiScript()">📁</button>
                     </div>
                 </div>
                 <div class="modal-form-row">
-                    <label>Vendor Boot 镜像:</label>
+                    <label>System 镜像:</label>
                     <div class="input-with-btn">
-                        <input type="text" id="gsi-vendor" placeholder="/path/to/vendor_boot.img (可选)" />
-                        <button class="btn-small" onclick="browseLocalFileForVendor()">📁 浏览</button>
+                        <input type="text" id="gsi-system" placeholder="请选择System镜像" />
+                        <button class="btn-small" onclick="browseLocalFileForGsiSystem()">📁</button>
+                    </div>
+                </div>
+                <div class="modal-form-row">
+                    <label>Vendor 镜像:</label>
+                    <div class="input-with-btn">
+                        <input type="text" id="gsi-vendor" placeholder="Vendor镜像(可选)" />
+                        <button class="btn-small" onclick="browseLocalFileForGsiVendor()">📁</button>
                     </div>
                 </div>
                 <div class="modal-info-text">
@@ -1704,7 +1692,7 @@
                             ${device.locked_by || '-'}
                         </td>
                         <td style="padding: 12px; text-align: center;">
-                            <button class="btn-xxs" onclick="openDeviceShell('${device.serial_no}')" style="background: var(--primary-color);">🐧 Shell</button>
+                            <button class="btn-xxs" onclick="openDeviceShell('${device.serial_no}')" style="background: var(--primary-color); font-size: 14px; padding: 8px 12px;">🐧 Shell</button>
                         </td>
                     </tr>
                 `;
