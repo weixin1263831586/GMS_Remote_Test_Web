@@ -337,6 +337,64 @@ def get_client_id_from_request(request: Request) -> str:
 
     return client_manager.get_client_id(client_ip, username)
 
+async def broadcast_device_lock_update(device_ids: list = None):
+    """广播设备锁定更新（快速版本，不需要SSH查询）"""
+    try:
+        # 获取所有锁定的设备信息
+        all_locks = device_lock_manager.get_all_locks()
+
+        # 构建设备更新消息
+        device_updates = []
+        if device_ids:
+            # 只更新指定的设备
+            logger.debug(f"[Broadcast Device Lock] 更新指定设备: {device_ids}")
+            for device_id in device_ids:
+                if device_id in all_locks:
+                    lock_info = all_locks[device_id]
+                    # 直接使用client_id (username@ip格式)
+                    locked_by = lock_info['client_id']
+                    device_updates.append({
+                        'device_id': device_id,
+                        'locked': True,
+                        'locked_by': locked_by,
+                        'locked_at': lock_info['timestamp']
+                    })
+                    logger.debug(f"[Broadcast Device Lock] 设备 {device_id} 已锁定 by {locked_by}")
+                else:
+                    device_updates.append({
+                        'device_id': device_id,
+                        'locked': False
+                    })
+                    logger.debug(f"[Broadcast Device Lock] 设备 {device_id} 已解锁")
+        else:
+            # 更新所有锁定的设备
+            logger.debug(f"[Broadcast Device Lock] 更新所有锁定设备")
+            for device_id, lock_info in all_locks.items():
+                # 直接使用client_id (username@ip格式)
+                locked_by = lock_info['client_id']
+                device_updates.append({
+                    'device_id': device_id,
+                    'locked': True,
+                    'locked_by': locked_by,
+                    'locked_at': lock_info['timestamp']
+                })
+
+        # 广播到所有连接的客户端
+        logger.debug(f"[Broadcast Device Lock] 广播到 {len(global_state.websocket_connections)} 个客户端")
+        for client_id, ws in global_state.websocket_connections.items():
+            try:
+                await ws.send_json({
+                    'type': 'device_lock_update',
+                    'devices': device_updates
+                })
+                logger.debug(f"[Broadcast Device Lock] 成功发送到客户端 {client_id}")
+            except Exception as e:
+                logger.warning(f"[Broadcast Device Lock] 发送到客户端 {client_id} 失败: {e}")
+
+        logger.debug(f"[Broadcast Device Lock] 已发送设备锁定更新到 {len(global_state.websocket_connections)} 个客户端")
+    except Exception as e:
+        logger.error(f"[Broadcast Device Lock] 广播设备锁定更新失败: {e}")
+
 def get_or_create_user_state(client_id: str) -> dict:
     """获取或创建用户状态（不修正client_id，使用原始key）"""
     with global_state.user_states_lock:
@@ -619,17 +677,20 @@ async def set_client_info(req: ClientInfoRequest, request: Request):
         'last_seen': datetime.now().isoformat()
     })
 
-    # 如果用户名从"unknown"更新为实际用户名，删除旧的unknown记录
-    if username != 'unknown':
-        old_unknown_id = f'unknown@{client_ip}'
-        with global_state.user_states_lock:
-            if old_unknown_id in global_state.user_states:
-                # 检查是否应该删除（同一IP，不同用户名）
-                old_state = global_state.user_states[old_unknown_id]
-                old_ip = old_state.get('ip', '')
-                if old_ip == client_ip:
-                    del global_state.user_states[old_unknown_id]
-                    logger.info(f"[ClientInfo] Removed old unknown user: {old_unknown_id}")
+    # 清理同一IP的旧记录（不同用户名的记录）
+    with global_state.user_states_lock:
+        to_remove = []
+        for existing_id, existing_state in global_state.user_states.items():
+            if existing_id == client_id:
+                continue
+            # 检查是否是同一IP但不同用户名的旧记录
+            existing_ip = existing_state.get('client_ip', '')
+            if existing_ip == client_ip:
+                to_remove.append(existing_id)
+
+        for old_id in to_remove:
+            del global_state.user_states[old_id]
+            logger.info(f"[ClientInfo] Removed old user record for same IP: {old_id} -> {client_id}")
 
     logger.info(f"[ClientInfo] IP: {client_ip} | Username: {username} | ClientID: {client_id}")
 
@@ -688,8 +749,13 @@ async def list_users():
 
             # 解析client_id (username@ip)
             parts = client_id.split('@')
-            username = parts[0] if len(parts) > 0 else 'unknown'
+            username_from_id = parts[0] if len(parts) > 0 else 'unknown'
             ip = parts[1] if len(parts) > 1 else 'unknown'
+
+            # 优先使用state中存储的username（更准确）
+            username = state.get('client_username', username_from_id)
+            if username == 'unknown':
+                username = username_from_id
 
             # 过滤本地地址
             if ip in local_addresses:
@@ -4422,14 +4488,17 @@ async def burn_firmware(request: Request):
         # 获取客户端ID
         client_id = get_client_id_from_request(request)
 
-        # 解析表单数据（支持文件上传）
-        form = await request.form()
-        devices_str = form.get('devices')
-        devices = devices_str.split(',') if devices_str else []
-
-        # 检查是否有上传的文件
-        firmware_file = form.get('firmware_file')
-        firmware_path = form.get('firmware_path', '').strip()
+        # 从URL参数获取设备列表（优先，这样可以在文件上传前先锁定）
+        devices_param = request.query_params.get('devices')
+        if devices_param:
+            devices = devices_param.split(',')
+            logger.info(f"[Firmware Burn] 设备列表从URL参数获取: {devices}")
+        else:
+            # 兼容旧版本：从FormData获取
+            form = await request.form()
+            devices_str = form.get('devices')
+            devices = devices_str.split(',') if devices_str else []
+            logger.info(f"[Firmware Burn] 设备列表从FormData获取: {devices}")
 
         # 检查设备
         if not devices:
@@ -4437,15 +4506,67 @@ async def burn_firmware(request: Request):
                 content={'success': False, 'error': 'No devices selected'}
             )
 
+        # 获取用户名并立即锁定设备（在等待FormData之前）
+        config = config_manager.load_config()
+        username = config.get('client_username', 'unknown')
+
+        # 锁定设备
+        locked_devices = []
+        failed_devices = []
+        for device_id in devices:
+            success, message = device_lock_manager.lock_device(device_id, client_id, username)
+            if success:
+                locked_devices.append(device_id)
+            else:
+                failed_devices.append({'device_id': device_id, 'error': message})
+
+        logger.info(f"[Device Lock] 锁定完成: 成功 {len(locked_devices)} 台, 失败 {len(failed_devices)} 台")
+        logger.info(f"[Device Lock] 锁定的设备: {locked_devices}")
+
+        # 如果有设备锁定失败，释放已锁定的设备并返回错误
+        if failed_devices:
+            for device_id in locked_devices:
+                device_lock_manager.unlock_device(device_id, client_id)
+
+            error_msg = "以下设备已被其他用户占用：\n"
+            for fail in failed_devices:
+                error_msg += f"- {fail['device_id']} ({fail['error']})\n"
+
+            return JSONResponse(
+                content={
+                    'success': False,
+                    'error': error_msg.strip(),
+                    'failed_devices': failed_devices
+                },
+                status_code=409
+            )
+
+        # 广播设备锁定状态（立即显示）
+        logger.info(f"[Device Lock] 开始广播锁定状态到 {len(global_state.websocket_connections)} 个客户端")
+        await broadcast_device_lock_update(locked_devices)
+        logger.info(f"[Device Lock] 锁定状态广播完成")
+
+        # 现在才开始等待FormData（此时设备已经锁定并显示）
+        form = await request.form()
+        firmware_file = form.get('firmware_file')
+        firmware_path = form.get('firmware_path', '').strip()
+
         # 检查固件来源
         if not firmware_file and not firmware_path:
+            # 释放设备锁
+            for device_id in locked_devices:
+                device_lock_manager.unlock_device(device_id, client_id)
+            await broadcast_device_lock_update(locked_devices)
+
             return JSONResponse(
                 content={'success': False, 'error': 'Please upload a firmware file or provide a firmware path'}
             )
 
-        config = config_manager.load_config()
         ssh = ssh_manager.get_connection(config)
         if not ssh:
+            # 释放设备锁
+            for device_id in locked_devices:
+                device_lock_manager.unlock_device(device_id, client_id)
             return JSONResponse(
                 content={'success': False, 'error': 'SSH connection failed'}
             )
@@ -4521,11 +4642,6 @@ async def burn_firmware(request: Request):
                 # 发送上传开始消息
                 if client_id in global_state.websocket_connections:
                     try:
-                        await global_state.websocket_connections[client_id].send_json({
-                            'type': 'log_update',
-                            'log': f'📤 上传固件到测试主机 ({firmware_size / 1024 / 1024:.2f} MB)...',
-                            'log_type': 'info'
-                        })
                         await global_state.websocket_connections[client_id].send_json({
                             'type': 'file_upload_progress',
                             'filename': firmware_name,
@@ -4634,11 +4750,6 @@ async def burn_firmware(request: Request):
                     # 发送上传开始消息
                     if client_id in global_state.websocket_connections:
                         try:
-                            await global_state.websocket_connections[client_id].send_json({
-                                'type': 'log_update',
-                                'log': f'📤 开始上传固件文件 ({file_size / 1024 / 1024:.2f} MB)...',
-                                'log_type': 'info'
-                            })
                             await global_state.websocket_connections[client_id].send_json({
                                 'type': 'file_upload_progress',
                                 'filename': firmware_name,
@@ -4776,7 +4887,15 @@ async def burn_firmware(request: Request):
             import select
             output_buffer = []
 
+            # 进度条状态
+            firmware_burn_start = False
+            current_progress = 0
+            last_progress_time = 0
+
             while not stdout.channel.exit_status_ready():
+                current_time = asyncio.get_event_loop().time()
+
+                # 如果有数据可读，读取并处理
                 if stdout.channel.recv_ready():
                     chunk = stdout.channel.recv(1024).decode('utf-8', errors='ignore')
                     output_buffer.append(chunk)
@@ -4784,28 +4903,58 @@ async def burn_firmware(request: Request):
                     # 清理ANSI转义码
                     clean_chunk = strip_ansi_codes(chunk)
 
-                    # 发送进度更新到前端
+                    # 检测烧写状态开始
+                    if 'Download Firmware Start' in clean_chunk and not firmware_burn_start:
+                        firmware_burn_start = True
+                        current_progress = 0
+                        last_progress_time = current_time
+                        logger.info("[Firmware Burn] 检测到固件烧写开始，启动进度条")
+
+                    # 发送所有非空输出到前端
                     if client_id in global_state.websocket_connections:
                         try:
-                            # 解析进度（upgrade_tool 输出包含进度信息）
-                            progress_match = None
                             for line in clean_chunk.split('\n'):
                                 line = line.strip()
-                                if '%' in line:
-                                    progress_match = line
-                                elif 'Download' in line or 'Writing' in line or 'Erase' in line:
-                                    progress_match = line
+                                if line:
+                                    # 固件烧写期间不显示日志（保持日志区域干净）
+                                    # 除非是错误信息
+                                    if firmware_burn_start:
+                                        # 只显示错误信息
+                                        if any(keyword in line.lower() for keyword in ['error', 'failed', 'fail', '错误', '失败']):
+                                            await global_state.websocket_connections[client_id].send_json({
+                                                'type': 'log_update',
+                                                'log': line,
+                                                'log_type': 'error'
+                                            })
+                                        continue
 
-                            if progress_match:
-                                await global_state.websocket_connections[client_id].send_json({
-                                    'type': 'log_update',
-                                    'log': progress_match,
-                                    'log_type': 'info'
-                                })
-                        except:
-                            pass
-                else:
-                    await asyncio.sleep(0.5)
+                                    # 其他正常日志
+                                    await global_state.websocket_connections[client_id].send_json({
+                                        'type': 'log_update',
+                                        'log': line,
+                                        'log_type': 'info'
+                                    })
+                        except Exception as e:
+                            logger.error(f"[Firmware Burn] 发送日志失败: {e}")
+
+                # 如果固件烧写开始，每0.5秒更新一次进度
+                if firmware_burn_start and (current_time - last_progress_time > 0.5):
+                    # 进度条从0%到95%，每0.5秒增加5%
+                    current_progress = min(current_progress + 5, 95)
+                    last_progress_time = current_time
+
+                    # 发送进度更新到前端（只更新进度条，不显示在日志）
+                    if client_id in global_state.websocket_connections:
+                        try:
+                            await global_state.websocket_connections[client_id].send_json({
+                                'type': 'firmware_progress',
+                                'percentage': current_progress
+                            })
+                        except Exception as e:
+                            logger.error(f"[Firmware Burn] 发送进度失败: {e}")
+
+                # 短暂休眠避免CPU占用过高
+                await asyncio.sleep(0.1)
 
             # 获取最终输出
             final_output = ''.join(output_buffer)
@@ -4814,6 +4963,16 @@ async def burn_firmware(request: Request):
             if exit_status == 0:
                 logger.info(f"[Firmware Burn] Success:\n{final_output}")
                 ssh_manager.return_connection(ssh)
+
+                # 发送100%完成进度
+                if client_id in global_state.websocket_connections:
+                    try:
+                        await global_state.websocket_connections[client_id].send_json({
+                            'type': 'firmware_progress',
+                            'percentage': 100
+                        })
+                    except:
+                        pass
 
                 # 发送完成消息
                 if client_id in global_state.websocket_connections:
@@ -4826,24 +4985,56 @@ async def burn_firmware(request: Request):
                     except:
                         pass
 
+                # 释放设备锁
+                logger.info(f"[Device Lock] 开始解锁设备: {locked_devices}")
+                for device_id in locked_devices:
+                    device_lock_manager.unlock_device(device_id, client_id)
+                logger.info(f"[Device Lock] 设备解锁完成")
+
+                # 广播设备解锁状态（立即移除）
+                logger.info(f"[Device Lock] 开始广播解锁状态")
+                await broadcast_device_lock_update(locked_devices)
+                logger.info(f"[Device Lock] 解锁状态广播完成")
+
                 return JSONResponse(
                     content={'success': True, 'message': 'Firmware burn completed successfully'}
                 )
             else:
                 logger.error(f"[Firmware Burn] Failed with exit code {exit_status}")
-                error_output = stderr.read().decode('utf-8', errors='ignore')
+
+                # 从输出缓冲区获取错误信息
+                final_output = ''.join(output_buffer)
+                error_output = final_output or stderr.read().decode('utf-8', errors='ignore')
                 ssh_manager.return_connection(ssh)
 
-                # 发送失败消息
+                # 发送失败消息（显示详细错误）
                 if client_id in global_state.websocket_connections:
                     try:
                         await global_state.websocket_connections[client_id].send_json({
                             'type': 'log_update',
-                            'log': f'❌ 固件烧写失败: {error_output}',
+                            'log': f'❌ 固件烧写失败 (exit code: {exit_status})',
                             'log_type': 'error'
                         })
+                        # 如果有详细错误信息，也发送
+                        if error_output and len(error_output) < 500:  # 限制长度
+                            await global_state.websocket_connections[client_id].send_json({
+                                'type': 'log_update',
+                                'log': f'错误详情: {error_output[:200]}',
+                                'log_type': 'error'
+                            })
                     except:
                         pass
+
+                # 释放设备锁
+                logger.info(f"[Device Lock] 开始解锁设备: {locked_devices}")
+                for device_id in locked_devices:
+                    device_lock_manager.unlock_device(device_id, client_id)
+                logger.info(f"[Device Lock] 设备解锁完成")
+
+                # 广播设备解锁状态（立即移除）
+                logger.info(f"[Device Lock] 开始广播解锁状态")
+                await broadcast_device_lock_update(locked_devices)
+                logger.info(f"[Device Lock] 解锁状态广播完成")
 
                 return JSONResponse(
                     content={'success': False, 'error': error_output or 'Firmware burn failed'}
@@ -4852,6 +5043,14 @@ async def burn_firmware(request: Request):
         except Exception as e:
             ssh_manager.return_connection(ssh)
             logger.error(f"[Firmware Burn] Error: {e}")
+
+            # 释放设备锁
+            for device_id in locked_devices:
+                device_lock_manager.unlock_device(device_id, client_id)
+
+            # 广播设备更新（移除锁定状态）
+            await broadcast_device_update()
+
             return JSONResponse(
                 content={'success': False, 'error': str(e)}
             )
@@ -4899,9 +5098,52 @@ async def burn_gsi(request: Request):
                 content={'success': False, 'error': 'System image path is required'}
             )
 
+        # 获取用户名
+        config = config_manager.load_config()
+        username = config.get('client_username', 'unknown')
+
+        # 锁定设备
+        locked_devices = []
+        failed_devices = []
+        for device_id in devices:
+            success, message = device_lock_manager.lock_device(device_id, client_id, username)
+            if success:
+                locked_devices.append(device_id)
+            else:
+                failed_devices.append({'device_id': device_id, 'error': message})
+
+        logger.info(f"[Device Lock] 锁定完成: 成功 {len(locked_devices)} 台, 失败 {len(failed_devices)} 台")
+        logger.info(f"[Device Lock] 锁定的设备: {locked_devices}")
+
+        # 如果有设备锁定失败，释放已锁定的设备并返回错误
+        if failed_devices:
+            for device_id in locked_devices:
+                device_lock_manager.unlock_device(device_id, client_id)
+
+            error_msg = "以下设备已被其他用户占用：\n"
+            for fail in failed_devices:
+                error_msg += f"- {fail['device_id']} ({fail['error']})\n"
+
+            return JSONResponse(
+                content={
+                    'success': False,
+                    'error': error_msg.strip(),
+                    'failed_devices': failed_devices
+                },
+                status_code=409
+            )
+
+        # 广播设备锁定状态（立即显示）
+        logger.info(f"[Device Lock] 开始广播锁定状态到 {len(global_state.websocket_connections)} 个客户端")
+        await broadcast_device_lock_update(locked_devices)
+        logger.info(f"[Device Lock] 锁定状态广播完成")
+
         config = config_manager.load_config()
         ssh = ssh_manager.get_connection(config)
         if not ssh:
+            # 释放设备锁
+            for device_id in locked_devices:
+                device_lock_manager.unlock_device(device_id, client_id)
             return JSONResponse(
                 content={'success': False, 'error': 'SSH connection failed'}
             )
@@ -5085,6 +5327,13 @@ async def burn_gsi(request: Request):
 
             ssh_manager.return_connection(ssh)
 
+            # 释放所有设备锁
+            for device_id in locked_devices:
+                device_lock_manager.unlock_device(device_id, client_id)
+
+            # 广播设备更新（移除锁定状态）
+            await broadcast_device_update()
+
             # 检查是否全部成功
             all_success = all(r['success'] for r in results)
             if all_success:
@@ -5099,6 +5348,14 @@ async def burn_gsi(request: Request):
         except Exception as e:
             ssh_manager.return_connection(ssh)
             logger.error(f"[GSI Burn] Error: {e}")
+
+            # 释放所有设备锁
+            for device_id in locked_devices:
+                device_lock_manager.unlock_device(device_id, client_id)
+
+            # 广播设备更新（移除锁定状态）
+            await broadcast_device_update()
+
             return JSONResponse(
                 content={'success': False, 'error': str(e)}
             )

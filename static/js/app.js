@@ -235,11 +235,13 @@ function initWebSocket() {
                 switch (messageType) {
                     case 'log_update':
                         console.log('[WebSocket] log_update:', data.log);
+                        // 所有日志都添加到日志区域
                         addLogEntry(data.log, data.log_type || 'info');
                         break;
 
                     case 'test_complete':
                         state.testing = false;
+                        state.currentBurningProgress = 0;  // 重置进度
                         updateTestToggleButton(false);
                         addLogEntry('测试完成', 'success');
                         showToast('测试完成', 'success');
@@ -250,12 +252,49 @@ function initWebSocket() {
                         renderDevices();
                         break;
 
+                    case 'device_lock_update':
+                        // 快速更新设备锁定状态（不需要重新查询设备列表）
+                        console.log('[WebSocket] device_lock_update:', data);
+                        if (data.devices && Array.isArray(data.devices)) {
+                            data.devices.forEach(update => {
+                                const deviceId = update.device_id;
+                                console.log(`[Device Lock] Updating ${deviceId}: locked=${update.locked}, by=${update.locked_by}`);
+                                // 更新 state.devices 中的锁定状态
+                                const device = state.devices.find(d => {
+                                    const id = typeof d === 'string' ? d : d.device_id;
+                                    return id === deviceId;
+                                });
+                                if (device) {
+                                    if (typeof device === 'string') {
+                                        // 转换为对象格式
+                                        const idx = state.devices.indexOf(device);
+                                        state.devices[idx] = {
+                                            device_id: device,
+                                            locked: update.locked,
+                                            locked_by: update.locked_by || '',
+                                            locked_at: update.locked_at || ''
+                                        };
+                                        console.log(`[Device Lock] Converted to object:`, state.devices[idx]);
+                                    } else {
+                                        // 更新现有对象
+                                        device.locked = update.locked;
+                                        device.locked_by = update.locked_by || '';
+                                        device.locked_at = update.locked_at || '';
+                                        console.log(`[Device Lock] Updated device:`, device);
+                                    }
+                                } else {
+                                    console.warn(`[Device Lock] Device ${deviceId} not found in state.devices`);
+                                }
+                            });
+                            // 重新渲染设备列表
+                            console.log('[Device Lock] Re-rendering devices...');
+                            renderDevices();
+                        }
+                        break;
+
                     case 'devices_changed':
                         // USB设备插拔事件，自动刷新设备列表
                         console.log('[WebSocket] devices_changed:', data.devices);
-                        addLogEntry(`检测到USB设备变化，当前设备: ${data.devices.length || 0} 台`, 'info');
-                        // 移除"正在刷新"提示,避免弹框叠加
-                        // showToast('检测到USB设备变化，正在刷新...', 'info');
                         // 保存旧设备列表用于比较
                         const oldDevices = new Set(state.devices.map(d => typeof d === 'string' ? d : d.device_id));
                         // 自动刷新设备列表
@@ -265,6 +304,16 @@ function initWebSocket() {
                             const connected = [...newDevices].filter(d => !oldDevices.has(d));
                             // 找出断开的设备（在旧列表中但不在新列表中）
                             const disconnected = [...oldDevices].filter(d => !newDevices.has(d));
+
+                            // 构建设备变化消息
+                            let changeMessage = '检测到USB设备变化';
+                            if (connected.length > 0) {
+                                changeMessage += `，连接: ${connected.join(' ')}`;
+                            }
+                            if (disconnected.length > 0) {
+                                changeMessage += `，断开: ${disconnected.join(' ')}`;
+                            }
+                            addLogEntry(changeMessage, 'info');
 
                             let message = '设备列表已更新';
                             if (connected.length > 0) {
@@ -281,9 +330,14 @@ function initWebSocket() {
 
                     case 'firmware_progress':
                         // 固件烧写进度更新
-                        console.log('[WebSocket] firmware_progress:', data.progress);
-                        if (data.progress) {
-                            addLogEntry(data.progress, 'info');
+                        console.log('[WebSocket] firmware_progress:', data.percentage);
+                        if (data.percentage !== undefined) {
+                            // 只在百分比大于等于当前值时才更新（避免跳动）
+                            const currentProgress = state.currentBurningProgress || 0;
+                            if (data.percentage >= currentProgress) {
+                                state.currentBurningProgress = data.percentage;
+                                updateProgressBar(data.percentage, '', '烧写固件');
+                            }
                         }
                         break;
 
@@ -667,6 +721,7 @@ function renderDevices() {
         if (isLocked) {
             const lockStatus = document.createElement('div');
             lockStatus.className = 'lock-status';
+            // 直接显示后端发送的完整值 (username@ip格式)
             lockStatus.textContent = `🔒 ${lockedBy}`;
             info.appendChild(lockStatus);
         }
@@ -835,6 +890,32 @@ function closeFirmwareModal() {
     modal.classList.remove('show');
 }
 
+// 在UI上锁定设备（前端立即显示，不等待后端）
+function lockDevicesInUI(devices) {
+    devices.forEach(deviceId => {
+        const device = state.devices.find(d => {
+            const id = typeof d === 'string' ? d : d.device_id;
+            return id === deviceId;
+        });
+        if (device) {
+            if (typeof device === 'string') {
+                const idx = state.devices.indexOf(device);
+                state.devices[idx] = {
+                    device_id: device,
+                    locked: true,
+                    locked_by: '当前用户',
+                    locked_at: new Date().toISOString()
+                };
+            } else {
+                device.locked = true;
+                device.locked_by = '当前用户';
+                device.locked_at = new Date().toISOString();
+            }
+        }
+    });
+    renderDevices();  // 立即更新UI
+}
+
 // Browse local file for firmware (uses native file picker)
 function browseLocalFileForFirmware() {
     // 创建隐藏的文件输入框
@@ -868,29 +949,27 @@ async function submitFirmwareBurn() {
         return;
     }
 
-    // Upload firmware file and burn
     const devices = Array.from(state.selectedDevices);
     try {
-        // 立即关闭弹框
         closeFirmwareModal();
-
         showToast('正在烧写固件...', 'info');
         addLogEntry(`开始烧写固件: ${firmwarePath}`, 'info');
 
-        // 使用 FormData 上传文件
-        const formData = new FormData();
-        formData.append('devices', devices.join(','));
-        formData.append('firmware_path', firmwarePath);
+        // 立即在UI上标记设备为锁定状态
+        lockDevicesInUI(devices);
 
-        // 如果有实际的文件（从文件输入获取），添加到 FormData
+        // 准备FormData
+        const formData = new FormData();
+        formData.append('firmware_path', firmwarePath);
         const fileInput = document.getElementById('firmware-file-input');
         if (fileInput && fileInput.files && fileInput.files[0]) {
             formData.append('firmware_file', fileInput.files[0]);
         }
 
-        const response = await fetch('/api/firmware/burn', {
+        // 发送请求
+        const response = await fetch(`/api/firmware/burn?devices=${encodeURIComponent(devices.join(','))}`, {
             method: 'POST',
-            body: formData  // 不设置 Content-Type，让浏览器自动设置
+            body: formData
         });
 
         const result = await response.json();
@@ -1046,26 +1125,24 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
         return;
     }
 
+    const devices = Array.from(state.selectedDevices);
     try {
-        // 立即关闭模态框
         if (closeModalFunc) {
             closeModalFunc();
         }
 
-        // 显示正在操作的提示
         addLogEntry(`正在${operationName}...`, 'info');
         showToast(`正在${operationName}...`, 'info');
 
-        // 准备请求数据
-        const requestData = {
-            ...data,
-            devices: Array.from(state.selectedDevices)
-        };
+        // 立即在UI上标记设备为锁定状态
+        lockDevicesInUI(devices);
 
         // 调用API
-        const result = await apiCall(endpoint, 'POST', requestData);
+        const result = await apiCall(endpoint, 'POST', {
+            ...data,
+            devices: devices
+        });
 
-        // 处理结果
         if (result.success) {
             addLogEntry(`${operationName}完成`, 'success');
             showToast(`${operationName}完成`, 'success');
@@ -2117,6 +2194,52 @@ function addLogEntry(message, type = 'info') {
             logOutput.removeChild(logOutput.firstChild);
         }
     }
+}
+
+// 更新进度条 - 使用固件上传的进度条
+function updateProgressBar(percentage, message = '', title = '进度') {
+    console.log('[Progress] updateProgressBar called:', percentage, message, title);
+
+    const progressContainer = document.getElementById('upload-progress');
+    const progressFill = document.getElementById('upload-progress-fill');
+    const progressInfo = document.getElementById('progress-info');
+
+    if (!progressContainer || !progressFill || !progressInfo) {
+        console.warn('[Progress] Progress bar elements not found');
+        return;
+    }
+
+    // 显示进度条
+    progressContainer.style.display = 'flex';
+
+    // 更新进度
+    progressFill.style.width = `${percentage}%`;
+
+    // 显示标题和百分比在进度条右侧
+    progressInfo.textContent = `${title} ${percentage}%`;
+
+    // 如果有消息，显示在日志中
+    if (message) {
+        addLogEntry(message, 'info');
+    }
+
+    console.log('[Progress] Updated to:', percentage);
+
+    // 如果进度完成，3秒后隐藏进度条
+    if (percentage >= 100) {
+        setTimeout(() => {
+            progressContainer.style.display = 'none';
+            progressFill.style.width = '0%';
+            progressInfo.textContent = '';
+            state.currentBurningProgress = 0;  // 重置进度状态
+        }, 3000);
+    }
+}
+
+// 上传文件进度
+function updateUploadProgress(percentage, filename, uploadedSize, totalSize) {
+    // 只更新进度条，不显示日志消息
+    updateProgressBar(percentage, '', `上传文件`);
 }
 
 // ==================== Status Polling ====================
