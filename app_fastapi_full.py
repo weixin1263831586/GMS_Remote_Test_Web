@@ -5049,7 +5049,7 @@ async def burn_firmware(request: Request):
                 device_lock_manager.unlock_device(device_id, client_id)
 
             # 广播设备更新（移除锁定状态）
-            await broadcast_device_update()
+            await broadcast_device_lock_update(locked_devices)
 
             return JSONResponse(
                 content={'success': False, 'error': str(e)}
@@ -5314,12 +5314,22 @@ async def burn_gsi(request: Request):
                         'output': final_output
                     })
 
-                    # 发送失败消息
+                    # 发送失败消息（显示详细错误）
                     if client_id in global_state.websocket_connections:
                         try:
+                            error_msg = error_output or "未知错误"
+                            # 如果输出中有错误信息，显示最后几行
+                            if final_output:
+                                lines = final_output.strip().split('\n')
+                                if len(lines) > 0:
+                                    last_lines = lines[-3:]  # 取最后3行
+                                    error_detail = ' '.join(last_lines)
+                                    if error_detail and len(error_detail) < 200:
+                                        error_msg = error_detail
+
                             await global_state.websocket_connections[client_id].send_json({
                                 'type': 'log_update',
-                                'log': f'❌ 设备 {device} GSI烧写失败: {error_output or "未知错误"}',
+                                'log': f'❌ 设备 {device} GSI烧写失败: {error_msg}',
                                 'log_type': 'error'
                             })
                         except:
@@ -5332,7 +5342,7 @@ async def burn_gsi(request: Request):
                 device_lock_manager.unlock_device(device_id, client_id)
 
             # 广播设备更新（移除锁定状态）
-            await broadcast_device_update()
+            await broadcast_device_lock_update(locked_devices)
 
             # 检查是否全部成功
             all_success = all(r['success'] for r in results)
@@ -5354,7 +5364,7 @@ async def burn_gsi(request: Request):
                 device_lock_manager.unlock_device(device_id, client_id)
 
             # 广播设备更新（移除锁定状态）
-            await broadcast_device_update()
+            await broadcast_device_lock_update(locked_devices)
 
             return JSONResponse(
                 content={'success': False, 'error': str(e)}
