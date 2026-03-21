@@ -930,8 +930,8 @@ async def lock_devices(req: DeviceLockRequest, request: Request):
         try:
             results = []
 
-            # 本地脚本路径 - 动态获取当前用户主目录
-            local_script = os.path.join(os.path.expanduser('~'), 'GMS_Auto_Test', 'run_Device_Lock.sh')
+            # 本地脚本路径 - 使用tools目录
+            local_script = os.path.join(os.path.dirname(__file__), 'tools', 'run_Device_Lock.sh')
             # 远程脚本路径
             remote_script = f"/home/{config['ubuntu_user']}/GMS-Suite/run_Device_Lock.sh"
 
