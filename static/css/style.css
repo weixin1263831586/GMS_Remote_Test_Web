@@ -961,6 +961,7 @@ log-system { color: var(--info-color); }
     justify-content: center;
     line-height: 1.4;
     min-height: 26px;
+    min-width: 80px;
 }
 
 .btn-xxs:hover {

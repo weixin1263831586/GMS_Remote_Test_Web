@@ -1296,9 +1296,12 @@ async def reboot_devices(req: DeviceActionRequest):
             )
 
 @app.post("/api/devices/remount")
-async def remount_devices(req: DeviceActionRequest):
+async def remount_devices(req: DeviceActionRequest, request: Request):
     """Remount设备"""
     try:
+        # 获取client_id
+        client_id = get_client_id_from_request(request)
+
         config = config_manager.load_config()
         ssh = ssh_manager.get_connection(config)
         if not ssh:
@@ -1306,6 +1309,45 @@ async def remount_devices(req: DeviceActionRequest):
 
         results = []
         for device_id in req.devices:
+            # 执行 adb root
+            output, error, code = ssh_manager.execute_command(
+                ssh,
+                f"adb -s {device_id} root",
+                timeout=15
+            )
+
+            # 发送输出到前端
+            if client_id in global_state.websocket_connections:
+                try:
+                    await global_state.websocket_connections[client_id].send_json({
+                        'type': 'log_update',
+                        'log': f"[{device_id}] adb root: {output.strip()}",
+                        'log_type': 'info'
+                    })
+                except:
+                    pass
+
+            import time
+            time.sleep(2)
+
+            # 执行 remount
+            output, error, code = ssh_manager.execute_command(
+                ssh,
+                f"adb -s {device_id} remount",
+                timeout=15
+            )
+
+            # 发送输出到前端
+            if client_id in global_state.websocket_connections:
+                try:
+                    await global_state.websocket_connections[client_id].send_json({
+                        'type': 'log_update',
+                        'log': f"[{device_id}] adb remount: {output.strip()}",
+                        'log_type': 'info'
+                    })
+                except:
+                    pass
+
             result = device_manager.remount_device(device_id, ssh)
             result['device'] = device_id
             results.append(result)
