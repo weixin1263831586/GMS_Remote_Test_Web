@@ -663,12 +663,25 @@ const debouncedRefreshDevices = debounce(() => loadDevices(false), 500);
 function renderDevices() {
     const leftContainer = $('device-list-left');
     const rightContainer = $('device-list-right');
+    const deviceCanvas = $('device-canvas');
 
     if (state.devices.length === 0) {
-        leftContainer.innerHTML = '<div class="empty-message">点击刷新按钮获取设备列表...</div>';
-        rightContainer.innerHTML = '';
+        // 隐藏两个列，显示居中的空消息
+        leftContainer.style.display = 'none';
+        rightContainer.style.display = 'none';
+        deviceCanvas.innerHTML = '<div class="empty-message">点击刷新按钮获取设备列表...</div>';
+        deviceCanvas.style.display = 'flex';
+        deviceCanvas.style.justifyContent = 'center';
+        deviceCanvas.style.alignItems = 'center';
         return;
     }
+
+    // 恢复正常显示
+    leftContainer.style.display = '';
+    rightContainer.style.display = '';
+    deviceCanvas.style.display = '';
+    deviceCanvas.style.justifyContent = '';
+    deviceCanvas.style.alignItems = '';
 
     // 将设备交替分配到左右两栏
     const leftDevices = [];
