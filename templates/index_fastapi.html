@@ -136,6 +136,24 @@
             position: relative;
             min-height: 0;
         }
+        .terminal-wrapper.drag-over {
+            border: 3px dashed var(--primary-color);
+            background: rgba(76, 175, 80, 0.1);
+        }
+        .terminal-wrapper.drag-over::after {
+            content: '📁 拖拽文件上传到主机/tmp';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+            color: var(--primary-color);
+            font-weight: 600;
+            pointer-events: none;
+            z-index: 1000;
+            text-align: center;
+            white-space: nowrap;
+        }
         #terminal {
             width: 100%;
             height: 100%;
@@ -2120,6 +2138,9 @@
                     textArea.select();
                     document.execCommand('copy');
                     document.body.removeChild(textArea);
+
+                    // 立即恢复终端焦点
+                    terminal.focus();
                     console.log('复制成功:', selection);
                     return false;  // 阻止默认行为
                 }
@@ -2145,11 +2166,93 @@
                 terminal.focus();
             });
 
+            // 添加拖拽文件推送功能
+            const terminalWrapper = document.getElementById('terminal-wrapper');
+
+            terminalWrapper.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                terminalWrapper.classList.add('drag-over');
+            });
+
+            terminalWrapper.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                terminalWrapper.classList.remove('drag-over');
+            });
+
+            terminalWrapper.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                terminalWrapper.classList.remove('drag-over');
+
+                const files = e.dataTransfer.files;
+                if (files.length === 0) return;
+
+                const file = files[0];
+                const fileName = file.name;
+
+                terminal.writeln(`\r\n\x1b[33m📤 正在上传文件: ${fileName} (${formatFileSize(file.size)})\x1b[0m`);
+
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+
+                    const response = await fetch('/api/terminal/push', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        terminal.writeln(`\x1b[32m✅ 文件已上传到: ${result.remote_path}\x1b[0m`);
+                        terminal.writeln(`\x1b[90m使用: adb push ${result.remote_path} <目标路径>\x1b[0m`);
+                        terminal.writeln(`\x1b[90m示例: adb push ${result.remote_path} /data/local/tmp/\x1b[0m`);
+
+                        // 发送回车键,刷新提示符
+                        if (typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
+                            terminalSocket.send(JSON.stringify({
+                                type: 'terminal_input',
+                                data: '\r'
+                            }));
+                        }
+                    } else {
+                        terminal.writeln(`\x1b[31m❌ 上传失败: ${result.error}\x1b[0m`);
+                        // 发送回车键
+                        if (typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
+                            terminalSocket.send(JSON.stringify({
+                                type: 'terminal_input',
+                                data: '\r'
+                            }));
+                        }
+                    }
+                } catch (error) {
+                    terminal.writeln(`\x1b[31m❌ 上传失败: ${error.message}\x1b[0m`);
+                    // 发送回车键
+                    if (typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
+                        terminalSocket.send(JSON.stringify({
+                            type: 'terminal_input',
+                            data: '\r'
+                        }));
+                    }
+                }
+            });
+
             // 连接Socket.IO
             connectTerminalSocket();
 
             terminalInitialized = true;
             console.log('Terminal initialized');
+        }
+
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
         }
 
         // 终端控制函数

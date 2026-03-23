@@ -1460,6 +1460,57 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
             status_code=500
         )
 
+@app.post("/api/terminal/push")
+async def push_terminal_file(request: Request, file: UploadFile = File(...)):
+    """终端文件上传 - 上传到远程主机/tmp目录,供用户手动执行adb push"""
+    try:
+        config = config_manager.load_config()
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return JSONResponse(
+                content={"success": False, "error": "SSH连接失败"},
+                status_code=500
+            )
+
+        try:
+            # 读取文件内容
+            file_content = await file.read()
+
+            # 上传到远程主机的/tmp目录
+            remote_path = f"/tmp/{file.filename}"
+            sftp = ssh.open_sftp()
+            remote_file = sftp.file(remote_path, 'w')
+            remote_file.write(file_content)
+            remote_file.close()
+            sftp.close()
+
+            ssh_manager.return_connection(ssh)
+
+            logger.info(f"[Terminal Upload] File uploaded: {file.filename} -> {remote_path} ({len(file_content)} bytes)")
+
+            return JSONResponse(content={
+                "success": True,
+                "remote_path": remote_path,
+                "filename": file.filename,
+                "size": len(file_content),
+                "message": f"文件已上传到 {remote_path}"
+            })
+
+        except Exception as e:
+            ssh_manager.return_connection(ssh)
+            logger.error(f"[Terminal Upload] Upload failed: {e}")
+            return JSONResponse(
+                content={"success": False, "error": f"上传失败: {str(e)}"},
+                status_code=500
+            )
+
+    except Exception as e:
+        logger.error(f"[Terminal Upload] Error: {e}")
+        return JSONResponse(
+            content={"success": False, "error": f"服务器错误: {str(e)}"},
+            status_code=500
+        )
+
 # ==================== 测试管理 ====================
 
 @app.post("/api/test/start")
