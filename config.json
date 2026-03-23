@@ -14,22 +14,6 @@
     "script_path": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/run_GMS_Test_Auto.sh",
     "gsi_scripts": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/run_GSI_Burn.sh",
     "scrcpy_path": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/scrcpy-linux-x86_64-v3.3.4/scrcpy",
-    "device_host": "hcq@172.16.14.68",
-    "device_pswd": "20240120",
-    "client_hosts": {
-        "172.16.14.65": "cp2-share",
-        "172.16.14.68": "hcq"
-    },
-    "client_ssh_credentials": [
-        {
-            "username": "hcq",
-            "password": "20240120"
-        },
-        {
-            "username": "cp2-share",
-            "password": "Rockchip@2025"
-        }
-    ],
     "ai_models": {
         "enabled": true,
         "primary_provider": "zhipu",
@@ -37,7 +21,7 @@
             "zhipu": {
                 "name": "智谱GLM-4.7",
                 "enabled": true,
-                "api_key": "e77094ad6bfa49a6958380b9652ab38a.K2ZM71vpl2gHHeDW",
+                "api_key": "d386361b9cf14b0b8c33aa5c272fe525.zELxeFIpUHhxkxsL",
                 "model": "glm-4",
                 "base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
                 "temperature": 0.3,

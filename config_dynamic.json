@@ -1,4 +1,20 @@
 {
     "client_ip": "172.16.14.68",
-    "client_username": "hcq"
+    "client_username": "hcq",
+    "device_host": "hcq@172.16.14.68",
+    "device_pswd": "20240120",
+    "client_hosts": {
+        "172.16.14.65": "cp2-share",
+        "172.16.14.68": "hcq"
+    },
+    "client_ssh_credentials": [
+        {
+            "username": "hcq",
+            "password": "20240120"
+        },
+        {
+            "username": "cp2-share",
+            "password": "Rockchip@2025"
+        }
+    ]
 }
