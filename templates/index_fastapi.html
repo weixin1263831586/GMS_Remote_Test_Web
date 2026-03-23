@@ -548,9 +548,9 @@
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">用户标识</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">IP地址</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">状态</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">占用设备</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">连接时间</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">最后活跃</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">连接时间</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">占用设备</th>
                         </tr>
                     </thead>
                     <tbody id="users-table-body">
@@ -642,7 +642,7 @@
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">类型</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">类型</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">客户端</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">时间戳</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">通过</th>
@@ -726,7 +726,7 @@
     <div id="config-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <span class="modal-title">系统配置(config.json)</span>
+                <span class="modal-title">系统配置</span>
                 <span class="modal-close" onclick="closeModal()">&times;</span>
             </div>
             <div class="modal-body" id="config-modal-body">
@@ -1531,14 +1531,14 @@
                             <span style="color: ${statusColor}; font-weight: 600; font-size: 11px;">●</span>
                             <span style="margin-left: 6px; font-size: 11px;">${statusText}</span>
                         </td>
-                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
-                            ${devices}
+                        <td style="padding: 12px; text-align: center; font-size: 11px;">
+                            ${createdAt}
                         </td>
                         <td style="padding: 12px; text-align: center; font-size: 11px;">
                             ${lastSeen}
                         </td>
-                        <td style="padding: 12px; text-align: center; font-size: 11px;">
-                            ${createdAt}
+                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
+                            ${devices}
                         </td>
                     </tr>
                 `;

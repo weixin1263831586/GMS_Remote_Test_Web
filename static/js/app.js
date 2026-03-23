@@ -439,6 +439,8 @@ function initSocket() {
         updateTestToggleButton(false);
         addLogEntry('测试完成', 'success');
         showToast('测试完成', 'success');
+        // 刷新设备列表，更新设备锁定状态
+        loadDevices(true);
     });
 
     state.socket.on('vpn_status_update', (data) => {
@@ -2548,6 +2550,7 @@ function displayTestReports(reports) {
                 <td style="padding: 12px; text-align: center;">
                     <button class="btn-xxs" onclick="event.stopPropagation(); analyzeReport('${report.timestamp}')">📈 分析报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); viewReportDetails('${report.timestamp}')">📄 查看报告</button>
+                    <button class="btn-xxs" onclick="event.stopPropagation(); retryReportWithSuite('${report.timestamp}', '${report.test_type || ''}', '${(report.suite_path || '').replace(/'/g, "\\'")}')" style="background: var(--primary-color);">🔄 retry报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); downloadReport('${report.timestamp}')" style="background: var(--success-color);">⬇️ 下载报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); deleteReport('${report.timestamp}')" style="background: var(--danger-color);">🗑️ 删除报告</button>
                 </td>
@@ -2578,6 +2581,161 @@ async function deleteReport(timestamp) {
     } catch (error) {
         console.error('Delete report error:', error);
         showToast('删除失败: ' + error.message, 'error');
+    }
+}
+
+async function retryReport(timestamp, testType) {
+    try {
+        // 先切换到测试界面
+        switchPage('test');
+
+        // 等待页面切换完成后填充数据
+        setTimeout(() => {
+            console.log(`[Retry] 开始填充数据, timestamp=${timestamp}, testType=${testType}`);
+
+            // 填入测试报告名称（字段ID是 retry-result）
+            const reportNameInput = document.getElementById('retry-result');
+            if (reportNameInput) {
+                reportNameInput.value = timestamp;
+                console.log(`[Retry] 已填入报告名称: ${timestamp}`);
+            } else {
+                console.error('[Retry] 未找到 retry-result 元素');
+            }
+
+            // 设置测试类型
+            const testTypeSelect = document.getElementById('test-type');
+            if (testTypeSelect) {
+                if (testType) {
+                    testTypeSelect.value = testType;
+                    console.log(`[Retry] 已设置测试类型: ${testType}, 当前值: ${testTypeSelect.value}`);
+                } else {
+                    console.warn('[Retry] testType 为空');
+                }
+            } else {
+                console.error('[Retry] 未找到 test-type 元素');
+            }
+
+            // 根据测试类型填入测试套件路径
+            const suitePathInput = document.getElementById('suite-path');
+            if (suitePathInput) {
+                // 根据测试类型设置默认路径
+                const suitePaths = {
+                    'CTS': 'android-cts',
+                    'GSI': 'android-gsi',
+                    'GTS': 'android-gts',
+                    'STS': 'android-sts',
+                    'VTS': 'android-vts',
+                    'APTS': 'android-apts'
+                };
+
+                // 如果有匹配的测试类型，使用对应的路径
+                if (testType && suitePaths[testType]) {
+                    suitePathInput.value = suitePaths[testType];
+                    console.log(`[Retry] 已设置测试套件路径: ${suitePaths[testType]}, 当前值: ${suitePathInput.value}`);
+                } else {
+                    console.warn(`[Retry] testType=${testType} 没有对应的套件路径`);
+                }
+            } else {
+                console.error('[Retry] 未找到 suite-path 元素');
+            }
+
+            // 打印所有相关元素的值以便调试
+            console.log('[Retry] 当前字段值:', {
+                reportName: document.getElementById('retry-result')?.value,
+                testType: document.getElementById('test-type')?.value,
+                suitePath: document.getElementById('suite-path')?.value
+            });
+        }, 200);
+
+        showToast(`已填入报告名称: ${timestamp}${testType ? ' (类型: ' + testType + ')' : ''}`, 'success');
+
+        // 可选：自动开始测试（如果需要的话，取消下面的注释）
+        // setTimeout(() => {
+        //     startTest();
+        // }, 500);
+    } catch (error) {
+        console.error('Retry report error:', error);
+        showToast('操作失败: ' + error.message, 'error');
+    }
+}
+
+async function retryReportWithSuite(timestamp, testType, suitePath) {
+    try {
+        // 先切换到测试界面
+        switchPage('test');
+
+        // 等待页面切换完成后填充数据
+        setTimeout(() => {
+            console.log(`[Retry] 开始填充数据, timestamp=${timestamp}, testType=${testType}, suitePath=${suitePath}`);
+
+            // 填入测试报告名称（字段ID是 retry-result）
+            const reportNameInput = document.getElementById('retry-result');
+            if (reportNameInput) {
+                reportNameInput.value = timestamp;
+                console.log(`[Retry] 已填入报告名称: ${timestamp}`);
+            } else {
+                console.error('[Retry] 未找到 retry-result 元素');
+            }
+
+            // 设置测试类型
+            const testTypeSelect = document.getElementById('test-type');
+            if (testTypeSelect) {
+                if (testType) {
+                    testTypeSelect.value = testType;
+                    console.log(`[Retry] 已设置测试类型: ${testType}, 当前值: ${testTypeSelect.value}`);
+                } else {
+                    console.warn('[Retry] testType 为空');
+                }
+            } else {
+                console.error('[Retry] 未找到 test-type 元素');
+            }
+
+            // 填入测试套件路径（优先使用原始路径，否则使用默认路径）
+            const suitePathInput = document.getElementById('suite-path');
+            if (suitePathInput) {
+                if (suitePath && suitePath !== 'null' && suitePath !== '') {
+                    // 使用报告中的原始测试套件路径
+                    suitePathInput.value = suitePath;
+                    console.log(`[Retry] 已设置测试套件路径(原始): ${suitePath}, 当前值: ${suitePathInput.value}`);
+                } else {
+                    // 根据测试类型设置默认路径
+                    const suitePaths = {
+                        'CTS': 'android-cts',
+                        'GSI': 'android-gsi',
+                        'GTS': 'android-gts',
+                        'STS': 'android-sts',
+                        'VTS': 'android-vts',
+                        'APTS': 'android-apts'
+                    };
+
+                    if (testType && suitePaths[testType]) {
+                        suitePathInput.value = suitePaths[testType];
+                        console.log(`[Retry] 已设置测试套件路径(默认): ${suitePaths[testType]}, 当前值: ${suitePathInput.value}`);
+                    } else {
+                        console.warn(`[Retry] testType=${testType} 没有对应的套件路径`);
+                    }
+                }
+            } else {
+                console.error('[Retry] 未找到 suite-path 元素');
+            }
+
+            // 打印所有相关元素的值以便调试
+            console.log('[Retry] 当前字段值:', {
+                reportName: document.getElementById('retry-result')?.value,
+                testType: document.getElementById('test-type')?.value,
+                suitePath: document.getElementById('suite-path')?.value
+            });
+        }, 200);
+
+        showToast(`已填入报告名称: ${timestamp}${testType ? ' (类型: ' + testType + ')' : ''}`, 'success');
+
+        // 可选：自动开始测试（如果需要的话，取消下面的注释）
+        // setTimeout(() => {
+        //     startTest();
+        // }, 500);
+    } catch (error) {
+        console.error('Retry report error:', error);
+        showToast('操作失败: ' + error.message, 'error');
     }
 }
 
@@ -3314,7 +3472,11 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
         const response = await fetch('/api/test/ai-analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ test_name: testName, error_message: errorMessage })
+            body: JSON.stringify({
+                test_name: testName,
+                error_message: errorMessage,
+                stack_trace: errorMessage
+            })
         });
 
         const result = await response.json();
@@ -3363,6 +3525,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                 });
                 content += '</div></div>';
             }
+
 
             // AI标记
             if (data.ai_enabled === false) {

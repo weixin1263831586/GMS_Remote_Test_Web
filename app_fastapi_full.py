@@ -658,14 +658,11 @@ async def set_client_info(req: ClientInfoRequest, request: Request):
 
     username = req.username or 'unknown'
 
-    # 保存客户端信息
-    config = config_manager.load_config()
-    config['client_ip'] = client_ip
-    config['client_username'] = username
-    config_manager.save_dynamic_config({
-        'client_ip': client_ip,
-        'client_username': username
-    })
+    # 保存客户端信息（合并现有动态配置）
+    existing_dynamic = config_manager._load_dynamic_config() or {}
+    existing_dynamic['client_ip'] = client_ip
+    existing_dynamic['client_username'] = username
+    config_manager.save_dynamic_config(existing_dynamic)
 
     client_id = client_manager.get_client_id(client_ip, username)
 
@@ -809,17 +806,31 @@ async def get_config(request: Request):
 
 @app.post("/api/config")
 async def update_config(req: dict):
-    """更新配置 - 与Flask版本一致，保留SSH密码"""
-    new_config = req.copy()
-    existing_config = config_manager.load_config()
+    """更新配置 - 只修改动态配置，禁止修改config.json"""
+    existing_dynamic = config_manager._load_dynamic_config() or {}
 
-    # 保留SSH密码（与Flask版本一致）
-    for key in ['ubuntu_pswd', 'device_pswd']:
-        if key not in new_config or new_config.get(key, '') == '':
-            if key in existing_config:
-                new_config[key] = existing_config[key]
+    # 动态配置字段（保存在 config_dynamic.json）
+    # 所有可修改的配置项都在这里
+    dynamic_keys = {
+        'device_host', 'device_pswd',
+        'client_ip', 'client_username',
+        'client_hosts', 'client_ssh_credentials',
+        'ubuntu_user', 'ubuntu_host', 'ubuntu_pswd',
+        'local_server', 'suites_path', 'usbip_vid_pid'
+    }
 
-    if config_manager.save_config(new_config):
+    # 更新动态配置
+    dynamic_updates = existing_dynamic.copy()
+
+    for key, value in req.items():
+        if key in dynamic_keys:
+            # 空字符串不覆盖现有值（用于密码字段）
+            if value != '' or key not in existing_dynamic:
+                dynamic_updates[key] = value
+        # 忽略不在dynamic_keys中的字段（不允许修改config.json）
+
+    # 只保存动态配置，不修改config.json
+    if config_manager.save_dynamic_config(dynamic_updates):
         return JSONResponse(content={'success': True})
     else:
         raise HTTPException(status_code=500, detail="保存配置失败")
@@ -1839,6 +1850,11 @@ async def run_test_background(
         for device_id in locked_devices:
             device_lock_manager.unlock_device(device_id, client_id)
 
+        # 广播设备解锁状态
+        if locked_devices:
+            await broadcast_device_lock_update(locked_devices)
+            logger.info(f"[Device Lock] 测试完成，已广播设备解锁状态: {locked_devices}")
+
         # 更新状态为停止
         update_user_state_field(client_id, {'running': False, 'devices': []})
 
@@ -1960,14 +1976,21 @@ async def stop_test(request: Request):
         )
 
 @app.post("/api/test/clean")
-async def clean_test_logs():
-    """清理测试日志"""
+async def clean_test_logs(request: Request):
+    """清理当前用户的测试日志"""
     try:
-        result = test_logs_manager.clean_old_logs(days=7)
+        client_id = get_client_id_from_request(request)
+
+        # 清除当前用户的日志
+        user_state = get_or_create_user_state(client_id)
+        user_state['logs'] = []
+        update_user_state_field(client_id, {'logs': []})
+
+        logger.info(f"[Clean Logs] 用户 {client_id} 清除了测试日志")
+
         return JSONResponse(content={
             "success": True,
-            "message": f"清理了 {result['cleaned_files']} 个文件，释放 {result['freed_space_mb']} MB",
-            "data": result
+            "message": "日志已清除"
         })
     except Exception as e:
         logger.error(f"Error cleaning logs: {e}")
@@ -3268,7 +3291,7 @@ def rule_based_analysis(test_name, error_message, stack_trace, module):
         'root_cause': root_cause,
         'related_docs': related_docs,
         'ai_enabled': False  # 标记这不是AI分析
-    }
+ }
 
 
 def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
