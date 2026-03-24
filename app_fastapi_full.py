@@ -1423,7 +1423,7 @@ class DeviceShellRequest(BaseModel):
     """设备Shell请求"""
     serial_no: str = Field(..., description="设备序列号")
 
-@app.post("/api/device/shell")
+@app.post("/api/devices/shell")
 async def open_device_shell(req: DeviceShellRequest, request: Request):
     """打开设备ADB Shell - 为终端页面准备设备连接"""
     try:
@@ -2438,7 +2438,6 @@ async def get_status(request: Request):
             )
 
 # ==================== 报告管理 ====================
-
 @app.get("/api/reports/list")
 async def list_reports(request: Request, user_only: bool = False):
     """
@@ -2481,7 +2480,7 @@ async def list_reports(request: Request, user_only: bool = False):
         logger.error(f"获取报告列表失败: {e}")
         return JSONResponse(content={'reports': []})
 
-@app.get("/api/reports/{report_timestamp}/files")
+@app.get("/api/reports/files/{report_timestamp}")
 async def list_report_files(report_timestamp: str):
     """从数据库获取报告目录并列出文件（与Flask版本一致）"""
     try:
@@ -2539,7 +2538,7 @@ async def list_report_files(report_timestamp: str):
             detail=str(e)
         )
 
-@app.get("/api/reports/{report_timestamp}/analyze")
+@app.get("/api/reports/analyze/{report_timestamp}")
 async def analyze_report(report_timestamp: str):
     """从数据库分析测试报告（与Flask版本一致）"""
     try:
@@ -2655,64 +2654,7 @@ async def view_report_file(request: Request):
             status_code=500
         )
 
-@app.delete("/api/reports/delete")
-async def delete_report(request: Request, timestamp: str = Query(..., description="报告时间戳")):
-    """删除测试报告（仅限报告所有者）"""
-    try:
-        # 获取当前客户端信息
-        client_id = get_client_id_from_request(request)
-
-        # 从数据库获取报告
-        report = test_report_db.get_report_by_timestamp(timestamp)
-
-        if not report:
-            return JSONResponse(
-                content={'success': False, 'error': '报告不存在'},
-                status_code=404
-            )
-
-        # 权限校验：只允许报告的所有者删除
-        report_client_id = report.get('client_id')
-        if report_client_id != client_id:
-            logger.warning(f"[DELETE] 权限拒绝: 客户端 {client_id} 尝试删除客户端 {report_client_id} 的报告")
-            return JSONResponse(
-                content={'success': False, 'error': '您没有权限删除此报告'},
-                status_code=403
-            )
-
-        # 删除报告目录
-        result_dir = report.get('result_dir')
-        if result_dir and os.path.exists(result_dir):
-            import shutil
-            try:
-                shutil.rmtree(result_dir)
-                logger.info(f"已删除报告目录: {result_dir}")
-            except Exception as e:
-                logger.error(f"删除报告目录失败: {e}")
-                return JSONResponse(
-                    content={'success': False, 'error': f'删除报告目录失败: {str(e)}'},
-                    status_code=500
-                )
-
-        # 从数据库删除记录
-        success = test_report_db.delete_report(timestamp)
-
-        if success:
-            return JSONResponse(content={'success': True, 'message': '报告已删除'})
-        else:
-            return JSONResponse(
-                content={'success': False, 'error': '删除数据库记录失败'},
-                status_code=500
-            )
-
-    except Exception as e:
-        logger.error(f"Error deleting report: {e}")
-        return JSONResponse(
-            content={'success': False, 'error': str(e)},
-            status_code=500
-        )
-
-@app.get("/api/reports/{report_timestamp}/download")
+@app.get("/api/reports/download/{report_timestamp}")
 async def download_report(request: Request, report_timestamp: str):
     """下载测试报告（打包为ZIP文件）"""
     import io
@@ -2792,7 +2734,64 @@ async def download_report(request: Request, report_timestamp: str):
             status_code=500
         )
 
-@app.post("/api/report/analyze")
+@app.delete("/api/reports/delete")
+async def delete_report(request: Request, timestamp: str = Query(..., description="报告时间戳")):
+    """删除测试报告（仅限报告所有者）"""
+    try:
+        # 获取当前客户端信息
+        client_id = get_client_id_from_request(request)
+
+        # 从数据库获取报告
+        report = test_report_db.get_report_by_timestamp(timestamp)
+
+        if not report:
+            return JSONResponse(
+                content={'success': False, 'error': '报告不存在'},
+                status_code=404
+            )
+
+        # 权限校验：只允许报告的所有者删除
+        report_client_id = report.get('client_id')
+        if report_client_id != client_id:
+            logger.warning(f"[DELETE] 权限拒绝: 客户端 {client_id} 尝试删除客户端 {report_client_id} 的报告")
+            return JSONResponse(
+                content={'success': False, 'error': '您没有权限删除此报告'},
+                status_code=403
+            )
+
+        # 删除报告目录
+        result_dir = report.get('result_dir')
+        if result_dir and os.path.exists(result_dir):
+            import shutil
+            try:
+                shutil.rmtree(result_dir)
+                logger.info(f"已删除报告目录: {result_dir}")
+            except Exception as e:
+                logger.error(f"删除报告目录失败: {e}")
+                return JSONResponse(
+                    content={'success': False, 'error': f'删除报告目录失败: {str(e)}'},
+                    status_code=500
+                )
+
+        # 从数据库删除记录
+        success = test_report_db.delete_report(timestamp)
+
+        if success:
+            return JSONResponse(content={'success': True, 'message': '报告已删除'})
+        else:
+            return JSONResponse(
+                content={'success': False, 'error': '删除数据库记录失败'},
+                status_code=500
+            )
+
+    except Exception as e:
+        logger.error(f"Error deleting report: {e}")
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+
+@app.post("/api/reports/analyze")
 async def analyze_test_report(
     file: Optional[UploadFile] = File(default=None),
     files: Optional[List[UploadFile]] = File(default=None),
@@ -3786,7 +3785,7 @@ async def analyze_test_source(req: dict):
         )
 
 
-@app.post("/api/report/analyze-ai")
+@app.post("/api/reports/analyze-ai")
 async def ai_analyze_failure(req: dict):
     """
     使用AI分析测试失败（自动获取源码并分析，使用OpenGrok源码搜索）
@@ -3847,6 +3846,21 @@ async def ai_analyze_failure(req: dict):
         )
 
 # ==================== VNC管理 ====================
+@app.get("/api/vnc/status")
+async def get_vnc_status():
+    """获取VNC状态"""
+    try:
+        result = vnc_manager.get_vnc_status()
+        return JSONResponse(content={
+            "success": True,
+            "data": result
+        })
+    except Exception as e:
+        logger.error(f"Error getting VNC status: {e}")
+        raise HTTPException(
+                status_code=500,
+                detail=f"{str(e)}. 请检查配置和参数是否正确。"
+            )
 
 @app.post("/api/vnc/start")
 async def start_vnc(req: Optional[VNCStartRequest] = Body(default=None)):
@@ -3871,23 +3885,7 @@ async def stop_vnc():
     result = vnc_manager.stop_vnc()
     return JSONResponse(content=result)
 
-@app.get("/api/vnc/status")
-async def get_vnc_status():
-    """获取VNC状态"""
-    try:
-        result = vnc_manager.get_vnc_status()
-        return JSONResponse(content={
-            "success": True,
-            "data": result
-        })
-    except Exception as e:
-        logger.error(f"Error getting VNC status: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=f"{str(e)}. 请检查配置和参数是否正确。"
-            )
-
-@app.post("/api/desktop/vnc-start")
+@app.post("/api/vnc/start-desktop")
 async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None)):
     """启动桌面VNC - 支持多主机VNC连接（与Flask版本完全一致）"""
     import time
@@ -4187,7 +4185,6 @@ async def show_device_screens(req: DeviceActionRequest):
             )
 
 # ==================== ADB转发 ====================
-
 @app.post("/api/adb-forward/start")
 async def start_adb_forward(req: ADBForwardStartRequest):
     """启动ADB转发"""
@@ -4226,6 +4223,33 @@ async def stop_adb_forward():
             )
 
 # ==================== USB/IP ====================
+@app.get("/api/usbip/status")
+async def get_usbip_status(request: Request):
+    """
+    获取 USB/IP 状态（与5000端口完全一致）
+
+    通过检查多个维度来判断 USB/IP 连接状态：
+    1. 检查当前客户端的连接状态记录
+    2. 检查全局 USB/IP 设备来源记录（支持刷新页面后恢复状态）
+    """
+    client_id = get_client_id_from_request(request)
+
+    # 方法1：检查当前客户端的连接状态
+    with global_state.usbip_states_lock:
+        state_info = global_state.usbip_states.get(client_id, {'connected': False, 'timestamp': 0})
+        connected = state_info['connected']
+
+    # 方法2：如果当前客户端没有记录，检查是否有全局 USB/IP 设备记录
+    # 这样可以支持刷新页面后恢复按钮状态
+    if not connected:
+        with global_state.usbip_devices_source_lock:
+            # 如果有任何 USB/IP 设备记录，说明有 USB/IP 连接
+            has_usbip_devices = len(global_state.usbip_devices_source) > 0
+            if has_usbip_devices:
+                connected = True
+
+    logger.info(f"[USB/IP Status] client_id={client_id}, connected={connected}, device_count={len(global_state.usbip_devices_source)}")
+    return JSONResponse(content={'connected': connected})
 
 @app.post("/api/usbip/start")
 async def start_usbip(req: Optional[USBIPStartRequest] = Body(default=None), request: Request = None):
@@ -4332,36 +4356,7 @@ async def stop_usbip(request: Request):
         logger.info(f"[USB/IP Stop] Connection cleared on error (device source preserved)")
         return JSONResponse(content={'success': True, 'message': '本地设备已断开'})
 
-@app.get("/api/usbip/status")
-async def get_usbip_status(request: Request):
-    """
-    获取 USB/IP 状态（与5000端口完全一致）
-
-    通过检查多个维度来判断 USB/IP 连接状态：
-    1. 检查当前客户端的连接状态记录
-    2. 检查全局 USB/IP 设备来源记录（支持刷新页面后恢复状态）
-    """
-    client_id = get_client_id_from_request(request)
-
-    # 方法1：检查当前客户端的连接状态
-    with global_state.usbip_states_lock:
-        state_info = global_state.usbip_states.get(client_id, {'connected': False, 'timestamp': 0})
-        connected = state_info['connected']
-
-    # 方法2：如果当前客户端没有记录，检查是否有全局 USB/IP 设备记录
-    # 这样可以支持刷新页面后恢复按钮状态
-    if not connected:
-        with global_state.usbip_devices_source_lock:
-            # 如果有任何 USB/IP 设备记录，说明有 USB/IP 连接
-            has_usbip_devices = len(global_state.usbip_devices_source) > 0
-            if has_usbip_devices:
-                connected = True
-
-    logger.info(f"[USB/IP Status] client_id={client_id}, connected={connected}, device_count={len(global_state.usbip_devices_source)}")
-    return JSONResponse(content={'connected': connected})
-
 # ==================== VPN管理 ====================
-
 @app.get("/api/vpn/check-sshd")
 async def check_vpn_sshd():
     """检查VPN SSH服务 - 与Flask实现一致"""
@@ -4475,6 +4470,49 @@ async def check_vpn_routing():
             status_code=500
         )
 
+@app.get("/api/vpn/status")
+async def get_vpn_status():
+    """获取VPN连接状态"""
+    try:
+        config = config_manager.load_config()
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return JSONResponse(
+                content={"success": False, "error": "SSH连接失败"},
+                status_code=500
+            )
+
+        try:
+            vpn_target = config.get('vpn_target', ['www.google.com'])[0]
+            if isinstance(vpn_target, list):
+                vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
+
+            output, error, code = ssh_manager.execute_command(
+                ssh,
+                f"ping -c 1 -W 2 {vpn_target} 2>&1",
+                timeout=10
+            )
+
+            ssh_manager.return_connection(ssh)
+
+            # 检查ping结果
+            connected = '1 packets transmitted, 1 received' in output or '1 received' in output
+
+            return JSONResponse(content={
+                "success": True,
+                "connected": connected
+            })
+        except Exception as e:
+            ssh_manager.return_connection(ssh)
+            raise
+
+    except Exception as e:
+        logger.error(f"Error getting VPN status: {e}")
+        return JSONResponse(
+            content={"success": False, "error": str(e)},
+            status_code=500
+        )
+
 @app.post("/api/vpn/connect")
 async def connect_vpn(
     req: Optional[VPNConnectRequest] = Body(default=None)
@@ -4574,49 +4612,6 @@ async def disconnect_vpn():
 
     except Exception as e:
         logger.error(f"Error disconnecting VPN: {e}")
-        return JSONResponse(
-            content={"success": False, "error": str(e)},
-            status_code=500
-        )
-
-@app.get("/api/vpn/status")
-async def get_vpn_status():
-    """获取VPN连接状态"""
-    try:
-        config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return JSONResponse(
-                content={"success": False, "error": "SSH连接失败"},
-                status_code=500
-            )
-
-        try:
-            vpn_target = config.get('vpn_target', ['www.google.com'])[0]
-            if isinstance(vpn_target, list):
-                vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
-
-            output, error, code = ssh_manager.execute_command(
-                ssh,
-                f"ping -c 1 -W 2 {vpn_target} 2>&1",
-                timeout=10
-            )
-
-            ssh_manager.return_connection(ssh)
-
-            # 检查ping结果
-            connected = '1 packets transmitted, 1 received' in output or '1 received' in output
-
-            return JSONResponse(content={
-                "success": True,
-                "connected": connected
-            })
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            raise
-
-    except Exception as e:
-        logger.error(f"Error getting VPN status: {e}")
         return JSONResponse(
             content={"success": False, "error": str(e)},
             status_code=500
@@ -4794,8 +4789,7 @@ async def get_upload_progress(req: dict):
             )
 
 # ==================== 固件管理 ====================
-
-@app.post("/api/firmware/burn")
+@app.post("/api/burn/firmware")
 async def burn_firmware(request: Request):
     """
     固件烧写 - 支持文件上传
@@ -5380,7 +5374,7 @@ async def burn_firmware(request: Request):
             status_code=500
         )
 
-@app.post("/api/gsi/burn")
+@app.post("/api/burn/gsi")
 async def burn_gsi(request: Request):
     """
     GSI 烧写 - 按照GUI版本实现
@@ -5695,7 +5689,7 @@ async def burn_gsi(request: Request):
             status_code=500
         )
 
-@app.post("/api/sn/burn")
+@app.post("/api/burn/serial")
 async def burn_sn(req: SNBurnRequest):
     """
     SN烧录 - 与Flask版本一致

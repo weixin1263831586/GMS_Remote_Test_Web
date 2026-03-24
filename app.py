@@ -2078,7 +2078,7 @@ def vnc_status():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== Desktop Multi-Host Management ====================
-@app.route('/api/desktop/vnc-start', methods=['POST'])
+@app.route('/api/vnc/start-desktop', methods=['POST'])
 def desktop_vnc_start():
     """Start VNC for a specific host - 支持多主机VNC连接和免密登录"""
     import time
@@ -3092,7 +3092,7 @@ def list_test_reports():
         print(f"[ERROR] 获取报告列表失败: {e}")
         return jsonify({'reports': []})
 
-@app.route('/api/reports/<path:report_timestamp>/files')
+@app.route('/api/reports/files/<path:report_timestamp>')
 def list_report_files(report_timestamp):
     """从数据库获取报告目录并列出文件"""
     try:
@@ -3181,7 +3181,7 @@ def view_report_file():
         return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/reports/<path:report_timestamp>/analyze', methods=['GET'])
+@app.route('/api/reports/analyze/<path:report_timestamp>', methods=['GET'])
 def analyze_remote_report(report_timestamp):
     """从数据库分析测试报告"""
     try:
@@ -3732,7 +3732,7 @@ def find_xml_file(directory):
 
     return None
 
-@app.route('/api/report/analyze', methods=['POST'])
+@app.route('/api/reports/analyze', methods=['POST'])
 def analyze_report():
     """
     分析上传的测试报告文件或文件夹（使用新的简化分析器模块）
@@ -4585,7 +4585,7 @@ def analyze_test_source():
         }), 500
 
 
-@app.route('/api/report/analyze-ai', methods=['POST'])
+@app.route('/api/reports/analyze-ai', methods=['POST'])
 def ai_analyze_test_failure():
     """
     使用大模型分析测试失败并给出解决建议
@@ -5650,7 +5650,7 @@ def upload_file_with_progress():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== Firmware Burning ====================
-@app.route('/api/firmware/burn', methods=['POST'])
+@app.route('/api/burn/firmware', methods=['POST'])
 def burn_firmware():
     """
     Burn firmware image to selected devices
@@ -5830,7 +5830,7 @@ def list_files():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== GSI Burning ====================
-@app.route('/api/gsi/burn', methods=['POST'])
+@app.route('/api/burn/gsi', methods=['POST'])
 def burn_gsi():
     """
     Burn GSI (Generic System Image) to selected devices
@@ -5924,7 +5924,7 @@ def burn_gsi():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== SN Burning ====================
-@app.route('/api/sn/burn', methods=['POST'])
+@app.route('/api/burn/serial', methods=['POST'])
 def burn_sn():
     """Burn serial number to selected devices"""
     data = request.json

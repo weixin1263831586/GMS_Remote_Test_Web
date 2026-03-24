@@ -982,7 +982,7 @@ async function submitFirmwareBurn() {
         }
 
         // 发送请求
-        const response = await fetch(`/api/firmware/burn?devices=${encodeURIComponent(devices.join(','))}`, {
+        const response = await fetch(`/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`, {
             method: 'POST',
             body: formData
         });
@@ -1098,7 +1098,7 @@ async function submitGsiBurn() {
         return;
     }
 
-    await executeBurnOperation('/api/gsi/burn', {
+    await executeBurnOperation('/api/burn/gsi', {
         system_img: systemImg,
         vendor_img: document.getElementById('gsi-vendor').value.trim(),
         script_path: document.getElementById('gsi-script').value.trim()
@@ -1128,7 +1128,7 @@ async function submitSnBurn() {
         return;
     }
 
-    await executeBurnOperation('/api/sn/burn', {
+    await executeBurnOperation('/api/burn/serial', {
         sn_code: snCode
     }, '烧写SN码', closeSnModal);
 }
@@ -2743,7 +2743,7 @@ async function downloadReport(timestamp) {
     try {
         showToast('正在下载报告...', 'info');
 
-        const response = await fetch(`/api/reports/${timestamp}/download`);
+        const response = await fetch(`/api/reports/download/${timestamp}`);
 
         // 检查响应状态
         if (!response.ok) {
@@ -2838,7 +2838,7 @@ async function analyzeReport(timestamp) {
         setTimeout(async () => {
             showToast('正在分析报告...', 'info');
 
-            const resp = await fetch(`/api/reports/${timestamp}/analyze`);
+            const resp = await fetch(`/api/reports/analyze/${timestamp}`);
             const data = await resp.json();
 
             if (!data.success) {
@@ -2858,7 +2858,7 @@ async function analyzeReport(timestamp) {
 
 async function viewReportDetails(timestamp) {
     try {
-        const resp = await fetch(`/api/reports/${timestamp}/files`);
+        const resp = await fetch(`/api/reports/files/${timestamp}`);
         const data = await resp.json();
 
         if (!data.success) {
@@ -3211,7 +3211,7 @@ async function handleReportFile(file) {
 
         progressFill.style.width = '50%';
 
-        const response = await fetch('/api/report/analyze', {
+        const response = await fetch('/api/reports/analyze', {
             method: 'POST',
             body: formData
         });
@@ -3278,7 +3278,7 @@ async function handleReportFolder(files) {
         console.log(`Uploading ${fileCount} files...`);
         progressFill.style.width = '30%';
 
-        const response = await fetch('/api/report/analyze', {
+        const response = await fetch('/api/reports/analyze', {
             method: 'POST',
             body: formData
         });
@@ -3469,7 +3469,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
     document.body.appendChild(modal);
 
     try {
-        const response = await fetch('/api/report/analyze-ai', {
+        const response = await fetch('/api/reports/analyze-ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -4049,7 +4049,7 @@ async function aiAnalyzeFailure(testName, errorMessage, module = '') {
         // 显示加载提示
         showToast('🤖 AI正在分析...', 'info');
 
-        const response = await fetch('/api/report/analyze-ai', {
+        const response = await fetch('/api/reports/analyze-ai', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

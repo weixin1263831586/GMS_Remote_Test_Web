@@ -1213,7 +1213,7 @@
             // 切换到其他主机时，需要调用API
             try {
                 showToast(`正在连接到 ${currentHost.name}...`, 'info');
-                const response = await fetch('/api/desktop/vnc-start', {
+                const response = await fetch('/api/vnc/start-desktop', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1704,7 +1704,7 @@
             try {
                 showToast(`正在打开设备 ${serialNo} 的 Shell...`, 'info');
 
-                const response = await fetch('/api/device/shell', {
+                const response = await fetch('/api/devices/shell', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
