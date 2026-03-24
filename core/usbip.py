@@ -17,6 +17,12 @@ from .device_utils import DeviceUtils
 
 logger = logging.getLogger(__name__)
 
+# usbipd 安装命令常量
+USBIPD_INSTALL_CMD = 'winget install dorssel.usbipd-win --source winget'
+USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行PowerShell执行：
+{install_cmd}
+验证安装：usbipd --version'''
+
 
 class USBIPManager:
     """
@@ -90,16 +96,14 @@ class USBIPManager:
                     win_ssh.close()
                     return {'success': False, 'error': 'USB/IP仅支持Windows主机'}
 
-                # 检查usbipd
-                stdout, stderr, code = self._execute_ssh(win_ssh, 'usbipd --version')
-                if stderr or not stdout:
+                # 检查usbipd是否已安装
+                installed, version = self.check_usbipd_installed(win_ssh)
+                if not installed:
                     win_ssh.close()
                     return {
                         'success': False,
                         'error': 'usbipd未安装',
-                        'install_guide': '''在Windows电脑上以【管理员身份】运行PowerShell执行：
-winget install dorssel.usbipd-win --source winget
-验证安装：usbipd --version'''
+                        'install_guide': USBIPD_INSTALL_GUIDE.format(install_cmd=USBIPD_INSTALL_CMD)
                     }
 
                 # 终止ADB
@@ -134,10 +138,11 @@ winget install dorssel.usbipd-win --source winget
                         busids
                     )
 
-                    # 保存密码
+                    # 保存密码到动态配置
                     if device_password and device_password != config.get('device_pswd', ''):
-                        config['device_pswd'] = device_password
-                        self.config_manager.save_config(config)
+                        dynamic_config = self.config_manager._load_dynamic_config() or {}
+                        dynamic_config['device_pswd'] = device_password
+                        self.config_manager.save_dynamic_config(dynamic_config)
 
                     # 更新设备来源记录
                     for device_id in device_list:
@@ -372,6 +377,78 @@ winget install dorssel.usbipd-win --source winget
         except Exception as e:
             logger.error(f"Error attaching devices: {e}")
             return [], []
+
+    def check_usbipd_installed(self, ssh) -> Tuple[bool, str]:
+        """
+        检查 usbipd 是否已安装
+
+        Args:
+            ssh: SSH 连接对象
+
+        Returns:
+            (是否安装, 版本信息)
+        """
+        try:
+            stdout, stderr, code = self._execute_ssh(ssh, 'usbipd --version')
+            if code == 0 and stdout.strip():
+                return True, stdout.strip()
+            return False, ''
+        except Exception as e:
+            logger.error(f"Error checking usbipd: {e}")
+            return False, ''
+
+    def install_usbipd(self, ssh, config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        自动安装 usbipd 到 Windows 主机
+
+        Args:
+            ssh: SSH 连接对象
+            config: 配置字典
+
+        Returns:
+            安装结果字典
+        """
+        try:
+            # 检查是否已经是管理员权限
+            check_admin_cmd = 'whoami /groups | findstr S-1-16-12288'
+            stdout, stderr, code = self._execute_ssh(ssh, check_admin_cmd)
+
+            if code != 0 or 'S-1-16-12288' not in stdout:
+                return {
+                    'success': False,
+                    'error': f'需要管理员权限。请在 Windows 上以【管理员身份】运行 PowerShell，然后执行: {USBIPD_INSTALL_CMD}'
+                }
+
+            # 执行自动安装命令（添加自动接受参数）
+            install_cmd = f'{USBIPD_INSTALL_CMD} --accept-package-agreements --accept-source-agreements'
+            stdout, stderr, code = self._execute_ssh(ssh, install_cmd, timeout=120)
+
+            if code == 0:
+                # 验证安装
+                installed, version = self.check_usbipd_installed(ssh)
+                if installed:
+                    return {
+                        'success': True,
+                        'message': f'usbipd 安装成功！版本: {version}',
+                        'version': version
+                    }
+                else:
+                    return {
+                        'success': True,
+                        'message': 'usbipd 安装完成，请验证版本'
+                    }
+            else:
+                return {
+                    'success': False,
+                    'error': f'安装失败: {stderr or stdout}'
+                }
+
+        except Exception as e:
+            logger.error(f"Error installing usbipd: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
 
 
 # 全局USB/IP管理器实例

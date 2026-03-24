@@ -57,14 +57,17 @@ class ConfigManager:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
 
-                # 替换 ${ubuntu_user} 占位符
+                # 替换 ${ubuntu_user} 占位符（不修改原始配置，返回副本）
                 ubuntu_user = config.get('ubuntu_user', 'hcq')
+                config_copy = {}
                 for key, value in config.items():
                     if isinstance(value, str) and '${ubuntu_user}' in value:
-                        config[key] = value.replace('${ubuntu_user}', ubuntu_user)
+                        config_copy[key] = value.replace('${ubuntu_user}', ubuntu_user)
+                    else:
+                        config_copy[key] = value
 
                 logger.debug(f"Loaded static config from {self.config_path}")
-                return config
+                return config_copy
 
         except FileNotFoundError:
             logger.warning(f"Config file not found: {self.config_path}")
