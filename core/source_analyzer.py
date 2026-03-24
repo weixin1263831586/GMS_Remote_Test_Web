@@ -1,12 +1,14 @@
 """
 Android源码分析器
-获取Android源码并分析失败原因，给出修改建议
+使用OpenGrok获取Android源码并分析失败原因，给出修改建议
 """
 
 import re
 import requests
 import logging
-import base64
+import json
+import os
+import subprocess
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote
 
@@ -14,15 +16,15 @@ logger = logging.getLogger(__name__)
 
 
 class AndroidSourceAnalyzer:
-    """Android源码分析器"""
+    """Android源码分析器 (使用OpenGrok)"""
 
     def __init__(self):
-        self.base_url = "https://cs.android.com/android/platform/superproject"
+        self.opengrok_plugin = "/home/hcq/remote-run-server/plugins/commands/opengrok/run.py"
         self.timeout = 15
 
     def fetch_source_code(self, class_name: str, package: Optional[str] = None) -> Optional[Dict]:
         """
-        获取Android源码
+        使用OpenGrok获取Android源码
 
         Args:
             class_name: 类名（如 AngleAllowlistTraceTest）
@@ -32,171 +34,197 @@ class AndroidSourceAnalyzer:
             dict: 包含源码信息，如果失败返回None
         """
         try:
-            # 构造文件名和搜索路径
+            # 构造文件名
             simple_class_name = class_name.split('.')[-1]
             filename = f"{simple_class_name}.java"
 
-            # 构造可能的文件路径
-            possible_paths = self._guess_file_paths(simple_class_name, package)
+            logger.info(f"使用OpenGrok获取源码: {simple_class_name}")
 
-            logger.info(f"尝试获取源码: {simple_class_name}")
+            # 使用OpenGrok搜索源码
+            result = self._fetch_via_opengrok(simple_class_name)
 
-            # 尝试多个策略获取源码
-            for path in possible_paths:
-                # 策略1: 使用Android Code Search API
-                content = self._fetch_via_code_search_api(path)
-                if content:
-                    logger.info(f"通过API成功获取源码: {path}")
-                    return {
-                        'class_name': simple_class_name,
-                        'file_path': path,
-                        'source_url': f"{self.base_url}/android/platform/superproject/+/android-latest-release:{path}",
-                        'content': content,
-                        'filename': filename,
-                        'fetch_method': 'api'
-                    }
+            if result and result.get('content'):
+                logger.info(f"通过OpenGrok成功获取源码: {result.get('file_path')}")
+                return {
+                    'class_name': simple_class_name,
+                    'file_path': result.get('file_path', ''),
+                    'source_url': result.get('source_url', ''),
+                    'content': result['content'],
+                    'filename': filename,
+                    'fetch_method': 'opengrok'
+                }
 
-                # 策略2: 尝试使用GitHub镜像
-                content = self._fetch_via_github_mirror(path)
-                if content:
-                    logger.info(f"通过GitHub镜像获取源码: {path}")
-                    return {
-                        'class_name': simple_class_name,
-                        'file_path': path,
-                        'source_url': f"https://github.com/android/platform-superproject/blob/android-latest-release/{path}",
-                        'content': content,
-                        'filename': filename,
-                        'fetch_method': 'github'
-                    }
-
-            logger.warning(f"无法获取源码: {class_name}")
+            logger.warning(f"OpenGrok无法获取源码: {class_name}")
             return None
 
         except Exception as e:
             logger.error(f"获取源码失败: {e}")
             return None
 
-    def _fetch_via_code_search_api(self, file_path: str) -> Optional[str]:
-        """通过Android Code Search API获取文件内容"""
-        try:
-            # 方法1: 尝试直接文本格式
-            url = f"{self.base_url}/android/platform/superproject/+/android-latest-release:{file_path}?format=TEXT"
-            response = requests.get(url, timeout=self.timeout, headers={'Accept': 'text/plain'})
-
-            if response.status_code == 200 and response.text:
-                content = response.text
-                # 检查是否是base64编码
-                if self._is_base64(content):
-                    try:
-                        return base64.b64decode(content).decode('utf-8')
-                    except:
-                        pass
-                # 检查是否是有效的Java代码
-                if 'package ' in content or 'import ' in content or 'class ' in content:
-                    return content
-
-            # 方法2: 尝试JSON API
-            api_url = f"{self.base_url}/_go/ ../android/platform/superproject/+/android-latest-release:{file_path}?format=JSON"
-            response = requests.get(api_url, timeout=self.timeout)
-
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    if 'content' in data:
-                        content = data['content']
-                        if isinstance(content, str):
-                            # 可能是base64编码
-                            try:
-                                return base64.b64decode(content).decode('utf-8')
-                            except:
-                                return content
-                except:
-                    pass
-
-            return None
-
-        except Exception as e:
-            logger.debug(f"API获取失败: {e}")
-            return None
-
-    def _fetch_via_github_mirror(self, file_path: str) -> Optional[str]:
-        """通过GitHub镜像获取文件内容"""
-        try:
-            # GitHub上的Android平台镜像
-            github_urls = [
-                f"https://raw.githubusercontent.com/android/platform-superproject/main/{file_path}",
-                f"https://raw.githubusercontent.com/aosp-mirror/platform_superproject/master/{file_path}",
-            ]
-
-            for url in github_urls:
-                response = requests.get(url, timeout=self.timeout)
-                if response.status_code == 200:
-                    content = response.text
-                    if 'package ' in content or 'import ' in content or 'class ' in content:
-                        return content
-
-            return None
-
-        except Exception as e:
-            logger.debug(f"GitHub获取失败: {e}")
-            return None
-
-    def _is_base64(self, s: str) -> bool:
-        """检查字符串是否是base64编码"""
-        try:
-            if len(s) % 4 != 0:
-                return False
-            if not re.match(r'^[A-Za-z0-9+/]+={0,2}$', s):
-                return False
-            # 尝试解码
-            decoded = base64.b64decode(s)
-            # 检查解码后是否包含可打印字符
-            return any(32 <= byte < 127 for byte in decoded)
-        except:
-            return False
-
-    def _guess_file_paths(self, class_name: str, package: Optional[str] = None) -> List[str]:
+    def _fetch_via_opengrok(self, class_name: str) -> Optional[Dict]:
         """
-        根据类名和包名猜测可能的文件路径
+        使用OpenGrok插件搜索并获取源码
 
         Args:
-            class_name: 简单类名（如 AngleAllowlistTraceTest）
-            package: 完整包名（如 com.google.android.angleallowlists.vts）
+            class_name: 类名
 
         Returns:
-            list: 可能的文件路径列表
+            dict: 包含源码内容和路径信息
         """
-        paths = []
+        try:
+            if not os.path.exists(self.opengrok_plugin):
+                logger.warning(f"OpenGrok插件不存在: {self.opengrok_plugin}")
+                return None
 
-        # 如果有包名，构造标准路径
-        if package:
-            # 将包名转换为路径
-            package_path = package.replace('.', '/')
-            # 测试文件通常在 test/ 目录下
-            paths.append(f"test/{package_path}/{class_name}.java")
+            # 调用OpenGrok插件搜索
+            cmd = [
+                'python3',
+                self.opengrok_plugin,
+                'search',
+                '--query', class_name,
+                '--search-field', 'full',
+                '--limit', '3'
+            ]
 
-            # VTS测试的特殊路径
-            if 'vts' in package_path.lower():
-                # 尝试从类名推导模块名
-                module_name = class_name.replace('Test', '').replace('test', '').lower()
-                paths.append(f"test/vts-tests/{module_name}/host/src/{package_path}/{class_name}.java")
-                paths.append(f"test/vts/tests/{module_name}/host/src/{package_path}/{class_name}.java")
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout
+            )
 
-        # 通用测试路径
-        paths.append(f"test/{class_name}.java")
+            if result.returncode != 0:
+                logger.debug(f"OpenGrok搜索失败: {result.stderr}")
+                return None
 
-        # CTS/GTS/VTS 特定路径
-        if class_name.endswith('Test'):
-            module_name = class_name[:-4].lower()
-            paths.append(f"test/{module_name}/{class_name}.java")
+            # 解析搜索结果 - 从文本输出中提取文件路径
+            lines = result.stdout.strip().split('\n')
+            file_path = None
+            project = None
 
-        # 添加src路径（非测试代码）
-        if package:
-            package_path = package.replace('.', '/')
-            paths.append(f"src/{package_path}/{class_name}.java")
+            # 查找包含 [reference], [path], [definition] 等标记的行
+            for i, line in enumerate(lines):
+                line = line.strip()
+                # 匹配格式: [type] project/path
+                if line.startswith('[') and ']' in line:
+                    # 提取路径部分
+                    # 例如: [reference] cts/libs/input/src/com/android/cts/input/UinputTouchDevice.kt
+                    after_bracket = line.split(']', 1)[1].strip()
+                    if after_bracket:
+                        # 检查下一行是否有 project 信息
+                        if i + 1 < len(lines):
+                            next_line = lines[i + 1].strip()
+                            if next_line.startswith('project:'):
+                                # 提取项目名
+                                project = next_line.split(':', 1)[1].strip()
+                                # 构造完整路径: project/path
+                                file_path = f"{project}/{after_bracket}"
+                                break
 
-        logger.info(f"猜测的文件路径: {paths[:3]}")
-        return paths
+                        # 如果没有 project 行,直接使用路径
+                        if '/' in after_bracket and any(after_bracket.endswith(ext) for ext in ['.java', '.kt', '.cpp', '.c', '.h']):
+                            file_path = after_bracket
+                            break
+
+            if not file_path:
+                logger.debug(f"OpenGrok未找到结果: {class_name}")
+                logger.debug(f"输出: {result.stdout[:500]}")
+                return None
+
+            # 获取文件内容
+            content = self._fetch_file_content_from_opengrok(file_path)
+
+            if content:
+                return {
+                    'file_path': file_path,
+                    'source_url': self._get_opengrok_url(file_path),
+                    'content': content
+                }
+
+            return None
+
+        except subprocess.TimeoutExpired:
+            logger.warning(f"OpenGrok搜索超时: {class_name}")
+            return None
+        except Exception as e:
+            logger.debug(f"OpenGrok搜索异常: {e}")
+            return None
+
+    def _fetch_file_content_from_opengrok(self, file_path: str) -> Optional[str]:
+        """
+        从OpenGrok API获取文件内容
+
+        Args:
+            file_path: 文件路径
+
+        Returns:
+            str: 文件内容
+        """
+        try:
+            # 读取配置
+            config_path = os.path.join(os.path.dirname(self.opengrok_plugin), 'config/config.json')
+            base_url = "http://10.10.10.203:8080/source"
+            token = "G3wtcawHUYvsv1whz"
+
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    base_url = config.get('base_url', base_url)
+                    token = config.get('token', token)
+
+            # 构造API URL
+            # 格式: /api/v1/files/{project}/path/{encoded_path}
+            project = "Android14"  # 默认项目,可以从配置中读取
+
+            # 分离项目名和路径
+            path_parts = file_path.split('/', 1)
+            if len(path_parts) > 1 and path_parts[0] in ['Android14', 'Android13', 'Android16', 'Android12', 'Android11']:
+                project = path_parts[0]
+                file_path = path_parts[1]
+
+            encoded_path = file_path
+            api_url = f"{base_url}/api/v1/files/{project}/path/{encoded_path}"
+
+            # 发送请求
+            response = requests.get(
+                api_url,
+                headers={'Authorization': f'Bearer {token}', 'Accept': 'text/plain'},
+                timeout=self.timeout
+            )
+
+            if response.status_code == 200:
+                return response.text
+
+            logger.debug(f"获取文件内容失败: HTTP {response.status_code}")
+            return None
+
+        except Exception as e:
+            logger.debug(f"获取文件内容失败: {e}")
+            return None
+
+    def _get_opengrok_url(self, file_path: str) -> str:
+        """
+        构造OpenGrok的URL
+
+        Args:
+            file_path: 文件路径
+
+        Returns:
+            str: OpenGrok URL
+        """
+        try:
+            # 读取OpenGrok配置获取base_url
+            config_path = os.path.join(os.path.dirname(self.opengrok_plugin), 'config/config.json')
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    base_url = config.get('base_url', 'http://10.10.10.203:8080/source')
+                    return f"{base_url.rstrip('/')}/{file_path}"
+        except:
+            pass
+
+        # 默认URL
+        return f"http://10.10.10.203:8080/source/{file_path}"
 
     def analyze_failure_with_source(
         self,
@@ -226,11 +254,11 @@ class AndroidSourceAnalyzer:
         }
 
         try:
-            # 获取源码
+            # 使用OpenGrok获取源码
             source_info = self.fetch_source_code(class_name)
 
             if not source_info or not source_info.get('content'):
-                logger.info("无法获取源码，使用错误模式分析")
+                logger.info("无法从OpenGrok获取源码，使用错误模式分析")
                 result['analysis'].append("无法自动获取源码，基于错误模式进行分析")
                 # 即使没有源码，也要提供有价值的分析
                 pattern_analysis = self._analyze_by_error_pattern(error_message, stack_trace)
@@ -242,7 +270,7 @@ class AndroidSourceAnalyzer:
             # 验证源码内容
             source_code = source_info['content']
             if not source_code or len(source_code.strip()) < 50:
-                result['analysis'].append("获取的源码内容不完整")
+                result['analysis'].append("从OpenGrok获取的源码内容不完整")
                 pattern_analysis = self._analyze_by_error_pattern(error_message, stack_trace)
                 result['analysis'].extend(pattern_analysis['analysis'])
                 result['suggestions'].extend(pattern_analysis['suggestions'])
@@ -583,7 +611,7 @@ class AndroidSourceAnalyzer:
             analysis.append(f"检测到错误: {error_type if error_type else '未知错误'}")
             suggestions = [
                 "查看完整的堆栈跟踪信息",
-                "使用源码搜索链接定位相关代码",
+                "使用OpenGrok搜索相关源码",
                 "检查测试环境配置",
                 "参考错误信息中的关键字进行排查"
             ]

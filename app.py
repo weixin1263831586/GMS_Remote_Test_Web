@@ -4585,7 +4585,7 @@ def analyze_test_source():
         }), 500
 
 
-@app.route('/api/test/ai-analyze', methods=['POST'])
+@app.route('/api/report/analyze-ai', methods=['POST'])
 def ai_analyze_test_failure():
     """
     使用大模型分析测试失败并给出解决建议

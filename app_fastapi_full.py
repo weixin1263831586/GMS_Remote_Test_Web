@@ -1522,6 +1522,128 @@ async def push_terminal_file(request: Request, file: UploadFile = File(...)):
             status_code=500
         )
 
+# ==================== OpenGrok源码搜索 ====================
+
+@app.post("/api/opengrok/search")
+async def opengrok_search(request: Request):
+    """OpenGrok源码搜索 - 调用OpenGrok插件进行源码搜索"""
+    try:
+        # 获取请求参数
+        data = await request.json()
+        query = data.get("query", "").strip()
+        search_field = data.get("search_field", "smart")
+        project = data.get("project", "")
+        file_type = data.get("type", "")
+        limit = data.get("limit", 15)
+
+        if not query:
+            return JSONResponse(
+                content={"success": False, "error": "请输入搜索关键词"},
+                status_code=400
+            )
+
+        # OpenGrok插件路径
+        plugin_dir = "/home/hcq/remote-run-server/plugins/commands/opengrok"
+        run_script = os.path.join(plugin_dir, "run.py")
+
+        if not os.path.exists(run_script):
+            logger.warning(f"[OpenGrok] Plugin not found: {run_script}")
+            return JSONResponse(
+                content={"success": False, "error": f"OpenGrok插件不存在: {run_script}"},
+                status_code=500
+            )
+
+        # 构建命令
+        cmd = [
+            "python3",
+            run_script,
+            "search",
+            "--query", query,
+            "--search-field", search_field,
+            "--limit", str(limit)
+        ]
+
+        # 添加可选参数
+        if project:
+            cmd.extend(["--project", project])
+        if file_type:
+            cmd.extend(["--type", file_type])
+
+        logger.info(f"[OpenGrok Search] Command: {' '.join(cmd)}")
+
+        # 执行搜索
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=plugin_dir
+            )
+
+            if result.returncode != 0:
+                logger.error(f"[OpenGrok Search] Plugin error: {result.stderr}")
+                return JSONResponse(
+                    content={
+                        "success": False,
+                        "error": f"搜索失败: {result.stderr}"
+                    },
+                    status_code=500
+                )
+
+            # 解析输出
+            output = result.stdout.strip()
+            results = []
+
+            if output:
+                # OpenGrok插件输出格式为纯文本，按行解析
+                for line in output.split('\n'):
+                    line = line.strip()
+                    if line and '|' in line:
+                        # 格式: file_path | line_number | context_text
+                        parts = line.split('|', 2)
+                        if len(parts) >= 3:
+                            file_path = parts[0].strip()
+                            line_num = parts[1].strip()
+                            context = parts[2].strip()
+                            results.append({
+                                "file": file_path,
+                                "line": line_num,
+                                "context": context
+                            })
+
+            logger.info(f"[OpenGrok Search] Found {len(results)} results for query: {query}")
+
+            return JSONResponse(content={
+                "success": True,
+                "query": query,
+                "search_field": search_field,
+                "project": project,
+                "type": file_type,
+                "count": len(results),
+                "results": results
+            })
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"[OpenGrok Search] Timeout after 60s")
+            return JSONResponse(
+                content={"success": False, "error": "搜索超时(60秒)"},
+                status_code=500
+            )
+        except Exception as e:
+            logger.error(f"[OpenGrok Search] Execution error: {e}")
+            return JSONResponse(
+                content={"success": False, "error": f"搜索执行失败: {str(e)}"},
+                status_code=500
+            )
+
+    except Exception as e:
+        logger.error(f"[OpenGrok Search] Error: {e}")
+        return JSONResponse(
+            content={"success": False, "error": f"服务器错误: {str(e)}"},
+            status_code=500
+        )
+
 # ==================== 测试管理 ====================
 
 @app.post("/api/test/start")
@@ -2903,26 +3025,20 @@ def parse_cts_failure_info(test_name, error_message):
     return result
 
 
-def construct_source_search_url(search_term, search_type='code'):
+def construct_source_search_url(search_term, search_type='full'):
     """
-    构造Android源码搜索URL
+    构造OpenGrok源码搜索URL
 
     Args:
         search_term: 搜索词（通常是类名）
-        search_type: 搜索类型 (code, symbol, file)
+        search_type: 搜索类型 (full, path, symbol, def)
 
     Returns:
-        str: 完整的搜索URL
+        str: OpenGrok搜索命令提示
     """
-    base_url = "https://cs.android.com/android/platform/superproject"
-    encoded_term = urllib.parse.quote(search_term)
-
-    if search_type == 'symbol':
-        return f"{base_url}/+/refs/heads/main:qd/?q={encoded_term}"
-    else:
-        # 使用文件名搜索（添加.java扩展名），这样更容易找到源文件
-        # 例如: AngleAllowlistTraceTest -> AngleAllowlistTraceTest.java
-        return f"{base_url}/+/android-latest-release:qd/?q={encoded_term}.java&ss=android%2Fplatform%2Fsuperproject"
+    # 返回OpenGrok搜索命令的提示信息
+    # 实际搜索通过OpenGrok插件完成
+    return f"使用OpenGrok搜索: {search_term} (字段: {search_type})"
 
 
 def analyze_test_failure_class(class_name, error_type=None):
@@ -2957,7 +3073,7 @@ def analyze_test_failure_class(class_name, error_type=None):
             analysis['possible_causes'].append('多用户功能实现不完整')
             analysis['source_links'].append({
                 'title': '多用户管理源码',
-                'url': 'https://cs.android.com/android/platform/superproject/+/refs/heads/main:frameworks/base/services/core/java/com/android/server/pm/UserManagerService.java'
+                'url': construct_source_search_url('UserManagerService', 'full')
             })
         elif 'Permission' in class_name or 'permission' in class_name.lower():
             analysis['test_type'] = '权限测试'
@@ -3178,6 +3294,73 @@ def call_ollama(prompt):
         raise Exception(f'Ollama调用失败: {str(e)}')
 
 
+# ==================== OpenGrok源码搜索辅助函数 ====================
+
+def search_opengrok_sources(class_names):
+    """
+    使用OpenGrok搜索源码
+
+    Args:
+        class_names: 类名列表
+
+    Returns:
+        list: 搜索结果列表
+    """
+    logger = logging.getLogger(__name__)
+
+    # OpenGrok插件路径
+    plugin_dir = "/home/hcq/remote-run-server/plugins/commands/opengrok"
+    run_script = os.path.join(plugin_dir, "run.py")
+
+    if not os.path.exists(run_script):
+        logger.warning(f"OpenGrok插件不存在: {run_script}")
+        return []
+
+    results = []
+
+    for class_name in class_names:
+        try:
+            # 构建命令
+            cmd = [
+                "python3",
+                run_script,
+                "search",
+                "--query", class_name,
+                "--search-field", "def",  # 搜索定义
+                "--limit", "5"
+            ]
+
+            logger.info(f"[OpenGrok] Searching for: {class_name}")
+
+            # 执行搜索
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=plugin_dir
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                # 解析输出
+                for line in result.stdout.strip().split('\n'):
+                    if '|' in line:
+                        parts = line.split('|', 2)
+                        if len(parts) >= 3:
+                            results.append({
+                                'class_name': class_name,
+                                'file': parts[0].strip(),
+                                'line': parts[1].strip(),
+                                'context': parts[2].strip()
+                            })
+        except subprocess.TimeoutExpired:
+            logger.warning(f"[OpenGrok] Timeout searching for: {class_name}")
+        except Exception as e:
+            logger.warning(f"[OpenGrok] Error searching for {class_name}: {e}")
+
+    return results
+
+
 def rule_based_analysis(test_name, error_message, stack_trace, module):
     """
     基于规则的分析（当AI不可用时）
@@ -3294,7 +3477,7 @@ def rule_based_analysis(test_name, error_message, stack_trace, module):
  }
 
 
-def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
+def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_names=None):
     """
     调用大模型API分析测试失败（支持多个AI提供商，自动获取源码）
 
@@ -3303,11 +3486,21 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
         error_message: 错误消息
         stack_trace: 堆栈跟踪
         module: 测试模块名称
+        class_names: 从堆栈中提取的类名列表
 
     Returns:
         dict: AI分析结果（包含源码分析）
     """
     logger = logging.getLogger(__name__)
+
+    if class_names is None:
+        class_names = []
+
+    # 使用OpenGrok搜索相关源码
+    opengrok_results = []
+    if class_names:
+        opengrok_results = search_opengrok_sources(class_names[:3])  # 限制搜索前3个类名
+        logger.info(f"OpenGrok搜索到 {len(opengrok_results)} 条源码结果")
 
     # 优先使用通用AI分析器
     try:
@@ -3355,6 +3548,11 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
                 response['source_url'] = source_info.get('source_url', '')
                 response['source_file_path'] = source_info.get('file_path', '')
                 logger.info(f"分析包含源码: {source_info.get('file_path', 'unknown')}")
+
+            # 添加OpenGrok搜索结果
+            if opengrok_results:
+                response['opengrok_results'] = opengrok_results
+                logger.info(f"添加了 {len(opengrok_results)} 条OpenGrok搜索结果")
 
             return response
         else:
@@ -3588,13 +3786,14 @@ async def analyze_test_source(req: dict):
         )
 
 
-@app.post("/api/test/ai-analyze")
+@app.post("/api/report/analyze-ai")
 async def ai_analyze_failure(req: dict):
     """
-    使用AI分析测试失败（自动获取源码并分析）
+    使用AI分析测试失败（自动获取源码并分析，使用OpenGrok源码搜索）
 
     功能说明：
-    - 自动从 https://cs.android.com/android/platform/superproject 获取测试用例源码
+    - 使用OpenGrok自动获取测试用例源码
+    - 使用OpenGrok搜索失败堆栈中的相关类源码
     - 结合源码、错误信息和测试逻辑进行综合分析
     - 提供诊断结果和修复建议
 
@@ -3603,7 +3802,8 @@ async def ai_analyze_failure(req: dict):
             "test_name": "com.google.android.gts.multiuser.RestrictedProfileHostTest#testUserIsRestricted",
             "error_message": "java.lang.AssertionError: ...",
             "stack_trace": "...",  // 可选
-            "module": "GtsGmscoreHostTestCases"  // 可选
+            "module": "GtsGmscoreHostTestCases",  // 可选
+            "class_names": ["com.android.server.xxx", "MyClass"]  // 可选：提取的类名列表
         }
 
     Response:
@@ -3616,6 +3816,7 @@ async def ai_analyze_failure(req: dict):
                 "source_code_fetched": true,  // 是否成功获取源码
                 "source_url": "...",  // 源码链接（如果获取成功）
                 "source_file_path": "...",  // 源码文件路径
+                "opengrok_results": [...],  // OpenGrok搜索结果（如果有）
                 "ai_model": "GLM-4 (智谱AI)",  // 使用的AI模型
                 "related_docs": [...]
             }
@@ -3626,12 +3827,13 @@ async def ai_analyze_failure(req: dict):
         error_message = req.get('error_message', '')
         stack_trace = req.get('stack_trace', '')
         module = req.get('module', '')
+        class_names = req.get('class_names', [])  # 新增：提取的类名列表
 
         if not test_name:
             raise HTTPException(status_code=400, detail="缺少test_name参数")
 
-        # 调用AI分析
-        result = analyze_with_ai(test_name, error_message, stack_trace, module)
+        # 调用AI分析（包含OpenGrok源码搜索）
+        result = analyze_with_ai(test_name, error_message, stack_trace, module, class_names)
 
         return JSONResponse(content={'success': True, 'data': result})
 

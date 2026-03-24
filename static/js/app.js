@@ -2526,11 +2526,11 @@ function displayTestReports(reports) {
 
         return `
             <tr style="border-bottom: 1px solid var(--border-color);">
-                <td style="padding: 12px; text-align: center; font-weight: 700; font-size: 12px; ${typeStyle}">
-                    ${testType}
-                </td>
                 <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                     ${displayClient}
+                </td>
+                <td style="padding: 12px; text-align: center; font-weight: 700; font-size: 12px; ${typeStyle}">
+                    ${testType}
                 </td>
                 <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
                     ${report.timestamp}
@@ -3469,7 +3469,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
     document.body.appendChild(modal);
 
     try {
-        const response = await fetch('/api/test/ai-analyze', {
+        const response = await fetch('/api/report/analyze-ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3480,6 +3480,15 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
         });
 
         const result = await response.json();
+
+        // 检查HTTP状态码
+        if (!response.ok) {
+            // 处理HTTP错误（FastAPI的HTTPException返回 {detail: "error message"}）
+            const errorDetail = result.detail || result.error || '未知错误';
+            modal.querySelector('.modal-title').textContent = '❌ 分析失败';
+            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${errorDetail}</div>`;
+            return;
+        }
 
         // 更新模态框内容
         modal.querySelector('.modal-title').textContent = '🤖 AI 分析结果';
@@ -3526,6 +3535,37 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                 content += '</div></div>';
             }
 
+            // OpenGrok源码搜索结果
+            if (data.opengrok_results && data.opengrok_results.length > 0) {
+                content += '<div style="margin-top: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px; border-left: 3px solid #9c27b0;">';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: #9c27b0;">🔍 相关源码 (OpenGrok)</div>';
+                content += '<div style="max-height: 300px; overflow-y: auto;">';
+
+                data.opengrok_results.forEach(item => {
+                    const opengrokUrl = `http://10.10.10.203:8080/source/xref/${item.file}#${item.line}`;
+                    content += `
+                        <div style="background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                <div style="font-family: monospace; font-size: 11px; color: #1976d2; font-weight: 600;">
+                                    ${item.class_name}
+                                </div>
+                                <a href="${opengrokUrl}" target="_blank" style="font-size: 10px; color: #9c27b0; text-decoration: none; white-space: nowrap;">
+                                    查看源码 ↗
+                                </a>
+                            </div>
+                            <div style="font-family: monospace; font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
+                                ${item.file}:${item.line}
+                            </div>
+                            <div style="font-family: monospace; font-size: 10px; color: #424242; background: white; padding: 4px; border-radius: 3px; overflow-x: auto;">
+                                ${escapeHtml(item.context)}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                content += '</div></div>';
+            }
+
 
             // AI标记
             if (data.ai_enabled === false) {
@@ -3536,12 +3576,14 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
 
             modal.querySelector('.modal-body').innerHTML = content;
         } else {
-            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color);">分析失败: ${result.error}</div>`;
+            // 处理业务逻辑错误（success: false）
+            const errorDetail = result.error || result.detail || '未知错误';
+            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${errorDetail}</div>`;
         }
 
     } catch (error) {
         modal.querySelector('.modal-title').textContent = '❌ 分析失败';
-        modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color);">请求失败: ${error.message}</div>`;
+        modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">请求失败: ${error.message}</div>`;
     }
 }
 
@@ -3578,6 +3620,15 @@ async function analyzeFailureSource(testName, errorMessage) {
         });
 
         const result = await response.json();
+
+        // 检查HTTP状态码
+        if (!response.ok) {
+            // 处理HTTP错误（FastAPI的HTTPException返回 {detail: "error message"}）
+            const errorDetail = result.detail || result.error || '未知错误';
+            modal.querySelector('.modal-title').textContent = '❌ 分析失败';
+            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${errorDetail}</div>`;
+            return;
+        }
 
         // 更新模态框内容
         modal.querySelector('.modal-title').textContent = '🔍 源码分析结果';
@@ -3776,12 +3827,14 @@ async function analyzeFailureSource(testName, errorMessage) {
 
             modal.querySelector('.modal-body').innerHTML = content;
         } else {
-            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color);">分析失败: ${result.error}</div>`;
+            // 处理业务逻辑错误（success: false）
+            const errorDetail = result.error || result.detail || '未知错误';
+            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${errorDetail}</div>`;
         }
 
     } catch (error) {
         modal.querySelector('.modal-title').textContent = '❌ 分析失败';
-        modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color);">请求失败: ${error.message}</div>`;
+        modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">请求失败: ${error.message}</div>`;
     }
 }
 
@@ -3834,7 +3887,7 @@ async function analyzeSourceCode(testName, errorMessage) {
         if (result.success) {
             displaySourceAnalysis(result.data);
         } else {
-            showToast('源码分析失败: ' + result.error, 'error');
+            showToast('源码分析失败: ' + (result.error || result.detail || '未知错误'), 'error');
         }
     } catch (error) {
         console.error('源码分析错误:', error);
@@ -3996,7 +4049,7 @@ async function aiAnalyzeFailure(testName, errorMessage, module = '') {
         // 显示加载提示
         showToast('🤖 AI正在分析...', 'info');
 
-        const response = await fetch('/api/test/ai-analyze', {
+        const response = await fetch('/api/report/analyze-ai', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -4013,7 +4066,7 @@ async function aiAnalyzeFailure(testName, errorMessage, module = '') {
         if (result.success) {
             displayAIAnalysis(result.data, testName, errorMessage);
         } else {
-            showToast('AI分析失败: ' + result.error, 'error');
+            showToast('AI分析失败: ' + (result.error || result.detail || '未知错误'), 'error');
         }
     } catch (error) {
         console.error('AI分析错误:', error);
@@ -4201,4 +4254,148 @@ function copyAIAnalysis(modalId) {
     }).catch(() => {
         showToast('复制失败', 'error');
     });
+}
+
+// ==================== OpenGrok源码分析 ====================
+
+/**
+ * 打开源码分析弹框
+ */
+function openSourceAnalysisModal() {
+    const modal = document.getElementById('source-analysis-modal');
+    if (modal) {
+        modal.classList.add('show');
+        // 清空之前的搜索结果
+        document.getElementById('opengrok-results').style.display = 'none';
+        document.getElementById('opengrok-results-list').innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">请输入关键词进行搜索</div>';
+    }
+}
+
+/**
+ * 关闭源码分析弹框
+ */
+function closeSourceAnalysisModal() {
+    const modal = document.getElementById('source-analysis-modal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+}
+
+/**
+ * 执行源码搜索
+ */
+async function searchSourceCode() {
+    const query = document.getElementById('opengrok-query').value.trim();
+    const searchField = document.getElementById('opengrok-search-field').value;
+    const project = document.getElementById('opengrok-project').value;
+    const fileType = document.getElementById('opengrok-type').value;
+    const resultsDiv = document.getElementById('opengrok-results');
+    const resultsList = document.getElementById('opengrok-results-list');
+
+    if (!query) {
+        showToast('请输入搜索关键词', 'warning');
+        return;
+    }
+
+    // 显示加载状态
+    resultsDiv.style.display = 'block';
+    resultsList.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">搜索中...</div>';
+
+    try {
+        const response = await fetch('/api/opengrok/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: query,
+                search_field: searchField,
+                project: project,
+                type: fileType,
+                limit: 15
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success && data.results && data.results.length > 0) {
+            // 渲染搜索结果
+            resultsList.innerHTML = data.results.map(item => {
+                const opengrokUrl = `http://10.10.10.203:8080/source/xref/${item.file}#${item.line}`;
+                return `
+                    <div style="background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; margin-bottom: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                            <div style="font-family: monospace; font-size: 11px; color: #1976d2; font-weight: 600;">
+                                ${item.file}
+                            </div>
+                            <a href="${opengrokUrl}" target="_blank" style="font-size: 10px; color: #9c27b0; text-decoration: none; white-space: nowrap;">
+                                查看源码 ↗
+                            </a>
+                        </div>
+                        <div style="font-family: monospace; font-size: 10px; color: var(--text-secondary); margin-bottom: 5px;">
+                            Line ${item.line}
+                        </div>
+                        <div style="font-family: monospace; font-size: 11px; color: #424242; background: white; padding: 8px; border-radius: 3px; overflow-x: auto; white-space: pre-wrap;">
+                            ${escapeHtml(item.context)}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            showToast(`找到 ${data.count} 条结果`, 'success');
+        } else {
+            resultsList.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">未找到匹配的结果</div>';
+            showToast('未找到匹配的结果', 'info');
+        }
+    } catch (error) {
+        console.error('[OpenGrok] Search error:', error);
+        resultsList.innerHTML = '<div style="text-align: center; color: var(--danger-color); padding: 20px;">搜索失败: ' + error.message + '</div>';
+        showToast('搜索失败: ' + error.message, 'error');
+    }
+}
+
+/**
+ * 在OpenGrok网站打开搜索结果
+ */
+function openOpenGrokLink() {
+    const query = document.getElementById('opengrok-query').value.trim();
+    const searchField = document.getElementById('opengrok-search-field').value;
+    const project = document.getElementById('opengrok-project').value;
+
+    if (!query) {
+        showToast('请输入搜索关键词', 'warning');
+        return;
+    }
+
+    // 构建OpenGrok URL
+    let url = 'http://10.10.10.203:8080/source/search?';
+
+    const params = new URLSearchParams();
+    params.append('q', query);
+
+    // 根据搜索字段设置参数
+    if (searchField === 'full') {
+        params.append('full', query);
+    } else if (searchField === 'def') {
+        params.append('defs', query);
+    } else if (searchField === 'symbol') {
+        params.append('refs', query);
+    } else if (searchField === 'path') {
+        params.append('path', query);
+    }
+
+    // 添加项目过滤
+    if (project) {
+        params.append('project', project);
+    }
+
+    url += params.toString();
+
+    // 在新标签页打开
+    window.open(url, '_blank');
+    showToast('已在OpenGrok网站打开搜索', 'success');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
