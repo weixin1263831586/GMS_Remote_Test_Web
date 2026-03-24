@@ -657,13 +657,6 @@ async def set_client_info(req: ClientInfoRequest, request: Request):
     )
 
     username = req.username or 'unknown'
-
-    # 保存客户端信息（合并现有动态配置）
-    existing_dynamic = config_manager._load_dynamic_config() or {}
-    existing_dynamic['client_ip'] = client_ip
-    existing_dynamic['client_username'] = username
-    config_manager.save_dynamic_config(existing_dynamic)
-
     client_id = client_manager.get_client_id(client_ip, username)
 
     # 更新用户状态
@@ -811,9 +804,9 @@ async def update_config(req: dict):
 
     # 动态配置字段（保存在 config_dynamic.json）
     # 所有可修改的配置项都在这里
+    # 注意：client_ip 和 client_username 是运行时状态，不应保存到配置文件
     dynamic_keys = {
         'device_host', 'device_pswd',
-        'client_ip', 'client_username',
         'client_hosts', 'client_ssh_credentials',
         'ubuntu_user', 'ubuntu_host', 'ubuntu_pswd',
         'local_server', 'suites_path', 'usbip_vid_pid'
@@ -4355,6 +4348,48 @@ async def stop_usbip(request: Request):
             global_state.usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
         logger.info(f"[USB/IP Stop] Connection cleared on error (device source preserved)")
         return JSONResponse(content={'success': True, 'message': '本地设备已断开'})
+
+@app.post("/api/usbip/auto-install")
+async def auto_install_usbipd(request: Request):
+    """自动安装 usbipd 到 Windows 主机"""
+    try:
+        config = config_manager.load_config()
+        client_id = get_client_id_from_request(request)
+        device_host = client_id
+        config['device_host'] = device_host
+
+        # 自动从 client_ssh_credentials 中查找密码
+        device_password = find_device_host_password(config, device_host)
+        if not device_password:
+            device_password = config.get('device_pswd', '')
+
+        if device_password:
+            config['device_pswd'] = device_password
+
+        # 连接到 Windows 主机
+        win_ssh = create_device_ssh_connection(config)
+        if not win_ssh:
+            return JSONResponse(
+                content={"success": False, "error": "无法连接到 Windows 主机"},
+                status_code=500
+            )
+
+        try:
+            # 使用 USBIPManager 的安装方法
+            result = usbip_manager.install_usbipd(win_ssh, config)
+            win_ssh.close()
+            return JSONResponse(content=result)
+
+        except Exception as e:
+            win_ssh.close()
+            raise
+
+    except Exception as e:
+        logger.error(f"Error auto-installing usbipd: {e}")
+        return JSONResponse(
+            content={"success": False, "error": str(e)},
+            status_code=500
+        )
 
 # ==================== VPN管理 ====================
 @app.get("/api/vpn/check-sshd")

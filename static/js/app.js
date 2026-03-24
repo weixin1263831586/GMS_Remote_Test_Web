@@ -2963,44 +2963,23 @@ async function viewReportFile(filePath, fileName) {
 
 // ==================== 安装指南弹窗 ====================
 function showInstallGuide(title, guide) {
-    // 创建或获取弹窗元素
-    let modal = document.getElementById('install-guide-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'install-guide-modal';
-        modal.className = 'modal';
-        modal.innerHTML = `
-            <div class="modal-content" style="max-width: 600px;">
-                <div class="modal-header">
-                    <h2 id="install-guide-title">安装指南</h2>
-                    <button class="close-btn" onclick="closeInstallGuide()">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <pre id="install-guide-content" style="white-space: pre-wrap; word-wrap: break-word; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; line-height: 1.6; color: #333;"></pre>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-primary" onclick="closeInstallGuide()">知道了</button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modal);
+    const modal = document.getElementById('install-guide-modal');
+    if (modal) {
+        modal.classList.add('show');
+        // 添加 ESC 键监听
+        document.addEventListener('keydown', handleInstallGuideEsc);
     }
-
-    // 设置标题和内容
-    document.getElementById('install-guide-title').textContent = title;
-    document.getElementById('install-guide-content').textContent = guide;
-
-    // 显示弹窗
-    modal.classList.add('show');
-
-    // 添加 ESC 键监听
-    document.addEventListener('keydown', handleInstallGuideEsc);
 }
 
 function closeInstallGuide() {
     const modal = document.getElementById('install-guide-modal');
     if (modal) {
         modal.classList.remove('show');
+        // 隐藏进度条
+        const progressDiv = document.getElementById('install-progress');
+        if (progressDiv) {
+            progressDiv.style.display = 'none';
+        }
     }
     document.removeEventListener('keydown', handleInstallGuideEsc);
 }
@@ -3008,6 +2987,61 @@ function closeInstallGuide() {
 function handleInstallGuideEsc(event) {
     if (event.key === 'Escape') {
         closeInstallGuide();
+    }
+}
+
+async function autoInstallUsbipd() {
+    const progressDiv = document.getElementById('install-progress');
+    const progressBar = document.getElementById('install-progress-bar');
+    const statusText = document.getElementById('install-status');
+
+    // 显示进度条
+    progressDiv.style.display = 'block';
+
+    try {
+        // 更新状态：准备安装
+        progressBar.style.width = '10%';
+        statusText.textContent = '📡 正在连接 Windows 主机...';
+
+        // 调用后端自动安装 API
+        const result = await apiCall('/api/usbip/auto-install', 'POST', {});
+
+        // 更新状态：安装中
+        progressBar.style.width = '50%';
+        statusText.textContent = '⏳ 正在安装 usbipd，请稍候...';
+
+        if (result.success) {
+            // 安装成功
+            progressBar.style.width = '100%';
+            progressBar.style.background = 'var(--success-color, #28a745)';
+            statusText.innerHTML = '✅ 安装成功！usbipd 已就绪';
+            statusText.style.color = 'var(--success-color, #28a745)';
+
+            addLogEntry('usbipd 自动安装成功', 'success');
+
+            // 3秒后关闭弹窗并刷新设备
+            setTimeout(() => {
+                closeInstallGuide();
+                // 直接调用 refreshDevices 而不是 debouncedRefreshDevices，避免防抖延迟
+                refreshDevices();
+            }, 3000);
+        } else {
+            // 安装失败
+            progressBar.style.width = '100%';
+            progressBar.style.background = 'var(--danger-color, #dc3545)';
+            statusText.innerHTML = '❌ 安装失败: ' + (result.error || '未知错误');
+            statusText.style.color = 'var(--danger-color, #dc3545)';
+
+            addLogEntry('usbipd 自动安装失败: ' + (result.error || '未知错误'), 'error');
+        }
+    } catch (error) {
+        // 异常处理
+        progressBar.style.width = '100%';
+        progressBar.style.background = 'var(--danger-color, #dc3545)';
+        statusText.innerHTML = '❌ 安装失败: ' + error.message;
+        statusText.style.color = 'var(--danger-color, #dc3545)';
+
+        addLogEntry('usbipd 自动安装失败: ' + error.message, 'error');
     }
 }
 
@@ -4399,3 +4433,27 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+
+// ==================== 全局函数暴露 ====================
+// 将 HTML onclick 需要的函数暴露到 window 对象
+window.refreshDevices = refreshDevices;
+window.selectAllDevices = selectAllDevices;
+window.rebootDevices = rebootDevices;
+window.remountDevices = remountDevices;
+window.connectWifi = connectWifi;
+window.startUsbip = startUsbip;
+window.stopUsbip = stopUsbip;
+window.startLocalUsbip = startLocalUsbip;
+window.checkSshd = checkSshd;
+window.checkUsbipd = checkUsbipd;
+window.checkRouting = checkRouting;
+window.connectVpn = connectVpn;
+window.checkVpnStatus = checkVpnStatus;
+window.startTest = startTest;
+window.stopTest = stopTest;
+window.selectReportSource = selectReportSource;
+window.deleteReport = deleteReport;
+window.viewReport = viewReport;
+window.analyzeReport = analyzeReport;
+window.searchOpenGrok = searchOpenGrok;
+window.openOpenGrokLink = openOpenGrokLink;

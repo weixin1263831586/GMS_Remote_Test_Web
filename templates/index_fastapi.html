@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260324-3">
+    <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- Socket.IO not used in FastAPI version, using native WebSocket -->
     <script src="/static/vendor/xterm/xterm.min.js"></script>
     <script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
@@ -983,6 +983,45 @@
                 <div class="modal-buttons" style="margin-top: 20px;">
                     <button class="btn-xxs" onclick="closeSshModal()">取消</button>
                     <button class="btn-xxs btn-primary" onclick="submitSsh()">连接</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 安装指南弹框 -->
+    <div id="install-guide-modal" class="modal">
+        <div class="modal-content" style="max-width: 620px;">
+            <div class="modal-header">
+                <span class="modal-title">⚠️ usbipd 安装指南</span>
+                <span class="modal-close" onclick="closeInstallGuide()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin-bottom: 15px; border-radius: 4px; color: #856404;">
+                    📋 检测到 Windows 主机缺少必要组件，需要安装 usbipd
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <div style="font-weight: 600; margin-bottom: 10px; color: var(--text-primary);">🔧 手动安装步骤：</div>
+                    <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 12px;">
+                        <ol style="margin: 0; padding-left: 20px; color: var(--text-secondary); line-height: 1.8;">
+                            <li>在 Windows 电脑上以<strong style="color: var(--danger-color);">【管理员身份】</strong>打开 PowerShell</li>
+                            <li>安装命令：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; color: var(--primary-color);">winget install dorssel.usbipd-win --source winget</code></li>
+                            <li>查看版本：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; color: var(--primary-color);">usbipd --version</code></li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div id="install-progress" style="display: none; margin-bottom: 15px;">
+                    <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">⏳ 正在自动安装...</div>
+                    <div style="background: var(--border-color); border-radius: 4px; height: 6px; overflow: hidden;">
+                        <div id="install-progress-bar" style="background: var(--primary-color); height: 100%; width: 0%; transition: width 0.3s;"></div>
+                    </div>
+                    <div id="install-status" style="margin-top: 8px; font-size: 13px; color: var(--text-secondary);">准备安装...</div>
+                </div>
+
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeInstallGuide()">关闭</button>
+                    <button class="btn-xxs btn-primary" onclick="autoInstallUsbipd()">🚀 一键自动安装</button>
                 </div>
             </div>
         </div>
@@ -2432,7 +2471,7 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=20260324-4"></script>
 </div> <!-- End of main-container -->
 </body>
 </html>
