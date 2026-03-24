@@ -69,7 +69,7 @@ class UniversalAIAnalyzer:
             error_message: 错误信息
             stack_trace: 堆栈跟踪
             source_code: 源码（可选，如果为空且auto_fetch_source=True则自动获取）
-            auto_fetch_source: 是否自动从 https://cs.android.com/android/platform/superproject 获取源码
+            auto_fetch_source: 是否自动使用OpenGrok获取源码
 
         Returns:
             dict: 分析结果，包含源码信息
@@ -402,7 +402,7 @@ class UniversalAIAnalyzer:
 
     def _fetch_source_code_android(self, class_name: str) -> Optional[Dict]:
         """
-        从 https://cs.android.com/android/platform/superproject 获取Android源码
+        使用OpenGrok获取Android源码
 
         Args:
             class_name: 测试类名（如 com.android.angleallowlists.vts.AngleAllowlistTraceTest）

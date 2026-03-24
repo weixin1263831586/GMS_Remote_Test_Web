@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>测试界面 - GMS 远程测试</title>
+    <title>测试界面 - GMS远程测试</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
     <!-- Socket.IO not used in FastAPI version, using native WebSocket -->
@@ -257,7 +257,7 @@
         <!-- 左侧导航栏 -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <div class="sidebar-brand">GMS 远程测试</div>
+                <div class="sidebar-brand">GMS远程测试</div>
             </div>
             <nav class="sidebar-nav">
                 <a href="#" class="sidebar-item" data-page="test" onclick="switchPage('test', event)">
@@ -642,8 +642,8 @@
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">类型</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">客户端</th>
+                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">类型</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">时间戳</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">通过</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">失败</th>
@@ -1845,15 +1845,15 @@
 
             // 动态更新页面标题
             const titles = {
-                'test': '测试界面 - GMS 远程测试',
-                'desktop': '主机桌面 - GMS 远程测试',
-                'terminal': '主机终端 - GMS 远程测试',
-                'devices': '设备管理 - GMS 远程测试',
-                'users': '用户管理 - GMS 远程测试',
-                'reports': '报告管理 - GMS 远程测试',
-                'report-analysis': '报告分析 - GMS 远程测试'
+                'test': '测试界面 - GMS远程测试',
+                'desktop': '主机桌面 - GMS远程测试',
+                'terminal': '主机终端 - GMS程测试',
+                'devices': '设备管理 - GMS远程测试',
+                'users': '用户管理 - GMS远程测试',
+                'reports': '报告管理 - GMS远程测试',
+                'report-analysis': '报告分析 - GMS远程测试'
             };
-            document.title = titles[pageName] || 'GMS 远程测试';
+            document.title = titles[pageName] || 'GMS远程测试';
 
             // 如果切换到终端页面且未初始化，则初始化终端
             // 如果是ADB模式(pendingAdbDevice存在),强制重新初始化
@@ -2353,17 +2353,84 @@
 
             // 更新页面标题
             const titles = {
-                'test': '测试界面 - GMS 远程测试',
-                'desktop': '主机桌面 - GMS 远程测试',
-                'terminal': '主机终端 - GMS 远程测试',
-                'devices': '设备管理 - GMS 远程测试',
-                'users': '用户管理 - GMS 远程测试',
-                'reports': '报告管理 - GMS 远程测试',
-                'report-analysis': '报告分析 - GMS 远程测试'
+                'test': '测试界面 - GMS远程测试',
+                'desktop': '主机桌面 - GMS远程测试',
+                'terminal': '主机终端 - GMS远程测试',
+                'devices': '设备管理 - GMS远程测试',
+                'users': '用户管理 - GMS远程测试',
+                'reports': '报告管理 - GMS远程测试',
+                'report-analysis': '报告分析 - GMS远程测试'
             };
-            document.title = titles[targetPage] || 'GMS 远程测试';
+            document.title = titles[targetPage] || 'GMS远程测试';
         });
     </script>
+
+    <!-- AI+源码分析弹框 -->
+    <div id="source-analysis-modal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <span class="modal-title">🔍 AI+源码分析 (OpenGrok)</span>
+                <span class="modal-close" onclick="closeSourceAnalysisModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row">
+                    <label>搜索关键词:</label>
+                    <input type="text" id="opengrok-query" placeholder="输入类名、方法名或变量名" style="flex: 1;" />
+                </div>
+
+                <div class="modal-form-row" style="display: flex; gap: 10px;">
+                    <div style="flex: 1;">
+                        <label>搜索字段:</label>
+                        <select id="opengrok-search-field" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;">
+                            <option value="smart">智能搜索 (推荐)</option>
+                            <option value="full">全文搜索</option>
+                            <option value="def">定义搜索</option>
+                            <option value="symbol">符号搜索</option>
+                            <option value="path">路径搜索</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1;">
+                        <label>项目:</label>
+                        <select id="opengrok-project" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;">
+                            <option value="">所有项目</option>
+                            <option value="Android14" selected>Android14</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="modal-form-row">
+                    <label>文件类型:</label>
+                    <select id="opengrok-type" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;">
+                        <option value="">所有类型</option>
+                        <option value="java">Java</option>
+                        <option value="kotlin">Kotlin</option>
+                        <option value="c">C</option>
+                        <option value="cxx">C++</option>
+                        <option value="python">Python</option>
+                        <option value="sh">Shell</option>
+                        <option value="golang">Go</option>
+                        <option value="rust">Rust</option>
+                    </select>
+                </div>
+
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeSourceAnalysisModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="searchSourceCode()">🔍 搜索</button>
+                </div>
+
+                <!-- 搜索结果区域 -->
+                <div id="opengrok-results" style="margin-top: 20px; display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <div style="font-size: 14px; font-weight: 600;">搜索结果</div>
+                        <button class="btn-xxs" onclick="openOpenGrokLink()" style="font-size: 11px;">🌐 在OpenGrok中打开</button>
+                    </div>
+                    <div id="opengrok-results-list" style="max-height: 400px; overflow-y: auto; background: var(--light-bg); border-radius: 4px; padding: 10px; font-size: 12px;">
+                        <div style="text-align: center; color: var(--text-secondary); padding: 20px;">请输入关键词进行搜索</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="/static/js/app.js"></script>
 </div> <!-- End of main-container -->

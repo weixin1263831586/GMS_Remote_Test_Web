@@ -1395,7 +1395,7 @@ log-system { color: var(--info-color); }
 /* ==================== Report Analysis Page ==================== */
 #report-analysis-result > div:first-child {
     padding: 12px !important;
-    margin-bottom: 12px !important;
+    margin-bottom: 8px !important;
 }
 
 #report-analysis-result > div:first-child > div:first-child {
@@ -1403,7 +1403,7 @@ log-system { color: var(--info-color); }
 }
 
 #report-summary {
-    margin-bottom: 12px !important;
+    margin-bottom: 8px !important;
 }
 
 #report-failures {
@@ -1433,7 +1433,7 @@ log-system { color: var(--info-color); }
 
 /* 上传前占满屏幕 */
 .report-upload-zone.upload-empty {
-    min-height: 90vh;
+    min-height: 50vh;
     max-height: none;
     flex: 1;
 }
@@ -1530,7 +1530,7 @@ log-system { color: var(--info-color); }
 }
 
 #report-summary .summary-value {
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 700;
     color: var(--primary-color);
 }
