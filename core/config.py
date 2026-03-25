@@ -4,6 +4,8 @@
 import json
 import os
 import logging
+import time
+import threading
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -14,14 +16,16 @@ class ConfigManager:
     配置管理器
 
     管理配置文件的读取和保存，支持静态配置和动态配置
+    支持TTL缓存机制，减少磁盘I/O操作
     """
 
-    def __init__(self, base_dir: str = None):
+    def __init__(self, base_dir: str = None, cache_ttl: int = 5):
         """
         初始化配置管理器
 
         Args:
             base_dir: 基础目录（默认为当前文件所在目录）
+            cache_ttl: 缓存生存时间（秒），默认5秒
         """
         if base_dir is None:
             base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -30,13 +34,94 @@ class ConfigManager:
         self.config_path = os.path.join(base_dir, '..', 'config.json')
         self.dynamic_config_path = os.path.join(base_dir, '..', 'config_dynamic.json')
 
-    def load_config(self) -> Dict[str, Any]:
+        # 缓存相关
+        self._cache: Optional[Dict[str, Any]] = None
+        self._cache_timestamp: float = 0
+        self._cache_ttl: int = cache_ttl
+        self._cache_lock: threading.Lock = threading.Lock()
+
+        # 文件修改时间追踪
+        self._static_mtime: float = 0
+        self._dynamic_mtime: float = 0
+
+    def load_config(self, force_reload: bool = False) -> Dict[str, Any]:
         """
         加载配置（静态 + 动态）
+
+        Args:
+            force_reload: 强制重新加载，忽略缓存
 
         Returns:
             配置字典
         """
+        with self._cache_lock:
+            current_time = time.time()
+
+            # 检查是否需要重新加载
+            if not force_reload and self._is_cache_valid(current_time):
+                logger.debug("Using cached config")
+                return self._cache.copy() if self._cache else {}
+
+            # 加载配置
+            config = self._load_and_merge_config()
+
+            # 更新缓存
+            self._cache = config
+            self._cache_timestamp = current_time
+
+            return config.copy() if config else {}
+
+    def _is_cache_valid(self, current_time: float) -> bool:
+        """
+        检查缓存是否有效
+
+        Args:
+            current_time: 当前时间戳
+
+        Returns:
+            缓存是否有效
+        """
+        # 检查缓存是否存在
+        if self._cache is None:
+            return False
+
+        # 检查TTL是否过期
+        if current_time - self._cache_timestamp > self._cache_ttl:
+            return False
+
+        # 检查文件是否被修改
+        try:
+            static_mtime = os.path.getmtime(self.config_path)
+            dynamic_mtime = 0
+            if os.path.exists(self.dynamic_config_path):
+                dynamic_mtime = os.path.getmtime(self.dynamic_config_path)
+
+            # 如果文件修改时间变化，缓存失效
+            if static_mtime != self._static_mtime or dynamic_mtime != self._dynamic_mtime:
+                logger.debug("Config files modified, cache invalidated")
+                return False
+
+        except Exception as e:
+            logger.warning(f"Error checking file mtime: {e}")
+            return False
+
+        return True
+
+    def _load_and_merge_config(self) -> Dict[str, Any]:
+        """
+        加载并合并配置
+
+        Returns:
+            合并后的配置字典
+        """
+        # 更新文件修改时间
+        try:
+            self._static_mtime = os.path.getmtime(self.config_path)
+            if os.path.exists(self.dynamic_config_path):
+                self._dynamic_mtime = os.path.getmtime(self.dynamic_config_path)
+        except Exception as e:
+            logger.warning(f"Error updating file mtime: {e}")
+
         # 加载静态配置
         config = self._load_static_config()
 
@@ -50,6 +135,13 @@ class ConfigManager:
                 config['ai_models'] = ai_config
 
         return config
+
+    def invalidate_cache(self):
+        """使缓存失效，下次调用load_config时将重新加载"""
+        with self._cache_lock:
+            self._cache = None
+            self._cache_timestamp = 0
+            logger.debug("Config cache invalidated")
 
     def _load_static_config(self) -> Dict[str, Any]:
         """加载静态配置"""
@@ -124,6 +216,10 @@ class ConfigManager:
             with open(self.dynamic_config_path, 'w', encoding='utf-8') as f:
                 json.dump(dynamic_config, f, indent=4, ensure_ascii=False)
             logger.info(f"Saved dynamic config to {self.dynamic_config_path}")
+
+            # 保存后使缓存失效
+            self.invalidate_cache()
+
             return True
         except Exception as e:
             logger.error(f"Error saving dynamic config: {e}")
