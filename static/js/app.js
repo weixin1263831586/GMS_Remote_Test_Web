@@ -1360,8 +1360,10 @@ async function setupUsbipForward() {
                 btn.textContent = '📱 本地设备';
                 btn.disabled = false;
 
-                // 检查是否有安装指南
-                if (result.install_guide) {
+                // 检查是否是 SSH 连接失败
+                if (result.error && result.error.includes('SSH连接失败')) {
+                    addLogEntry('⚠️ SSH 连接失败，请点击 "📡 检查SSHD" 按钮检查SSH服务状态', 'warning');
+                } else if (result.install_guide) {
                     // 显示友好的安装指南弹窗
                     showInstallGuide('usbipd 安装指南', result.install_guide);
                     addLogEntry('启动 USB/IP 失败: ' + (result.error || '未知错误'), 'error');
@@ -1465,7 +1467,15 @@ async function submitDevicePassword() {
 async function checkSshd() {
     try {
         const result = await apiCall('/api/vpn/check-sshd', 'GET');
-        addLogEntry(`SSHD 状态: ${result.running ? '运行中' : '未运行'}`, result.running ? 'success' : 'warning');
+
+        if (!result.installed) {
+            // SSHD 未安装，显示安装指南
+            showSshdInstallGuide(result.install_guide);
+        } else if (result.running) {
+            addLogEntry(`SSHD 状态: 运行中`, 'success');
+        } else {
+            addLogEntry(`SSHD 状态: 已安装但未运行`, 'warning');
+        }
     } catch (error) {
         addLogEntry('检查 SSHD 失败: ' + error.message, 'error');
     }
@@ -2962,12 +2972,21 @@ async function viewReportFile(filePath, fileName) {
 }
 
 // ==================== 安装指南弹窗 ====================
+// 模块级状态管理，避免使用 this
+const _modalState = {
+    installGuide: { escListenerAdded: false },
+    sshdInstallGuide: { escListenerAdded: false }
+};
+
 function showInstallGuide(title, guide) {
     const modal = document.getElementById('install-guide-modal');
     if (modal) {
         modal.classList.add('show');
         // 添加 ESC 键监听
-        document.addEventListener('keydown', handleInstallGuideEsc);
+        if (!_modalState.installGuide.escListenerAdded) {
+            document.addEventListener('keydown', handleInstallGuideEsc);
+            _modalState.installGuide.escListenerAdded = true;
+        }
     }
 }
 
@@ -2981,7 +3000,10 @@ function closeInstallGuide() {
             progressDiv.style.display = 'none';
         }
     }
-    document.removeEventListener('keydown', handleInstallGuideEsc);
+    if (_modalState.installGuide.escListenerAdded) {
+        document.removeEventListener('keydown', handleInstallGuideEsc);
+        _modalState.installGuide.escListenerAdded = false;
+    }
 }
 
 function handleInstallGuideEsc(event) {
@@ -3043,6 +3065,46 @@ async function autoInstallUsbipd() {
 
         addLogEntry('usbipd 自动安装失败: ' + error.message, 'error');
     }
+}
+
+// ==================== SSHD 安装指南弹窗 ====================
+function showSshdInstallGuide(guide) {
+    const modal = document.getElementById('sshd-install-guide-modal');
+    if (modal) {
+        // 设置指南内容
+        const guideContent = document.getElementById('sshd-guide-content');
+        if (guideContent) {
+            guideContent.textContent = guide;
+        }
+        modal.classList.add('show');
+        // 添加 ESC 键监听（防止重复添加）
+        if (!_modalState.sshdInstallGuide.escListenerAdded) {
+            document.addEventListener('keydown', handleSshdInstallGuideEsc);
+            _modalState.sshdInstallGuide.escListenerAdded = true;
+        }
+    }
+}
+
+function closeSshdInstallGuide() {
+    const modal = document.getElementById('sshd-install-guide-modal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+    if (_modalState.sshdInstallGuide.escListenerAdded) {
+        document.removeEventListener('keydown', handleSshdInstallGuideEsc);
+        _modalState.sshdInstallGuide.escListenerAdded = false;
+    }
+}
+
+function handleSshdInstallGuideEsc(event) {
+    if (event.key === 'Escape') {
+        closeSshdInstallGuide();
+    }
+}
+
+async function autoInstallSshd() {
+    // SSHD 需要手动安装，直接显示提示
+    addLogEntry('⚠️ SSHD 需要在 Windows 客户端上手动安装，请按照安装指南操作', 'warning');
 }
 
 // ==================== Report Analysis ====================
@@ -4457,3 +4519,6 @@ window.viewReport = viewReport;
 window.analyzeReport = analyzeReport;
 window.searchOpenGrok = searchOpenGrok;
 window.openOpenGrokLink = openOpenGrokLink;
+window.showSshdInstallGuide = showSshdInstallGuide;
+window.closeSshdInstallGuide = closeSshdInstallGuide;
+window.autoInstallSshd = autoInstallSshd;

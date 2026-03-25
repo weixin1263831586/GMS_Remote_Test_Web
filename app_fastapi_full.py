@@ -106,7 +106,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # 导入核心模块
 from core.config import config_manager
-from core.ssh import ssh_manager
+from core.ssh import ssh_manager, SSHD_INSTALL_GUIDE
 from core.device import device_manager
 from core.test_runner import test_runner
 from core.test_report import test_report_manager
@@ -4393,44 +4393,76 @@ async def auto_install_usbipd(request: Request):
 
 # ==================== VPN管理 ====================
 @app.get("/api/vpn/check-sshd")
-async def check_vpn_sshd():
-    """检查VPN SSH服务 - 与Flask实现一致"""
+async def check_vpn_sshd(request: Request):
+    """检查VPN SSH服务状态
+
+    通过SSH连接到Windows客户端检查SSHD服务状态。
+    """
+    def exec_ssh_cmd(ssh, cmd):
+        """执行SSH命令并返回输出"""
+        stdin, stdout, stderr = ssh.exec_command(cmd, timeout=10)
+        return stdout.read().decode('utf-8', errors='ignore').strip()
+
     try:
         config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
+        device_host = get_client_id_from_request(request)
+        config['device_host'] = device_host
+        config['device_pswd'] = find_device_host_password(config, device_host) or config.get('device_pswd', '')
+
+        ssh = create_device_ssh_connection(config)
         if not ssh:
-            return JSONResponse(
-                content={"success": False, "error": "SSH连接失败"},
-                status_code=500
-            )
+            logger.warning(f"[SSHD Check] Cannot connect to {device_host}")
+            return JSONResponse(content={
+                "success": True,
+                "installed": False,
+                "running": False,
+                "error": "无法连接到SSH服务",
+                "install_guide": SSHD_INSTALL_GUIDE
+            })
 
         try:
-            # 执行命令检查sshd进程
-            output, error, code = ssh_manager.execute_command(
-                ssh,
-                "ps aux | grep sshd | grep -v grep"
-            )
+            # 检查是否已安装（先找文件，再查服务）
+            installed = bool(exec_ssh_cmd(ssh, "where sshd.exe 2>nul"))
+            if not installed:
+                installed = bool(exec_ssh_cmd(ssh, "sc query sshd 2>nul | findstr /C:\"RUNNING\" /C:\"STOPPED\""))
 
-            ssh_manager.return_connection(ssh)
+            # 检查是否运行中
+            running = bool(exec_ssh_cmd(ssh, "sc query sshd | findstr /C:\"RUNNING\" 2>nul"))
 
-            # 检查是否有输出
-            running = len(output.strip()) > 0
+            logger.info(f"[SSHD Check] {device_host}: installed={installed}, running={running}")
 
-            # 返回扁平结构（与Flask一致）
+            ssh.close()
             return JSONResponse(content={
                 'success': True,
-                'running': running
+                'installed': installed,
+                'running': running,
+                'install_guide': SSHD_INSTALL_GUIDE if not installed else None
             })
+
         except Exception as e:
-            ssh_manager.return_connection(ssh)
+            ssh.close()
             raise
 
     except Exception as e:
-        logger.error(f"Error checking VPN sshd: {e}")
+        logger.error(f"[SSHD Check] Error: {e}")
         return JSONResponse(
-            content={"success": False, "error": str(e)},
+            content={"success": False, "error": str(e), "installed": False, "running": False},
             status_code=500
         )
+
+@app.post("/api/vpn/install-sshd")
+async def install_vpn_sshd():
+    """获取SSHD安装说明
+
+    SSHD需要在Windows客户端上手动安装,返回安装指南供用户参考。
+    """
+    return JSONResponse(content={
+        'success': False,
+        'error': 'SSHD 需要在 Windows 客户端上手动安装',
+        'install_guide': SSHD_INSTALL_GUIDE,
+        'manual_install': True
+    })
+
 
 @app.get("/api/vpn/check-routing")
 async def check_vpn_routing():
