@@ -24,6 +24,7 @@ import urllib.error
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
+from collections import deque
 import asyncio
 
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Body, Query
@@ -167,6 +168,9 @@ def url_for_static(filename: str) -> str:
 templates.env.globals['url_for'] = lambda endpoint, filename='': (
     url_for_static(filename) if endpoint == 'static' else f'/{endpoint}'
 )
+
+# ==================== 常量定义 ====================
+MAX_LOG_ENTRIES = 1000  # 最大日志条目数
 
 # ==================== 全局状态管理 ====================
 
@@ -927,11 +931,7 @@ async def lock_devices(req: DeviceLockRequest, request: Request):
         action = req.action
         config = config_manager.load_config()
 
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return ApiResponse.error('SSH连接失败', status_code=500)
-
-        try:
+        with ssh_manager.connection(config) as ssh:
             results = []
 
             # 本地脚本路径 - 使用tools目录
@@ -945,9 +945,8 @@ async def lock_devices(req: DeviceLockRequest, request: Request):
 
             # 上传脚本到远程服务器
             try:
-                sftp = ssh.open_sftp()
-                sftp.put(local_script, remote_script)
-                sftp.close()
+                with ssh.open_sftp() as sftp:
+                    sftp.put(local_script, remote_script)
                 # 设置执行权限
                 ssh_manager.execute_command(ssh, f"chmod +x '{remote_script}'")
             except Exception as e:
@@ -968,7 +967,7 @@ async def lock_devices(req: DeviceLockRequest, request: Request):
                             check_output, _, check_code = ssh_manager.execute_command(ssh, check_cmd)
                             if 'device' in check_output.lower():
                                 break
-                            time.sleep(2)
+                    await asyncio.sleep(2)
 
                     results.append({
                         'device': device_id,
@@ -982,12 +981,7 @@ async def lock_devices(req: DeviceLockRequest, request: Request):
                         'error': str(e)
                     })
 
-            ssh_manager.return_connection(ssh)
             return ApiResponse.success({'results': results}, '设备锁定操作完成')
-
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            return ApiResponse.error(str(e), status_code=500)
 
     except HTTPException:
         raise
@@ -1000,11 +994,8 @@ async def check_lock_status(req: DeviceActionRequest):
     """Check verified boot lock status of selected devices（与Flask版本完全一致）"""
     try:
         config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return ApiResponse.error('SSH连接失败', status_code=500)
 
-        try:
+        with ssh_manager.connection(config) as ssh:
             results = []
             for device_id in req.devices:
                 # Check verified boot state (GREEN = locked, ORANGE = unlocked)
@@ -1035,12 +1026,7 @@ async def check_lock_status(req: DeviceActionRequest):
                     'status': status_text
                 })
 
-            ssh_manager.return_connection(ssh)
             return ApiResponse.success({'results': results}, '锁定状态检查完成')
-
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            return ApiResponse.error(str(e), status_code=500)
 
     except HTTPException:
         raise
@@ -1328,11 +1314,10 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
                         'log': f"[{device_id}] adb root: {output.strip()}",
                         'log_type': 'info'
                     })
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"WebSocket send failed: {e}")
 
-            import time
-            time.sleep(2)
+            await asyncio.sleep(2)
 
             # 执行 remount
             output, error, code = ssh_manager.execute_command(
@@ -1482,11 +1467,9 @@ async def push_terminal_file(request: Request, file: UploadFile = File(...)):
 
             # 上传到远程主机的/tmp目录
             remote_path = f"/tmp/{file.filename}"
-            sftp = ssh.open_sftp()
-            remote_file = sftp.file(remote_path, 'w')
-            remote_file.write(file_content)
-            remote_file.close()
-            sftp.close()
+            with ssh.open_sftp() as sftp:
+                with sftp.file(remote_path, 'w') as remote_file:
+                    remote_file.write(file_content)
 
             ssh_manager.return_connection(ssh)
 
@@ -1746,24 +1729,18 @@ async def run_test_background(
 
         # 保存到全局状态（限制数量，防止内存溢出）
         if client_id not in global_state.test_logs:
-            global_state.test_logs[client_id] = []
+            global_state.test_logs[client_id] = deque(maxlen=MAX_LOG_ENTRIES)
         global_state.test_logs[client_id].append({
             'message': message,
             'type': log_type,
             'timestamp': datetime.now().isoformat()
         })
-        # 限制最多保留1000条日志
-        if len(global_state.test_logs[client_id]) > 1000:
-            global_state.test_logs[client_id] = global_state.test_logs[client_id][-1000:]
 
         # 保存到用户状态（限制数量，防止内存溢出）
         user_state = get_or_create_user_state(client_id)
         if 'logs' not in user_state:
-            user_state['logs'] = []
+            user_state['logs'] = deque(maxlen=MAX_LOG_ENTRIES)
         user_state['logs'].append(log_str)
-        # 限制最多保留1000条日志
-        if len(user_state['logs']) > 1000:
-            user_state['logs'] = user_state['logs'][-1000:]
 
         # 通过WebSocket推送
         if client_id in global_state.websocket_connections:
@@ -1773,8 +1750,8 @@ async def run_test_background(
                     'log': message,
                     'log_type': log_type
                 })
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"WebSocket send failed (client disconnected): {e}")
 
     try:
         # 检查测试是否仍在运行（可能被停止）
@@ -1816,9 +1793,8 @@ async def run_test_background(
             await log_callback(f"📤 上传文件: run_GMS_Test_Auto.sh → {remote_script} ({size_kb:.2f}KB)", 'info')
 
             try:
-                sftp = ssh.open_sftp()
-                sftp.put(local_script, remote_script)
-                sftp.close()
+                with ssh.open_sftp() as sftp:
+                    sftp.put(local_script, remote_script)
 
                 # 设置可执行权限
                 stdin, stdout, stderr = ssh.exec_command(f"chmod +x '{remote_script}'")
@@ -1979,8 +1955,8 @@ async def run_test_background(
                 await global_state.websocket_connections[client_id].send_json({
                     'type': 'test_complete'
                 })
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"WebSocket send failed (client disconnected): {e}")
 
 @app.post("/api/test/stop")
 async def stop_test(request: Request):
@@ -4730,9 +4706,8 @@ async def upload_file(
 
             # 上传到远程服务器
             remote_path = f"/home/{config['ubuntu_user']}/{file.filename}"
-            sftp = ssh.open_sftp()
-            sftp.put(temp_path, remote_path)
-            sftp.close()
+            with ssh.open_sftp() as sftp:
+                sftp.put(temp_path, remote_path)
             ssh_manager.return_connection(ssh)
 
             # 清理临时文件
@@ -4789,9 +4764,8 @@ async def upload_files(files: List[UploadFile] = File(...), file_path: str = For
                 remote_path = f"/home/{config['ubuntu_user']}/{filename}"
 
                 # 使用SFTP上传
-                sftp = ssh.open_sftp()
-                sftp.put(file_path, remote_path)
-                sftp.close()
+                with ssh.open_sftp() as sftp:
+                    sftp.put(file_path, remote_path)
                 ssh_manager.return_connection(ssh)
 
                 return JSONResponse(content={

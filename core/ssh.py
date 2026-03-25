@@ -4,6 +4,7 @@ SSH管理器 - 同步SSH操作
 import paramiko
 import logging
 from typing import Tuple, Optional, Dict, Any
+from contextlib import contextmanager
 import queue
 
 logger = logging.getLogger(__name__)
@@ -256,6 +257,33 @@ class SSHManager:
                 ssh.close()
             except queue.Empty:
                 break
+
+    @contextmanager
+    def connection(self, config: dict):
+        """
+        SSH连接上下文管理器
+
+        自动获取和归还SSH连接，确保资源正确释放
+
+        Args:
+            config: 配置字典
+
+        Yields:
+            SSHClient 对象
+
+        Example:
+            >>> with ssh_manager.connection(config) as ssh:
+            ...     stdout, stderr, code = ssh_manager.execute_command(ssh, "ls -la")
+            # 连接自动归还到池中
+        """
+        ssh = self.get_connection(config)
+        if not ssh:
+            raise RuntimeError("Failed to get SSH connection")
+
+        try:
+            yield ssh
+        finally:
+            self.return_connection(ssh)
 
 
 # 全局SSH管理器实例
