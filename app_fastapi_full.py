@@ -28,6 +28,37 @@ from collections import deque
 import asyncio
 
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Body, Query
+from starlette.websockets import WebSocketState
+from enum import Enum
+
+# ==================== 枚举定义 ====================
+
+class VerifiedBootState(str, Enum):
+    """设备启动验证状态"""
+    LOCKED = 'green'
+    UNLOCKED_ORANGE = 'orange'
+    UNLOCKED_YELLOW = 'yellow'
+
+    @property
+    def is_locked(self) -> bool:
+        """返回是否已锁定"""
+        return self == self.LOCKED
+
+    @property
+    def display_text(self) -> str:
+        """返回显示文本"""
+        return {
+            'green': '已锁定 (GREEN)',
+            'orange': '未锁定 (ORANGE)',
+            'yellow': '未锁定 (YELLOW)',
+        }[self.value]
+
+class LogLevel(str, Enum):
+    """日志级别"""
+    INFO = 'info'
+    WARNING = 'warning'
+    ERROR = 'error'
+    SUCCESS = 'success'
 
 # ==================== Lifespan 事件处理 ====================
 
@@ -38,6 +69,22 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     logger.info("Application startup")
     logger.info("=" * 60)
+
+    # 启动定期清理任务
+    async def periodic_cleanup_with_retry():
+        """定期清理旧用户状态和测试日志（带错误恢复）"""
+        while True:
+            try:
+                await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
+                global_state.cleanup_old_user_states()
+                logger.info("Periodic cleanup completed")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Cleanup failed, retrying in 5 minutes: {e}")
+                await asyncio.sleep(300)
+
+    cleanup_task = asyncio.create_task(periodic_cleanup_with_retry())
 
     # 初始化USB监控
     try:
@@ -86,6 +133,13 @@ async def lifespan(app: FastAPI):
     # 关闭时执行
     logger.info("Application shutdown")
 
+    # 取消清理任务
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+
     # 停止USB监控
     try:
         stop_usb_monitor()
@@ -114,6 +168,7 @@ from core.test_report import test_report_manager
 from core.vnc import vnc_manager, calculate_window_positions
 from core.adb_forward import adb_forward_manager
 from core.usbip import usbip_manager
+from core.common_utils import CommonUtils
 from report_analyzer import ReportAnalyzer
 from test_report_db import test_report_db
 
@@ -171,6 +226,8 @@ templates.env.globals['url_for'] = lambda endpoint, filename='': (
 
 # ==================== 常量定义 ====================
 MAX_LOG_ENTRIES = 1000  # 最大日志条目数
+CLEANUP_INTERVAL_SECONDS = 3600  # 定期清理间隔（1小时）
+USER_STATE_MAX_AGE_HOURS = 24  # 用户状态最大存活时间
 
 # ==================== 全局状态管理 ====================
 
@@ -182,7 +239,9 @@ class GlobalState:
         self.ssh_connections = {}  # {client_id: ssh_connection}
         self.scrcpy_sessions = {}  # {device_id: session_info}
         self.device_cache = {'devices': [], 'timestamp': 0}  # 3秒TTL
+        self.device_cache_lock = threading.Lock()  # 设备缓存锁
         self.websocket_connections = {}  # {client_id: websocket}
+        self.websocket_connections_lock = threading.Lock()  # WebSocket连接锁
         self.usbip_states = {}  # {client_id: {'connected': bool, 'timestamp': float}}
         self.usbip_devices_source = {}  # {device_id: {'source': device_host, 'timestamp': float}}
         self.terminal_ssh_sessions = {}  # {session_id: {'ssh': ssh, 'channel': channel, 'websocket': websocket}}
@@ -191,10 +250,91 @@ class GlobalState:
         self.user_states_lock = threading.Lock()  # 用户状态锁
         self.usbip_states_lock = threading.Lock()  # USB/IP状态锁（与Flask一致）
         self.usbip_devices_source_lock = threading.Lock()  # USB/IP设备来源锁（与Flask一致）
+        self.test_logs_lock = threading.Lock()  # 测试日志锁
+
+    def cleanup_old_user_states(self):
+        """清理超过指定时间的旧用户状态，防止内存泄漏"""
+        try:
+            to_remove = []
+            now = datetime.now()
+
+            # 收集需要清理的client_id（在锁内快速遍历）
+            with self.user_states_lock:
+                for client_id, state in self.user_states.items():
+                    if 'last_seen' in state:
+                        try:
+                            last_seen = datetime.fromisoformat(state['last_seen'])
+                            if (now - last_seen) > timedelta(hours=USER_STATE_MAX_AGE_HOURS):
+                                to_remove.append(client_id)
+                        except (ValueError, TypeError):
+                            to_remove.append(client_id)
+
+                # 删除用户状态
+                for client_id in to_remove:
+                    del self.user_states[client_id]
+
+            # 清理相关的测试日志（在user_states_lock外执行，避免嵌套锁）
+            if to_remove:
+                with self.test_logs_lock:
+                    for client_id in to_remove:
+                        self.test_logs.pop(client_id, None)
+
+                logger.info(f"Cleaned up {len(to_remove)} old user states (age > {USER_STATE_MAX_AGE_HOURS}h)")
+        except Exception as e:
+            logger.error(f"Error cleaning up user states: {e}")
 
 global_state = GlobalState()
 
 DEVICE_CACHE_TTL = 3
+
+# ==================== SSH 连接上下文管理器 ====================
+
+class SSHConnection:
+    """SSH连接上下文管理器，自动处理连接获取和归还"""
+
+    def __init__(self, config=None):
+        self.config = config or config_manager.load_config()
+        self.ssh = None
+
+    def __enter__(self):
+        self.ssh = ssh_manager.get_connection(self.config)
+        if not self.ssh:
+            raise HTTPException(
+                status_code=500,
+                detail="SSH连接失败"
+            )
+        return self.ssh
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.ssh:
+            ssh_manager.return_connection(self.ssh)
+
+# ==================== WebSocket 辅助函数 ====================
+
+async def safe_websocket_send(client_id: str, message: dict):
+    """线程安全地发送WebSocket消息（带背压检查）"""
+    # 先获取WebSocket连接（使用锁）
+    with global_state.websocket_connections_lock:
+        ws = global_state.websocket_connections.get(client_id)
+
+    # 在锁外执行异步操作
+    if ws:
+        try:
+            # 检查WebSocket状态
+            if ws.client_state == WebSocketState.DISCONNECTED:
+                logger.debug(f"WebSocket {client_id} already disconnected")
+                return
+
+            # 检查缓冲区大小（防止内存泄漏）
+            if hasattr(ws, '_queue') and ws._queue.qsize() > 100:
+                logger.warning(f"WebSocket buffer full for {client_id}, dropping message")
+                return
+
+            await ws.send_json(message)
+        except (WebSocketDisconnect, ConnectionError):
+            logger.debug(f"WebSocket {client_id} disconnected during send")
+        except Exception as e:
+            logger.debug(f"Failed to send WebSocket message to {client_id}: {e}")
 
 # ==================== 统一响应格式工具类 ====================
 
@@ -738,7 +878,7 @@ async def list_users():
                     last_seen = datetime.fromisoformat(state['last_seen'])
                     if (now - last_seen) > timedelta(hours=24):
                         continue
-                except:
+                except (ValueError, TypeError):
                     continue
 
             # 解析client_id (username@ip)
@@ -901,11 +1041,12 @@ async def list_devices(request: Request):
 
             devices_with_status.append(device_info)
 
-        # 更新缓存
-        global_state.device_cache = {
-            'devices': devices_with_status,
-            'timestamp': now
-        }
+        # 更新缓存（使用专用锁确保原子性）
+        with global_state.device_cache_lock:
+            global_state.device_cache = {
+                'devices': devices_with_status,
+                'timestamp': now
+            }
 
         # 直接返回数组（与Flask一致）
         return JSONResponse(content=devices_with_status)
@@ -1005,17 +1146,12 @@ async def check_lock_status(req: DeviceActionRequest):
                 )
                 state = output.strip()
 
-                # 根据状态判断是否锁定
-                if state == 'green':
-                    is_locked = True
-                    status_text = '已锁定 (GREEN)'
-                elif state == 'orange':
-                    is_locked = False
-                    status_text = '未锁定 (ORANGE)'
-                elif state == 'yellow':
-                    is_locked = False
-                    status_text = '未锁定 (YELLOW)'
-                else:
+                # 根据状态判断是否锁定（使用枚举）
+                try:
+                    boot_state = VerifiedBootState(state)
+                    is_locked = boot_state.is_locked
+                    status_text = boot_state.display_text
+                except ValueError:
                     is_locked = False
                     status_text = f'未知状态 ({state})'
 
@@ -1038,39 +1174,42 @@ async def check_lock_status(req: DeviceActionRequest):
 async def get_device_info(req: DeviceActionRequest):
     """获取设备详细信息 - 与Flask一致，返回15个关键字段的中文标签"""
     try:
-        config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return JSONResponse(
-                content={"success": False, "error": "SSH连接失败"},
-                status_code=500
-            )
-
-        try:
-            # 定义信息命令（与Flask完全一致）
-            info_commands = [
-                ("设备序列号", "adb -s {device} shell getprop ro.serialno"),
-                ("设备型号", "adb -s {device} shell getprop ro.product.model"),
-                ("Android版本", "adb -s {device} shell getprop ro.build.version.release"),
-                ("编译类型", "adb -s {device} shell getprop ro.build.type"),
-                ("编译标签", "adb -s {device} shell getprop ro.build.tags"),
-                ("编译时间", "adb -s {device} shell getprop ro.build.date"),
-                ("SDK版本", "adb -s {device} shell getprop ro.build.version.sdk"),
-                ("DATA分区", "adb -s {device} shell cat vendor/etc/fstab.rk30board | grep userdata"),
-                ("API级别", "adb -s {device} shell getprop | grep api_level"),
-                ("Mali库版本", "adb -s {device} shell getprop sys.gmali.version"),
-                ("安全补丁", "adb -s {device} shell getprop ro.build.version.security_patch"),
-                ("指纹", "adb -s {device} shell getprop ro.build.fingerprint"),
-                ("内存信息", "adb -s {device} shell cat /proc/meminfo | grep -E 'MemTotal|MemFree'"),
-                ("时区设置", "adb -s {device} shell getprop persist.sys.timezone"),
-                ("语言设置", "adb -s {device} shell getprop persist.sys.locale")
-            ]
-
+        with SSHConnection() as ssh:
             results = []
             for device_id in req.devices:
                 device_info = {'device': device_id, 'properties': {}}
 
-                for label, cmd_template in info_commands:
+                # 使用device_manager获取基本信息
+                base_info = device_manager.get_device_info(device_id, ssh)
+
+                # 添加base_info中的字段
+                field_mapping = {
+                    'serial_no': '设备序列号',
+                    'model': '设备型号',
+                    'android_version': 'Android版本',
+                    'build_type': '编译类型',
+                    'build_tags': '编译标签',
+                    'build_date': '编译时间',
+                    'sdk_version': 'SDK版本',
+                    'security_patch': '安全补丁',
+                    'fingerprint': '指纹'
+                }
+
+                for key, label in field_mapping.items():
+                    if key in base_info:
+                        device_info['properties'][label] = base_info[key]
+
+                # 只获取额外的字段（不在base_info中的）
+                extra_commands = [
+                    ("DATA分区", "adb -s {device} shell cat vendor/etc/fstab.rk30board | grep userdata"),
+                    ("API级别", "adb -s {device} shell getprop | grep api_level"),
+                    ("Mali库版本", "adb -s {device} shell getprop sys.gmali.version"),
+                    ("内存信息", "adb -s {device} shell cat /proc/meminfo | grep -E 'MemTotal|MemFree'"),
+                    ("时区设置", "adb -s {device} shell getprop persist.sys.timezone"),
+                    ("语言设置", "adb -s {device} shell getprop persist.sys.locale")
+                ]
+
+                for label, cmd_template in extra_commands:
                     cmd = cmd_template.format(device=device_id)
                     stdout, stderr, code = ssh_manager.execute_command(ssh, cmd, timeout=10)
 
@@ -1086,12 +1225,7 @@ async def get_device_info(req: DeviceActionRequest):
 
                 results.append(device_info)
 
-            ssh_manager.return_connection(ssh)
             return JSONResponse(content={'success': True, 'results': results})
-
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            raise
 
     except Exception as e:
         logger.error(f"Error getting device info: {e}")
@@ -1113,24 +1247,19 @@ async def devices_management():
             with open(config_manager.dynamic_config_path, 'r') as f:
                 dynamic_config = json.load(f)
                 persisted_usbip_sources = dynamic_config.get('usbip_devices_source', {})
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
             persisted_usbip_sources = {}
 
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return JSONResponse(content={'devices': []})
-
-        try:
+        with SSHConnection(config) as ssh:
             # 获取基本设备列表
             output, _, _ = ssh_manager.execute_command(ssh, "adb devices", timeout=5)
-            device_ids = []
-            for line in output.split('\n')[1:]:
-                if line.strip() and '\tdevice' in line:
-                    device_id = line.split('\t')[0]
-                    device_ids.append(device_id)
+            device_ids = [
+                line.split('\t')[0]
+                for line in output.split('\n')[1:]
+                if line.strip() and '\tdevice' in line
+            ]
 
             if not device_ids:
-                ssh_manager.return_connection(ssh)
                 return JSONResponse(content={'devices': []})
 
             # 获取设备锁定状态
@@ -1165,41 +1294,27 @@ async def devices_management():
                     elif not device_data[current_device]['battery_level']:
                         device_data[current_device]['battery_level'] = line
 
-            ssh_manager.return_connection(ssh)
-
             # 构建响应（与Flask版本保持一致）
             devices_info = []
             ubuntu_host = config.get("ubuntu_host", "")
             ubuntu_user = config.get("ubuntu_user", "")
 
             # 合并所有USB/IP设备来源字典（包括持久化的）
-            all_usbip_sources = {}
-            all_usbip_sources.update(global_state.usbip_devices_source)
-            all_usbip_sources.update(usbip_manager.device_sources)
-            all_usbip_sources.update(persisted_usbip_sources)
+            all_usbip_sources = {**global_state.usbip_devices_source, **usbip_manager.device_sources, **persisted_usbip_sources}
 
             # 清理已不存在的设备来源记录（与Flask版本一致）
-            # 如果设备已不在当前设备列表中，说明设备已断开/移除，应该清除其来源记录
             current_device_set = set(device_ids)
-            devices_to_remove = [
-                dev_id for dev_id in all_usbip_sources.keys()
-                if dev_id not in current_device_set
-            ]
+            devices_to_remove = [dev_id for dev_id in all_usbip_sources if dev_id not in current_device_set]
+
             if devices_to_remove:
                 logger.info(f"[Device Management] Cleaning up removed devices: {devices_to_remove}")
                 # 从全局状态中清除
                 with global_state.usbip_devices_source_lock:
                     for dev_id in devices_to_remove:
-                        if dev_id in global_state.usbip_devices_source:
-                            del global_state.usbip_devices_source[dev_id]
+                        global_state.usbip_devices_source.pop(dev_id, None)
                 # 从usbip_manager中清除
                 for dev_id in devices_to_remove:
-                    if dev_id in usbip_manager.device_sources:
-                        del usbip_manager.device_sources[dev_id]
-                # 也要从合并后的字典中清除
-                for dev_id in devices_to_remove:
-                    if dev_id in all_usbip_sources:
-                        del all_usbip_sources[dev_id]
+                    usbip_manager.device_sources.pop(dev_id, None)
 
             for device_id in device_ids:
                 props = device_data.get(device_id, {})
@@ -1207,11 +1322,9 @@ async def devices_management():
 
                 # 判断设备来源类型（与Flask版本一致）
                 if device_id in all_usbip_sources:
-                    # 设备在 USB/IP 记录中 -> 通过 USB/IP 添加的设备
                     source_type = 'usbip'
                     source_host = all_usbip_sources.get(device_id, {}).get('source', 'Unknown')
                 else:
-                    # 设备不在 USB/IP 记录中 -> 本地直连设备
                     source_type = 'local'
                     source_host = f'{ubuntu_user}@{ubuntu_host}'
 
@@ -1229,12 +1342,7 @@ async def devices_management():
                 }
                 devices_info.append(device_info)
 
-            return JSONResponse(content={
-                'devices': devices_info
-            })
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            raise
+            return JSONResponse(content={'devices': devices_info})
 
     except Exception as e:
         logger.error(f"Error getting devices management: {e}")
@@ -1334,7 +1442,7 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
                         'log': f"[{device_id}] adb remount: {output.strip()}",
                         'log_type': 'info'
                     })
-                except:
+                except (WebSocketDisconnect, ConnectionError, KeyError):
                     pass
 
             result = device_manager.remount_device(device_id, ssh)
@@ -1720,7 +1828,7 @@ async def run_test_background(
     ssh = None
 
     # 定义日志回调
-    async def log_callback(message: str, log_type: str = 'info'):
+    async def log_callback(message: str, log_type: LogLevel = LogLevel.INFO):
         # 构建时间戳
         timestamp_str = datetime.now().strftime('%H:%M:%S')
 
@@ -1728,13 +1836,14 @@ async def run_test_background(
         log_str = f"[{timestamp_str}] {message}"
 
         # 保存到全局状态（限制数量，防止内存溢出）
-        if client_id not in global_state.test_logs:
-            global_state.test_logs[client_id] = deque(maxlen=MAX_LOG_ENTRIES)
-        global_state.test_logs[client_id].append({
-            'message': message,
-            'type': log_type,
-            'timestamp': datetime.now().isoformat()
-        })
+        with global_state.test_logs_lock:
+            if client_id not in global_state.test_logs:
+                global_state.test_logs[client_id] = deque(maxlen=MAX_LOG_ENTRIES)
+            global_state.test_logs[client_id].append({
+                'message': message,
+                'type': log_type.value,
+                'timestamp': datetime.now().isoformat()
+            })
 
         # 保存到用户状态（限制数量，防止内存溢出）
         user_state = get_or_create_user_state(client_id)
@@ -1743,15 +1852,11 @@ async def run_test_background(
         user_state['logs'].append(log_str)
 
         # 通过WebSocket推送
-        if client_id in global_state.websocket_connections:
-            try:
-                await global_state.websocket_connections[client_id].send_json({
-                    'type': 'log_update',
-                    'log': message,
-                    'log_type': log_type
-                })
-            except Exception as e:
-                logger.debug(f"WebSocket send failed (client disconnected): {e}")
+        await safe_websocket_send(client_id, {
+            'type': 'log_update',
+            'log': message,
+            'log_type': log_type
+        })
 
     try:
         # 检查测试是否仍在运行（可能被停止）
@@ -1877,7 +1982,7 @@ async def run_test_background(
                 # 终止进程
                 try:
                     ssh.exec_command("pkill -f 'run_GMS_Test_Auto.sh'")
-                except:
+                except (WebSocketDisconnect, ConnectionError, KeyError):
                     pass
                 break
 
@@ -2011,8 +2116,7 @@ async def stop_test(request: Request):
                         killed_count += 1
 
                 # 等待进程终止
-                import time
-                time.sleep(1)
+                await asyncio.sleep(1)
 
                 user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 已终止 {killed_count} 个测试进程")
                 ssh_manager.return_connection(ssh)
@@ -2029,7 +2133,7 @@ async def stop_test(request: Request):
                         ssh_manager.execute_command(ssh, f"pkill -9 -P {pid.strip()} 2>/dev/null")
                         killed_count += 1
 
-                time.sleep(1)
+                await asyncio.sleep(1)
                 user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 已终止 {killed_count} 个测试进程（命令行匹配）")
                 ssh_manager.return_connection(ssh)
                 return JSONResponse(content={"success": True, "message": "测试已停止"})
@@ -2481,7 +2585,7 @@ async def list_report_files(report_timestamp: str):
                 # 获取文件大小
                 try:
                     file_size = os.path.getsize(file_path)
-                except:
+                except (FileNotFoundError, OSError):
                     file_size = 0
 
                 files.append({
@@ -3888,14 +3992,7 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
             )
 
         # 检查是否是本地主机
-        local_hosts = ['localhost', '127.0.0.1', '::1']
-        try:
-            local_ip = socket.gethostbyname(socket.gethostname())
-            local_hosts.append(local_ip)
-        except:
-            local_ip = None
-
-        is_local = ip in local_hosts
+        is_local = CommonUtils.is_local_host(ip)
 
         if is_local:
             # 本地主机的 VNC 启动 - 免密码模式
@@ -3918,16 +4015,21 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
                 raise HTTPException(status_code=500, detail=result.get('error', 'VNC服务启动失败'))
 
         # 远程主机的 VNC 启动
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
+        ssh = None
         try:
-            # 如果提供了密码，使用密码连接
-            if password:
-                ssh.connect(ip, username=user, password=password, timeout=10)
-            else:
-                # 尝试使用密钥
-                ssh.connect(ip, username=user, timeout=10)
+            # 使用 ssh_manager 获取连接
+            config = {
+                'hostname': ip,
+                'username': user,
+                'password': password,
+                'timeout': 10
+            }
+            ssh = ssh_manager.create_connection(config)
+            if not ssh:
+                raise HTTPException(
+                    status_code=500,
+                    detail='SSH连接失败'
+                )
 
             logger.info(f"[Desktop] Connected to {host_connection}, starting VNC...")
 
@@ -3937,7 +4039,6 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
             novnc_output = stdout.read().decode()
 
             if "missing" in novnc_output:
-                ssh.close()
                 raise HTTPException(
                     status_code=404,
                     detail='noVNC未安装'
@@ -3952,10 +4053,9 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
                 if "ready" in disp_output:
                     display_ready = True
                     break
-                time.sleep(1)
+                await asyncio.sleep(1)
 
             if not display_ready:
-                ssh.close()
                 raise HTTPException(
                     status_code=503,
                     detail='DISPLAY未就绪'
@@ -3985,7 +4085,7 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
                         "-nopw -o /tmp/x11vnc.log > /dev/null 2>&1 &"
                     )
                 ssh.exec_command(x11vnc_cmd)
-                time.sleep(2)
+                await asyncio.sleep(2)
 
             # 检查并启动websockify
             check_web_cmd = "pgrep -f 'websockify.*6080' && echo 'RUNNING' || echo 'NOT_RUNNING'"
@@ -4000,12 +4100,12 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
                     "> /tmp/websockify.log 2>&1 &"
                 )
                 ssh.exec_command(websockify_cmd)
-                time.sleep(2)
+                await asyncio.sleep(2)
 
-            ssh.close()
+            # SSH连接会在finally块中自动返回到连接池
 
             # 等待VNC服务就绪
-            time.sleep(2)
+            await asyncio.sleep(2)
 
             # 构建VNC URL，如果提供了密码则添加到URL中
             vnc_url = f"http://{ip}:6080/vnc.html?autoconnect=true"
@@ -4021,7 +4121,6 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
             })
 
         except paramiko.AuthenticationException:
-            ssh.close()
             raise HTTPException(
                 status_code=401,
                 detail={'error': 'SSH认证失败', 'needs_password': True}
@@ -4035,6 +4134,13 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
             status_code=500,
             detail=str(e)
         )
+    finally:
+        # 确保SSH连接返回到连接池
+        if ssh:
+            try:
+                ssh_manager.return_connection(ssh)
+            except Exception as e:
+                logger.warning(f"Failed to return SSH connection: {e}")
 
 @app.post("/api/desktop/validate-host")
 async def validate_host(req: dict = Body(...)):
@@ -4058,14 +4164,7 @@ async def validate_host(req: dict = Body(...)):
             )
 
         # 检查是否是本地主机
-        local_hosts = ['localhost', '127.0.0.1', '::1']
-        try:
-            local_ip = socket.gethostbyname(socket.gethostname())
-            local_hosts.append(local_ip)
-        except:
-            pass
-
-        is_local = ip in local_hosts
+        is_local = CommonUtils.is_local_host(ip)
 
         if is_local:
             # 本地主机直接验证成功
@@ -4077,48 +4176,46 @@ async def validate_host(req: dict = Body(...)):
             })
 
         # 远程主机验证
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-        if password:
-            try:
-                ssh.connect(ip, username=user, password=password, timeout=10)
-            except paramiko.AuthenticationException:
-                ssh.close()
+        ssh = None
+        try:
+            # 使用 ssh_manager 获取连接
+            config = {
+                'hostname': ip,
+                'username': user,
+                'password': password,
+                'timeout': 10
+            }
+            ssh = ssh_manager.create_connection(config)
+            if not ssh:
                 return JSONResponse(
-                    content={'success': False, 'error': 'SSH认证失败', 'needs_password': True},
-                    status_code=401
-                )
-        else:
-            # 尝试无密码连接（密钥认证）
-            try:
-                ssh.connect(ip, username=user, timeout=10)
-            except paramiko.AuthenticationException:
-                ssh.close()
-                return JSONResponse(
-                    content={'success': False, 'error': '需要SSH密码', 'needs_password': True},
+                    content={'success': False, 'error': 'SSH连接失败', 'needs_password': True},
                     status_code=401
                 )
 
-        # 检查VNC密码文件
-        check_passwd_cmd = "[ -f ~/.vnc/passwd ] && echo 'exists' || echo 'missing'"
-        stdin, stdout, stderr = ssh.exec_command(check_passwd_cmd)
-        passwd_output = stdout.read().decode()
+            # 检查VNC密码文件
+            check_passwd_cmd = "[ -f ~/.vnc/passwd ] && echo 'exists' || echo 'missing'"
+            stdin, stdout, stderr = ssh.exec_command(check_passwd_cmd)
+            passwd_output = stdout.read().decode()
 
-        ssh.close()
+            if "missing" in passwd_output:
+                return JSONResponse(
+                    content={'success': False, 'error': 'VNC密码文件不存在', 'needs_password': True},
+                    status_code=404
+                )
 
-        if "missing" in passwd_output:
-            return JSONResponse(
-                content={'success': False, 'error': 'VNC密码文件不存在', 'needs_password': True},
-                status_code=404
-            )
-
-        return JSONResponse(content={
-            'success': True,
-            'message': '主机验证成功',
-            'needs_password': False,
-            'password': password if password else ''
-        })
+            return JSONResponse(content={
+                'success': True,
+                'message': '主机验证成功',
+                'needs_password': False,
+                'password': password if password else ''
+            })
+        finally:
+            # 确保SSH连接返回到连接池
+            if ssh:
+                try:
+                    ssh_manager.return_connection(ssh)
+                except Exception as e:
+                    logger.warning(f"Failed to return SSH connection: {e}")
 
     except paramiko.AuthenticationException:
         return JSONResponse(
@@ -4304,8 +4401,8 @@ async def stop_usbip(request: Request):
 
     try:
         ssh_manager.execute_command(win_ssh, 'usbipd unbind --all', timeout=10)
-        win_ssh.close()
-        time.sleep(2)
+        ssh_manager.return_connection(win_ssh)
+        await asyncio.sleep(2)
 
         # 只更新 USB/IP 连接状态，不清除设备来源记录
         # 设备仍然在测试主机上，来源信息应该保留
@@ -4318,7 +4415,7 @@ async def stop_usbip(request: Request):
             'message': '本地设备已断开'
         })
     except Exception as e:
-        win_ssh.close()
+        ssh_manager.return_connection(win_ssh)
         # 即使失败也清除连接状态，但保留设备来源记录
         with global_state.usbip_states_lock:
             global_state.usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
@@ -4353,11 +4450,11 @@ async def auto_install_usbipd(request: Request):
         try:
             # 使用 USBIPManager 的安装方法
             result = usbip_manager.install_usbipd(win_ssh, config)
-            win_ssh.close()
+            ssh_manager.return_connection(win_ssh)
             return JSONResponse(content=result)
 
         except Exception as e:
-            win_ssh.close()
+            ssh_manager.return_connection(win_ssh)
             raise
 
     except Exception as e:
@@ -4392,8 +4489,7 @@ async def check_vpn_sshd(request: Request):
                 "success": True,
                 "installed": False,
                 "running": False,
-                "error": "无法连接到SSH服务",
-                "install_guide": SSHD_INSTALL_GUIDE
+                "error": "无法连接到SSH服务，请检查网络连接和Windows客户端状态"
             })
 
         try:
@@ -4582,8 +4678,7 @@ async def connect_vpn(
                 timeout=20
             )
 
-            import time
-            time.sleep(2)
+            await asyncio.sleep(2)
 
             # 检查连接结果
             if code == 0:
@@ -5002,8 +5097,8 @@ async def burn_firmware(request: Request):
                             'total_size': firmware_size,
                             'uploaded_size': 0
                         })
-                    except:
-                        pass
+                    except (WebSocketDisconnect, ConnectionError):
+                        pass  # WebSocket disconnected, continue with upload
 
                 # 启动上传线程
                 upload_thread = threading.Thread(target=upload_file_thread)
@@ -5027,7 +5122,7 @@ async def burn_firmware(request: Request):
                                     'total_size': firmware_size,
                                     'uploaded_size': sent_size
                                 })
-                            except:
+                            except (WebSocketDisconnect, ConnectionError, KeyError):
                                 pass
                         last_percentage = current_percentage
 
@@ -5056,7 +5151,7 @@ async def burn_firmware(request: Request):
                             'log': '✅ 固件文件上传完成',
                             'log_type': 'success'
                         })
-                    except:
+                    except (WebSocketDisconnect, ConnectionError, KeyError):
                         pass
 
                 logger.info(f"[Firmware Burn] Firmware uploaded successfully, skipping local file check")
@@ -5110,7 +5205,7 @@ async def burn_firmware(request: Request):
                                 'total_size': file_size,
                                 'uploaded_size': 0
                             })
-                        except:
+                        except (WebSocketDisconnect, ConnectionError, KeyError):
                             pass
 
                     # 启动上传线程
@@ -5135,7 +5230,7 @@ async def burn_firmware(request: Request):
                                         'total_size': file_size,
                                         'uploaded_size': sent_size
                                     })
-                                except:
+                                except (WebSocketDisconnect, ConnectionError, KeyError):
                                     pass
                             last_percentage = current_percentage
 
@@ -5164,7 +5259,7 @@ async def burn_firmware(request: Request):
                                 'log': '✅ 固件文件上传完成',
                                 'log_type': 'success'
                             })
-                        except:
+                        except (WebSocketDisconnect, ConnectionError, KeyError):
                             pass
 
                     logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_firmware}")
@@ -5222,7 +5317,7 @@ async def burn_firmware(request: Request):
                         'log': '🔥 开始烧写固件...',
                         'log_type': 'info'
                     })
-                except:
+                except (WebSocketDisconnect, ConnectionError, KeyError):
                     pass
 
             # 执行烧写并获取实时输出
@@ -5324,7 +5419,7 @@ async def burn_firmware(request: Request):
                             'type': 'firmware_progress',
                             'percentage': 100
                         })
-                    except:
+                    except (WebSocketDisconnect, ConnectionError, KeyError):
                         pass
 
                 # 发送完成消息
@@ -5335,7 +5430,7 @@ async def burn_firmware(request: Request):
                             'log': '✅ 固件烧写完成！',
                             'log_type': 'success'
                         })
-                    except:
+                    except (WebSocketDisconnect, ConnectionError, KeyError):
                         pass
 
                 # 释放设备锁
@@ -5375,7 +5470,7 @@ async def burn_firmware(request: Request):
                                 'log': f'错误详情: {error_output[:200]}',
                                 'log_type': 'error'
                             })
-                    except:
+                    except (WebSocketDisconnect, ConnectionError, KeyError):
                         pass
 
                 # 释放设备锁
@@ -5565,7 +5660,7 @@ async def burn_gsi(request: Request):
                         'log': f'🔥 开始烧写GSI镜像到 {len(devices)} 台设备...',
                         'log_type': 'info'
                     })
-                except:
+                except (WebSocketDisconnect, ConnectionError, KeyError):
                     pass
 
             for device in devices:
@@ -5586,7 +5681,7 @@ async def burn_gsi(request: Request):
                             'log': f'📱 正在烧写设备: {device}',
                             'log_type': 'info'
                         })
-                    except:
+                    except (WebSocketDisconnect, ConnectionError, KeyError):
                         pass
 
                 # 执行命令并实时读取输出
@@ -5621,7 +5716,7 @@ async def burn_gsi(request: Request):
                                             'log': line,
                                             'log_type': 'info'
                                         })
-                            except:
+                            except (WebSocketDisconnect, ConnectionError, KeyError):
                                 pass
                     else:
                         await asyncio.sleep(0.5)
@@ -5656,7 +5751,7 @@ async def burn_gsi(request: Request):
                                 'log': f'✅ 设备 {device} GSI烧写完成',
                                 'log_type': 'success'
                             })
-                        except:
+                        except (WebSocketDisconnect, ConnectionError, KeyError):
                             pass
                 else:
                     logger.error(f"[GSI Burn] Failed for {device}: {error_output}")
@@ -5685,7 +5780,7 @@ async def burn_gsi(request: Request):
                                 'log': f'❌ 设备 {device} GSI烧写失败: {error_msg}',
                                 'log_type': 'error'
                             })
-                        except:
+                        except (WebSocketDisconnect, ConnectionError, KeyError):
                             pass
 
             ssh_manager.return_connection(ssh)
@@ -5877,7 +5972,7 @@ def is_windows_host(ssh):
         stdin, stdout, stderr = ssh.exec_command('ver 2>&1', timeout=3)
         output = stdout.read().decode('utf-8', errors='ignore').lower()
         return 'microsoft' in output or 'windows' in output
-    except:
+    except (paramiko.SSHException, AttributeError):
         return False
 
 
@@ -5949,7 +6044,7 @@ async def start_screen_recording(req: Optional[dict] = Body(default=None)):
                         # 解析设备列表
                         lines = stdout.strip().split('\n')[1:]  # 跳过第一行 "List of devices attached"
                         devices = [line.split()[0] for line in lines if line.strip() and '\tdevice' in line]
-                except:
+                except (WebSocketDisconnect, ConnectionError, KeyError):
                     pass
 
         if not devices:
@@ -6032,7 +6127,7 @@ async def start_screen_recording(req: Optional[dict] = Body(default=None)):
                 ssh_manager.execute_command(ssh, cmd, timeout=10)
 
                 # 验证scrcpy是否成功启动
-                time.sleep(0.3)
+                await asyncio.sleep(0.3)
                 check_cmd = f"pgrep -f 'scrcpy.*-s {device_id}' && echo 'RUNNING' || echo 'NOT_RUNNING'"
                 check_output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
                 is_started = 'RUNNING' in check_output
@@ -6088,7 +6183,8 @@ async def start_screen_recording(req: Optional[dict] = Body(default=None)):
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """WebSocket连接端点"""
     await websocket.accept()
-    global_state.websocket_connections[client_id] = websocket
+    with global_state.websocket_connections_lock:
+        global_state.websocket_connections[client_id] = websocket
     logger.info(f"WebSocket client connected: {client_id}")
 
     try:
@@ -6121,8 +6217,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         logger.error(f"WebSocket error for {client_id}: {e}")
     finally:
         # 清理WebSocket连接
-        if client_id in global_state.websocket_connections:
-            del global_state.websocket_connections[client_id]
+        with global_state.websocket_connections_lock:
+            if client_id in global_state.websocket_connections:
+                del global_state.websocket_connections[client_id]
 
         # 清理终端SSH会话（如果存在）
         with global_state.terminal_lock:
@@ -6138,7 +6235,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         try:
                             session_info['channel'].close()
                             logger.info(f"[TERMINAL] Closed ADB channel for {client_id}")
-                        except:
+                        except (WebSocketDisconnect, ConnectionError, KeyError):
                             pass
                         # 归还SSH连接到连接池
                         ssh_manager.return_connection(session_info['ssh'])
@@ -6235,10 +6332,10 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
                         # ADB模式:只关闭channel
                         try:
                             old_session['channel'].close()
-                        except:
+                        except (WebSocketDisconnect, ConnectionError, KeyError):
                             pass
                         ssh_manager.return_connection(old_session['ssh'])
-                except:
+                except (WebSocketDisconnect, ConnectionError, KeyError):
                     pass
 
             global_state.terminal_ssh_sessions[session_id] = {
@@ -6304,7 +6401,7 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
                         logger.error(f"[TERMINAL] ADB read error: {e}")
                         break
 
-                    time.sleep(0.01)  # 防止CPU占用过高
+                    time.sleep(0.01)  # 防止CPU占用过高（线程函数中使用time.sleep）
 
             except Exception as e:
                 logger.error(f"[TERMINAL] ADB read thread error: {e}")
@@ -6346,56 +6443,19 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
 
         logger.info(f"[TERMINAL] SSH Connection request from {session_id} to {user}@{host}")
 
-        # 创建SSH客户端
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # 使用 ssh_manager 创建SSH连接
+        ssh_config = {
+            'hostname': host,
+            'username': user,
+            'password': password,
+            'timeout': 5,
+            'use_key_auth': config.get('use_key_auth', False),
+            'private_key_path': config.get('private_key_path', '~/.ssh/id_rsa')
+        }
 
-        # 优化的SSH连接参数
-        ssh_connect_timeout = 5
-        ssh_banner_timeout = 3
-
-        connected = False
-        last_error = None
-
-        # 尝试密钥认证（如果启用）
-        use_key_auth = config.get('use_key_auth', False)
-        if use_key_auth:
-            try:
-                key_path = os.path.expanduser(config.get('private_key_path', '~/.ssh/id_rsa'))
-                key = paramiko.RSAKey.from_private_key_file(key_path)
-                ssh.connect(
-                    host,
-                    username=user,
-                    pkey=key,
-                    timeout=ssh_connect_timeout,
-                    banner_timeout=ssh_banner_timeout,
-                    compress=True
-                )
-                connected = True
-                logger.info(f"[TERMINAL] Connected using key authentication")
-            except Exception as e:
-                last_error = e
-                logger.warning(f"[TERMINAL] Key auth failed: {e}")
-
-        # 尝试密码认证
-        if not connected and password:
-            try:
-                ssh.connect(
-                    host,
-                    username=user,
-                    password=password,
-                    timeout=ssh_connect_timeout,
-                    banner_timeout=ssh_banner_timeout,
-                    compress=True
-                )
-                connected = True
-                logger.info(f"[TERMINAL] Connected using password authentication")
-            except Exception as e:
-                last_error = e
-                logger.warning(f"[TERMINAL] Password auth failed: {e}")
-
-        if not connected:
-            error_msg = f'SSH连接失败：{str(last_error) if last_error else "请检查用户名、密码或密钥配置"}'
+        ssh = ssh_manager.create_connection(ssh_config)
+        if not ssh:
+            error_msg = 'SSH连接失败：请检查用户名、密码或密钥配置'
             await websocket.send_json({
                 'type': 'terminal_error',
                 'error': error_msg
@@ -6416,7 +6476,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
             if session_id in global_state.terminal_ssh_sessions:
                 try:
                     global_state.terminal_ssh_sessions[session_id]['ssh'].close()
-                except:
+                except (WebSocketDisconnect, ConnectionError, KeyError):
                     pass
 
             global_state.terminal_ssh_sessions[session_id] = {
@@ -6478,7 +6538,8 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                         logger.error(f"[TERMINAL] Read error: {e}")
                         break
 
-                    time.sleep(0.01)  # 防止CPU占用过高
+                    import time
+                    time.sleep(0.01)  # 防止CPU占用过高（线程函数中）
 
             except Exception as e:
                 logger.error(f"[TERMINAL] Read thread error: {e}")
@@ -6488,7 +6549,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                     if session_id in global_state.terminal_ssh_sessions:
                         try:
                             global_state.terminal_ssh_sessions[session_id]['ssh'].close()
-                        except:
+                        except (WebSocketDisconnect, ConnectionError, KeyError):
                             pass
                         del global_state.terminal_ssh_sessions[session_id]
                         logger.info(f"[TERMINAL] Cleaned up session {session_id}")
@@ -6502,7 +6563,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                         }),
                         loop
                     )
-                except:
+                except (WebSocketDisconnect, ConnectionError, KeyError):
                     pass
 
         # 启动读取线程
