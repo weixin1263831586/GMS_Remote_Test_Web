@@ -22,7 +22,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from contextlib import asynccontextmanager
 from collections import deque
 import asyncio
@@ -1828,12 +1828,18 @@ async def run_test_background(
     ssh = None
 
     # 定义日志回调
-    async def log_callback(message: str, log_type: LogLevel = LogLevel.INFO):
+    async def log_callback(message: str, log_type: Union[LogLevel, str] = LogLevel.INFO):
         # 构建时间戳
         timestamp_str = datetime.now().strftime('%H:%M:%S')
 
         # 使用与Flask版本一致的字符串格式
         log_str = f"[{timestamp_str}] {message}"
+
+        # 处理log_type参数（兼容枚举和字符串）
+        if isinstance(log_type, str):
+            log_type_str = log_type
+        else:
+            log_type_str = log_type.value
 
         # 保存到全局状态（限制数量，防止内存溢出）
         with global_state.test_logs_lock:
@@ -1841,7 +1847,7 @@ async def run_test_background(
                 global_state.test_logs[client_id] = deque(maxlen=MAX_LOG_ENTRIES)
             global_state.test_logs[client_id].append({
                 'message': message,
-                'type': log_type.value,
+                'type': log_type_str,
                 'timestamp': datetime.now().isoformat()
             })
 
@@ -1855,7 +1861,7 @@ async def run_test_background(
         await safe_websocket_send(client_id, {
             'type': 'log_update',
             'log': message,
-            'log_type': log_type
+            'log_type': log_type_str
         })
 
     try:
@@ -1917,7 +1923,20 @@ async def run_test_background(
         test_case = test_params.get('test_case', '')
         retry_dir = test_params.get('retry_dir', '')
         test_suite = test_params.get('test_suite', '')
-        local_server = test_params.get('local_server', '')
+
+        # 修复：将testcases路径转换为tools路径（因为cts-tradefed在tools目录）
+        if test_suite and 'testcases' in test_suite:
+            test_suite_tools = test_suite.replace('/testcases', '/tools')
+            await log_callback(f"🔧 转换测试套件路径: testcases -> tools", 'info')
+        else:
+            test_suite_tools = test_suite
+
+        # 调试：打印test_params和config中的local_server
+        await log_callback(f"🔍 test_params中的local_server: '{test_params.get('local_server', 'KEY_NOT_FOUND')}'", 'info')
+        await log_callback(f"🔍 config中的local_server: '{config.get('local_server', 'NOT_FOUND')}'", 'info')
+
+        # 修复：只有当test_params中没有local_server时才从config读取
+        local_server = test_params.get('local_server') or config.get('local_server', '')
         devices = test_params.get('devices', [])
 
         suites_path = config.get('suites_path', '/home/hcq/GMS-Suite')
@@ -1953,15 +1972,18 @@ async def run_test_background(
             cmd_parts.extend(["--device-args", device_args_str])
             await log_callback(f"Devices: {', '.join(devices)}", 'info')
 
-        # 添加测试套件
-        if test_suite:
-            cmd_parts.extend(["--test-suite", test_suite])
-            await log_callback(f"📂 测试套件: {test_suite}", 'info')
+        # 添加测试套件（使用tools路径）
+        if test_suite_tools:
+            cmd_parts.extend(["--test-suite", test_suite_tools])
+            await log_callback(f"📂 测试套件: {test_suite_tools}", 'info')
 
         # 添加本地服务器
+        await log_callback(f"🔍 local_server参数值: '{local_server}'", 'info')
         if local_server:
             cmd_parts.extend(["--local-server", local_server])
             await log_callback(f"🌐 本地主机: {local_server}", 'info')
+        else:
+            await log_callback("⚠️ local_server为空，测试可能失败", 'warning')
 
         # 构建最终命令
         import shlex
@@ -2012,6 +2034,30 @@ async def run_test_background(
 
         # 获取退出码
         exit_code = stdout.channel.recv_exit_status()
+
+        # 读取剩余的输出
+        if stdout.channel.recv_ready():
+            try:
+                remaining_data = stdout.channel.recv(65536).decode('utf-8', errors='replace')
+                if remaining_data:
+                    lines = remaining_data.split('\n')
+                    for line in lines:
+                        if line.strip():
+                            await log_callback(line.strip(), 'info')
+            except Exception as e:
+                logger.error(f"Error reading remaining stdout: {e}")
+
+        # 读取剩余的错误输出
+        if stderr.channel.recv_stderr_ready():
+            try:
+                remaining_error = stderr.channel.recv_stderr(65536).decode('utf-8', errors='replace')
+                if remaining_error:
+                    lines = remaining_error.split('\n')
+                    for line in lines:
+                        if line.strip():
+                            await log_callback(line.strip(), 'error')
+            except Exception as e:
+                logger.error(f"Error reading remaining stderr: {e}")
 
         if exit_code == 0:
             await log_callback(f"✅ Test completed successfully (exit code: {exit_code})", 'success')
@@ -2439,7 +2485,7 @@ async def autocomplete_suite(req: AutocompleteSuiteRequest):
             status_code=500
         )
 
-@app.get("/api/status")
+@app.get("/api/test/status")
 async def get_status(request: Request):
     """获取测试状态 - 优化版本，减少数据传输"""
     try:
@@ -4611,7 +4657,7 @@ async def check_vpn_routing():
 
 @app.get("/api/vpn/status")
 async def get_vpn_status():
-    """获取VPN连接状态"""
+    """获取VPN连接状态（多次ping提高可靠性）"""
     try:
         config = config_manager.load_config()
         ssh = ssh_manager.get_connection(config)
@@ -4622,25 +4668,30 @@ async def get_vpn_status():
             )
 
         try:
-            vpn_target = config.get('vpn_target', ['www.google.com'])[0]
+            vpn_target = config.get('vpn_target', 'www.google.com')
             if isinstance(vpn_target, list):
                 vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
 
-            output, error, code = ssh_manager.execute_command(
-                ssh,
-                f"ping -c 1 -W 2 {vpn_target} 2>&1",
-                timeout=10
-            )
+            # 多次ping测试，只要一次成功即认为已连接
+            max_attempts = 2
+            for attempt in range(max_attempts):
+                output, error, code = ssh_manager.execute_command(
+                    ssh,
+                    f"ping -c 1 -W 2 {vpn_target} 2>&1",
+                    timeout=5
+                )
 
+                # 检查ping结果（成功则立即返回）
+                if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
+                    ssh_manager.return_connection(ssh)
+                    logger.info(f"[VPN Status] {vpn_target}: connected (attempt {attempt + 1})")
+                    return JSONResponse(content={"success": True, "connected": True})
+
+            # 所有尝试都失败
             ssh_manager.return_connection(ssh)
+            logger.info(f"[VPN Status] {vpn_target}: disconnected (0/{max_attempts} successful)")
+            return JSONResponse(content={"success": True, "connected": False})
 
-            # 检查ping结果
-            connected = '1 packets transmitted, 1 received' in output or '1 received' in output
-
-            return JSONResponse(content={
-                "success": True,
-                "connected": connected
-            })
         except Exception as e:
             ssh_manager.return_connection(ssh)
             raise
@@ -6616,6 +6667,545 @@ async def handle_terminal_resize(client_id: str, websocket: WebSocket, data: dic
                 logger.info(f"[TERMINAL] Terminal resized for session {session_id}: {cols}x{rows}")
             except Exception as e:
                 logger.error(f"[TERMINAL] Resize error for session {session_id}: {e}")
+
+# ==================== API文档 ====================
+
+# 预定义API文档列表（模块级常量，只初始化一次）
+API_DOCS_LIST = [
+    # ==================== 基础接口 ====================
+    {
+        "method": "GET",
+        "path": "/",
+        "description": "获取首页（Web界面）",
+        "params": []
+    },
+    {
+        "method": "GET",
+        "path": "/health",
+        "description": "健康检查接口",
+        "params": [],
+        "category": "health"
+    },
+
+    # ==================== 配置管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/config/validate",
+        "description": "验证配置文件",
+        "params": [],
+        "category": "config"
+    },
+    {
+        "method": "GET",
+        "path": "/api/config/values",
+        "description": "获取配置值",
+        "params": [],
+        "category": "config"
+    },
+    {
+        "method": "GET",
+        "path": "/api/config",
+        "description": "获取完整配置",
+        "params": [],
+        "category": "config"
+    },
+    {
+        "method": "POST",
+        "path": "/api/config",
+        "description": "更新配置",
+        "params": [{"name": "config", "type": "object", "required": True}],
+        "category": "config"
+    },
+
+    # ==================== 客户端信息 ====================
+    {
+        "method": "GET",
+        "path": "/api/client-info",
+        "description": "获取客户端IP信息",
+        "params": [],
+        "category": "client"
+    },
+    {
+        "method": "POST",
+        "path": "/api/client-info",
+        "description": "设置客户端用户名",
+        "params": [{"name": "username", "type": "string", "required": False}],
+        "category": "client"
+    },
+    {
+        "method": "POST",
+        "path": "/api/client-info/detect",
+        "description": "自动检测客户端用户名",
+        "params": [{"name": "ip", "type": "string", "required": False}, {"name": "username", "type": "string", "required": False}, {"name": "password", "type": "string", "required": False}],
+        "category": "client"
+    },
+
+    # ==================== 用户管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/users",
+        "description": "获取在线用户列表",
+        "params": [],
+        "category": "client"
+    },
+
+    # ==================== 设备管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/devices",
+        "description": "获取设备列表",
+        "params": [],
+        "category": "device"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/lock",
+        "description": "锁定设备",
+        "params": [{"name": "device_id", "type": "string", "required": True}, {"name": "client_id", "type": "string", "required": True}, {"name": "username", "type": "string", "required": True}],
+        "category": "device"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/lock-status",
+        "description": "批量检查设备锁定状态",
+        "params": [{"name": "device_ids", "type": "array", "required": True}],
+        "category": "device"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/info",
+        "description": "获取设备详细信息",
+        "params": [{"name": "device_id", "type": "string", "required": True}],
+        "category": "device"
+    },
+    {
+        "method": "GET",
+        "path": "/api/devices/management",
+        "description": "获取设备管理列表",
+        "params": [],
+        "category": "device"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/management",
+        "description": "执行设备管理操作",
+        "params": [{"name": "action", "type": "string", "required": True}, {"name": "device_id", "type": "string", "required": True}],
+        "category": "device"
+    },
+    {
+        "method": "GET",
+        "path": "/api/devices/locks",
+        "description": "获取所有设备锁定信息",
+        "params": [],
+        "category": "device"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/reboot",
+        "description": "重启设备",
+        "params": [{"name": "device_id", "type": "string", "required": True}],
+        "category": "device"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/remount",
+        "description": "重新挂载设备为读写模式",
+        "params": [{"name": "device_id", "type": "string", "required": True}],
+        "category": "device"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/connect-wifi",
+        "description": "连接设备WiFi",
+        "params": [{"name": "device_id", "type": "string", "required": True}, {"name": "ssid", "type": "string", "required": True}, {"name": "password", "type": "string", "required": True}],
+        "category": "device"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/shell",
+        "description": "执行Shell命令",
+        "params": [{"name": "device_id", "type": "string", "required": True}, {"name": "command", "type": "string", "required": True}],
+        "category": "device"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/screen",
+        "description": "显示设备屏幕",
+        "params": [{"name": "devices", "type": "array", "required": True}],
+        "category": "screen"
+    },
+    {
+        "method": "POST",
+        "path": "/api/terminal/push",
+        "description": "终端推送命令",
+        "params": [{"name": "command", "type": "string", "required": True}],
+        "category": "device"
+    },
+    {
+        "method": "POST",
+        "path": "/api/opengrok/search",
+        "description": "OpenGrok代码搜索",
+        "params": [{"name": "query", "type": "string", "required": True}, {"name": "full", "type": "boolean", "required": False}],
+        "category": "device"
+    },
+
+    # ==================== 测试执行 ====================
+    {
+        "method": "POST",
+        "path": "/api/test/start",
+        "description": "启动测试 ⭐核心接口",
+        "params": [{"name": "devices", "type": "array", "required": True}, {"name": "test_type", "type": "string", "required": True}, {"name": "test_module", "type": "string", "required": True}],
+        "category": "test"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/stop",
+        "description": "停止测试",
+        "params": [],
+        "category": "test"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/clean",
+        "description": "清理测试环境",
+        "params": [],
+        "category": "test"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/autocomplete-suite",
+        "description": "自动补全测试套件",
+        "params": [{"name": "query", "type": "string", "required": True}],
+        "category": "test"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/analyze-source",
+        "description": "分析测试源码",
+        "params": [{"name": "test_name", "type": "string", "required": True}, {"name": "error_message", "type": "string", "required": False}],
+        "category": "test"
+    },
+    {
+        "method": "GET",
+        "path": "/api/test/logs/download",
+        "description": "下载日志（GET）",
+        "params": [{"name": "log_type", "type": "string", "required": False}],
+        "category": "test"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/logs/download",
+        "description": "下载日志（POST）",
+        "params": [{"name": "log_type", "type": "string", "required": True}, {"name": "start_time", "type": "string", "required": False}, {"name": "end_time", "type": "string", "required": False}],
+        "category": "test"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/logs/save-current",
+        "description": "保存当前日志",
+        "params": [],
+        "category": "test"
+    },
+    {
+        "method": "GET",
+        "path": "/api/test/logs/list",
+        "description": "获取日志列表",
+        "params": [],
+        "category": "test"
+    },
+
+    # ==================== 报告管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/test/status",
+        "description": "获取测试状态",
+        "params": [],
+        "category": "test"
+    },
+    {
+        "method": "GET",
+        "path": "/api/reports/list",
+        "description": "获取报告列表",
+        "params": [],
+        "category": "report"
+    },
+    {
+        "method": "GET",
+        "path": "/api/reports/files/{report_timestamp}",
+        "description": "获取报告文件",
+        "params": [{"name": "report_timestamp", "type": "string", "required": True}],
+        "category": "report"
+    },
+    {
+        "method": "GET",
+        "path": "/api/reports/analyze/{report_timestamp}",
+        "description": "分析报告",
+        "params": [{"name": "report_timestamp", "type": "string", "required": True}],
+        "category": "report"
+    },
+    {
+        "method": "GET",
+        "path": "/api/reports/view",
+        "description": "查看报告",
+        "params": [{"name": "report_timestamp", "type": "string", "required": True}],
+        "category": "report"
+    },
+    {
+        "method": "GET",
+        "path": "/api/reports/download/{report_timestamp}",
+        "description": "下载报告",
+        "params": [{"name": "report_timestamp", "type": "string", "required": True}],
+        "category": "report"
+    },
+    {
+        "method": "DELETE",
+        "path": "/api/reports/delete",
+        "description": "删除报告",
+        "params": [{"name": "report_timestamp", "type": "string", "required": True}],
+        "category": "report"
+    },
+    {
+        "method": "POST",
+        "path": "/api/reports/analyze",
+        "description": "AI分析报告",
+        "params": [{"name": "report_timestamp", "type": "string", "required": True}, {"name": "use_ai", "type": "boolean", "required": False}],
+        "category": "report"
+    },
+    {
+        "method": "POST",
+        "path": "/api/reports/analyze-ai",
+        "description": "AI深度分析",
+        "params": [{"name": "report_timestamp", "type": "string", "required": True}],
+        "category": "report"
+    },
+
+    # ==================== VNC管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/vnc/status",
+        "description": "获取VNC状态",
+        "params": [],
+        "category": "vnc"
+    },
+    {
+        "method": "POST",
+        "path": "/api/vnc/start",
+        "description": "启动VNC服务",
+        "params": [],
+        "category": "vnc"
+    },
+    {
+        "method": "POST",
+        "path": "/api/vnc/stop",
+        "description": "停止VNC服务",
+        "params": [],
+        "category": "vnc"
+    },
+    {
+        "method": "POST",
+        "path": "/api/vnc/start-desktop",
+        "description": "启动桌面VNC",
+        "params": [{"name": "host", "type": "string", "required": True}, {"name": "password", "type": "string", "required": True}, {"name": "vnc_password", "type": "string", "required": False}],
+        "category": "vnc"
+    },
+    {
+        "method": "POST",
+        "path": "/api/desktop/validate-host",
+        "description": "验证桌面主机",
+        "params": [{"name": "host", "type": "string", "required": True}],
+        "category": "vnc"
+    },
+
+    # ==================== USB/IP管理 ====================
+    {
+        "method": "POST",
+        "path": "/api/adb-forward/start",
+        "description": "启动ADB端口转发",
+        "params": [{"name": "device_host", "type": "string", "required": True}, {"name": "device_password", "type": "string", "required": True}],
+        "category": "usbip"
+    },
+    {
+        "method": "POST",
+        "path": "/api/adb-forward/stop",
+        "description": "停止ADB端口转发",
+        "params": [{"name": "device_host", "type": "string", "required": True}],
+        "category": "usbip"
+    },
+    {
+        "method": "GET",
+        "path": "/api/usbip/status",
+        "description": "获取USB/IP状态",
+        "params": [],
+        "category": "usbip"
+    },
+    {
+        "method": "POST",
+        "path": "/api/usbip/start",
+        "description": "启动USB/IP",
+        "params": [{"name": "device_id", "type": "string", "required": True}],
+        "category": "usbip"
+    },
+    {
+        "method": "POST",
+        "path": "/api/usbip/stop",
+        "description": "停止USB/IP",
+        "params": [],
+        "category": "usbip"
+    },
+    {
+        "method": "POST",
+        "path": "/api/usbip/auto-install",
+        "description": "自动安装USB/IP",
+        "params": [],
+        "category": "usbip"
+    },
+
+    # ==================== VPN管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/vpn/check-sshd",
+        "description": "检查SSHD状态",
+        "params": [],
+        "category": "vpn"
+    },
+    {
+        "method": "POST",
+        "path": "/api/vpn/install-sshd",
+        "description": "安装SSHD服务",
+        "params": [],
+        "category": "vpn"
+    },
+    {
+        "method": "GET",
+        "path": "/api/vpn/check-routing",
+        "description": "检查路由状态",
+        "params": [],
+        "category": "vpn"
+    },
+    {
+        "method": "GET",
+        "path": "/api/vpn/status",
+        "description": "获取VPN状态",
+        "params": [],
+        "category": "vpn"
+    },
+    {
+        "method": "POST",
+        "path": "/api/vpn/connect",
+        "description": "连接VPN",
+        "params": [{"name": "server", "type": "string", "required": True}, {"name": "username", "type": "string", "required": True}, {"name": "password", "type": "string", "required": True}],
+        "category": "vpn"
+    },
+    {
+        "method": "POST",
+        "path": "/api/vpn/disconnect",
+        "description": "断开VPN",
+        "params": [],
+        "category": "vpn"
+    },
+
+    # ==================== 文件上传 ====================
+    {
+        "method": "POST",
+        "path": "/api/upload/file",
+        "description": "上传文件",
+        "params": [{"name": "file", "type": "file", "required": True}],
+        "category": "upload"
+    },
+    {
+        "method": "POST",
+        "path": "/api/upload",
+        "description": "上传并安装",
+        "params": [{"name": "file", "type": "file", "required": True}, {"name": "device_id", "type": "string", "required": True}],
+        "category": "upload"
+    },
+    {
+        "method": "POST",
+        "path": "/api/upload/progress",
+        "description": "获取上传进度",
+        "params": [],
+        "category": "upload"
+    },
+
+    # ==================== 刷机功能 ====================
+    {
+        "method": "POST",
+        "path": "/api/burn/firmware",
+        "description": "刷入固件",
+        "params": [{"name": "firmware", "type": "file", "required": True}, {"name": "device_id", "type": "string", "required": True}],
+        "category": "burn"
+    },
+    {
+        "method": "POST",
+        "path": "/api/burn/gsi",
+        "description": "刷入GSI",
+        "params": [{"name": "gsi_image", "type": "file", "required": True}, {"name": "device_id", "type": "string", "required": True}],
+        "category": "burn"
+    },
+    {
+        "method": "POST",
+        "path": "/api/burn/serial",
+        "description": "修改序列号",
+        "params": [{"name": "device_id", "type": "string", "required": True}, {"name": "new_serial", "type": "string", "required": True}],
+        "category": "burn"
+    },
+
+    # ==================== 文件管理 ====================
+    {
+        "method": "POST",
+        "path": "/api/files/list",
+        "description": "列出文件",
+        "params": [{"name": "path", "type": "string", "required": False}],
+        "category": "file"
+    },
+
+    # ==================== 屏幕录制 ====================
+    {
+        "method": "POST",
+        "path": "/api/screen/start",
+        "description": "启动屏幕录制",
+        "params": [{"name": "device_id", "type": "string", "required": True}, {"name": "duration", "type": "integer", "required": False}],
+        "category": "screen"
+    },
+
+    # ==================== WebSocket ====================
+    {
+        "method": "WebSocket",
+        "path": "/ws/{client_id}",
+        "description": "WebSocket实时通信",
+        "params": [{"name": "client_id", "type": "string", "required": True}],
+        "category": "websocket"
+    },
+
+    # ==================== API文档 ====================
+    {
+        "method": "GET",
+        "path": "/api/docs",
+        "description": "获取API文档列表",
+        "params": [],
+        "category": "config"
+    }
+]
+
+@app.get("/api/docs")
+async def get_api_docs():
+    """获取所有API文档（使用预定义列表，性能优化）"""
+    try:
+        # 直接返回预定义的API列表，避免每次请求重新构建
+        return JSONResponse(
+            content={
+                "success": True,
+                "apis": API_DOCS_LIST,
+                "total": len(API_DOCS_LIST)
+            },
+            headers={
+                "Cache-Control": "public, max-age=300",  # 缓存5分钟
+                "X-Content-Type-Options": "nosniff"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error getting API docs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== 主程序 ====================
 

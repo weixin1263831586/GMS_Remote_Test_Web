@@ -9,6 +9,8 @@
     <!-- Socket.IO not used in FastAPI version, using native WebSocket -->
     <script src="/static/vendor/xterm/xterm.min.js"></script>
     <script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
+    <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
+    <script src="/static/js/app.js?v=20260328-20"></script>
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
@@ -250,6 +252,46 @@
         .host-input::placeholder {
             color: var(--text-secondary);
         }
+
+        /* 筛选按钮样式 */
+        .filter-btn {
+            padding: 6px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--light-bg);
+            color: var(--text-primary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .filter-btn:hover {
+            background: var(--darker-bg);
+            border-color: var(--primary-color);
+        }
+        .filter-btn.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        /* 使用实例弹框特殊样式 - 白色背景 */
+        #usage-examples-modal .modal-content {
+            background: #ffffff !important;
+            border: 1px solid #e0e0e0 !important;
+        }
+        #usage-examples-modal .modal-header {
+            background: #f8f9fa !important;
+            border-bottom: 1px solid #e0e0e0 !important;
+        }
+        #usage-examples-modal .modal-title {
+            color: #333 !important;
+        }
+        #usage-examples-modal .modal-close {
+            color: #666 !important;
+        }
+        #usage-examples-modal .modal-close:hover {
+            color: #333 !important;
+        }
     </style>
 </head>
 <body>
@@ -287,6 +329,10 @@
                 <a href="#" class="sidebar-item" data-page="report-analysis" onclick="switchPage('report-analysis', event)">
                     <span class="sidebar-icon">📈</span>
                     <span class="sidebar-text">报告分析</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="api-docs" onclick="switchPage('api-docs', event)">
+                    <span class="sidebar-icon">📡</span>
+                    <span class="sidebar-text">系统API</span>
                 </a>
             </nav>
 
@@ -638,9 +684,9 @@
             </div>
 
             <!-- 报告列表 -->
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 90px); overflow-y: auto;">
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
-                    <thead>
+                    <thead style="position: sticky; top: 0; z-index: 10;">
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">客户端</th>
                             <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">类型</th>
@@ -720,6 +766,109 @@
                 </div>
             </div>
         </div>
+
+        <!-- 系统API页面 -->
+        <div class="container page-content" id="page-api-docs">
+            <div class="section-title">📡 系统API</div>
+
+            <!-- API统计卡片 -->
+            <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">API总数</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="get-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">GET接口</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="post-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">POST接口</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--info-color);" id="filtered-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">筛选结果</div>
+                </div>
+            </div>
+
+            <!-- 搜索栏 -->
+            <div style="margin-bottom: 20px;">
+                <input type="text" id="api-search-input" placeholder="🔍 搜索API路径或说明..."
+                       style="width: 100%; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 14px;"
+                       oninput="debounceFilterApiDocs()">
+            </div>
+
+            <!-- 分类筛选 - 按钮组 -->
+            <div style="margin-bottom: 20px;">
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="filter-btn active" data-category="all" onclick="filterByCategory('all')">
+                        📁 全部分类
+                    </button>
+                    <button class="filter-btn" data-category="test" onclick="filterByCategory('test')">
+                        🧪 测试管理
+                    </button>
+                    <button class="filter-btn" data-category="config" onclick="filterByCategory('config')">
+                        ⚙️ 配置管理
+                    </button>
+                    <button class="filter-btn" data-category="device" onclick="filterByCategory('device')">
+                        📱 设备管理
+                    </button>
+                    <button class="filter-btn" data-category="client" onclick="filterByCategory('client')">
+                        👤 用户管理
+                    </button>
+                    <button class="filter-btn" data-category="report" onclick="filterByCategory('report')">
+                        📊 报告管理
+                    </button>
+                    <button class="filter-btn" data-category="vpn" onclick="filterByCategory('vpn')">
+                        🔐 VPN管理
+                    </button>
+                    <button class="filter-btn" data-category="vnc" onclick="filterByCategory('vnc')">
+                        🖥️ VNC管理
+                    </button>
+                    <button class="filter-btn" data-category="usbip" onclick="filterByCategory('usbip')">
+                        📡 USB/IP
+                    </button>
+                    <button class="filter-btn" data-category="screen" onclick="filterByCategory('screen')">
+                        📺 屏幕共享
+                    </button>
+                    <button class="filter-btn" data-category="upload" onclick="filterByCategory('upload')">
+                        📤 文件上传
+                    </button>
+                    <button class="filter-btn" data-category="burn" onclick="filterByCategory('burn')">
+                        🔥 固件烧写
+                    </button>
+                    <button class="filter-btn" data-category="file" onclick="filterByCategory('file')">
+                        📁 文件管理
+                    </button>
+                    <button class="filter-btn" data-category="health" onclick="filterByCategory('health')">
+                        💚 健康检查
+                    </button>
+                    <button class="filter-btn" onclick="showUsageExamples()" style="background: var(--primary-color); color: white;">
+                        📖 使用实例
+                    </button>
+                </div>
+            </div>
+
+            <!-- API列表 -->
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 300px); overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                    <thead style="position: sticky; top: 0; z-index: 10;">
+                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                            <th style="padding: 10px 12px; text-align: left; font-size: 12px; color: var(--text-secondary); width: 30%;">API接口</th>
+                            <th style="padding: 10px 12px; text-align: left; font-size: 12px; color: var(--text-secondary); width: 20%;">接口说明</th>
+                            <th style="padding: 10px 12px; text-align: left; font-size: 12px; color: var(--text-secondary); width: 50%;">使用方法</th>
+                        </tr>
+                    </thead>
+                    <tbody id="api-docs-table-body">
+                        <tr>
+                            <td colspan="3" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <!-- 弹框 -->
@@ -749,7 +898,7 @@
                 </div>
                 <div class="modal-form-row">
                     <label>Wi-Fi 密码:</label>
-                    <input type="password" id="wifi-password" value="1234567890" />
+                    <input type="password" id="wifi-password" value="1234567890" autocomplete="current-password" />
                 </div>
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeWifiModal()">取消</button>
@@ -773,7 +922,7 @@
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="device-pswd" placeholder="请输入SSH密码" onkeypress="handleDevicePasswordKeyPress(event)" />
+                    <input type="password" id="device-pswd" placeholder="请输入SSH密码" onkeypress="handleDevicePasswordKeyPress(event)" autocomplete="current-password" />
                 </div>
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeDevicePasswordModal()">取消</button>
@@ -915,7 +1064,7 @@
                 </div>
                 <div class="modal-form-row" style="margin-top: 12px;">
                     <label>VNC密码:</label>
-                    <input type="password" id="new-host-vnc-password" class="host-input" placeholder="请输入该主机的VNC密码（将自动保存）" />
+                    <input type="password" id="new-host-vnc-password" class="host-input" placeholder="请输入该主机的VNC密码（将自动保存）" autocomplete="new-password" />
                 </div>
                 <div class="modal-info-text" style="margin-top: 10px;">
                     💡 添加新主机需要输入VNC密码，系统将自动保存<br>
@@ -942,7 +1091,7 @@
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="host-password-input" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--darker-bg);" onkeypress="handleHostPasswordKeyPress(event)" />
+                    <input type="password" id="host-password-input" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--darker-bg);" onkeypress="handleHostPasswordKeyPress(event)" autocomplete="current-password" />
                 </div>
                 <div class="modal-info-text" style="margin-top: 10px;">
                     💡 密码将被加密保存供下次使用
@@ -975,7 +1124,7 @@
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="ssh-password" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;" onkeypress="handleSshKeyPress(event)" />
+                    <input type="password" id="ssh-password" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;" onkeypress="handleSshKeyPress(event)" autocomplete="current-password" />
                 </div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 8px;">
                     💡 密码将被加密保存,下次访问自动使用
@@ -1286,16 +1435,22 @@
             const defaultHost = '{{ config.ubuntu_user }}@{{ config.ubuntu_host }}';
             const defaultUrl = `http://{{ config.ubuntu_host }}:6080/vnc.html?autoconnect=true`;
 
-            // 如果是默认主机
+            // 如果是默认主机，也需要先启动VNC服务
             if (currentHost.id === 'default') {
                 // 检查 iframe 是否已经是默认主机的 URL
                 if (vncFrame.src.includes(defaultUrl) || vncFrame.src.includes('{{ config.ubuntu_host }}')) {
                     console.log('[Desktop] Already on default host');
-                    return;  // 已经是默认主机，无需切换
+                    return;
                 }
-                // 需要切换回默认主机，直接设置URL
-                console.log('[Desktop] Switching back to default host');
-                vncFrame.src = defaultUrl;
+                // 需要切换回默认主机，先启动VNC服务
+                console.log('[Desktop] Switching to default host, starting VNC first');
+                const url = await startDefaultHostVNC(
+                    defaultHost,
+                    '{{ config.ubuntu_password }}',
+                    currentHost.vnc_password || '',
+                    defaultUrl
+                );
+                vncFrame.src = url;
                 return;
             }
 
@@ -1899,6 +2054,7 @@
             document.getElementById('page-devices').classList.remove('active');
             document.getElementById('page-reports').classList.remove('active');
             document.getElementById('page-report-analysis').classList.remove('active');
+            document.getElementById('page-api-docs').classList.remove('active');
 
             // 显示目标页面
             document.getElementById(`page-${pageName}`).classList.add('active');
@@ -1916,7 +2072,8 @@
                 'devices': '设备管理 - GMS远程测试',
                 'users': '用户管理 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
-                'report-analysis': '报告分析 - GMS远程测试'
+                'report-analysis': '报告分析 - GMS远程测试',
+                'api-docs': '系统API - GMS远程测试'
             };
             document.title = titles[pageName] || 'GMS远程测试';
 
@@ -1959,6 +2116,11 @@
             // 如果切换到报告管理页面，加载报告列表
             if (pageName === 'reports') {
                 loadTestReports();
+            }
+
+            // 如果切换到系统API页面，加载API文档
+            if (pageName === 'api-docs') {
+                loadApiDocs();
             }
 
             // 切换页面时重新fit终端（如果已初始化）
@@ -2396,6 +2558,9 @@
             if (targetPage === 'reports') {
                 loadTestReports();
             }
+            if (targetPage === 'api-docs') {
+                loadApiDocs();
+            }
             if (targetPage === 'desktop') {
                 // 初始化主机列表（仅首次）
                 if (!window.desktopHostsInitialized) {
@@ -2424,11 +2589,138 @@
                 'devices': '设备管理 - GMS远程测试',
                 'users': '用户管理 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
-                'report-analysis': '报告分析 - GMS远程测试'
+                'report-analysis': '报告分析 - GMS远程测试',
+                'api-docs': '系统API - GMS远程测试'
             };
             document.title = titles[targetPage] || 'GMS远程测试';
         });
     </script>
+
+    <!-- 使用实例弹框 -->
+    <div id="usage-examples-modal" class="modal">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <span class="modal-title">📖 测试接口使用实例</span>
+                <span class="modal-close" onclick="closeUsageExamplesModal()">&times;</span>
+            </div>
+            <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; line-height: 1.6; color: var(--text-primary);">
+                    <h3 style="color: var(--primary-color); margin-bottom: 16px;">启动CTS测试完整流程</h3>
+
+                    <div style="margin-bottom: 16px;">
+                        <div style="color: #333; font-weight: 600; margin-bottom: 6px; font-size: 13px;">1.获取客户端ID</div>
+                        <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
+                            <code id="cmd-1" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-1')">curl -s http://172.16.14.233:5001/api/client-info | jq '.'</code>
+                            <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <div style="color: #333; font-weight: 600; margin-bottom: 6px; font-size: 13px;">2.获取设备列表</div>
+                        <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
+                            <code id="cmd-2" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-2')">curl -s http://172.16.14.233:5001/api/devices | jq '.'</code>
+                            <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-2')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 20px;">
+                        <div style="color: #333; font-weight: 600; margin-bottom: 8px; font-size: 13px;">3.启动测试（会自动锁定设备）</div>
+                        <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
+                            <code id="cmd-3" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-3')">curl -sX POST http://172.16.14.233:5001/api/test/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "devices": ["rk3572cai"],
+    "test_type": "CTS",
+    "test_module": "CtsPermissionTestCases",
+    "test_case": "android.permission.cts.AccessibilityPrivacySourceTest#testJobDoesNotSendNotificationInSecondRunForSameService",
+    "test_suite": "/home/hcq/GMS-Suite/android-cts-16_r4/android-cts/tools"
+  }' | jq '.'</code>
+                            <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-3')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <div style="color: #333; font-weight: 600; margin-bottom: 6px; font-size: 13px;">4.检查测试状态</div>
+                        <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
+                            <code id="cmd-4" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-4')">curl -s http://172.16.14.233:5001/api/test/status | jq '.'</code>
+                            <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-4')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <div style="color: #333; font-weight: 600; margin-bottom: 6px; font-size: 13px;">5.停止测试（会自动解锁设备）</div>
+                        <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
+                            <code id="cmd-5" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-5')">curl -sX POST http://172.16.14.233:5001/api/test/stop | jq '.'</code>
+                            <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-5')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                    </div>
+
+                    <h4 style="color: var(--primary-color); margin: 20px 0 12px 0;">完整脚本示例</h4>
+                    <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; margin-bottom: 16px; position: relative;">
+                        <code id="cmd-full-script" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; padding-right: 70px; display: block;">#!/bin/bash
+# 自动化测试脚本示例
+
+BASE_URL="http://172.16.14.233:5001"
+DEVICE_ID="rk3572cai"
+TEST_TYPE="CTS"
+TEST_MODULE="CtsPermissionTestCases"
+TEST_CASE="android.permission.cts.AccessibilityPrivacySourceTest#testJobDoesNotSendNotificationInSecondRunForSameService"
+TEST_SUITE="/home/hcq/GMS-Suite/android-cts-16_r4/android-cts/tools"
+
+# 步骤1: 获取客户端信息
+echo "步骤1: 获取客户端信息..."
+curl -s "$BASE_URL/api/client-info" | jq "."
+
+# 步骤2: 检查设备状态
+echo "步骤2: 检查设备状态..."
+curl -s "$BASE_URL/api/devices" | jq "."
+
+# 步骤3: 启动测试（自动锁定设备）
+echo "步骤3: 启动测试（会自动锁定设备）..."
+START_RESULT=$(curl -s -X POST "$BASE_URL/api/test/start" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"devices\": [\"$DEVICE_ID\"],
+    \"test_type\": \"$TEST_TYPE\",
+    \"test_module\": \"$TEST_MODULE\",
+    \"test_case\": \"$TEST_CASE\",
+    \"test_suite\": \"$TEST_SUITE\"
+  }")
+
+echo "$START_RESULT" | jq "."
+
+# 检查是否启动成功
+if echo "$START_RESULT" | jq -e '.success' > /dev/null; then
+    echo "✅ 测试已启动"
+
+    # 步骤4: 轮询测试状态
+    echo "步骤4: 等待测试完成..."
+    while true; do
+        STATUS=$(curl -s "$BASE_URL/api/test/status")
+        RUNNING=$(echo "$STATUS" | jq -r '.running')
+
+        if [ "$RUNNING" = "false" ]; then
+            echo "✅ 测试已完成"
+            break
+        fi
+
+        echo "⏳ 测试运行中... $(date '+%H:%M:%S')"
+        sleep 10
+    done
+
+    # 步骤5: 查看结果
+    echo "步骤5: 查看测试结果..."
+    curl -s "$BASE_URL/api/reports/list" | jq ".reports[0]"
+else
+    echo "❌ 测试启动失败"
+    exit 1
+fi</code>
+                        <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-full-script')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- AI+源码分析弹框 -->
     <div id="source-analysis-modal" class="modal">
@@ -2496,8 +2788,6 @@
             </div>
         </div>
     </div>
-
-    <script src="/static/js/app.js?v=20260324-4"></script>
 </div> <!-- End of main-container -->
 </body>
 </html>

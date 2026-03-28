@@ -9,6 +9,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <script src="{{ url_for('static', filename='vendor/xterm/xterm.min.js') }}"></script>
     <script src="{{ url_for('static', filename='vendor/xterm/xterm-addon-fit.min.js') }}"></script>
+    <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=20260327-20"></script>
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
@@ -18,7 +20,7 @@
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hash && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis'].includes(hash)) {
+            if (hash && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'api-docs'].includes(hash)) {
                 targetPage = hash;
             } else {
                 targetPage = savedPage;
@@ -232,6 +234,27 @@
         .host-input::placeholder {
             color: var(--text-secondary);
         }
+
+        /* 筛选按钮样式 */
+        .filter-btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--light-bg);
+            color: var(--text-primary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .filter-btn:hover {
+            background: var(--darker-bg);
+            border-color: var(--primary-color);
+        }
+        .filter-btn.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
     </style>
 </head>
 <body>
@@ -269,6 +292,10 @@
                 <a href="#" class="sidebar-item" data-page="report-analysis" onclick="switchPage('report-analysis', event)">
                     <span class="sidebar-icon">📈</span>
                     <span class="sidebar-text">报告分析</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="api-docs" onclick="switchPage('api-docs', event)">
+                    <span class="sidebar-icon">📡</span>
+                    <span class="sidebar-text">系统API</span>
                 </a>
             </nav>
 
@@ -696,6 +723,183 @@
                 </div>
             </div>
         </div>
+
+        <!-- 系统API页面 -->
+        <div class="container page-content" id="page-api-docs">
+            <div class="section-title">📡 系统API文档</div>
+
+            <!-- API统计卡片 -->
+            <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">API总数</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="get-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">GET接口</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="post-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">POST接口</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--info-color);" id="filtered-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">筛选结果</div>
+                </div>
+            </div>
+
+            <!-- 搜索栏 -->
+            <div style="margin-bottom: 20px;">
+                <input type="text" id="api-search-input" placeholder="🔍 搜索API路径或说明..."
+                       style="width: 100%; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 14px;"
+                       oninput="filterApiDocs()">
+            </div>
+
+            <!-- 方法筛选 - 按钮组 -->
+            <div style="margin-bottom: 20px;">
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="filter-btn active" data-method="all" onclick="filterByMethod('all')">
+                        📋 全部 (51)
+                    </button>
+                    <button class="filter-btn" data-method="GET" onclick="filterByMethod('GET')">
+                        GET (17)
+                    </button>
+                    <button class="filter-btn" data-method="POST" onclick="filterByMethod('POST')">
+                        POST (33)
+                    </button>
+                    <button class="filter-btn" data-method="WebSocket" onclick="filterByMethod('WebSocket')">
+                        WebSocket (1)
+                    </button>
+                </div>
+            </div>
+
+            <!-- 分类筛选 - 按钮组 -->
+            <div style="margin-bottom: 20px;">
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="filter-btn active" data-category="all" onclick="filterByCategory('all')">
+                        📁 全部分类
+                    </button>
+                    <button class="filter-btn" data-category="health" onclick="filterByCategory('health')">
+                        💚 健康检查
+                    </button>
+                    <button class="filter-btn" data-category="config" onclick="filterByCategory('config')">
+                        ⚙️ 配置管理
+                    </button>
+                    <button class="filter-btn" data-category="client" onclick="filterByCategory('client')">
+                        👤 客户端信息
+                    </button>
+                    <button class="filter-btn" data-category="device" onclick="filterByCategory('device')">
+                        📱 设备管理
+                    </button>
+                    <button class="filter-btn" data-category="vnc" onclick="filterByCategory('vnc')">
+                        🖥️ VNC管理
+                    </button>
+                    <button class="filter-btn" data-category="test" onclick="filterByCategory('test')">
+                        🧪 测试管理
+                    </button>
+                    <button class="filter-btn" data-category="report" onclick="filterByCategory('report')">
+                        📊 报告管理
+                    </button>
+                    <button class="filter-btn" data-category="vpn" onclick="filterByCategory('vpn')">
+                        🔐 VPN管理
+                    </button>
+                    <button class="filter-btn" data-category="usbip" onclick="filterByCategory('usbip')">
+                        📡 USB/IP
+                    </button>
+                    <button class="filter-btn" data-category="upload" onclick="filterByCategory('upload')">
+                        📤 文件上传
+                    </button>
+                    <button class="filter-btn" data-category="burn" onclick="filterByCategory('burn')">
+                        🔥 固件烧写
+                    </button>
+                    <button class="filter-btn" data-category="file" onclick="filterByCategory('file')">
+                        📁 文件管理
+                    </button>
+                    <button class="filter-btn" data-category="screen" onclick="filterByCategory('screen')">
+                        📺 屏幕共享
+                    </button>
+                </div>
+            </div>
+
+            <!-- API列表 -->
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); max-height: 800px; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: auto;">
+                    <thead style="position: sticky; top: 0; z-index: 10;">
+                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                            <th style="padding: 8px 10px; text-align: left; font-size: 11px; color: var(--text-secondary); width: 22%;">接口</th>
+                            <th style="padding: 8px 10px; text-align: left; font-size: 11px; color: var(--text-secondary); width: 18%;">分类</th>
+                            <th style="padding: 8px 10px; text-align: left; font-size: 11px; color: var(--text-secondary); width: 25%;">说明</th>
+                            <th style="padding: 8px 10px; text-align: left; font-size: 11px; color: var(--text-secondary); width: 35%;">使用方法</th>
+                        </tr>
+                    </thead>
+                    <tbody id="api-docs-table-body">
+                        <tr>
+                            <td colspan="4" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 弹框 -->
+    <div id="config-modal" class="modal">
+
+            <!-- 拖拽上传区域 -->
+            <div style="margin-bottom: 20px;">
+                <div id="report-upload-zone" class="report-upload-zone">
+                    <input type="file" id="report-file-input" accept=".xml,.zip,.tar,.tar.gz" style="display: none;" />
+                    <input type="file" id="report-folder-input" webkitdirectory directory style="display: none;" />
+                    <div class="report-upload-content">
+                        <div>📁</div>
+                        <div>
+                            <div style="font-size: 14px; font-weight: 600; white-space: nowrap;">拖拽测试报告到此处</div>
+                        </div>
+                        <button class="btn-xs" onclick="document.getElementById('report-file-input').click()" style="font-size: 12px; padding: 10px 20px;">
+                            📤 上传报告
+                        </button>
+                    </div>
+                    <div class="report-upload-progress" id="report-upload-progress">
+                        <div class="report-upload-progress-bar" id="report-progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 分析结果区域 -->
+            <div id="report-analysis-result" style="display: none;">
+                <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <div style="font-size: 16px; font-weight: 600;">📊 分析结果</div>
+                        <button class="btn-xs" onclick="resetReportAnalysis()">清除</button>
+                    </div>
+
+                    <!-- 总体统计 -->
+                    <div id="report-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px;">
+                        <!-- 动态生成 -->
+                    </div>
+
+                    <!-- 详细信息 -->
+                    <div id="report-details" style="font-size: 12px; color: var(--text-primary);">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
+
+                <!-- 失败用例列表 -->
+                <div id="report-failures" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="font-size: 14px; font-weight: 600;">❌ 失败用例</div>
+                        <div id="report-failure-actions" style="display: flex; gap: 6px;">
+                            <!-- 动态生成按钮 -->
+                        </div>
+                    </div>
+                    <div id="report-failure-list" style="max-height: 580px; overflow-y: auto;">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- 弹框 -->
@@ -725,7 +929,7 @@
                 </div>
                 <div class="modal-form-row">
                     <label>Wi-Fi 密码:</label>
-                    <input type="password" id="wifi-password" value="1234567890" />
+                    <input type="password" id="wifi-password" value="1234567890" autocomplete="current-password" />
                 </div>
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeWifiModal()">取消</button>
@@ -749,7 +953,7 @@
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="device-pswd" placeholder="请输入SSH密码" onkeypress="handleDevicePasswordKeyPress(event)" />
+                    <input type="password" id="device-pswd" placeholder="请输入SSH密码" onkeypress="handleDevicePasswordKeyPress(event)" autocomplete="current-password" />
                 </div>
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeDevicePasswordModal()">取消</button>
@@ -891,7 +1095,7 @@
                 </div>
                 <div class="modal-form-row" style="margin-top: 12px;">
                     <label>VNC密码:</label>
-                    <input type="password" id="new-host-vnc-password" class="host-input" placeholder="请输入该主机的VNC密码（将自动保存）" />
+                    <input type="password" id="new-host-vnc-password" class="host-input" placeholder="请输入该主机的VNC密码（将自动保存）" autocomplete="new-password" />
                 </div>
                 <div class="modal-info-text" style="margin-top: 10px;">
                     💡 添加新主机需要输入VNC密码，系统将自动保存<br>
@@ -918,7 +1122,7 @@
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="host-password-input" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--darker-bg);" onkeypress="handleHostPasswordKeyPress(event)" />
+                    <input type="password" id="host-password-input" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--darker-bg);" onkeypress="handleHostPasswordKeyPress(event)" autocomplete="current-password" />
                 </div>
                 <div class="modal-info-text" style="margin-top: 10px;">
                     💡 密码将被加密保存供下次使用
@@ -951,7 +1155,7 @@
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="ssh-password" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;" onkeypress="handleSshKeyPress(event)" />
+                    <input type="password" id="ssh-password" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;" onkeypress="handleSshKeyPress(event)" autocomplete="current-password" />
                 </div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 8px;">
                     💡 密码将被加密保存,下次访问自动使用
@@ -1197,16 +1401,22 @@
             const defaultHost = '{{ config.ubuntu_user }}@{{ config.ubuntu_host }}';
             const defaultUrl = `http://{{ config.ubuntu_host }}:6080/vnc.html?autoconnect=true`;
 
-            // 如果是默认主机
+            // 如果是默认主机，也需要先启动VNC服务
             if (currentHost.id === 'default') {
                 // 检查 iframe 是否已经是默认主机的 URL
                 if (vncFrame.src.includes(defaultUrl) || vncFrame.src.includes('{{ config.ubuntu_host }}')) {
                     console.log('[Desktop] Already on default host');
-                    return;  // 已经是默认主机，无需切换
+                    return;
                 }
-                // 需要切换回默认主机，直接设置URL
-                console.log('[Desktop] Switching back to default host');
-                vncFrame.src = defaultUrl;
+                // 需要切换回默认主机，先启动VNC服务
+                console.log('[Desktop] Switching to default host, starting VNC first');
+                const url = await startDefaultHostVNC(
+                    defaultHost,
+                    '{{ config.ubuntu_password }}',
+                    currentHost.vnc_password || '',
+                    defaultUrl
+                );
+                vncFrame.src = url;
                 return;
             }
 
@@ -1796,6 +2006,7 @@
             document.getElementById('page-devices').classList.remove('active');
             document.getElementById('page-reports').classList.remove('active');
             document.getElementById('page-report-analysis').classList.remove('active');
+            document.getElementById('page-api-docs').classList.remove('active');
 
             // 显示目标页面
             document.getElementById(`page-${pageName}`).classList.add('active');
@@ -1813,7 +2024,8 @@
                 'devices': '设备管理 - GMS 远程测试',
                 'users': '用户管理 - GMS 远程测试',
                 'reports': '测试报告 - GMS 远程测试',
-                'report-analysis': '报告分析 - GMS 远程测试'
+                'report-analysis': '报告分析 - GMS 远程测试',
+                'api-docs': '系统API - GMS 远程测试'
             };
             document.title = titles[pageName] || 'GMS 远程测试';
 
@@ -1835,6 +2047,11 @@
             // 如果切换到测试报告页面，加载报告列表
             if (pageName === 'reports') {
                 loadTestReports();
+            }
+
+            // 如果切换到API文档页面，加载API列表
+            if (pageName === 'api-docs') {
+                loadApiDocs();
             }
 
             // 切换页面时重新fit终端（如果已初始化）
@@ -2095,6 +2312,9 @@
             if (targetPage === 'reports') {
                 loadTestReports();
             }
+            if (targetPage === 'api-docs') {
+                loadApiDocs();
+            }
             if (targetPage === 'desktop') {
                 // 初始化主机列表（仅首次）
                 if (!window.desktopHostsInitialized) {
@@ -2123,13 +2343,12 @@
                 'devices': '设备管理 - GMS 远程测试',
                 'users': '用户管理 - GMS 远程测试',
                 'reports': '测试报告 - GMS 远程测试',
-                'report-analysis': '报告分析 - GMS 远程测试'
+                'report-analysis': '报告分析 - GMS 远程测试',
+                'api-docs': '系统API - GMS 远程测试'
             };
             document.title = titles[targetPage] || 'GMS 远程测试';
         });
     </script>
-
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </div> <!-- End of main-container -->
 </body>
 </html>
