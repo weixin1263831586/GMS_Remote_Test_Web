@@ -18,6 +18,12 @@ const state = {
     isRefreshingDevices: false
 };
 
+// API文档缓存（全局变量，避免重复请求）
+let apiDocsCache = null;
+let apiDocsCacheTime = 0;
+let allApiDocs = []; // 所有API文档数据（已排序）
+const API_DOCS_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
+
 // 辅助函数
 function validateDeviceSelection() {
     if (state.selectedDevices.size === 0) {
@@ -1193,6 +1199,30 @@ async function initAndStartVnc() {
     }
 }
 
+// 启动默认主机VNC服务的共享函数
+async function startDefaultHostVNC(defaultHost, defaultPassword, vncPassword, fallbackUrl) {
+    try {
+        showToast('正在启动默认主机VNC服务...', 'info');
+        const result = await apiCall('/api/vnc/start-desktop', 'POST', {
+            host: defaultHost,
+            password: defaultPassword,
+            vnc_password: vncPassword || ''
+        });
+
+        if (result.success && result.url) {
+            console.log('[Desktop] Default host VNC started');
+            return result.url;
+        } else {
+            // API失败，使用备用URL
+            return fallbackUrl;
+        }
+    } catch (e) {
+        console.error('[Desktop] Failed to start default host VNC:', e);
+        // 异常时也使用备用URL
+        return fallbackUrl;
+    }
+}
+
 async function showDeviceScreen() {
     if (state.selectedDevices.size === 0) {
         showToast('请先选择设备', 'warning');
@@ -2283,7 +2313,7 @@ function startStatusPolling() {
                        'WebSocket:', state.websocket ? state.websocket.readyState : 'none');
 
             // 如果没有实时连接，获取日志；否则只获取状态
-            const status = await apiCall(hasRealtimeConnection ? '/api/status?logs=false' : '/api/status');
+            const status = await apiCall(hasRealtimeConnection ? '/api/test/status?logs=false' : '/api/test/status');
 
             // 检查 USB 监控器状态并提示（仅显示一次）
             if (!shownPyudevWarning && status.usb_monitor) {
@@ -2357,7 +2387,7 @@ function startStatusPolling() {
 
 async function checkInitialTestStatus() {
     try {
-        const status = await apiCall('/api/status');
+        const status = await apiCall('/api/test/status');
         state.testing = status.running;
         updateTestToggleButton(status.running);
 
@@ -4490,10 +4520,18 @@ function openOpenGrokLink() {
     showToast('已在OpenGrok网站打开搜索', 'success');
 }
 
+// HTML实体映射（模块级常量，避免重复创建）
+const HTML_ENTITIES = Object.freeze({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+});
+
+// Escape HTML to prevent XSS (efficient regex-based implementation)
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return text.replace(/[&<>"']/g, char => HTML_ENTITIES[char]);
 }
 
 // ==================== 全局函数暴露 ====================
@@ -4503,11 +4541,8 @@ window.selectAllDevices = selectAllDevices;
 window.rebootDevices = rebootDevices;
 window.remountDevices = remountDevices;
 window.connectWifi = connectWifi;
-window.startUsbip = startUsbip;
-window.stopUsbip = stopUsbip;
-window.startLocalUsbip = startLocalUsbip;
+window.setupUsbipForward = setupUsbipForward;
 window.checkSshd = checkSshd;
-window.checkUsbipd = checkUsbipd;
 window.checkRouting = checkRouting;
 window.connectVpn = connectVpn;
 window.checkVpnStatus = checkVpnStatus;
@@ -4515,10 +4550,1388 @@ window.startTest = startTest;
 window.stopTest = stopTest;
 window.selectReportSource = selectReportSource;
 window.deleteReport = deleteReport;
-window.viewReport = viewReport;
+window.viewReportDetails = viewReportDetails;  // 使用实际存在的函数名
+window.downloadReport = downloadReport;
+window.retryReportWithSuite = retryReportWithSuite;
 window.analyzeReport = analyzeReport;
-window.searchOpenGrok = searchOpenGrok;
 window.openOpenGrokLink = openOpenGrokLink;
 window.showSshdInstallGuide = showSshdInstallGuide;
 window.closeSshdInstallGuide = closeSshdInstallGuide;
+window.autoInstallUsbipd = autoInstallUsbipd;
+window.resetReportAnalysis = resetReportAnalysis;
+
+// ==================== API文档相关函数 ====================
+
+/**
+ * API分类定义
+ */
+const API_CATEGORIES = {
+    '/health': 'health',
+    '/api/config': 'config',
+    '/api/client-info': 'client',
+    '/api/users': 'client',
+    '/api/devices': 'device',
+    '/api/devices/locks': 'device',
+    '/api/vnc': 'vnc',
+    '/api/desktop': 'vnc',
+    '/api/test': 'test',
+    '/api/reports': 'report',
+    '/api/vpn': 'vpn',
+    '/api/adb-forward': 'usbip',
+    '/api/usbip': 'usbip',
+    '/api/upload': 'upload',
+    '/api/burn': 'burn',
+    '/api/files': 'file',
+    '/api/screen': 'screen',
+    '/ws/': 'websocket'
+};
+
+/**
+ * 获取API分类
+ */
+function getApiCategory(path) {
+    for (const [prefix, category] of Object.entries(API_CATEGORIES)) {
+        if (path.startsWith(prefix)) {
+            return category;
+        }
+    }
+    return 'other';
+}
+
+/**
+ * 获取分类显示名称
+ */
+function getCategoryName(category) {
+    const names = {
+        'test': '🧪 测试管理',
+        'config': '⚙️ 配置管理',
+        'device': '📱 设备管理',
+        'client': '👤 用户管理',
+        'report': '📊 报告管理',
+        'vpn': '🔐 VPN管理',
+        'vnc': '🖥️ VNC管理',
+        'usbip': '📡 USB/IP',
+        'screen': '📺 屏幕共享',
+        'upload': '📤 文件上传',
+        'burn': '🔥 固件烧写',
+        'file': '📁 文件管理',
+        'health': '💚 健康检查',
+        'websocket': '🔌 WebSocket',
+        'other': '📋 其他'
+    };
+    return names[category] || '📋 其他';
+}
+
+/**
+ * 获取分类排序权重
+ */
+function getCategoryOrder(category) {
+    const order = {
+        'test': 1,
+        'config': 2,
+        'device': 3,
+        'client': 4,
+        'report': 5,
+        'vpn': 6,
+        'vnc': 7,
+        'usbip': 8,
+        'screen': 9,
+        'upload': 10,
+        'burn': 11,
+        'file': 12,
+        'health': 13,
+        'websocket': 14,
+        'other': 999
+    };
+    return order[category] || 999;
+}
+
+/**
+ * 按分类排序API列表
+ */
+function sortApisByCategory(apis) {
+    return apis.sort((a, b) => {
+        const categoryA = getCategoryOrder(a.category);
+        const categoryB = getCategoryOrder(b.category);
+
+        if (categoryA !== categoryB) {
+            return categoryA - categoryB;
+        }
+
+        // 同一分类内，按路径字母顺序排序
+        return a.path.localeCompare(b.path);
+    });
+}
+
+// 当前筛选状态
+let currentCategoryFilter = 'all';
+let currentMethodFilter = 'all';
+
+/**
+ * 按分类筛选
+ */
+function filterByCategory(category) {
+    currentCategoryFilter = category;
+
+    // 更新按钮状态
+    document.querySelectorAll('[data-category]').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.category === category) {
+            btn.classList.add('active');
+        }
+    });
+
+    applyFilters();
+}
+
+/**
+ * 按方法筛选
+ */
+function filterByMethod(method) {
+    currentMethodFilter = method;
+
+    // 更新按钮状态
+    document.querySelectorAll('[data-method]').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.method === method) {
+            btn.classList.add('active');
+        }
+    });
+
+    applyFilters();
+}
+
+/**
+ * Debounce wrapper for search input
+ */
+let debounceTimer;
+function debounceFilterApiDocs() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+        filterApiDocs();
+    }, 300);
+}
+
+/**
+ * 应用筛选
+ */
+function applyFilters() {
+    const searchInput = document.getElementById('api-search-input');
+    const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+
+    console.log('[API Docs] Filtering:', { searchTerm, category: currentCategoryFilter, method: currentMethodFilter });
+
+    // 筛选API
+    const filteredApis = allApiDocs.filter(api => {
+        // 搜索关键词匹配
+        const matchesSearch = !searchTerm ||
+            api.path.toLowerCase().includes(searchTerm) ||
+            api.description.toLowerCase().includes(searchTerm);
+
+        // 分类匹配
+        const matchesCategory = currentCategoryFilter === 'all' || api.category === currentCategoryFilter;
+
+        // 方法匹配
+        const matchesMethod = currentMethodFilter === 'all' || api.method === currentMethodFilter;
+
+        return matchesSearch && matchesCategory && matchesMethod;
+    });
+
+    // 筛选结果保持原有顺序（allApiDocs已排序），无需重新排序
+    console.log('[API Docs] Filtered:', filteredApis.length, 'APIs');
+    displayApiDocs(filteredApis);
+
+    // 更新筛选结果数量
+    const filteredCountEl = document.getElementById('filtered-apis-count');
+    if (filteredCountEl) {
+        filteredCountEl.textContent = filteredApis.length;
+    }
+}
+
+/**
+ * 筛选API文档（搜索框使用）
+ */
+function filterApiDocs() {
+    applyFilters();
+}
+
+/**
+ * 加载API文档列表（带缓存优化）
+ */
+async function loadApiDocs() {
+    console.log('[API Docs] ===== loadApiDocs called =====');
+    try {
+        // 检查DOM元素是否存在
+        const tbody = document.getElementById('api-docs-table-body');
+        console.log('[API Docs] tbody element:', tbody);
+        if (!tbody) {
+            console.warn('[API Docs] Table body not found, skipping load');
+            return;
+        }
+
+        // 检查缓存
+        const now = Date.now();
+        console.log('[API Docs] Cache check:', {
+            hasCache: !!apiDocsCache,
+            cacheTime: apiDocsCacheTime,
+            now: now,
+            elapsed: now - apiDocsCacheTime,
+            duration: API_DOCS_CACHE_DURATION
+        });
+        if (apiDocsCache && (now - apiDocsCacheTime) < API_DOCS_CACHE_DURATION) {
+            console.log('[API Docs] Using cached data');
+            displayApiDocs(apiDocsCache);
+            updateApiStats(apiDocsCache);
+            return;
+        }
+
+        console.log('[API Docs] Fetching from server...');
+        const resp = await fetch('/api/docs');
+        console.log('[API Docs] Response status:', resp.status, resp.statusText);
+
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        }
+
+        const data = await resp.json();
+        console.log('[API Docs] Response data:', {
+            success: data.success,
+            hasApis: !!data.apis,
+            apisLength: data.apis ? data.apis.length : 'N/A',
+            total: data.total
+        });
+
+        if (data.apis && Array.isArray(data.apis)) {
+            // 为每个API添加分类信息
+            const apisWithCategory = data.apis.map(api => ({
+                ...api,
+                category: getApiCategory(api.path)
+            }));
+
+            // 按分类排序
+            const sortedApis = sortApisByCategory(apisWithCategory);
+
+            // 更新缓存
+            apiDocsCache = sortedApis;
+            allApiDocs = sortedApis;
+            apiDocsCacheTime = now;
+
+            console.log('[API Docs] Calling displayApiDocs with', sortedApis.length, 'APIs');
+            displayApiDocs(sortedApis);
+            console.log('[API Docs] Calling updateApiStats');
+            updateApiStats(sortedApis);
+            console.log('[API Docs] ===== Load complete =====');
+        } else {
+            throw new Error('Invalid response format: missing or invalid apis field');
+        }
+    } catch (e) {
+        console.error('[API Docs] Error loading API docs:', e);
+        console.error('[API Docs] Error stack:', e.stack);
+        showToast('加载API文档失败: ' + e.message, 'error');
+
+        // 显示错误状态
+        const tbody = document.getElementById('api-docs-table-body');
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" style="padding: 40px; text-align: center; color: var(--danger-color);">
+                        加载失败: ${escapeHtml(e.message)}
+                    </td>
+                </tr>
+            `;
+        }
+    }
+}
+
+/**
+ * 更新API统计数据
+ */
+function updateApiStats(apis) {
+    const totalCount = apis.length;
+    const getCount = apis.filter(api => api.method === 'GET').length;
+    const postCount = apis.filter(api => api.method === 'POST').length;
+
+    console.log('[API Stats] Updating stats:', { totalCount, getCount, postCount });
+
+    const totalEl = document.getElementById('total-apis-count');
+    const getEl = document.getElementById('get-apis-count');
+    const postEl = document.getElementById('post-apis-count');
+    const filteredEl = document.getElementById('filtered-apis-count');
+
+    if (totalEl) {
+        totalEl.textContent = totalCount;
+        console.log('[API Stats] Set total-apis-count to', totalCount);
+    }
+    if (getEl) {
+        getEl.textContent = getCount;
+        console.log('[API Stats] Set get-apis-count to', getCount);
+    }
+    if (postEl) {
+        postEl.textContent = postCount;
+        console.log('[API Stats] Set post-apis-count to', postCount);
+    }
+    if (filteredEl) {
+        filteredEl.textContent = totalCount;
+        console.log('[API Stats] Set filtered-apis-count to', totalCount);
+    }
+}
+
+// ==================== 常量定义 ====================
+// API表格列宽配置
+const API_TABLE_COLUMNS = {
+    INTERFACE: 30,    // 百分比
+    DESCRIPTION: 20,  // 百分比
+    USAGE: 50         // 百分比
+};
+
+// HTTP方法类型
+const HTTP_METHODS = {
+    GET: 'GET',
+    POST: 'POST',
+    WEBSOCKET: 'WebSocket'
+};
+
+// CURL特殊参数
+const CURL_SPECIAL_PARAMS = ['force_refresh', 'log_type', 'report_timestamp'];
+
+// 视口高度偏移量（用于表格高度计算）
+const VIEWPORT_HEIGHT_OFFSET = 150; // 像素
+
+// ==================== API Documentation Constants ====================
+
+/**
+ * Parameter type constants for type safety
+ */
+const PARAM_TYPES = {
+    STRING: 'string',
+    NUMBER: 'number',
+    ARRAY: 'array',
+    BOOLEAN: 'boolean',
+    FILE: 'file',
+    OBJECT: 'object'
+};
+
+/**
+ * Curl placeholder values for different parameter types (immutable)
+ */
+const CURL_PLACEHOLDERS = Object.freeze({
+    [PARAM_TYPES.STRING]: 'VALUE',
+    [PARAM_TYPES.NUMBER]: 123,
+    [PARAM_TYPES.ARRAY]: ['Serial'],
+    [PARAM_TYPES.BOOLEAN]: true,
+    [PARAM_TYPES.OBJECT]: {}
+});
+
+/**
+ * Path parameter normalization patterns
+ */
+const PATH_PATTERNS = [
+    { pattern: /^\/api\/reports\/files\//, template: '/api/reports/files/{report_timestamp}' },
+    { pattern: /^\/api\/reports\/analyze\//, template: '/api/reports/analyze/{report_timestamp}' },
+    { pattern: /^\/api\/reports\/download\//, template: '/api/reports/download/{report_timestamp}' }
+];
+
+/**
+ * API details cache to avoid repeated lookups
+ */
+const apiDetailsCache = new Map();
+
+/**
+ * Default API details for unknown endpoints
+ */
+const DEFAULT_API_DETAILS = Object.freeze({
+    title: 'API接口',
+    description: '执行API操作',
+    params: Object.freeze([]),
+    response: '{ "success": true }',
+    usage: '使用该接口完成相关操作'
+});
+
+/**
+ * Badge size and padding constants
+ */
+const BADGE_SIZES = { xs: '9px', sm: '10px', md: '11px', lg: '12px' };
+const BADGE_PADDINGS = { xs: '1px 4px', sm: '2px 6px', md: '3px 8px', lg: '4px 10px' };
+
+/**
+ * Badge HTML generation utility
+ */
+function createBadge(text, colorVar, size = 'xs') {
+    return `<span style="background: var(--${colorVar}); color: white; padding: ${BADGE_PADDINGS[size]}; border-radius: 3px; font-size: ${BADGE_SIZES[size]};">${escapeHtml(text)}</span>`;
+}
+
+/**
+ * Get example value for parameter type
+ */
+function getExampleValue(type) {
+    const examples = {
+        'string': '"VALUE"',
+        'number': '123',
+        'array': '[]',
+        'boolean': 'true',
+        'file': '"/path/to/file"',
+        'object': '{}'
+    };
+    return examples[type] || '"VALUE"';
+}
+
+/**
+ * Format JSON response for display
+ */
+function formatJsonResponse(response) {
+    try {
+        // Try to parse as JSON
+        const parsed = JSON.parse(response);
+        // Format with 2-space indentation
+        return JSON.stringify(parsed, null, 2);
+    } catch (e) {
+        // If not valid JSON, return as-is
+        return response;
+    }
+}
+
+/**
+ * API详细说明映射表
+ */
+const API_DETAILS_MAP = {
+    '/api/test/start': {
+        title: '启动测试',
+        description: '启动兼容性测试(CTS/VTS/GTS等)',
+        params: [
+            { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' },
+            { name: 'test_type', type: 'string', required: true, desc: '测试类型: CTS|VTS|STS|GTS|CTS_VERIFIER' },
+            { name: 'test_module', type: 'string', required: true, desc: '测试模块名称' },
+            { name: 'test_case', type: 'string', required: false, desc: '具体测试用例(可选)' },
+            { name: 'retry_dir', type: 'string', required: false, desc: '重试目录(可选)' },
+            { name: 'test_suite', type: 'string', required: false, desc: '测试套件路径(可选)' }
+        ],
+        response: '{ "success": true, "message": "测试已启动" }',
+        usage: '⭐核心接口 - 启动CTS/VTS/GTS等兼容性测试'
+    },
+    '/api/test/stop': {
+        title: '停止测试',
+        description: '停止当前正在运行的测试',
+        params: [],
+        response: '{ "success": true, "message": "测试已停止" }',
+        usage: '紧急停止正在运行的测试'
+    },
+    '/api/test/clean': {
+        title: '清理测试环境',
+        description: '清理测试环境并释放资源',
+        params: [],
+        response: '{ "success": true, "message": "测试环境已清理" }',
+        usage: '测试完成后清理临时文件和进程'
+    },
+    '/api/test/autocomplete-suite': {
+        title: '自动补全测试套件',
+        description: '根据查询自动补全测试套件名称',
+        params: [
+            { name: 'query', type: 'string', required: true, desc: '查询关键词' }
+        ],
+        response: '{ "suggestions": ["CtsCameraTestCases", "CtsCameraApiTestCases"] }',
+        usage: '输入测试套件名称时获得智能提示'
+    },
+    '/api/test/analyze-source': {
+        title: '分析源码',
+        description: '分析测试用例的源代码',
+        params: [
+            { name: 'test_name', type: 'string', required: true, desc: '测试用例名称' },
+            { name: 'error_message', type: 'string', required: true, desc: '错误信息' }
+        ],
+        response: '{ "source_code": "...", "analysis": "..." }',
+        usage: '测试失败时分析源代码找出原因'
+    },
+    '/api/test/logs/download': {
+        title: '下载日志',
+        description: '下载测试日志文件',
+        params: [
+            { name: 'log_type', type: 'string', required: true, desc: '日志类型: console|result' }
+        ],
+        response: '日志文件下载',
+        usage: '下载控制台日志或测试结果日志'
+    },
+    '/api/test/logs/save-current': {
+        title: '保存当前日志',
+        description: '保存当前正在运行的日志',
+        params: [],
+        response: '{ "success": true, "log_path": "/logs/saved_20260326_110000.log" }',
+        usage: '测试运行中保存当前日志快照'
+    },
+    '/api/test/logs/list': {
+        title: '获取日志列表',
+        description: '获取所有保存的日志文件列表',
+        params: [],
+        response: '{ "logs": [{ "filename": "console_20260326_100000.log" }] }',
+        usage: '查看历史日志文件'
+    },
+    '/api/test/status': {
+        title: '获取测试状态',
+        description: '获取当前测试运行状态',
+        params: [],
+        response: '{ "running": false, "test_type": "CTS", "devices": ["RF8TC2W4JNH"] }',
+        usage: '⭐核心接口 - 查看测试是否正在运行及进度'
+    },
+    '/health': {
+        title: '健康检查',
+        description: '检查服务器运行状态',
+        params: [],
+        response: '{ "status": "healthy", "timestamp": "2026-03-26T10:30:00" }',
+        usage: '用于监控服务器健康状态,建议每分钟调用一次'
+    },
+    '/api/config/validate': {
+        title: '验证配置',
+        description: '验证系统配置文件的正确性',
+        params: [],
+        response: '{ "valid": true, "errors": [] }',
+        usage: '在修改配置后验证配置是否正确'
+    },
+    '/api/config/values': {
+        title: '获取配置',
+        description: '获取当前系统配置值',
+        params: [],
+        response: '{ "ubuntu_user": "hcq", "ubuntu_host": "172.16.14.248" }',
+        usage: '查看当前服务器配置信息'
+    },
+    '/api/config': {
+        title: '更新配置',
+        description: '更新系统配置',
+        params: [
+            { name: 'ubuntu_user', type: 'string', required: true, desc: 'Ubuntu用户名' },
+            { name: 'ubuntu_host', type: 'string', required: true, desc: 'Ubuntu主机地址' },
+            { name: 'ssh_port', type: 'number', required: false, desc: 'SSH端口,默认22' }
+        ],
+        response: '{ "success": true, "message": "配置已保存" }',
+        usage: '修改服务器连接配置,需要管理员权限'
+    },
+    '/api/client-info': {
+        title: '获取客户端信息',
+        description: '获取当前客户端ID和主机名',
+        params: [],
+        response: '{ "client_id": "172.16.14.248_1234567890", "hostname": "172.16.14.248" }',
+        usage: '初始化客户端身份,用于多用户隔离'
+    },
+    '/api/client-info/detect': {
+        title: '检测客户端信息',
+        description: '自动检测客户端用户名和身份',
+        params: [
+            { name: 'ip', type: 'string', required: false, desc: '客户端IP地址(可选)' },
+            { name: 'username', type: 'string', required: false, desc: '用户名(可选)' },
+            { name: 'password', type: 'string', required: false, desc: '密码(可选)' }
+        ],
+        response: '{ "success": true, "username": "hcq" }',
+        usage: '自动识别当前登录用户,首次使用需要提供SSH凭据'
+    },
+    '/api/users': {
+        title: '获取在线用户',
+        description: '获取所有在线用户列表',
+        params: [],
+        response: '{ "users": [{ "client_id": "xxx", "username": "admin", "running": false }] }',
+        usage: '查看当前在线用户及其设备使用情况'
+    },
+    '/api/devices': {
+        title: '获取设备列表',
+        description: '获取所有已连接的Android设备',
+        params: [
+            { name: 'force_refresh', type: 'number', required: false, desc: '是否强制刷新,默认0' }
+        ],
+        response: '[{ "device_id": "RF8TC2W4JNH", "serial": "RF8TC2W4JNH", "status": "device" }]',
+        usage: '查看可用设备列表,包括设备锁定状态'
+    },
+    '/api/devices/lock': {
+        title: '控制Bootloader锁',
+        description: '锁定或解锁设备的Bootloader(使用run_Device_Lock.sh脚本)',
+        params: [
+            { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' },
+            { name: 'action', type: 'string', required: true, desc: '操作类型: lock|unlock' }
+        ],
+        response: '{ "success": true, "results": [{ "device": "RF8TC2W4JNH", "success": true }] }',
+        usage: '⚠️危险操作 - 控制设备Bootloader锁定状态,可能影响系统安全性'
+    },
+    '/api/devices/lock-status': {
+        title: '检查Bootloader锁状态',
+        description: '检查设备的Verified Boot锁定状态(GREEN=锁定, ORANGE=未锁定)',
+        params: [
+            { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
+        ],
+        response: '[{ "device": "RF8TC2W4JNH", "locked": true, "state": "GREEN", "status": "已锁定" }]',
+        usage: '检查设备Bootloader是否被锁定,通过ro.boot.verifiedbootstate属性判断'
+    },
+    '/api/devices/info': {
+        title: '获取设备详细信息',
+        description: '获取设备的详细硬件和软件信息',
+        params: [
+            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' }
+        ],
+        response: '{ "serial": "RF8TC2W4JNH", "product": "takku", "android_version": "14" }',
+        usage: '查看设备详细配置信息,包括Android版本、安全补丁等'
+    },
+    '/api/devices/management': {
+        title: '设备管理操作',
+        description: '执行设备管理操作(重启/重挂载/WiFi)',
+        params: [
+            { name: 'action', type: 'string', required: true, desc: '操作类型: reboot|remount|connect_wifi' },
+            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
+            { name: 'ssid', type: 'string', required: false, desc: 'WiFi名称(连接WiFi时需要)' },
+            { name: 'password', type: 'string', required: false, desc: 'WiFi密码(连接WiFi时需要)' }
+        ],
+        response: '{ "success": true, "message": "操作执行成功" }',
+        usage: '重启设备、重新挂载为读写模式、连接WiFi'
+    },
+    '/api/devices/locks': {
+        title: '列出所有Bootloader锁',
+        description: '列出所有设备的Bootloader锁定信息',
+        params: [],
+        response: '{ "success": true, "data": [{ "device_id": "RF8TC2W4JNH", "locked": true, "locked_by": "admin" }] }',
+        usage: '查看全局设备的Bootloader锁定情况'
+    },
+    '/api/devices/reboot': {
+        title: '重启设备',
+        description: '重启指定的Android设备',
+        params: [
+            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' }
+        ],
+        response: '{ "success": true, "message": "设备正在重启" }',
+        usage: '设备无响应或需要清理状态时重启'
+    },
+    '/api/devices/remount': {
+        title: '重新挂载设备',
+        description: '将设备重新挂载为读写模式',
+        params: [
+            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' }
+        ],
+        response: '{ "success": true, "message": "设备已重新挂载为读写模式" }',
+        usage: '需要修改系统文件时使用'
+    },
+    '/api/devices/connect-wifi': {
+        title: '连接WiFi',
+        description: '让设备连接到指定的WiFi网络',
+        params: [
+            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
+            { name: 'ssid', type: 'string', required: true, desc: 'WiFi名称' },
+            { name: 'password', type: 'string', required: true, desc: 'WiFi密码' }
+        ],
+        response: '{ "success": true, "message": "WiFi连接成功" }',
+        usage: '配置设备连接到WiFi网络'
+    },
+    '/api/devices/shell': {
+        title: '执行Shell命令',
+        description: '在设备上执行ADB Shell命令',
+        params: [
+            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
+            { name: 'command', type: 'string', required: true, desc: 'Shell命令' }
+        ],
+        response: '{ "success": true, "output": "命令输出..." }',
+        usage: '在设备上执行任意Shell命令,如pm list packages'
+    },
+    '/api/devices/screen': {
+        title: '显示设备屏幕',
+        description: '启动设备屏幕显示(VNC)',
+        params: [
+            { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
+        ],
+        response: '{ "success": true, "screens": [{ "device_id": "RF8TC2W4JNH", "port": 5900 }] }',
+        usage: '批量查看多个设备屏幕,用于远程监控'
+    },
+    '/api/reports/list': {
+        title: '获取报告列表',
+        description: '获取所有历史测试报告',
+        params: [],
+        response: '{ "reports": [{ "timestamp": "20260326_100000", "test_type": "CTS" }] }',
+        usage: '查看所有历史测试报告'
+    },
+    '/api/reports/files/{report_timestamp}': {
+        title: '获取报告文件',
+        description: '下载指定时间戳的报告文件',
+        params: [
+            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳,如20260326_100000' }
+        ],
+        response: '报告文件下载',
+        usage: '下载完整测试报告'
+    },
+    '/api/reports/analyze/{report_timestamp}': {
+        title: '分析报告',
+        description: '分析测试报告并给出统计信息',
+        params: [
+            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
+        ],
+        response: '{ "summary": { "passed": 150, "failed": 5 }, "failed_tests": [] }',
+        usage: '快速查看测试结果统计和失败用例'
+    },
+    '/api/reports/view': {
+        title: '查看报告',
+        description: '在浏览器中查看HTML报告',
+        params: [
+            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
+        ],
+        response: 'HTML报告页面',
+        usage: '在浏览器中查看详细测试报告'
+    },
+    '/api/reports/download/{report_timestamp}': {
+        title: '下载报告ZIP',
+        description: '下载测试报告的ZIP压缩包',
+        params: [
+            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
+        ],
+        response: 'ZIP文件下载',
+        usage: '下载完整报告ZIP包,包含所有测试结果'
+    },
+    '/api/reports/delete': {
+        title: '删除报告',
+        description: '删除指定的测试报告',
+        params: [
+            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
+        ],
+        response: '{ "success": true, "message": "报告已删除" }',
+        usage: '删除不需要的历史报告'
+    },
+    '/api/reports/analyze': {
+        title: 'AI分析报告',
+        description: '使用AI分析测试失败原因',
+        params: [
+            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' },
+            { name: 'use_ai', type: 'boolean', required: false, desc: '是否使用AI分析' }
+        ],
+        response: '{ "analysis": "基于AI分析...", "suggestions": [] }',
+        usage: 'AI智能分析测试失败原因并给出修复建议'
+    },
+    '/api/reports/analyze-ai': {
+        title: 'AI深度分析',
+        description: '使用AI进行深度分析',
+        params: [
+            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
+        ],
+        response: '{ "ai_analysis": "...", "root_cause": "...", "fix_suggestions": [] }',
+        usage: 'AI深度分析,找出根本原因'
+    },
+    '/api/vnc/status': {
+        title: '获取VNC状态',
+        description: '检查VNC服务运行状态',
+        params: [],
+        response: '{ "running": false, "port": 5900 }',
+        usage: '检查VNC服务是否正在运行'
+    },
+    '/api/vnc/start': {
+        title: '启动VNC',
+        description: '启动设备VNC服务',
+        params: [
+            { name: 'device_id', type: 'string', required: false, desc: '设备序列号' }
+        ],
+        response: '{ "success": true, "port": 5900 }',
+        usage: '启动VNC服务以远程查看设备屏幕'
+    },
+    '/api/vnc/stop': {
+        title: '停止VNC',
+        description: '停止VNC服务',
+        params: [],
+        response: '{ "success": true, "message": "VNC已停止" }',
+        usage: '停止VNC服务释放资源'
+    },
+    '/api/vnc/start-desktop': {
+        title: '启动桌面VNC',
+        description: '连接Ubuntu桌面的VNC',
+        params: [
+            { name: 'host', type: 'string', required: true, desc: '桌面主机地址,格式: 用户名@主机' },
+            { name: 'password', type: 'string', required: true, desc: 'SSH登录密码' },
+            { name: 'vnc_password', type: 'string', required: false, desc: 'VNC密码(可选)' }
+        ],
+        response: '{ "success": true, "url": "http://xxx:6080/vnc.html" }',
+        usage: '远程连接Ubuntu桌面进行图形化操作'
+    },
+    '/api/desktop/validate-host': {
+        title: '验证桌面主机',
+        description: '验证桌面主机连接是否有效',
+        params: [
+            { name: 'host', type: 'string', required: true, desc: '主机地址' }
+        ],
+        response: '{ "valid": true, "hostname": "desktop-pc" }',
+        usage: '连接桌面主机前验证连接是否有效'
+    },
+    '/api/adb-forward/start': {
+        title: '启动ADB端口转发',
+        description: '通过USB/IP启动ADB端口转发',
+        params: [
+            { name: 'device_host', type: 'string', required: true, desc: '设备主机地址' },
+            { name: 'device_password', type: 'string', required: true, desc: '设备SSH密码' }
+        ],
+        response: '{ "success": true, "forwarding": [] }',
+        usage: '通过USB/IP连接远程设备进行ADB调试'
+    },
+    '/api/adb-forward/stop': {
+        title: '停止ADB端口转发',
+        description: '停止ADB端口转发',
+        params: [
+            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' }
+        ],
+        response: '{ "success": true, "message": "ADB端口转发已停止" }',
+        usage: '停止ADB端口转发'
+    },
+    '/api/usbip/status': {
+        title: '获取USB/IP状态',
+        description: '检查USB/IP服务状态',
+        params: [],
+        response: '{ "installed": true, "running": false }',
+        usage: '检查USB/IP服务是否已安装和运行'
+    },
+    '/api/usbip/start': {
+        title: '启动USB/IP',
+        description: '启动USB/IP设备共享',
+        params: [
+            { name: 'device_id', type: 'string', required: true, desc: 'USB设备ID,如1-5' }
+        ],
+        response: '{ "success": true, "message": "USB/IP已启动" }',
+        usage: '通过IP网络共享USB设备'
+    },
+    '/api/usbip/stop': {
+        title: '停止USB/IP',
+        description: '停止USB/IP服务',
+        params: [],
+        response: '{ "success": true, "message": "USB/IP已停止" }',
+        usage: '停止USB/IP服务'
+    },
+    '/api/usbip/auto-install': {
+        title: '自动安装USB/IP',
+        description: '自动安装USB/IP服务',
+        params: [],
+        response: '{ "success": true, "message": "USB/IP已自动安装" }',
+        usage: '一键安装USB/IP服务'
+    },
+    '/api/vpn/check-sshd': {
+        title: '检查SSHD状态',
+        description: '检查SSH服务状态',
+        params: [],
+        response: '{ "installed": true, "running": true }',
+        usage: '检查SSH服务是否正常运行'
+    },
+    '/api/vpn/install-sshd': {
+        title: '安装SSHD',
+        description: '安装SSH服务',
+        params: [],
+        response: '{ "success": true, "message": "SSH服务已安装" }',
+        usage: '安装SSH服务'
+    },
+    '/api/vpn/check-routing': {
+        title: '检查路由',
+        description: '检查系统路由表',
+        params: [],
+        response: '{ "routing_table": [] }',
+        usage: '查看系统路由配置'
+    },
+    '/api/vpn/status': {
+        title: '获取VPN状态',
+        description: '检查VPN连接状态',
+        params: [],
+        response: '{ "connected": false, "server": "" }',
+        usage: '检查VPN是否已连接'
+    },
+    '/api/vpn/connect': {
+        title: '连接VPN',
+        description: '连接到VPN服务器',
+        params: [
+            { name: 'server', type: 'string', required: true, desc: 'VPN服务器地址' },
+            { name: 'username', type: 'string', required: true, desc: 'VPN用户名' },
+            { name: 'password', type: 'string', required: true, desc: 'VPN密码' }
+        ],
+        response: '{ "success": true, "message": "VPN已连接" }',
+        usage: '连接到VPN服务器'
+    },
+    '/api/vpn/disconnect': {
+        title: '断开VPN',
+        description: '断开VPN连接',
+        params: [],
+        response: '{ "success": true, "message": "VPN已断开" }',
+        usage: '断开当前VPN连接'
+    },
+    '/api/upload/file': {
+        title: '上传文件',
+        description: '上传文件到服务器',
+        params: [
+            { name: 'file', type: 'file', required: true, desc: '要上传的文件' }
+        ],
+        response: '{ "success": true, "filename": "test.apk" }',
+        usage: '上传任意文件到服务器'
+    },
+    '/api/upload': {
+        title: '上传并安装',
+        description: '上传APK并安装到设备',
+        params: [
+            { name: 'file', type: 'file', required: true, desc: 'APK文件' },
+            { name: 'device_id', type: 'string', required: true, desc: '目标设备序列号' }
+        ],
+        response: '{ "success": true, "message": "应用已安装" }',
+        usage: '上传并安装APK到指定设备'
+    },
+    '/api/upload/progress': {
+        title: '获取上传进度',
+        description: '获取当前文件上传进度',
+        params: [],
+        response: '{ "uploading": false, "progress": 0 }',
+        usage: '查看文件上传进度'
+    },
+    '/api/burn/firmware': {
+        title: '刷入固件',
+        description: '刷入设备固件',
+        params: [
+            { name: 'firmware', type: 'file', required: true, desc: '固件文件' },
+            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
+            { name: 'wipe_data', type: 'boolean', required: false, desc: '是否清除数据' }
+        ],
+        response: '{ "success": true, "message": "固件刷入成功" }',
+        usage: '⚠️危险操作 - 刷入固件会重启设备'
+    },
+    '/api/burn/gsi': {
+        title: '刷入GSI',
+        description: '刷入GSI镜像',
+        params: [
+            { name: 'gsi_image', type: 'file', required: true, desc: 'GSI镜像文件' },
+            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
+            { name: 'wipe_data', type: 'boolean', required: false, desc: '是否清除数据' }
+        ],
+        response: '{ "success": true, "message": "GSI刷入成功" }',
+        usage: '⚠️危险操作 - 刷入GSI镜像'
+    },
+    '/api/burn/serial': {
+        title: '修改序列号',
+        description: '修改设备序列号',
+        params: [
+            { name: 'device_id', type: 'string', required: true, desc: '当前设备序列号' },
+            { name: 'new_serial', type: 'string', required: true, desc: '新的序列号' }
+        ],
+        response: '{ "success": true, "message": "序列号已修改" }',
+        usage: '⚠️危险操作 - 修改设备序列号'
+    },
+    '/api/files/list': {
+        title: '列出文件',
+        description: '列出设备指定目录的文件',
+        params: [
+            { name: 'path', type: 'string', required: true, desc: '目录路径,如/sdcard' }
+        ],
+        response: '{ "files": [{ "name": "DCIM", "type": "directory" }] }',
+        usage: '浏览设备文件系统'
+    },
+    '/api/screen/start': {
+        title: '启动屏幕录制',
+        description: '录制设备屏幕',
+        params: [
+            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
+            { name: 'duration', type: 'number', required: false, desc: '录制时长(秒),默认60' }
+        ],
+        response: '{ "success": true, "recording_id": "20260326_110000" }',
+        usage: '录制设备屏幕操作'
+    },
+    '/api/terminal/push': {
+        title: '终端推送命令',
+        description: '向终端推送命令执行',
+        params: [
+            { name: 'command', type: 'string', required: true, desc: '要执行的命令' }
+        ],
+        response: '{ "success": true, "output": "命令输出..." }',
+        usage: '在Web终端中执行命令'
+    },
+    '/api/opengrok/search': {
+        title: 'OpenGrok搜索',
+        description: '在源码中搜索代码',
+        params: [
+            { name: 'query', type: 'string', required: true, desc: '搜索关键词' },
+            { name: 'full', type: 'boolean', required: false, desc: '是否全文搜索' }
+        ],
+        response: '{ "results": [{ "file": "/path/to/Test.java", "line": 10 }] }',
+        usage: '在Android源码中搜索代码'
+    }
+};
+
+/**
+ * Normalize API path to handle path parameters
+ */
+function normalizeApiPath(apiPath) {
+    const matched = PATH_PATTERNS.find(p => p.pattern.test(apiPath));
+    return matched ? matched.template : apiPath;
+}
+
+/**
+ * Get API details with caching
+ */
+function getApiDetails(apiPath) {
+    // Single cache lookup (more efficient than has() + get())
+    const cached = apiDetailsCache.get(apiPath);
+    if (cached !== undefined) {
+        return cached;
+    }
+
+    // Normalize path for path parameters
+    const detailPath = normalizeApiPath(apiPath);
+
+    // Get details or use default (frozen constant)
+    const details = API_DETAILS_MAP[detailPath] || DEFAULT_API_DETAILS;
+
+    // Cache the result
+    apiDetailsCache.set(apiPath, details);
+    return details;
+}
+
+// Module-level constants for server info (never change during page lifetime)
+const SERVER_HOST = window.location.hostname;
+const SERVER_PORT = window.location.port || '5001';
+const BASE_URL = `http://${SERVER_HOST}:${SERVER_PORT}`;
+
+/**
+ * Generate curl command for an API endpoint
+ * Moved to module level to avoid recreating on every render
+ */
+function generateCurlCommand(api, details) {
+    if (api.method === 'GET') {
+        let cmd = `curl -s "${BASE_URL}${api.path}"`;
+        // Add query parameter example
+        if (details.params && details.params.length > 0) {
+            const queryParams = details.params.filter(p =>
+                !p.required || p.name === 'force_refresh' || p.name === 'log_type' || p.name === 'report_timestamp'
+            );
+            if (queryParams.length > 0) {
+                cmd += ` \\\n  -G \\\n  -d "${queryParams[0].name}=VALUE"`;
+            }
+        }
+        // For GET requests, add continuation if there are params
+        const displayCmd = cmd.includes('\\') ? cmd.split('\n')[0] : cmd;
+        return { display: displayCmd, full: cmd };
+    } else if (api.method === 'POST') {
+        // Generate multi-line version
+        let multiLineCmd = `curl -sX POST "${BASE_URL}${api.path}" \\\n  -H "Content-Type: application/json"`;
+
+        // Generate request body example
+        if (details.params && details.params.length > 0) {
+            const bodyLines = ['{'];
+            const validParams = details.params.filter(p => p.type !== PARAM_TYPES.FILE);
+
+            validParams.forEach((p, index) => {
+                // Include all parameters (both required and optional)
+                const placeholder = CURL_PLACEHOLDERS[p.type] || CURL_PLACEHOLDERS[PARAM_TYPES.STRING];
+
+                // Format the value based on type
+                let valueStr;
+                if (p.type === PARAM_TYPES.STRING) {
+                    valueStr = `"${placeholder}"`;
+                } else if (p.type === PARAM_TYPES.NUMBER) {
+                    valueStr = placeholder;
+                } else if (p.type === PARAM_TYPES.BOOLEAN) {
+                    valueStr = placeholder;
+                } else if (p.type === PARAM_TYPES.ARRAY) {
+                    valueStr = JSON.stringify(placeholder);
+                } else {
+                    valueStr = placeholder;
+                }
+
+                // Add comma if not last item
+                const comma = (index < validParams.length - 1) ? ',' : '';
+                bodyLines.push(`    "${p.name}": ${valueStr}${comma}`);
+            });
+            bodyLines.push('  }');
+
+            if (bodyLines.length > 2) { // More than just '{' and '}'
+                multiLineCmd += ' \\\n  -d \'' + bodyLines.join('\n') + '\'';
+            } else {
+                multiLineCmd += ` \\\n  -d '{}'`;
+            }
+        } else {
+            multiLineCmd += ` \\\n  -d '{}'`;
+        }
+
+        // Display version: only first line with continuation
+        const displayCmd = multiLineCmd.split('\n')[0];
+
+        return { display: displayCmd, full: multiLineCmd };
+    } else if (api.method === 'WebSocket') {
+        return { display: `# WebSocket连接\nwscat -c ws://${BASE_URL}${api.path.replace('{client_id}', 'YOUR_CLIENT_ID')}`, full: `# WebSocket连接\nwscat -c ws://${BASE_URL}${api.path.replace('{client_id}', 'YOUR_CLIENT_ID')}` };
+    }
+    return { display: `curl -s ${BASE_URL}${api.path}`, full: `curl -s ${BASE_URL}${api.path}` };
+}
+
+/**
+ * Generate parameter descriptions HTML
+ * Moved to module level to avoid recreating on every render
+ */
+function generateParamsHtml(details) {
+    if (!details.params || details.params.length === 0) {
+        return '<span style="color: var(--text-secondary);">无参数</span>';
+    }
+
+    // Use array.join() instead of string concatenation
+    const parts = ['<div style="margin-top: 8px;">'];
+    details.params.forEach(param => {
+        const requiredBadge = createBadge(
+            param.required ? '必需' : '可选',
+            param.required ? 'danger-color' : 'info-color'
+        );
+        const typeBadge = createBadge(param.type, 'primary-color');
+
+        parts.push(`
+            <div style="margin-bottom: 4px; font-size: 10px;">
+                <span style="font-family: monospace; font-weight: 600; color: var(--primary-color);">${escapeHtml(param.name)}</span>
+                ${typeBadge} ${requiredBadge}
+                <span style="color: var(--text-secondary); margin-left: 4px;">${escapeHtml(param.desc)}</span>
+            </div>
+        `);
+    });
+    parts.push('</div>');
+    return parts.join('');
+}
+
+/**
+ * Display API documentation list with collapsible details
+ */
+function displayApiDocs(apis) {
+    const tbody = document.getElementById('api-docs-table-body');
+    if (!tbody) return;
+
+    // Use array.join() instead of string concatenation for better performance
+    const htmlParts = [];
+    apis.forEach((api, index) => {
+        const methodClass = api.method === 'GET' ? 'color: var(--success-color);' :
+                           api.method === 'POST' ? 'color: var(--warning-color);' :
+                           api.method === 'WebSocket' ? 'color: var(--primary-color);' :
+                           'color: var(--text-secondary);';
+
+        const categoryBadge = getCategoryName(api.category);
+
+        // 获取API详细信息
+        const details = getApiDetails(api.path);
+        const curlCmdObj = generateCurlCommand(api, details);
+        const paramsHtml = generateParamsHtml(details);
+
+        // 将curl命令存储到data属性中,避免在onclick中直接传递复杂字符串
+        const escapedCurlCmd = curlCmdObj.full.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        const displayCurlCmd = curlCmdObj.display;
+
+        htmlParts.push(`
+            <tr style="border-bottom: 1px solid var(--border-color); ${index % 2 === 0 ? 'background: var(--bg-color);' : 'background: var(--light-bg);'}">
+                <!-- Column 1: API Interface -->
+                <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 30%;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="${methodClass} font-weight: 700; font-size: 13px; min-width: 55px;">${api.method}</span>
+                        <span style="font-family: monospace; font-size: 12px; color: var(--text-primary); word-break: break-all;">${escapeHtml(api.path)}</span>
+                    </div>
+                </td>
+
+                <!-- Column 2: Description -->
+                <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 20%;">
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <div style="font-size: 11px; color: var(--text-primary); font-weight: 600; line-height: 1.3;">
+                            ${escapeHtml(details.title)}(${escapeHtml(details.description)})
+                        </div>
+                    </div>
+                </td>
+
+                <!-- Column 3: Usage Method -->
+                <td style="padding: 4px 8px; text-align: left; vertical-align: middle; width: 50%;">
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <!-- Curl Command Row -->
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <pre
+                                 data-cmd="${escapedCurlCmd}"
+                                 style="margin: 0; padding: 2px 6px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; color: var(--success-color); overflow-x: auto; white-space: nowrap; cursor: pointer; transition: all 0.2s; line-height: 1.3; display: block; flex: 1; background: transparent; border: none; text-overflow: ellipsis;"
+                                 onclick="copyCurlCommandFromData(this)"
+                                 onmouseover="this.style.color='var(--primary-color)';"
+                                 onmouseout="this.style.color='var(--success-color)';"
+                                 title="点击复制curl命令">${escapeHtml(displayCurlCmd)}</pre>
+                            <button
+                                id="expand-btn-${index}"
+                                onclick="toggleApiDetails('${index}')"
+                                style="background: var(--primary-color); color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: 600; min-width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0;"
+                                title="点击展开/收起详情">
+                                <span id="expand-icon-${index}">▶</span>
+                            </button>
+                        </div>
+
+                        <!-- Expandable Details (Hidden by Default) -->
+                        <div id="api-details-${index}" style="display: none;">
+                            <div style="border-top: 1px solid var(--border-color); padding-top: 8px; margin-top: 4px;">
+                                <!-- Full Curl Command -->
+                                <div style="font-size: 11px; font-weight: 600; margin-bottom: 4px; color: var(--text-primary);">📜 完整curl命令:</div>
+                                <pre style="font-family: 'Monaco', 'Menlo', monospace; font-size: 10px; color: var(--success-color); background: var(--darker-bg); padding: 6px; border-radius: 4px; margin-bottom: 8px; white-space: pre-wrap; word-break: break-all; cursor: pointer;" onclick="navigator.clipboard.writeText(this.textContent); this.style.background='var(--success-color)'; this.style.color='white'; setTimeout(() => { this.style.background='var(--darker-bg)'; this.style.color='var(--success-color)'; }, 200);" title="点击复制">${escapeHtml(curlCmdObj.full)}</pre>
+
+                                <!-- Title with star if core API -->
+                                <div style="font-size: 12px; font-weight: 700; color: var(--primary-color); margin-bottom: 6px;">
+                                    ${details.usage.includes('⭐核心接口') ? '### ' : ''}${escapeHtml(details.title)} ${details.usage.includes('⭐核心接口') ? '⭐核心接口' : ''}
+                                </div>
+
+                                <!-- HTTP Method and Path -->
+                                <div style="font-family: monospace; font-size: 11px; color: var(--text-primary); background: var(--darker-bg); padding: 6px; border-radius: 4px; margin-bottom: 8px; font-weight: 600;">
+${api.method} ${api.path}
+${api.method === 'POST' ? 'Content-Type: application/json' : ''}
+                                </div>
+
+                                <!-- Parameters -->
+                                ${details.params && details.params.length > 0 ? `
+                                <div style="font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary);">📋 请求参数说明:</div>
+                                ${paramsHtml}
+                                ` : ''}
+
+                                <!-- Response Example -->
+                                <div style="margin-top: 12px; font-size: 11px; font-weight: 600; margin-bottom: 4px; color: var(--text-secondary);">📤 响应示例:</div>
+                                <div style="font-family: monospace; font-size: 10px; color: var(--success-color); background: var(--darker-bg); padding: 6px; border-radius: 4px; white-space: pre-wrap; word-break: break-all;">${escapeHtml(formatJsonResponse(details.response))}</div>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        `);
+    });
+
+    tbody.innerHTML = htmlParts.join('');
+}
+
+/**
+ * Toggle API details visibility
+ */
+window.toggleApiDetails = function(index) {
+    const detailsDiv = document.getElementById(`api-details-${index}`);
+    const iconSpan = document.getElementById(`expand-icon-${index}`);
+    const button = document.getElementById(`expand-btn-${index}`);
+
+    if (detailsDiv.style.display === 'none') {
+        // Expand
+        detailsDiv.style.display = 'block';
+        iconSpan.textContent = '▼';
+        button.style.background = 'var(--warning-color)';
+    } else {
+        // Collapse
+        detailsDiv.style.display = 'none';
+        iconSpan.textContent = '▶';
+        button.style.background = 'var(--primary-color)';
+    }
+};
+
+/**
+ * 从data属性复制curl命令到剪贴板（自动添加jq格式化）
+ */
+window.copyCurlCommandFromData = function(element) {
+    const text = element.getAttribute('data-cmd');
+    if (!text) {
+        console.error('[Copy] No data-cmd attribute found');
+        showToast('✗ 复制失败: 未找到命令', 'error');
+        return;
+    }
+    console.log('[Copy] Attempting to copy:', text);
+    const commandWithJq = text + ' | jq "."';
+
+    // 方法1: 使用现代Clipboard API
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(commandWithJq).then(() => {
+            console.log('[Copy] Success with Clipboard API');
+            showToast('✓ curl命令已复制 (含jq格式化)', 'success');
+        }).catch(err => {
+            console.error('[Copy] Clipboard API failed:', err);
+            // 尝试备用方法
+            fallbackCopyTextToClipboard(commandWithJq);
+        });
+    } else {
+        console.log('[Copy] Clipboard API not available, using fallback');
+        fallbackCopyTextToClipboard(commandWithJq);
+    }
+};
+
+/**
+ * 显示使用实例弹窗
+ */
+function showUsageExamples() {
+    const modal = document.getElementById('usage-examples-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+/**
+ * 关闭使用实例弹窗
+ */
+function closeUsageExamplesModal() {
+    const modal = document.getElementById('usage-examples-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+/**
+ * 复制文本到剪贴板（统一函数）
+ * @param {string} text - 要复制的文本
+ * @param {Object} options - 配置选项 { addJq: boolean, successMsg: string }
+ */
+function copyText(text, options = {}) {
+    const { addJq = false, successMsg = '✓ 命令已复制到剪贴板' } = options;
+    const textToCopy = addJq ? text + ' | jq "."' : text;
+
+    console.log('[Copy] Copying text:', textToCut);
+
+    // 使用现代Clipboard API
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            console.log('[Copy] Success with Clipboard API');
+            showToast(successMsg, 'success');
+        }).catch(err => {
+            console.error('[Copy] Clipboard API failed:', err);
+            fallbackCopyTextToClipboard(textToCopy, successMsg);
+        });
+    } else {
+        console.log('[Copy] Clipboard API not available, using fallback');
+        fallbackCopyTextToClipboard(textToCopy, successMsg);
+    }
+}
+
+/**
+ * 复制curl命令到剪贴板（自动添加jq格式化）- 兼容旧代码
+ */
+window.copyCurlCommand = function(text) {
+    copyText(text, { addJq: true, successMsg: '✓ curl命令已复制 (含jq格式化)' });
+};
+
+/**
+ * 备用复制方法（使用传统textarea方法）
+ * @param {string} text - 要复制的文本
+ * @param {string} successMsg - 成功提示消息
+ */
+function fallbackCopyTextToClipboard(text, successMsg = '✓ 已复制到剪贴板') {
+    console.log('[Copy] Using fallback method');
+    try {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+
+        if (successful) {
+            console.log('[Copy] Fallback method successful');
+            showToast(successMsg, 'success');
+        } else {
+            console.error('[Copy] Fallback method failed');
+            showToast('✗ 复制失败，请手动复制', 'error');
+        }
+    } catch (err) {
+        console.error('[Copy] Fallback method error:', err);
+        showToast('✗ 复制失败: ' + err.message, 'error');
+    }
+}
+
+/**
+ * 复制命令（使用示例专用）
+ */
+window.copyCommand = function(elementId) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        console.error('[CopyCommand] Element not found:', elementId);
+        showToast('✗ 找不到命令内容', 'error');
+        return;
+    }
+
+    const text = element.textContent || element.innerText;
+    console.log('[CopyCommand] Copying from element:', elementId, text);
+
+    copyText(text);
+};
+
+// 将API文档函数暴露到window对象
+window.loadApiDocs = loadApiDocs;
+window.filterApiDocs = filterApiDocs;
 window.autoInstallSshd = autoInstallSshd;
