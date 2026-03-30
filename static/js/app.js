@@ -151,7 +151,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 先设置 client username,再初始化 Socket.IO
     try {
         // 检测客户端用户名
-        const detectResponse = await fetch('/api/client-info/detect', {
+        const detectResponse = await fetch('/api/users/detect', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'}
         });
@@ -159,7 +159,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const detectData = await detectResponse.json();
             console.log('[Init] Detected client username:', detectData.username);
             // 更新 session 中的用户名
-            await fetch('/api/client-info', {
+            await fetch('/api/users/info', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({username: detectData.username})
@@ -199,7 +199,7 @@ async function loadConfig() {
 // ==================== WebSocket Connection (FastAPI) ====================
 function initWebSocket() {
     // 获取客户端ID
-    apiCall('/api/client-info', 'GET').then(data => {
+    apiCall('/api/users/info', 'GET').then(data => {
         const clientId = data.client_id || 'unknown';
         state.clientId = clientId;
 
@@ -1496,7 +1496,7 @@ async function submitDevicePassword() {
 // ==================== VPN Control ====================
 async function checkSshd() {
     try {
-        const result = await apiCall('/api/vpn/check-sshd', 'GET');
+        const result = await apiCall('/api/ssh/sshd-check', 'GET');
 
         if (!result.installed) {
             // SSHD 未安装，显示安装指南
@@ -1513,8 +1513,32 @@ async function checkSshd() {
 
 async function checkRouting() {
     try {
-        const result = await apiCall('/api/vpn/check-routing', 'GET');
-        addLogEntry('路由检查: ' + JSON.stringify(result, null, 2), 'info');
+        const result = await apiCall('/api/ssh/route', 'GET');
+
+        if (result.same_network) {
+            addLogEntry(result.message, 'success');
+        } else if (result.need_route) {
+            addLogEntry(result.message, 'warning');
+            addLogEntry('📋 建议路由命令:', 'info');
+
+            // 显示 Windows 路由命令
+            if (result.route_commands && result.route_commands.windows) {
+                addLogEntry('--- Windows 路由命令 ---', 'info');
+                result.route_commands.windows.forEach(cmd => {
+                    addLogEntry('  ' + cmd, 'info');
+                });
+            }
+
+            // 显示 Linux 路由命令
+            if (result.route_commands && result.route_commands.linux) {
+                addLogEntry('--- Linux 路由命令 ---', 'info');
+                result.route_commands.linux.forEach(cmd => {
+                    addLogEntry('  ' + cmd, 'info');
+                });
+            }
+
+            addLogEntry('⚠️ 请根据您的操作系统选择相应的命令添加路由', 'warning');
+        }
     } catch (error) {
         addLogEntry('检查路由失败: ' + error.message, 'error');
     }
@@ -1954,7 +1978,7 @@ function navigateToParent() {
 // ==================== Test Control ====================
 async function toggleTest() {
     if (state.testing) {
-        //await stopTest();
+        await stopTest();
     } else {
         await startTest();
     }
@@ -2588,6 +2612,7 @@ function displayTestReports(reports) {
                     ${passRate}
                 </td>
                 <td style="padding: 12px; text-align: center;">
+                    <button class="btn-xxs" onclick="event.stopPropagation(); claudeAnalyzeReport('${report.timestamp}')" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: 600;">🤖 Claude分析</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); analyzeReport('${report.timestamp}')">📈 分析报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); viewReportDetails('${report.timestamp}')">📄 查看报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); retryReportWithSuite('${report.timestamp}', '${report.test_type || ''}', '${(report.suite_path || '').replace(/'/g, "\\'")}')" style="background: var(--primary-color);">🔄 retry报告</button>
@@ -2621,6 +2646,189 @@ async function deleteReport(timestamp) {
     } catch (error) {
         console.error('Delete report error:', error);
         showToast('删除失败: ' + error.message, 'error');
+    }
+}
+
+/**
+ * 使用Claude分析测试报告
+ */
+async function claudeAnalyzeReport(timestamp) {
+    console.log(`[Claude Analyze] 分析报告: ${timestamp}`);
+
+    // 显示分析中提示
+    showToast('🤖 正在使用Claude分析报告...', 'info');
+
+    try {
+        // 询问是否使用Claude API
+        const useClaudeApi = confirm('是否使用Claude API进行深度分析？\n\n确定 = 使用Claude API (需要API密钥)\n取消 = 仅基础分析 (免费)');
+
+        let apiUrl = `/api/reports/claude-analyze/${encodeURIComponent(timestamp)}`;
+
+        if (useClaudeApi) {
+            // 获取Claude API密钥
+            const apiKey = prompt('请输入Claude API密钥 (sk-ant-xxxxx):');
+            if (!apiKey) {
+                showToast('已取消分析', 'info');
+                return;
+            }
+            apiUrl += `?use_claude_api=true&claude_api_key=${encodeURIComponent(apiKey)}`;
+        }
+
+        const response = await fetch(apiUrl);
+        const result = await response.json();
+
+        if (!result.success) {
+            showToast('分析失败: ' + (result.error || '未知错误'), 'error');
+            return;
+        }
+
+        // 显示分析结果弹窗
+        showClaudeAnalysisResult(result, timestamp);
+
+    } catch (error) {
+        console.error('[Claude Analyze] Error:', error);
+        showToast('分析失败: ' + error.message, 'error');
+    }
+}
+
+/**
+ * 显示Claude分析结果弹窗
+ */
+function showClaudeAnalysisResult(result, timestamp) {
+    const basic = result.basic_analysis;
+    const claude = result.claude_analysis;
+
+    // 创建弹窗HTML
+    const modalHtml = `
+        <div id="claude-analysis-modal" class="modal" style="display: flex;">
+            <div class="modal-content" style="max-width: 900px; max-height: 90vh;">
+                <div class="modal-header">
+                    <span class="modal-title">🤖 Claude分析报告 - ${timestamp}</span>
+                    <span class="modal-close" onclick="closeClaudeAnalysisModal()">&times;</span>
+                </div>
+                <div class="modal-body" style="padding: 20px; overflow-y: auto;">
+                    <!-- 基础分析 -->
+                    <div style="margin-bottom: 24px;">
+                        <h3 style="color: var(--primary-color); margin-bottom: 12px;">📊 测试概要</h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px;">
+                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 24px; font-weight: bold; color: ${basic.summary.failed === 0 ? 'var(--success-color)' : 'var(--danger-color)'};">
+                                    ${basic.summary.status}
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">状态</div>
+                            </div>
+                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);">
+                                    ${basic.summary.total_tests}
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">总测试数</div>
+                            </div>
+                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 24px; font-weight: bold; color: var(--success-color);">
+                                    ${basic.summary.passed}
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">通过</div>
+                            </div>
+                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 24px; font-weight: bold; color: var(--danger-color);">
+                                    ${basic.summary.failed}
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">失败</div>
+                            </div>
+                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 20px; font-weight: bold; color: var(--text-primary);">
+                                    ${basic.summary.duration || '-'}
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">耗时</div>
+                            </div>
+                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 20px; font-weight: bold; color: var(--warning-color);">
+                                    ${basic.summary.retry_success}/${basic.summary.retry_failure}
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">重试</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 测试信息 -->
+                    <div style="margin-bottom: 24px;">
+                        <h3 style="color: var(--primary-color); margin-bottom: 12px;">📋 测试信息</h3>
+                        <div style="background: var(--light-bg); padding: 16px; border-radius: 8px;">
+                            <div style="margin-bottom: 8px;">
+                                <strong>设备:</strong> <code style="background: var(--darker-bg); padding: 4px 8px; border-radius: 4px;">${basic.test_info.device}</code>
+                            </div>
+                            <div style="margin-bottom: 8px;">
+                                <strong>模块:</strong> <code style="background: var(--darker-bg); padding: 4px 8px; border-radius: 4px;">${basic.test_info.module}</code>
+                            </div>
+                            <div>
+                                <strong>测试用例:</strong> <code style="background: var(--darker-bg); padding: 4px 8px; border-radius: 4px; word-break: break-all;">${basic.test_info.test_case}</code>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 智能洞察 -->
+                    ${basic.insights.length > 0 ? `
+                    <div style="margin-bottom: 24px;">
+                        <h3 style="color: var(--primary-color); margin-bottom: 12px;">💡 智能洞察</h3>
+                        ${basic.insights.map(insight => `
+                            <div style="background: ${insight.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : insight.type === 'warning' ? 'rgba(245, 158, 11, 0.1)' : insight.type === 'success' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)'}; padding: 12px; border-radius: 8px; border-left: 4px solid ${insight.type === 'error' ? 'var(--danger-color)' : insight.type === 'warning' ? 'var(--warning-color)' : insight.type === 'success' ? 'var(--success-color)' : 'var(--primary-color)'}; margin-bottom: 12px;">
+                                <div style="display: flex; gap: 12px; align-items: start;">
+                                    <span style="font-size: 20px;">${insight.icon}</span>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600; margin-bottom: 4px; color: var(--text-primary);">${insight.title}</div>
+                                        <div style="font-size: 13px; color: var(--text-secondary);">${insight.message}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    ` : ''}
+
+                    <!-- Claude深度分析 -->
+                    ${claude && claude.success ? `
+                    <div style="margin-bottom: 24px;">
+                        <h3 style="color: var(--primary-color); margin-bottom: 12px;">🤖 Claude深度分析</h3>
+                        <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); padding: 16px; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.2);">
+                            <div style="font-size: 13px; line-height: 1.6; color: var(--text-primary); white-space: pre-wrap;">${claude.analysis}</div>
+                        </div>
+                    </div>
+                    ` : ''}
+
+                    <!-- 路径信息 -->
+                    <div>
+                        <h3 style="color: var(--primary-color); margin-bottom: 12px;">📁 文件路径</h3>
+                        <div style="background: var(--light-bg); padding: 16px; border-radius: 8px;">
+                            ${basic.paths.log_dir ? `<div style="margin-bottom: 8px;"><strong>日志目录:</strong> <code style="background: var(--darker-bg); padding: 4px 8px; border-radius: 4px; font-size: 11px; word-break: break-all;">${basic.paths.log_dir}</code></div>` : ''}
+                            ${basic.paths.result_dir ? `<div><strong>结果目录:</strong> <code style="background: var(--darker-bg); padding: 4px 8px; border-radius: 4px; font-size: 11px; word-break: break-all;">${basic.paths.result_dir}</code></div>` : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // 添加到页面
+    const modalContainer = document.createElement('div');
+    modalContainer.innerHTML = modalHtml;
+    document.body.appendChild(modalContainer);
+
+    // 显示弹窗
+    const modal = document.getElementById('claude-analysis-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+/**
+ * 关闭Claude分析弹窗
+ */
+function closeClaudeAnalysisModal() {
+    const modal = document.getElementById('claude-analysis-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        setTimeout(() => {
+            modal.remove();
+        }, 300);
     }
 }
 
@@ -4568,8 +4776,7 @@ window.resetReportAnalysis = resetReportAnalysis;
 const API_CATEGORIES = {
     '/health': 'health',
     '/api/config': 'config',
-    '/api/client-info': 'client',
-    '/api/users': 'client',
+    '/api/users': 'users',
     '/api/devices': 'device',
     '/api/devices/locks': 'device',
     '/api/vnc': 'vnc',
@@ -4577,6 +4784,7 @@ const API_CATEGORIES = {
     '/api/test': 'test',
     '/api/reports': 'report',
     '/api/vpn': 'vpn',
+    '/api/ssh': 'ssh',
     '/api/adb-forward': 'usbip',
     '/api/usbip': 'usbip',
     '/api/upload': 'upload',
@@ -4606,9 +4814,11 @@ function getCategoryName(category) {
         'test': '🧪 测试管理',
         'config': '⚙️ 配置管理',
         'device': '📱 设备管理',
+        'users': '👥 用户管理',
         'client': '👤 用户管理',
         'report': '📊 报告管理',
         'vpn': '🔐 VPN管理',
+        'ssh': '🔑 SSH管理',
         'vnc': '🖥️ VNC管理',
         'usbip': '📡 USB/IP',
         'screen': '📺 屏幕共享',
@@ -4630,17 +4840,19 @@ function getCategoryOrder(category) {
         'test': 1,
         'config': 2,
         'device': 3,
+        'users': 4,
         'client': 4,
         'report': 5,
         'vpn': 6,
-        'vnc': 7,
-        'usbip': 8,
-        'screen': 9,
-        'upload': 10,
-        'burn': 11,
-        'file': 12,
-        'health': 13,
-        'websocket': 14,
+        'ssh': 7,
+        'vnc': 8,
+        'usbip': 9,
+        'screen': 10,
+        'upload': 11,
+        'burn': 12,
+        'file': 13,
+        'health': 14,
+        'websocket': 15,
         'other': 999
     };
     return order[category] || 999;
@@ -5103,14 +5315,14 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "配置已保存" }',
         usage: '修改服务器连接配置,需要管理员权限'
     },
-    '/api/client-info': {
+    '/api/users/info': {
         title: '获取客户端信息',
         description: '获取当前客户端ID和主机名',
         params: [],
         response: '{ "client_id": "172.16.14.248_1234567890", "hostname": "172.16.14.248" }',
         usage: '初始化客户端身份,用于多用户隔离'
     },
-    '/api/client-info/detect': {
+    '/api/users/detect': {
         title: '检测客户端信息',
         description: '自动检测客户端用户名和身份',
         params: [
@@ -5121,7 +5333,7 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "username": "hcq" }',
         usage: '自动识别当前登录用户,首次使用需要提供SSH凭据'
     },
-    '/api/users': {
+    '/api/users/list': {
         title: '获取在线用户',
         description: '获取所有在线用户列表',
         params: [],
@@ -5395,21 +5607,21 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "USB/IP已自动安装" }',
         usage: '一键安装USB/IP服务'
     },
-    '/api/vpn/check-sshd': {
+    '/api/ssh/sshd-check': {
         title: '检查SSHD状态',
         description: '检查SSH服务状态',
         params: [],
         response: '{ "installed": true, "running": true }',
         usage: '检查SSH服务是否正常运行'
     },
-    '/api/vpn/install-sshd': {
+    '/api/ssh/sshd-install': {
         title: '安装SSHD',
         description: '安装SSH服务',
         params: [],
         response: '{ "success": true, "message": "SSH服务已安装" }',
         usage: '安装SSH服务'
     },
-    '/api/vpn/check-routing': {
+    '/api/ssh/route': {
         title: '检查路由',
         description: '检查系统路由表',
         params: [],
@@ -5579,7 +5791,11 @@ const BASE_URL = `http://${SERVER_HOST}:${SERVER_PORT}`;
  */
 function generateCurlCommand(api, details) {
     if (api.method === 'GET') {
-        let cmd = `curl -s "${BASE_URL}${api.path}"`;
+        // 特殊处理stream端点：使用 -N 而不是 -s
+        const isStreamEndpoint = api.path.includes('/api/test/logs/stream');
+        const curlOptions = isStreamEndpoint ? 'curl -N' : 'curl -s';
+
+        let cmd = `${curlOptions} "${BASE_URL}${api.path}"`;
         // Add query parameter example
         if (details.params && details.params.length > 0) {
             const queryParams = details.params.filter(p =>
@@ -5800,7 +6016,7 @@ window.toggleApiDetails = function(index) {
 };
 
 /**
- * 从data属性复制curl命令到剪贴板（自动添加jq格式化）
+ * 从data属性复制curl命令到剪贴板（自动添加jq格式化，但跳过纯文本端点）
  */
 window.copyCurlCommandFromData = function(element) {
     const text = element.getAttribute('data-cmd');
@@ -5810,21 +6026,33 @@ window.copyCurlCommandFromData = function(element) {
         return;
     }
     console.log('[Copy] Attempting to copy:', text);
-    const commandWithJq = text + ' | jq "."';
+
+    // 检查是否为纯文本端点（不需要jq格式化）
+    const isPlainTextEndpoint = text.includes('/api/test/logs/stream') ||
+                                text.includes('/api/terminal/ws') ||
+                                text.includes('/api/screen/ws');
+
+    let commandToCopy = text;
+    let successMessage = '✓ curl命令已复制';
+
+    if (!isPlainTextEndpoint) {
+        commandToCopy = text + ' | jq "."';
+        successMessage = '✓ curl命令已复制 (含jq格式化)';
+    }
 
     // 方法1: 使用现代Clipboard API
     if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(commandWithJq).then(() => {
+        navigator.clipboard.writeText(commandToCopy).then(() => {
             console.log('[Copy] Success with Clipboard API');
-            showToast('✓ curl命令已复制 (含jq格式化)', 'success');
+            showToast(successMessage, 'success');
         }).catch(err => {
             console.error('[Copy] Clipboard API failed:', err);
             // 尝试备用方法
-            fallbackCopyTextToClipboard(commandWithJq);
+            fallbackCopyTextToClipboard(commandToCopy);
         });
     } else {
         console.log('[Copy] Clipboard API not available, using fallback');
-        fallbackCopyTextToClipboard(commandWithJq);
+        fallbackCopyTextToClipboard(commandToCopy);
     }
 };
 
@@ -5857,7 +6085,7 @@ function copyText(text, options = {}) {
     const { addJq = false, successMsg = '✓ 命令已复制到剪贴板' } = options;
     const textToCopy = addJq ? text + ' | jq "."' : text;
 
-    console.log('[Copy] Copying text:', textToCut);
+    console.log('[Copy] Copying text:', textToCopy);
 
     // 使用现代Clipboard API
     if (navigator.clipboard && navigator.clipboard.writeText) {

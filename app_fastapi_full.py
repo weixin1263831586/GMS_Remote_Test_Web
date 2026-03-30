@@ -168,6 +168,7 @@ from core.test_report import test_report_manager
 from core.vnc import vnc_manager, calculate_window_positions
 from core.adb_forward import adb_forward_manager
 from core.usbip import usbip_manager
+from core.claude_report_analyzer import ClaudeReportAnalyzer
 from core.common_utils import CommonUtils
 from report_analyzer import ReportAnalyzer
 from test_report_db import test_report_db
@@ -769,7 +770,7 @@ async def get_config_values():
 
     return JSONResponse(content={"success": True, "data": safe_config})
 
-@app.get("/api/client-info")
+@app.get("/api/users/info")
 async def get_client_info(request: Request):
     """获取客户端信息（返回client_id用于WebSocket连接）"""
     # 使用统一的client_id获取逻辑（优先从client_hosts读取）
@@ -791,7 +792,7 @@ async def get_client_info(request: Request):
         "username": username
     })
 
-@app.post("/api/client-info")
+@app.post("/api/users/info")
 async def set_client_info(req: ClientInfoRequest, request: Request):
     """设置客户端信息"""
     client_ip = req.ip or (
@@ -833,7 +834,7 @@ async def set_client_info(req: ClientInfoRequest, request: Request):
         "client_id": client_id
     })
 
-@app.post("/api/client-info/detect")
+@app.post("/api/users/detect")
 async def detect_client(req: ClientInfoRequest, request: Request):
     """自动检测客户端用户名"""
     client_ip = req.ip or (
@@ -859,7 +860,7 @@ async def detect_client(req: ClientInfoRequest, request: Request):
             "error": error
         }, status_code=401)
 
-@app.get("/api/users")
+@app.get("/api/users/list")
 async def list_users():
     """获取所有在线用户列表"""
     users = []
@@ -2540,12 +2541,12 @@ async def get_status(request: Request):
                     response['logs'] = logs[since_int:]
                     response['log_count'] = len(logs)
                 else:
-                    # 返回最近50条日志
-                    response['logs'] = logs[-50:]
+                    # 返回所有日志
+                    response['logs'] = logs
                     response['log_count'] = len(logs)
             else:
-                # 返回最近50条日志
-                response['logs'] = logs[-50:]
+                # 返回所有日志
+                response['logs'] = logs
                 response['log_count'] = len(logs)
 
         return JSONResponse(content=response)
@@ -2555,6 +2556,62 @@ async def get_status(request: Request):
                 status_code=500,
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
+
+@app.get("/api/test/logs/stream")
+async def stream_test_logs(request: Request):
+    """
+    流式输出测试日志（纯文本格式）
+
+    提供实时日志流，适合:
+    - 命令行工具（curl, wget等）
+    - 脚本自动化
+    - 日志收集系统
+
+    返回格式: 纯文本流，每行一条日志
+    """
+    client_id = get_client_id_from_request(request)
+
+    async def log_stream():
+        """生成纯文本日志流"""
+        try:
+            last_log_count = 0
+
+            while True:
+                user_state = get_or_create_user_state(client_id)
+                running = user_state.get('running', False)
+                logs = user_state.get('logs', [])
+                current_log_count = len(logs)
+
+                # 发送新日志
+                if current_log_count > last_log_count:
+                    for i in range(last_log_count, current_log_count):
+                        log_entry = logs[i]
+                        # 直接输出日志内容，每行一个日志
+                        yield f"{log_entry}\n"
+                    last_log_count = current_log_count
+
+                # 如果测试结束，退出
+                if not running and last_log_count > 0:
+                    yield "=== 测试完成 ===\n"
+                    break
+
+                # 等待一段时间再检查
+                await asyncio.sleep(0.5)
+
+        except Exception as e:
+            logger.error(f"Error in stream: {e}")
+            yield f"错误: {str(e)}\n"
+
+    return StreamingResponse(
+        log_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "X-Accel-Buffering": "no"  # 禁用nginx缓冲
+        }
+    )
 
 # ==================== 报告管理 ====================
 @app.get("/api/reports/list")
@@ -3077,6 +3134,42 @@ async def analyze_test_report(
         )
 
 # ==================== 测试分析辅助函数 ====================
+
+# ==================== IP和网络工具函数 ====================
+import ipaddress
+
+def extract_ip_from_host(host_string: str) -> str:
+    """从user@host或host字符串中提取IP地址"""
+    return host_string.split('@')[-1] if '@' in host_string else host_string
+
+def get_client_ip_from_request_headers(request: Request) -> str:
+    """从请求头中提取客户端IP，支持代理"""
+    forwarded_for = request.headers.get('X-Forwarded-For', '').strip()
+    if forwarded_for:
+        return forwarded_for.split(',')[0].strip()
+
+    real_ip = request.headers.get('X-Real-IP')
+    if real_ip:
+        return real_ip
+
+    if request.client:
+        return request.client.host
+
+    return 'unknown'
+
+def are_same_network(ip1: str, ip2: str, prefix_len: int = 24) -> bool:
+    """检查两个IP是否在同一网段"""
+    try:
+        network1 = ipaddress.IPv4Network(f"{ip1}/{prefix_len}", strict=False)
+        network2 = ipaddress.IPv4Network(f"{ip2}/{prefix_len}", strict=False)
+        return network1 == network2
+    except (ipaddress.AddressValueError, ValueError):
+        # 如果IP格式无效，回退到字符串比较
+        parts1 = ip1.split('.')
+        parts2 = ip2.split('.')
+        if len(parts1) == 4 and len(parts2) == 4:
+            return parts1[:3] == parts2[:3]
+        return False
 
 def parse_cts_failure_info(test_name, error_message):
     """
@@ -4511,8 +4604,8 @@ async def auto_install_usbipd(request: Request):
         )
 
 # ==================== VPN管理 ====================
-@app.get("/api/vpn/check-sshd")
-async def check_vpn_sshd(request: Request):
+@app.get("/api/ssh/sshd-check")
+async def check_ssh_sshd(request: Request):
     """检查VPN SSH服务状态
 
     通过SSH连接到Windows客户端检查SSHD服务状态。
@@ -4568,8 +4661,8 @@ async def check_vpn_sshd(request: Request):
             status_code=500
         )
 
-@app.post("/api/vpn/install-sshd")
-async def install_vpn_sshd():
+@app.post("/api/ssh/sshd-install")
+async def install_ssh_sshd():
     """获取SSHD安装说明
 
     SSHD需要在Windows客户端上手动安装,返回安装指南供用户参考。
@@ -4582,74 +4675,85 @@ async def install_vpn_sshd():
     })
 
 
-@app.get("/api/vpn/check-routing")
-async def check_vpn_routing():
-    """检查VPN路由（通过ping目标）- 与Flask实现一致"""
+@app.get("/api/ssh/route")
+async def check_ssh_route(request: Request):
+    """检查网络路由 - 检查测试主机和设备主机是否在同一网段"""
     try:
         config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return JSONResponse(
-                content={"success": False, "error": "SSH连接失败"},
-                status_code=500
-            )
 
-        try:
-            # 获取VPN目标列表
-            vpn_target = config.get("vpn_target", [])
-            if isinstance(vpn_target, str):
-                vpn_target = [t.strip() for t in vpn_target.split(',')]
+        ubuntu_host = config.get("ubuntu_host", "")
+        client_ip = get_client_ip_from_request_headers(request)
 
-            if not vpn_target:
-                ssh_manager.return_connection(ssh)
-                return JSONResponse(content={
-                    'success': True,
-                    'message': '未配置VPN目标',
-                    'results': []
-                })
+        if not ubuntu_host or client_ip == 'unknown':
+            return JSONResponse(content={
+                'success': False,
+                'error': '无法获取主机IP地址'
+            }, status_code=400)
 
-            results = []
-            success_count = 0
-            failed_targets = []
+        ubuntu_ip = extract_ip_from_host(ubuntu_host)
+        device_ip = extract_ip_from_host(client_ip)
 
-            # Ping每个目标
-            for target in vpn_target:
-                cmd = f"ping -c 1 -W 2 {target} 2>&1"
-                output, error, code = ssh_manager.execute_command(ssh, cmd)
+        same_network = are_same_network(ubuntu_ip, device_ip)
+        need_route = not same_network
 
-                # 检查ping是否成功
-                is_reachable = '1 packets transmitted, 1 received' in output or '1 received' in output
+        if need_route:
+            try:
+                ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
+                device_network_obj = ipaddress.IPv4Network(f"{device_ip}/24", strict=False)
+                ubuntu_network = str(ubuntu_network_obj.network_address)
+                device_network = str(device_network_obj.network_address)
+            except (ipaddress.AddressValueError, ValueError):
+                ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
+                device_network = '.'.join(device_ip.split('.')[:3]) + '.0'
 
-                result = {
-                    'target': target,
-                    'reachable': is_reachable,
-                    'output': output[:200]  # 截断输出
-                }
-                results.append(result)
+            route_commands = {
+                'windows': [
+                    f"route add {ubuntu_network} mask 255.255.255.0 {device_ip}",
+                    f"route add {device_network} mask 255.255.255.0 {ubuntu_ip}",
+                    "# 检查路由表: route print",
+                    f"# 删除路由表: route delete {ubuntu_network}",
+                    f"# 删除路由表: route delete {device_network}"
+                ],
+                'linux': [
+                    f"sudo ip route add {ubuntu_network}/24 via {device_ip}",
+                    f"sudo ip route add {device_network}/24 via {ubuntu_ip}",
+                    "# 检查路由表: ip route show",
+                    f"# 删除路由表: sudo ip route del {ubuntu_network}/24",
+                    f"# 删除路由表: sudo ip route del {device_network}/24"
+                ]
+            }
 
-                if is_reachable:
-                    success_count += 1
-                else:
-                    failed_targets.append(target)
-
-            ssh_manager.return_connection(ssh)
             return JSONResponse(content={
                 'success': True,
-                'results': results,
-                'summary': {
-                    'total': len(vpn_target),
-                    'success': success_count,
-                    'failed': len(failed_targets),
-                    'success_rate': f"{success_count}/{len(vpn_target)}"
-                },
-                'failed_targets': failed_targets
+                'same_network': False,
+                'need_route': True,
+                'message': f'⚠️ 网段不同: {ubuntu_ip} (网段: {ubuntu_network}/24) ↔ {device_ip} (网段: {device_network}/24)',
+                'ubuntu_ip': ubuntu_ip,
+                'device_ip': device_ip,
+                'ubuntu_network': ubuntu_network,
+                'device_network': device_network,
+                'route_commands': route_commands,
+                'warning': '测试主机和设备主机不在同一网段，可能影响网络通信，建议添加路由表'
             })
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            raise
+        else:
+            try:
+                ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
+                ubuntu_network = str(ubuntu_network_obj.network_address)
+            except (ipaddress.AddressValueError, ValueError):
+                ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
+
+            return JSONResponse(content={
+                'success': True,
+                'same_network': True,
+                'need_route': False,
+                'message': f'✅ 网段相同: {ubuntu_ip} ↔ {device_ip}',
+                'ubuntu_ip': ubuntu_ip,
+                'device_ip': device_ip,
+                'network': ubuntu_network
+            })
 
     except Exception as e:
-        logger.error(f"Error checking VPN routing: {e}")
+        logger.error(f"Error checking routing: {e}")
         return JSONResponse(
             content={"success": False, "error": str(e)},
             status_code=500
@@ -6717,36 +6821,34 @@ API_DOCS_LIST = [
         "category": "config"
     },
 
-    # ==================== 客户端信息 ====================
-    {
-        "method": "GET",
-        "path": "/api/client-info",
-        "description": "获取客户端IP信息",
-        "params": [],
-        "category": "client"
-    },
-    {
-        "method": "POST",
-        "path": "/api/client-info",
-        "description": "设置客户端用户名",
-        "params": [{"name": "username", "type": "string", "required": False}],
-        "category": "client"
-    },
-    {
-        "method": "POST",
-        "path": "/api/client-info/detect",
-        "description": "自动检测客户端用户名",
-        "params": [{"name": "ip", "type": "string", "required": False}, {"name": "username", "type": "string", "required": False}, {"name": "password", "type": "string", "required": False}],
-        "category": "client"
-    },
-
     # ==================== 用户管理 ====================
     {
         "method": "GET",
-        "path": "/api/users",
-        "description": "获取在线用户列表",
+        "path": "/api/users/info",
+        "description": "获取客户端IP信息",
         "params": [],
-        "category": "client"
+        "category": "users"
+    },
+    {
+        "method": "POST",
+        "path": "/api/users/info",
+        "description": "设置客户端用户名",
+        "params": [{"name": "username", "type": "string", "required": False}],
+        "category": "users"
+    },
+    {
+        "method": "POST",
+        "path": "/api/users/detect",
+        "description": "自动检测客户端用户名",
+        "params": [{"name": "ip", "type": "string", "required": False}, {"name": "username", "type": "string", "required": False}, {"name": "password", "type": "string", "required": False}],
+        "category": "users"
+    },
+    {
+        "method": "GET",
+        "path": "/api/users/list",
+        "description": "获取所有在线用户列表",
+        "params": [],
+        "category": "users"
     },
 
     # ==================== 设备管理 ====================
@@ -6913,6 +7015,15 @@ API_DOCS_LIST = [
         "params": [],
         "category": "test"
     },
+    {
+        "method": "GET",
+        "path": "/api/test/logs/stream",
+        "description": "流式输出测试日志（实时）⭐",
+        "params": [],
+        "category": "test",
+        "usage": "curl -N http://server:5001/api/test/logs/stream",
+        "note": "返回纯文本流，适合CLI工具和脚本"
+    },
 
     # ==================== 报告管理 ====================
     {
@@ -7060,27 +7171,27 @@ API_DOCS_LIST = [
         "category": "usbip"
     },
 
-    # ==================== VPN管理 ====================
+    # ==================== SSH管理 ====================
     {
         "method": "GET",
-        "path": "/api/vpn/check-sshd",
+        "path": "/api/ssh/sshd-check",
         "description": "检查SSHD状态",
         "params": [],
-        "category": "vpn"
+        "category": "ssh"
     },
     {
         "method": "POST",
-        "path": "/api/vpn/install-sshd",
+        "path": "/api/ssh/sshd-install",
         "description": "安装SSHD服务",
         "params": [],
-        "category": "vpn"
+        "category": "ssh"
     },
     {
         "method": "GET",
-        "path": "/api/vpn/check-routing",
+        "path": "/api/ssh/route",
         "description": "检查路由状态",
         "params": [],
-        "category": "vpn"
+        "category": "ssh"
     },
     {
         "method": "GET",
@@ -7206,6 +7317,145 @@ async def get_api_docs():
     except Exception as e:
         logger.error(f"Error getting API docs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ==================== Claude报告分析API ====================
+
+@app.get("/api/reports/claude-analyze/{report_timestamp}")
+async def claude_analyze_report(
+    report_timestamp: str,
+    use_claude_api: bool = Query(False, description="是否使用Claude API进行深度分析"),
+    claude_api_key: Optional[str] = Query(None, description="Claude API密钥（如果使用Claude API）")
+):
+    """
+    使用Claude分析测试报告
+
+    Args:
+        report_timestamp: 报告时间戳
+        use_claude_api: 是否使用Claude API（需要API密钥）
+        claude_api_key: Claude API密钥
+
+    Returns:
+        {
+            "success": true,
+            "basic_analysis": {...},  # 基础分析（总是返回）
+            "claude_analysis": {...}  # Claude深度分析（如果use_claude_api=true）
+        }
+    """
+    try:
+        # 从数据库获取报告信息
+        report = test_report_db.get_report_by_timestamp(report_timestamp)
+
+        if not report:
+            return JSONResponse(
+                content={'success': False, 'error': '报告不存在'},
+                status_code=404
+            )
+
+        # 获取路径信息
+        result_dir = report.get('result_dir')
+        log_file = report.get('log_file')
+
+        if not result_dir or not os.path.exists(result_dir):
+            return JSONResponse(
+                content={'success': False, 'error': '报告目录不存在'},
+                status_code=404
+            )
+
+        # 创建Claude分析器
+        analyzer = ClaudeReportAnalyzer()
+
+        # 1. 基础分析（解析日志摘要）
+        basic_analysis = analyzer.analyze_report_file(result_dir, log_file)
+
+        if not basic_analysis.get('success'):
+            return JSONResponse(
+                content={'success': False, 'error': '基础分析失败'},
+                status_code=500
+            )
+
+        result = {
+            'success': True,
+            'basic_analysis': basic_analysis
+        }
+
+        # 2. Claude API深度分析（可选）
+        if use_claude_api and claude_api_key:
+            logger.info(f"[Claude] 使用Claude API深度分析报告: {report_timestamp}")
+            claude_analysis = analyzer.analyze_with_claude_api(basic_analysis, claude_api_key)
+            result['claude_analysis'] = claude_analysis
+
+            if claude_analysis.get('success'):
+                logger.info("[Claude] Claude API分析成功")
+            else:
+                logger.warning(f"[Claude] Claude API分析失败: {claude_analysis.get('error')}")
+
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"Claude分析失败: {e}", exc_info=True)
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+
+
+@app.post("/api/reports/claude-analyze-upload")
+async def claude_analyze_uploaded_report(
+    file: UploadFile = File(..., description="测试日志文件或XML报告"),
+    use_claude_api: bool = Form(False, description="是否使用Claude API"),
+    claude_api_key: Optional[str] = Form(None, description="Claude API密钥")
+):
+    """
+    分析上传的测试报告文件
+
+    Args:
+        file: 上传的文件（支持.log、.xml、.zip、.tar.gz）
+        use_claude_api: 是否使用Claude API
+        claude_api_key: Claude API密钥
+
+    Returns:
+        分析结果
+    """
+    import tempfile
+    import shutil
+
+    try:
+        # 保存上传的文件到临时目录
+        temp_dir = tempfile.mkdtemp(prefix='claude_analyze_')
+        file_path = os.path.join(temp_dir, file.filename)
+
+        with open(file_path, 'wb') as f:
+            content = await file.read()
+            f.write(content)
+
+        # 创建分析器
+        analyzer = ClaudeReportAnalyzer()
+
+        # 基础分析
+        basic_analysis = analyzer.analyze_report_file(temp_dir, file_path)
+
+        result = {
+            'success': True,
+            'basic_analysis': basic_analysis
+        }
+
+        # Claude API分析
+        if use_claude_api and claude_api_key:
+            claude_analysis = analyzer.analyze_with_claude_api(basic_analysis, claude_api_key)
+            result['claude_analysis'] = claude_analysis
+
+        # 清理临时文件
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"分析上传文件失败: {e}", exc_info=True)
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+
 
 # ==================== 主程序 ====================
 
