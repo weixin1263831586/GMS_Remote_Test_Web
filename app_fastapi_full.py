@@ -7539,6 +7539,31 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
     Returns:
         格式化的帮助文本，如果API不存在则返回None
     """
+
+    def get_display_width(text):
+        """计算字符串的显示宽度（中文算2个字符）"""
+        width = 0
+        for char in text:
+            if ord(char) > 127:  # 非ASCII字符（中文等）
+                width += 2
+            else:
+                width += 1
+        return width
+
+    def pad_string(text, target_width, align='left'):
+        """填充字符串到目标显示宽度，考虑中文"""
+        current_width = get_display_width(text)
+        padding = target_width - current_width
+
+        if align == 'center':
+            left_pad = padding // 2
+            right_pad = padding - left_pad
+            return ' ' * left_pad + text + ' ' * right_pad
+        elif align == 'right':
+            return ' ' * padding + text
+        else:  # left
+            return text + ' ' * padding
+
     base_url = "http://172.16.14.233:5001"
 
     # 详细的API参数映射（与前端保持一致）
@@ -7621,11 +7646,48 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
 
     # 构建帮助文本（优化格式）
     help_text = ""
-    help_text += "╔════════════════════════════════════════════════════════════════════╗\n"
-    help_text += f"║  {method}  {path:<55} ║\n"
-    help_text += "╠════════════════════════════════════════════════════════════════════╣\n"
-    help_text += f"║  📋 {api_details['description']:<54} ║\n"
-    help_text += "╚════════════════════════════════════════════════════════════════════╝\n\n"
+
+    # 固定的边框线（70个字符宽，包含左右边框）
+    border_line = "╔════════════════════════════════════════════════════════════════════╗"
+    mid_line = "╠════════════════════════════════════════════════════════════════════╣"
+    bottom_line = "╚════════════════════════════════════════════════════════════════════╝"
+
+    help_text += f"{border_line}\n"
+
+    # 第一行：方法 + 路径
+    method_part = f"  {method}  "
+    # 目标：让字符串长度与边框线一致（70个字符）
+    # 内容区：70 - 2(左右║) = 68个字符
+    content_length = 68
+    method_length = len(method_part)
+    path_length = len(path)
+    needed_padding = content_length - method_length - path_length
+    path_part = path + ' ' * needed_padding
+
+    help_text += f"║{method_part}{path_part}║\n"
+
+    help_text += f"{mid_line}\n"
+
+    # 第二行：emoji + 描述
+    description = api_details['description']
+    desc_prefix = "  📋 "
+    prefix_length = len(desc_prefix)
+    desc_length = len(description)
+
+    # 对于包含中文的行，需要调整填充以确保视觉对齐
+    # 计算中文字符数量
+    chinese_chars = len([c for c in description + desc_prefix if ord(c) > 127])
+    # 每个中文字符的显示宽度比字符长度多1，所以需要减少相应数量的空格
+    # 但不能减少太多，否则字符串长度会不够
+    # 这里我们减少一半的差值作为平衡
+    visual_adjustment = chinese_chars // 2
+    needed_padding = content_length - prefix_length - desc_length + visual_adjustment
+
+    desc_part = description + ' ' * needed_padding
+
+    help_text += f"║{desc_prefix}{desc_part}║\n"
+
+    help_text += f"{bottom_line}\n\n"
 
     # 完整curl命令
     if method == 'GET':
@@ -7674,15 +7736,109 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             help_text += f"Content-Type: application/json\n"
     help_text += "\n"
 
-    # 参数说明
+    # 参数说明（表格格式）
     if params:
-        help_text += "📋 请求参数说明:\n"
-        for param in params:
-            param_name = param['name']
-            param_type = param['type']
-            param_desc = param['desc']
-            required = '必需' if param['required'] else '可选'
-            help_text += f"{param_name} {param_type} {required} {param_desc}\n"
+        help_text += "📋 API 参数对照表\n\n"
+
+        # 计算列宽（使用显示宽度，但确保最小宽度）
+        name_width = max(get_display_width('API 参数'), max((get_display_width(p['name']) for p in params), default=get_display_width('API 参数')))
+        desc_width = max(get_display_width('说明'), max(((get_display_width(p['desc'].split('(')[0]) + 6) for p in params), default=get_display_width('说明')))
+
+        # 表格字符定义
+        border_char = '─'
+        corner_tl = '┌'
+        corner_tr = '┐'
+        corner_bl = '└'
+        corner_br = '┘'
+        tee_top = '┬'
+        tee_bottom = '┴'
+        tee_cross = '┼'  # 用于行分隔线的十字连接符
+        bar = '│'
+
+        # 列宽定义（固定）
+        col1_width = name_width + 2      # API 参数列（含左右空格）
+        col2_width = 6                    # 类型列（固定 6 字符，确保对齐）
+        col3_width = desc_width + 10      # 说明列（含标记）
+        col4_width = 14                   # 默认值列（固定 14 字符）
+
+        # 构建表格行（使用显示宽度计算表头）
+        top_border     = f"{corner_tl}{border_char * col1_width}{tee_top}{border_char * col2_width}{tee_top}{border_char * col3_width}{tee_top}{border_char * col4_width}{corner_tr}\n"
+        header_row     = f"{bar}{pad_string('API 参数', col1_width, 'center')}{bar}{pad_string('类型', col2_width, 'center')}{bar}{pad_string('说明', col3_width, 'center')}{bar}{pad_string('默认值', col4_width, 'center')}{bar}\n"
+        header_border  = f"{bar}{border_char * col1_width}{tee_top}{border_char * col2_width}{tee_top}{border_char * col3_width}{tee_top}{border_char * col4_width}{bar}\n"
+
+        # 创建一个函数来生成正确长度的分隔线
+        def create_separator():
+            # 生成一个示例数据行来获取实际长度
+            sample_row = f"{bar}{pad_string('sample', col1_width, 'center')}{bar}{pad_string('str', col2_width, 'center')}{bar}{pad_string('sample text', col3_width, 'left')}{bar}{pad_string('', col4_width, 'center')}{bar}"
+            # 获取每一节的实际长度
+            sections = []
+            current_section = ""
+            in_section = False
+            for char in sample_row:
+                if char == bar:
+                    if in_section:
+                        sections.append(current_section)
+                        current_section = ""
+                    in_section = True
+                elif in_section:
+                    current_section += char
+            if current_section:
+                sections.append(current_section)
+
+            # 使用实际的字符串长度来构建分隔线
+            if len(sections) >= 4:
+                return f"{bar}{border_char * len(sections[0])}{tee_cross}{border_char * len(sections[1])}{tee_cross}{border_char * len(sections[2])}{tee_cross}{border_char * len(sections[3])}{bar}\n"
+            else:
+                # 备用方案
+                return f"{bar}{border_char * col1_width}{tee_cross}{border_char * col2_width}{tee_cross}{border_char * col3_width}{tee_cross}{border_char * col4_width}{bar}\n"
+
+        row_separator  = create_separator()
+        bottom_border  = f"{corner_bl}{border_char * col1_width}{tee_bottom}{border_char * col2_width}{tee_bottom}{border_char * col3_width}{tee_bottom}{border_char * col4_width}{corner_br}\n"
+
+        # 添加表头部分
+        help_text += f"  {top_border}"
+        help_text += f"  {header_row}"
+        help_text += f"  {header_border}"
+
+        # 参数行
+        for i, param in enumerate(params):
+            name = param['name']
+            ptype = param.get('type', 'string')
+            # 统一类型缩写，确保对齐
+            type_map = {
+                'array': 'arr',
+                'string': 'str',
+                'number': 'num',
+                'integer': 'int',
+                'boolean': 'bool',
+                'object': 'obj'
+            }
+            ptype = type_map.get(ptype.lower(), ptype[:3])
+            desc = param['desc'].split('(')[0].strip()  # 去掉 (可选) 等后缀
+            default_val = param.get('default', '')
+            required = param.get('required', False)
+
+            # 在说明中添加必需/可选标记
+            if required:
+                desc_with_mark = f"{desc} ⭐"
+            else:
+                desc_with_mark = f"{desc} (可选)"
+
+            # 使用新的填充函数格式化每个单元格
+            name_formatted = pad_string(name, col1_width, 'center')
+            ptype_formatted = pad_string(ptype, col2_width, 'center')
+            desc_formatted = pad_string(desc_with_mark, col3_width, 'left')
+            default_formatted = pad_string(default_val, col4_width, 'center')
+
+            row = f"{bar}{name_formatted}{bar}{ptype_formatted}{bar}{desc_formatted}{bar}{default_formatted}{bar}\n"
+            help_text += f"  {row}"
+
+            # 在每一行后面添加分隔线（除了最后一行）
+            if i < len(params) - 1:
+                help_text += f"  {row_separator}"
+
+        # 表尾
+        help_text += f"  {bottom_border}"
         help_text += "\n"
 
     # 响应示例
