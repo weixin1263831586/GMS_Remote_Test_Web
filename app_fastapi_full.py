@@ -289,6 +289,45 @@ global_state = GlobalState()
 
 DEVICE_CACHE_TTL = 3
 
+# ==================== 通用工具函数 ====================
+
+# Pre-compiled regex patterns for efficiency
+_ANSI_ESCAPE_PATTERN = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+_IP_PATTERN = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
+_PING_RTT_PATTERN = re.compile(r'rtt min/avg/max/mdev = [\d.]+/([\d.]+)/[\d.]+/[\d.]+ ms')
+_PING_AVG_PATTERN = re.compile(r'avg[=\s]+([\d.]+)', re.IGNORECASE)
+_PING_LOSS_PATTERN = re.compile(r'(\d+)% packet loss')
+
+def strip_ansi_codes(text: str) -> str:
+    """
+    移除ANSI转义码
+
+    Args:
+        text: 包含ANSI转义码的文本
+
+    Returns:
+        清理后的文本
+    """
+    return _ANSI_ESCAPE_PATTERN.sub('', text)
+
+async def release_device_locks(client_id: str, device_ids: List[str], broadcast: bool = True):
+    """
+    批量释放设备锁并广播更新
+
+    Args:
+        client_id: 客户端ID
+        device_ids: 要释放的设备ID列表
+        broadcast: 是否广播设备锁更新
+    """
+    if not device_ids:
+        return
+
+    for device_id in device_ids:
+        device_lock_manager.unlock_device(device_id, client_id)
+
+    if broadcast:
+        await broadcast_device_lock_update(device_ids)
+
 # ==================== SSH 连接上下文管理器 ====================
 
 class SSHConnection:
@@ -309,7 +348,10 @@ class SSHConnection:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.ssh:
-            ssh_manager.return_connection(self.ssh)
+            try:
+                ssh_manager.return_connection(self.ssh)
+            except Exception as e:
+                logger.error(f"Failed to return SSH connection: {e}")
 
 # ==================== WebSocket 辅助函数 ====================
 
@@ -1828,8 +1870,7 @@ async def start_test(
 
     # 如果有设备锁定失败，释放已锁定的设备并返回错误
     if failed_devices:
-        for device_id in locked_devices:
-            device_lock_manager.unlock_device(device_id, client_id)
+        await release_device_locks(client_id, locked_devices, broadcast=False)
 
         error_msg = "以下设备已被其他用户占用：\n"
         for fail in failed_devices:
@@ -2153,13 +2194,8 @@ async def run_test_background(
             ssh_manager.return_connection(ssh)
 
         # 释放设备锁
-        for device_id in locked_devices:
-            device_lock_manager.unlock_device(device_id, client_id)
-
-        # 广播设备解锁状态
-        if locked_devices:
-            await broadcast_device_lock_update(locked_devices)
-            logger.info(f"[Device Lock] 测试完成，已广播设备解锁状态: {locked_devices}")
+        await release_device_locks(client_id, locked_devices)
+        logger.info(f"[Device Lock] 测试完成，已广播设备解锁状态: {locked_devices}")
 
         # 更新状态为停止
         update_user_state_field(client_id, {'running': False, 'devices': []})
@@ -2830,7 +2866,7 @@ async def analyze_report(report_timestamp: str):
 
         # 获取 result_dir 路径
         result_dir = report.get('result_dir')
-        if not result_dir or not os.path.exists(result_dir):
+        if not result_dir or not await asyncio.to_thread(os.path.exists, result_dir):
             return JSONResponse(
                 content={'success': False, 'error': '报告目录不存在'},
                 status_code=404
@@ -2838,7 +2874,7 @@ async def analyze_report(report_timestamp: str):
 
         # 查找 test_result.xml
         result_xml = os.path.join(result_dir, 'test_result.xml')
-        if not os.path.exists(result_xml):
+        if not await asyncio.to_thread(os.path.exists, result_xml):
             return JSONResponse(
                 content={'success': False, 'error': 'test_result.xml 不存在'},
                 status_code=404
@@ -4873,6 +4909,180 @@ async def check_ssh_route(request: Request):
             status_code=500
         )
 
+
+def _validate_ip_address(ip: str) -> bool:
+    """验证IPv4地址格式和范围"""
+    try:
+        ipaddress.IPv4Address(ip)
+        return True
+    except (ipaddress.AddressValueError, ValueError):
+        return False
+
+
+def _extract_network(ip: str) -> str:
+    """从IP地址提取网络地址"""
+    try:
+        network = ipaddress.IPv4Network(f"{ip}/24", strict=False)
+        return str(network.network_address)
+    except (ipaddress.AddressValueError, ValueError):
+        # Fallback to string manipulation for edge cases
+        return '.'.join(ip.split('.')[:3]) + '.0'
+
+
+def _parse_ping_output(ping_output: str, exit_status: int) -> tuple[bool, str]:
+    """解析ping输出，返回(可达性, 延迟)"""
+    if exit_status == 0:
+        if "0% packet loss" in ping_output:
+            # 无丢包
+            time_match = _PING_RTT_PATTERN.search(ping_output)
+            if time_match:
+                return True, f"{time_match.group(1)}ms"
+            else:
+                avg_match = _PING_AVG_PATTERN.search(ping_output)
+                if avg_match:
+                    return True, f"{avg_match.group(1)}ms"
+                else:
+                    return True, '<10ms'
+        elif "packet loss" in ping_output:
+            # 部分丢包
+            loss_match = _PING_LOSS_PATTERN.search(ping_output)
+            if loss_match:
+                loss_percent = int(loss_match.group(1))
+                if loss_percent < 100:
+                    return True, f'{loss_percent}% 丢包'
+                else:
+                    return False, 'N/A (100% 丢包)'
+            else:
+                return False, 'N/A'
+        else:
+            return True, 'N/A'
+    else:
+        # ping失败
+        if "100% packet loss" in ping_output or "Network is unreachable" in ping_output:
+            return False, 'N/A (不可达)'
+        else:
+            return False, 'N/A'
+
+
+def _generate_route_commands(test_network: str, client_network: str, test_host_ip: str, client_ip: str) -> dict:
+    """生成路由命令
+
+    重要：路由应该通过网关，而不是直接指向主机IP
+    """
+    # 推测网关地址（通常是网段的第一个IP）
+    test_gateway = '.'.join(test_network.split('.')[:3]) + '.1'
+    client_gateway = '.'.join(client_network.split('.')[:3]) + '.1'
+
+    return {
+        'windows': [
+            f"# 在测试主机上执行以下命令:",
+            f"# 添加到客户端主机网段的路由（通过测试主机网关）",
+            f"route add {client_network} mask 255.255.255.0 {test_gateway}",
+            f"# 检查路由表: route print",
+            f"# 删除路由: route delete {client_network}"
+        ],
+        'linux': [
+            f"# 在测试主机上执行以下命令:",
+            f"# 添加到客户端主机网段的路由（通过测试主机网关）",
+            f"sudo ip route add {client_network}/24 via {test_gateway}",
+            f"# 检查路由表: ip route show",
+            f"# 删除路由: sudo ip route del {client_network}/24"
+        ],
+        'note': [
+            f"⚠️ 重要提示:",
+            f"1. 这些路由命令应该在测试主机上执行",
+            f"2. {test_gateway} 是测试主机的网关地址",
+            f"3. 确保网关地址可以ping通后再添加路由",
+            f"4. 如果已经在同一网段，不需要添加路由",
+            f"5. 删除路由前请确保不会影响SSH连接"
+        ]
+    }
+
+
+@app.post("/api/ssh/route/ping")
+async def ping_route_test(request: Request):
+    """测试客户端到测试主机的网络连通性"""
+    try:
+        # 获取请求数据
+        data = await request.json()
+        test_host_ip = data.get('test_host_ip', '').strip()
+        client_ip = data.get('client_ip', '').strip()
+
+        # 验证IP格式
+        if not _validate_ip_address(test_host_ip) or not _validate_ip_address(client_ip):
+            return JSONResponse(
+                content={'success': False, 'error': 'IP地址格式不正确'},
+                status_code=400
+            )
+
+        # 检查是否在同一网段
+        test_network = _extract_network(test_host_ip)
+        client_network = _extract_network(client_ip)
+        same_network = (test_network == client_network)
+
+        # 尝试真正的ping测试（从测试主机ping客户端）
+        reachable = False
+        latency = None
+        ping_output = ""
+
+        if same_network:
+            # 同一网段，理论上可达
+            reachable = True
+            latency = '<1ms (同一网段)'
+        else:
+            # 不同网段，需要从测试主机执行ping来验证连通性
+            try:
+                config = config_manager.load_config()
+                ssh = ssh_manager.get_connection(config)
+                if ssh:
+                    # 从测试主机ping客户端IP
+                    ping_cmd = f"ping -c 3 -W 2 {client_ip}"
+                    stdin, stdout, stderr = ssh.exec_command(ping_cmd, timeout=10)
+
+                    # 读取ping输出（限制大小防止内存溢出）
+                    ping_output = stdout.read(8192).decode('utf-8', errors='ignore')   # 8KB sufficient for ping
+                    error_output = stderr.read(2048).decode('utf-8', errors='ignore')   # 2KB sufficient for errors
+                    exit_status = stdout.channel.recv_exit_status()
+
+                    ssh_manager.return_connection(ssh)
+
+                    # 解析ping结果
+                    reachable, latency = _parse_ping_output(ping_output, exit_status)
+
+                    logger.info(f"Ping test from {test_host_ip} to {client_ip}: reachable={reachable}, latency={latency}")
+                    if ping_output:
+                        logger.debug(f"Ping output: {ping_output[:200]}")
+
+            except Exception as e:
+                logger.warning(f"Ping test failed: {e}")
+                reachable = False
+                latency = 'N/A'
+
+        # 准备路由命令（只在不可达时提供）
+        route_commands = None
+        if not reachable:
+            # 使用已计算的 test_network 和 client_network，避免重复计算
+            route_commands = _generate_route_commands(test_network, client_network, test_host_ip, client_ip)
+
+        return JSONResponse(content={
+            'success': True,
+            'reachable': reachable,
+            'latency': latency,
+            'same_network': same_network,
+            'test_host_ip': test_host_ip,
+            'client_ip': client_ip,
+            'test_network': test_network,
+            'client_network': client_network,
+            'route_commands': route_commands
+        })
+
+    except Exception as e:
+        logger.error(f"Error in ping route test: {e}")
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+
 @app.get("/api/vpn/status")
 async def get_vpn_status():
     """获取VPN连接状态（多次ping提高可靠性）"""
@@ -5258,8 +5468,7 @@ async def burn_firmware(
 
         # 如果有设备锁定失败，释放已锁定的设备并返回错误
         if failed_devices:
-            for device_id in locked_devices:
-                device_lock_manager.unlock_device(device_id, client_id)
+            await release_device_locks(client_id, locked_devices, broadcast=False)
 
             error_msg = "以下设备已被其他用户占用：\n"
             for fail in failed_devices:
@@ -5286,10 +5495,7 @@ async def burn_firmware(
 
         # 检查固件来源
         if not firmware_file and not firmware_path:
-            # 释放设备锁
-            for device_id in locked_devices:
-                device_lock_manager.unlock_device(device_id, client_id)
-            await broadcast_device_lock_update(locked_devices)
+            await release_device_locks(client_id, locked_devices)
 
             return JSONResponse(
                 content={'success': False, 'error': 'Please upload a firmware file or provide a firmware path'}
@@ -5297,9 +5503,7 @@ async def burn_firmware(
 
         ssh = ssh_manager.get_connection(config)
         if not ssh:
-            # 释放设备锁
-            for device_id in locked_devices:
-                device_lock_manager.unlock_device(device_id, client_id)
+            await release_device_locks(client_id, locked_devices)
             return JSONResponse(
                 content={'success': False, 'error': 'SSH connection failed'}
             )
@@ -5608,14 +5812,6 @@ async def burn_firmware(
             # 执行烧写并获取实时输出
             stdin, stdout, stderr = ssh.exec_command(burn_cmd, get_pty=True, timeout=300)
 
-            # ANSI转义码过滤函数
-            def strip_ansi_codes(text):
-                """移除ANSI转义码"""
-                import re
-                # 移除ANSI转义序列
-                ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
-                return ansi_escape.sub('', text)
-
             # 实时读取输出并发送到前端
             import select
             output_buffer = []
@@ -5720,14 +5916,8 @@ async def burn_firmware(
 
                 # 释放设备锁
                 logger.info(f"[Device Lock] 开始解锁设备: {locked_devices}")
-                for device_id in locked_devices:
-                    device_lock_manager.unlock_device(device_id, client_id)
+                await release_device_locks(client_id, locked_devices)
                 logger.info(f"[Device Lock] 设备解锁完成")
-
-                # 广播设备解锁状态（立即移除）
-                logger.info(f"[Device Lock] 开始广播解锁状态")
-                await broadcast_device_lock_update(locked_devices)
-                logger.info(f"[Device Lock] 解锁状态广播完成")
 
                 return JSONResponse(
                     content={'success': True, 'message': 'Firmware burn completed successfully'}
@@ -5760,14 +5950,8 @@ async def burn_firmware(
 
                 # 释放设备锁
                 logger.info(f"[Device Lock] 开始解锁设备: {locked_devices}")
-                for device_id in locked_devices:
-                    device_lock_manager.unlock_device(device_id, client_id)
+                await release_device_locks(client_id, locked_devices)
                 logger.info(f"[Device Lock] 设备解锁完成")
-
-                # 广播设备解锁状态（立即移除）
-                logger.info(f"[Device Lock] 开始广播解锁状态")
-                await broadcast_device_lock_update(locked_devices)
-                logger.info(f"[Device Lock] 解锁状态广播完成")
 
                 return JSONResponse(
                     content={'success': False, 'error': error_output or 'Firmware burn failed'}
@@ -5778,11 +5962,7 @@ async def burn_firmware(
             logger.error(f"[Firmware Burn] Error: {e}")
 
             # 释放设备锁
-            for device_id in locked_devices:
-                device_lock_manager.unlock_device(device_id, client_id)
-
-            # 广播设备更新（移除锁定状态）
-            await broadcast_device_lock_update(locked_devices)
+            await release_device_locks(client_id, locked_devices)
 
             return JSONResponse(
                 content={'success': False, 'error': str(e)}
@@ -5850,8 +6030,7 @@ async def burn_gsi(request: Request):
 
         # 如果有设备锁定失败，释放已锁定的设备并返回错误
         if failed_devices:
-            for device_id in locked_devices:
-                device_lock_manager.unlock_device(device_id, client_id)
+            await release_device_locks(client_id, locked_devices, broadcast=False)
 
             error_msg = "以下设备已被其他用户占用：\n"
             for fail in failed_devices:
@@ -5874,9 +6053,7 @@ async def burn_gsi(request: Request):
         config = config_manager.load_config()
         ssh = ssh_manager.get_connection(config)
         if not ssh:
-            # 释放设备锁
-            for device_id in locked_devices:
-                device_lock_manager.unlock_device(device_id, client_id)
+            await release_device_locks(client_id, locked_devices)
             return JSONResponse(
                 content={'success': False, 'error': 'SSH connection failed'}
             )
@@ -5972,13 +6149,6 @@ async def burn_gsi(request: Request):
                 # 执行命令并实时读取输出
                 stdin, stdout, stderr = ssh.exec_command(burn_cmd, get_pty=True, timeout=600)
 
-                # ANSI转义码过滤函数
-                def strip_ansi_codes(text):
-                    """移除ANSI转义码"""
-                    import re
-                    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
-                    return ansi_escape.sub('', text)
-
                 # 实时读取输出并发送到前端
                 output_buffer = []
 
@@ -6071,11 +6241,7 @@ async def burn_gsi(request: Request):
             ssh_manager.return_connection(ssh)
 
             # 释放所有设备锁
-            for device_id in locked_devices:
-                device_lock_manager.unlock_device(device_id, client_id)
-
-            # 广播设备更新（移除锁定状态）
-            await broadcast_device_lock_update(locked_devices)
+            await release_device_locks(client_id, locked_devices)
 
             # 检查是否全部成功
             all_success = all(r['success'] for r in results)
@@ -6093,11 +6259,7 @@ async def burn_gsi(request: Request):
             logger.error(f"[GSI Burn] Error: {e}")
 
             # 释放所有设备锁
-            for device_id in locked_devices:
-                device_lock_manager.unlock_device(device_id, client_id)
-
-            # 广播设备更新（移除锁定状态）
-            await broadcast_device_lock_update(locked_devices)
+            await release_device_locks(client_id, locked_devices)
 
             return JSONResponse(
                 content={'success': False, 'error': str(e)}
