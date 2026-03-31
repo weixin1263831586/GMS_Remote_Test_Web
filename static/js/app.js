@@ -262,6 +262,7 @@ function initWebSocket() {
                         // 快速更新设备锁定状态（不需要重新查询设备列表）
                         console.log('[WebSocket] device_lock_update:', data);
                         if (data.devices && Array.isArray(data.devices)) {
+                            let updated = false;
                             data.devices.forEach(update => {
                                 const deviceId = update.device_id;
                                 console.log(`[Device Lock] Updating ${deviceId}: locked=${update.locked}, by=${update.locked_by}`);
@@ -271,6 +272,7 @@ function initWebSocket() {
                                     return id === deviceId;
                                 });
                                 if (device) {
+                                    updated = true;
                                     if (typeof device === 'string') {
                                         // 转换为对象格式
                                         const idx = state.devices.indexOf(device);
@@ -292,9 +294,19 @@ function initWebSocket() {
                                     console.warn(`[Device Lock] Device ${deviceId} not found in state.devices`);
                                 }
                             });
+
                             // 重新渲染设备列表
-                            console.log('[Device Lock] Re-rendering devices...');
-                            renderDevices();
+                            if (updated) {
+                                console.log('[Device Lock] Re-rendering devices...');
+                                try {
+                                    renderDevices();
+                                    console.log('[Device Lock] Render completed successfully');
+                                } catch (error) {
+                                    console.error('[Device Lock] Render failed:', error);
+                                }
+                            } else {
+                                console.warn('[Device Lock] No devices were updated, skipping render');
+                            }
                         }
                         break;
 
@@ -699,6 +711,9 @@ function renderDevices() {
         const deviceId = typeof device === 'string' ? device : device.device_id;
         const isLocked = typeof device === 'object' && device.locked;
         const lockedBy = typeof device === 'object' ? device.locked_by : '';
+
+        // 调试日志
+        console.log(`[RenderDevices] Device ${deviceId}: type=${typeof device}, locked=${isLocked}, lockedBy=${lockedBy}`);
 
         if (index % 2 === 0) {
             leftDevices.push({ deviceId, isLocked, lockedBy });
@@ -3947,7 +3962,7 @@ async function analyzeFailureSource(testName, errorMessage) {
     document.body.appendChild(modal);
 
     try {
-        const response = await fetch('/api/test/analyze-source', {
+        const response = await fetch('/api/reports/analyze-source', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ test_name: testName, error_message: errorMessage })
@@ -4205,7 +4220,7 @@ async function analyzeSourceCode(testName, errorMessage) {
         // 显示加载提示
         showToast('正在分析源码...', 'info');
 
-        const response = await fetch('/api/test/analyze-source', {
+        const response = await fetch('/api/reports/analyze-source', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -5131,6 +5146,7 @@ const CURL_PLACEHOLDERS = Object.freeze({
     [PARAM_TYPES.NUMBER]: 123,
     [PARAM_TYPES.ARRAY]: ['Serial'],
     [PARAM_TYPES.BOOLEAN]: true,
+    [PARAM_TYPES.FILE]: '/path/to/file.img',
     [PARAM_TYPES.OBJECT]: {}
 });
 
@@ -5234,16 +5250,7 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "测试环境已清理" }',
         usage: '测试完成后清理临时文件和进程'
     },
-    '/api/test/autocomplete-suite': {
-        title: '自动补全测试套件',
-        description: '根据查询自动补全测试套件名称',
-        params: [
-            { name: 'query', type: 'string', required: true, desc: '查询关键词' }
-        ],
-        response: '{ "suggestions": ["CtsCameraTestCases", "CtsCameraApiTestCases"] }',
-        usage: '输入测试套件名称时获得智能提示'
-    },
-    '/api/test/analyze-source': {
+    '/api/reports/analyze-source': {
         title: '分析源码',
         description: '分析测试用例的源代码',
         params: [
@@ -5491,10 +5498,11 @@ const API_DETAILS_MAP = {
         title: '删除报告',
         description: '删除指定的测试报告',
         params: [
-            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
+            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳（如20260330-120000）' }
         ],
         response: '{ "success": true, "message": "报告已删除" }',
-        usage: '删除不需要的历史报告'
+        usage: '⚠️ 危险操作 - 删除后无法恢复',
+        curl_example: 'curl -X DELETE "http://server:5001/api/reports/delete" -G -d "report_timestamp=20260330-120000"'
     },
     '/api/reports/analyze': {
         title: 'AI分析报告',
@@ -5616,10 +5624,10 @@ const API_DETAILS_MAP = {
     },
     '/api/ssh/sshd-install': {
         title: '安装SSHD',
-        description: '安装SSH服务',
+        description: '获取SSHD安装指南',
         params: [],
-        response: '{ "success": true, "message": "SSH服务已安装" }',
-        usage: '安装SSH服务'
+        response: '{ "success": false, "error": "SSHD需要在Windows客户端手动安装", "install_guide": "安装步骤...", "manual_install": true }',
+        usage: '💡 提示：使用 jq -r \'.install_guide\' 查看换行内容\n命令：curl -sX POST "..." | jq -r \'.install_guide\''
     },
     '/api/ssh/route': {
         title: '检查路由',
@@ -5681,22 +5689,23 @@ const API_DETAILS_MAP = {
     },
     '/api/burn/firmware': {
         title: '刷入固件',
-        description: '刷入设备固件',
+        description: '上传固件文件并刷入设备',
         params: [
-            { name: 'firmware', type: 'file', required: true, desc: '固件文件' },
-            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
-            { name: 'wipe_data', type: 'boolean', required: false, desc: '是否清除数据' }
+            { name: 'firmware_file', type: 'file', required: true, desc: '固件文件（.img格式）' },
+            { name: 'devices', type: 'string', required: true, desc: '设备序列号（多个用逗号分隔）' },
+            { name: 'wipe_data', type: 'boolean', required: false, desc: '是否清除数据（默认true）' }
         ],
         response: '{ "success": true, "message": "固件刷入成功" }',
-        usage: '⚠️危险操作 - 刷入固件会重启设备'
+        usage: '⚠️危险操作 - 刷入固件会重启设备',
+        curl_example: 'curl -X POST "http://server:5001/api/burn/firmware" -F "devices=rk3572cai" -F "firmware_file=@/path/to/firmware.img" -F "wipe_data=true"'
     },
     '/api/burn/gsi': {
         title: '刷入GSI',
         description: '刷入GSI镜像',
         params: [
-            { name: 'gsi_image', type: 'file', required: true, desc: 'GSI镜像文件' },
-            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
-            { name: 'wipe_data', type: 'boolean', required: false, desc: '是否清除数据' }
+            { name: 'gsi_image', type: 'file', required: true, desc: 'GSI镜像文件（.img格式）' },
+            { name: 'devices', type: 'string', required: true, desc: '设备序列号（多个用逗号分隔）' },
+            { name: 'wipe_data', type: 'boolean', required: false, desc: '是否清除数据（默认true）' }
         ],
         response: '{ "success": true, "message": "GSI刷入成功" }',
         usage: '⚠️危险操作 - 刷入GSI镜像'
@@ -5809,51 +5818,99 @@ function generateCurlCommand(api, details) {
         const displayCmd = cmd.includes('\\') ? cmd.split('\n')[0] : cmd;
         return { display: displayCmd, full: cmd };
     } else if (api.method === 'POST') {
-        // Generate multi-line version
-        let multiLineCmd = `curl -sX POST "${BASE_URL}${api.path}" \\\n  -H "Content-Type: application/json"`;
+        // Check if any parameter is of type FILE - if so, use FormData format
+        const hasFileParam = details.params && details.params.some(p => p.type === PARAM_TYPES.FILE);
 
-        // Generate request body example
-        if (details.params && details.params.length > 0) {
-            const bodyLines = ['{'];
-            const validParams = details.params.filter(p => p.type !== PARAM_TYPES.FILE);
+        if (hasFileParam) {
+            // Generate FormData format for file uploads
+            let multiLineCmd = `curl -sX POST "${BASE_URL}${api.path}"`;
 
-            validParams.forEach((p, index) => {
-                // Include all parameters (both required and optional)
-                const placeholder = CURL_PLACEHOLDERS[p.type] || CURL_PLACEHOLDERS[PARAM_TYPES.STRING];
+            if (details.params && details.params.length > 0) {
+                details.params.forEach(p => {
+                    const placeholder = CURL_PLACEHOLDERS[p.type] || CURL_PLACEHOLDERS[PARAM_TYPES.STRING];
 
-                // Format the value based on type
-                let valueStr;
-                if (p.type === PARAM_TYPES.STRING) {
-                    valueStr = `"${placeholder}"`;
-                } else if (p.type === PARAM_TYPES.NUMBER) {
-                    valueStr = placeholder;
-                } else if (p.type === PARAM_TYPES.BOOLEAN) {
-                    valueStr = placeholder;
-                } else if (p.type === PARAM_TYPES.ARRAY) {
-                    valueStr = JSON.stringify(placeholder);
-                } else {
-                    valueStr = placeholder;
-                }
-
-                // Add comma if not last item
-                const comma = (index < validParams.length - 1) ? ',' : '';
-                bodyLines.push(`    "${p.name}": ${valueStr}${comma}`);
-            });
-            bodyLines.push('  }');
-
-            if (bodyLines.length > 2) { // More than just '{' and '}'
-                multiLineCmd += ' \\\n  -d \'' + bodyLines.join('\n') + '\'';
-            } else {
-                multiLineCmd += ` \\\n  -d '{}'`;
+                    if (p.type === PARAM_TYPES.FILE) {
+                        // File parameter: -F "name=@path"
+                        multiLineCmd += ` \\\n  -F "${p.name}=@${placeholder}"`;
+                    } else if (p.type === PARAM_TYPES.BOOLEAN) {
+                        // Boolean parameter: -F "name=true"
+                        multiLineCmd += ` \\\n  -F "${p.name}=${placeholder}"`;
+                    } else {
+                        // Other parameters: -F "name=value"
+                        multiLineCmd += ` \\\n  -F "${p.name}=${placeholder}"`;
+                    }
+                });
             }
+
+            const displayCmd = multiLineCmd.split('\n')[0];
+            return { display: displayCmd, full: multiLineCmd };
         } else {
-            multiLineCmd += ` \\\n  -d '{}'`;
+            // Generate JSON format for non-file uploads
+            let multiLineCmd = `curl -sX POST "${BASE_URL}${api.path}"`;
+
+            // Generate request body example
+            if (details.params && details.params.length > 0) {
+                multiLineCmd += ` \\\n  -H "Content-Type: application/json"`;
+                const bodyLines = ['{'];
+
+                // Include all parameters including FILE type for documentation
+                details.params.forEach((p, index) => {
+                    // Include all parameters (both required and optional)
+                    const placeholder = CURL_PLACEHOLDERS[p.type] || CURL_PLACEHOLDERS[PARAM_TYPES.STRING];
+
+                    // Format the value based on type
+                    let valueStr;
+                    if (p.type === PARAM_TYPES.STRING) {
+                        valueStr = `"${placeholder}"`;
+                    } else if (p.type === PARAM_TYPES.NUMBER) {
+                        valueStr = placeholder;
+                    } else if (p.type === PARAM_TYPES.BOOLEAN) {
+                        valueStr = placeholder;
+                    } else if (p.type === PARAM_TYPES.ARRAY) {
+                        valueStr = JSON.stringify(placeholder);
+                    } else if (p.type === PARAM_TYPES.FILE) {
+                        // For file type, still show in JSON format as placeholder
+                        valueStr = `"${placeholder}"`;
+                    } else {
+                        valueStr = placeholder;
+                    }
+
+                    // Add comma if not last item
+                    const comma = (index < details.params.length - 1) ? ',' : '';
+                    bodyLines.push(`    "${p.name}": ${valueStr}${comma}`);
+                });
+                bodyLines.push('  }');
+
+                if (bodyLines.length > 2) { // More than just '{' and '}'
+                    multiLineCmd += ' \\\n  -d \'' + bodyLines.join('\n') + '\'';
+                } else {
+                    multiLineCmd += ` \\\n  -d '{}'`;
+                }
+            } else {
+                // No parameters - don't add -d '{}' or Content-Type header
+                // Just return the basic curl command
+            }
+
+            // Display version: only first line with continuation
+            const displayCmd = multiLineCmd.split('\n')[0];
+
+            return { display: displayCmd, full: multiLineCmd };
+        }
+    } else if (api.method === 'DELETE') {
+        // Generate DELETE request
+        let cmd = `curl -X DELETE "${BASE_URL}${api.path}"`;
+
+        // Add query parameters or request body
+        if (details.params && details.params.length > 0) {
+            const queryParams = details.params.filter(p => p.required || p.name === 'report_timestamp');
+            if (queryParams.length > 0) {
+                // Use query parameters for DELETE
+                cmd += ` \\\n  -G \\\n  -d "${queryParams[0].name}=VALUE"`;
+            }
         }
 
-        // Display version: only first line with continuation
-        const displayCmd = multiLineCmd.split('\n')[0];
-
-        return { display: displayCmd, full: multiLineCmd };
+        const displayCmd = cmd.includes('\\') ? cmd.split('\n')[0] : cmd;
+        return { display: displayCmd, full: cmd };
     } else if (api.method === 'WebSocket') {
         return { display: `# WebSocket连接\nwscat -c ws://${BASE_URL}${api.path.replace('{client_id}', 'YOUR_CLIENT_ID')}`, full: `# WebSocket连接\nwscat -c ws://${BASE_URL}${api.path.replace('{client_id}', 'YOUR_CLIENT_ID')}` };
     }
@@ -6027,15 +6084,27 @@ window.copyCurlCommandFromData = function(element) {
     }
     console.log('[Copy] Attempting to copy:', text);
 
+    let commandToCopy = text;
+    let successMessage = '✓ curl命令已复制';
+
     // 检查是否为纯文本端点（不需要jq格式化）
     const isPlainTextEndpoint = text.includes('/api/test/logs/stream') ||
                                 text.includes('/api/terminal/ws') ||
                                 text.includes('/api/screen/ws');
 
-    let commandToCopy = text;
-    let successMessage = '✓ curl命令已复制';
+    // 检查是否为需要特殊jq处理的端点
+    const isSshdInstall = text.includes('/api/ssh/sshd-install');
 
-    if (!isPlainTextEndpoint) {
+    if (isPlainTextEndpoint) {
+        // 纯文本端点，不添加jq
+        commandToCopy = text;
+        successMessage = '✓ curl命令已复制';
+    } else if (isSshdInstall) {
+        // sshd-install API，使用 jq -r '.install_guide'
+        commandToCopy = text + ' | jq -r \'.install_guide\'';
+        successMessage = '✓ curl命令已复制 (含jq -r查看指南)';
+    } else {
+        // 其他JSON端点，使用 jq "."
         commandToCopy = text + ' | jq "."';
         successMessage = '✓ curl命令已复制 (含jq格式化)';
     }

@@ -28,6 +28,7 @@ from collections import deque
 import asyncio
 
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Body, Query
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.websockets import WebSocketState
 from enum import Enum
 
@@ -976,8 +977,24 @@ async def update_config(req: dict):
 # ==================== 设备管理 ====================
 
 @app.get("/api/devices")
-async def list_devices(request: Request):
-    """获取设备列表 - 与Flask一致，直接返回数组"""
+async def get_connected_devices(
+    request: Request,
+    help: bool = Query(False)
+):
+    """获取所有已连接的设备列表（与adb devices相同）"""
+    # 检查是否需要显示帮助
+    if help:
+        help_text = generate_per_api_help_text("GET", "/api/devices")
+        if help_text:
+            return PlainTextResponse(
+                content=help_text,
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=300"
+                }
+            )
+
+    # 获取设备列表 - 与Flask一致，直接返回数组
     try:
         # 跟踪用户访问
         client_id = get_client_id_from_request(request)
@@ -1059,8 +1076,25 @@ async def list_devices(request: Request):
             )
 
 @app.post("/api/devices/lock")
-async def lock_devices(req: DeviceLockRequest, request: Request):
+async def lock_devices(
+    request: Request,
+    h: Optional[str] = Query(None),
+    help: bool = Query(False),
+    req: DeviceLockRequest = Body(None)
+):
     """锁定/解锁设备（使用run_Device_Lock.sh脚本 - 与Flask版本完全一致）"""
+    # 检查是否需要显示帮助（支持 ?h 或 ?help）
+    if help:
+        help_text = generate_per_api_help_text("POST", "/api/devices/lock")
+        if help_text:
+            return PlainTextResponse(
+                content=help_text,
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=300"
+                }
+            )
+
     try:
         # 兼容两种请求格式：单设备（device_id）和批量（devices）
         devices = req.devices if req.devices else []
@@ -1732,8 +1766,32 @@ async def opengrok_search(request: Request):
 # ==================== 测试管理 ====================
 
 @app.post("/api/test/start")
-async def start_test(req: TestStartRequest, request: Request):
+async def start_test(
+    request: Request,
+    h: Optional[str] = Query(None),
+    help: bool = Query(False),
+    req: TestStartRequest = Body(None)
+):
     """启动测试 - 与Flask版本逻辑一致（后台执行，立即返回）"""
+    # 检查是否需要显示帮助（支持 ?h 或 ?help 或 ?h=1 或 ?help=true）
+    if help:
+        help_text = generate_per_api_help_text("POST", "/api/test/start")
+        if help_text:
+            return PlainTextResponse(
+                content=help_text,
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=300"
+                }
+            )
+
+    # 如果req为None（显示帮助时没有body），返回错误
+    if req is None:
+        return JSONResponse(
+            content={'success': False, 'error': 'Missing request body'},
+            status_code=400
+        )
+
     # 从请求中获取client_id
     client_id = get_client_id_from_request(request)
 
@@ -1785,6 +1843,11 @@ async def start_test(req: TestStartRequest, request: Request):
             },
             status_code=409
         )
+
+    # 立即广播设备锁定状态（不等待后台任务）
+    if locked_devices:
+        logger.info(f"[TestStart] Broadcasting device lock for: {locked_devices}")
+        await broadcast_device_lock_update(locked_devices)
 
     # 准备测试参数
     test_params = req.model_dump()
@@ -2111,8 +2174,24 @@ async def run_test_background(
                 logger.debug(f"WebSocket send failed (client disconnected): {e}")
 
 @app.post("/api/test/stop")
-async def stop_test(request: Request):
+async def stop_test(
+    request: Request,
+    h: Optional[str] = Query(None),
+    help: bool = Query(False)
+):
     """停止测试 - 与Flask版本逻辑一致"""
+    # 检查是否需要显示帮助（支持 ?h 或 ?help）
+    if help:
+        help_text = generate_per_api_help_text("POST", "/api/test/stop")
+        if help_text:
+            return PlainTextResponse(
+                content=help_text,
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=300"
+                }
+            )
+
     client_id = get_client_id_from_request(request)
     user_state = get_or_create_user_state(client_id)
     process_group_id = user_state.get('process_group_id')
@@ -2129,8 +2208,15 @@ async def stop_test(request: Request):
 
     # 立即释放设备锁（与Flask版本一致）
     devices_to_release = user_state.get('devices', [])
+    logger.info(f"[TestStop] Releasing device locks for: {devices_to_release}")
     for device_id in devices_to_release:
         device_lock_manager.unlock_device(device_id, client_id)
+
+    # 广播设备解锁状态更新
+    if devices_to_release:
+        logger.info(f"[TestStop] Broadcasting device unlock for: {devices_to_release}")
+        await broadcast_device_lock_update(devices_to_release)
+
     update_user_state_field(client_id, {'devices': []})
 
     # 通过SSH杀死测试进程
@@ -2487,8 +2573,23 @@ async def autocomplete_suite(req: AutocompleteSuiteRequest):
         )
 
 @app.get("/api/test/status")
-async def get_status(request: Request):
+async def get_status(
+    request: Request,
+    h: Optional[str] = Query(None),
+    help: bool = Query(False)
+):
     """获取测试状态 - 优化版本，减少数据传输"""
+    # 检查是否需要显示帮助（支持 ?h 或 ?help）
+    if help:
+        help_text = generate_per_api_help_text("GET", "/api/test/status")
+        if help_text:
+            return PlainTextResponse(
+                content=help_text,
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=300"
+                }
+            )
     try:
         # 处理USB事件队列（如果有）
         if hasattr(app.state, 'usb_event_queue'):
@@ -3951,7 +4052,7 @@ def get_source_code_suggestions(test_name, error_message, stack_trace=None):
     return result
 
 
-@app.post("/api/test/analyze-source")
+@app.post("/api/reports/analyze-source")
 async def analyze_test_source(req: dict):
     """
     分析测试失败并提供Android源码查询链接
@@ -5081,12 +5182,28 @@ async def get_upload_progress(req: dict):
 
 # ==================== 固件管理 ====================
 @app.post("/api/burn/firmware")
-async def burn_firmware(request: Request):
+async def burn_firmware(
+    request: Request,
+    h: Optional[str] = Query(None),
+    help: bool = Query(False)
+):
     """
     固件烧写 - 支持文件上传
 
     使用 upgrade_tool 烧写固件到选定的设备
     """
+    # 检查是否需要显示帮助（支持 ?h 或 ?help）
+    if help:
+        help_text = generate_per_api_help_text("POST", "/api/burn/firmware")
+        if help_text:
+            return PlainTextResponse(
+                content=help_text,
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=300"
+                }
+            )
+
     try:
         # 获取客户端ID
         client_id = get_client_id_from_request(request)
@@ -6975,17 +7092,10 @@ API_DOCS_LIST = [
     },
     {
         "method": "POST",
-        "path": "/api/test/autocomplete-suite",
-        "description": "自动补全测试套件",
-        "params": [{"name": "query", "type": "string", "required": True}],
-        "category": "test"
-    },
-    {
-        "method": "POST",
-        "path": "/api/test/analyze-source",
+        "path": "/api/reports/analyze-source",
         "description": "分析测试源码",
         "params": [{"name": "test_name", "type": "string", "required": True}, {"name": "error_message", "type": "string", "required": False}],
-        "category": "test"
+        "category": "reports"
     },
     {
         "method": "GET",
@@ -7184,6 +7294,8 @@ API_DOCS_LIST = [
         "path": "/api/ssh/sshd-install",
         "description": "安装SSHD服务",
         "params": [],
+        "usage": "curl -sX POST \"http://server:5001/api/ssh/sshd-install\" | jq -r '.install_guide'",
+        "note": "💡 提示：返回JSON包含install_guide字段，使用jq -r查看换行内容",
         "category": "ssh"
     },
     {
@@ -7242,15 +7354,25 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/burn/firmware",
-        "description": "刷入固件",
-        "params": [{"name": "firmware", "type": "file", "required": True}, {"name": "device_id", "type": "string", "required": True}],
+        "description": "刷入固件（上传固件文件并刷入设备）",
+        "params": [
+            {"name": "firmware_file", "type": "file", "required": True, "desc": "固件文件（.img格式）"},
+            {"name": "devices", "type": "string", "required": True, "desc": "设备序列号（多个用逗号分隔）"},
+            {"name": "wipe_data", "type": "boolean", "required": False, "desc": "是否清除数据（默认true）"}
+        ],
+        "usage": "curl -X POST \"http://server:5001/api/burn/firmware\" -F \"firmware_file=@/path/to/firmware.img\" -F \"devices=rk3572cai\" -F \"wipe_data=true\"",
+        "note": "⚠️ 危险操作：刷入固件会重启设备并清除数据",
         "category": "burn"
     },
     {
         "method": "POST",
         "path": "/api/burn/gsi",
-        "description": "刷入GSI",
-        "params": [{"name": "gsi_image", "type": "file", "required": True}, {"name": "device_id", "type": "string", "required": True}],
+        "description": "刷入GSI镜像",
+        "params": [
+            {"name": "gsi_image", "type": "file", "required": True, "desc": "GSI镜像文件（.img格式）"},
+            {"name": "devices", "type": "string", "required": True, "desc": "设备序列号（多个用逗号分隔）"},
+            {"name": "wipe_data", "type": "boolean", "required": False, "desc": "是否清除数据（默认true）"}
+        ],
         "category": "burn"
     },
     {
@@ -7317,6 +7439,334 @@ async def get_api_docs():
     except Exception as e:
         logger.error(f"Error getting API docs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/help")
+async def get_api_help():
+    """获取API列表（纯文本格式，只显示方法名和路径）"""
+    try:
+        # 按方法类型和路径排序
+        sorted_apis = sorted(API_DOCS_LIST, key=lambda x: (x['method'], x['path']))
+
+        # 生成纯文本API列表
+        api_list = []
+        for api in sorted_apis:
+            # 格式：METHOD    PATH
+            api_list.append(f"{api['method']:<10} {api['path']}")
+
+        # 直接返回纯文本（每个API一行）
+        text_content = "GMS Auto Test API List\n"
+        text_content += "=" * 60 + "\n\n"
+        text_content += f"Total: {len(api_list)} APIs\n"
+        text_content += f"Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        text_content += "=" * 60 + "\n\n"
+        text_content += "\n".join(api_list) + "\n"  # 确保最后也有换行
+
+        return PlainTextResponse(
+            content=text_content,
+            headers={
+                "Cache-Control": "public, max-age=300",
+                "Content-Type": "text/plain; charset=utf-8"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error getting API help: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/help/{api_path:path}")
+async def get_api_help_detail(api_path: str, help: Optional[str] = None):
+    """获取单个API的详细帮助信息（通过GET请求）"""
+    try:
+        # 查找匹配的API
+        api_doc = None
+        for api in API_DOCS_LIST:
+            # 移除开头的斜杠进行匹配
+            if api['path'].lstrip('/') == api_path:
+                api_doc = api
+                break
+
+        if not api_doc:
+            raise HTTPException(status_code=404, detail=f"API not found: /{api_path}")
+
+        # 生成帮助文本
+        help_text = generate_per_api_help_text(api_doc['method'], api_doc['path'])
+
+        if not help_text:
+            raise HTTPException(status_code=404, detail=f"Help not available for: /{api_path}")
+
+        return PlainTextResponse(
+            content=help_text,
+            headers={
+                "Content-Type": "text/plain; charset=utf-8",
+                "Cache-Control": "public, max-age=300"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting API help detail: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
+    """为指定API生成详细帮助文本（优化格式）
+
+    Args:
+        method: HTTP方法 (GET/POST/DELETE等)
+        path: API路径
+
+    Returns:
+        格式化的帮助文本，如果API不存在则返回None
+    """
+    base_url = "http://172.16.14.233:5001"
+
+    # 详细的API参数映射（与前端保持一致）
+    API_DETAILS_MAP = {
+        '/api/test/start': {
+            'title': '启动测试',
+            'description': '启动兼容性测试(CTS/VTS/GTS等)',
+            'params': [
+                {'name': 'devices', 'type': 'array', 'required': True, 'desc': '设备序列号数组'},
+                {'name': 'test_type', 'type': 'string', 'required': True, 'desc': '测试类型: CTS|VTS|STS|GTS|CTS_VERIFIER'},
+                {'name': 'test_module', 'type': 'string', 'required': True, 'desc': '测试模块名称'},
+                {'name': 'test_case', 'type': 'string', 'required': False, 'desc': '具体测试用例(可选)'},
+                {'name': 'retry_dir', 'type': 'string', 'required': False, 'desc': '重试目录(可选)'},
+                {'name': 'test_suite', 'type': 'string', 'required': False, 'desc': '测试套件路径(可选)'}
+            ],
+            'response': '{"success": true, "message": "测试已启动"}',
+            'usage': '⭐核心接口'
+        },
+        '/api/test/stop': {
+            'title': '停止测试',
+            'description': '停止当前正在运行的测试',
+            'params': [],
+            'response': '{"success": true, "message": "测试已停止"}',
+            'usage': ''
+        },
+        '/api/devices': {
+            'title': '获取设备列表',
+            'description': '获取所有已连接的设备列表',
+            'params': [],
+            'response': '{"success": true, "devices": [...]}',
+            'usage': ''
+        },
+        '/api/devices/lock': {
+            'title': '锁定设备',
+            'description': '锁定/解锁设备',
+            'params': [
+                {'name': 'device_id', 'type': 'string', 'required': True, 'desc': '设备序列号'},
+                {'name': 'client_id', 'type': 'string', 'required': True, 'desc': '客户端ID'},
+                {'name': 'username', 'type': 'string', 'required': True, 'desc': '用户名'}
+            ],
+            'response': '{"success": true, "message": "设备已锁定"}',
+            'usage': ''
+        },
+        '/api/burn/firmware': {
+            'title': '刷入固件',
+            'description': '上传固件文件并刷入设备',
+            'params': [
+                {'name': 'firmware_file', 'type': 'file', 'required': True, 'desc': '固件文件（.img格式）'},
+                {'name': 'devices', 'type': 'string', 'required': True, 'desc': '设备序列号（多个用逗号分隔）'},
+                {'name': 'wipe_data', 'type': 'boolean', 'required': False, 'desc': '是否清除数据（默认true）'}
+            ],
+            'response': '{"success": true, "message": "固件刷入完成"}',
+            'usage': ''
+        }
+    }
+
+    # 查找API详情
+    api_details = API_DETAILS_MAP.get(path)
+    if not api_details:
+        return None
+
+    params = api_details.get('params', [])
+
+    # 构建帮助文本（优化格式）
+    help_text = ""
+    help_text += "╔════════════════════════════════════════════════════════════════════╗\n"
+    help_text += f"║  {method}  {path:<55} ║\n"
+    help_text += "╠════════════════════════════════════════════════════════════════════╣\n"
+    help_text += f"║  📋 {api_details['description']:<54} ║\n"
+    help_text += "╚════════════════════════════════════════════════════════════════════╝\n\n"
+
+    # 完整curl命令
+    if method == 'GET':
+        help_text += f'curl -s "{base_url}{path}"\n\n'
+    elif method == 'POST':
+        has_file = any(p.get('type') == 'file' for p in params)
+        if has_file:
+            # FormData格式
+            curl_cmd = f'curl -sX POST "{base_url}{path}"'
+            for p in params:
+                if p.get('type') == 'file':
+                    curl_cmd += f' \\\n  -F "{p["name"]}=@VALUE"'
+                elif p.get('type') == 'boolean':
+                    curl_cmd += f' \\\n  -F "{p["name"]}=true"'
+                else:
+                    curl_cmd += f' \\\n  -F "{p["name"]}=VALUE"'
+            help_text += curl_cmd + "\n\n"
+        else:
+            # JSON格式
+            curl_cmd = f'curl -sX POST "{base_url}{path}"'
+            if params:
+                curl_cmd += ' \\\n  -H "Content-Type: application/json" \\\n  -d \''
+                body_lines = ['{']
+                for i, p in enumerate(params):
+                    comma = "," if i < len(params) - 1 else ""
+                    value = '["Serial"]' if p.get('type') == 'array' else '"VALUE"'
+                    body_lines.append(f'    "{p["name"]}": {value}{comma}')
+                body_lines.append('  }')
+                curl_cmd += '\n'.join(body_lines) + '\''
+            help_text += curl_cmd + "\n\n"
+    elif method == 'DELETE':
+        help_text += f'curl -X DELETE "{base_url}{path}"\n\n'
+
+    # 标题
+    usage = api_details.get('usage', '')
+    if usage:
+        help_text += f"### {api_details['title']} {usage}\n\n"
+    else:
+        help_text += f"### {api_details['title']}\n\n"
+
+    # HTTP信息
+    help_text += f"{method} {path}\n"
+    if method == 'POST':
+        has_file = any(p.get('type') == 'file' for p in params)
+        if not has_file:
+            help_text += f"Content-Type: application/json\n"
+    help_text += "\n"
+
+    # 参数说明
+    if params:
+        help_text += "📋 请求参数说明:\n"
+        for param in params:
+            param_name = param['name']
+            param_type = param['type']
+            param_desc = param['desc']
+            required = '必需' if param['required'] else '可选'
+            help_text += f"{param_name} {param_type} {required} {param_desc}\n"
+        help_text += "\n"
+
+    # 响应示例
+    help_text += "📤 响应示例:\n"
+    response_str = api_details.get('response', '{"success": true}')
+    try:
+        response_obj = json.loads(response_str)
+        help_text += json.dumps(response_obj, ensure_ascii=False, indent=2)
+    except:
+        help_text += response_str
+
+    # 添加结尾换行符（两个换行，视觉上更明显）
+    help_text += "\n\n"
+
+    return help_text
+
+
+def generate_curl_example(api):
+    """生成API的curl示例命令"""
+    method = api['method']
+    path = api['path']
+    params = api.get('params', [])
+    base_url = "http://172.16.14.233:5001"
+
+    if method == 'GET':
+        if params:
+            # 有参数的GET请求
+            param = params[0]
+            return f'curl -s "{base_url}{path}?{param["name"]}=VALUE"'
+        else:
+            return f'curl -s "{base_url}{path}"'
+
+    elif method == 'POST':
+        if params:
+            # 检查是否有file类型参数
+            has_file = any(p.get('type') == 'file' for p in params)
+            if has_file:
+                # FormData格式
+                file_params = [p for p in params if p.get('type') == 'file']
+                other_params = [p for p in params if p.get('type') != 'file']
+
+                parts = []
+                for p in file_params:
+                    parts.append(f'-F "{p["name"]}=@VALUE"')
+                for p in other_params[:2]:  # 最多显示2个参数
+                    parts.append(f'-F "{p["name"]}=VALUE"')
+
+                cmd = f'curl -sX POST "{base_url}{path}"'
+                if parts:
+                    cmd += ' \\\n  ' + ' \\\n  '.join(parts)
+                return cmd
+            else:
+                # JSON格式
+                json_body = "{"
+                for i, p in enumerate(params[:2]):  # 最多显示2个参数
+                    comma = "," if i < min(len(params), 2) - 1 else ""
+                    json_body += f'\\n    "{p["name"]}": "VALUE"{comma}'
+                json_body += "\\n  }"
+
+                return f'curl -sX POST "{base_url}{path}" \\\n  -H "Content-Type: application/json" \\\n  -d \'{json_body}\''
+        else:
+            return f'curl -sX POST "{base_url}{path}"'
+
+    elif method == 'DELETE':
+        if params:
+            param = params[0]
+            return f'curl -X DELETE "{base_url}{path}" \\\n  -G \\\n  -d "{param["name"]}=VALUE"'
+        else:
+            return f'curl -X DELETE "{base_url}{path}"'
+
+    else:
+        return f'curl -X {method} "{base_url}{path}"'
+
+
+def generate_api_example(api):
+    """生成API使用示例"""
+    method = api['method']
+    path = api['path']
+    params = api.get('params', [])
+
+    base_url = "http://172.16.14.233:5001"
+
+    if method == 'GET':
+        if params:
+            # 有参数的GET请求
+            param_str = "&".join([f"{p['name']}=VALUE" for p in params[:2]])
+            return f'curl -s "{base_url}{path}?{param_str}"'
+        else:
+            return f'curl -s "{base_url}{path}"'
+
+    elif method == 'POST':
+        if params:
+            # 检查是否有file类型参数
+            has_file = any(p.get('type') == 'file' for p in params)
+            if has_file:
+                # FormData格式
+                param_str = " \\\n  ".join([
+                    f'-F "{p["name"]}=@{p.get("desc", "path/to/file")}"' if p.get('type') == 'file' else f'-F "{p["name"]}=VALUE"'
+                    for p in params[:3]
+                ])
+                return f'curl -sX POST "{base_url}{path}" \\\n  {param_str}'
+            else:
+                # JSON格式
+                body = "{"
+                for i, p in enumerate(params[:3]):
+                    comma = "," if i < len(params) - 1 else ""
+                    body += f'\n    "{p["name"]}": "VALUE"{comma}'
+                body += "\n  }"
+                return f'curl -sX POST "{base_url}{path}" \\\n  -H "Content-Type: application/json" \\\n  -d \'{body}\''
+        else:
+            return f'curl -sX POST "{base_url}{path}"'
+
+    elif method == 'DELETE':
+        if params:
+            param = params[0]['name']
+            return f'curl -X DELETE "{base_url}{path}" \\\n  -G \\\n  -d "{param}=VALUE"'
+        else:
+            return f'curl -X DELETE "{base_url}{path}"'
+
+    else:
+        return f'curl -X {method} "{base_url}{path}"'
 
 # ==================== Claude报告分析API ====================
 
