@@ -4558,8 +4558,21 @@ async def get_usbip_status(request: Request):
     return JSONResponse(content={'connected': connected})
 
 @app.post("/api/usbip/start")
-async def start_usbip(req: Optional[USBIPStartRequest] = Body(default=None), request: Request = None):
+async def start_usbip(
+    req: Optional[USBIPStartRequest] = Body(default=None),
+    request: Request = None,
+    help: bool = Query(False)
+):
     """启动 USB/IP 转发（使用usbip_manager.start_usbip高级封装方法 - 与Flask版本一致）"""
+    # 检查是否需要显示帮助
+    if help:
+        help_text = generate_per_api_help_text("POST", "/api/usbip/start")
+        if help_text:
+            return PlainTextResponse(
+                content=help_text,
+                headers={"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=300"}
+            )
+
     try:
         config = config_manager.load_config()
         client_id = get_client_id_from_request(request)
@@ -7462,6 +7475,13 @@ async def get_api_help():
         text_content += "=" * 60 + "\n\n"
         text_content += "\n".join(api_list) + "\n"  # 确保最后也有换行
 
+        # 添加使用示例
+        text_content += "\n" + "=" * 60 + "\n"
+        text_content += "Usage Examples:\n"
+        text_content += '  curl -s "http://172.16.14.233:5001/api/devices?help=1"           \n'
+        text_content += '  curl -s "http://172.16.14.233:5001/api/test/status?help=1"       \n'
+        text_content += '  curl -sX POST "http://172.16.14.233:5001/api/test/start?help=1"  \n'
+
         return PlainTextResponse(
             content=text_content,
             headers={
@@ -7571,6 +7591,23 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
                 {'name': 'wipe_data', 'type': 'boolean', 'required': False, 'desc': '是否清除数据（默认true）'}
             ],
             'response': '{"success": true, "message": "固件刷入完成"}',
+            'usage': ''
+        },
+        '/api/test/status': {
+            'title': '获取测试状态',
+            'description': '获取当前测试运行状态',
+            'params': [],
+            'response': '{"running": false, "devices": []}',
+            'usage': ''
+        },
+        '/api/usbip/start': {
+            'title': '启动 USB/IP 连接',
+            'description': '通过 USB/IP 连接到远程设备',
+            'params': [
+                {'name': 'device_host', 'type': 'string', 'required': True, 'desc': 'Windows 主机地址 (user@ip)'},
+                {'name': 'device_password', 'type': 'string', 'required': True, 'desc': 'SSH 密码'}
+            ],
+            'response': '{"success": true, "devices": [...]}',
             'usage': ''
         }
     }

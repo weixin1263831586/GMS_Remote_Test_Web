@@ -138,11 +138,6 @@ class USBIPManager:
                         busids
                     )
 
-                    # 保存密码到动态配置
-                    if device_password and device_password != config.get('device_pswd', ''):
-                        dynamic_config = self.config_manager._load_dynamic_config() or {}
-                        dynamic_config['device_pswd'] = device_password
-                        self.config_manager.save_dynamic_config(dynamic_config)
 
                     # 更新设备来源记录
                     for device_id in device_list:
