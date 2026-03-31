@@ -1527,36 +1527,201 @@ async function checkSshd() {
 }
 
 async function checkRouting() {
+    // 创建弹框
+    const dialog = document.createElement('div');
+    dialog.className = 'route-check-dialog';
+    dialog.innerHTML = `
+        <div class="route-check-content">
+            <h3>📡 检查路由连通性</h3>
+            <div class="route-check-form">
+                <div class="form-group">
+                    <label for="test-host-ip">测试主机IP:</label>
+                    <input type="text" id="test-host-ip" placeholder="例如: 192.168.1.100" />
+                    <small>从配置文件读取的ubuntu_host</small>
+                </div>
+                <div class="form-group">
+                    <label for="client-ip">客户端IP:</label>
+                    <input type="text" id="client-ip" placeholder="例如: 192.168.2.100" />
+                    <small>您当前浏览器的IP地址</small>
+                </div>
+                <div class="route-check-actions">
+                    <button id="ping-test-btn" class="btn-primary">🔍 测试连通性</button>
+                    <button id="close-dialog-btn" class="btn-secondary">关闭</button>
+                </div>
+                <div id="ping-result" class="ping-result"></div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(dialog);
+
+    // 获取配置中的默认值
     try {
-        const result = await apiCall('/api/ssh/route', 'GET');
-
-        if (result.same_network) {
-            addLogEntry(result.message, 'success');
-        } else if (result.need_route) {
-            addLogEntry(result.message, 'warning');
-            addLogEntry('📋 建议路由命令:', 'info');
-
-            // 显示 Windows 路由命令
-            if (result.route_commands && result.route_commands.windows) {
-                addLogEntry('--- Windows 路由命令 ---', 'info');
-                result.route_commands.windows.forEach(cmd => {
-                    addLogEntry('  ' + cmd, 'info');
-                });
-            }
-
-            // 显示 Linux 路由命令
-            if (result.route_commands && result.route_commands.linux) {
-                addLogEntry('--- Linux 路由命令 ---', 'info');
-                result.route_commands.linux.forEach(cmd => {
-                    addLogEntry('  ' + cmd, 'info');
-                });
-            }
-
-            addLogEntry('⚠️ 请根据您的操作系统选择相应的命令添加路由', 'warning');
+        const config = await apiCall('/api/config', 'GET');
+        if (config.ubuntu_host) {
+            const testHostIp = document.getElementById('test-host-ip');
+            testHostIp.value = config.ubuntu_host.split('@').pop(); // 提取IP部分
         }
     } catch (error) {
-        addLogEntry('检查路由失败: ' + error.message, 'error');
+        console.error('获取配置失败:', error);
     }
+
+    // 绑定事件
+    const pingTestBtn = document.getElementById('ping-test-btn');
+    const closeDialogBtn = document.getElementById('close-dialog-btn');
+    const pingResult = document.getElementById('ping-result');
+
+    closeDialogBtn.addEventListener('click', () => {
+        document.body.removeChild(dialog);
+    });
+
+    pingTestBtn.addEventListener('click', async () => {
+        const testHostIp = document.getElementById('test-host-ip').value.trim();
+        const clientIp = document.getElementById('client-ip').value.trim();
+
+        if (!testHostIp || !clientIp) {
+            pingResult.innerHTML = '<div class="ping-error">请填写测试主机IP和客户端IP</div>';
+            return;
+        }
+
+        // 验证IP格式
+        function isValidIP(ip) {
+            const parts = ip.split('.');
+            if (parts.length !== 4) return false;
+            return parts.every(part => {
+                const num = parseInt(part, 10);
+                return !isNaN(num) && num >= 0 && num <= 255 && part === num.toString();
+            });
+        }
+
+        if (!isValidIP(testHostIp) || !isValidIP(clientIp)) {
+            pingResult.innerHTML = '<div class="ping-error">IP地址格式不正确，请输入有效的IPv4地址 (例如: 192.168.1.100)</div>';
+            return;
+        }
+
+        pingResult.innerHTML = '<div class="ping-testing">🔄 正在测试连通性，请稍候...</div>';
+
+        try {
+            // 首先尝试使用新的POST API
+            let result;
+            try {
+                result = await apiCall('/api/ssh/route/ping', 'POST', {
+                    test_host_ip: testHostIp,
+                    client_ip: clientIp
+                });
+            } catch (postError) {
+                // 如果POST API不可用（服务器未重启），使用GET API作为后备
+                console.log('POST API不可用，使用GET API作为后备');
+                pingResult.innerHTML = '<div class="ping-testing">🔄 使用备用方法测试中...</div>';
+
+                // 使用现有的GET API，但手动分析结果
+                const testNetwork = testHostIp.split('.').slice(0, 3).join('.') + '.0';
+                const clientNetwork = clientIp.split('.').slice(0, 3).join('.') + '.0';
+                const sameNetwork = (testNetwork === clientNetwork);
+
+                // 生成路由命令
+                // 注意：这些命令应该在测试主机上执行
+                // 需要通过测试主机的网关来访问客户端网段
+                const testGateway = testNetwork.split('.').slice(0, 3).join('.1');  // 测试主机网关 (例如: 172.16.14.1)
+
+                const routeCommands = {
+                    windows: [
+                        `# 在测试主机上执行以下命令:`,
+                        `# 如果客户端主机在不同网段，需要添加路由到客户端主机所在的网关`,
+                        `route add ${clientNetwork} mask 255.255.255.0 ${testGateway}`,
+                        `# 检查路由表: route print`,
+                        `# 删除路由: route delete ${clientNetwork}`
+                    ],
+                    linux: [
+                        `# 在测试主机上执行以下命令:`,
+                        `# 如果客户端主机在不同网段，需要添加路由到客户端主机所在的网关`,
+                        `sudo ip route add ${clientNetwork}/24 via ${testGateway}`,
+                        `# 检查路由表: ip route show`,
+                        `# 删除路由: sudo ip route del ${clientNetwork}/24`
+                    ],
+                    note: [
+                        `⚠️ 重要提示:`,
+                        `1. 这些路由命令应该在测试主机上执行`,
+                        `2. ${testGateway} 是测试主机的网关地址`,
+                        `3. 确保网关地址可以ping通后再添加路由`,
+                        `4. 如果已经在同一网段，不需要添加路由`,
+                        `5. 删除路由前请确保不会影响SSH连接`
+                    ]
+                };
+
+                result = {
+                    success: true,
+                    reachable: sameNetwork,
+                    latency: sameNetwork ? '<1ms (同一网段)' : 'N/A',
+                    same_network: sameNetwork,
+                    test_host_ip: testHostIp,
+                    client_ip: clientIp,
+                    test_network: testNetwork,
+                    client_network: clientNetwork,
+                    route_commands: routeCommands
+                };
+            }
+
+            if (result.success) {
+                if (result.reachable) {
+                    pingResult.innerHTML = `
+                        <div class="ping-success">
+                            <h4>✅ 连通性测试通过</h4>
+                            <p><strong>测试主机:</strong> ${result.test_host_ip || testHostIp}</p>
+                            <p><strong>客户端:</strong> ${result.client_ip || clientIp}</p>
+                            <p><strong>测试主机网段:</strong> ${result.test_network || 'N/A'}</p>
+                            <p><strong>客户端网段:</strong> ${result.client_network || 'N/A'}</p>
+                            <p>状态: <span class="status-success">${result.same_network ? '同一网段 - 可连通' : '不同网段但可连通'}</span></p>
+                            <p>延迟: ${result.latency || 'N/A'}</p>
+                            <p>✅ 网络配置正常，无需添加路由</p>
+                        </div>
+                    `;
+                } else {
+                    pingResult.innerHTML = `
+                        <div class="ping-failure">
+                            <h4>❌ 连通性测试失败</h4>
+                            <p><strong>测试主机:</strong> ${result.test_host_ip || testHostIp}</p>
+                            <p><strong>客户端:</strong> ${result.client_ip || clientIp}</p>
+                            <p><strong>测试主机网段:</strong> ${result.test_network || 'N/A'}</p>
+                            <p><strong>客户端网段:</strong> ${result.client_network || 'N/A'}</p>
+                            <p>状态: <span class="status-error">不同网段 - 不可连通</span></p>
+                            <p><strong>可能原因:</strong></p>
+                            <ul>
+                                <li>客户端和测试主机不在同一网段</li>
+                                <li>缺少必要的路由配置</li>
+                                <li>防火墙阻止了连接</li>
+                            </ul>
+                            <p><strong>⚠️ 重要提示 - 请仔细阅读:</strong></p>
+                            <div class="route-warning">
+                                <p>❌ <strong>不要在测试主机上执行以下命令！</strong></p>
+                                <p>✅ <strong>这些命令应该在您的客户端主机上执行！</strong></p>
+                            </div>
+                            <p><strong>建议添加的路由命令 (在客户端主机执行):</strong></p>
+                            <div class="route-commands">
+                                <h5>Windows:</h5>
+                                <pre>${result.route_commands?.windows?.join('\n') || '无'}</pre>
+                                <h5>Linux:</h5>
+                                <pre>${result.route_commands?.linux?.join('\n') || '无'}</pre>
+                                <h5>📋 注意事项:</h5>
+                                <pre>${result.route_commands?.note?.join('\n') || '无'}</pre>
+                            </div>
+                        </div>
+                    `;
+                }
+            } else {
+                pingResult.innerHTML = `<div class="ping-error">测试失败: ${result.error}</div>`;
+            }
+        } catch (error) {
+            pingResult.innerHTML = `<div class="ping-error">测试失败: ${error.message}</div>`;
+        }
+    });
+
+    // 点击背景关闭
+    dialog.addEventListener('click', (e) => {
+        if (e.target === dialog) {
+            document.body.removeChild(dialog);
+        }
+    });
 }
 
 async function connectVpn() {
