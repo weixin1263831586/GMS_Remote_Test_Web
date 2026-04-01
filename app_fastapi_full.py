@@ -61,6 +61,18 @@ class LogLevel(str, Enum):
     ERROR = 'error'
     SUCCESS = 'success'
 
+# ==================== 常量定义 ====================
+
+# TRADEFED二进制文件映射
+TRADEFED_BINARY_MAP = {
+    'cts': 'cts-tradefed',
+    'gsi': 'cts-tradefed',
+    'gts': 'gts-tradefed',
+    'sts': 'sts-tradefed',
+    'vts': 'vts-tradefed',
+    'xts': 'xts-tradefed'
+}
+
 # ==================== Lifespan 事件处理 ====================
 
 @asynccontextmanager
@@ -412,6 +424,106 @@ class ApiResponse:
             'summary': {'total': len(results), 'success': success_count, 'failed': fail_count}
         }, f"{operation_name}完成: 成功 {success_count} 台, 失败 {fail_count} 台")
 
+# ==================== 优化工具函数 ====================
+
+from functools import wraps, lru_cache
+import asyncio
+
+def async_subprocess_run(cmd, **kwargs):
+    """异步执行subprocess.run，避免阻塞事件循环"""
+    return asyncio.to_thread(subprocess.run, cmd, **kwargs)
+
+def handle_api_errors(func):
+    """统一API错误处理装饰器"""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error in {func.__name__}: {e}")
+            return ApiResponse.error(str(e), status_code=500)
+    return wrapper
+
+async def execute_on_devices_parallel(devices: List[str], operation_func, ssh, **kwargs) -> List[Dict]:
+    """
+    并行执行设备操作，替代串行循环
+
+    Args:
+        devices: 设备ID列表
+        operation_func: 单设备操作函数，签名为 async def func(device_id, ssh, **kwargs) -> dict
+        ssh: SSH连接对象
+        **kwargs: 传递给operation_func的额外参数
+
+    Returns:
+        操作结果列表
+    """
+    async def process_device(device_id: str) -> Dict:
+        try:
+            result = await operation_func(device_id, ssh, **kwargs)
+            result['device'] = device_id
+            result['success'] = True
+        except Exception as e:
+            logger.error(f"Error processing device {device_id}: {e}")
+            result = {'device': device_id, 'success': False, 'error': str(e)}
+        return result
+
+    # 并行执行所有设备操作
+    tasks = [process_device(device_id) for device_id in devices]
+    return await asyncio.gather(*tasks)
+
+async def get_device_properties_optimized(device_id: str, ssh) -> Dict[str, str]:
+    """
+    优化版设备属性获取 - 一次SSH调用获取所有属性
+
+    原版本需要6次SSH调用，优化后只需1次
+    """
+    cmd = f"""adb -s {device_id} shell "
+    getprop ro.boot.verifiedbootstate;
+    getprop | grep api_level;
+    getprop sys.gmali.version;
+    getprop persist.sys.timezone;
+    getprop persist.sys.locale;
+    cat /proc/meminfo | grep -E 'MemTotal|MemFree';
+    cat vendor/etc/fstab.rk30board 2>/dev/null | grep userdata || echo 'N/A'
+" """
+
+    stdout, stderr, code = ssh_manager.execute_command(ssh, cmd, timeout=15)
+    lines = stdout.strip().split('\n')
+
+    properties = {}
+    for line in lines:
+        line = line.strip()
+        if 'verifiedbootstate' in line or line in ['green', 'orange', 'yellow']:
+            properties['boot_state'] = line
+        elif 'api_level' in line:
+            properties['api_level'] = line.split(':')[-1].strip() if ':' in line else line
+        elif 'sys.gmali.version' in line:
+            properties['mali_version'] = line.split(':')[-1].strip() if ':' in line else line
+        elif 'MemTotal' in line:
+            properties['mem_total'] = line.split()[-2] if len(line.split()) > 1 else line
+        elif 'MemFree' in line:
+            properties['mem_free'] = line.split()[-2] if len(line.split()) > 1 else line
+        elif 'persist.sys.timezone' in line:
+            properties['timezone'] = line.split(':')[-1].strip() if ':' in line else line
+        elif 'persist.sys.locale' in line:
+            properties['locale'] = line.split(':')[-1].strip() if ':' in line else line
+        elif 'userdata' in line:
+            properties['data_partition'] = line.split()[-1] if len(line.split()) > 0 else line
+
+    return properties
+
+@lru_cache(maxsize=128)
+def cached_xml_analysis(xml_path: str, mtime: float) -> Dict:
+    """带缓存的XML分析结果"""
+    from core.test_report import ReportAnalyzer
+    return ReportAnalyzer().analyze_file(xml_path)
+
+def get_config_cached() -> Dict:
+    """带缓存的配置加载"""
+    return config_manager.load_config()
+
 # ==================== 用户状态管理辅助函数 ====================
 
 def save_test_report_to_db(
@@ -474,10 +586,11 @@ def save_test_report_to_db(
         if '@' in client_id:
             report_info['user'] = client_id.split('@')[0]
 
-        # 解析XML获取测试结果统计
+        # 解析XML获取测试结果统计（使用缓存）
         if os.path.exists(xml_path):
             try:
-                result = ReportAnalyzer().analyze_file(xml_path)
+                stat = os.stat(xml_path)
+                result = cached_xml_analysis(xml_path, stat.st_mtime)
                 if result:
                     report_info.update({
                         'pass': result['summary']['pass'],
@@ -503,11 +616,7 @@ def save_test_report_to_db(
 
 def get_client_id_from_request(request: Request) -> str:
     """从请求中获取client_id（优先从配置文件读取用户名）"""
-    client_ip = (
-        request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or
-        request.headers.get('X-Real-IP') or
-        request.client.host if request.client else 'unknown'
-    )
+    client_ip = get_client_ip(request)
 
     # 优先从配置文件读取client_hosts映射
     config = config_manager.load_config()
@@ -520,8 +629,13 @@ def get_client_id_from_request(request: Request) -> str:
         # 其次从请求头获取用户名
         username = request.headers.get('X-Client-Username')
         if not username or username == 'unknown':
-            # 最后从配置文件读取默认用户名
-            username = config.get('client_username', 'unknown')
+            # 尝试动态检测用户名（通过已保存的 SSH 凭据）
+            success, detected_username, _ = client_manager.detect_username(client_ip)
+            if success and detected_username:
+                username = detected_username
+            else:
+                # 无法识别用户，使用 unknown
+                username = 'unknown'
 
     return client_manager.get_client_id(client_ip, username)
 
@@ -813,7 +927,7 @@ async def get_config_values():
 
     return JSONResponse(content={"success": True, "data": safe_config})
 
-@app.get("/api/users/info")
+@app.get("/api/users/current")
 async def get_client_info(request: Request):
     """获取客户端信息（返回client_id用于WebSocket连接）"""
     # 使用统一的client_id获取逻辑（优先从client_hosts读取）
@@ -835,56 +949,21 @@ async def get_client_info(request: Request):
         "username": username
     })
 
-@app.post("/api/users/info")
-async def set_client_info(req: ClientInfoRequest, request: Request):
-    """设置客户端信息"""
-    client_ip = req.ip or (
+
+def get_client_ip(request: Request, fallback_ip: Optional[str] = None) -> str:
+    """提取客户端真实IP地址（支持代理）"""
+    if fallback_ip:
+        return fallback_ip
+    return (
         request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or
         request.headers.get('X-Real-IP') or
         request.client.host if request.client else 'unknown'
     )
-
-    username = req.username or 'unknown'
-    client_id = client_manager.get_client_id(client_ip, username)
-
-    # 更新用户状态
-    get_or_create_user_state(client_id)
-    update_user_state_field(client_id, {
-        'client_ip': client_ip,
-        'client_username': username,
-        'last_seen': datetime.now().isoformat()
-    })
-
-    # 清理同一IP的旧记录（不同用户名的记录）
-    with global_state.user_states_lock:
-        to_remove = []
-        for existing_id, existing_state in global_state.user_states.items():
-            if existing_id == client_id:
-                continue
-            # 检查是否是同一IP但不同用户名的旧记录
-            existing_ip = existing_state.get('client_ip', '')
-            if existing_ip == client_ip:
-                to_remove.append(existing_id)
-
-        for old_id in to_remove:
-            del global_state.user_states[old_id]
-            logger.info(f"[ClientInfo] Removed old user record for same IP: {old_id} -> {client_id}")
-
-    logger.info(f"[ClientInfo] IP: {client_ip} | Username: {username} | ClientID: {client_id}")
-
-    return JSONResponse(content={
-        "success": True,
-        "client_id": client_id
-    })
 
 @app.post("/api/users/detect")
 async def detect_client(req: ClientInfoRequest, request: Request):
     """自动检测客户端用户名"""
-    client_ip = req.ip or (
-        request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or
-        request.headers.get('X-Real-IP') or
-        request.client.host if request.client else 'unknown'
-    )
+    client_ip = get_client_ip(request, req.ip)
 
     success, username, error = client_manager.detect_username(
         client_ip,
@@ -903,6 +982,83 @@ async def detect_client(req: ClientInfoRequest, request: Request):
             "error": error
         }, status_code=401)
 
+@app.post("/api/users/set-username")
+async def set_client_username(req: ClientInfoRequest, request: Request):
+    """手动设置客户端用户名（不需要SSH密码）"""
+    client_ip = get_client_ip(request, req.ip)
+    username = req.username
+
+    if not username or username == 'unknown':
+        return JSONResponse(content={
+            "success": False,
+            "error": "用户名不能为空或unknown"
+        }, status_code=400)
+
+    # 加载配置
+    config = config_manager.load_config()
+    client_hosts = config.get('client_hosts', {})
+
+    # 保存映射
+    client_hosts[client_ip] = username
+    config['client_hosts'] = client_hosts
+
+    # 保存到配置文件
+    if config_manager.save_dynamic_config(config):
+        # 更新内存中的映射
+        client_manager.client_hosts = client_hosts
+
+        logger.info(f"[Set Username] {client_ip} -> {username}")
+
+        return JSONResponse(content={
+            "success": True,
+            "username": username,
+            "ip": client_ip,
+            "client_id": f"{username}@{client_ip}"
+        })
+    else:
+        return JSONResponse(content={
+            "success": False,
+            "error": "保存配置失败"
+        }, status_code=500)
+
+@app.get("/api/client-info")
+async def handle_client_info_get(request: Request):
+    """获取客户端IP（兼容Flask路由）"""
+    client_ip = get_client_ip(request)
+    return JSONResponse(content={'ip': client_ip})
+
+@app.post("/api/client-info")
+async def handle_client_info_post(req: ClientInfoRequest, request: Request):
+    """记录客户端信息（兼容Flask路由）"""
+    client_ip = get_client_ip(request, req.ip)
+    username = req.username
+
+    # 如果前端未提供用户名或为'unknown'，尝试动态检测
+    if not username or username == 'unknown':
+        success, detected_username, _ = client_manager.detect_username(client_ip)
+        if success and detected_username:
+            username = detected_username
+        else:
+            username = 'unknown'
+
+    # 更新用户状态
+    client_id = client_manager.get_client_id(client_ip, username)
+    get_or_create_user_state(client_id)
+    update_user_state_field(client_id, {
+        'client_ip': client_ip,
+        'client_username': username,
+        'last_seen': datetime.now().isoformat()
+    })
+
+    logger.info(f"[ClientInfo] IP: {client_ip} | Username: {username} | ClientID: {client_id}")
+
+    return ApiResponse.success({'client_id': client_id})
+
+@app.post("/api/client-info/detect")
+async def detect_client_info(req: ClientInfoRequest, request: Request):
+    """自动检测客户端用户名（兼容Flask路由）"""
+    return await detect_client(req, request)
+
 @app.get("/api/users/list")
 async def list_users():
     """获取所有在线用户列表"""
@@ -911,6 +1067,9 @@ async def list_users():
 
     # 本地地址列表，不显示在用户列表中
     local_addresses = {'127.0.0.1', 'localhost', '::1', '0.0.0.0'}
+
+    # VPN网关地址列表（不显示在用户列表中）
+    vpn_gateway_addresses = {'10.10.10.1'}
 
     with global_state.user_states_lock:
         # 收集所有用户
@@ -935,8 +1094,12 @@ async def list_users():
             if username == 'unknown':
                 username = username_from_id
 
-            # 过滤本地地址
-            if ip in local_addresses:
+            # 过滤本地地址和VPN网关地址
+            if ip in local_addresses or ip in vpn_gateway_addresses:
+                continue
+
+            # 过滤unknown用户（用户名识别失败的情况）
+            if username == 'unknown':
                 continue
 
             # 如果同一个IP有多个用户记录，优先保留非unknown的用户
@@ -1076,11 +1239,7 @@ async def get_connected_devices(
             }
 
             # 检查锁定状态
-            client_ip = (
-                request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or
-                request.headers.get('X-Real-IP') or
-                request.client.host if request.client else 'unknown'
-            )
+            client_ip = get_client_ip(request)
             client_id = client_manager.get_client_id(client_ip)
             lock_status = device_lock_manager.get_lock_status(device_id)
 
@@ -1209,13 +1368,11 @@ async def lock_devices(
 
 @app.post("/api/devices/lock-status")
 async def check_lock_status(req: DeviceActionRequest):
-    """Check verified boot lock status of selected devices（与Flask版本完全一致）"""
+    """Check verified boot lock status of selected devices - 优化版，并行检查"""
     try:
-        config = config_manager.load_config()
-
-        with ssh_manager.connection(config) as ssh:
-            results = []
-            for device_id in req.devices:
+        with SSHConnection() as ssh:
+            # 并行检查所有设备的锁定状态
+            async def check_single_device(device_id: str) -> Dict:
                 # Check verified boot state (GREEN = locked, ORANGE = unlocked)
                 output, error, code = ssh_manager.execute_command(
                     ssh,
@@ -1232,12 +1389,14 @@ async def check_lock_status(req: DeviceActionRequest):
                     is_locked = False
                     status_text = f'未知状态 ({state})'
 
-                results.append({
+                return {
                     'device': device_id,
                     'locked': is_locked,
                     'state': state,
                     'status': status_text
-                })
+                }
+
+            results = await asyncio.gather(*[check_single_device(d) for d in req.devices])
 
             return ApiResponse.success({'results': results}, '锁定状态检查完成')
 
@@ -1249,11 +1408,11 @@ async def check_lock_status(req: DeviceActionRequest):
 
 @app.post("/api/devices/info")
 async def get_device_info(req: DeviceActionRequest):
-    """获取设备详细信息 - 与Flask一致，返回15个关键字段的中文标签"""
+    """获取设备详细信息 - 优化版，并行获取所有设备信息"""
     try:
         with SSHConnection() as ssh:
-            results = []
-            for device_id in req.devices:
+            # 并行获取所有设备信息
+            async def get_single_device_info(device_id: str) -> Dict:
                 device_info = {'device': device_id, 'properties': {}}
 
                 # 使用device_manager获取基本信息
@@ -1276,40 +1435,37 @@ async def get_device_info(req: DeviceActionRequest):
                     if key in base_info:
                         device_info['properties'][label] = base_info[key]
 
-                # 只获取额外的字段（不在base_info中的）
-                extra_commands = [
-                    ("DATA分区", "adb -s {device} shell cat vendor/etc/fstab.rk30board | grep userdata"),
-                    ("API级别", "adb -s {device} shell getprop | grep api_level"),
-                    ("Mali库版本", "adb -s {device} shell getprop sys.gmali.version"),
-                    ("内存信息", "adb -s {device} shell cat /proc/meminfo | grep -E 'MemTotal|MemFree'"),
-                    ("时区设置", "adb -s {device} shell getprop persist.sys.timezone"),
-                    ("语言设置", "adb -s {device} shell getprop persist.sys.locale")
-                ]
+                # 优化：一次SSH调用获取所有额外属性
+                extra_props = await get_device_properties_optimized(device_id, ssh)
 
-                for label, cmd_template in extra_commands:
-                    cmd = cmd_template.format(device=device_id)
-                    stdout, stderr, code = ssh_manager.execute_command(ssh, cmd, timeout=10)
+                # 映射属性到中文标签
+                prop_mapping = {
+                    'boot_state': ('启动状态', lambda x: x if x else '未知'),
+                    'api_level': ('API级别', lambda x: x.split('[')[-1].replace(']', '') if '[' in x else (x or '未知')),
+                    'mali_version': ('Mali库版本', lambda x: x or '未知'),
+                    'mem_total': ('总内存', lambda x: f"{x} KB" if x else '未知'),
+                    'mem_free': ('可用内存', lambda x: f"{x} KB" if x else '未知'),
+                    'timezone': ('时区', lambda x: x or '未知'),
+                    'locale': ('语言', lambda x: x or '未知'),
+                    'data_partition': ('DATA分区', lambda x: x.split()[-1] if x and 'userdata' in x else '未知')
+                }
 
-                    # 清理输出
-                    value = stdout.strip()
-                    if '\n' in value:
-                        # 如果是多行，取第一行
-                        value = value.split('\n')[0].strip()
-                    elif not value:
-                        value = "未知"
+                for key, (label, formatter) in prop_mapping.items():
+                    if key in extra_props:
+                        device_info['properties'][label] = formatter(extra_props[key])
 
-                    device_info['properties'][label] = value
+                return device_info
 
-                results.append(device_info)
+            # 并行执行所有设备的信息获取
+            results = await asyncio.gather(*[get_single_device_info(d) for d in req.devices])
 
-            return JSONResponse(content={'success': True, 'results': results})
+            return ApiResponse.success({'results': results}, '设备信息获取完成')
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting device info: {e}")
-        return JSONResponse(
-            content={"success": False, "error": str(e)},
-            status_code=500
-        )
+        return ApiResponse.error(str(e), status_code=500)
 
 @app.get("/api/devices/management")
 @app.post("/api/devices/management")
@@ -1438,112 +1594,77 @@ async def list_device_locks():
 
 @app.post("/api/devices/reboot")
 async def reboot_devices(req: DeviceActionRequest):
-    """重启设备"""
+    """重启设备 - 优化版，并行重启"""
     try:
-        config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            raise HTTPException(status_code=500, detail="SSH连接失败")
+        with SSHConnection() as ssh:
+            # 并行重启所有设备
+            async def reboot_single_device(device_id: str) -> Dict:
+                result = device_manager.reboot_device(device_id, ssh)
+                result['device'] = device_id
+                return result
 
-        results = []
-        for device_id in req.devices:
-            result = device_manager.reboot_device(device_id, ssh)
-            result['device'] = device_id
-            results.append(result)
+            results = await asyncio.gather(*[reboot_single_device(d) for d in req.devices])
+            return ApiResponse.device_results(results, "设备重启")
 
-        ssh_manager.return_connection(ssh)
-
-        success_count = sum(1 for r in results if r.get('success', False))
-        return JSONResponse(content={
-            "success": True,
-            "results": results,
-            "summary": {
-                "total": len(results),
-                "success": success_count,
-                "failed": len(results) - success_count
-            }
-        })
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error rebooting devices: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=f"{str(e)}. 请检查配置和参数是否正确。"
-            )
+        return ApiResponse.error(str(e), status_code=500)
 
 @app.post("/api/devices/remount")
 async def remount_devices(req: DeviceActionRequest, request: Request):
-    """Remount设备"""
+    """Remount设备 - 优化版，并行remount"""
     try:
         # 获取client_id
         client_id = get_client_id_from_request(request)
 
-        config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            raise HTTPException(status_code=500, detail="SSH连接失败")
+        with SSHConnection() as ssh:
+            # 并行remount所有设备
+            async def remount_single_device(device_id: str) -> Dict:
+                # 执行 adb root
+                output, error, code = ssh_manager.execute_command(
+                    ssh,
+                    f"adb -s {device_id} root",
+                    timeout=15
+                )
 
-        results = []
-        for device_id in req.devices:
-            # 执行 adb root
-            output, error, code = ssh_manager.execute_command(
-                ssh,
-                f"adb -s {device_id} root",
-                timeout=15
-            )
+                # 发送输出到前端
+                await safe_websocket_send(client_id, {
+                    'type': 'log_update',
+                    'log': f"[{device_id}] adb root: {output.strip()}",
+                    'log_type': 'info'
+                })
 
-            # 发送输出到前端
-            if client_id in global_state.websocket_connections:
-                try:
-                    await global_state.websocket_connections[client_id].send_json({
-                        'type': 'log_update',
-                        'log': f"[{device_id}] adb root: {output.strip()}",
-                        'log_type': 'info'
-                    })
-                except Exception as e:
-                    logger.debug(f"WebSocket send failed: {e}")
+                await asyncio.sleep(2)
 
-            await asyncio.sleep(2)
+                # 执行 remount
+                output, error, code = ssh_manager.execute_command(
+                    ssh,
+                    f"adb -s {device_id} remount",
+                    timeout=15
+                )
 
-            # 执行 remount
-            output, error, code = ssh_manager.execute_command(
-                ssh,
-                f"adb -s {device_id} remount",
-                timeout=15
-            )
+                # 发送输出到前端
+                await safe_websocket_send(client_id, {
+                    'type': 'log_update',
+                    'log': f"[{device_id}] adb remount: {output.strip()}",
+                    'log_type': 'info'
+                })
 
-            # 发送输出到前端
-            if client_id in global_state.websocket_connections:
-                try:
-                    await global_state.websocket_connections[client_id].send_json({
-                        'type': 'log_update',
-                        'log': f"[{device_id}] adb remount: {output.strip()}",
-                        'log_type': 'info'
-                    })
-                except (WebSocketDisconnect, ConnectionError, KeyError):
-                    pass
+                # 使用device_manager的remount方法获取完整结果
+                result = device_manager.remount_device(device_id, ssh)
+                result['device'] = device_id
+                return result
 
-            result = device_manager.remount_device(device_id, ssh)
-            result['device'] = device_id
-            results.append(result)
+            results = await asyncio.gather(*[remount_single_device(d) for d in req.devices])
+            return ApiResponse.device_results(results, "设备Remount")
 
-        ssh_manager.return_connection(ssh)
-
-        success_count = sum(1 for r in results if r.get('success', False))
-        return JSONResponse(content={
-            "success": True,
-            "results": results,
-            "summary": {
-                "total": len(results),
-                "success": success_count,
-                "failed": len(results) - success_count
-            }
-        })
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error remounting devices: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=f"{str(e)}. 请检查配置和参数是否正确。"
-            )
+        return ApiResponse.error(str(e), status_code=500)
 
 @app.post("/api/devices/connect-wifi")
 async def connect_wifi(req: WifiConnectRequest):
@@ -1732,9 +1853,9 @@ async def opengrok_search(request: Request):
 
         logger.info(f"[OpenGrok Search] Command: {' '.join(cmd)}")
 
-        # 执行搜索
+        # 执行搜索（使用异步版本避免阻塞）
         try:
-            result = subprocess.run(
+            result = await async_subprocess_run(
                 cmd,
                 capture_output=True,
                 text=True,
@@ -2309,15 +2430,7 @@ async def stop_test(
 
         # 方法2: 回退到传统方法（杀死tradefed进程）
         test_type = user_state.get('test_type', 'cts')
-        binary_map = {
-            'cts': 'cts-tradefed',
-            'gsi': 'cts-tradefed',
-            'gts': 'gts-tradefed',
-            'sts': 'sts-tradefed',
-            'vts': 'vts-tradefed',
-            'xts': 'xts-tradefed'
-        }
-        tradefed_bin = binary_map.get(test_type, 'tradefed')
+        tradefed_bin = TRADEFED_BINARY_MAP.get(test_type, 'tradefed')
         kill_cmd = f"pkill -f '[./]?{tradefed_bin}.*run commandAndExit'"
 
         output, error, code = ssh_manager.execute_command(ssh, kill_cmd, timeout=10)
@@ -4964,44 +5077,40 @@ def _parse_ping_output(ping_output: str, exit_status: int) -> tuple[bool, str]:
             return False, 'N/A'
 
 
-def _generate_route_commands(test_network: str, client_network: str, test_host_ip: str, client_ip: str) -> dict:
+def _generate_route_commands(test_network: str, device_network: str, test_host_ip: str) -> dict:
     """生成路由命令
 
-    重要：路由应该通过网关，而不是直接指向主机IP
+    网络拓扑说明：
+    - 测试主机: 172.16.14.233 (运行GMS服务)
+    - Android设备: 172.16.21.x (设备网段)
+    - 测试主机网关: 172.16.14.1
+
+    路由目的：让测试主机能够访问Android设备网段
     """
     # 推测网关地址（通常是网段的第一个IP）
     test_gateway = '.'.join(test_network.split('.')[:3]) + '.1'
-    client_gateway = '.'.join(client_network.split('.')[:3]) + '.1'
 
     return {
         'windows': [
             f"# 在测试主机上执行以下命令:",
-            f"# 添加到客户端主机网段的路由（通过测试主机网关）",
-            f"route add {client_network} mask 255.255.255.0 {test_gateway}",
+            f"# 添加到Android设备网段的路由（通过测试主机网关）",
+            f"route add {device_network} mask 255.255.255.0 {test_gateway}",
             f"# 检查路由表: route print",
-            f"# 删除路由: route delete {client_network}"
+            f"# 删除路由: route delete {device_network}"
         ],
         'linux': [
             f"# 在测试主机上执行以下命令:",
-            f"# 添加到客户端主机网段的路由（通过测试主机网关）",
-            f"sudo ip route add {client_network}/24 via {test_gateway}",
+            f"# 添加到Android设备网段的路由（通过测试主机网关）",
+            f"sudo ip route add {device_network}/24 via {test_gateway}",
             f"# 检查路由表: ip route show",
-            f"# 删除路由: sudo ip route del {client_network}/24"
-        ],
-        'note': [
-            f"⚠️ 重要提示:",
-            f"1. 这些路由命令应该在测试主机上执行",
-            f"2. {test_gateway} 是测试主机的网关地址",
-            f"3. 确保网关地址可以ping通后再添加路由",
-            f"4. 如果已经在同一网段，不需要添加路由",
-            f"5. 删除路由前请确保不会影响SSH连接"
+            f"# 删除路由: sudo ip route del {device_network}/24"
         ]
     }
 
 
 @app.post("/api/ssh/route/ping")
 async def ping_route_test(request: Request):
-    """测试客户端到测试主机的网络连通性"""
+    """测试测试主机和客户端的网络连通性"""
     try:
         # 获取请求数据
         data = await request.json()
@@ -5058,11 +5167,14 @@ async def ping_route_test(request: Request):
                 reachable = False
                 latency = 'N/A'
 
-        # 准备路由命令（只在不可达时提供）
+        # 准备路由命令（检查测试主机是否需要添加路由到Android设备网段）
         route_commands = None
-        if not reachable:
-            # 使用已计算的 test_network 和 client_network，避免重复计算
-            route_commands = _generate_route_commands(test_network, client_network, test_host_ip, client_ip)
+        device_network = '172.16.21.0'
+        test_device_different = (test_network != device_network)
+
+        if test_device_different:
+            # 测试主机和Android设备不在同一网段，需要添加路由
+            route_commands = _generate_route_commands(test_network, device_network, test_host_ip)
 
         return JSONResponse(content={
             'success': True,
@@ -5073,6 +5185,8 @@ async def ping_route_test(request: Request):
             'client_ip': client_ip,
             'test_network': test_network,
             'client_network': client_network,
+            'device_network': device_network,
+            'test_device_different': test_device_different,
             'route_commands': route_commands
         })
 
@@ -7116,23 +7230,23 @@ API_DOCS_LIST = [
     # ==================== 用户管理 ====================
     {
         "method": "GET",
-        "path": "/api/users/info",
+        "path": "/api/users/current",
         "description": "获取客户端IP信息",
         "params": [],
         "category": "users"
     },
     {
         "method": "POST",
-        "path": "/api/users/info",
-        "description": "设置客户端用户名",
-        "params": [{"name": "username", "type": "string", "required": False}],
+        "path": "/api/users/detect",
+        "description": "自动检测客户端用户名（通过SSH）",
+        "params": [{"name": "ip", "type": "string", "required": False}, {"name": "username", "type": "string", "required": False}, {"name": "password", "type": "string", "required": False}],
         "category": "users"
     },
     {
         "method": "POST",
-        "path": "/api/users/detect",
-        "description": "自动检测客户端用户名",
-        "params": [{"name": "ip", "type": "string", "required": False}, {"name": "username", "type": "string", "required": False}, {"name": "password", "type": "string", "required": False}],
+        "path": "/api/users/set-username",
+        "description": "手动设置客户端用户名（无需SSH密码）",
+        "params": [{"name": "username", "type": "string", "required": True}],
         "category": "users"
     },
     {
@@ -7490,8 +7604,8 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/vpn/connect",
-        "description": "连接VPN",
-        "params": [{"name": "server", "type": "string", "required": True}, {"name": "username", "type": "string", "required": True}, {"name": "password", "type": "string", "required": True}],
+        "description": "连接VPN（无需参数，使用默认配置）",
+        "params": [],
         "category": "vpn"
     },
     {

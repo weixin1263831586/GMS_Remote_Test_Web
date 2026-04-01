@@ -158,12 +158,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (detectResponse.ok) {
             const detectData = await detectResponse.json();
             console.log('[Init] Detected client username:', detectData.username);
-            // 更新 session 中的用户名
-            await fetch('/api/users/info', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username: detectData.username})
-            });
         }
     } catch (error) {
         console.warn('[Init] Failed to detect client username:', error);
@@ -199,7 +193,7 @@ async function loadConfig() {
 // ==================== WebSocket Connection (FastAPI) ====================
 function initWebSocket() {
     // 获取客户端ID
-    apiCall('/api/users/info', 'GET').then(data => {
+    apiCall('/api/users/current', 'GET').then(data => {
         const clientId = data.client_id || 'unknown';
         state.clientId = clientId;
 
@@ -1693,17 +1687,17 @@ async function checkRouting() {
                             </ul>
                             <p><strong>⚠️ 重要提示 - 请仔细阅读:</strong></p>
                             <div class="route-warning">
-                                <p>❌ <strong>不要在测试主机上执行以下命令！</strong></p>
-                                <p>✅ <strong>这些命令应该在您的客户端主机上执行！</strong></p>
+                                <p><strong>📍 执行位置说明：</strong></p>
+                                <p>✅ 这些命令应该在您的<strong>测试主机</strong>（172.16.14.233）上执行</p>
+                                <p>❌ 不要在客户端主机（当前浏览器所在电脑）上执行这些命令</p>
+                                <p><strong>🎯 路由目的：</strong>让测试主机能够访问Android设备网段</p>
                             </div>
-                            <p><strong>建议添加的路由命令 (在客户端主机执行):</strong></p>
+                            <p><strong>建议添加的路由命令:</strong></p>
                             <div class="route-commands">
-                                <h5>Windows:</h5>
-                                <pre>${result.route_commands?.windows?.join('\n') || '无'}</pre>
                                 <h5>Linux:</h5>
                                 <pre>${result.route_commands?.linux?.join('\n') || '无'}</pre>
-                                <h5>📋 注意事项:</h5>
-                                <pre>${result.route_commands?.note?.join('\n') || '无'}</pre>
+                                <h5>Windows:</h5>
+                                <pre>${result.route_commands?.windows?.join('\n') || '无'}</pre>
                             </div>
                         </div>
                     `;
@@ -5487,7 +5481,7 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "配置已保存" }',
         usage: '修改服务器连接配置,需要管理员权限'
     },
-    '/api/users/info': {
+    '/api/users/current': {
         title: '获取客户端信息',
         description: '获取当前客户端ID和主机名',
         params: [],
@@ -5496,7 +5490,7 @@ const API_DETAILS_MAP = {
     },
     '/api/users/detect': {
         title: '检测客户端信息',
-        description: '自动检测客户端用户名和身份',
+        description: '自动检测客户端用户名和身份（通过SSH）',
         params: [
             { name: 'ip', type: 'string', required: false, desc: '客户端IP地址(可选)' },
             { name: 'username', type: 'string', required: false, desc: '用户名(可选)' },
@@ -5504,6 +5498,16 @@ const API_DETAILS_MAP = {
         ],
         response: '{ "success": true, "username": "hcq" }',
         usage: '自动识别当前登录用户,首次使用需要提供SSH凭据'
+    },
+    '/api/users/set-username': {
+        title: '设置客户端用户名',
+        description: '手动设置客户端用户名（无需SSH密码）',
+        params: [
+            { name: 'username', type: 'string', required: true, desc: '用户名（不能为unknown）' },
+            { name: 'ip', type: 'string', required: false, desc: '客户端IP地址（可选，默认自动获取）' }
+        ],
+        response: '{ "success": true, "username": "hjf", "ip": "10.10.10.206", "client_id": "hjf@10.10.10.206" }',
+        usage: '手动设置当前用户的用户名，保存后自动识别'
     },
     '/api/users/list': {
         title: '获取在线用户',
@@ -5805,19 +5809,15 @@ const API_DETAILS_MAP = {
         title: '获取VPN状态',
         description: '检查VPN连接状态',
         params: [],
-        response: '{ "connected": false, "server": "" }',
+        response: '{ "success": true, "connected": true }',
         usage: '检查VPN是否已连接'
     },
     '/api/vpn/connect': {
         title: '连接VPN',
-        description: '连接到VPN服务器',
-        params: [
-            { name: 'server', type: 'string', required: true, desc: 'VPN服务器地址' },
-            { name: 'username', type: 'string', required: true, desc: 'VPN用户名' },
-            { name: 'password', type: 'string', required: true, desc: 'VPN密码' }
-        ],
+        description: '连接到默认VPN服务器（无需参数）',
+        params: [],
         response: '{ "success": true, "message": "VPN已连接" }',
-        usage: '连接到VPN服务器'
+        usage: '连接到默认VPN服务器'
     },
     '/api/vpn/disconnect': {
         title: '断开VPN',
