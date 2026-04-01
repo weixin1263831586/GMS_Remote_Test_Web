@@ -106,7 +106,27 @@ class ClientManager:
             except Exception:
                 continue
 
-        return False, '', '请提供SSH凭据'
+        # 如果客户端 IP 与 local_server 中的 IP 匹配，通过 SSH 获取真实登录用户
+        local_server = config.get('local_server', '')
+        if '@' in local_server:
+            local_ip = local_server.split('@')[1]
+            if client_ip == local_ip:
+                # 尝试用已保存的凭据连接并执行 whoami
+                for cred in self.ssh_credentials:
+                    try:
+                        ssh = paramiko.SSHClient()
+                        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                        ssh.connect(client_ip, username=cred['username'], password=cred['password'], timeout=3)
+                        stdout = ssh.exec_command('whoami')[1]
+                        real_username = stdout.read().decode().strip()
+                        ssh.close()
+                        return True, real_username, None
+                    except Exception:
+                        continue
+
+        # 注意：不要使用 ubuntu_user 作为客户端用户名的默认值
+        # ubuntu_user 只用于服务器端操作，不应该用于客户端身份识别
+        return False, '', '无法自动检测用户名'
 
     def get_client_id(self, client_ip: str, username: str = 'unknown') -> str:
         """获取客户端ID"""

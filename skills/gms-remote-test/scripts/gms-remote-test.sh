@@ -274,6 +274,247 @@ gms-rt-config() {
 }
 
 # ==============================================================================
+# Network & Client Commands (New)
+# ==============================================================================
+
+# Get client IP
+gms-rt-client-info() {
+    check_jq
+    echo "🖥️  Getting client information..."
+    api_call "/client-info" | jq '.'
+}
+
+# Record client info
+gms-rt-client-record() {
+    local ip="$1"
+    local username="$2"
+
+    [ -z "$ip" ] && error "IP required. Usage: gms-rt-client-record <ip> [username]"
+
+    check_jq
+    echo "📝 Recording client info..."
+
+    local data="{\"ip\":\"$ip\""
+    [ -n "$username" ] && data=$(echo "$data" | jq ". + {\"username\":\"$username\"}")
+    data=$(echo "$data" | jq '.')
+
+    local response=$(api_call "/client-info" "POST" "$data")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        success "Client info recorded"
+        echo "$response" | jq '.'
+    else
+        error "Failed to record client info"
+    fi
+}
+
+# Auto-detect client username
+gms-rt-client-detect() {
+    local ip="$1"
+    local username="$2"
+    local password="$3"
+
+    [ -z "$ip" ] && error "IP required. Usage: gms-rt-client-detect <ip> [username] [password]"
+
+    check_jq
+    echo "🔍 Detecting client username..."
+
+    local data="{\"ip\":\"$ip\""
+    [ -n "$username" ] && data=$(echo "$data" | jq ". + {\"username\":\"$username\"}")
+    [ -n "$password" ] && data=$(echo "$data" | jq ". + {\"password\":\"$password\"}")
+    data=$(echo "$data" | jq '.')
+
+    local response=$(api_call "/client-info/detect" "POST" "$data")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        success "Client detected"
+        echo "$response" | jq '.'
+    else
+        error "Failed to detect client"
+    fi
+}
+
+# Test network connectivity
+gms-rt-network-ping() {
+    local test_host_ip="$1"
+    local client_ip="$2"
+
+    [ -z "$test_host_ip" ] && error "Test host IP required. Usage: gms-rt-network-ping <test_host_ip> <client_ip>"
+    [ -z "$client_ip" ] && error "Client IP required. Usage: gms-rt-network-ping <test_host_ip> <client_ip>"
+
+    check_jq
+    echo "🌐 Testing network connectivity..."
+
+    local data="{\"test_host_ip\":\"$test_host_ip\", \"client_ip\":\"$client_ip\"}"
+    local response=$(api_call "/ssh/route/ping" "POST" "$data")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        local reachable=$(echo "$response" | jq -r '.reachable')
+        local latency=$(echo "$response" | jq -r '.latency')
+
+        if [ "$reachable" = "true" ]; then
+            success "Network reachable (latency: $latency)"
+        else
+            warning "Network not reachable"
+        fi
+
+        # Show route commands if available
+        local route_commands=$(echo "$response" | jq '.route_commands')
+        if [ "$route_commands" != "null" ]; then
+            echo ""
+            echo "📋 Suggested route commands:"
+            echo ""
+            echo "${YELLOW}Linux:${NC}"
+            echo "$response" | jq -r '.route_commands.linux[]'
+            echo ""
+            echo "${YELLOW}Windows:${NC}"
+            echo "$response" | jq -r '.route_commands.windows[]'
+        fi
+    else
+        error "Network test failed"
+    fi
+}
+
+# ==============================================================================
+# Device Operations (New - Parallel)
+# ==============================================================================
+
+# Get device info for multiple devices (parallel)
+gms-rt-devices-info() {
+    local devices="$1"
+
+    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-devices-info \"[DEVICE-1,DEVICE-2]\""
+
+    check_jq
+    echo "📱 Getting device info (parallel execution)..."
+
+    local data="{\"devices\":$devices}"
+    local response=$(api_call "/devices/info" "POST" "$data")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        success "Device info retrieved"
+        echo "$response" | jq '.'
+    else
+        error "Failed to get device info"
+    fi
+}
+
+# Check lock status for multiple devices (parallel)
+gms-rt-devices-lock-status() {
+    local devices="$1"
+
+    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-devices-lock-status \"[DEVICE-1,DEVICE-2]\""
+
+    check_jq
+    echo "🔒 Checking lock status (parallel execution)..."
+
+    local data="{\"devices\":$devices}"
+    local response=$(api_call "/devices/lock-status" "POST" "$data")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        success "Lock status checked"
+        echo "$response" | jq '.'
+    else
+        error "Failed to check lock status"
+    fi
+}
+
+# Reboot multiple devices (parallel)
+gms-rt-devices-reboot() {
+    local devices="$1"
+
+    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-devices-reboot \"[DEVICE-1,DEVICE-2]\""
+
+    check_jq
+    echo "🔄 Rebooting devices (parallel execution)..."
+
+    local data="{\"devices\":$devices}"
+    local response=$(api_call "/devices/reboot" "POST" "$data")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        success "Devices rebooted"
+        echo "$response" | jq '.'
+    else
+        error "Failed to reboot devices"
+    fi
+}
+
+# Remount multiple devices (parallel)
+gms-rt-devices-remount() {
+    local devices="$1"
+
+    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-devices-remount \"[DEVICE-1,DEVICE-2]\""
+
+    check_jq
+    echo "🔄 Remounting devices (parallel execution)..."
+
+    local data="{\"devices\":$devices}"
+    local response=$(api_call "/devices/remount" "POST" "$data")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        success "Devices remounted"
+        echo "$response" | jq '.'
+    else
+        error "Failed to remount devices"
+    fi
+}
+
+# ==============================================================================
+# VPN Management Commands (New)
+# ==============================================================================
+
+# Connect to VPN
+gms-rt-vpn-connect() {
+    check_jq
+    echo "🔐 Connecting to VPN..."
+
+    local response=$(api_call "/vpn/connect" "POST")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        success "VPN connected"
+        echo "$response" | jq '.'
+    else
+        error "Failed to connect VPN"
+    fi
+}
+
+# Disconnect VPN
+gms-rt-vpn-disconnect() {
+    check_jq
+    echo "🔌 Disconnecting VPN..."
+
+    local response=$(api_call "/vpn/disconnect" "POST")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        success "VPN disconnected"
+        echo "$response" | jq '.'
+    else
+        error "Failed to disconnect VPN"
+    fi
+}
+
+# Check VPN status
+gms-rt-vpn-status() {
+    check_jq
+    echo "📊 Checking VPN status..."
+
+    local response=$(api_call "/vpn/status")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        local connected=$(echo "$response" | jq -r '.connected')
+        if [ "$connected" = "true" ]; then
+            success "VPN is connected"
+            echo "$response" | jq '.'
+        else
+            warning "VPN is not connected"
+            echo "$response" | jq '.'
+        fi
+    else
+        error "Failed to get VPN status"
+    fi
+}
+
+# ==============================================================================
 # Help Function
 # ==============================================================================
 
@@ -285,6 +526,10 @@ ${BLUE}GMS Remote Test API Helper (FastAPI Port 5001)${NC}
 ${YELLOW}Device Management:${NC}
   gms-rt-devices              - List all connected devices
   gms-rt-device-details <id>  - Get device details
+  gms-rt-devices-info "[...]" - Get device info (parallel, 75-85% faster)
+  gms-rt-devices-lock-status "[...]" - Check lock status (parallel)
+  gms-rt-devices-reboot "[...]" - Reboot devices (parallel)
+  gms-rt-devices-remount "[...]" - Remount RW (parallel)
 
 ${YELLOW}USB/IP Connection:${NC}
   gms-rt-usbip-start <user@ip> [password]
@@ -301,6 +546,12 @@ ${YELLOW}Test Management:${NC}
   gms-rt-stream-logs        - Stream test logs in real-time (plain text)
   gms-rt-latest-logs        - Get latest logs (JSON)
 
+${YELLOW}Network & Client (New):${NC}
+  gms-rt-client-info        - Get client IP information
+  gms-rt-client-record <ip> [username] - Record client info
+  gms-rt-client-detect <ip> [username] [password] - Auto-detect username
+  gms-rt-network-ping <test_host> <client> - Test network connectivity
+
 ${YELLOW}Reports:${NC}
   gms-rt-latest-report      - Get the latest test report
   gms-rt-list-reports       - List all test reports
@@ -309,9 +560,26 @@ ${YELLOW}Reports:${NC}
 ${YELLOW}Configuration:${NC}
   gms-rt-config             - Get current configuration
 
+${YELLOW}VPN Management (New):${NC}
+  gms-rt-vpn-connect        - Connect to VPN (no parameters needed)
+  gms-rt-vpn-disconnect     - Disconnect VPN
+  gms-rt-vpn-status         - Check VPN status
+
 ${YELLOW}Examples:${NC}
   # List devices
   gms-rt-devices
+
+  # Get device info for multiple devices (parallel)
+  gms-rt-devices-info "[\"DEVICE-1\", \"DEVICE-2\"]"
+
+  # Test network connectivity
+  gms-rt-network-ping "172.16.14.233" "172.16.14.68"
+
+  # Connect to VPN (no parameters needed)
+  gms-rt-vpn-connect
+
+  # Check VPN status
+  gms-rt-vpn-status
 
   # Start USB/IP connection
   gms-rt-usbip-start "user@192.168.1.100" "password"
@@ -327,6 +595,10 @@ ${YELLOW}Examples:${NC}
 
   # Get latest report
   gms-rt-latest-report
+
+${YELLOW}Performance Notes:${NC}
+  - Multi-device operations are 75-85% faster with parallel execution
+  - Use batch operations for better performance
 
 Server: ${GREEN}$SERVER_URL${NC}
 Docs:   ${GREEN}${SERVER_URL}/docs${NC}

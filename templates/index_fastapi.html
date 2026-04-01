@@ -10,7 +10,7 @@
     <script src="/static/vendor/xterm/xterm.min.js"></script>
     <script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260331-20"></script>
+    <script src="/static/js/app.js?v=20260401-02"></script>
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
@@ -1285,8 +1285,9 @@
                 clientInfo.ip = ipData.ip;
                 updateClientDisplay();
 
-                // 检测用户名
-                const savedUser = localStorage.getItem('gms_username');
+                // 检测用户名（按 IP 存储，避免跨 IP 混淆）
+                const storageKey = `gms_username_${clientInfo.ip}`;
+                const savedUser = localStorage.getItem(storageKey);
                 if (savedUser && savedUser !== 'guest' && savedUser !== 'unknown') {
                     clientInfo.username = savedUser;
                 } else {
@@ -1298,7 +1299,7 @@
                     const detectData = await detectResp.json();
                     if (detectData.success) {
                         clientInfo.username = detectData.username;
-                        localStorage.setItem('gms_username', detectData.username);
+                        localStorage.setItem(storageKey, detectData.username);
                     } else {
                         showSshModal();
                         return;
@@ -1359,7 +1360,8 @@
 
                 if (data.success) {
                     clientInfo.username = data.username;
-                    localStorage.setItem('gms_username', data.username);
+                    const storageKey = `gms_username_${clientInfo.ip}`;
+                    localStorage.setItem(storageKey, data.username);
                     updateClientDisplay();
                     closeSshModal();
                     showToast(`已识别: ${data.username}`, 'success');
