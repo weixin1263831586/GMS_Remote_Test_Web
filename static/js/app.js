@@ -22,7 +22,7 @@ const state = {
 let apiDocsCache = null;
 let apiDocsCacheTime = 0;
 let allApiDocs = []; // 所有API文档数据（已排序）
-const API_DOCS_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
+const API_DOCS_CACHE_DURATION = 30 * 1000; // 30秒缓存（便于调试）
 
 // 辅助函数
 function validateDeviceSelection() {
@@ -199,7 +199,7 @@ function initWebSocket() {
 
         // 建立WebSocket连接
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws/${clientId}`;
+        const wsUrl = `${protocol}//${window.location.host}/api/system/websocket/${clientId}`;
 
         console.log(`[WebSocket] Connecting to: ${wsUrl}`);
         state.websocket = new WebSocket(wsUrl);
@@ -646,7 +646,7 @@ async function loadDevices(forceRefresh = false) {
 
     try {
         // 添加 force_refresh 参数来强制绕过缓存
-        const url = forceRefresh ? '/api/devices?force_refresh=1' : '/api/devices';
+        const url = forceRefresh ? '/api/devices/list?force_refresh=1' : '/api/devices/list';
         const devices = await apiCall(url);
         state.devices = devices;
         renderDevices();
@@ -1243,7 +1243,7 @@ async function showDeviceScreen() {
         await initAndStartVnc();
 
         addLogEntry('正在启动屏幕投屏...', 'info');
-        const result = await apiCall('/api/screen/start', 'POST', {
+        const result = await apiCall('/api/devices/screen', 'POST', {
             devices: Array.from(state.selectedDevices)
         });
 
@@ -4948,13 +4948,22 @@ window.resetReportAnalysis = resetReportAnalysis;
  * API分类定义
  */
 const API_CATEGORIES = {
-    '/health': 'health',
+    '/api/system/health': 'health',
     '/api/config': 'config',
     '/api/users': 'users',
-    '/api/devices': 'device',
-    '/api/devices/locks': 'device',
-    '/api/vnc': 'vnc',
-    '/api/desktop': 'vnc',
+    '/api/devices/list': 'device',
+    '/api/devices/bootloader-lock': 'device',
+    '/api/devices/bootloader-unlock': 'device',
+    '/api/devices/bootloader-status': 'device',
+    '/api/devices/info': 'device',
+    '/api/devices/management': 'device',
+    '/api/devices/user-locked': 'device',
+    '/api/devices/reboot': 'device',
+    '/api/devices/remount': 'device',
+    '/api/devices/connect-wifi': 'device',
+    '/api/devices/shell': 'device',
+    '/api/devices/screen': 'device',
+    '/api/desktop': 'desktop',
     '/api/test': 'test',
     '/api/reports': 'report',
     '/api/vpn': 'vpn',
@@ -4964,8 +4973,7 @@ const API_CATEGORIES = {
     '/api/upload': 'upload',
     '/api/burn': 'burn',
     '/api/files': 'file',
-    '/api/screen': 'screen',
-    '/ws/': 'websocket'
+    '/api/system/websocket/': 'health'
 };
 
 /**
@@ -4993,14 +5001,12 @@ function getCategoryName(category) {
         'report': '📊 报告管理',
         'vpn': '🔐 VPN管理',
         'ssh': '🔑 SSH管理',
-        'vnc': '🖥️ VNC管理',
+        'desktop': '🖥️ 主机桌面',
         'usbip': '📡 USB/IP',
-        'screen': '📺 屏幕共享',
         'upload': '📤 文件上传',
         'burn': '🔥 固件烧写',
         'file': '📁 文件管理',
-        'health': '💚 健康检查',
-        'websocket': '🔌 WebSocket',
+        'health': '💚 系统管理',
         'other': '📋 其他'
     };
     return names[category] || '📋 其他';
@@ -5019,14 +5025,12 @@ function getCategoryOrder(category) {
         'report': 5,
         'vpn': 6,
         'ssh': 7,
-        'vnc': 8,
+        'desktop': 8,
         'usbip': 9,
-        'screen': 10,
-        'upload': 11,
-        'burn': 12,
-        'file': 13,
+        'upload': 10,
+        'burn': 11,
+        'file': 12,
         'health': 14,
-        'websocket': 15,
         'other': 999
     };
     return order[category] || 999;
@@ -5449,8 +5453,8 @@ const API_DETAILS_MAP = {
         response: '{ "running": false, "test_type": "CTS", "devices": ["RF8TC2W4JNH"] }',
         usage: '⭐核心接口 - 查看测试是否正在运行及进度'
     },
-    '/health': {
-        title: '健康检查',
+    '/api/system/health': {
+        title: '系统管理',
         description: '检查服务器运行状态',
         params: [],
         response: '{ "status": "healthy", "timestamp": "2026-03-26T10:30:00" }',
@@ -5516,7 +5520,7 @@ const API_DETAILS_MAP = {
         response: '{ "users": [{ "client_id": "xxx", "username": "admin", "running": false }] }',
         usage: '查看当前在线用户及其设备使用情况'
     },
-    '/api/devices': {
+    '/api/devices/list': {
         title: '获取设备列表',
         description: '获取所有已连接的Android设备',
         params: [
@@ -5525,17 +5529,25 @@ const API_DETAILS_MAP = {
         response: '[{ "device_id": "RF8TC2W4JNH", "serial": "RF8TC2W4JNH", "status": "device" }]',
         usage: '查看可用设备列表,包括设备锁定状态'
     },
-    '/api/devices/lock': {
-        title: '控制Bootloader锁',
-        description: '锁定或解锁设备的Bootloader(使用run_Device_Lock.sh脚本)',
+    '/api/devices/bootloader-lock': {
+        title: '锁定Bootloader',
+        description: '锁定设备的Bootloader(使用run_Device_Lock.sh脚本)',
         params: [
-            { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' },
-            { name: 'action', type: 'string', required: true, desc: '操作类型: lock|unlock' }
+            { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],
         response: '{ "success": true, "results": [{ "device": "RF8TC2W4JNH", "success": true }] }',
-        usage: '⚠️危险操作 - 控制设备Bootloader锁定状态,可能影响系统安全性'
+        usage: '⚠️危险操作 - 锁定设备Bootloader,启用安全启动'
     },
-    '/api/devices/lock-status': {
+    '/api/devices/bootloader-unlock': {
+        title: '解锁Bootloader',
+        description: '解锁设备的Bootloader(快捷方式,等同于bootloader-lock的unlock操作)',
+        params: [
+            { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
+        ],
+        response: '{ "success": true, "results": [{ "device": "RF8TC2W4JNH", "success": true }] }',
+        usage: '⚠️危险操作 - 解锁设备Bootloader,将允许刷入自定义系统'
+    },
+    '/api/devices/bootloader-status': {
         title: '检查Bootloader锁状态',
         description: '检查设备的Verified Boot锁定状态(GREEN=锁定, ORANGE=未锁定)',
         params: [
@@ -5548,35 +5560,30 @@ const API_DETAILS_MAP = {
         title: '获取设备详细信息',
         description: '获取设备的详细硬件和软件信息',
         params: [
-            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' }
+            { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],
         response: '{ "serial": "RF8TC2W4JNH", "product": "takku", "android_version": "14" }',
         usage: '查看设备详细配置信息,包括Android版本、安全补丁等'
     },
     '/api/devices/management': {
-        title: '设备管理操作',
-        description: '执行设备管理操作(重启/重挂载/WiFi)',
-        params: [
-            { name: 'action', type: 'string', required: true, desc: '操作类型: reboot|remount|connect_wifi' },
-            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
-            { name: 'ssid', type: 'string', required: false, desc: 'WiFi名称(连接WiFi时需要)' },
-            { name: 'password', type: 'string', required: false, desc: 'WiFi密码(连接WiFi时需要)' }
-        ],
-        response: '{ "success": true, "message": "操作执行成功" }',
-        usage: '重启设备、重新挂载为读写模式、连接WiFi'
-    },
-    '/api/devices/locks': {
-        title: '列出所有Bootloader锁',
-        description: '列出所有设备的Bootloader锁定信息',
+        title: '设备管理信息',
+        description: '获取所有设备的详细管理信息(设备列表、电池、来源等)',
         params: [],
-        response: '{ "success": true, "data": [{ "device_id": "RF8TC2W4JNH", "locked": true, "locked_by": "admin" }] }',
-        usage: '查看全局设备的Bootloader锁定情况'
+        response: '[{ "device_id": "xxx", "serial_no": "xxx", "model": "xxx", "android_version": "14", "battery_level": "85", "source_type": "usbip", "source_host": "172.16.14.68", "status": "online", "locked_by": "", "locked_by_self": false }]',
+        usage: '查看设备详细信息，包括电池电量、设备型号、Android版本、设备来源(本地/USB/IP)、锁定状态等'
+    },
+    '/api/devices/user-locked': {
+        title: '列出用户锁定设备',
+        description: '列出所有被用户锁定的设备(多用户环境下的设备占用状态)',
+        params: [],
+        response: '{ "success": true, "data": { "RF8TC2W4JNH": { "client_id": "hcq@172.16.14.68", "username": "hcq", "timestamp": "2026-04-04T15:30:00" } } }',
+        usage: '查看哪些设备被其他用户占用,避免多用户冲突'
     },
     '/api/devices/reboot': {
         title: '重启设备',
         description: '重启指定的Android设备',
         params: [
-            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' }
+            { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],
         response: '{ "success": true, "message": "设备正在重启" }',
         usage: '设备无响应或需要清理状态时重启'
@@ -5585,7 +5592,7 @@ const API_DETAILS_MAP = {
         title: '重新挂载设备',
         description: '将设备重新挂载为读写模式',
         params: [
-            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' }
+            { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],
         response: '{ "success": true, "message": "设备已重新挂载为读写模式" }',
         usage: '需要修改系统文件时使用'
@@ -5594,9 +5601,9 @@ const API_DETAILS_MAP = {
         title: '连接WiFi',
         description: '让设备连接到指定的WiFi网络',
         params: [
-            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
-            { name: 'ssid', type: 'string', required: true, desc: 'WiFi名称' },
-            { name: 'password', type: 'string', required: true, desc: 'WiFi密码' }
+            { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' },
+            { name: 'ssid', type: 'string', required: false, desc: 'WiFi名称，默认AndroidWifi' },
+            { name: 'password', type: 'string', required: false, desc: 'WiFi密码，默认1234567890' }
         ],
         response: '{ "success": true, "message": "WiFi连接成功" }',
         usage: '配置设备连接到WiFi网络'
@@ -5605,11 +5612,10 @@ const API_DETAILS_MAP = {
         title: '执行Shell命令',
         description: '在设备上执行ADB Shell命令',
         params: [
-            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
-            { name: 'command', type: 'string', required: true, desc: 'Shell命令' }
+            { name: 'serial_no', type: 'string', required: true, desc: '设备序列号' }
         ],
         response: '{ "success": true, "output": "命令输出..." }',
-        usage: '在设备上执行任意Shell命令,如pm list packages'
+        usage: '为终端页面准备设备连接,建立ADB Shell会话'
     },
     '/api/devices/screen': {
         title: '显示设备屏幕',
@@ -5701,12 +5707,10 @@ const API_DETAILS_MAP = {
     },
     '/api/vnc/start': {
         title: '启动VNC',
-        description: '启动设备VNC服务',
-        params: [
-            { name: 'device_id', type: 'string', required: false, desc: '设备序列号' }
-        ],
+        description: '启动VNC服务',
+        params: [],
         response: '{ "success": true, "port": 5900 }',
-        usage: '启动VNC服务以远程查看设备屏幕'
+        usage: '启动VNC服务以远程查看主机桌面'
     },
     '/api/vnc/stop': {
         title: '停止VNC',
@@ -5715,25 +5719,40 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "VNC已停止" }',
         usage: '停止VNC服务释放资源'
     },
-    '/api/vnc/start-desktop': {
-        title: '启动桌面VNC',
-        description: '连接Ubuntu桌面的VNC',
-        params: [
-            { name: 'host', type: 'string', required: true, desc: '桌面主机地址,格式: 用户名@主机' },
-            { name: 'password', type: 'string', required: true, desc: 'SSH登录密码' },
-            { name: 'vnc_password', type: 'string', required: false, desc: 'VNC密码(可选)' }
-        ],
-        response: '{ "success": true, "url": "http://xxx:6080/vnc.html" }',
-        usage: '远程连接Ubuntu桌面进行图形化操作'
-    },
-    '/api/desktop/validate-host': {
+    '/api/desktop/validate': {
         title: '验证桌面主机',
-        description: '验证桌面主机连接是否有效',
+        description: '验证Ubuntu主机SSH连接并检查VNC服务可用性',
         params: [
-            { name: 'host', type: 'string', required: true, desc: '主机地址' }
+            { name: 'host', type: 'string', required: true, desc: '主机地址（格式：user@ip，如hcq@172.16.14.233）' },
+            { name: 'password', type: 'string', required: false, desc: 'SSH登录密码（可选）' }
         ],
-        response: '{ "valid": true, "hostname": "desktop-pc" }',
-        usage: '连接桌面主机前验证连接是否有效'
+        response: '{ "success": true, "message": "SSH连接成功，VNC服务可用" }',
+        usage: '连接Ubuntu桌面主机前验证SSH连接和VNC服务状态'
+    },
+    '/api/desktop/vnc/status': {
+        title: '查询桌面VNC状态',
+        description: '查询Ubuntu主机桌面VNC服务状态',
+        params: [],
+        response: '{ "success": true, "running": true, "url": "http://172.16.14.233:6080/vnc.html" }',
+        usage: '检查Ubuntu桌面VNC服务是否正在运行，获取远程访问URL'
+    },
+    '/api/desktop/vnc/start': {
+        title: '启动桌面VNC',
+        description: '启动Ubuntu主机桌面VNC服务',
+        params: [
+            { name: 'host', type: 'string', required: false, desc: '桌面主机地址，格式：user@ip' },
+            { name: 'password', type: 'string', required: false, desc: 'SSH登录密码' },
+            { name: 'vnc_password', type: 'string', required: false, desc: 'VNC访问密码（可选）' }
+        ],
+        response: '{ "success": true, "url": "http://172.16.14.233:6080/vnc.html" }',
+        usage: '启动Ubuntu桌面的VNC服务，通过浏览器远程访问图形化桌面'
+    },
+    '/api/desktop/vnc/stop': {
+        title: '停止桌面VNC',
+        description: '停止Ubuntu主机桌面VNC服务',
+        params: [],
+        response: '{ "success": true, "message": "桌面VNC已停止" }',
+        usage: '停止Ubuntu桌面VNC服务，释放系统资源'
     },
     '/api/adb-forward/start': {
         title: '启动ADB端口转发',
@@ -5765,10 +5784,11 @@ const API_DETAILS_MAP = {
         title: '启动USB/IP',
         description: '启动USB/IP设备共享',
         params: [
-            { name: 'device_id', type: 'string', required: true, desc: 'USB设备ID,如1-5' }
+            { name: 'device_host', type: 'string', required: false, desc: '设备主机地址，如172.16.14.233' },
+            { name: 'device_password', type: 'string', required: false, desc: '设备主机SSH密码（可选）' }
         ],
         response: '{ "success": true, "message": "USB/IP已启动" }',
-        usage: '通过IP网络共享USB设备'
+        usage: '通过IP网络共享USB设备，连接远程测试主机的USB设备'
     },
     '/api/usbip/stop': {
         title: '停止USB/IP',
@@ -5893,16 +5913,6 @@ const API_DETAILS_MAP = {
         ],
         response: '{ "files": [{ "name": "DCIM", "type": "directory" }] }',
         usage: '浏览设备文件系统'
-    },
-    '/api/screen/start': {
-        title: '启动屏幕录制',
-        description: '录制设备屏幕',
-        params: [
-            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' },
-            { name: 'duration', type: 'number', required: false, desc: '录制时长(秒),默认60' }
-        ],
-        response: '{ "success": true, "recording_id": "20260326_110000" }',
-        usage: '录制设备屏幕操作'
     },
     '/api/terminal/push': {
         title: '终端推送命令',
@@ -6077,7 +6087,8 @@ function generateCurlCommand(api, details) {
         const displayCmd = cmd.includes('\\') ? cmd.split('\n')[0] : cmd;
         return { display: displayCmd, full: cmd };
     } else if (api.method === 'WebSocket') {
-        return { display: `# WebSocket连接\nwscat -c ws://${BASE_URL}${api.path.replace('{client_id}', 'YOUR_CLIENT_ID')}`, full: `# WebSocket连接\nwscat -c ws://${BASE_URL}${api.path.replace('{client_id}', 'YOUR_CLIENT_ID')}` };
+        const wsBaseUrl = `${SERVER_HOST}:${SERVER_PORT}`;
+        return { display: `wscat -c ws://${wsBaseUrl}${api.path.replace('{client_id}', 'YOUR_CLIENT_ID')}`, full: `wscat -c ws://${wsBaseUrl}${api.path.replace('{client_id}', 'YOUR_CLIENT_ID')}` };
     }
     return { display: `curl -s ${BASE_URL}${api.path}`, full: `curl -s ${BASE_URL}${api.path}` };
 }
@@ -6252,6 +6263,9 @@ window.copyCurlCommandFromData = function(element) {
     let commandToCopy = text;
     let successMessage = '✓ curl命令已复制';
 
+    // 检查是否为WebSocket端点（不需要jq格式化）
+    const isWebSocketEndpoint = text.startsWith('wscat -c');
+
     // 检查是否为纯文本端点（不需要jq格式化）
     const isPlainTextEndpoint = text.includes('/api/test/logs/stream') ||
                                 text.includes('/api/terminal/ws') ||
@@ -6260,7 +6274,11 @@ window.copyCurlCommandFromData = function(element) {
     // 检查是否为需要特殊jq处理的端点
     const isSshdInstall = text.includes('/api/ssh/sshd-install');
 
-    if (isPlainTextEndpoint) {
+    if (isWebSocketEndpoint) {
+        // WebSocket端点，不添加jq
+        commandToCopy = text;
+        successMessage = '✓ WebSocket命令已复制';
+    } else if (isPlainTextEndpoint) {
         // 纯文本端点，不添加jq
         commandToCopy = text;
         successMessage = '✓ curl命令已复制';

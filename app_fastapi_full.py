@@ -30,6 +30,7 @@ import asyncio
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Body, Query
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.websockets import WebSocketState
+import json
 from enum import Enum
 
 # ==================== 枚举定义 ====================
@@ -203,11 +204,23 @@ logger = logging.getLogger(__name__)
 
 # ==================== FastAPI应用 ====================
 
+# 自定义JSONResponse类，确保UTF-8编码
+class UTF8JSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
 app = FastAPI(
     title="GMS Auto Test - FastAPI Server (Port 5001)",
     description="完整的测试管理服务（替代Flask版本）",
     version="4.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    default_response_class=UTF8JSONResponse
 )
 
 # CORS中间件
@@ -405,14 +418,21 @@ class ApiResponse:
             response['data'] = data
         if message:
             response['message'] = message
-        return JSONResponse(content=response)
+        return JSONResponse(
+            content=response,
+            headers={"Content-Type": "application/json; charset=utf-8"}
+        )
 
     @staticmethod
     def error(error_message, status_code=500, **extra_fields):
         """错误响应（与Flask格式一致）"""
         response = {'success': False, 'error': error_message}
         response.update(extra_fields)
-        return JSONResponse(content=response, status_code=status_code)
+        return JSONResponse(
+            content=response,
+            status_code=status_code,
+            headers={"Content-Type": "application/json; charset=utf-8"}
+        )
 
     @staticmethod
     def device_results(results, operation_name):
@@ -832,7 +852,7 @@ async def root(request: Request):
     response.headers["Expires"] = "0"
     return response
 
-@app.get("/health")
+@app.get("/api/system/health")
 async def health_check():
     """健康检查"""
     return JSONResponse(content={
@@ -1181,7 +1201,7 @@ async def update_config(req: dict):
 
 # ==================== 设备管理 ====================
 
-@app.get("/api/devices")
+@app.get("/api/devices/list")
 async def get_connected_devices(
     request: Request,
     help: bool = Query(False)
@@ -1189,7 +1209,7 @@ async def get_connected_devices(
     """获取所有已连接的设备列表（与adb devices相同）"""
     # 检查是否需要显示帮助
     if help:
-        help_text = generate_per_api_help_text("GET", "/api/devices")
+        help_text = generate_per_api_help_text("GET", "/api/devices/list")
         if help_text:
             return PlainTextResponse(
                 content=help_text,
@@ -1276,17 +1296,16 @@ async def get_connected_devices(
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
 
-@app.post("/api/devices/lock")
-async def lock_devices(
+@app.post("/api/devices/bootloader-lock")
+async def lock_bootloader(
     request: Request,
-    h: Optional[str] = Query(None),
     help: bool = Query(False),
     req: DeviceLockRequest = Body(None)
 ):
-    """锁定/解锁设备（使用run_Device_Lock.sh脚本 - 与Flask版本完全一致）"""
-    # 检查是否需要显示帮助（支持 ?h 或 ?help）
+    """锁定设备Bootloader（使用run_Device_Lock.sh脚本）"""
+    # 检查是否需要显示帮助
     if help:
-        help_text = generate_per_api_help_text("POST", "/api/devices/lock")
+        help_text = generate_per_api_help_text("POST", "/api/devices/bootloader-lock")
         if help_text:
             return PlainTextResponse(
                 content=help_text,
@@ -1305,7 +1324,8 @@ async def lock_devices(
         if not devices:
             return ApiResponse.error("未选择设备", status_code=400)
 
-        action = req.action
+        # 固定为锁定操作
+        action = "lock"
         config = config_manager.load_config()
 
         with ssh_manager.connection(config) as ssh:
@@ -1366,9 +1386,25 @@ async def lock_devices(
         logger.error(f"Error managing device lock: {e}")
         return ApiResponse.error(str(e), status_code=500)
 
-@app.post("/api/devices/lock-status")
-async def check_lock_status(req: DeviceActionRequest):
-    """Check verified boot lock status of selected devices - 优化版，并行检查"""
+@app.post("/api/devices/bootloader-unlock")
+async def unlock_bootloader(
+    request: Request,
+    help: bool = Query(False),
+    req: DeviceLockRequest = Body(None)
+):
+    """解锁设备Bootloader（使用run_Device_Lock.sh脚本）"""
+    # 强制设置action为unlock
+    if req:
+        req.action = 'unlock'
+    else:
+        req = DeviceLockRequest(devices=[], action='unlock')
+
+    # 调用lock_bootliner函数
+    return await lock_bootliner(request, None, False, req)
+
+@app.post("/api/devices/bootloader-status")
+async def check_bootloader_status(req: DeviceActionRequest):
+    """检查设备Bootloader锁状态（GREEN=锁定, ORANGE=未锁定）"""
     try:
         with SSHConnection() as ssh:
             # 并行检查所有设备的锁定状态
@@ -1468,9 +1504,8 @@ async def get_device_info(req: DeviceActionRequest):
         return ApiResponse.error(str(e), status_code=500)
 
 @app.get("/api/devices/management")
-@app.post("/api/devices/management")
 async def devices_management():
-    """设备管理页面（支持GET和POST）- 与Flask一致"""
+    """设备管理页面（获取所有设备的详细管理信息）"""
     try:
         config = config_manager.load_config()
 
@@ -1584,9 +1619,9 @@ async def devices_management():
             status_code=500
         )
 
-@app.get("/api/devices/locks")
-async def list_device_locks():
-    """列出所有设备锁定"""
+@app.get("/api/devices/user-locked")
+async def list_user_locks():
+    """列出所有用户锁定设备（多用户环境下的设备占用状态）"""
     return JSONResponse(content={
         "success": True,
         "data": device_lock_manager.get_all_locks()
@@ -4308,8 +4343,8 @@ async def ai_analyze_failure(req: dict):
         )
 
 # ==================== VNC管理 ====================
-@app.get("/api/vnc/status")
-async def get_vnc_status():
+@app.get("/api/desktop/vnc/status")
+async def get_desktop_vnc_status():
     """获取VNC状态"""
     try:
         result = vnc_manager.get_vnc_status()
@@ -4324,9 +4359,9 @@ async def get_vnc_status():
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
 
-@app.post("/api/vnc/start")
-async def start_vnc(req: Optional[VNCStartRequest] = Body(default=None)):
-    """启动VNC"""
+@app.post("/api/desktop/vnc/start")
+async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None)):
+    """启动桌面VNC（Ubuntu桌面的VNC服务）"""
     if req is None:
         # 如果没有提供请求体，使用配置文件的默认值
         config = config_manager.load_config()
@@ -4341,199 +4376,16 @@ async def start_vnc(req: Optional[VNCStartRequest] = Body(default=None)):
     result = vnc_manager.start_vnc(host, password, vnc_password)
     return JSONResponse(content=result)
 
-@app.post("/api/vnc/stop")
-async def stop_vnc():
-    """停止VNC"""
+@app.post("/api/desktop/vnc/stop")
+async def stop_desktop_vnc():
+    """停止桌面VNC"""
     result = vnc_manager.stop_vnc()
     return JSONResponse(content=result)
 
-@app.post("/api/vnc/start-desktop")
-async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None)):
-    """启动桌面VNC - 支持多主机VNC连接（与Flask版本完全一致）"""
-    import time
-    try:
-        # 如果没有提供参数，使用配置文件的默认值
-        config = config_manager.load_config()
 
-        if req is None:
-            # 使用配置中的默认值
-            host_connection = f"{config.get('ubuntu_user', 'hcq')}@{config.get('ubuntu_host', 'localhost')}"
-            password = config.get('ubuntu_pswd', '')
-            vnc_password = config.get('vnc_password', '')
-        else:
-            host_connection = req.host or f"{config.get('ubuntu_user', 'hcq')}@{config.get('ubuntu_host', 'localhost')}"
-            password = req.password or config.get('ubuntu_pswd', '')
-            vnc_password = req.vnc_password or config.get('vnc_password', '')
-
-        if not host_connection or '@' not in host_connection:
-            raise HTTPException(
-                status_code=400,
-                detail='无效的主机格式，请使用: 用户名@IP地址'
-            )
-
-        # 解析主机信息
-        try:
-            user, ip = host_connection.split('@', 1)
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail='主机格式错误'
-            )
-
-        # 检查是否是本地主机
-        is_local = CommonUtils.is_local_host(ip)
-
-        if is_local:
-            # 本地主机的 VNC 启动 - 免密码模式
-            logger.info(f"[Desktop] Starting local VNC for {host_connection}...")
-            # 本地主机不需要VNC密码
-            result = vnc_manager.start_vnc(host_connection, password, None)
-            if result.get('success'):
-                # 统一URL格式，移除用户名前缀和密码参数，只使用IP地址
-                if 'url' in result:
-                    # 将 http://hcq@172.16.14.233:6080 替换为 http://172.16.14.233:6080
-                    import re
-                    # 移除用户名@部分
-                    result['url'] = re.sub(r'^(https?://)[^@]+@', r'\1', result['url'])
-                    # 移除URL中的密码参数 (&password=xxx 或 ?password=xxx)
-                    result['url'] = re.sub(r'[?&]password=[^&]*', '', result['url'])
-                    # 修复可能出现的 ?& 问题
-                    result['url'] = result['url'].replace('?&', '?')
-                return JSONResponse(content=result)
-            else:
-                raise HTTPException(status_code=500, detail=result.get('error', 'VNC服务启动失败'))
-
-        # 远程主机的 VNC 启动
-        ssh = None
-        try:
-            # 使用 ssh_manager 获取连接
-            config = {
-                'hostname': ip,
-                'username': user,
-                'password': password,
-                'timeout': 10
-            }
-            ssh = ssh_manager.create_connection(config)
-            if not ssh:
-                raise HTTPException(
-                    status_code=500,
-                    detail='SSH连接失败'
-                )
-
-            logger.info(f"[Desktop] Connected to {host_connection}, starting VNC...")
-
-            # 检查noVNC
-            check_novnc_cmd = "[ -d /opt/noVNC ] && echo 'exists' || echo 'missing'"
-            stdin, stdout, stderr = ssh.exec_command(check_novnc_cmd)
-            novnc_output = stdout.read().decode()
-
-            if "missing" in novnc_output:
-                raise HTTPException(
-                    status_code=404,
-                    detail='noVNC未安装'
-                )
-
-            # 等待显示就绪
-            display_ready = False
-            for _ in range(30):
-                display_cmd = "export DISPLAY=:0 && xprop -root &>/dev/null && echo 'ready'"
-                stdin, stdout, stderr = ssh.exec_command(display_cmd)
-                disp_output = stdout.read().decode()
-                if "ready" in disp_output:
-                    display_ready = True
-                    break
-                await asyncio.sleep(1)
-
-            if not display_ready:
-                raise HTTPException(
-                    status_code=503,
-                    detail='DISPLAY未就绪'
-                )
-
-            # 检查并启动x11vnc - 支持免密或密码模式
-            check_x11_cmd = "pgrep -f 'x11vnc.*:0' && echo 'RUNNING' || echo 'NOT_RUNNING'"
-            stdin, stdout, stderr = ssh.exec_command(check_x11_cmd)
-            check_output = stdout.read().decode()
-            x11vnc_running = 'RUNNING' in check_output
-
-            if not x11vnc_running:
-                if vnc_password:
-                    # 使用密码模式：需要创建密码文件
-                    x11vnc_cmd = (
-                        "export DISPLAY=:0 && "
-                        f"echo '{vnc_password}' | x11vnc -display :0 -forever -shared -rfbport 5900 "
-                        "-storepasswd ~/.vnc/passwd && "
-                        "nohup x11vnc -display :0 -forever -shared -rfbport 5900 "
-                        "-rfbauth ~/.vnc/passwd -o /tmp/x11vnc.log > /dev/null 2>&1 &"
-                    )
-                else:
-                    # 免密模式：不使用 -rfbauth 参数
-                    x11vnc_cmd = (
-                        "export DISPLAY=:0 && "
-                        "nohup x11vnc -display :0 -forever -shared -rfbport 5900 "
-                        "-nopw -o /tmp/x11vnc.log > /dev/null 2>&1 &"
-                    )
-                ssh.exec_command(x11vnc_cmd)
-                await asyncio.sleep(2)
-
-            # 检查并启动websockify
-            check_web_cmd = "pgrep -f 'websockify.*6080' && echo 'RUNNING' || echo 'NOT_RUNNING'"
-            stdin, stdout, stderr = ssh.exec_command(check_web_cmd)
-            web_output = stdout.read().decode()
-            websockify_running = 'RUNNING' in web_output
-
-            if not websockify_running:
-                websockify_cmd = (
-                    "cd /opt/noVNC && "
-                    "nohup python3 utils/novnc_proxy --vnc localhost:5900 --listen 6080 "
-                    "> /tmp/websockify.log 2>&1 &"
-                )
-                ssh.exec_command(websockify_cmd)
-                await asyncio.sleep(2)
-
-            # SSH连接会在finally块中自动返回到连接池
-
-            # 等待VNC服务就绪
-            await asyncio.sleep(2)
-
-            # 构建VNC URL，如果提供了密码则添加到URL中
-            vnc_url = f"http://{ip}:6080/vnc.html?autoconnect=true"
-            if vnc_password:
-                from urllib.parse import quote
-                vnc_url += f"&password={quote(vnc_password)}"
-
-            return JSONResponse(content={
-                'success': True,
-                'message': f'✅ VNC服务已启动: {host_connection}',
-                'url': vnc_url,
-                'local': False
-            })
-
-        except paramiko.AuthenticationException:
-            raise HTTPException(
-                status_code=401,
-                detail={'error': 'SSH认证失败', 'needs_password': True}
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error starting desktop VNC: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
-    finally:
-        # 确保SSH连接返回到连接池
-        if ssh:
-            try:
-                ssh_manager.return_connection(ssh)
-            except Exception as e:
-                logger.warning(f"Failed to return SSH connection: {e}")
-
-@app.post("/api/desktop/validate-host")
-async def validate_host(req: dict = Body(...)):
-    """验证主机连接并检查VNC服务（与Flask版本完全一致）"""
+@app.post("/api/desktop/validate")
+async def validate_desktop_host(req: dict = Body(...)):
+    """验证桌面主机连接并检查VNC服务"""
     try:
         host_connection = req.get('host', '')
         password = req.get('password', '')
@@ -4620,24 +4472,155 @@ async def validate_host(req: dict = Body(...)):
 
 @app.post("/api/devices/screen")
 async def show_device_screens(req: DeviceActionRequest):
-    """显示设备屏幕"""
+    """显示设备屏幕（启动scrcpy投屏）"""
     try:
-        if not req.devices:
-            raise HTTPException(status_code=400, detail="未选择设备")
+        devices = req.devices
 
-        result = vnc_manager.show_device_screens(req.devices)
-        if result.get('success'):
-            return JSONResponse(content=result)
-        else:
-            raise HTTPException(status_code=500, detail=result.get('error', '设备屏幕显示失败'))
-    except HTTPException:
-        raise
+        config = config_manager.load_config()
+        ubuntu_user = config.get('ubuntu_user', 'hcq')
+        ubuntu_host = config.get('ubuntu_host', '')
+
+        if not devices:
+            # 尝试从已连接设备列表获取
+            ssh = ssh_manager.get_connection(config)
+            if ssh:
+                try:
+                    stdout, stderr, code = ssh_manager.execute_command(ssh, "adb devices", timeout=5)
+                    ssh_manager.return_connection(ssh)
+                    if code == 0 and stdout:
+                        # 解析设备列表
+                        lines = stdout.strip().split('\n')[1:]  # 跳过第一行 "List of devices attached"
+                        devices = [line.split()[0] for line in lines if line.strip() and '\tdevice' in line]
+                except (WebSocketDisconnect, ConnectionError, KeyError):
+                    pass
+
+        if not devices:
+            return JSONResponse(content={'success': False, 'error': 'No devices selected'}, status_code=400)
+
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return JSONResponse(content={'success': False, 'error': 'SSH connection failed'}, status_code=500)
+
+        try:
+            # Check VNC service status
+            vnc_check_cmd = f"curl -s -o /dev/null -w '%{{http_code}}' http://{ubuntu_host}:6080 --connect-timeout 3"
+            vnc_output, _, _ = ssh_manager.execute_command(ssh, vnc_check_cmd, timeout=5)
+            vnc_available = vnc_output.strip() == '200'
+
+            # Check scrcpy availability
+            scrcpy_path = config.get("scrcpy_path", "")
+            if scrcpy_path:
+                # Substitute ubuntu_user in path
+                scrcpy_path = scrcpy_path.replace('${ubuntu_user}', ubuntu_user)
+                scrcpy_check_cmd = f"test -f '{scrcpy_path}' && echo 'exists' || echo 'not_found'"
+                scrcpy_output, _, scrcpy_code = ssh_manager.execute_command(ssh, scrcpy_check_cmd)
+
+                if "not_found" in scrcpy_output:
+                    ssh_manager.return_connection(ssh)
+                    return JSONResponse(content={
+                        'success': False,
+                        'error': f'scrcpy未找到: {scrcpy_path}',
+                        'instructions': '请检查配置文件中的 scrcpy_path 路径'
+                    }, status_code=404)
+            else:
+                # Fallback to checking PATH
+                scrcpy_check_cmd = "which scrcpy"
+                scrcpy_output, _, scrcpy_code = ssh_manager.execute_command(ssh, scrcpy_check_cmd)
+
+                if scrcpy_code != 0:
+                    ssh_manager.return_connection(ssh)
+                    return JSONResponse(content={
+                        'success': False,
+                        'error': 'scrcpy未安装',
+                        'instructions': 'sudo apt-get install -y scrcpy'
+                    }, status_code=404)
+                scrcpy_path = "scrcpy"  # Use command from PATH
+
+            # 启动scrcpy
+            results = []
+            vnc_sessions = []
+
+            # 使用智能位置计算函数
+            positions = calculate_window_positions(devices)
+
+            for idx, device_id in enumerate(sorted(devices)):
+                # 使用智能计算的窗口位置
+                x_offset = positions['start_x'] + idx * (positions['window_width'] + positions['horizontal_gap'])
+                y_offset = positions['start_y']
+                window_width = positions['window_width']
+                window_height = positions['window_height']
+
+                # 使用nohup确保scrcpy在SSH连接关闭后继续运行
+                cmd = (
+                    f"export DISPLAY=:0 && "
+                    f"if [ -f /run/user/1000/gdm/Xauthority ]; then "
+                    f"export XAUTHORITY=/run/user/1000/gdm/Xauthority; "
+                    f"else "
+                    f"export XAUTHORITY=/home/{ubuntu_user}/.Xauthority; "
+                    f"fi && "
+                    f"(nohup {scrcpy_path} -s {device_id} "
+                    f"--max-size 800 "
+                    f"--stay-awake "
+                    f"--window-title '{device_id}' "
+                    f"--window-x {x_offset} "
+                    f"--window-y {y_offset} "
+                    f"--window-width {window_width} "
+                    f"--window-height {window_height} "
+                    f"> /tmp/scrcpy_{device_id}.log 2>&1 &)"
+                )
+
+                ssh_manager.execute_command(ssh, cmd, timeout=10)
+
+                # 验证scrcpy是否成功启动
+                await asyncio.sleep(0.3)
+                check_cmd = f"pgrep -f 'scrcpy.*-s {device_id}' && echo 'RUNNING' || echo 'NOT_RUNNING'"
+                check_output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
+                is_started = 'RUNNING' in check_output
+
+                results.append({
+                    'device': device_id,
+                    'started': is_started,
+                    'position': {'x': x_offset, 'y': y_offset, 'width': window_width, 'height': window_height}
+                })
+
+                vnc_sessions.append({
+                    'device': device_id,
+                    'url': f"http://{ubuntu_host}:6080/vnc.html?autoconnect=true" if vnc_available else None,
+                    'message': 'VNC查看可用' if vnc_available else '仅本地显示'
+                })
+
+            ssh_manager.return_connection(ssh)
+
+            # 构建详细消息
+            newly_started = [r['device'] for r in results if r.get('started')]
+            failed_devices = [r['device'] for r in results if not r.get('started')]
+
+            message_parts = []
+            if newly_started:
+                message_parts.append(f"✅ 已启动{len(newly_started)}个投屏设备: {', '.join(newly_started)}")
+            if failed_devices:
+                message_parts.append(f"❌ {len(failed_devices)}个设备启动失败: {', '.join(failed_devices)}")
+
+            message = '\n'.join(message_parts) if message_parts else '投屏启动完成'
+
+            return JSONResponse(content={
+                'success': len(failed_devices) == 0,
+                'message': message,
+                'results': results,
+                'vnc_sessions': vnc_sessions,
+                'desktop_url': '/desktop',
+                'note': '点击"主机桌面"查看屏幕' if vnc_available else 'VNC未启动，屏幕仅在本地显示'
+            })
+        except Exception as e:
+            ssh_manager.return_connection(ssh)
+            raise
+
     except Exception as e:
         logger.error(f"Error showing device screens: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=f"{str(e)}. 请检查配置和参数是否正确。"
-            )
+        return JSONResponse(
+            content={"success": False, "error": str(e)},
+            status_code=500
+        )
 
 # ==================== ADB转发 ====================
 @app.post("/api/adb-forward/start")
@@ -6580,167 +6563,9 @@ def create_device_ssh_connection(config):
         logger.error(f"[USB/IP] Failed to connect to device host: {e}")
         return None
 
-@app.post("/api/screen/start")
-async def start_screen_recording(req: Optional[dict] = Body(default=None)):
-    """启动屏幕镜像（请求体可选，兼容前端无参数调用）"""
-    try:
-        # 如果没有提供参数或为空字典，使用默认行为
-        if req is None:
-            req = {}
-
-        devices = req.get('devices', [])
-
-        config = config_manager.load_config()
-        ubuntu_user = config.get('ubuntu_user', 'hcq')
-        ubuntu_host = config.get('ubuntu_host', '')
-
-        if not devices:
-            # 尝试从已连接设备列表获取
-            ssh = ssh_manager.get_connection(config)
-            if ssh:
-                try:
-                    stdout, stderr, code = ssh_manager.execute_command(ssh, "adb devices", timeout=5)
-                    ssh_manager.return_connection(ssh)
-                    if code == 0 and stdout:
-                        # 解析设备列表
-                        lines = stdout.strip().split('\n')[1:]  # 跳过第一行 "List of devices attached"
-                        devices = [line.split()[0] for line in lines if line.strip() and '\tdevice' in line]
-                except (WebSocketDisconnect, ConnectionError, KeyError):
-                    pass
-
-        if not devices:
-            return JSONResponse(content={'success': False, 'error': 'No devices selected'}, status_code=400)
-
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return JSONResponse(content={'success': False, 'error': 'SSH connection failed'}, status_code=500)
-
-        try:
-            client_id = client_manager.get_client_id('127.0.0.1')
-
-            # Check VNC service status
-            vnc_check_cmd = f"curl -s -o /dev/null -w '%{{http_code}}' http://{ubuntu_host}:6080 --connect-timeout 3"
-            vnc_output, _, _ = ssh_manager.execute_command(ssh, vnc_check_cmd, timeout=5)
-            vnc_available = vnc_output.strip() == '200'
-
-            # Check scrcpy availability (matching Flask version logic)
-            scrcpy_path = config.get("scrcpy_path", "")
-            if scrcpy_path:
-                # Substitute ubuntu_user in path
-                scrcpy_path = scrcpy_path.replace('${ubuntu_user}', ubuntu_user)
-                scrcpy_check_cmd = f"test -f '{scrcpy_path}' && echo 'exists' || echo 'not_found'"
-                scrcpy_output, _, scrcpy_code = ssh_manager.execute_command(ssh, scrcpy_check_cmd)
-
-                if "not_found" in scrcpy_output:
-                    ssh_manager.return_connection(ssh)
-                    return JSONResponse(content={
-                        'success': False,
-                        'error': f'scrcpy未找到: {scrcpy_path}',
-                        'instructions': '请检查配置文件中的 scrcpy_path 路径'
-                    }, status_code=404)
-            else:
-                # Fallback to checking PATH
-                scrcpy_check_cmd = "which scrcpy"
-                scrcpy_output, _, scrcpy_code = ssh_manager.execute_command(ssh, scrcpy_check_cmd)
-
-                if scrcpy_code != 0:
-                    ssh_manager.return_connection(ssh)
-                    return JSONResponse(content={
-                        'success': False,
-                        'error': 'scrcpy未安装',
-                        'instructions': 'sudo apt-get install -y scrcpy'
-                    }, status_code=404)
-                scrcpy_path = "scrcpy"  # Use command from PATH
-
-            # 启动scrcpy - 参考Flask版本实现
-            results = []
-            vnc_sessions = []
-
-            # 使用5000端口的智能位置计算函数
-            positions = calculate_window_positions(devices)
-
-            for idx, device_id in enumerate(sorted(devices)):
-                # 使用智能计算的窗口位置（与5000端口一致）
-                x_offset = positions['start_x'] + idx * (positions['window_width'] + positions['horizontal_gap'])
-                y_offset = positions['start_y']
-                window_width = positions['window_width']
-                window_height = positions['window_height']
-
-                # 使用nohup确保scrcpy在SSH连接关闭后继续运行
-                cmd = (
-                    f"export DISPLAY=:0 && "
-                    f"if [ -f /run/user/1000/gdm/Xauthority ]; then "
-                    f"export XAUTHORITY=/run/user/1000/gdm/Xauthority; "
-                    f"else "
-                    f"export XAUTHORITY=/home/{ubuntu_user}/.Xauthority; "
-                    f"fi && "
-                    f"(nohup {scrcpy_path} -s {device_id} "
-                    f"--max-size 800 "
-                    f"--stay-awake "
-                    f"--window-title '{device_id}' "
-                    f"--window-x {x_offset} "
-                    f"--window-y {y_offset} "
-                    f"--window-width {window_width} "
-                    f"--window-height {window_height} "
-                    f"> /tmp/scrcpy_{device_id}.log 2>&1 &)"
-                )
-
-                ssh_manager.execute_command(ssh, cmd, timeout=10)
-
-                # 验证scrcpy是否成功启动
-                await asyncio.sleep(0.3)
-                check_cmd = f"pgrep -f 'scrcpy.*-s {device_id}' && echo 'RUNNING' || echo 'NOT_RUNNING'"
-                check_output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
-                is_started = 'RUNNING' in check_output
-
-                results.append({
-                    'device': device_id,
-                    'started': is_started,
-                    'position': {'x': x_offset, 'y': y_offset, 'width': window_width, 'height': window_height}
-                })
-
-                vnc_sessions.append({
-                    'device': device_id,
-                    'url': f"http://{ubuntu_host}:6080/vnc.html?autoconnect=true" if vnc_available else None,
-                    'message': 'VNC查看可用' if vnc_available else '仅本地显示'
-                })
-
-            ssh_manager.return_connection(ssh)
-
-            # 构建详细消息
-            newly_started = [r['device'] for r in results if r.get('started')]
-            failed_devices = [r['device'] for r in results if not r.get('started')]
-
-            message_parts = []
-            if newly_started:
-                message_parts.append(f"✅ 已启动{len(newly_started)}个投屏设备: {', '.join(newly_started)}")
-            if failed_devices:
-                message_parts.append(f"❌ {len(failed_devices)}个设备启动失败: {', '.join(failed_devices)}")
-
-            message = '\n'.join(message_parts) if message_parts else '投屏启动完成'
-
-            return JSONResponse(content={
-                'success': len(failed_devices) == 0,
-                'message': message,
-                'results': results,
-                'vnc_sessions': vnc_sessions,
-                'desktop_url': '/desktop',
-                'note': '点击"主机桌面"查看屏幕' if vnc_available else 'VNC未启动，屏幕仅在本地显示'
-            })
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            raise
-
-    except Exception as e:
-        logger.error(f"Error starting screen recording: {e}")
-        return JSONResponse(
-            content={"success": False, "error": str(e)},
-            status_code=500
-        )
-
 # ==================== WebSocket ====================
 
-@app.websocket("/ws/{client_id}")
+@app.websocket("/api/system/websocket/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """WebSocket连接端点"""
     await websocket.accept()
@@ -7191,8 +7016,8 @@ API_DOCS_LIST = [
     },
     {
         "method": "GET",
-        "path": "/health",
-        "description": "健康检查接口",
+        "path": "/api/system/health",
+        "description": "系统管理",
         "params": [],
         "category": "health"
     },
@@ -7260,50 +7085,36 @@ API_DOCS_LIST = [
     # ==================== 设备管理 ====================
     {
         "method": "GET",
-        "path": "/api/devices",
+        "path": "/api/devices/list",
         "description": "获取设备列表",
         "params": [],
         "category": "device"
     },
     {
         "method": "POST",
-        "path": "/api/devices/lock",
-        "description": "锁定设备",
-        "params": [{"name": "device_id", "type": "string", "required": True}, {"name": "client_id", "type": "string", "required": True}, {"name": "username", "type": "string", "required": True}],
+        "path": "/api/devices/bootloader-lock",
+        "description": "锁定设备Bootloader(使用run_Device_Lock.sh脚本)",
+        "params": [{"name": "devices", "type": "array", "required": True}],
         "category": "device"
     },
     {
         "method": "POST",
-        "path": "/api/devices/lock-status",
-        "description": "批量检查设备锁定状态",
-        "params": [{"name": "device_ids", "type": "array", "required": True}],
+        "path": "/api/devices/bootloader-unlock",
+        "description": "解锁设备Bootloader",
+        "params": [{"name": "devices", "type": "array", "required": True}],
         "category": "device"
     },
     {
         "method": "POST",
-        "path": "/api/devices/info",
-        "description": "获取设备详细信息",
-        "params": [{"name": "device_id", "type": "string", "required": True}],
+        "path": "/api/devices/bootloader-status",
+        "description": "检查设备Bootloader锁状态(GREEN=锁定, ORANGE=未锁定)",
+        "params": [{"name": "devices", "type": "array", "required": True}],
         "category": "device"
     },
     {
         "method": "GET",
-        "path": "/api/devices/management",
-        "description": "获取设备管理列表",
-        "params": [],
-        "category": "device"
-    },
-    {
-        "method": "POST",
-        "path": "/api/devices/management",
-        "description": "执行设备管理操作",
-        "params": [{"name": "action", "type": "string", "required": True}, {"name": "device_id", "type": "string", "required": True}],
-        "category": "device"
-    },
-    {
-        "method": "GET",
-        "path": "/api/devices/locks",
-        "description": "获取所有设备锁定信息",
+        "path": "/api/devices/user-locked",
+        "description": "列出所有用户锁定设备(多用户环境下的设备占用状态)",
         "params": [],
         "category": "device"
     },
@@ -7489,41 +7300,34 @@ API_DOCS_LIST = [
         "category": "report"
     },
 
-    # ==================== VNC管理 ====================
+    # ==================== 主机桌面 ====================
     {
         "method": "GET",
-        "path": "/api/vnc/status",
-        "description": "获取VNC状态",
+        "path": "/api/desktop/vnc/status",
+        "description": "查询Ubuntu主机桌面VNC服务状态",
         "params": [],
-        "category": "vnc"
+        "category": "desktop"
     },
     {
         "method": "POST",
-        "path": "/api/vnc/start",
-        "description": "启动VNC服务",
+        "path": "/api/desktop/vnc/start",
+        "description": "启动Ubuntu主机桌面VNC服务",
+        "params": [{"name": "host", "type": "string", "required": False}, {"name": "password", "type": "string", "required": False}, {"name": "vnc_password", "type": "string", "required": False}],
+        "category": "desktop"
+    },
+    {
+        "method": "POST",
+        "path": "/api/desktop/vnc/stop",
+        "description": "停止Ubuntu主机桌面VNC服务",
         "params": [],
-        "category": "vnc"
+        "category": "desktop"
     },
     {
         "method": "POST",
-        "path": "/api/vnc/stop",
-        "description": "停止VNC服务",
-        "params": [],
-        "category": "vnc"
-    },
-    {
-        "method": "POST",
-        "path": "/api/vnc/start-desktop",
-        "description": "启动桌面VNC",
-        "params": [{"name": "host", "type": "string", "required": True}, {"name": "password", "type": "string", "required": True}, {"name": "vnc_password", "type": "string", "required": False}],
-        "category": "vnc"
-    },
-    {
-        "method": "POST",
-        "path": "/api/desktop/validate-host",
-        "description": "验证桌面主机",
-        "params": [{"name": "host", "type": "string", "required": True}],
-        "category": "vnc"
+        "path": "/api/desktop/validate",
+        "description": "验证Ubuntu主机SSH连接并检查VNC服务可用性（host格式：user@ip）",
+        "params": [{"name": "host", "type": "string", "required": True}, {"name": "password", "type": "string", "required": False}],
+        "category": "desktop"
     },
 
     # ==================== USB/IP管理 ====================
@@ -7681,22 +7485,13 @@ API_DOCS_LIST = [
         "category": "file"
     },
 
-    # ==================== 屏幕录制 ====================
-    {
-        "method": "POST",
-        "path": "/api/screen/start",
-        "description": "启动屏幕录制",
-        "params": [{"name": "device_id", "type": "string", "required": True}, {"name": "duration", "type": "integer", "required": False}],
-        "category": "screen"
-    },
-
     # ==================== WebSocket ====================
     {
         "method": "WebSocket",
-        "path": "/ws/{client_id}",
+        "path": "/api/system/websocket/{client_id}",
         "description": "WebSocket实时通信",
         "params": [{"name": "client_id", "type": "string", "required": True}],
-        "category": "websocket"
+        "category": "health"
     },
 
     # ==================== API文档 ====================
@@ -7721,7 +7516,7 @@ async def get_api_docs():
                 "total": len(API_DOCS_LIST)
             },
             headers={
-                "Cache-Control": "public, max-age=300",  # 缓存5分钟
+                "Cache-Control": "no-cache, no-store, must-revalidate",
                 "X-Content-Type-Options": "nosniff"
             }
         )
@@ -7910,6 +7705,41 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             ],
             'response': '{"success": true, "devices": [...]}',
             'usage': ''
+        },
+        '/api/desktop/vnc/status': {
+            'title': '查询桌面VNC状态',
+            'description': '查询Ubuntu桌面VNC服务状态（运行中/已停止）和远程访问地址',
+            'params': [],
+            'response': '{"success": true, "running": true, "url": "http://xxx:6080/vnc.html"}',
+            'usage': '检查Ubuntu桌面VNC服务是否正在运行，获取远程访问URL'
+        },
+        '/api/desktop/vnc/start': {
+            'title': '启动桌面VNC',
+            'description': '启动Ubuntu桌面VNC服务，返回VNC访问URL用于远程桌面连接',
+            'params': [
+                {'name': 'host', 'type': 'string', 'required': False, 'desc': '桌面主机地址，格式：user@ip（可选，使用配置默认值）'},
+                {'name': 'password', 'type': 'string', 'required': False, 'desc': 'SSH登录密码（可选）'},
+                {'name': 'vnc_password', 'type': 'string', 'required': False, 'desc': 'VNC访问密码（可选）'}
+            ],
+            'response': '{"success": true, "url": "http://xxx:6080/vnc.html"}',
+            'usage': '启动Ubuntu桌面的VNC服务，通过浏览器远程访问图形化桌面'
+        },
+        '/api/desktop/vnc/stop': {
+            'title': '停止桌面VNC',
+            'description': '停止Ubuntu桌面VNC服务，断开所有远程桌面连接',
+            'params': [],
+            'response': '{"success": true, "message": "桌面VNC已停止"}',
+            'usage': '停止Ubuntu桌面VNC服务，释放系统资源'
+        },
+        '/api/desktop/validate': {
+            'title': '验证桌面主机',
+            'description': '验证Ubuntu主机SSH连接并检查VNC服务可用性（host格式：user@ip）',
+            'params': [
+                {'name': 'host', 'type': 'string', 'required': True, 'desc': '主机地址（格式：user@ip，如hcq@172.16.14.233）'},
+                {'name': 'password', 'type': 'string', 'required': False, 'desc': 'SSH登录密码（可选）'}
+            ],
+            'response': '{"success": true, "message": "SSH连接成功，VNC服务可用"}',
+            'usage': '连接Ubuntu桌面主机前验证SSH连接和VNC服务状态'
         }
     }
 
