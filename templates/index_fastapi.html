@@ -10,7 +10,7 @@
     <script src="/static/vendor/xterm/xterm.min.js"></script>
     <script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260401-02"></script>
+    <script src="/static/js/app.js?v=20260404-24"></script>
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
@@ -864,14 +864,11 @@
                     <button class="filter-btn" data-category="ssh" onclick="filterByCategory('ssh')">
                         🔑 SSH管理
                     </button>
-                    <button class="filter-btn" data-category="vnc" onclick="filterByCategory('vnc')">
-                        🖥️ VNC管理
+                    <button class="filter-btn" data-category="desktop" onclick="filterByCategory('desktop')">
+                        🖥️ 主机桌面
                     </button>
                     <button class="filter-btn" data-category="usbip" onclick="filterByCategory('usbip')">
                         📡 USB/IP
-                    </button>
-                    <button class="filter-btn" data-category="screen" onclick="filterByCategory('screen')">
-                        📺 屏幕共享
                     </button>
                     <button class="filter-btn" data-category="upload" onclick="filterByCategory('upload')">
                         📤 文件上传
@@ -883,7 +880,7 @@
                         📁 文件管理
                     </button>
                     <button class="filter-btn" data-category="health" onclick="filterByCategory('health')">
-                        💚 健康检查
+                        💚 系统管理
                     </button>
                     <button class="filter-btn" onclick="showUsageExamples()" style="background: var(--primary-color); color: white;">
                         📖 使用实例
@@ -2214,7 +2211,7 @@
             const clientId = 'terminal_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 
             // 创建WebSocket连接
-            const wsUrl = `ws://${window.location.host}/ws/${clientId}`;
+            const wsUrl = `ws://${window.location.host}/api/system/websocket/${clientId}`;
             terminalSocket = new WebSocket(wsUrl);
 
             terminalSocket.onopen = () => {
