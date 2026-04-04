@@ -18,11 +18,14 @@ const state = {
     isRefreshingDevices: false
 };
 
+// Debug flag - set to false in production to disable console logs
+const DEBUG = false;
+
 // API文档缓存（全局变量，避免重复请求）
 let apiDocsCache = null;
 let apiDocsCacheTime = 0;
 let allApiDocs = []; // 所有API文档数据（已排序）
-const API_DOCS_CACHE_DURATION = 30 * 1000; // 30秒缓存（便于调试）
+const API_DOCS_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存（生产环境）
 
 // 辅助函数
 function validateDeviceSelection() {
@@ -39,6 +42,13 @@ function $(id) {
         state.domCache[id] = document.getElementById(id);
     }
     return state.domCache[id];
+}
+
+// Debug logger wrapper (only logs when DEBUG is true)
+function debugLog(...args) {
+    if (DEBUG) {
+        console.log(...args);
+    }
 }
 
 function debounce(func, wait) {
@@ -157,7 +167,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         if (detectResponse.ok) {
             const detectData = await detectResponse.json();
-            console.log('[Init] Detected client username:', detectData.username);
+            debugLog('[Init] Detected client username:', detectData.username);
         }
     } catch (error) {
         console.warn('[Init] Failed to detect client username:', error);
@@ -201,17 +211,17 @@ function initWebSocket() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/api/system/websocket/${clientId}`;
 
-        console.log(`[WebSocket] Connecting to: ${wsUrl}`);
+        debugLog(`[WebSocket] Connecting to: ${wsUrl}`);
         state.websocket = new WebSocket(wsUrl);
 
         state.websocket.onopen = () => {
-            console.log('[WebSocket] Connected');
+            debugLog('[WebSocket] Connected');
             updateConnectionStatus(true);
             addLogEntry(`WebSocket已连接 (Client ID: ${clientId})`, 'success');
         };
 
         state.websocket.onclose = () => {
-            console.log('[WebSocket] Disconnected');
+            debugLog('[WebSocket] Disconnected');
             updateConnectionStatus(false);
             addLogEntry('WebSocket连接已断开', 'warning');
             // 5秒后重连
@@ -405,7 +415,7 @@ function initSocket() {
     state.socket = io();
 
     state.socket.on('connect', () => {
-        console.log('Connected to server');
+        debugLog('Connected to server');
         updateConnectionStatus(true);
     });
 
@@ -679,6 +689,9 @@ function renderDevices() {
     const rightContainer = $('device-list-right');
     const deviceCanvas = $('device-canvas');
 
+    // Early return if containers not ready
+    if (!leftContainer || !rightContainer || !deviceCanvas) return;
+
     if (state.devices.length === 0) {
         // 隐藏两个列，显示居中的空消息
         leftContainer.style.display = 'none';
@@ -705,9 +718,6 @@ function renderDevices() {
         const deviceId = typeof device === 'string' ? device : device.device_id;
         const isLocked = typeof device === 'object' && device.locked;
         const lockedBy = typeof device === 'object' ? device.locked_by : '';
-
-        // 调试日志
-        console.log(`[RenderDevices] Device ${deviceId}: type=${typeof device}, locked=${isLocked}, lockedBy=${lockedBy}`);
 
         if (index % 2 === 0) {
             leftDevices.push({ deviceId, isLocked, lockedBy });
@@ -5106,10 +5116,8 @@ function debounceFilterApiDocs() {
  * 应用筛选
  */
 function applyFilters() {
-    const searchInput = document.getElementById('api-search-input');
+    const searchInput = $('api-search-input');
     const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
-
-    console.log('[API Docs] Filtering:', { searchTerm, category: currentCategoryFilter, method: currentMethodFilter });
 
     // 筛选API
     const filteredApis = allApiDocs.filter(api => {
@@ -5128,11 +5136,10 @@ function applyFilters() {
     });
 
     // 筛选结果保持原有顺序（allApiDocs已排序），无需重新排序
-    console.log('[API Docs] Filtered:', filteredApis.length, 'APIs');
     displayApiDocs(filteredApis);
 
     // 更新筛选结果数量
-    const filteredCountEl = document.getElementById('filtered-apis-count');
+    const filteredCountEl = $('filtered-apis-count');
     if (filteredCountEl) {
         filteredCountEl.textContent = filteredApis.length;
     }
@@ -5149,47 +5156,29 @@ function filterApiDocs() {
  * 加载API文档列表（带缓存优化）
  */
 async function loadApiDocs() {
-    console.log('[API Docs] ===== loadApiDocs called =====');
+    debugLog('[API Docs] ===== loadApiDocs called =====');
     try {
         // 检查DOM元素是否存在
-        const tbody = document.getElementById('api-docs-table-body');
-        console.log('[API Docs] tbody element:', tbody);
+        const tbody = $('api-docs-table-body');
         if (!tbody) {
-            console.warn('[API Docs] Table body not found, skipping load');
             return;
         }
 
         // 检查缓存
         const now = Date.now();
-        console.log('[API Docs] Cache check:', {
-            hasCache: !!apiDocsCache,
-            cacheTime: apiDocsCacheTime,
-            now: now,
-            elapsed: now - apiDocsCacheTime,
-            duration: API_DOCS_CACHE_DURATION
-        });
         if (apiDocsCache && (now - apiDocsCacheTime) < API_DOCS_CACHE_DURATION) {
-            console.log('[API Docs] Using cached data');
             displayApiDocs(apiDocsCache);
             updateApiStats(apiDocsCache);
             return;
         }
 
-        console.log('[API Docs] Fetching from server...');
         const resp = await fetch('/api/docs');
-        console.log('[API Docs] Response status:', resp.status, resp.statusText);
 
         if (!resp.ok) {
             throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
         }
 
         const data = await resp.json();
-        console.log('[API Docs] Response data:', {
-            success: data.success,
-            hasApis: !!data.apis,
-            apisLength: data.apis ? data.apis.length : 'N/A',
-            total: data.total
-        });
 
         if (data.apis && Array.isArray(data.apis)) {
             // 为每个API添加分类信息
@@ -5206,21 +5195,16 @@ async function loadApiDocs() {
             allApiDocs = sortedApis;
             apiDocsCacheTime = now;
 
-            console.log('[API Docs] Calling displayApiDocs with', sortedApis.length, 'APIs');
             displayApiDocs(sortedApis);
-            console.log('[API Docs] Calling updateApiStats');
             updateApiStats(sortedApis);
-            console.log('[API Docs] ===== Load complete =====');
         } else {
             throw new Error('Invalid response format: missing or invalid apis field');
         }
     } catch (e) {
-        console.error('[API Docs] Error loading API docs:', e);
-        console.error('[API Docs] Error stack:', e.stack);
         showToast('加载API文档失败: ' + e.message, 'error');
 
         // 显示错误状态
-        const tbody = document.getElementById('api-docs-table-body');
+        const tbody = $('api-docs-table-body');
         if (tbody) {
             tbody.innerHTML = `
                 <tr>
@@ -5241,29 +5225,15 @@ function updateApiStats(apis) {
     const getCount = apis.filter(api => api.method === 'GET').length;
     const postCount = apis.filter(api => api.method === 'POST').length;
 
-    console.log('[API Stats] Updating stats:', { totalCount, getCount, postCount });
+    const totalEl = $('total-apis-count');
+    const getEl = $('get-apis-count');
+    const postEl = $('post-apis-count');
+    const filteredEl = $('filtered-apis-count');
 
-    const totalEl = document.getElementById('total-apis-count');
-    const getEl = document.getElementById('get-apis-count');
-    const postEl = document.getElementById('post-apis-count');
-    const filteredEl = document.getElementById('filtered-apis-count');
-
-    if (totalEl) {
-        totalEl.textContent = totalCount;
-        console.log('[API Stats] Set total-apis-count to', totalCount);
-    }
-    if (getEl) {
-        getEl.textContent = getCount;
-        console.log('[API Stats] Set get-apis-count to', getCount);
-    }
-    if (postEl) {
-        postEl.textContent = postCount;
-        console.log('[API Stats] Set post-apis-count to', postCount);
-    }
-    if (filteredEl) {
-        filteredEl.textContent = totalCount;
-        console.log('[API Stats] Set filtered-apis-count to', totalCount);
-    }
+    if (totalEl) totalEl.textContent = totalCount;
+    if (getEl) getEl.textContent = getCount;
+    if (postEl) postEl.textContent = postCount;
+    if (filteredEl) filteredEl.textContent = totalCount;
 }
 
 // ==================== 常量定义 ====================
@@ -6254,7 +6224,7 @@ window.toggleApiDetails = function(index) {
 window.copyCurlCommandFromData = function(element) {
     const text = element.getAttribute('data-cmd');
     if (!text) {
-        console.error('[Copy] No data-cmd attribute found');
+        debugLog('[Copy] No data-cmd attribute found');
         showToast('✗ 复制失败: 未找到命令', 'error');
         return;
     }
