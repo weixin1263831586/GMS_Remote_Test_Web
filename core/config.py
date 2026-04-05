@@ -31,8 +31,9 @@ class ConfigManager:
             base_dir = os.path.dirname(os.path.abspath(__file__))
 
         self.base_dir = base_dir
-        self.config_path = os.path.join(base_dir, '..', 'config.json')
-        self.dynamic_config_path = os.path.join(base_dir, '..', 'config_dynamic.json')
+        # 配置文件已移动到 configs/ 目录
+        self.config_path = os.path.join(base_dir, '..', 'configs', 'config.json')
+        self.dynamic_config_path = os.path.join(base_dir, '..', 'configs', 'config_dynamic.json')
 
         # 缓存相关
         self._cache: Optional[Dict[str, Any]] = None
