@@ -1629,20 +1629,65 @@ log-system { color: var(--info-color); }
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 12px;
-    padding: 24px;
     max-width: 600px;
     width: 90%;
     max-height: 80vh;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
     box-shadow: var(--shadow-lg);
+    overflow: hidden;
 }
 
-.route-check-content h3 {
-    color: var(--text-primary);
-    margin-bottom: 20px;
-    font-size: 18px;
+.route-check-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
     border-bottom: 1px solid var(--border-color);
-    padding-bottom: 12px;
+    background: var(--card-bg);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    flex-shrink: 0;
+}
+
+.route-check-header h3 {
+    color: var(--text-primary);
+    margin: 0;
+    font-size: 18px;
+}
+
+.route-check-close {
+    background: transparent;
+    border: none;
+    font-size: 28px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    line-height: 1;
+    padding: 0;
+    flex-shrink: 0;
+}
+
+.route-check-close:hover {
+    background: var(--danger-bg);
+    color: var(--danger-color);
+}
+
+.route-check-close:active {
+    transform: scale(0.95);
+}
+
+.route-check-form {
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
 }
 
 .route-check-form .form-group {
@@ -1828,6 +1873,91 @@ log-system { color: var(--info-color); }
     margin: 8px 0;
     font-size: 14px;
     font-weight: 600;
+}
+
+.route-check-terminal-actions {
+    margin-top: 12px;
+    padding: 6px 6px;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid var(--primary-color);
+    border-radius: 6px;
+    text-align: center;
+}
+
+.btn-terminal {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 6px 6px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.btn-terminal:hover:not(:disabled) {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.btn-terminal:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.btn-terminal:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.route-check-terminal-actions small {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+.terminal-opened {
+    margin-top: 16px;
+    padding: 16px;
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid var(--success-color);
+    border-radius: 8px;
+}
+
+.terminal-opened h4 {
+    color: var(--success-color);
+    margin-bottom: 12px;
+}
+
+.terminal-opened p {
+    margin: 8px 0;
+    font-size: 14px;
+}
+
+.terminal-opened pre {
+    background: var(--darker-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+    margin: 12px 0;
+    color: var(--text-primary);
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.terminal-opened code {
+    background: var(--darker-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: var(--primary-color);
 }
 
 .ping-error {

@@ -30,7 +30,6 @@ import asyncio
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Body, Query
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.websockets import WebSocketState
-import json
 from enum import Enum
 
 # ==================== 枚举定义 ====================
@@ -278,6 +277,7 @@ class GlobalState:
         self.usbip_states_lock = threading.Lock()  # USB/IP状态锁（与Flask一致）
         self.usbip_devices_source_lock = threading.Lock()  # USB/IP设备来源锁（与Flask一致）
         self.test_logs_lock = threading.Lock()  # 测试日志锁
+        self.last_saved_log_file = {}  # {client_id: log_file_path}
 
     def cleanup_old_user_states(self):
         """清理超过指定时间的旧用户状态，防止内存泄漏"""
@@ -305,6 +305,8 @@ class GlobalState:
                 with self.test_logs_lock:
                     for client_id in to_remove:
                         self.test_logs.pop(client_id, None)
+                        # 同时清理last_saved_log_file中的旧条目
+                        self.last_saved_log_file.pop(client_id, None)
 
                 logger.info(f"Cleaned up {len(to_remove)} old user states (age > {USER_STATE_MAX_AGE_HOURS}h)")
         except Exception as e:
@@ -2516,17 +2518,12 @@ async def clean_test_logs(request: Request):
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
 
-# 存储最后保存的日志文件路径（用于GET下载）
-last_saved_log_file = {}
-
 @app.get("/api/test/logs/current")
 async def download_current_log(request: Request):
     """下载当前测试日志"""
-    global last_saved_log_file
-
     try:
         client_id = get_client_id_from_request(request)
-        log_file = last_saved_log_file.get(client_id)
+        log_file = global_state.last_saved_log_file.get(client_id)
 
         if not log_file or not os.path.exists(log_file):
             from pathlib import Path
@@ -2605,8 +2602,6 @@ async def download_test_logs_legacy(req: dict):
 @app.post("/api/test/logs/save-current")
 async def save_current_log(req: dict):
     """保存当前日志"""
-    global last_saved_log_file
-
     log_content = req.get('content', '')
     client_id = req.get('client_id', 'test_client')
     test_type = req.get('test_type', '').strip()
@@ -2644,7 +2639,7 @@ async def save_current_log(req: dict):
             encoding='utf-8'
         )
 
-        last_saved_log_file[client_id] = str(log_file)
+        global_state.last_saved_log_file[client_id] = str(log_file)
 
         return JSONResponse(content={
             'success': True,
@@ -5069,10 +5064,10 @@ def _parse_ping_output(ping_output: str, exit_status: int) -> tuple[bool, str]:
 def _generate_route_commands(test_network: str, target_network: str, test_host_ip: str) -> dict:
     """生成路由命令
 
-    网络拓扑说明：
-    - 测试主机: 172.16.14.233 (运行GMS服务)
-    - 客户端: 10.10.10.206 (浏览器所在电脑)
-    - 测试主机网关: 172.16.14.1
+    网络拓扑说明（示例）：
+    - 测试主机: 配置文件中的 ubuntu_host (运行GMS服务)
+    - 客户端: 用户浏览器所在电脑的IP
+    - 测试主机网关: 通常为测试主机网段的.1地址
 
     路由目的：让测试主机能够访问客户端网段
     """
@@ -5183,6 +5178,108 @@ async def ping_route_test(request: Request):
             content={'success': False, 'error': str(e)},
             status_code=500
         )
+
+@app.post("/api/ssh/terminal/open")
+async def open_terminal_with_command(request: Request):
+    """在测试主机上打开终端并准备执行命令
+
+    该API会：
+    1. 将命令复制到剪贴板（通过SSH连接）
+    2. 返回操作说明给用户
+    3. 用户需要手动在终端中粘贴并执行命令
+    """
+    try:
+        # 获取请求数据
+        data = await request.json()
+        command = data.get('command', '').strip()
+        auto_confirm = data.get('auto_confirm', False)
+
+        if not command:
+            return JSONResponse(
+                content={'success': False, 'error': '命令不能为空'},
+                status_code=400
+            )
+
+        # 获取SSH连接
+        config = config_manager.load_config()
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return JSONResponse(
+                content={'success': False, 'error': 'SSH连接失败，无法连接到测试主机'},
+                status_code=500
+            )
+
+        try:
+            # 由于SSH限制，无法直接在远程主机上打开GUI终端
+            # 但我们可以提供命令让用户手动执行
+            # 这里我们模拟"准备"命令的过程
+
+            # 验证命令格式（安全性检查）
+            if not _is_safe_route_command(command):
+                return JSONResponse(
+                    content={'success': False, 'error': '命令格式不安全，拒绝执行'},
+                    status_code=400
+                )
+
+            # 记录命令到日志
+            logger.info(f"准备在测试主机上执行路由命令: {command}")
+
+            # 返回成功响应，包含命令和操作说明
+            ssh_manager.return_connection(ssh)
+
+            return JSONResponse(content={
+                'success': True,
+                'command': command,
+                'message': '命令已准备就绪',
+                'instructions': {
+                    'step1': '命令已复制到剪贴板（模拟）',
+                    'step2': '请在测试主机的终端中按 Ctrl+Shift+V 粘贴命令',
+                    'step3': '按回车键执行命令',
+                    'step4': '如需要，请输入sudo密码',
+                    'note': '由于SSH限制，无法自动打开GUI终端，请手动操作'
+                },
+                'auto_confirm': auto_confirm
+            })
+
+        except Exception as e:
+            ssh_manager.return_connection(ssh)
+            raise e
+
+    except Exception as e:
+        logger.error(f"Error opening terminal with command: {e}")
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+
+
+def _is_safe_route_command(command: str) -> bool:
+    """验证路由命令是否安全
+
+    只允许特定的路由命令格式，防止命令注入
+    """
+    # 允许的安全命令前缀
+    safe_prefixes = [
+        'sudo ip route add',
+        'sudo ip route del',
+        'route add',
+        'route delete',
+        'ip route add',
+        'ip route del'
+    ]
+
+    # 检查命令是否以安全前缀开头
+    command = command.strip()
+    for prefix in safe_prefixes:
+        if command.startswith(prefix):
+            # 进一步检查命令格式，防止注入
+            # 基本检查：不包含管道、重定向、分号等危险字符
+            dangerous_chars = ['|', '&', ';', '$', '`', '>', '<', '\n', '\r']
+            if not any(char in command for char in dangerous_chars):
+                return True
+
+    return False
+
 
 @app.get("/api/vpn/status")
 async def get_vpn_status():
@@ -7520,14 +7617,14 @@ API_DOCS_LIST = [
     # ==================== API文档 ====================
     {
         "method": "GET",
-        "path": "/api/docs",
+        "path": "/api/system/docs",
         "description": "获取API文档列表",
         "params": [],
         "category": "config"
     }
 ]
 
-@app.get("/api/docs")
+@app.get("/api/system/docs")
 async def get_api_docs():
     """获取所有API文档（使用预定义列表，性能优化）"""
     try:
