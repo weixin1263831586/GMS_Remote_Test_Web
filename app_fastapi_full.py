@@ -183,6 +183,7 @@ from core.adb_forward import adb_forward_manager
 from core.usbip import usbip_manager
 from core.claude_report_analyzer import ClaudeReportAnalyzer
 from core.common_utils import CommonUtils
+from core.device_utils import DeviceUtils
 from report_analyzer import ReportAnalyzer
 from test_report_db import test_report_db
 
@@ -4541,17 +4542,50 @@ async def show_device_screens(req: DeviceActionRequest):
             results = []
             vnc_sessions = []
 
-            # 使用智能位置计算函数
-            positions = calculate_window_positions(devices)
+            # 检查请求的设备是否已有 scrcpy 进程在运行（高效单命令版本）
+            existing_devices = []
+            for device_id in devices:
+                is_healthy, pid_or_error = DeviceUtils.check_scrcpy_healthy(ssh, device_id)
 
-            for idx, device_id in enumerate(sorted(devices)):
-                # 使用智能计算的窗口位置
+                if is_healthy and pid_or_error:
+                    existing_devices.append(device_id)
+                    logger.info(f'检测到已投屏设备：{device_id} (PID: {pid_or_error})')
+                else:
+                    # 进程不存在或无效，清理可能存在的僵尸进程
+                    DeviceUtils.kill_process(ssh, f'scrcpy.*-s {device_id}')
+
+            # 只处理新设备
+            new_devices = [d for d in devices if d not in existing_devices]
+
+            if not new_devices:
+                # 所有设备都已运行
+                ssh_manager.return_connection(ssh)
+                return JSONResponse(content={
+                    'success': True,
+                    'message': f'所有 {len(devices)} 个设备已在投屏中',
+                    'results': [{'device': d, 'started': False, 'already_running': True} for d in devices],
+                    'vnc_sessions': [{'device': d, 'message': '已在运行'} for d in devices],
+                    'note': '所有设备已处于投屏状态'
+                })
+
+            # 计算窗口位置：考虑已有设备，新设备放在后面
+            all_devices_count = len(existing_devices) + len(new_devices)
+            positions = calculate_window_positions(
+                existing_devices + new_devices,
+                max_window_width=350
+            )
+
+            # 启动新设备（跳过已运行的）
+            for idx, device_id in enumerate(sorted(existing_devices + new_devices)):
+                # 只启动新设备
+                if device_id not in new_devices:
+                    continue
+
+                # 计算窗口位置
                 x_offset = positions['start_x'] + idx * (positions['window_width'] + positions['horizontal_gap'])
                 y_offset = positions['start_y']
                 window_width = positions['window_width']
                 window_height = positions['window_height']
-
-                # 使用nohup确保scrcpy在SSH连接关闭后继续运行
                 cmd = (
                     f"export DISPLAY=:0 && "
                     f"if [ -f /run/user/1000/gdm/Xauthority ]; then "
@@ -5298,20 +5332,25 @@ async def get_vpn_status():
             if isinstance(vpn_target, list):
                 vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
 
-            output, error, code = ssh_manager.execute_command(
-                ssh,
-                f"ping -c 1 -W 2 {vpn_target} 2>&1",
-                timeout=3
-            )
+            # 多次ping测试，只要一次成功即认为已连接
+            max_attempts = 2
+            for attempt in range(max_attempts):
+                output, error, code = ssh_manager.execute_command(
+                    ssh,
+                    f"ping -c 1 -W 2 {vpn_target} 2>&1",
+                    timeout=5
+                )
 
+                # 检查ping结果（成功则立即返回）
+                if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
+                    ssh_manager.return_connection(ssh)
+                    logger.info(f"[VPN Status] {vpn_target}: connected (attempt {attempt + 1})")
+                    return JSONResponse(content={"success": True, "connected": True})
+
+            # 所有尝试都失败
             ssh_manager.return_connection(ssh)
-
-            if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
-                logger.info(f"[VPN Status] {vpn_target}: connected")
-                return JSONResponse(content={"success": True, "connected": True})
-            else:
-                logger.info(f"[VPN Status] {vpn_target}: disconnected")
-                return JSONResponse(content={"success": True, "connected": False})
+            logger.info(f"[VPN Status] {vpn_target}: disconnected (0/{max_attempts} successful)")
+            return JSONResponse(content={"success": True, "connected": False})
 
         except Exception as e:
             ssh_manager.return_connection(ssh)

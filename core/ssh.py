@@ -110,7 +110,7 @@ class SSHManager:
 
     def get_connection(self, config: dict) -> Optional[paramiko.SSHClient]:
         """
-        从连接池获取或创建连接
+        从连接池获取或创建连接（带健康检查）
 
         Args:
             config: 配置字典
@@ -118,10 +118,30 @@ class SSHManager:
         Returns:
             SSHClient 对象
         """
-        try:
-            return self.pool.get_nowait()
-        except queue.Empty:
-            return self.create_connection(config)
+        # 尝试从池中获取有效连接，最多尝试 pool_size 次防止无限循环
+        max_attempts = self.pool.maxsize
+        for attempt in range(max_attempts):
+            try:
+                ssh = self.pool.get_nowait()
+                # 测试连接是否仍然有效（轻量级检查）
+                try:
+                    stdin, stdout, stderr = ssh.exec_command('true', timeout=2)
+                    exit_code = stdout.channel.recv_exit_status(timeout=2)
+                    if exit_code == 0:
+                        logger.debug("[SSH] Reused connection from pool")
+                        return ssh
+                except Exception as e:
+                    logger.debug(f"[SSH] Connection {attempt+1}/{max_attempts} is dead: {e}")
+                    try:
+                        ssh.close()
+                    except:
+                        pass
+            except queue.Empty:
+                break
+
+        # 池为空或所有连接都失效，创建新连接
+        logger.debug("[SSH] Creating new connection")
+        return self.create_connection(config)
 
     def return_connection(self, ssh: paramiko.SSHClient):
         """

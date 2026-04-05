@@ -4,7 +4,7 @@
 整合重复的设备解析、窗口计算等逻辑
 """
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class DeviceUtils:
         devices: List[str],
         screen_width: int = 1920,
         screen_height: int = 1080,
-        max_window_width: int = 400
+        max_window_width: int = 350
     ) -> Dict[str, Any]:
         """
         计算投屏窗口的位置和大小
@@ -44,7 +44,7 @@ class DeviceUtils:
             devices: 设备ID列表
             screen_width: 屏幕宽度，默认1920
             screen_height: 屏幕高度，默认1080
-            max_window_width: 窗口最大宽度，默认400
+            max_window_width: 窗口最大宽度，默认350
 
         Returns:
             dict: 包含窗口大小和起始位置的字典
@@ -162,3 +162,34 @@ class DeviceUtils:
         except Exception as e:
             logger.error(f"Error killing process: {e}")
             return False
+
+    @staticmethod
+    def check_scrcpy_healthy(ssh, device_id: str) -> tuple[bool, Optional[str]]:
+        """
+        检查 scrcpy 是否健康运行（单命令高效版本）
+
+        使用单个 SSH 命令同时检查：进程存在 + 状态正常 + 日志有 Connected
+
+        Args:
+            ssh: SSH 连接对象
+            device_id: 设备 ID
+
+        Returns:
+            (is_healthy, pid_or_error)
+        """
+        try:
+            # 单命令检查：获取 PID，验证状态为 R/S/D，并检查日志最后 2KB 是否有 Connected
+            cmd = (
+                f"pid=$(pgrep -f 'scrcpy.*-s {device_id}') && "
+                '[ -n "$pid" ] && '
+                'state=$(ps -p $pid -o state= 2>/dev/null | tr -d ' ') && '
+                '[[ "$state" =~ ^[RSD]$ ]] && '
+                f"tail -c 2048 /tmp/scrcpy_{device_id}.log 2>/dev/null | grep -q 'Connected' && "
+                'echo $pid || echo ""'
+            )
+            stdout, _, code = ssh.exec_command(cmd)
+            pid = stdout.read().decode('utf-8', errors='ignore').strip()
+            return (bool(pid), pid if pid else None)
+        except Exception as e:
+            logger.error(f"Error checking scrcpy health for {device_id}: {e}")
+            return (False, str(e))
