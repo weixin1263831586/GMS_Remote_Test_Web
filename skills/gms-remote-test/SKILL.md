@@ -1,44 +1,307 @@
 ---
 name: gms-remote-test
-version: "2026.04.05-100000"
+version: "2026.04.05-200000"
 description: >-
-  GMS Remote Test API Skill for FastAPI (Port 5001).
-  Manage remote Android devices, run CTS/VTS/GTS tests via USB/IP or direct connection,
-  and retrieve test results with real-time log streaming.
-  **New**: Improved API naming, desktop VNC management, parallel device operations (75-85% faster).
+  GMS Remote Test Web Platform & API Skill for FastAPI (Port 5001).
+  **Complete web interface** with device management, test execution, desktop VNC, terminal access,
+  user management, device locking, report analysis, and route diagnostics.
+  **Latest**: Route check terminal with auto-execute commands, O(n) buffer optimization, memory leak fixes.
 ---
 
-# GMS Remote Test API Automation
+# GMS Remote Test Platform - Complete Guide
 
-Interact with **GMS Auto Test FastAPI server (port 5001)** to remotely manage Android devices, run compatibility tests (CTS/VTS/GTS), and retrieve detailed test results.
+**Interactive Web Platform**: http://172.16.14.233:5001 (full-featured web interface)
+**API Endpoints**: RESTful API for automation and scripting
+**Best for**: Remote Android device testing, CTS/VTS/GTS execution, device management, and test automation
 
 ## Quick Reference
 
 | Item | Value |
 |------|-------|
-| **Server URL** | `http://172.16.14.233:5001` |
-| **Interactive Docs** | http://172.16.14.233:5001/docs |
+| **Web Interface** | http://172.16.14.233:5001 |
+| **API Docs (Swagger)** | http://172.16.14.233:5001/docs |
 | **API Help** | http://172.16.14.233:5001/api/help |
-| **Skill Version** | `2026.04.05-100000` |
+| **Skill Version** | `2026.04.05-200000` |
 | **Performance** | 75-85% faster multi-device operations (parallel execution) |
+
+---
+
+## Platform Overview
+
+### Web Interface Features
+
+The web platform provides **8 integrated pages** for complete test management:
+
+1. **📱 测试界面 (Test Interface)** - Main test control panel
+   - Device selection and management
+   - Test parameter configuration
+   - Real-time log streaming
+   - File upload to test host
+   - VPN/USB/IP connectivity
+
+2. **🖥️ 主机桌面 (Desktop VNC)** - Remote desktop access
+   - VNC viewer for test host desktop
+   - Multi-host support
+   - Host validation and management
+
+3. **🐧 主机终端 (Terminal)** - SSH terminal access
+   - Full xterm.js terminal emulator
+   - WebSocket-based real-time connection
+   - Drag-and-drop file upload
+   - Auto-execute route commands
+
+4. **📱 设备管理 (Device Management)** - Device inventory
+   - Device list with details (model, Android version, battery)
+   - Sortable columns
+   - Lock/unlock status tracking
+   - Source type identification (local/USB/IP)
+
+5. **👥 用户管理 (User Management)** - Multi-user support
+   - Online user monitoring
+   - Active user tracking
+   - Device allocation per user
+   - User activity statistics
+
+6. **📊 报告管理 (Report Management)** - Test report library
+   - Report listing with pass/fail statistics
+   - Per-user report filtering
+   - Report download and analysis
+
+7. **📈 报告分析 (Report Analysis)** - Report analysis tool
+   - Drag-and-drop report upload
+   - XML/ZIP/TAR.GZ support
+   - Failure case extraction
+   - Statistics summary
+
+8. **📡 系统API (System API)** - Interactive API documentation
+   - Complete API endpoint reference
+   - Category filtering (test, device, desktop, VPN, etc.)
+   - Copy-to-clipboard functionality
+   - Usage examples
 
 ---
 
 ## What's New (2026.04.05)
 
-### API Naming Improvements
-- ✅ **Config endpoints renamed**: `/api/config` → `/api/config/read` and `/api/config/update`
-- ✅ **Desktop VNC endpoints unified**: `/api/vnc/*` → `/api/desktop/vnc/*`
-- ✅ **Backward compatibility maintained**: Legacy endpoints still work
+### Latest Features
+- ✅ **Route Check Terminal**: Auto-execute route commands with cross-page navigation
+- ✅ **Performance Optimization**: O(n) buffer handling (was O(n²))
+- ✅ **Memory Leak Fix**: Proper cleanup of `last_saved_log_file` entries
+- ✅ **Sticky Dialog Headers**: Close button (X) on route check dialog
+- ✅ **Terminal Command Auto-fill**: Seamless command input from route check
 
-### Updated Features
-- ✅ Desktop VNC management with host validation
-- ✅ Parallel device operations (75-85% faster)
-- ✅ Improved client information tracking
+### Previous Improvements
+- ✅ **API Naming**: `/api/config` → `/api/config/read` and `/api/config/update`
+- ✅ **Desktop VNC**: Unified endpoints `/api/desktop/vnc/*`
+- ✅ **Parallel Operations**: 75-85% faster multi-device execution
+- ✅ **Client Tracking**: Improved client information management
 
 ---
 
-## Core Features
+## Web Interface Features
+
+### Test Interface (测试界面)
+
+#### Device Operations
+- **🔄 刷新设备** - Refresh connected ADB devices
+- **✅ 全选设备** - Select all devices for batch operations
+- **⏻ 重启设备** - Reboot selected devices (parallel execution)
+- **⏻ Remount** - Remount system partition as read-write
+- **🛜 连接Wifi** - Configure WiFi on selected devices
+- **🔒 锁定设备** - Lock devices for exclusive use
+- **🔓 解锁设备** - Unlock devices for other users
+- **🔐 锁定状态** - Check device lock status
+- **📋 设备信息** - Collect detailed device information (model, Android version, battery, etc.)
+
+#### VNC & Screen Control
+- **🚀 启动VNC** - Start VNC server for remote desktop viewing
+- **📺 显示屏幕** - Show device screen via scrcpy
+- **🔌 端口转发** - Setup ADB port forwarding
+- **📱 本地设备** - Connect USB/IP devices from Windows host
+
+#### Network & VPN
+- **📡 检查SSHD** - Verify SSH server status
+- **📡 检查路由** - Test network routing (includes route command dialog)
+  - Shows connectivity status between client and test host
+  - Provides Linux/Windows route commands
+  - **NEW**: "🖥️ 打开主机终端" button auto-switches to terminal with route command pre-filled
+- **🔌 连接VPN** - Connect to VPN for remote access
+- **📡 检查VPN** - Check VPN connection status
+
+#### File Management
+- **📤 上传到测试主机** - Upload files via drag-and-drop or file picker
+- **Progress bar** - Real-time upload progress tracking
+
+#### Test Controls
+- **▶ 开始测试** - Start CTS/VTS/GTS test execution
+- **⏸ 停止测试** - Stop running test
+- **📥 保存日志** - Download test log file
+- **🧹 清除日志** - Clear test log display
+- **⚙️ 配置** - Open system configuration modal
+
+---
+
+### Desktop VNC (主机桌面)
+
+#### Features
+- **Multi-host support** - Switch between different test hosts
+- **VNC viewer** - Full desktop remote control via web browser
+- **Host validation** - Verify host connectivity before connecting
+- **Auto-connect** - Automatic VNC connection on page load
+- **Password support** - Secure VNC authentication
+
+#### Controls
+- **🔄 刷新** - Refresh VNC connection
+- **➕ 添加主机** - Add new desktop host to the list
+
+---
+
+### Terminal (主机终端)
+
+#### Features
+- **xterm.js terminal** - Full-featured terminal emulator in browser
+- **WebSocket connection** - Real-time bidirectional communication
+- **SSH integration** - Automatic SSH connection to test host
+- **Silent mode** - Buffers output until shell prompt detected
+- **Command history** - Navigate previous commands with arrow keys
+
+#### File Upload
+- **Drag-and-drop** - Drop files directly onto terminal to upload to `/tmp`
+- **Visual feedback** - Overlay shows when drag is active
+
+#### Controls
+- **🧹 清空** - Clear terminal screen
+- **🔄 重连** - Reconnect to SSH session
+
+#### Route Command Integration
+- **Auto-execute** - Route commands from "检查路由" dialog auto-input
+- **Cursor positioning** - Cursor placed after command, waiting for Enter
+- **Smooth transition** - Seamless navigation from route check to terminal
+
+---
+
+### Device Management (设备管理)
+
+#### Statistics Cards
+- **总设备数** - Total connected devices
+- **测试主机设备** - Devices directly connected to test host
+- **USB/IP设备** - Devices connected via USB/IP
+
+#### Device List Columns
+- **设备序列号** - Device serial number (sortable)
+- **设备型号** - Device model (sortable)
+- **Android版本** - Android version (sortable)
+- **电池电量** - Battery level (sortable)
+- **状态** - Device status (sortable)
+- **来源类型** - Connection type (local/USB/IP) (sortable)
+- **来源主机** - Source host (sortable)
+- **占用用户** - Lock owner (sortable)
+- **操作** - Action buttons
+
+#### Features
+- **Click column headers** - Sort by any column
+- **Real-time updates** - WebSocket-driven device status updates
+- **Lock indicators** - Visual lock status per device
+
+---
+
+### User Management (用户管理)
+
+#### Statistics Cards
+- **在线用户数** - Currently connected users
+- **活跃用户数** - Active users in last 5 minutes
+- **测试中用户** - Users currently running tests
+
+#### User List Columns
+- **用户标识** - Client identifier (username@hostname)
+- **IP地址** - Client IP address
+- **状态** - Connection status
+- **连接时间** - Connection timestamp
+- **最后活跃** - Last activity time
+- **占用设备** - Devices locked by this user
+
+#### Features
+- **Real-time monitoring** - Live user activity tracking
+- **Auto-refresh** - WebSocket-driven updates
+- **Device allocation** - See which user owns which devices
+
+---
+
+### Report Management (报告管理)
+
+#### Features
+- **Report listing** - All test reports with timestamps
+- **Statistics** - Pass/fail counts and pass rate
+- **Per-user filtering** - Show only current user's reports
+- **Report download** - Download full report archives
+- **Delete reports** - Remove old reports
+
+#### Report Columns
+- **客户端** - Client identifier
+- **类型** - Test type (CTS/VTS/GTS)
+- **时间戳** - Report timestamp
+- **通过** - Passed test count
+- **失败** - Failed test count
+- **总计** - Total test count
+- **通过率** - Pass percentage
+- **操作** - Action buttons (download/delete)
+
+---
+
+### Report Analysis (报告分析)
+
+#### Features
+- **Drag-and-drop upload** - Drop XML/ZIP/TAR.GZ reports
+- **Automatic parsing** - Extract test results from XML
+- **Statistics summary** - Overall pass/fail statistics
+- **Failure list** - Detailed failure case listing
+- **Re-run support** - Generate re-run commands for failed cases
+
+#### Upload Options
+- **Single file** - Upload .xml report file
+- **Archive** - Upload .zip or .tar.gz archives
+- **Folder** - Upload entire report folder
+
+#### Analysis Results
+- **Summary cards** - Total tests, passed, failed, pass rate
+- **Module breakdown** - Results per test module
+- **Failure details** - Test name, failure reason
+- **Copy to clipboard** - One-click failure list copy
+
+---
+
+### System API (系统API)
+
+#### Features
+- **Complete API reference** - All available endpoints
+- **Category filtering** - Filter by feature category
+- **Search** - Search by path or description
+- **Copy to clipboard** - Click command to copy
+- **Usage examples** - Practical example workflows
+
+#### API Categories
+- **🧪 测试管理** - Test execution and control
+- **🖥️ 主机桌面** - Desktop VNC management
+- **📱 设备管理** - Device operations
+- **👥 用户管理** - User tracking
+- **📊 报告管理** - Report operations
+- **🔥 固件烧写** - Firmware/GSI/SN burning
+- **📁 文件管理** - File operations
+- **⚙️ 配置管理** - Configuration management
+- **💚 系统管理** - Health and system status
+- **🔑 SSH管理** - SSH operations
+- **🔐 VPN管理** - VPN control
+- **📡 USB/IP** - USB/IP device connection
+
+#### Statistics
+- **API总数** - Total endpoint count
+- **GET接口** - GET endpoint count
+- **POST接口** - POST endpoint count
+- **筛选结果** - Filtered result count
+
+---
+
+## Core API Features
 
 ### 1. Device Discovery & Management
 
@@ -726,16 +989,189 @@ fi
 
 ---
 
+## Practical Web Interface Workflows
+
+### Workflow 1: Run CTS Test on Remote Device
+
+1. **Open web interface**: http://172.16.14.233:5001
+2. **Connect device** (if needed):
+   - Click "📱 本地设备" to connect USB/IP device from Windows host
+   - Enter Windows SSH password when prompted
+   - Wait for device to appear in device list
+3. **Select device**: Click device checkbox in ADB device list
+4. **Configure test**:
+   - Set **测试类型** to "CTS"
+   - Set **测试模块** to "CtsPermissionTestCases"
+   - Set **测试套件** to suite path (or use "📁 选择套件")
+5. **Start test**: Click "▶ 开始测试"
+6. **Monitor progress**: Watch real-time logs in log area
+7. **View results**: Go to "📊 报告管理" page to see results
+
+### Workflow 2: Check Network Route & Add Routing
+
+1. **Click "📡 检查路由"** button in 操作控制
+2. **Review connectivity status**:
+   - Shows if client can reach test host
+   - Displays latency and network information
+   - Lists required route commands
+3. **Add routing** (if needed):
+   - Click "🖥️ 打开主机终端" button
+   - Terminal page opens automatically
+   - Route command is pre-filled: `sudo ip route add 172.16.21.0/24 via 172.16.14.1`
+   - Press **Enter** to execute
+   - Enter sudo password if prompted
+4. **Verify**: Click "📡 检查路由" again to confirm connectivity
+
+### Workflow 3: View Device Desktop via VNC
+
+1. **Navigate to "🖥️ 主机桌面"** page
+2. **Select host** from dropdown (if multiple hosts)
+3. **View desktop**: VNC viewer loads automatically
+4. **Control desktop**: Use mouse and keyboard in browser
+5. **Add new host** (if needed):
+   - Click "➕ 添加主机"
+   - Enter host IP and SSH password
+   - Click "添加并连接"
+
+### Workflow 4: Upload and Install APK
+
+1. **Select devices** in device list
+2. **Drag APK file** to "📁 本地文件" drop zone
+3. **Click "📤 上传到测试主机"**
+4. **Wait for upload** (progress bar shows completion)
+5. **Go to "🐧 主机终端"** page
+6. **Install APK**:
+   ```bash
+   adb -s DEVICE_ID install -r /tmp/uploaded_app.apk
+   ```
+
+### Workflow 5: Analyze Test Report
+
+1. **Go to "📈 报告分析"** page
+2. **Upload report**:
+   - Drag report XML/ZIP to upload zone, OR
+   - Click "📤 上传报告" and select file
+3. **View results**:
+   - Summary cards show pass/fail statistics
+   - Failure list shows detailed error information
+4. **Copy failures**: Click failure case to copy
+5. **Generate re-run command**: Failed cases can be used for re-testing
+
+### Workflow 6: Terminal File Upload
+
+1. **Go to "🐧 主机终端"** page
+2. **Drag file** onto terminal area
+3. **Overlay appears**: "📁 拖拽文件上传到主机/tmp"
+4. **Drop file**: File uploads to `/tmp/` on test host
+5. **Use file**: Access file in terminal at `/tmp/filename`
+
+---
+
 ## Tips & Best Practices
 
-1. **USB/IP Setup**: Ensure `usbipd` is installed on Windows host before connecting.
-2. **Device Locking**: Tests auto-lock devices; no manual locking needed.
-3. **Parallel Testing**: Run tests on multiple devices simultaneously for efficiency.
-4. **Log Streaming**: Use `/api/test/logs/stream` for real-time monitoring (plain text).
-5. **Result Analysis**: Reports are stored with timestamps and accessible via `/api/reports/list`.
-6. **Performance**: Use batch device operations for 75-85% performance improvement.
-7. **Network Diagnostics**: Use `/api/ssh/route/ping` before testing to verify connectivity.
-8. **Config Management**: Use new `/api/config/read` and `/api/config/update` endpoints.
+### Web Interface Usage
+1. **Device Locking**: Tests auto-lock devices; no manual locking needed for normal testing
+2. **Route Check**: Always check routing before testing if client and device are on different networks
+3. **Terminal Upload**: Use drag-and-drop for quick file uploads to test host
+4. **VNC Access**: Use "🖥️ 主机桌面" for full GUI access to test host
+5. **Report Analysis**: Upload old reports to "📈 报告分析" for detailed failure analysis
+6. **Multi-User**: Check "👥 用户管理" to see which devices are locked by other users
+7. **Device Info**: Use "📋 设备信息" to collect detailed specs before testing
+8. **Parallel Testing**: Select multiple devices for simultaneous test execution
+
+### API Automation Usage
+1. **USB/IP Setup**: Ensure `usbipd` is installed on Windows host before connecting
+2. **Log Streaming**: Use `/api/test/logs/stream` for real-time monitoring (plain text)
+3. **Result Analysis**: Reports are stored with timestamps and accessible via `/api/reports/list`
+4. **Performance**: Use batch device operations for 75-85% performance improvement
+5. **Network Diagnostics**: Use `/api/ssh/route/ping` before testing to verify connectivity
+6. **Config Management**: Use `/api/config/read` and `/api/config/update` endpoints
+7. **Error Handling**: Always check `success` field in API responses
+8. **Parallel Operations**: Send device arrays to batch endpoints for speed improvement
+
+### Network & Connectivity
+1. **Same Network**: If client and test host are on same network, no routing needed
+2. **Different Networks**: Use "📡 检查路由" to diagnose and fix routing issues
+3. **VPN**: Use VPN when accessing test host from external network
+4. **USB/IP**: Use "📱 本地设备" when devices are connected to Windows machine
+5. **Firewall**: Ensure ports 5001 (web), 22 (SSH), and 6080 (VNC) are accessible
+
+### Performance Optimization
+1. **Buffer Optimization**: Terminal uses O(n) buffer handling for smooth long sessions
+2. **Parallel Device Ops**: 10 devices complete in 10-15s vs 60-90s before
+3. **WebSocket Updates**: Real-time status without page refresh
+4. **API Caching**: Report analysis cached for faster repeat access
+5. **Connection Pooling**: SSH connections reused for multiple operations
+
+---
+
+## Troubleshooting
+
+### Web Interface Issues
+
+**Problem**: Devices not appearing in list
+- **Solution**: Click "🔄 刷新设备" or check USB/IP connection status
+
+**Problem**: Cannot connect to terminal
+- **Solution**: Check SSH server status with "📡 检查SSHD"
+
+**Problem**: VNC not showing desktop
+- **Solution**: Click "🔄 刷新" on desktop page or verify VNC server is running
+
+**Problem**: Route check shows unreachable
+- **Solution**: Click "🖥️ 打开主机终端" and execute the suggested route command
+
+**Problem**: File upload stuck
+- **Solution**: Check network connectivity and verify file size (<100MB recommended)
+
+### API Issues
+
+**Problem**: API returns 401 Unauthorized
+- **Solution**: Check authentication credentials and client IP is whitelisted
+
+**Problem**: Device operations timeout
+- **Solution**: Device may be offline; check device status with `/api/devices/list`
+
+**Problem**: Test not starting
+- **Solution**: Verify device is unlocked and not in use by another user
+
+### Performance Issues
+
+**Problem**: Slow device operations
+- **Solution**: Use parallel batch operations instead of sequential calls
+
+**Problem**: Terminal lag
+- **Solution**: Clear terminal with "🧹 清空" - buffer may be large
+
+**Problem**: Page load slow
+- **Solution**: Check network latency to test host; use local network when possible
+
+---
+
+## System Requirements
+
+### Web Browser
+- **Modern browser**: Chrome 90+, Firefox 88+, Safari 14+, Edge 90+
+- **JavaScript**: Enabled (required for WebSocket and xterm.js)
+- **Network**: Stable connection to http://172.16.14.233:5001
+
+### Test Host
+- **OS**: Ubuntu 18.04+ with SSH access
+- **Python**: Python 3.8+ with FastAPI
+- **Android SDK**: Platform tools for ADB
+- **VNC Server**: For desktop viewing (port 6080)
+- **Disk Space**: 10GB+ for test suites and reports
+
+### Windows Host (for USB/IP)
+- **OS**: Windows 10/11 with SSH server enabled
+- **USB/IP**: `usbipd-win` installed and running
+- **Network**: Reachable from test host
+
+### Android Devices
+- **Android**: 8.0+ (API 26+) recommended
+- **ADB**: USB debugging enabled
+- **Network**: WiFi or Ethernet connectivity
+- **Storage**: 5GB+ free space for test execution
 
 ---
 

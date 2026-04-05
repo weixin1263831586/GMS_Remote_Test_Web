@@ -1,0 +1,529 @@
+INFO:     Started server process [68111]
+INFO:     Waiting for application startup.
+INFO:app_fastapi_full:============================================================
+INFO:app_fastapi_full:Application startup
+INFO:app_fastapi_full:============================================================
+INFO:core.usb_monitor:[USBMonitor] ✓ pyudev可用，将使用udev模式（高性能，事件驱动）
+INFO:paramiko.transport:Connected (version 2.0, client OpenSSH_8.9p1)
+INFO:paramiko.transport:Authentication (publickey) successful!
+INFO:core.ssh:[SSH] Connected to 172.16.14.233
+INFO:core.usb_monitor:[USBMonitor] 初始设备列表: ['RK3572GMS1', 'RK3572GMS2']
+INFO:core.usb_monitor:[USBMonitor] 启动udev模式监控（高性能，实时响应）
+INFO:core.usb_monitor:[USBMonitor] Udev monitor loop started
+INFO:core.usb_monitor:[USBMonitor] USB monitor started in udev mode
+INFO:app_fastapi_full:USB monitor started successfully
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:5001 (Press CTRL+C to quit)
+INFO:     127.0.0.1:49876 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:63580 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:53374 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     127.0.0.1:49888 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49894 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36292 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:63580 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:63580 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36302 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:63580 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:63580 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63580 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:     172.16.14.68:63580 - "GET /static/css/style.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /static/js/app.js?v=20260404-24 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63129 - "GET /static/vendor/xterm/xterm.min.js HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET /static/vendor/xterm/xterm-addon-fit.min.js HTTP/1.1" 200 OK
+INFO:     172.16.14.68:59156 - "GET /static/vendor/xterm/xterm.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:50069 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63129 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:56115 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:63129 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:50069 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63129 - "GET /api/system/docs HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:12.997698'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:63828 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:63828 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:50069 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:50069 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:50069 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:50069 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:50069 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:59234 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:50069 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:63828 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/system/docs HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:16.900000'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:50069 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET / HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:63828 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:63828 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:56986 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:63828 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/system/docs HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:17.603388'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:50069 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:50069 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:63828 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:63828 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:63828 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64204 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:50069 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:63828 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:18.771027'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:63828 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:63828 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:63828 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:61095 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:63828 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:19.312464'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:63828 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET /api/reports/list HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:63828 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:50069 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:50069 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:50069 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:50069 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:61596 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:50069 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET /api/reports/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:20.297390'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:63828 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:63828 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49227 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:50069 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:63828 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/reports/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:20.779391'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:50069 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/users/list HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:50069 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:63828 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:63828 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:63828 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:     172.16.14.68:59556 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:63828 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     connection open
+INFO:     172.16.14.68:63828 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/users/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:21.923328'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:50069 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:50069 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:55819 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     172.16.14.68:63828 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:     connection open
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:50069 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET /api/users/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:22.410545'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:63828 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET /api/devices/management HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50069 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:63828 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: disconnected
+INFO:     172.16.14.68:50069 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63828 - "GET / HTTP/1.1" 200 OK
+INFO:     172.16.14.68:56441 - "GET / HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:50069 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:     172.16.14.68:60887 - "WebSocket /api/system/websocket/terminal_1775377524379_5jbuzqoxc" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: terminal_1775377524379_5jbuzqoxc
+INFO:     connection closed
+INFO:app_fastapi_full:WebSocket client disconnected: terminal_1775377524379_5jbuzqoxc
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:49335 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:53959 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:64167 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63146 - "WebSocket /api/system/websocket/terminal_1775377525215_bpsfsh823" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: terminal_1775377525215_bpsfsh823
+INFO:     connection open
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:25.350110'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:49335 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[TERMINAL] SSH Connection request from terminal_1775377525215_bpsfsh823 to hcq@172.16.14.233
+INFO:paramiko.transport:Connected (version 2.0, client OpenSSH_8.9p1)
+INFO:paramiko.transport:Authentication (publickey) successful!
+INFO:core.ssh:[SSH] Connected to None
+INFO:app_fastapi_full:[TERMINAL] Terminal session created for terminal_1775377525215_bpsfsh823
+INFO:     172.16.14.68:49335 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:49335 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:64167 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:64167 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:64167 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET /api/devices/management HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:app_fastapi_full:WebSocket client disconnected: terminal_1775377525215_bpsfsh823
+INFO:app_fastapi_full:[TERMINAL] Closed SSH connection for terminal_1775377525215_bpsfsh823
+INFO:app_fastapi_full:[TERMINAL] No data received, connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:53470 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:49335 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:64167 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET /api/devices/management HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:29.070219'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:64167 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:49335 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:59875 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:49335 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:64167 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET /api/devices/management HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:29.945551'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:64167 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:49335 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:49335 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:49335 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:58125 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:64167 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:31.066773'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:64167 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:49335 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:49335 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:49335 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49753 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:64167 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:36.038492'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:58036 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     172.16.14.68:49335 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:64167 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     connection open
+INFO:     172.16.14.68:64167 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:36.685462'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51675 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     172.16.14.68:49335 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:     connection open
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:64167 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:37.172896'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63884 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:49335 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:64167 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:37.645933'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:64167 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:55608 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:64167 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:38.241159'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:60097 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:49335 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:64167 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:25:38.725544'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64167 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64167 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:64167 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:49335 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:49335 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49335 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:     172.16.14.68:49335 - "GET /static/css/style.css?v=20260405-25 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:58170 - "GET /static/vendor/xterm/xterm.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50325 - "GET /static/vendor/xterm/xterm.min.js HTTP/1.1" 200 OK
+INFO:     172.16.14.68:52782 - "GET /static/js/app.js?v=20260405-25 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50781 - "GET /static/vendor/xterm/xterm-addon-fit.min.js HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:52782 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50325 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:56707 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     172.16.14.68:50325 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:52782 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     connection open
+INFO:     172.16.14.68:52782 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:52782 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:26:08.404558'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:50325 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50325 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:50325 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:52782 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:52782 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:52782 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:52782 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:52782 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:52782 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:52782 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:52782 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:52782 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:52782 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
