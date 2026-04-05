@@ -779,26 +779,35 @@
                     <button class="filter-btn active" data-category="all" onclick="filterByCategory('all')">
                         📁 全部分类
                     </button>
-                    <button class="filter-btn" data-category="health" onclick="filterByCategory('health')">
-                        💚 系统管理
-                    </button>
-                    <button class="filter-btn" data-category="config" onclick="filterByCategory('config')">
-                        ⚙️ 配置管理
-                    </button>
-                    <button class="filter-btn" data-category="client" onclick="filterByCategory('client')">
-                        👤 客户端信息
-                    </button>
-                    <button class="filter-btn" data-category="device" onclick="filterByCategory('device')">
-                        📱 设备管理
+                    <button class="filter-btn" data-category="test" onclick="filterByCategory('test')">
+                        🧪 测试管理
                     </button>
                     <button class="filter-btn" data-category="vnc" onclick="filterByCategory('vnc')">
                         🖥️ 主机桌面
                     </button>
-                    <button class="filter-btn" data-category="test" onclick="filterByCategory('test')">
-                        🧪 测试管理
+                    <button class="filter-btn" data-category="device" onclick="filterByCategory('device')">
+                        📱 设备管理
+                    </button>
+                    <button class="filter-btn" data-category="users" onclick="filterByCategory('users')">
+                        👥 用户管理
                     </button>
                     <button class="filter-btn" data-category="report" onclick="filterByCategory('report')">
                         📊 报告管理
+                    </button>
+                    <button class="filter-btn" data-category="burn" onclick="filterByCategory('burn')">
+                        🔥 固件烧写
+                    </button>
+                    <button class="filter-btn" data-category="file" onclick="filterByCategory('file')">
+                        📁 文件管理
+                    </button>
+                    <button class="filter-btn" data-category="config" onclick="filterByCategory('config')">
+                        ⚙️ 配置管理
+                    </button>
+                    <button class="filter-btn" data-category="health" onclick="filterByCategory('health')">
+                        💚 系统管理
+                    </button>
+                    <button class="filter-btn" data-category="ssh" onclick="filterByCategory('ssh')">
+                        🔑 SSH管理
                     </button>
                     <button class="filter-btn" data-category="vpn" onclick="filterByCategory('vpn')">
                         🔐 VPN管理
@@ -806,14 +815,8 @@
                     <button class="filter-btn" data-category="usbip" onclick="filterByCategory('usbip')">
                         📡 USB/IP
                     </button>
-                    <button class="filter-btn" data-category="upload" onclick="filterByCategory('upload')">
-                        📤 文件上传
-                    </button>
-                    <button class="filter-btn" data-category="burn" onclick="filterByCategory('burn')">
-                        🔥 固件烧写
-                    </button>
-                    <button class="filter-btn" data-category="file" onclick="filterByCategory('file')">
-                        📁 文件管理
+                    <button class="filter-btn" onclick="showUsageExamples()" style="background: var(--primary-color); color: white;">
+                        📖 使用实例
                     </button>
                 </div>
             </div>
@@ -1420,7 +1423,7 @@
             // 切换到其他主机时，需要调用API
             try {
                 showToast(`正在连接到 ${currentHost.name}...`, 'info');
-                const response = await fetch('/api/vnc/start-desktop', {
+                const response = await fetch('/api/desktop/vnc/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

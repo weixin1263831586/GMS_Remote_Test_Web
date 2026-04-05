@@ -914,13 +914,7 @@ async def validate_config():
             "success": len(errors) == 0,
             "valid": len(errors) == 0,
             "errors": errors,
-            "warnings": warnings,
-            "config": {
-                "ubuntu_host": config.get('ubuntu_host'),
-                "ubuntu_user": config.get('ubuntu_user'),
-                "suites_path": config.get('suites_path'),
-                "script_path": config.get('script_path')
-            }
+            "warnings": warnings
         })
     except Exception as e:
         logger.error(f"Error validating config: {e}")
@@ -1157,7 +1151,7 @@ async def list_users():
 
 # ==================== 配置管理 ====================
 
-@app.get("/api/config")
+@app.get("/api/config/read")
 async def get_config(request: Request):
     """获取配置 - 与Flask版本一致，直接返回配置对象"""
     # 跟踪用户访问
@@ -1168,7 +1162,7 @@ async def get_config(request: Request):
     # 直接返回配置对象，与Flask版本一致
     return JSONResponse(content=config)
 
-@app.post("/api/config")
+@app.post("/api/config/update")
 async def update_config(req: dict):
     """更新配置 - 只修改动态配置，禁止修改config.json"""
     existing_dynamic = config_manager._load_dynamic_config() or {}
@@ -1198,6 +1192,17 @@ async def update_config(req: dict):
         return JSONResponse(content={'success': True})
     else:
         raise HTTPException(status_code=500, detail="保存配置失败")
+
+# 向后兼容别名
+@app.get("/api/config")
+async def get_config_legacy(request: Request):
+    """获取配置（向后兼容别名）"""
+    return await get_config(request)
+
+@app.post("/api/config")
+async def update_config_legacy(req: dict):
+    """更新配置（向后兼容别名）"""
+    return await update_config(req)
 
 # ==================== 设备管理 ====================
 
@@ -2514,7 +2519,7 @@ async def clean_test_logs(request: Request):
 # 存储最后保存的日志文件路径（用于GET下载）
 last_saved_log_file = {}
 
-@app.get("/api/test/logs/download")
+@app.get("/api/test/logs/current")
 async def download_current_log(request: Request):
     """下载当前测试日志"""
     global last_saved_log_file
@@ -2558,9 +2563,15 @@ async def download_current_log(request: Request):
             detail=str(e)
         )
 
-@app.post("/api/test/logs/download")
+# 向后兼容别名
+@app.get("/api/test/logs/download")
+async def download_current_log_legacy(request: Request):
+    """下载当前测试日志（向后兼容别名）"""
+    return await download_current_log(request)
+
+@app.post("/api/test/logs/batch")
 async def download_test_logs(req: dict):
-    """下载测试日志"""
+    """批量下载测试日志（ZIP压缩包）"""
     try:
         file_paths = req.get('files', [])
         if not file_paths:
@@ -2584,6 +2595,12 @@ async def download_test_logs(req: dict):
                 status_code=500,
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
+
+# 向后兼容别名
+@app.post("/api/test/logs/download")
+async def download_test_logs_legacy(req: dict):
+    """批量下载测试日志（向后兼容别名）"""
+    return await download_test_logs(req)
 
 @app.post("/api/test/logs/save-current")
 async def save_current_log(req: dict):
@@ -4433,17 +4450,6 @@ async def validate_desktop_host(req: dict = Body(...)):
                     status_code=401
                 )
 
-            # 检查VNC密码文件
-            check_passwd_cmd = "[ -f ~/.vnc/passwd ] && echo 'exists' || echo 'missing'"
-            stdin, stdout, stderr = ssh.exec_command(check_passwd_cmd)
-            passwd_output = stdout.read().decode()
-
-            if "missing" in passwd_output:
-                return JSONResponse(
-                    content={'success': False, 'error': 'VNC密码文件不存在', 'needs_password': True},
-                    status_code=404
-                )
-
             return JSONResponse(content={
                 'success': True,
                 'message': '主机验证成功',
@@ -5197,25 +5203,20 @@ async def get_vpn_status():
             if isinstance(vpn_target, list):
                 vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
 
-            # 多次ping测试，只要一次成功即认为已连接
-            max_attempts = 2
-            for attempt in range(max_attempts):
-                output, error, code = ssh_manager.execute_command(
-                    ssh,
-                    f"ping -c 1 -W 2 {vpn_target} 2>&1",
-                    timeout=5
-                )
+            output, error, code = ssh_manager.execute_command(
+                ssh,
+                f"ping -c 1 -W 2 {vpn_target} 2>&1",
+                timeout=3
+            )
 
-                # 检查ping结果（成功则立即返回）
-                if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
-                    ssh_manager.return_connection(ssh)
-                    logger.info(f"[VPN Status] {vpn_target}: connected (attempt {attempt + 1})")
-                    return JSONResponse(content={"success": True, "connected": True})
-
-            # 所有尝试都失败
             ssh_manager.return_connection(ssh)
-            logger.info(f"[VPN Status] {vpn_target}: disconnected (0/{max_attempts} successful)")
-            return JSONResponse(content={"success": True, "connected": False})
+
+            if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
+                logger.info(f"[VPN Status] {vpn_target}: connected")
+                return JSONResponse(content={"success": True, "connected": True})
+            else:
+                logger.info(f"[VPN Status] {vpn_target}: disconnected")
+                return JSONResponse(content={"success": True, "connected": False})
 
         except Exception as e:
             ssh_manager.return_connection(ssh)
@@ -5333,7 +5334,7 @@ async def disconnect_vpn():
 
 # ==================== 文件上传 ====================
 
-@app.post("/api/upload/file")
+@app.post("/api/files/upload")
 async def upload_file(
     file: UploadFile = File(...),
     path: str = Form("")
@@ -5404,10 +5405,10 @@ async def upload_file(
                 detail=str(e)
             )
 
-@app.post("/api/upload")
+@app.post("/api/files/install")
 async def upload_files(files: List[UploadFile] = File(...), file_path: str = Form(None)):
     """
-    文件上传 - 支持两种模式
+    文件上传并安装 - 支持两种模式
     1. 多文件上传：接收文件对象列表
     2. 本地路径上传：通过file_path参数指定本地文件路径
     """
@@ -5478,12 +5479,10 @@ async def upload_files(files: List[UploadFile] = File(...), file_path: str = For
                 detail=str(e)
             )
 
-@app.post("/api/upload/progress")
-async def get_upload_progress(req: dict):
+@app.get("/api/files/progress")
+async def get_upload_progress(upload_id: Optional[str] = None):
     """获取上传进度"""
     try:
-        upload_id = req.get('upload_id')
-
         # 返回上传进度（这里需要实现实际的进度跟踪）
         return JSONResponse(content={
             "success": True,
@@ -5499,6 +5498,23 @@ async def get_upload_progress(req: dict):
                 status_code=500,
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
+
+# 向后兼容别名
+@app.post("/api/upload/file")
+async def upload_file_legacy(file: UploadFile = File(...), path: str = Form("")):
+    """文件上传（向后兼容别名）"""
+    return await upload_file(file, path)
+
+@app.post("/api/upload")
+async def upload_files_legacy(files: List[UploadFile] = File(...), file_path: str = Form(None)):
+    """文件上传并安装（向后兼容别名）"""
+    return await upload_files(files, file_path)
+
+@app.post("/api/upload/progress")
+async def get_upload_progress_legacy(req: dict):
+    """获取上传进度（向后兼容别名）"""
+    upload_id = req.get('upload_id')
+    return await get_upload_progress(upload_id)
 
 # ==================== 固件管理 ====================
 @app.post("/api/burn/firmware")
@@ -7026,29 +7042,38 @@ API_DOCS_LIST = [
     {
         "method": "GET",
         "path": "/api/config/validate",
-        "description": "验证配置文件",
+        "description": "验证配置文件正确性（检查必要字段和路径）",
         "params": [],
         "category": "config"
     },
     {
         "method": "GET",
         "path": "/api/config/values",
-        "description": "获取配置值",
+        "description": "获取前端配置（仅返回前端需要的字段，不含敏感信息）",
         "params": [],
         "category": "config"
     },
     {
         "method": "GET",
-        "path": "/api/config",
-        "description": "获取完整配置",
+        "path": "/api/config/read",
+        "description": "获取完整配置（读取当前系统配置）",
         "params": [],
         "category": "config"
     },
     {
         "method": "POST",
-        "path": "/api/config",
-        "description": "更新配置",
-        "params": [{"name": "config", "type": "object", "required": True}],
+        "path": "/api/config/update",
+        "description": "更新配置（修改动态配置字段，保存在config_dynamic.json）",
+        "params": [
+            {"name": "ubuntu_user", "type": "string", "required": False, "desc": "Ubuntu用户名"},
+            {"name": "ubuntu_host", "type": "string", "required": False, "desc": "Ubuntu主机地址"},
+            {"name": "ubuntu_pswd", "type": "string", "required": False, "desc": "Ubuntu密码"},
+            {"name": "device_host", "type": "string", "required": False, "desc": "设备主机地址"},
+            {"name": "device_pswd", "type": "string", "required": False, "desc": "设备密码"},
+            {"name": "local_server", "type": "string", "required": False, "desc": "本地服务器地址"},
+            {"name": "suites_path", "type": "string", "required": False, "desc": "测试套件路径"},
+            {"name": "usbip_vid_pid", "type": "string", "required": False, "desc": "USB/IP的VID:PID"}
+        ],
         "category": "config"
     },
 
@@ -7199,16 +7224,16 @@ API_DOCS_LIST = [
     },
     {
         "method": "GET",
-        "path": "/api/test/logs/download",
-        "description": "下载日志（GET）",
-        "params": [{"name": "log_type", "type": "string", "required": False}],
+        "path": "/api/test/logs/current",
+        "description": "下载当前日志",
+        "params": [],
         "category": "test"
     },
     {
         "method": "POST",
-        "path": "/api/test/logs/download",
-        "description": "下载日志（POST）",
-        "params": [{"name": "log_type", "type": "string", "required": True}, {"name": "start_time", "type": "string", "required": False}, {"name": "end_time", "type": "string", "required": False}],
+        "path": "/api/test/logs/batch",
+        "description": "批量下载日志（ZIP压缩包）",
+        "params": [{"name": "files", "type": "array", "required": True, "desc": "日志文件路径数组"}],
         "category": "test"
     },
     {
@@ -7423,24 +7448,24 @@ API_DOCS_LIST = [
     # ==================== 文件上传 ====================
     {
         "method": "POST",
-        "path": "/api/upload/file",
-        "description": "上传文件",
-        "params": [{"name": "file", "type": "file", "required": True}],
-        "category": "upload"
+        "path": "/api/files/upload",
+        "description": "上传文件到服务器",
+        "params": [{"name": "file", "type": "file", "required": True}, {"name": "path", "type": "string", "required": False, "desc": "目标路径"}],
+        "category": "file"
     },
     {
         "method": "POST",
-        "path": "/api/upload",
-        "description": "上传并安装",
+        "path": "/api/files/install",
+        "description": "上传APK并安装到设备",
         "params": [{"name": "file", "type": "file", "required": True}, {"name": "device_id", "type": "string", "required": True}],
-        "category": "upload"
+        "category": "file"
     },
     {
-        "method": "POST",
-        "path": "/api/upload/progress",
-        "description": "获取上传进度",
-        "params": [],
-        "category": "upload"
+        "method": "GET",
+        "path": "/api/files/progress",
+        "description": "获取文件上传进度",
+        "params": [{"name": "upload_id", "type": "string", "required": False, "desc": "上传任务ID"}],
+        "category": "file"
     },
 
     # ==================== 刷机功能 ====================

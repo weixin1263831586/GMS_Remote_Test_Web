@@ -157,7 +157,7 @@ class VNCManager:
                 ]
                 subprocess.Popen(x11vnc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 logger.info("[VNC] Started x11vnc")
-                time.sleep(1)
+                time.sleep(0.5)
 
             # 启动websockify
             if not websockify_running:
@@ -169,7 +169,7 @@ class VNCManager:
                 ]
                 subprocess.Popen(websockify_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 logger.info("[VNC] Started websockify")
-                time.sleep(1)
+                time.sleep(0.5)
 
             # 验证服务是否运行
             x11vnc_running = subprocess.run(
@@ -221,17 +221,12 @@ class VNCManager:
 
             ubuntu_user = config.get('ubuntu_user', 'hcq')
 
-            # 检查VNC密码文件
-            check_passwd_cmd = "[ -f ~/.vnc/passwd ] && echo 'exists' || echo 'missing'"
-            stdout, stderr, code = self.ssh_manager.execute_command(ssh, check_passwd_cmd)
-
-            if "missing" in stdout:
-                self.ssh_manager.return_connection(ssh)
-                return {
-                    'success': False,
-                    'error': 'VNC密码文件不存在，请先运行: x11vnc -storepasswd',
-                    'instructions': 'x11vnc -storepasswd'
-                }
+            # 如果提供了VNC密码，需要创建密码文件；否则使用免密模式
+            if vnc_password:
+                # 创建VNC密码文件
+                create_passwd_cmd = f"echo '{vnc_password}' | x11vnc -display :0 -storepasswd ~/.vnc/passwd"
+                self.ssh_manager.execute_command(ssh, create_passwd_cmd, timeout=10)
+                time.sleep(0.5)  # 等待文件创建完成
 
             # 检查noVNC安装
             check_novnc_cmd = "[ -d /opt/noVNC ] && echo 'exists' || echo 'missing'"
@@ -248,15 +243,14 @@ sudo git clone https://github.com/novnc/noVNC.git
 sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                 }
 
-            # 等待显示就绪
             display_ready = False
-            for _ in range(60):
+            for _ in range(30):
                 display_cmd = "export DISPLAY=:0 && xprop -root &>/dev/null && echo 'ready'"
                 stdout, _, _ = self.ssh_manager.execute_command(ssh, display_cmd)
                 if "ready" in stdout:
                     display_ready = True
                     break
-                time.sleep(1)
+                time.sleep(0.5)
 
             if not display_ready:
                 self.ssh_manager.return_connection(ssh)
@@ -271,15 +265,28 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             stdout, _, _ = self.ssh_manager.execute_command(ssh, check_x11_cmd)
             x11vnc_running = 'RUNNING' in stdout
 
+            # 如果x11vnc正在运行，检查是否使用了密码模式
+            if x11vnc_running and not vnc_password:
+                # 免密模式，检查是否需要从密码模式重启
+                check_password_mode = "pgrep -f 'x11vnc.*-rfbauth' && echo 'PASSWORD' || echo 'NOPASSWORD'"
+                stdout, _, _ = self.ssh_manager.execute_command(ssh, check_password_mode)
+
+                if 'PASSWORD' in stdout:
+                    # 当前是密码模式，需要重启为免密模式
+                    logger.info("[VNC] Found x11vnc running with password, restarting without password...")
+                    self.ssh_manager.execute_command(ssh, "pkill -f 'x11vnc.*:0'", timeout=5)
+                    time.sleep(0.5)
+                    x11vnc_running = False
+
             if not x11vnc_running:
-                # 启动x11vnc
+                auth_param = "-rfbauth ~/.vnc/passwd" if vnc_password else ""
                 x11vnc_cmd = (
                     f"export DISPLAY=:0 && "
                     f"export XAUTHORITY=/home/{ubuntu_user}/.Xauthority && "
-                    "x11vnc -display :0 -forever -shared -rfbauth ~/.vnc/passwd -bg -o ~/logs/x11vnc.log"
+                    f"x11vnc -display :0 -forever -shared {auth_param} -bg -o ~/logs/x11vnc.log"
                 )
                 self.ssh_manager.execute_command(ssh, x11vnc_cmd, timeout=15)
-                time.sleep(2)
+                time.sleep(1)
 
             # 检查并启动websockify
             check_ws_cmd = "pgrep -f 'websockify.*6080' && echo 'RUNNING' || echo 'NOT_RUNNING'"
@@ -293,7 +300,9 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                     "> ~/logs/novnc.log 2>&1 &"
                 )
                 self.ssh_manager.execute_command(ssh, novnc_cmd, timeout=10)
-                time.sleep(2)
+                time.sleep(1)
+
+            target_ip = host.split('@')[-1] if '@' in host else host
 
             self.ssh_manager.return_connection(ssh)
 
@@ -304,7 +313,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                 'websockify_running': websockify_running,
                 'vnc_port': 5900,
                 'web_port': 6080,
-                'url': f"http://{host}:6080/vnc.html?autoconnect=true"
+                'url': f"http://{target_ip}:6080/vnc.html?autoconnect=true"
             }
 
         except Exception as e:
