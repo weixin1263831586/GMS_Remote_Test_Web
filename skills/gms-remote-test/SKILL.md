@@ -586,7 +586,7 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/system/health` | GET | Health check |
-| `/api/docs` | GET | API documentation |
+| `/api/system/docs` | GET | API documentation |
 | `/api/help` | GET | API help |
 
 ### Device Management

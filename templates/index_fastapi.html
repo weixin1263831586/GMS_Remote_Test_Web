@@ -2118,10 +2118,14 @@
             // 如果切换到终端页面且未初始化，则初始化终端
             // 如果是ADB模式(pendingAdbDevice存在),强制重新初始化
             if (pageName === 'terminal') {
-                if (!terminalInitialized || pendingAdbDevice) {
+                // 检查是否有待执行的命令（从路由检查弹框来的）
+                const pendingCommand = sessionStorage.getItem('pending_terminal_command');
+                const commandSource = sessionStorage.getItem('command_source');
+
+                if (!terminalInitialized || pendingAdbDevice || pendingCommand) {
                     // ADB模式需要重新初始化,先清理旧连接
-                    if (pendingAdbDevice && terminalInitialized) {
-                        console.log('ADB mode: forcing terminal re-initialization');
+                    if ((pendingAdbDevice || pendingCommand) && terminalInitialized) {
+                        console.log('Forcing terminal re-initialization');
                         isReconnecting = true;  // 标记为重新连接,隐藏断开消息
                         if (terminalSocket) {
                             terminalSocket.close();
@@ -2137,6 +2141,15 @@
                             isReconnecting = false;
                         }, 100);
                     }
+
+                    // 如果有路由命令，启用静默模式
+                    if (pendingCommand && commandSource === 'route_check') {
+                        updateSilentMode(false, 'route', pendingCommand);
+                        sessionStorage.removeItem('pending_terminal_command');
+                        sessionStorage.removeItem('command_source');
+                        console.log('Route command mode enabled, command:', pendingCommand);
+                    }
+
                     initTerminal();
                 }
             }
@@ -2179,6 +2192,9 @@
             }
         }
 
+        // 将 switchPage 导出到全局作用域，供外部脚本调用
+        window.switchPage = switchPage;
+
         // ==================== 终端功能 ====================
         const terminalConfig = {
             ssh_host: '{{ config.ubuntu_host }}',
@@ -2186,10 +2202,33 @@
             ssh_password: '{{ config.ubuntu_pswd | default("", true) }}'
         };
 
-        // ADB shell 模式下的静默处理
-        let adbSilentMode = false;  // 是否在静默模式(ADB启动中)
-        let adbBuffer = [];  // 静默模式下的输出缓冲区
-        let isReconnecting = false;  // 是否正在重新连接(用于隐藏断开消息)
+        // 终端静默模式处理（统一管理ADB和路由命令）
+        let silentMode = {
+            active: false,
+            type: null,  // 'adb' | 'route'
+            buffer: [],
+            pendingCommand: null,  // 仅用于route模式
+            isReconnecting: false
+        };
+
+        // 兼容旧代码的别名（将在后续版本移除）
+        let adbSilentMode = false;
+        let adbBuffer = [];
+        let isReconnecting = false;
+        let routeCommandMode = false;
+        let pendingRouteCommand = null;
+
+        // 同步函数
+        function updateSilentMode(active, type = null, command = null) {
+            silentMode.active = active;
+            silentMode.type = type;
+            silentMode.pendingCommand = command;
+
+            // 同步到旧变量
+            adbSilentMode = active;
+            routeCommandMode = (type === 'route');
+            pendingRouteCommand = command;
+        }
 
         function updateTerminalStatus(connected) {
             isTerminalConnected = connected;
@@ -2215,13 +2254,24 @@
                 console.log('Terminal WebSocket connected');
                 updateTerminalStatus(true);
 
+                // 检查是否为路由命令模式
+                if (silentMode.type === 'route' && silentMode.pendingCommand) {
+                    console.log('Route command mode: enabling silent mode');
+                    updateSilentMode(true, 'route', silentMode.pendingCommand);
+                    terminalSocket.send(JSON.stringify({
+                        type: 'terminal_connect',
+                        mode: 'ssh',
+                        host: terminalConfig.ssh_host,
+                        user: terminalConfig.ssh_user,
+                        password: terminalConfig.ssh_password
+                    }));
+                    return;
+                }
+
                 // 检查是否为ADB shell模式
                 if (pendingAdbDevice) {
                     console.log('Opening ADB shell for device:', pendingAdbDevice);
-                    // 启用静默模式
-                    adbSilentMode = true;
-                    adbBuffer = [];
-                    // 请求ADB shell连接
+                    updateSilentMode(true, 'adb');
                     terminalSocket.send(JSON.stringify({
                         type: 'terminal_connect',
                         mode: 'adb',
@@ -2230,7 +2280,6 @@
                         user: terminalConfig.ssh_user,
                         password: terminalConfig.ssh_password
                     }));
-                    // 清除pending标志
                     pendingAdbDevice = null;
                 } else {
                     // 请求SSH连接
@@ -2264,24 +2313,56 @@
 
                     if (msg.type === 'terminal_data') {
                         if (terminal) {
-                            // 静默模式:缓冲输出,等待ADB shell提示符
-                            if (adbSilentMode) {
-                                adbBuffer.push(msg.data);
+                            // 静默模式:缓冲输出,等待提示符
+                            if (silentMode.active) {
+                                silentMode.buffer.push(msg.data);
+                                adbBuffer.push(msg.data);  // 兼容旧代码
 
-                                // 检测ADB shell提示符(如: generic_arm64:/ $, rk3572cai:/ # 等)
-                                const text = adbBuffer.join('');
-                                // 匹配常见的Android shell提示符模式
-                                if (/:\/ [$#]/.test(text) || /\w+:\S+ [$#]/.test(text)) {
-                                    console.log('ADB shell prompt detected, flushing buffer');
-                                    adbSilentMode = false;
+                                // 优化：只检查最后10条消息，避免O(n²)性能问题
+                                const recentText = silentMode.buffer.length > 10
+                                    ? silentMode.buffer.slice(-10).join('')
+                                    : silentMode.buffer.join('');
 
-                                    // 只显示最后的部分(包含提示符)
-                                    const lines = text.split('\r\n');
-                                    const lastLines = lines.slice(-3).join('\r\n');  // 只保留最后3行
-                                    terminal.write(lastLines);
+                                // 路由命令模式:检测Linux shell提示符
+                                if (silentMode.type === 'route' && silentMode.pendingCommand) {
+                                    if (/^[\w-]+@[\w-]+:.+[$#]\s*$/.test(recentText) ||
+                                        /@.+[$#]\s*$/.test(recentText) ||
+                                        recentText.includes(':~$') || recentText.includes(':~#')) {
+
+                                        console.log('Shell prompt detected for route command');
+                                        const commandToSend = silentMode.pendingCommand;
+
+                                        terminal.clear();
+                                        terminal.writeln('\x1b[33m========================================\x1b[0m');
+                                        terminal.writeln('\x1b[33m📋 路由命令已准备就绪\x1b[0m');
+                                        terminal.writeln('\x1b[33m========================================\x1b[0m\r\n');
+                                        terminal.writeln('\x1b[36m命令: ' + commandToSend + '\x1b[0m\r\n');
+                                        terminal.writeln('\x1b[90m提示: 正在自动执行命令，可能需要输入 sudo 密码\x1b[0m\r\n');
+                                        terminal.writeln('\x1b[33m========================================\x1b[0m\r\n');
+
+                                        setTimeout(() => {
+                                            if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN && commandToSend) {
+                                                terminalSocket.send(JSON.stringify({
+                                                    type: 'terminal_input',
+                                                    input: commandToSend + '\r'
+                                                }));
+                                                console.log('Route command sent:', commandToSend);
+                                            }
+                                        }, 500);
+
+                                        terminal.focus();
+                                        updateSilentMode(false);
+                                    }
+                                } else if (silentMode.type === 'adb') {
+                                    if (/:\/ [$#]/.test(recentText) || /\w+:\S+ [$#]/.test(recentText)) {
+                                        console.log('ADB shell prompt detected');
+                                        const text = silentMode.buffer.join('');
+                                        const lines = text.split('\r\n');
+                                        terminal.write(lines.slice(-3).join('\r\n'));
+                                        updateSilentMode(false);
+                                    }
                                 }
                             } else {
-                                // 正常模式:直接显示
                                 terminal.write(msg.data);
                             }
                         }
@@ -2291,18 +2372,18 @@
                             terminal.writeln(`\r\n\x1b[31m❌ 错误: ${msg.error}\x1b[0m\r\n`);
                         }
                         updateTerminalStatus(false);
-                        adbSilentMode = false;  // 出错时退出静默模式
+                        updateSilentMode(false);  // 出错时退出静默模式
                     } else if (msg.type === 'terminal_connected') {
                         console.log('Terminal connected, mode:', msg.mode);
-                        // ADB模式:不显示连接消息,让adb shell的输出直接显示
-                        if (msg.mode !== 'adb') {
+                        // 路由命令模式和ADB模式:不显示连接消息,让输出直接显示
+                        if (msg.mode !== 'adb' && silentMode.type !== 'route') {
                             if (terminal) {
                                 terminal.clear();
                                 terminal.writeln('\x1b[32m✅ 已连接到 Ubuntu 主机\x1b[0m');
                                 terminal.writeln('\x1b[90m快捷键: Ctrl+C=复制/中断 Ctrl+L=清屏\x1b[0m\r\n');
                             }
                         }
-                        // ADB模式:保持静默模式,等待检测到提示符
+                        // ADB模式和路由命令模式:保持静默模式,等待检测到提示符
                         updateTerminalStatus(true);
                     }
                 } catch (e) {

@@ -1549,7 +1549,10 @@ async function checkRouting() {
     dialog.className = 'route-check-dialog';
     dialog.innerHTML = `
         <div class="route-check-content">
-            <h3>📡 检查路由连通性</h3>
+            <div class="route-check-header">
+                <h3>📡 检查路由连通性</h3>
+                <button class="route-check-close" aria-label="关闭">&times;</button>
+            </div>
             <div class="route-check-form">
                 <div class="form-group">
                     <label for="test-host-ip">测试主机IP:</label>
@@ -1586,7 +1589,13 @@ async function checkRouting() {
     // 绑定事件
     const pingTestBtn = document.getElementById('ping-test-btn');
     const closeDialogBtn = document.getElementById('close-dialog-btn');
+    const closeXBtn = dialog.querySelector('.route-check-close');
     const pingResult = document.getElementById('ping-result');
+
+    // X 按钮关闭
+    closeXBtn.addEventListener('click', () => {
+        document.body.removeChild(dialog);
+    });
 
     closeDialogBtn.addEventListener('click', () => {
         document.body.removeChild(dialog);
@@ -1685,8 +1694,8 @@ async function checkRouting() {
                         <div class="ping-success">
                             <h4>✅ 连通性测试通过</h4>
                             <p><strong>测试主机:</strong> ${result.test_host_ip || testHostIp}</p>
-                            <p><strong>客户端:</strong> ${result.client_ip || clientIp}</p>
                             <p><strong>测试主机网段:</strong> ${result.test_network || 'N/A'}</p>
+                            <p><strong>客户端:</strong> ${result.client_ip || clientIp}</p>
                             <p><strong>客户端网段:</strong> ${result.client_network || 'N/A'}</p>
                             <p>状态: <span class="status-success">${result.same_network ? '同一网段 - 可连通' : '不同网段但可连通'}</span></p>
                             <p>延迟: ${result.latency || 'N/A'}</p>
@@ -1698,8 +1707,8 @@ async function checkRouting() {
                         <div class="ping-failure">
                             <h4>❌ 连通性测试失败</h4>
                             <p><strong>测试主机:</strong> ${result.test_host_ip || testHostIp}</p>
-                            <p><strong>客户端:</strong> ${result.client_ip || clientIp}</p>
                             <p><strong>测试主机网段:</strong> ${result.test_network || 'N/A'}</p>
+                            <p><strong>客户端:</strong> ${result.client_ip || clientIp}</p>
                             <p><strong>客户端网段:</strong> ${result.client_network || 'N/A'}</p>
                             <p>状态: <span class="status-error">不同网段 - 不可连通</span></p>
                             <p><strong>可能原因:</strong></p>
@@ -1710,20 +1719,63 @@ async function checkRouting() {
                             </ul>
                             <p><strong>⚠️ 重要提示 - 请仔细阅读:</strong></p>
                             <div class="route-warning">
-                                <p><strong>📍 执行位置说明：</strong></p>
-                                <p>✅ 这些命令应该在您的<strong>测试主机</strong>（172.16.14.233）上执行</p>
+                                <p>✅ 以下命令应该在您的<strong>测试主机</strong>（${testHostIp}）上执行</p>
                                 <p>❌ 不要在客户端主机（当前浏览器所在电脑）上执行这些命令</p>
-                                <p><strong>🎯 路由目的：</strong>让测试主机能够访问Android设备网段</p>
+                                <p><strong>🎯 路由目的：</strong>让测试主机能够访问客户端主机网段</p>
                             </div>
                             <p><strong>建议添加的路由命令:</strong></p>
                             <div class="route-commands">
                                 <h5>Linux:</h5>
-                                <pre>${result.route_commands?.linux?.join('\n') || '无'}</pre>
+                                <pre id="linux-route-command">${result.route_commands?.linux?.[2] || '无'}</pre>
                                 <h5>Windows:</h5>
-                                <pre>${result.route_commands?.windows?.join('\n') || '无'}</pre>
+                                <pre id="windows-route-command">${result.route_commands?.windows?.[2] || '无'}</pre>
+                            </div>
+                            <div class="route-check-terminal-actions">
+                                <button id="open-terminal-btn" class="btn-terminal" data-command="${result.route_commands?.linux?.[2] || ''}">
+                                    🖥️ 打开主机终端添加路由
+                                </button>
                             </div>
                         </div>
                     `;
+
+                    // 绑定打开终端按钮事件
+                    const openTerminalBtn = document.getElementById('open-terminal-btn');
+                    if (openTerminalBtn) {
+                        openTerminalBtn.addEventListener('click', async () => {
+                            const command = openTerminalBtn.dataset.command;
+                            if (!command || command === '无') {
+                                addLogEntry('没有可用的路由命令', 'warning');
+                                return;
+                            }
+
+                            try {
+                                // 保存命令到 sessionStorage，供终端页面使用
+                                sessionStorage.setItem('pending_terminal_command', command);
+                                sessionStorage.setItem('command_source', 'route_check');
+
+                                // 关闭路由检查弹框
+                                document.body.removeChild(dialog);
+
+                                // 切换到终端页面
+                                if (typeof switchPage === 'function') {
+                                    switchPage('terminal');
+                                } else {
+                                    // 如果 switchPage 不在全局作用域，使用 DOM 操作
+                                    const event = new Event('click');
+                                    const terminalLink = document.querySelector('[data-page="terminal"]');
+                                    if (terminalLink) {
+                                        terminalLink.dispatchEvent(event);
+                                    }
+                                }
+
+                                addLogEntry(`✅ 已切换到终端页面，命令已准备: ${command}`, 'success');
+
+                            } catch (error) {
+                                addLogEntry('打开终端失败: ' + error.message, 'error');
+                                console.error('Error opening terminal:', error);
+                            }
+                        });
+                    }
                 }
             } else {
                 pingResult.innerHTML = `<div class="ping-error">测试失败: ${result.error}</div>`;
@@ -5064,17 +5116,8 @@ function getCategoryOrder(category) {
  * 按分类排序API列表
  */
 function sortApisByCategory(apis) {
-    return apis.sort((a, b) => {
-        const categoryA = getCategoryOrder(a.category);
-        const categoryB = getCategoryOrder(b.category);
-
-        if (categoryA !== categoryB) {
-            return categoryA - categoryB;
-        }
-
-        // 同一分类内，按路径字母顺序排序
-        return a.path.localeCompare(b.path);
-    });
+    // 全部分类时，直接按路径字母顺序排序
+    return apis.sort((a, b) => a.path.localeCompare(b.path));
 }
 
 // 当前筛选状态
@@ -5186,7 +5229,7 @@ async function loadApiDocs() {
             return;
         }
 
-        const resp = await fetch('/api/docs');
+        const resp = await fetch('/api/system/docs');
 
         if (!resp.ok) {
             throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
@@ -5195,8 +5238,11 @@ async function loadApiDocs() {
         const data = await resp.json();
 
         if (data.apis && Array.isArray(data.apis)) {
+            // 过滤掉根路径（返回HTML，不是真正的API接口）
+            const filteredApis = data.apis.filter(api => api.path !== '/');
+
             // 为每个API添加分类信息
-            const apisWithCategory = data.apis.map(api => ({
+            const apisWithCategory = filteredApis.map(api => ({
                 ...api,
                 category: getApiCategory(api.path)
             }));
@@ -6165,7 +6211,7 @@ function displayApiDocs(apis) {
                 <!-- Column 1: API Interface -->
                 <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 30%;">
                     <div style="display: flex; align-items: center; gap: 6px;">
-                        <span style="${methodClass} font-weight: 700; font-size: 13px; min-width: 55px;">${api.method}</span>
+                        <span style="${methodClass} font-weight: 700; font-size: 13px; min-width: 90px; display: inline-block;">${api.method}</span>
                         <span style="font-family: monospace; font-size: 12px; color: var(--text-primary); word-break: break-all;">${escapeHtml(api.path)}</span>
                     </div>
                 </td>
@@ -6280,7 +6326,9 @@ window.copyCurlCommandFromData = function(element) {
     // 检查是否为纯文本端点（不需要jq格式化）
     const isPlainTextEndpoint = text.includes('/api/test/logs/stream') ||
                                 text.includes('/api/terminal/ws') ||
-                                text.includes('/api/screen/ws');
+                                text.includes('/api/screen/ws') ||
+                                // 匹配根路径（如 "http://localhost:5001/" 或 "http://172.16.14.233:5001/"）
+                                (text.match(/http:\/\/[^\/]+:\d+\/"$/) !== null);
 
     // 检查是否为需要特殊jq处理的端点
     const isSshdInstall = text.includes('/api/ssh/sshd-install');
@@ -6325,6 +6373,13 @@ window.copyCurlCommandFromData = function(element) {
 function showUsageExamples() {
     const modal = document.getElementById('usage-examples-modal');
     if (modal) {
+        // 获取当前服务器地址
+        const serverUrl = window.location.origin || 'http://172.16.14.233:5001';
+
+        // 替换弹框中的硬编码IP为动态服务器地址
+        const currentContent = modal.innerHTML;
+        const updatedContent = currentContent.replace(/172\.16\.14\.233:5001/g, serverUrl);
+        modal.innerHTML = updatedContent;
         modal.style.display = 'flex';
     }
 }
