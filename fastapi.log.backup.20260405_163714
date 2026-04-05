@@ -1,0 +1,607 @@
+INFO:     Started server process [68551]
+INFO:     Waiting for application startup.
+INFO:app_fastapi_full:============================================================
+INFO:app_fastapi_full:Application startup
+INFO:app_fastapi_full:============================================================
+INFO:core.usb_monitor:[USBMonitor] ✓ pyudev可用，将使用udev模式（高性能，事件驱动）
+INFO:paramiko.transport:Connected (version 2.0, client OpenSSH_8.9p1)
+INFO:paramiko.transport:Authentication (publickey) successful!
+INFO:core.ssh:[SSH] Connected to 172.16.14.233
+INFO:core.usb_monitor:[USBMonitor] 初始设备列表: ['RK3572GMS1', 'RK3572GMS2']
+INFO:core.usb_monitor:[USBMonitor] 启动udev模式监控（高性能，实时响应）
+INFO:core.usb_monitor:[USBMonitor] Udev monitor loop started
+INFO:core.usb_monitor:[USBMonitor] USB monitor started in udev mode
+INFO:app_fastapi_full:USB monitor started successfully
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:5001 (Press CTRL+C to quit)
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:64693 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64693 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33356 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     172.16.14.68:64693 - "GET /static/css/style.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:53080 - "GET /static/js/app.js?v=20260404-24 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63223 - "GET /static/vendor/xterm/xterm-addon-fit.min.js HTTP/1.1" 200 OK
+INFO:     172.16.14.68:57308 - "GET /static/vendor/xterm/xterm.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:58019 - "GET /static/vendor/xterm/xterm.min.js HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:58019 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:53080 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51861 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     172.16.14.68:53080 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:     connection open
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:58019 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:58019 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:58019 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:26:31.227590'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:53080 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:53080 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:53080 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:58019 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:58019 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33370 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:33376 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:58019 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33382 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     172.16.14.68:58019 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:     172.16.14.68:53080 - "GET /static/vendor/xterm/xterm.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:63223 - "GET /static/vendor/xterm/xterm-addon-fit.min.js HTTP/1.1" 200 OK
+INFO:     172.16.14.68:58019 - "GET /static/css/style.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64693 - "GET /static/js/app.js?v=20260404-24 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:57308 - "GET /static/vendor/xterm/xterm.min.js HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:57308 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64693 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:53014 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:64693 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:57308 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33386 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     172.16.14.68:57308 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:57308 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:26:34.978334'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:64693 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:64693 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:64693 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:57308 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:57308 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:57308 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:57308 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     172.16.14.68:57308 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:     172.16.14.68:64693 - "GET /static/vendor/xterm/xterm.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:57308 - "GET /static/css/style.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51015 - "GET /static/vendor/xterm/xterm.min.js HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50770 - "GET /static/js/app.js?v=20260404-24 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:57507 - "GET /static/vendor/xterm/xterm-addon-fit.min.js HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:50770 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51015 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51015 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:50770 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50684 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:50770 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50770 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:26:40.569779'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:51015 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50770 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:50770 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:51015 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:51015 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:51015 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:51015 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:51015 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51015 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:     172.16.14.68:55088 - "GET /static/js/app.js?v=20260404-24 HTTP/1.1" 304 Not Modified
+INFO:     172.16.14.68:51015 - "GET /static/css/style.css?v=20260324-3 HTTP/1.1" 304 Not Modified
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:51015 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:55088 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51053 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:55088 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:51015 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51015 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:26:47.012012'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:51015 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51015 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:51015 - "GET /api/usbip/status HTTP/1.1" 200 OK
+ERROR:core.ssh:[SSH] Command execution error: 
+INFO:app_fastapi_full:[VPN Status] www.google.com: disconnected
+INFO:     172.16.14.68:55088 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:51015 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:55088 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     172.16.14.68:55088 - "GET /static/css/style.css?v=20260324-3 HTTP/1.1" 304 Not Modified
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     172.16.14.68:55088 - "GET /static/vendor/xterm/xterm.js.map HTTP/1.1" 404 Not Found
+INFO:     172.16.14.68:55088 - "GET /static/vendor/xterm/xterm-addon-fit.js.map HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     127.0.0.1:46726 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:55088 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:59335 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:58702 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49941 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:49941 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     172.16.14.68:49941 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:     172.16.14.68:49941 - "GET /static/css/style.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:58857 - "GET /static/vendor/xterm/xterm.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:52579 - "GET /static/vendor/xterm/xterm.min.js HTTP/1.1" 200 OK
+INFO:     172.16.14.68:61029 - "GET /static/vendor/xterm/xterm-addon-fit.min.js HTTP/1.1" 200 OK
+INFO:     172.16.14.68:61007 - "GET /static/js/app.js?v=20260404-24 HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:61007 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:52579 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:58997 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:52579 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:61007 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:61007 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:32:44.689391'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:52579 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:52579 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:52579 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: disconnected
+INFO:     172.16.14.68:61007 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:52579 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:61007 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:61007 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:     172.16.14.68:61007 - "GET / HTTP/1.1" 200 OK
+INFO:app_fastapi_full:WebSocket client disconnected: hcq@172.16.14.68
+INFO:     connection closed
+INFO:     172.16.14.68:61007 - "GET /static/css/style.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:61412 - "GET /static/vendor/xterm/xterm.css?v=20260324-3 HTTP/1.1" 200 OK
+INFO:     172.16.14.68:57215 - "GET /static/vendor/xterm/xterm-addon-fit.min.js HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51774 - "GET /static/vendor/xterm/xterm.min.js HTTP/1.1" 200 OK
+INFO:     172.16.14.68:56548 - "GET /static/js/app.js?v=20260404-24 HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[ClientInfo] GET - IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:56548 - "GET /api/users/current HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51774 - "GET /api/config/read HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51774 - "GET /api/devices/list HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status HTTP/1.1" 200 OK
+INFO:     172.16.14.68:50208 - "WebSocket /api/system/websocket/hcq%40172.16.14.68" [accepted]
+INFO:app_fastapi_full:WebSocket client connected: hcq@172.16.14.68
+INFO:     connection open
+INFO:     172.16.14.68:56548 - "GET /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:56548 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:app_fastapi_full:[State] Updated hcq@172.16.14.68: ['client_ip', 'client_username', 'last_seen'] = {'client_ip': '172.16.14.68', 'client_username': 'hcq', 'last_seen': '2026-04-05T16:33:44.915876'}
+INFO:app_fastapi_full:[ClientInfo] IP: 172.16.14.68 | Username: hcq | ClientID: hcq@172.16.14.68
+INFO:     172.16.14.68:51774 - "POST /api/client-info HTTP/1.1" 200 OK
+INFO:     172.16.14.68:51774 - "POST /api/users/detect HTTP/1.1" 422 Unprocessable Entity
+INFO:app_fastapi_full:[USB/IP Status] client_id=hcq@172.16.14.68, connected=False, device_count=0
+INFO:     172.16.14.68:51774 - "GET /api/usbip/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     172.16.14.68:56548 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:core.vnc:[VNC] Starting local VNC services...
+INFO:     172.16.14.68:56548 - "POST /api/desktop/vnc/start HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[VPN Status] www.google.com: connected
+INFO:     127.0.0.1:32948 - "GET /api/vpn/status HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:56548 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:57149 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60575 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK
+INFO:app_fastapi_full:[Status] Client hcq@172.16.14.68 running=False
+INFO:     172.16.14.68:60309 - "GET /api/test/status?logs=false HTTP/1.1" 200 OK

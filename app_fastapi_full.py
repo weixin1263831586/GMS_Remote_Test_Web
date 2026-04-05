@@ -5298,20 +5298,25 @@ async def get_vpn_status():
             if isinstance(vpn_target, list):
                 vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
 
-            output, error, code = ssh_manager.execute_command(
-                ssh,
-                f"ping -c 1 -W 2 {vpn_target} 2>&1",
-                timeout=3
-            )
+            # 多次ping测试，只要一次成功即认为已连接
+            max_attempts = 2
+            for attempt in range(max_attempts):
+                output, error, code = ssh_manager.execute_command(
+                    ssh,
+                    f"ping -c 1 -W 2 {vpn_target} 2>&1",
+                    timeout=5
+                )
 
+                # 检查ping结果（成功则立即返回）
+                if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
+                    ssh_manager.return_connection(ssh)
+                    logger.info(f"[VPN Status] {vpn_target}: connected (attempt {attempt + 1})")
+                    return JSONResponse(content={"success": True, "connected": True})
+
+            # 所有尝试都失败
             ssh_manager.return_connection(ssh)
-
-            if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
-                logger.info(f"[VPN Status] {vpn_target}: connected")
-                return JSONResponse(content={"success": True, "connected": True})
-            else:
-                logger.info(f"[VPN Status] {vpn_target}: disconnected")
-                return JSONResponse(content={"success": True, "connected": False})
+            logger.info(f"[VPN Status] {vpn_target}: disconnected (0/{max_attempts} successful)")
+            return JSONResponse(content={"success": True, "connected": False})
 
         except Exception as e:
             ssh_manager.return_connection(ssh)
