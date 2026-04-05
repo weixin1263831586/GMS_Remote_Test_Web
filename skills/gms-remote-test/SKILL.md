@@ -1,16 +1,16 @@
 ---
 name: gms-remote-test
-version: "2026.04.01-100000"
+version: "2026.04.05-100000"
 description: >-
   GMS Remote Test API Skill for FastAPI (Port 5001).
   Manage remote Android devices, run CTS/VTS/GTS tests via USB/IP or direct connection,
   and retrieve test results with real-time log streaming.
-  **New**: Parallel device operations (75-85% faster), client info endpoints, route diagnostics.
+  **New**: Improved API naming, desktop VNC management, parallel device operations (75-85% faster).
 ---
 
 # GMS Remote Test API Automation
 
-Interact with the **GMS Auto Test FastAPI server (port 5001)** to remotely manage Android devices, run compatibility tests (CTS/VTS/GTS), and retrieve detailed test results.
+Interact with **GMS Auto Test FastAPI server (port 5001)** to remotely manage Android devices, run compatibility tests (CTS/VTS/GTS), and retrieve detailed test results.
 
 ## Quick Reference
 
@@ -18,22 +18,23 @@ Interact with the **GMS Auto Test FastAPI server (port 5001)** to remotely manag
 |------|-------|
 | **Server URL** | `http://172.16.14.233:5001` |
 | **Interactive Docs** | http://172.16.14.233:5001/docs |
-| **Skill Version** | `2026.04.01-100000` |
+| **API Help** | http://172.16.14.233:5001/api/help |
+| **Skill Version** | `2026.04.05-100000` |
 | **Performance** | 75-85% faster multi-device operations (parallel execution) |
 
 ---
 
-## What's New (2026.04.01)
+## What's New (2026.04.05)
 
-### Performance Optimizations
-- ✅ **Parallel device operations** - 75-85% faster for multi-device tasks
-- ✅ **Optimized device info collection** - 83% reduction in SSH calls
-- ✅ **Cached XML analysis** - 90% faster for repeated report parsing
+### API Naming Improvements
+- ✅ **Config endpoints renamed**: `/api/config` → `/api/config/read` and `/api/config/update`
+- ✅ **Desktop VNC endpoints unified**: `/api/vnc/*` → `/api/desktop/vnc/*`
+- ✅ **Backward compatibility maintained**: Legacy endpoints still work
 
-### New Endpoints
-- ✅ `GET/POST /api/client-info` - Client information management
-- ✅ `POST /api/client-info/detect` - Auto-detect client username
-- ✅ `POST /api/ssh/route/ping` - Network connectivity diagnostics
+### Updated Features
+- ✅ Desktop VNC management with host validation
+- ✅ Parallel device operations (75-85% faster)
+- ✅ Improved client information tracking
 
 ---
 
@@ -43,26 +44,23 @@ Interact with the **GMS Auto Test FastAPI server (port 5001)** to remotely manag
 
 #### List All Connected Devices
 ```bash
-curl -s http://172.16.14.233:5001/api/devices | jq '.'
+curl -s http://172.16.14.233:5001/api/devices/list | jq '.'
 ```
 
 **Response format:**
 ```json
-[
-  {
-    "device_id": "RK3588-DEVICE",
-    "model": "Rockchip RK3588",
-    "state": "device"
-  }
-]
+{
+  "devices": [
+    {
+      "device_id": "RK3588-DEVICE",
+      "model": "Rockchip RK3588",
+      "state": "device"
+    }
+  ]
+}
 ```
 
-#### Get Device Details (Optimized - Parallel)
-```bash
-curl -s "http://172.16.14.233:5001/api/devices/details/RK3588-DEVICE" | jq '.'
-```
-
-#### Get Device Info (New - Parallel Execution)
+#### Get Device Info (Parallel Execution)
 ```bash
 curl -sX POST http://172.16.14.233:5001/api/devices/info \
   -H "Content-Type: application/json" \
@@ -71,18 +69,40 @@ curl -sX POST http://172.16.14.233:5001/api/devices/info \
 
 **Performance**: 10 devices in 10-15 seconds (vs 60-90 seconds before)
 
-#### Check Device Lock Status (New - Parallel)
+---
+
+### 2. Desktop VNC Management
+
+#### Start Desktop VNC
 ```bash
-curl -sX POST http://172.16.14.233:5001/api/devices/lock-status \
+curl -sX POST http://172.16.14.233:5001/api/desktop/vnc/start \
   -H "Content-Type: application/json" \
-  -d '{"devices": ["DEVICE-1", "DEVICE-2"]}' | jq '.'
+  -d '{
+    "host": "172.16.14.233",
+    "username": "hcq"
+  }' | jq '.'
+```
+
+#### Check Desktop VNC Status
+```bash
+curl -s http://172.16.14.233:5001/api/desktop/vnc/status | jq '.'
+```
+
+#### Stop Desktop VNC
+```bash
+curl -sX POST http://172.16.14.233:5001/api/desktop/vnc/stop | jq '.'
+```
+
+#### Validate Desktop Host
+```bash
+curl -sX POST http://172.16.14.233:5001/api/desktop/validate \
+  -H "Content-Type: application/json" \
+  -d '{"host": "172.16.14.233"}' | jq '.'
 ```
 
 ---
 
-### 2. USB/IP Remote Connection
-
-Connect to Android devices hosted on a Windows machine via USB/IP tunneling.
+### 3. USB/IP Remote Connection
 
 #### Start USB/IP Connection
 ```bash
@@ -122,7 +142,7 @@ curl -s http://172.16.14.233:5001/api/usbip/status | jq '.'
 
 ---
 
-### 3. Test Execution
+### 4. Test Execution
 
 #### Start a Test
 ```bash
@@ -175,7 +195,7 @@ curl -s http://172.16.14.233:5001/api/test/status | jq '.'
 
 ---
 
-### 4. Real-Time Log Streaming
+### 5. Real-Time Log Streaming
 
 #### Stream Test Logs (Plain Text)
 ```bash
@@ -193,18 +213,18 @@ Example output:
 === CtsPermissionTestCases ===
 ```
 
-#### Get Latest Logs (JSON)
+#### Download Current Log
 ```bash
-curl -s http://172.16.14.233:5001/api/test/logs/latest | jq '.'
+curl -s http://172.16.14.233:5001/api/test/logs/download -o test.log
 ```
 
 ---
 
-### 5. Test Reports & Results
+### 6. Test Reports & Results
 
 #### List All Reports
 ```bash
-curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[]'
+curl -s http://172.16.14.233:5001/api/reports/list | jq '.'
 ```
 
 **Response:**
@@ -212,7 +232,7 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[]'
 {
   "reports": [
     {
-      "timestamp": "2026-03-31_10-39-00",
+      "timestamp": "2026-04-05_10-39-00",
       "client_id": "hcq@ats-041055-64g",
       "test_type": "CTS",
       "result": "PASS"
@@ -223,31 +243,59 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[]'
 
 #### Get Report Files
 ```bash
-curl -s "http://172.16.14.233:5001/api/reports/files/2026-03-31_10-39-00" | jq '.'
+curl -s "http://172.16.14.233:5001/api/reports/files/2026-04-05_10-39-00" | jq '.'
+```
+
+#### Analyze Report
+```bash
+curl -s "http://172.16.14.233:5001/api/reports/analyze/2026-04-05_10-39-00" | jq '.'
 ```
 
 #### Download Report File
 ```bash
 # Download specific report file
-curl -O "http://172.16.14.233:5001/api/reports/download/2026-03-31_10-39-00/report.xml"
+curl -O "http://172.16.14.233:5001/api/reports/download/2026-04-05_10-39-00/report.xml"
 ```
 
 ---
 
-### 6. Device Operations
+### 7. Device Operations
 
 #### Lock Bootloader
 ```bash
-curl -sX POST http://172.16.14.233:5001/api/devices/lock \
+curl -sX POST http://172.16.14.233:5001/api/devices/bootloader-lock \
   -H "Content-Type: application/json" \
   -d '{"device_id": "RK3588-DEVICE"}' | jq '.'
 ```
 
 #### Unlock Bootloader
 ```bash
-curl -sX POST http://172.16.14.233:5001/api/devices/unlock \
+curl -sX POST http://172.16.14.233:5001/api/devices/bootloader-unlock \
   -H "Content-Type: application/json" \
   -d '{"device_id": "RK3588-DEVICE"}' | jq '.'
+```
+
+#### Check Bootloader Status
+```bash
+curl -sX POST http://172.16.14.233:5001/api/devices/bootloader-status \
+  -H "Content-Type: application/json" \
+  -d '{"device_id": "RK3588-DEVICE"}' | jq '.'
+```
+
+#### Reboot Devices (Parallel)
+```bash
+curl -sX POST http://172.16.14.233:5001/api/devices/reboot \
+  -H "Content-Type: application/json" \
+  -d '{"devices": ["DEVICE-1", "DEVICE-2"]}' | jq '.'
+```
+
+**Performance**: 10 devices in 3-5 seconds (vs 20-60 seconds before)
+
+#### Remount as Read-Write (Parallel)
+```bash
+curl -sX POST http://172.16.14.233:5001/api/devices/remount \
+  -H "Content-Type: application/json" \
+  -d '{"devices": ["DEVICE-1", "DEVICE-2"]}' | jq '.'
 ```
 
 #### Connect to WiFi
@@ -261,25 +309,9 @@ curl -sX POST http://172.16.14.233:5001/api/devices/connect-wifi \
   }' | jq '.'
 ```
 
-#### Remount as Read-Write (Optimized - Parallel)
-```bash
-curl -sX POST http://172.16.14.233:5001/api/devices/remount \
-  -H "Content-Type: application/json" \
-  -d '{"devices": ["DEVICE-1", "DEVICE-2"]}' | jq '.'
-```
-
-#### Reboot Devices (Optimized - Parallel)
-```bash
-curl -sX POST http://172.16.14.233:5001/api/devices/reboot \
-  -H "Content-Type: application/json" \
-  -d '{"devices": ["DEVICE-1", "DEVICE-2"]}' | jq '.'
-```
-
-**Performance**: 10 devices in 3-5 seconds (vs 20-60 seconds before)
-
 ---
 
-### 7. Network Diagnostics (New)
+### 8. Network Diagnostics
 
 #### Test Client-Host Connectivity
 ```bash
@@ -321,7 +353,7 @@ curl -sX POST http://172.16.14.233:5001/api/ssh/route/ping \
 
 ---
 
-### 8. Client Information (New)
+### 9. Client Information
 
 #### Get Client IP
 ```bash
@@ -358,15 +390,17 @@ curl -sX POST http://172.16.14.233:5001/api/client-info/detect \
 
 ---
 
-### 9. Configuration Management
+### 10. Configuration Management
 
 #### Get Current Config
 ```bash
-curl -s http://172.16.14.233:5001/api/config | jq '.'
+# New endpoint
+curl -s http://172.16.14.233:5001/api/config/read | jq '.'
 ```
 
 #### Update Dynamic Config
 ```bash
+# New endpoint
 curl -sX POST http://172.16.14.233:5001/api/config/update \
   -H "Content-Type: application/json" \
   -d '{
@@ -375,7 +409,95 @@ curl -sX POST http://172.16.14.233:5001/api/config/update \
   }' | jq '.'
 ```
 
+**Note:** Legacy `/api/config` endpoints (GET/POST) still work for backward compatibility.
+
 **Updatable fields:** `device_host`, `device_pswd`, `client_hosts`, `client_ssh_credentials`, `ubuntu_user`, `ubuntu_host`, `ubuntu_pswd`, `local_server`, `suites_path`, `usbip_vid_pid`
+
+---
+
+### 11. VPN Management
+
+#### Connect to VPN
+```bash
+curl -sX POST http://172.16.14.233:5001/api/vpn/connect | jq '.'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "VPN已连接",
+  "connected": true
+}
+```
+
+#### Disconnect VPN
+```bash
+curl -sX POST http://172.16.14.233:5001/api/vpn/disconnect | jq '.'
+```
+
+#### Check VPN Status
+```bash
+curl -s http://172.16.14.233:5001/api/vpn/status | jq '.'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "connected": true,
+  "server": "vpn.example.com"
+}
+```
+
+---
+
+### 12. File Management
+
+#### Upload File
+```bash
+curl -sX POST http://172.16.14.233:5001/api/files/upload \
+  -F "file=@/path/to/file.txt" \
+  -F "file_path=/tmp" | jq '.'
+```
+
+#### List Files
+```bash
+curl -sX POST http://172.16.14.233:5001/api/files/list \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/tmp"}' | jq '.'
+```
+
+#### Upload Files for Installation
+```bash
+curl -sX POST http://172.16.14.233:5001/api/files/install \
+  -F "files=@/path/to/app.apk" | jq '.'
+```
+
+---
+
+### 13. Firmware Burning
+
+#### Burn Firmware to Device
+```bash
+curl -sX POST http://172.16.14.233:5001/api/burn/firmware \
+  -F "firmware=@/path/to/firmware.img" \
+  -F "device_id=DEVICE-123" | jq '.'
+```
+
+#### Burn GSI Image
+```bash
+curl -sX POST http://172.16.14.233:5001/api/burn/gsi \
+  -F "gsi=@/path/to/system_gsi.img" \
+  -F "device_id=DEVICE-123" | jq '.'
+```
+
+#### Burn Serial Number
+```bash
+curl -sX POST http://172.16.14.233:5001/api/burn/serial \
+  -H "Content-Type: application/json" \
+  -d '{"device_id": "DEVICE-123", "serial": "RK3588-SN001"}' | jq '.'
+```
 
 ---
 
@@ -427,7 +549,7 @@ echo
 
 # 2. Verify device is connected
 echo "📱 Checking devices..."
-curl -s http://172.16.14.233:5001/api/devices | jq '.'
+curl -s http://172.16.14.233:5001/api/devices/list | jq '.'
 echo
 
 # 3. Start test
@@ -458,6 +580,114 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 
 ---
 
+## API Endpoints Summary
+
+### System
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/system/health` | GET | Health check |
+| `/api/docs` | GET | API documentation |
+| `/api/help` | GET | API help |
+
+### Device Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/devices/list` | GET | List connected devices |
+| `/api/devices/info` | POST | Get device info (parallel) |
+| `/api/devices/reboot` | POST | Reboot devices (parallel) |
+| `/api/devices/remount` | POST | Remount RW (parallel) |
+| `/api/devices/bootloader-lock` | POST | Lock bootloader |
+| `/api/devices/bootloader-unlock` | POST | Unlock bootloader |
+| `/api/devices/bootloader-status` | POST | Check bootloader status |
+| `/api/devices/connect-wifi` | POST | Connect to WiFi |
+| `/api/devices/management` | GET | Device management page |
+| `/api/devices/user-locked` | GET | List user locks |
+
+### Desktop VNC
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/desktop/vnc/start` | POST | Start VNC |
+| `/api/desktop/vnc/stop` | POST | Stop VNC |
+| `/api/desktop/vnc/status` | GET | Check VNC status |
+| `/api/desktop/validate` | POST | Validate desktop host |
+
+### USB/IP Connection
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/usbip/start` | POST | Start USB/IP connection |
+| `/api/usbip/stop` | POST | Stop USB/IP connection |
+| `/api/usbip/status` | GET | Check USB/IP status |
+| `/api/usbip/auto-install` | POST | Auto-install usbipd |
+
+### Test Execution
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/test/start` | POST | Start a test |
+| `/api/test/stop` | POST | Stop running test |
+| `/api/test/status` | GET | Get test status |
+| `/api/test/logs/stream` | GET | Stream logs (plain text) |
+| `/api/test/logs/download` | GET | Download current log |
+| `/api/test/logs/list` | GET | List test logs |
+| `/api/test/clean` | POST | Clean test logs |
+
+### Reports
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/reports/list` | GET | List all reports |
+| `/api/reports/files/{ts}` | GET | Get report files |
+| `/api/reports/analyze/{ts}` | GET | Analyze report |
+| `/api/reports/download/{ts}` | GET | Download report file |
+| `/api/reports/delete` | DELETE | Delete report |
+
+### Network & Client
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/client-info` | GET | Get client IP |
+| `/api/client-info` | POST | Record client info |
+| `/api/client-info/detect` | POST | Auto-detect username |
+| `/api/ssh/route/ping` | POST | Test connectivity |
+| `/api/ssh/route` | GET | Check SSH route |
+| `/api/ssh/sshd-check` | GET | Check SSH server |
+| `/api/ssh/sshd-install` | POST | Install SSH server |
+
+### Configuration
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/config/read` | GET | Get current config |
+| `/api/config/update` | POST | Update dynamic config |
+| `/api/config/validate` | GET | Validate config |
+| `/api/config/values` | GET | Get config values |
+
+### VPN Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/vpn/connect` | POST | Connect to VPN |
+| `/api/vpn/disconnect` | POST | Disconnect VPN |
+| `/api/vpn/status` | GET | Check VPN status |
+
+### File Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/files/upload` | POST | Upload file |
+| `/api/files/install` | POST | Upload files for install |
+| `/api/files/progress` | GET | Get upload progress |
+| `/api/files/list` | POST | List files |
+
+### Firmware Burning
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/burn/firmware` | POST | Burn firmware |
+| `/api/burn/gsi` | POST | Burn GSI image |
+| `/api/burn/serial` | POST | Burn serial number |
+
+### Legacy Endpoints (Backward Compatible)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/config` | GET | Get config (legacy) |
+| `/api/config` | POST | Update config (legacy) |
+
+---
+
 ## Error Handling
 
 All endpoints return JSON with a `success` field:
@@ -484,139 +714,15 @@ fi
 | Operation | Before | After | Improvement |
 |-----------|--------|-------|-------------|
 | Device Info | 60-90s | 10-15s | **83% faster** |
-| Lock Status | 20-30s | 3-5s | **85% faster** |
 | Reboot | 20-30s | 3-5s | **85% faster** |
 | Remount | 40-60s | 10-15s | **75% faster** |
 
 ### Key Optimizations
 
 1. **Parallel Execution** - All device operations run concurrently
-2. **Optimized SSH Calls** - Device info: 6 calls → 1 call (83% reduction)
-3. **Smart Caching** - XML analysis cached for 90% faster repeat access
-4. **Connection Pooling** - Reused SSH connections with context managers
-
----
-
-## Helper Script
-
-Source the helper script for convenient CLI access:
-
-```bash
-# Load helper functions
-source /home/hcq/.claude/skills/gms-remote-test/scripts/gms-remote-test.sh
-
-# Available commands:
-gms-rt-help           # Show help
-gms-rt-status         # Check server status
-gms-rt-devices        # List devices
-gms-rt-usbip-start    # Start USB/IP connection
-gms-rt-usbip-stop     # Stop USB/IP connection
-gms-rt-test-start     # Start a test
-gms-rt-test-stop      # Stop running test
-gms-rt-test-monitor   # Monitor test progress
-gms-rt-stream-logs    # Stream logs in real-time
-gms-rt-latest-report  # Get latest report
-```
-
----
-
-### 10. VPN Management (New)
-
-#### Connect to Default VPN
-```bash
-curl -sX POST http://172.16.14.233:5001/api/vpn/connect | jq '.'
-```
-
-**No parameters required** - connects to default VPN configuration.
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "VPN已连接",
-  "connected": true
-}
-```
-
-#### Disconnect VPN
-```bash
-curl -sX POST http://172.16.14.233:5001/api/vpn/disconnect | jq '.'
-```
-
-#### Check VPN Status
-```bash
-curl -s http://172.16.14.233:5001/api/vpn/status | jq '.'
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "connected": true,
-  "server": "vpn.example.com"
-}
-```
-
----
-
-## API Endpoints Summary
-
-### Device Management
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/devices` | GET | List connected devices |
-| `/api/devices/details/{id}` | GET | Get device details |
-| `/api/devices/info` | POST | Get device info (parallel) |
-| `/api/devices/lock-status` | POST | Check lock status (parallel) |
-| `/api/devices/reboot` | POST | Reboot devices (parallel) |
-| `/api/devices/remount` | POST | Remount RW (parallel) |
-| `/api/devices/lock` | POST | Lock bootloader |
-| `/api/devices/unlock` | POST | Unlock bootloader |
-| `/api/devices/connect-wifi` | POST | Connect to WiFi |
-
-### USB/IP Connection
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/usbip/start` | POST | Start USB/IP connection |
-| `/api/usbip/stop` | POST | Stop USB/IP connection |
-| `/api/usbip/status` | GET | Check USB/IP status |
-
-### Test Execution
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/test/start` | POST | Start a test |
-| `/api/test/stop` | POST | Stop running test |
-| `/api/test/status` | GET | Get test status |
-| `/api/test/logs/stream` | GET | Stream logs (plain text) |
-| `/api/test/logs/latest` | GET | Get latest logs (JSON) |
-
-### Reports
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/reports/list` | GET | List all reports |
-| `/api/reports/files/{ts}` | GET | Get report files |
-| `/api/reports/download/{ts}/{filename}` | GET | Download report file |
-
-### Network & Client
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/client-info` | GET | Get client IP |
-| `/api/client-info` | POST | Record client info |
-| `/api/client-info/detect` | POST | Auto-detect username |
-| `/api/ssh/route/ping` | POST | Test connectivity |
-
-### Configuration
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/config` | GET | Get current config |
-| `/api/config/update` | POST | Update dynamic config |
-
-### VPN Management
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/vpn/connect` | POST | Connect to VPN (no params needed) |
-| `/api/vpn/disconnect` | POST | Disconnect VPN |
-| `/api/vpn/status` | GET | Check VPN status |
+2. **Optimized SSH Calls** - Reduced redundant connections
+3. **Smart Caching** - Report analysis cached for faster repeat access
+4. **Connection Pooling** - Reused SSH connections
 
 ---
 
@@ -629,6 +735,7 @@ curl -s http://172.16.14.233:5001/api/vpn/status | jq '.'
 5. **Result Analysis**: Reports are stored with timestamps and accessible via `/api/reports/list`.
 6. **Performance**: Use batch device operations for 75-85% performance improvement.
 7. **Network Diagnostics**: Use `/api/ssh/route/ping` before testing to verify connectivity.
+8. **Config Management**: Use new `/api/config/read` and `/api/config/update` endpoints.
 
 ---
 
@@ -637,3 +744,5 @@ curl -s http://172.16.14.233:5001/api/vpn/status | jq '.'
 For complete API documentation with try-it-out functionality:
 
 **http://172.16.14.233:5001/docs** (Swagger UI)
+
+**http://172.16.14.233:5001/api/help** (API Help)
