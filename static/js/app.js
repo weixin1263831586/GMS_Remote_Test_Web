@@ -158,41 +158,54 @@ async function callDeviceApi(endpoint, additionalData = {}) {
 
 // ==================== Initialization ====================
 document.addEventListener('DOMContentLoaded', async () => {
-    // 先设置 client username,再初始化 Socket.IO
-    try {
-        // 检测客户端用户名
-        const detectResponse = await fetch('/api/users/detect', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'}
-        });
-        if (detectResponse.ok) {
-            const detectData = await detectResponse.json();
-            debugLog('[Init] Detected client username:', detectData.username);
-        }
-    } catch (error) {
-        console.warn('[Init] Failed to detect client username:', error);
-    }
-
     initSocket();
     initEventListeners();
 
-    // 立即检查USB/IP和VPN状态，避免按钮显示错误
-    await Promise.all([
-        checkUsbipStatus(),
-        checkVpnStatus()
-    ]);
-
+    // 立即加载配置
     await loadConfig();
     loadDevices();
     initDragDrop();
     await checkInitialTestStatus();
     startStatusPolling();
+
+    // 延迟执行耗时操作，不阻塞页面加载
+    setTimeout(async () => {
+        // 检测客户端用户名（设置短超时）
+        try {
+            const detectResponse = await Promise.race([
+                fetch('/api/users/detect', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+            ]);
+            if (detectResponse.ok) {
+                const detectData = await detectResponse.json();
+                debugLog('[Init] Detected client username:', detectData.username);
+            }
+        } catch (error) {
+            console.warn('[Init] Failed to detect client username:', error);
+        }
+
+        // 检查状态
+        await Promise.all([
+            checkUsbipStatus(),
+            checkVpnStatus()
+        ]);
+
+        // 自动启动 VNC 服务
+        try {
+            await initAndStartVnc();
+        } catch (error) {
+            console.warn('[Init] Failed to auto-start VNC:', error);
+        }
+    }, 500);
 });
 
 // ==================== Configuration ====================
 async function loadConfig() {
     try {
-        const config = await apiCall('/api/config', 'GET');
+        const config = await apiCall('/api/config/read', 'GET');
         state.config = config;
     } catch (error) {
         console.error('Failed to load config:', error);
@@ -534,7 +547,7 @@ function onDeviceHostConfirm() {
     addLogEntry(`设备主机地址已更新: ${deviceHost}`, 'info');
     showToast('设备主机地址已更新', 'success');
     // Save to backend
-    apiCall('/api/config', 'POST', { device_host: deviceHost });
+    apiCall('/api/config/update', 'POST', { device_host: deviceHost });
 }
 
 function onLocalServerConfirm() {
@@ -542,7 +555,7 @@ function onLocalServerConfirm() {
     addLogEntry(`本地主机地址已更新: ${localServer}`, 'info');
     showToast('本地主机地址已更新', 'success');
     // Save to backend
-    apiCall('/api/config', 'POST', { local_server: localServer });
+    apiCall('/api/config/update', 'POST', { local_server: localServer });
 }
 
 // ==================== Drag and Drop ====================
@@ -1209,7 +1222,7 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
 
 async function initAndStartVnc() {
     try {
-        const result = await apiCall('/api/vnc/start', 'POST');
+        const result = await apiCall('/api/desktop/vnc/start', 'POST');
         addLogEntry(result.message || 'VNC 服务已就绪', 'info');
         return result;
     } catch (error) {
@@ -1222,7 +1235,7 @@ async function initAndStartVnc() {
 async function startDefaultHostVNC(defaultHost, defaultPassword, vncPassword, fallbackUrl) {
     try {
         showToast('正在启动默认主机VNC服务...', 'info');
-        const result = await apiCall('/api/vnc/start-desktop', 'POST', {
+        const result = await apiCall('/api/desktop/vnc/start', 'POST', {
             host: defaultHost,
             password: defaultPassword,
             vnc_password: vncPassword || ''
@@ -1561,7 +1574,7 @@ async function checkRouting() {
 
     // 获取配置中的默认值
     try {
-        const config = await apiCall('/api/config', 'GET');
+        const config = await apiCall('/api/config/read', 'GET');
         if (config.ubuntu_host) {
             const testHostIp = document.getElementById('test-host-ip');
             testHostIp.value = config.ubuntu_host.split('@').pop(); // 提取IP部分
@@ -1871,7 +1884,7 @@ async function handleUploadFile() {
         });
 
         // Start upload
-        xhr.open('POST', '/api/upload/file');
+        xhr.open('POST', '/api/files/upload');
         xhr.send(formData);
     } catch (error) {
         addLogEntry('文件上传失败: ' + error.message, 'error');
@@ -2295,7 +2308,7 @@ async function downloadTestLog() {
 
             // 然后触发下载
             const link = document.createElement('a');
-            link.href = '/api/test/logs/download';
+            link.href = '/api/test/logs/current';
             link.download = saveResult.filename;
             document.body.appendChild(link);
             link.click();
@@ -4959,7 +4972,10 @@ window.resetReportAnalysis = resetReportAnalysis;
  */
 const API_CATEGORIES = {
     '/api/system/health': 'health',
-    '/api/config': 'config',
+    '/api/config/read': 'config',
+    '/api/config/update': 'config',
+    '/api/config/validate': 'config',
+    '/api/config/values': 'config',
     '/api/users': 'users',
     '/api/devices/list': 'device',
     '/api/devices/bootloader-lock': 'device',
@@ -4980,7 +4996,7 @@ const API_CATEGORIES = {
     '/api/ssh': 'ssh',
     '/api/adb-forward': 'usbip',
     '/api/usbip': 'usbip',
-    '/api/upload': 'upload',
+    '/api/files': 'file',
     '/api/burn': 'burn',
     '/api/files': 'file',
     '/api/system/websocket/': 'health'
@@ -5013,7 +5029,6 @@ function getCategoryName(category) {
         'ssh': '🔑 SSH管理',
         'desktop': '🖥️ 主机桌面',
         'usbip': '📡 USB/IP',
-        'upload': '📤 文件上传',
         'burn': '🔥 固件烧写',
         'file': '📁 文件管理',
         'health': '💚 系统管理',
@@ -5037,10 +5052,9 @@ function getCategoryOrder(category) {
         'ssh': 7,
         'desktop': 8,
         'usbip': 9,
-        'upload': 10,
-        'burn': 11,
-        'file': 12,
-        'health': 14,
+        'burn': 10,
+        'file': 11,
+        'health': 13,
         'other': 999
     };
     return order[category] || 999;
@@ -5393,14 +5407,23 @@ const API_DETAILS_MAP = {
         response: '{ "source_code": "...", "analysis": "..." }',
         usage: '测试失败时分析源代码找出原因'
     },
-    '/api/test/logs/download': {
-        title: '下载日志',
-        description: '下载测试日志文件',
+    '/api/test/logs/current': {
+        title: '下载当前日志',
+        description: '下载当前单个测试日志文件',
+        method: 'GET',
+        params: [],
+        response: '日志文件下载 (.log格式)',
+        usage: '快速下载当前正在运行的测试日志'
+    },
+    '/api/test/logs/batch': {
+        title: '批量下载日志',
+        description: '批量下载多个测试日志文件（ZIP压缩包）',
+        method: 'POST',
         params: [
-            { name: 'log_type', type: 'string', required: true, desc: '日志类型: console|result' }
+            { name: 'files', type: 'array', required: true, desc: '日志文件路径数组' }
         ],
-        response: '日志文件下载',
-        usage: '下载控制台日志或测试结果日志'
+        response: 'ZIP压缩包下载',
+        usage: '批量下载和归档多个日志文件'
     },
     '/api/test/logs/save-current': {
         title: '保存当前日志',
@@ -5432,28 +5455,40 @@ const API_DETAILS_MAP = {
     },
     '/api/config/validate': {
         title: '验证配置',
-        description: '验证系统配置文件的正确性',
+        description: '验证系统配置文件的正确性（检查必要字段和路径）',
+        method: 'GET',
         params: [],
-        response: '{ "valid": true, "errors": [] }',
+        response: '{ "valid": true, "errors": [], "warnings": [] }',
         usage: '在修改配置后验证配置是否正确'
     },
     '/api/config/values': {
-        title: '获取配置',
-        description: '获取当前系统配置值',
+        title: '获取前端配置',
+        description: '获取前端页面需要的配置（不含敏感信息）',
+        method: 'GET',
         params: [],
-        response: '{ "ubuntu_user": "hcq", "ubuntu_host": "172.16.14.248" }',
-        usage: '查看当前服务器配置信息'
+        response: '{ "success": true, "data": {"script_path": "...", "ubuntu_user": "..."}}',
+        usage: '前端页面初始化使用，不暴露密码'
     },
-    '/api/config': {
+    '/api/config/read': {
+        title: '获取完整配置',
+        description: '获取完整系统配置（包含所有字段和敏感信息）',
+        method: 'GET',
+        params: [],
+        response: '{ "ubuntu_user": "hcq", "ubuntu_host": "172.16.14.233", "ubuntu_pswd": "..."}',
+        usage: '管理员查看完整配置，包含密码等敏感信息'
+    },
+    '/api/config/update': {
         title: '更新配置',
-        description: '更新系统配置',
+        description: '更新系统配置（修改动态配置字段）',
+        method: 'POST',
         params: [
-            { name: 'ubuntu_user', type: 'string', required: true, desc: 'Ubuntu用户名' },
-            { name: 'ubuntu_host', type: 'string', required: true, desc: 'Ubuntu主机地址' },
-            { name: 'ssh_port', type: 'number', required: false, desc: 'SSH端口,默认22' }
+            { name: 'ubuntu_user', type: 'string', required: false, desc: 'Ubuntu用户名' },
+            { name: 'ubuntu_host', type: 'string', required: false, desc: 'Ubuntu主机地址' },
+            { name: 'device_host', type: 'string', required: false, desc: '设备主机地址' },
+            { name: 'local_server', type: 'string', required: false, desc: '本地服务器地址' }
         ],
         response: '{ "success": true, "message": "配置已保存" }',
-        usage: '修改服务器连接配置,需要管理员权限'
+        usage: '修改服务器连接配置'
     },
     '/api/users/current': {
         title: '获取客户端信息',
@@ -5816,18 +5851,21 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "VPN已断开" }',
         usage: '断开当前VPN连接'
     },
-    '/api/upload/file': {
+    '/api/files/upload': {
         title: '上传文件',
         description: '上传文件到服务器',
+        method: 'POST',
         params: [
-            { name: 'file', type: 'file', required: true, desc: '要上传的文件' }
+            { name: 'file', type: 'file', required: true, desc: '要上传的文件' },
+            { name: 'path', type: 'string', required: false, desc: '目标路径' }
         ],
         response: '{ "success": true, "filename": "test.apk" }',
         usage: '上传任意文件到服务器'
     },
-    '/api/upload': {
+    '/api/files/install': {
         title: '上传并安装',
         description: '上传APK并安装到设备',
+        method: 'POST',
         params: [
             { name: 'file', type: 'file', required: true, desc: 'APK文件' },
             { name: 'device_id', type: 'string', required: true, desc: '目标设备序列号' }
@@ -5835,10 +5873,13 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "应用已安装" }',
         usage: '上传并安装APK到指定设备'
     },
-    '/api/upload/progress': {
+    '/api/files/progress': {
         title: '获取上传进度',
         description: '获取当前文件上传进度',
-        params: [],
+        method: 'GET',
+        params: [
+            { name: 'upload_id', type: 'string', required: false, desc: '上传任务ID' }
+        ],
         response: '{ "uploading": false, "progress": 0 }',
         usage: '查看文件上传进度'
     },
