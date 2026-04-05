@@ -5066,15 +5066,15 @@ def _parse_ping_output(ping_output: str, exit_status: int) -> tuple[bool, str]:
             return False, 'N/A'
 
 
-def _generate_route_commands(test_network: str, device_network: str, test_host_ip: str) -> dict:
+def _generate_route_commands(test_network: str, target_network: str, test_host_ip: str) -> dict:
     """生成路由命令
 
     网络拓扑说明：
     - 测试主机: 172.16.14.233 (运行GMS服务)
-    - Android设备: 172.16.21.x (设备网段)
+    - 客户端: 10.10.10.206 (浏览器所在电脑)
     - 测试主机网关: 172.16.14.1
 
-    路由目的：让测试主机能够访问Android设备网段
+    路由目的：让测试主机能够访问客户端网段
     """
     # 推测网关地址（通常是网段的第一个IP）
     test_gateway = '.'.join(test_network.split('.')[:3]) + '.1'
@@ -5082,17 +5082,17 @@ def _generate_route_commands(test_network: str, device_network: str, test_host_i
     return {
         'windows': [
             f"# 在测试主机上执行以下命令:",
-            f"# 添加到Android设备网段的路由（通过测试主机网关）",
-            f"route add {device_network} mask 255.255.255.0 {test_gateway}",
+            f"# 添加到客户端网段的路由（通过测试主机网关）",
+            f"route add {target_network} mask 255.255.255.0 {test_gateway}",
             f"# 检查路由表: route print",
-            f"# 删除路由: route delete {device_network}"
+            f"# 删除路由: route delete {target_network}"
         ],
         'linux': [
             f"# 在测试主机上执行以下命令:",
-            f"# 添加到Android设备网段的路由（通过测试主机网关）",
-            f"sudo ip route add {device_network}/24 via {test_gateway}",
+            f"# 添加到客户端网段的路由（通过测试主机网关）",
+            f"sudo ip route add {target_network}/24 via {test_gateway}",
             f"# 检查路由表: ip route show",
-            f"# 删除路由: sudo ip route del {device_network}/24"
+            f"# 删除路由: sudo ip route del {target_network}/24"
         ]
     }
 
@@ -5156,14 +5156,13 @@ async def ping_route_test(request: Request):
                 reachable = False
                 latency = 'N/A'
 
-        # 准备路由命令（检查测试主机是否需要添加路由到Android设备网段）
+        # 准备路由命令（检查测试主机是否需要添加路由到客户端网段）
         route_commands = None
-        device_network = '172.16.21.0'
-        test_device_different = (test_network != device_network)
+        test_client_different = (test_network != client_network)
 
-        if test_device_different:
-            # 测试主机和Android设备不在同一网段，需要添加路由
-            route_commands = _generate_route_commands(test_network, device_network, test_host_ip)
+        if test_client_different:
+            # 测试主机和客户端不在同一网段，需要添加路由
+            route_commands = _generate_route_commands(test_network, client_network, test_host_ip)
 
         return JSONResponse(content={
             'success': True,
@@ -5174,8 +5173,7 @@ async def ping_route_test(request: Request):
             'client_ip': client_ip,
             'test_network': test_network,
             'client_network': client_network,
-            'device_network': device_network,
-            'test_device_different': test_device_different,
+            'test_client_different': test_client_different,
             'route_commands': route_commands
         })
 
