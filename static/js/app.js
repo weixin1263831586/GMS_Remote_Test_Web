@@ -5269,7 +5269,7 @@ async function loadApiDocs() {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="4" style="padding: 40px; text-align: center; color: var(--danger-color);">
-                        加载失败: ${escapeHtml(e.message)}
+                        ❌ 加载失败: ${escapeHtml(e.message)}
                     </td>
                 </tr>
             `;
@@ -5297,11 +5297,12 @@ function updateApiStats(apis) {
 }
 
 // ==================== 常量定义 ====================
-// API表格列宽配置
+// API表格列宽配置 (与HTML模板保持一致: 25%, 18%, 17%, 40%)
 const API_TABLE_COLUMNS = {
-    INTERFACE: 30,    // 百分比
-    DESCRIPTION: 20,  // 百分比
-    USAGE: 50         // 百分比
+    INTERFACE: 25,    // 百分比 - API接口
+    DESCRIPTION: 18,  // 百分比 - 接口说明
+    SKILL: 17,        // 百分比 - skill使用
+    USAGE: 40         // 百分比 - 使用方法
 };
 
 // HTTP方法类型
@@ -6209,7 +6210,7 @@ function displayApiDocs(apis) {
         htmlParts.push(`
             <tr style="border-bottom: 1px solid var(--border-color); ${index % 2 === 0 ? 'background: var(--bg-color);' : 'background: var(--light-bg);'}">
                 <!-- Column 1: API Interface -->
-                <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 30%;">
+                <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 25%;">
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <span style="${methodClass} font-weight: 700; font-size: 13px; min-width: 90px; display: inline-block;">${api.method}</span>
                         <span style="font-family: monospace; font-size: 12px; color: var(--text-primary); word-break: break-all;">${escapeHtml(api.path)}</span>
@@ -6225,8 +6226,17 @@ function displayApiDocs(apis) {
                     </div>
                 </td>
 
-                <!-- Column 3: Usage Method -->
-                <td style="padding: 4px 8px; text-align: left; vertical-align: middle; width: 50%;">
+                <!-- Column 3: Skill Usage -->
+                <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 20%;">
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <div style="font-size: 11px; color: var(--primary-color); font-weight: 600; line-height: 1.3;">
+                            ${api.skill ? escapeHtml(api.skill) : '<span style="color: var(--text-secondary);">-</span>'}
+                        </div>
+                    </div>
+                </td>
+
+                <!-- Column 4: Usage Method -->
+                <td style="padding: 4px 8px; text-align: left; vertical-align: middle; width: 35%;">
                     <div style="display: flex; flex-direction: column; gap: 4px;">
                         <!-- Curl Command Row -->
                         <div style="display: flex; align-items: center; gap: 6px;">
