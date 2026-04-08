@@ -11,9 +11,9 @@
         "www.google.com"
     ],
     "suites_path": "/home/${ubuntu_user}/GMS-Suite",
-    "script_path": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/run_GMS_Test_Auto.sh",
-    "gsi_scripts": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/run_GSI_Burn.sh",
-    "scrcpy_path": "/home/${ubuntu_user}/GMS_Auto_Test/web_app/tools/scrcpy-linux-x86_64-v3.3.4/scrcpy",
+    "script_path": "/home/${ubuntu_user}/GMS-Suite/run_GMS_Test_Auto.sh",
+    "gsi_scripts": "/home/${ubuntu_user}/GMS-Suite/run_GSI_Burn.sh",
+    "scrcpy_path": "/home/${ubuntu_user}/Software/scrcpy-linux-x86_64-v3.3.4/scrcpy",
     "ai_models": {
         "enabled": true,
         "primary_provider": "zhipu",

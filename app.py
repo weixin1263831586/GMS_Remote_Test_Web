@@ -1661,7 +1661,6 @@ def get_device_info():
         return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
 
     try:
-        # Define info commands matching GUI (lines 1677-1732 in GMS_Auto_Test_GUI.py)
         info_commands = [
             ("设备序列号", "adb -s {device} shell getprop ro.serialno"),
             ("设备型号", "adb -s {device} shell getprop ro.product.model"),
