@@ -226,6 +226,23 @@ class ConfigManager:
             logger.error(f"Error saving dynamic config: {e}")
             return False
 
+    def prepare_client_config(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        准备客户端相关配置，保留现有client_hosts和client_ssh_credentials
+
+        Args:
+            updates: 要更新的字段字典
+
+        Returns:
+            完整的客户端配置字典
+        """
+        existing = self._load_dynamic_config() or {}
+        dynamic_config = {
+            'client_hosts': updates.get('client_hosts', existing.get('client_hosts', {})),
+            'client_ssh_credentials': updates.get('client_ssh_credentials', existing.get('client_ssh_credentials', []))
+        }
+        return dynamic_config
+
     def get_device_hosts(self, config: Dict[str, Any] = None) -> list:
         """
         获取设备主机列表

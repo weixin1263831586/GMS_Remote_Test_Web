@@ -39,8 +39,8 @@ api_call() {
     local method="${2:-GET}"
     local data="${3:-}"
 
-    if [ -n "$data" ]; then
-        curl -sX "${method}" "${API_BASE}${endpoint}" \
+    if [ -n "$data" ] || [ "$method" = "POST" ]; then
+        curl -s -X "${method}" "${API_BASE}${endpoint}" \
             -H "Content-Type: application/json" \
             -d "${data}"
     else
@@ -58,6 +58,35 @@ check_jq() {
 # ==============================================================================
 # Device Management Commands
 # ==============================================================================
+
+# Convert device input to JSON array format and wrap in devices object
+# Supports: JSON array ["dev1","dev2"], space-separated list, or single device
+# Returns: {"devices":[...]} JSON object
+build_devices_json_data() {
+    local devices="$1"
+    if [[ "$devices" == \[* ]]; then
+        # Already JSON array - wrap directly
+        echo "{\"devices\":$devices}"
+    else
+        # Convert space-separated list to JSON array and wrap
+        local device_array=$(echo "$devices" | jq -R -c 'split(" ") | map(select(length>0))')
+        echo "{\"devices\":$device_array}"
+    fi
+}
+
+# Convert device input to JSON array format only
+# Supports: JSON array ["dev1","dev2"], space-separated list, or single device
+# Returns: [...] JSON array
+convert_devices_to_json() {
+    local devices="$1"
+    if [[ "$devices" == \[* ]]; then
+        # Already JSON array
+        echo "$devices"
+    else
+        # Convert space-separated list to JSON array
+        echo "$devices" | jq -R -c 'split(" ") | map(select(length>0))'
+    fi
+}
 
 # List all connected devices
 gms-rt-devices() {
@@ -78,90 +107,103 @@ gms-rt-device-details() {
 # Get device info for multiple devices (parallel)
 gms-rt-devices-info() {
     local devices="$1"
-    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-devices-info \"[DEVICE-1,DEVICE-2]\""
+    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-info DEVICE1 [DEVICE2 ...]"
     check_jq
-    echo "📱 Getting device info (parallel execution)..."
-    local data="{\"devices\":$devices}"
+    echo "📱 获取设备信息..."
+
+    local device_array=$(convert_devices_to_json "$devices")
+    local data="{\"devices\":$device_array}"
+
     local response=$(api_call "/devices/info" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
-        success "Device info retrieved"
+        success "设备信息获取成功"
         echo "$response" | jq '.'
     else
-        error "Failed to get device info"
+        error "设备信息获取失败"
     fi
 }
 
 # Reboot multiple devices (parallel)
 gms-rt-devices-reboot() {
     local devices="$1"
-    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-devices-reboot \"[DEVICE-1,DEVICE-2]\""
+    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-reboot DEVICE1 [DEVICE2 ...]"
     check_jq
-    echo "🔄 Rebooting devices (parallel execution)..."
-    local data="{\"devices\":$devices}"
+    echo "🔄 重启设备..."
+
+    local data=$(build_devices_json_data "$devices")
+
     local response=$(api_call "/devices/reboot" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
-        success "Devices rebooted"
+        success "设备重启成功"
         echo "$response" | jq '.'
     else
-        error "Failed to reboot devices"
+        error "设备重启失败"
     fi
 }
 
 # Remount multiple devices (parallel)
 gms-rt-devices-remount() {
     local devices="$1"
-    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-devices-remount \"[DEVICE-1,DEVICE-2]\""
+    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-remount DEVICE1 [DEVICE2 ...]"
     check_jq
-    echo "🔄 Remounting devices (parallel execution)..."
-    local data="{\"devices\":$devices}"
+    echo "🔄 重新挂载设备..."
+
+    local data=$(build_devices_json_data "$devices")
+
     local response=$(api_call "/devices/remount" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
-        success "Devices remounted"
+        success "设备重新挂载成功"
         echo "$response" | jq '.'
     else
-        error "Failed to remount devices"
+        error "设备重新挂载失败"
     fi
 }
 
 # Lock bootloader
 gms-rt-devices-bootloader-lock() {
     local devices="$1"
-    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-devices-bootloader-lock <DEVICE_IDS>"
+    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-bootloader-lock DEVICE1 [DEVICE2 ...]"
     check_jq
-    echo "🔒 Locking bootloader for devices: $devices..."
-    local data="{\"devices\":$devices}"
+    echo "🔒 锁定Bootloader..."
+
+    local data=$(build_devices_json_data "$devices")
+
     local response=$(api_call "/devices/bootloader-lock" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
-        success "Bootloader locked"
+        success "Bootloader锁定成功"
         echo "$response" | jq '.'
     else
-        error "Failed to lock bootloader"
+        error "Bootloader锁定失败"
     fi
 }
 
 # Unlock bootloader
 gms-rt-devices-bootloader-unlock() {
     local devices="$1"
-    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-devices-bootloader-unlock <DEVICE_IDS>"
+    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-bootloader-unlock DEVICE1 [DEVICE2 ...]"
     check_jq
-    echo "🔓 Unlocking bootloader for devices: $devices..."
-    local data="{\"devices\":$devices}"
+    echo "🔓 解锁Bootloader..."
+
+    local data=$(build_devices_json_data "$devices")
+
     local response=$(api_call "/devices/bootloader-unlock" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
-        success "Bootloader unlocked"
+        success "Bootloader解锁成功"
         echo "$response" | jq '.'
     else
-        error "Failed to unlock bootloader"
+        error "Bootloader解锁失败"
     fi
 }
 
 # Check bootloader status
 gms-rt-devices-bootloader-status() {
     local devices="$1"
-    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-devices-bootloader-status <DEVICE_IDS>"
+    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-bootloader-status DEVICE1 [DEVICE2 ...]"
     check_jq
-    echo "🔐 Checking bootloader status for devices: $devices..."
-    local data="{\"devices\":$devices}"
+    echo "🔐 检查Bootloader状态..."
+
+    local data=$(build_devices_json_data "$devices")
+
     local response=$(api_call "/devices/bootloader-status" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "Bootloader status retrieved"
@@ -780,52 +822,39 @@ gms-rt-devices-user-locked() {
     api_call "/devices/user-locked" | jq '.'
 }
 
-# Reboot device
-gms-rt-devices-reboot() {
-    local device_id="$1"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-devices-reboot <device_id>"
-    check_jq
-    echo "🔄 Rebooting device $device_id..."
-    local data="{\"device_id\":\"$device_id\"}"
-    local response=$(api_call "/devices/reboot" "POST" "$data")
-    echo "$response" | jq '.'
-}
-
-# Remount device
-gms-rt-devices-remount() {
-    local device_id="$1"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-devices-remount <device_id>"
-    check_jq
-    echo "🔄 Remounting device $device_id..."
-    local data="{\"device_id\":\"$device_id\"}"
-    local response=$(api_call "/devices/remount" "POST" "$data")
-    echo "$response" | jq '.'
-}
-
 # Connect WiFi
 gms-rt-devices-connect-wifi() {
-    local device_id="$1"
+    local devices="$1"
     local ssid="$2"
     local password="$3"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-devices-connect-wifi <device_id> <ssid> <password>"
-    [ -z "$ssid" ] && error "SSID required. Usage: gms-rt-devices-connect-wifi <device_id> <ssid> <password>"
-    [ -z "$password" ] && error "Password required. Usage: gms-rt-devices-connect-wifi <device_id> <ssid> <password>"
+
+    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"
+    [ -z "$ssid" ] && error "SSID必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"
+    [ -z "$password" ] && error "密码必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"
+
     check_jq
-    echo "📶 Connecting to WiFi $ssid on $device_id..."
-    local data="{\"device_id\":\"$device_id\",\"ssid\":\"$ssid\",\"password\":\"$password\"}"
+    echo "📶 连接WiFi: $ssid..."
+
+    local device_array=$(convert_devices_to_json "$devices")
+    local data=$(echo "{\"devices\":$device_array,\"ssid\":\"$ssid\",\"password\":\"$password\"}" | jq -c '.')
     local response=$(api_call "/devices/connect-wifi" "POST" "$data")
-    echo "$response" | jq '.'
+
+    if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then
+        success "WiFi连接已启动"
+        echo "$response" | jq '.'
+    else
+        error "WiFi连接失败"
+        echo "$response" | jq '.'
+    fi
 }
 
 # Execute shell command
 gms-rt-devices-shell() {
     local device_id="$1"
-    local command="$2"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-devices-shell <device_id> <command>"
-    [ -z "$command" ] && error "Command required. Usage: gms-rt-devices-shell <device_id> <command>"
+    [ -z "$device_id" ] && error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID"
     check_jq
-    echo "💻 Executing command on $device_id..."
-    local data="{\"device_id\":\"$device_id\",\"command\":\"$command\"}"
+    echo "💻 打开设备Shell: $device_id..."
+    local data="{\"serial_no\":\"$device_id\"}"
     local response=$(api_call "/devices/shell" "POST" "$data")
     echo "$response" | jq '.'
 }
@@ -833,10 +862,12 @@ gms-rt-devices-shell() {
 # Show device screen
 gms-rt-devices-screen() {
     local devices="$1"
-    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-devices-screen <DEVICE_IDS>"
+    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-screen DEVICE1 [DEVICE2 ...]"
     check_jq
-    echo "📺 Showing screen for devices: $devices..."
-    local data="{\"devices\":$devices}"
+    echo "📺 显示设备屏幕..."
+
+    local data=$(build_devices_json_data "$devices")
+
     local response=$(api_call "/devices/screen" "POST" "$data")
     echo "$response" | jq '.'
 }
@@ -917,7 +948,7 @@ gms-rt-test-logs-list() {
 # Stream test logs
 gms-rt-test-logs-stream() {
     echo "📡 Streaming test logs (Ctrl+C to stop)..."
-    curl -N "${SERVER_URL}/test/logs/stream"
+    curl -N "${API_BASE}/test/logs/stream"
 }
 
 # ==============================================================================
@@ -1074,25 +1105,6 @@ gms-rt-usbip-status() {
     api_call "/usbip/status" | jq '.'
 }
 
-# Start USB/IP
-gms-rt-usbip-start() {
-    local device_id="$1"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-usbip-start <device_id>"
-    check_jq
-    echo "🔌 Starting USB/IP for $device_id..."
-    local data="{\"device_id\":\"$device_id\"}"
-    local response=$(api_call "/usbip/start" "POST" "$data")
-    echo "$response" | jq '.'
-}
-
-# Stop USB/IP
-gms-rt-usbip-stop() {
-    check_jq
-    echo "🛑 Stopping USB/IP..."
-    local response=$(api_call "/usbip/stop" "POST" "{}")
-    echo "$response" | jq '.'
-}
-
 # Auto install USB/IP
 gms-rt-usbip-auto-install() {
     check_jq
@@ -1169,12 +1181,12 @@ gms-rt-files-upload() {
     echo "📤 Uploading file: $file_path..."
 
     if [ -n "$target_path" ]; then
-        curl -X POST "${SERVER_URL}/files/upload" \
+        curl -X POST "${API_BASE}/files/upload" \
             -F "file=@$file_path" \
             -F "path=$target_path" \
             | jq '.'
     else
-        curl -X POST "${SERVER_URL}/files/upload" \
+        curl -X POST "${API_BASE}/files/upload" \
             -F "file=@$file_path" \
             | jq '.'
     fi
@@ -1191,7 +1203,7 @@ gms-rt-files-install() {
     check_jq
     echo "📦 Installing APK: $file_path to $device_id..."
 
-    curl -X POST "${SERVER_URL}/files/install" \
+    curl -X POST "${API_BASE}/files/install" \
         -F "file=@$file_path" \
         -F "device_id=$device_id" \
         | jq '.'
@@ -1234,7 +1246,7 @@ gms-rt-burn-firmware() {
     check_jq
     echo "🔥 Burning firmware: $firmware_path to devices: $devices..."
 
-    curl -X POST "${SERVER_URL}/burn/firmware" \
+    curl -X POST "${API_BASE}/burn/firmware" \
         -F "firmware_file=@$firmware_path" \
         -F "devices=$devices" \
         -F "wipe_data=$wipe_data" \
@@ -1254,7 +1266,7 @@ gms-rt-burn-gsi() {
     check_jq
     echo "🔥 Burning GSI: $gsi_path to devices: $devices..."
 
-    curl -X POST "${SERVER_URL}/burn/gsi" \
+    curl -X POST "${API_BASE}/burn/gsi" \
         -F "gsi_image=@$gsi_path" \
         -F "devices=$devices" \
         -F "wipe_data=$wipe_data" \

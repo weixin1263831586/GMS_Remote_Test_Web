@@ -170,21 +170,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 延迟执行耗时操作，不阻塞页面加载
     setTimeout(async () => {
-        // 检测客户端用户名（设置短超时）
+        // 立即获取客户端信息（使用/api/users/current）
         try {
-            const detectResponse = await Promise.race([
-                fetch('/api/users/detect', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'}
-                }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
-            ]);
-            if (detectResponse.ok) {
-                const detectData = await detectResponse.json();
-                debugLog('[Init] Detected client username:', detectData.username);
+            const currentUserResponse = await fetch('/api/users/current');
+            if (currentUserResponse.ok) {
+                const userData = await currentUserResponse.json();
+                if (userData.client_id) {
+                    state.clientId = userData.client_id;
+                    debugLog('[Init] Set state.clientId from /api/users/current:', state.clientId);
+
+                    // 检查是否是unknown用户（apiCall中会统一处理弹框）
+                    if (userData.client_id.startsWith('unknown@')) {
+                        console.warn('[Init] Detected unknown client, will show username modal via apiCall');
+                    }
+                }
+            } else {
+                console.warn('[Init] Failed to call /api/users/current');
             }
         } catch (error) {
-            console.warn('[Init] Failed to detect client username:', error);
+            console.warn('[Init] Error getting current user:', error);
         }
 
         // 检查状态
@@ -199,7 +203,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (error) {
             console.warn('[Init] Failed to auto-start VNC:', error);
         }
-    }, 500);
+    }, 100);  // 减少延迟时间，更快获取客户端信息
 });
 
 // ==================== Configuration ====================
@@ -620,11 +624,22 @@ function initDragDrop() {
 // ==================== API Calls ====================
 async function apiCall(url, method = 'GET', data = null) {
     try {
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+
+        // 添加客户端用户名请求头（如果可用）
+        if (state.clientId && state.clientId !== 'unknown') {
+            const username = state.clientId.split('@')[0];
+            headers['X-Client-Username'] = username;
+            console.log(`[apiCall] Adding X-Client-Username: ${username} for URL: ${url}`);
+        } else {
+            console.warn(`[apiCall] No valid clientId available. state.clientId: ${state.clientId}, URL: ${url}`);
+        }
+
         const options = {
             method,
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            headers
         };
 
         // Only add body for POST/PUT/PATCH/DELETE methods (not GET/HEAD)
@@ -634,6 +649,30 @@ async function apiCall(url, method = 'GET', data = null) {
 
         const response = await fetch(url, options);
         const result = await response.json();
+
+        // 如果API返回了client_id，更新state.clientId
+        if (result.client_id) {
+            const oldClientId = state.clientId;
+            state.clientId = result.client_id;
+
+            // 检查是否是unknown用户
+            if (result.client_id.startsWith('unknown@')) {
+                console.warn(`[apiCall] Detected unknown client: ${result.client_id}`);
+
+                // 只在第一次检测到unknown时显示弹框（避免重复弹窗）
+                if (!state.usernameDetectShown) {
+                    state.usernameDetectShown = true;
+                    console.log('[apiCall] Showing username detect modal for:', result.ip);
+
+                    // 延迟显示弹框，确保页面已加载完成
+                    setTimeout(() => {
+                        showUsernameDetectModal(result.ip);
+                    }, 500);
+                }
+            } else if (oldClientId !== result.client_id) {
+                console.log(`[apiCall] Updated state.clientId: ${oldClientId} → ${result.client_id}`);
+            }
+        }
 
         if (!response.ok) {
             const error = new Error(result.error || 'Request failed');
@@ -1478,6 +1517,92 @@ function handleDevicePasswordEsc(event) {
     }
 }
 
+// ==================== Username Detection Modal ====================
+function showUsernameDetectModal(clientIp) {
+    document.getElementById('username-detect-ip').value = clientIp;
+    document.getElementById('username-detect-username').value = '';
+    document.getElementById('username-detect-password').value = '';
+    const modal = document.getElementById('username-detect-modal');
+    modal.classList.add('show');
+    document.getElementById('username-detect-username').focus();
+
+    // Add ESC key listener
+    document.addEventListener('keydown', handleUsernameDetectEsc);
+}
+
+function closeUsernameDetectModal() {
+    const modal = document.getElementById('username-detect-modal');
+    modal.classList.remove('show');
+    document.removeEventListener('keydown', handleUsernameDetectEsc);
+}
+
+function handleUsernameDetectEsc(event) {
+    if (event.key === 'Escape') {
+        closeUsernameDetectModal();
+    }
+}
+
+function handleUsernameDetectKeyPress(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        if (event.target.id === 'username-detect-password') {
+            submitUsernameDetect();
+        }
+    }
+}
+
+async function submitUsernameDetect() {
+    const clientIp = document.getElementById('username-detect-ip').value;
+    const username = document.getElementById('username-detect-username').value.trim();
+    const password = document.getElementById('username-detect-password').value;
+
+    if (!username) {
+        showToast('请输入用户名', 'error');
+        return;
+    }
+
+    if (!password) {
+        showToast('请输入SSH密码', 'error');
+        return;
+    }
+
+    try {
+        // 显示加载状态
+        const submitBtn = document.querySelector('#username-detect-modal .btn-primary');
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = '验证中...';
+        submitBtn.disabled = true;
+
+        // 调用用户名检测API
+        const response = await apiCall('/api/users/detect', 'POST', {
+            ip: clientIp,
+            username: username,
+            password: password
+        });
+
+        if (response.success) {
+            showToast(`✅ 用户名验证成功: ${username}`, 'success');
+            addLogEntry(`客户端识别成功: ${username}@${clientIp}`, 'success');
+
+            // 更新state.clientId
+            state.clientId = `${username}@${clientIp}`;
+            debugLog('[UsernameDetect] Updated state.clientId:', state.clientId);
+
+            closeUsernameDetectModal();
+        } else {
+            showToast(`❌ 用户名验证失败: ${response.error || '未知错误'}`, 'error');
+        }
+    } catch (error) {
+        console.error('[UsernameDetect] Error:', error);
+        showToast(`❌ 验证失败: ${error.message}`, 'error');
+    } finally {
+        // 恢复按钮状态
+        const submitBtn = document.querySelector('#username-detect-modal .btn-primary');
+        submitBtn.textContent = '确定';
+        submitBtn.disabled = false;
+    }
+}
+
 function handleDevicePasswordKeyPress(event) {
     if (event.key === 'Enter') {
         event.preventDefault();
@@ -1538,14 +1663,42 @@ async function checkSshd() {
 
         if (!result.installed) {
             // SSHD 未安装，显示安装指南
-            showSshdInstallGuide(result.install_guide);
+            // 优先使用 API 返回的指南，否则从服务器获取
+            let guide = result.install_guide;
+            if (!guide) {
+                guide = await getSshdInstallGuide();
+            }
+            showSshdInstallGuide(guide);
         } else if (result.running) {
             addLogEntry(`SSHD 状态: 运行中`, 'success');
         } else {
             addLogEntry(`SSHD 状态: 已安装但未运行`, 'warning');
         }
+
+        // 如果有错误信息，显示警告
+        if (result.error) {
+            addLogEntry(`⚠️ ${result.error}`, 'warning');
+        }
     } catch (error) {
         addLogEntry('检查 SSHD 失败: ' + error.message, 'error');
+        // 即使检查失败，也尝试从服务器获取安装指南
+        try {
+            const guide = await getSshdInstallGuide();
+            showSshdInstallGuide(guide);
+        } catch (guideError) {
+            addLogEntry('无法加载安装指南', 'error');
+        }
+    }
+}
+
+// 获取 SSHD 安装指南（从服务器加载）
+async function getSshdInstallGuide() {
+    try {
+        const result = await apiCall('/api/ssh/sshd-guide', 'GET');
+        return result.install_guide || '无法加载安装指南，请刷新页面重试';
+    } catch (error) {
+        console.error('Failed to load SSHD install guide:', error);
+        return '无法加载安装指南，请检查网络连接后重试';
     }
 }
 

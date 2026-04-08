@@ -1193,6 +1193,16 @@ log-system { color: var(--info-color); }
     margin-top: 10px;
 }
 
+.modal-ssh-info {
+    padding: 10px;
+    background: rgba(52, 152, 219, 0.1);
+    border-left: 3px solid #3498db;
+    border-radius: 4px;
+    color: #3498db;
+    font-size: 12px;
+    margin-top: 10px;
+}
+
 /* ==================== File Browser ==================== */
 .file-browser-path {
     padding: 10px;
