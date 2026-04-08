@@ -4872,7 +4872,9 @@ async def start_usbip(
         if not device_password:
             return ApiResponse.error(
                 f'未找到 {device_host} 的SSH凭据，请先在登录页面输入SSH密码',
-                status_code=401
+                status_code=401,
+                need_password=True,
+                device_host=device_host
             )
 
         # 直接调用高级封装方法（简化实现，与Flask版本一致）
