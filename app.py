@@ -1344,7 +1344,7 @@ def list_logs():
 
 @app.route('/api/status')
 def get_status():
-    """Get current test status - 优化版本，减少数据传输"""
+    """Get current test status"""
     user_state = get_user_state()
 
     # 获取请求参数，只返回需要的数据
@@ -3639,7 +3639,6 @@ def extract_archive_recursive(archive_path, extract_dir, processed_archives=None
 def extract_nested_archives(directory):
     """
     递归检查并解压目录中的嵌套压缩包
-    优化版本：单次遍历 + 队列处理
     """
     import collections
 

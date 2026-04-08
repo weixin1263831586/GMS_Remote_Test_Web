@@ -279,6 +279,17 @@ class GlobalState:
         self.usbip_devices_source_lock = threading.Lock()  # USB/IP设备来源锁（与Flask一致）
         self.test_logs_lock = threading.Lock()  # 测试日志锁
         self.last_saved_log_file = {}  # {client_id: log_file_path}
+        self.device_ssh_pools = {}
+        self.device_ssh_pools_lock = threading.Lock()
+        self.device_ssh_pools_max = 10  # 最大设备SSH连接池数量
+
+    def _close_ssh_safely(self, ssh):
+        """安全关闭SSH连接"""
+        try:
+            if ssh and ssh.get_transport() is not None:
+                ssh.close()
+        except Exception:
+            pass
 
     def cleanup_old_user_states(self):
         """清理超过指定时间的旧用户状态，防止内存泄漏"""
@@ -313,9 +324,112 @@ class GlobalState:
         except Exception as e:
             logger.error(f"Error cleaning up user states: {e}")
 
+    def device_ssh_pool_get(self, pool_key: str, config: dict, pool_size: int = 3):
+        """
+        从设备SSH连接池获取或创建连接
+
+        使用FIFO策略清理最老的连接池,防止内存泄漏
+        """
+        with self.device_ssh_pools_lock:
+            # 限制连接池数量,防止内存泄漏
+            if pool_key not in self.device_ssh_pools:
+                if len(self.device_ssh_pools) >= self.device_ssh_pools_max:
+                    # 清理最老的连接池
+                    oldest_key = next(iter(self.device_ssh_pools))
+                    old_pool = self.device_ssh_pools.pop(oldest_key)
+                    while not old_pool.empty():
+                        ssh = old_pool.get_nowait()
+                        self._close_ssh_safely(ssh)
+                    logger.info(f"[Device SSH Pool] Cleaned oldest pool: {oldest_key}")
+
+                self.device_ssh_pools[pool_key] = queue.Queue(maxsize=pool_size)
+
+            pool = self.device_ssh_pools[pool_key]
+
+        # 尝试从池中获取有效连接（最多尝试pool_size次）
+        max_attempts = pool.maxsize
+        for attempt in range(max_attempts):
+            try:
+                ssh = pool.get_nowait()
+                # 健康检查
+                try:
+                    transport = ssh.get_transport() if ssh else None
+                    if transport and transport.is_active():
+                        logger.debug(f"[Device SSH Pool] Reused connection for {pool_key}")
+                        return ssh
+                    else:
+                        logger.debug(f"[Device SSH Pool] Connection {attempt+1}/{max_attempts} is inactive")
+                        self._close_ssh_safely(ssh)
+                except Exception as e:
+                    logger.debug(f"[Device SSH Pool] Connection {attempt+1}/{max_attempts} check failed: {e}")
+                    self._close_ssh_safely(ssh)
+            except queue.Empty:
+                break
+
+        # 池为空或所有连接都失效，创建新连接
+        logger.debug(f"[Device SSH Pool] Creating new connection for {pool_key}")
+        return self._create_device_ssh_connection(pool_key, config)
+
+    def device_ssh_pool_return(self, pool_key: str, ssh):
+        """
+        归还连接到设备SSH连接池
+
+        Args:
+            pool_key: 连接池键值
+            ssh: SSHClient 对象
+        """
+        with self.device_ssh_pools_lock:
+            if pool_key in self.device_ssh_pools:
+                try:
+                    self.device_ssh_pools[pool_key].put_nowait(ssh)
+                except queue.Full:
+                    # 池已满，关闭连接
+                    self._close_ssh_safely(ssh)
+            else:
+                # 池不存在，关闭连接
+                self._close_ssh_safely(ssh)
+
+    def _create_device_ssh_connection(self, pool_key: str, config: dict):
+        """
+        创建设备SSH连接
+
+        Args:
+            pool_key: 连接池键值（通常是 device_host）
+            config: 配置字典
+
+        Returns:
+            SSHClient 对象，失败返回 None
+        """
+        device_host = config.get('device_host', pool_key)
+        if not device_host:
+            logger.error(f"[Device SSH Pool] No device host in config")
+            return None
+
+        if '@' not in device_host:
+            logger.error(f"[Device SSH Pool] Device host format should be user@host: {device_host}")
+            return None
+
+        username, hostname = device_host.split('@', 1)
+        password = config.get('device_pswd', '')
+
+        if not password:
+            logger.error(f"[Device SSH Pool] No SSH password configured for {pool_key}")
+            return None
+
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(hostname=hostname, username=username, password=password, timeout=10)
+            logger.info(f"[Device SSH Pool] Connected to {pool_key}")
+            return ssh
+        except Exception as e:
+            logger.error(f"[Device SSH Pool] Failed to connect to {pool_key}: {e}")
+            return None
+
 global_state = GlobalState()
 
 DEVICE_CACHE_TTL = 3
+DEVICE_SSH_POOLS_MAX = 10  # 最大设备SSH连接池数量
 
 # ==================== 通用工具函数 ====================
 
@@ -447,7 +561,7 @@ class ApiResponse:
             'summary': {'total': len(results), 'success': success_count, 'failed': fail_count}
         }, f"{operation_name}完成: 成功 {success_count} 台, 失败 {fail_count} 台")
 
-# ==================== 优化工具函数 ====================
+# ==================== 工具函数 ====================
 
 from functools import wraps, lru_cache
 import asyncio
@@ -457,9 +571,9 @@ def async_subprocess_run(cmd, **kwargs):
     return asyncio.to_thread(subprocess.run, cmd, **kwargs)
 
 def handle_api_errors(func):
-    """统一API错误处理装饰器"""
+    """统一API错误处理装饰器 - 支持同步和异步函数"""
     @wraps(func)
-    async def wrapper(*args, **kwargs):
+    async def async_wrapper(*args, **kwargs):
         try:
             return await func(*args, **kwargs)
         except HTTPException:
@@ -467,7 +581,22 @@ def handle_api_errors(func):
         except Exception as e:
             logger.error(f"Error in {func.__name__}: {e}")
             return ApiResponse.error(str(e), status_code=500)
-    return wrapper
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error in {func.__name__}: {e}")
+            return ApiResponse.error(str(e), status_code=500)
+
+    # 检查函数是否是协程函数
+    if asyncio.iscoroutinefunction(func):
+        return async_wrapper
+    else:
+        return sync_wrapper
 
 async def execute_on_devices_parallel(devices: List[str], operation_func, ssh, **kwargs) -> List[Dict]:
     """
@@ -497,11 +626,7 @@ async def execute_on_devices_parallel(devices: List[str], operation_func, ssh, *
     return await asyncio.gather(*tasks)
 
 async def get_device_properties_optimized(device_id: str, ssh) -> Dict[str, str]:
-    """
-    优化版设备属性获取 - 一次SSH调用获取所有属性
-
-    原版本需要6次SSH调用，优化后只需1次
-    """
+    """获取设备属性 - 一次SSH调用获取所有属性"""
     cmd = f"""adb -s {device_id} shell "
     getprop ro.boot.verifiedbootstate;
     getprop | grep api_level;
@@ -856,6 +981,7 @@ async def root(request: Request):
     return response
 
 @app.get("/api/system/health")
+@handle_api_errors
 async def health_check():
     """健康检查"""
     return JSONResponse(content={
@@ -884,50 +1010,45 @@ async def health_check():
 
 
 @app.get("/api/config/validate")
+@handle_api_errors
 async def validate_config():
     """验证配置文件"""
-    try:
-        config = config_manager.load_config()
+    config = config_manager.load_config()
 
-        errors = []
-        warnings = []
+    errors = []
+    warnings = []
 
-        # 检查必要字段
-        required_fields = ['ubuntu_host', 'ubuntu_user', 'ubuntu_pswd', 'suites_path', 'script_path']
-        for field in required_fields:
-            if field not in config or not config[field]:
-                errors.append(f"缺少必要字段: {field}")
+    # 检查必要字段
+    required_fields = ['ubuntu_host', 'ubuntu_user', 'ubuntu_pswd', 'suites_path', 'script_path']
+    for field in required_fields:
+        if field not in config or not config[field]:
+            errors.append(f"缺少必要字段: {field}")
 
-        # 检查ubuntu_host
-        ubuntu_host = config.get('ubuntu_host', '')
-        if ubuntu_host in ['test', 'localhost', '127.0.0.1']:
-            warnings.append(f"ubuntu_host '{ubuntu_host}' 可能无法从远程访问")
+    # 检查ubuntu_host
+    ubuntu_host = config.get('ubuntu_host', '')
+    if ubuntu_host in ['test', 'localhost', '127.0.0.1']:
+        warnings.append(f"ubuntu_host '{ubuntu_host}' 可能无法从远程访问")
 
-        # 检查路径是否存在
-        for path_field in ['suites_path', 'script_path']:
-            path = config.get(path_field, '')
-            if path and not os.path.exists(path):
-                warnings.append(f"路径不存在: {path_field} = {path}")
+    # 检查路径是否存在
+    for path_field in ['suites_path', 'script_path']:
+        path = config.get(path_field, '')
+        if path and not os.path.exists(path):
+            warnings.append(f"路径不存在: {path_field} = {path}")
 
-        # 检查SSH凭据
-        if not config.get('ubuntu_pswd'):
-            warnings.append("未设置ubuntu_pswd，可能影响SSH连接")
+    # 检查SSH凭据
+    if not config.get('ubuntu_pswd'):
+        warnings.append("未设置ubuntu_pswd，可能影响SSH连接")
 
-        return JSONResponse(content={
-            "success": len(errors) == 0,
-            "valid": len(errors) == 0,
-            "errors": errors,
-            "warnings": warnings
-        })
-    except Exception as e:
-        logger.error(f"Error validating config: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=f"{str(e)}. 请检查配置和参数是否正确。"
-            )
+    return JSONResponse(content={
+        "success": len(errors) == 0,
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings
+    })
 
 
 @app.get("/api/config/values")
+@handle_api_errors
 async def get_config_values():
     """获取配置值供前端使用（不包含敏感信息）"""
     config = config_manager.load_config()
@@ -1039,12 +1160,14 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
         }, status_code=500)
 
 @app.get("/api/client-info")
+@handle_api_errors
 async def handle_client_info_get(request: Request):
     """获取客户端IP（兼容Flask路由）"""
     client_ip = get_client_ip(request)
     return JSONResponse(content={'ip': client_ip})
 
 @app.post("/api/client-info")
+@handle_api_errors
 async def handle_client_info_post(req: ClientInfoRequest, request: Request):
     """记录客户端信息（兼容Flask路由）"""
     client_ip = get_client_ip(request, req.ip)
@@ -1072,11 +1195,13 @@ async def handle_client_info_post(req: ClientInfoRequest, request: Request):
     return ApiResponse.success({'client_id': client_id})
 
 @app.post("/api/client-info/detect")
+@handle_api_errors
 async def detect_client_info(req: ClientInfoRequest, request: Request):
     """自动检测客户端用户名（兼容Flask路由）"""
     return await detect_client(req, request)
 
 @app.get("/api/users/list")
+@handle_api_errors
 async def list_users():
     """获取所有在线用户列表"""
     users = []
@@ -1210,6 +1335,7 @@ async def update_config_legacy(req: dict):
 # ==================== 设备管理 ====================
 
 @app.get("/api/devices/list")
+@handle_api_errors
 async def get_connected_devices(
     request: Request,
     help: bool = Query(False)
@@ -1228,81 +1354,74 @@ async def get_connected_devices(
             )
 
     # 获取设备列表 - 与Flask一致，直接返回数组
-    try:
-        # 跟踪用户访问
-        client_id = get_client_id_from_request(request)
-        get_or_create_user_state(client_id)
+    # 跟踪用户访问
+    client_id = get_client_id_from_request(request)
+    get_or_create_user_state(client_id)
 
-        config = config_manager.load_config()
+    config = config_manager.load_config()
 
-        # 先刷新设备列表（需要最新状态来清理记录）
-        devices = device_manager.get_connected_devices()
+    # 先刷新设备列表（需要最新状态来清理记录）
+    devices = device_manager.get_connected_devices()
 
-        # 清理已不存在的设备来源记录（与Flask版本一致）
-        # 如果设备已不在当前设备列表中，说明设备已断开/移除，应该清除其来源记录
-        current_device_set = set(devices)
-        devices_to_remove = [
-            dev_id for dev_id in global_state.usbip_devices_source.keys()
-            if dev_id not in current_device_set
-        ]
-        if devices_to_remove:
-            logger.info(f"[Devices API] Cleaning up removed devices: {devices_to_remove}")
-            with global_state.usbip_devices_source_lock:
-                for dev_id in devices_to_remove:
-                    del global_state.usbip_devices_source[dev_id]
+    # 清理已不存在的设备来源记录（与Flask版本一致）
+    # 如果设备已不在当前设备列表中，说明设备已断开/移除，应该清除其来源记录
+    current_device_set = set(devices)
+    devices_to_remove = [
+        dev_id for dev_id in global_state.usbip_devices_source.keys()
+        if dev_id not in current_device_set
+    ]
+    if devices_to_remove:
+        logger.info(f"[Devices API] Cleaning up removed devices: {devices_to_remove}")
+        with global_state.usbip_devices_source_lock:
+            for dev_id in devices_to_remove:
+                del global_state.usbip_devices_source[dev_id]
 
-        # 检查缓存（清理后检查）
-        now = datetime.now().timestamp()
-        if now - global_state.device_cache['timestamp'] < DEVICE_CACHE_TTL:
-            cached_devices = global_state.device_cache['devices']
-            return JSONResponse(content=cached_devices)
+    # 检查缓存（清理后检查）
+    now = datetime.now().timestamp()
+    if now - global_state.device_cache['timestamp'] < DEVICE_CACHE_TTL:
+        cached_devices = global_state.device_cache['devices']
+        return JSONResponse(content=cached_devices)
 
-        devices_with_status = []
+    devices_with_status = []
 
-        for device_id in devices:
-            device_info = {
-                'device_id': device_id,
-                'status': 'online',
-                'locked': False
-            }
+    for device_id in devices:
+        device_info = {
+            'device_id': device_id,
+            'status': 'online',
+            'locked': False
+        }
 
-            # 检查锁定状态
-            client_ip = get_client_ip(request)
-            client_id = client_manager.get_client_id(client_ip)
-            lock_status = device_lock_manager.get_lock_status(device_id)
+        # 检查锁定状态
+        client_ip = get_client_ip(request)
+        client_id = client_manager.get_client_id(client_ip)
+        lock_status = device_lock_manager.get_lock_status(device_id)
 
-            if lock_status:
-                device_info['locked'] = True
-                device_info['locked_by'] = lock_status['locked_by']
-                device_info['locked_by_self'] = lock_status.get('client_id') == client_id
-                device_info['locked_at'] = lock_status['locked_at']
-            else:
-                device_info['locked_by'] = ''
-                device_info['locked_by_self'] = False
+        if lock_status:
+            device_info['locked'] = True
+            device_info['locked_by'] = lock_status['locked_by']
+            device_info['locked_by_self'] = lock_status.get('client_id') == client_id
+            device_info['locked_at'] = lock_status['locked_at']
+        else:
+            device_info['locked_by'] = ''
+            device_info['locked_by_self'] = False
 
-            # 检查USB/IP来源
-            if device_id in global_state.usbip_devices_source:
-                source = global_state.usbip_devices_source[device_id]
-                device_info['source'] = source['source']
-                device_info['is_usbip'] = True
+        # 检查USB/IP来源
+        if device_id in global_state.usbip_devices_source:
+            source = global_state.usbip_devices_source[device_id]
+            device_info['source'] = source['source']
+            device_info['is_usbip'] = True
 
-            devices_with_status.append(device_info)
+        devices_with_status.append(device_info)
 
-        # 更新缓存（使用专用锁确保原子性）
-        with global_state.device_cache_lock:
-            global_state.device_cache = {
-                'devices': devices_with_status,
-                'timestamp': now
-            }
+    # 更新缓存（使用专用锁确保原子性）
+    with global_state.device_cache_lock:
+        global_state.device_cache = {
+            'devices': devices_with_status,
+            'timestamp': now
+        }
 
-        # 直接返回数组（与Flask一致）
-        return JSONResponse(content=devices_with_status)
-    except Exception as e:
-        logger.error(f"Error listing devices: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=f"{str(e)}. 请检查配置和参数是否正确。"
-            )
+    # 直接返回数组（与Flask一致）
+    return JSONResponse(content=devices_with_status)
 
 @app.post("/api/devices/bootloader-lock")
 async def lock_bootloader(
@@ -1452,7 +1571,7 @@ async def check_bootloader_status(req: DeviceActionRequest):
 
 @app.post("/api/devices/info")
 async def get_device_info(req: DeviceActionRequest):
-    """获取设备详细信息 - 优化版，并行获取所有设备信息"""
+    """获取设备详细信息"""
     try:
         with SSHConnection() as ssh:
             # 并行获取所有设备信息
@@ -1479,7 +1598,7 @@ async def get_device_info(req: DeviceActionRequest):
                     if key in base_info:
                         device_info['properties'][label] = base_info[key]
 
-                # 优化：一次SSH调用获取所有额外属性
+                # 一次SSH调用获取所有额外属性
                 extra_props = await get_device_properties_optimized(device_id, ssh)
 
                 # 映射属性到中文标签
@@ -1636,78 +1755,66 @@ async def list_user_locks():
     })
 
 @app.post("/api/devices/reboot")
+@handle_api_errors
 async def reboot_devices(req: DeviceActionRequest):
-    """重启设备 - 优化版，并行重启"""
-    try:
-        with SSHConnection() as ssh:
-            # 并行重启所有设备
-            async def reboot_single_device(device_id: str) -> Dict:
-                result = device_manager.reboot_device(device_id, ssh)
-                result['device'] = device_id
-                return result
+    """重启设备"""
+    with SSHConnection() as ssh:
+        # 并行重启所有设备
+        async def reboot_single_device(device_id: str) -> Dict:
+            result = device_manager.reboot_device(device_id, ssh)
+            result['device'] = device_id
+            return result
 
-            results = await asyncio.gather(*[reboot_single_device(d) for d in req.devices])
-            return ApiResponse.device_results(results, "设备重启")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error rebooting devices: {e}")
-        return ApiResponse.error(str(e), status_code=500)
+        results = await asyncio.gather(*[reboot_single_device(d) for d in req.devices])
+        return ApiResponse.device_results(results, "设备重启")
 
 @app.post("/api/devices/remount")
+@handle_api_errors
 async def remount_devices(req: DeviceActionRequest, request: Request):
-    """Remount设备 - 优化版，并行remount"""
-    try:
-        # 获取client_id
-        client_id = get_client_id_from_request(request)
+    """Remount设备"""
+    # 获取client_id
+    client_id = get_client_id_from_request(request)
 
-        with SSHConnection() as ssh:
-            # 并行remount所有设备
-            async def remount_single_device(device_id: str) -> Dict:
-                # 执行 adb root
-                output, error, code = ssh_manager.execute_command(
-                    ssh,
-                    f"adb -s {device_id} root",
-                    timeout=15
-                )
+    with SSHConnection() as ssh:
+        # 并行remount所有设备
+        async def remount_single_device(device_id: str) -> Dict:
+            # 执行 adb root
+            output, error, code = ssh_manager.execute_command(
+                ssh,
+                f"adb -s {device_id} root",
+                timeout=15
+            )
 
-                # 发送输出到前端
-                await safe_websocket_send(client_id, {
-                    'type': 'log_update',
-                    'log': f"[{device_id}] adb root: {output.strip()}",
-                    'log_type': 'info'
-                })
+            # 发送输出到前端
+            await safe_websocket_send(client_id, {
+                'type': 'log_update',
+                'log': f"[{device_id}] adb root: {output.strip()}",
+                'log_type': 'info'
+            })
 
-                await asyncio.sleep(2)
+            await asyncio.sleep(2)
 
-                # 执行 remount
-                output, error, code = ssh_manager.execute_command(
-                    ssh,
-                    f"adb -s {device_id} remount",
-                    timeout=15
-                )
+            # 执行 remount
+            output, error, code = ssh_manager.execute_command(
+                ssh,
+                f"adb -s {device_id} remount",
+                timeout=15
+            )
 
-                # 发送输出到前端
-                await safe_websocket_send(client_id, {
-                    'type': 'log_update',
-                    'log': f"[{device_id}] adb remount: {output.strip()}",
-                    'log_type': 'info'
-                })
+            # 发送输出到前端
+            await safe_websocket_send(client_id, {
+                'type': 'log_update',
+                'log': f"[{device_id}] adb remount: {output.strip()}",
+                'log_type': 'info'
+            })
 
-                # 使用device_manager的remount方法获取完整结果
-                result = device_manager.remount_device(device_id, ssh)
-                result['device'] = device_id
-                return result
+            # 使用device_manager的remount方法获取完整结果
+            result = device_manager.remount_device(device_id, ssh)
+            result['device'] = device_id
+            return result
 
-            results = await asyncio.gather(*[remount_single_device(d) for d in req.devices])
-            return ApiResponse.device_results(results, "设备Remount")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error remounting devices: {e}")
-        return ApiResponse.error(str(e), status_code=500)
+        results = await asyncio.gather(*[remount_single_device(d) for d in req.devices])
+        return ApiResponse.device_results(results, "设备Remount")
 
 @app.post("/api/devices/connect-wifi")
 async def connect_wifi(req: WifiConnectRequest):
@@ -2775,7 +2882,7 @@ async def get_status(
     h: Optional[str] = Query(None),
     help: bool = Query(False)
 ):
-    """获取测试状态 - 优化版本，减少数据传输"""
+    """获取测试状态"""
     # 检查是否需要显示帮助（支持 ?h 或 ?help）
     if help:
         help_text = generate_per_api_help_text("GET", "/api/test/status")
@@ -4697,6 +4804,7 @@ async def stop_adb_forward():
 
 # ==================== USB/IP ====================
 @app.get("/api/usbip/status")
+@handle_api_errors
 async def get_usbip_status(request: Request):
     """
     获取 USB/IP 状态（与5000端口完全一致）
@@ -4810,36 +4918,27 @@ async def stop_usbip(request: Request):
     if device_password:
         config['device_pswd'] = device_password
 
-    win_ssh = create_device_ssh_connection(config)
-    if not win_ssh:
+    try:
+        with DeviceSSHConnection(config) as win_ssh:
+            ssh_manager.execute_command(win_ssh, 'usbipd unbind --all', timeout=10)
+            await asyncio.sleep(2)
+
+            # 只更新 USB/IP 连接状态，不清除设备来源记录
+            # 设备仍然在测试主机上，来源信息应该保留
+            with global_state.usbip_states_lock:
+                global_state.usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
+            logger.info(f"[USB/IP Stop] Connection cleared (device source preserved)")
+
+            return JSONResponse(content={
+                'success': True,
+                'message': '本地设备已断开'
+            })
+    except HTTPException:
         # 无法连接到 Windows，只清除连接状态
         # 注意：不清除设备来源记录，因为设备仍然在测试主机上
         with global_state.usbip_states_lock:
             global_state.usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
         logger.info(f"[USB/IP Stop] Connection cleared (device source preserved)")
-        return JSONResponse(content={'success': True, 'message': '本地设备已断开'})
-
-    try:
-        ssh_manager.execute_command(win_ssh, 'usbipd unbind --all', timeout=10)
-        ssh_manager.return_connection(win_ssh)
-        await asyncio.sleep(2)
-
-        # 只更新 USB/IP 连接状态，不清除设备来源记录
-        # 设备仍然在测试主机上，来源信息应该保留
-        with global_state.usbip_states_lock:
-            global_state.usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
-        logger.info(f"[USB/IP Stop] Connection cleared (device source preserved)")
-
-        return JSONResponse(content={
-            'success': True,
-            'message': '本地设备已断开'
-        })
-    except Exception as e:
-        ssh_manager.return_connection(win_ssh)
-        # 即使失败也清除连接状态，但保留设备来源记录
-        with global_state.usbip_states_lock:
-            global_state.usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
-        logger.info(f"[USB/IP Stop] Connection cleared on error (device source preserved)")
         return JSONResponse(content={'success': True, 'message': '本地设备已断开'})
 
 @app.post("/api/usbip/auto-install")
@@ -4860,22 +4959,10 @@ async def auto_install_usbipd(request: Request):
             config['device_pswd'] = device_password
 
         # 连接到 Windows 主机
-        win_ssh = create_device_ssh_connection(config)
-        if not win_ssh:
-            return JSONResponse(
-                content={"success": False, "error": "无法连接到 Windows 主机"},
-                status_code=500
-            )
-
-        try:
+        with DeviceSSHConnection(config) as win_ssh:
             # 使用 USBIPManager 的安装方法
             result = usbip_manager.install_usbipd(win_ssh, config)
-            ssh_manager.return_connection(win_ssh)
             return JSONResponse(content=result)
-
-        except Exception as e:
-            ssh_manager.return_connection(win_ssh)
-            raise
 
     except Exception as e:
         logger.error(f"Error auto-installing usbipd: {e}")
@@ -4886,6 +4973,7 @@ async def auto_install_usbipd(request: Request):
 
 # ==================== VPN管理 ====================
 @app.get("/api/ssh/sshd-check")
+@handle_api_errors
 async def check_ssh_sshd(request: Request):
     """检查VPN SSH服务状态
 
@@ -4896,23 +4984,13 @@ async def check_ssh_sshd(request: Request):
         stdin, stdout, stderr = ssh.exec_command(cmd, timeout=10)
         return stdout.read().decode('utf-8', errors='ignore').strip()
 
+    config = config_manager.load_config()
+    device_host = get_client_id_from_request(request)
+    config['device_host'] = device_host
+    config['device_pswd'] = find_device_host_password(config, device_host) or config.get('device_pswd', '')
+
     try:
-        config = config_manager.load_config()
-        device_host = get_client_id_from_request(request)
-        config['device_host'] = device_host
-        config['device_pswd'] = find_device_host_password(config, device_host) or config.get('device_pswd', '')
-
-        ssh = create_device_ssh_connection(config)
-        if not ssh:
-            logger.warning(f"[SSHD Check] Cannot connect to {device_host}")
-            return JSONResponse(content={
-                "success": True,
-                "installed": False,
-                "running": False,
-                "error": "无法连接到SSH服务，请检查网络连接和Windows客户端状态"
-            })
-
-        try:
+        with DeviceSSHConnection(config) as ssh:
             # 检查是否已安装（先找文件，再查服务）
             installed = bool(exec_ssh_cmd(ssh, "where sshd.exe 2>nul"))
             if not installed:
@@ -4923,24 +5001,20 @@ async def check_ssh_sshd(request: Request):
 
             logger.info(f"[SSHD Check] {device_host}: installed={installed}, running={running}")
 
-            ssh.close()
             return JSONResponse(content={
                 'success': True,
                 'installed': installed,
                 'running': running,
                 'install_guide': SSHD_INSTALL_GUIDE if not installed else None
             })
-
-        except Exception as e:
-            ssh.close()
-            raise
-
-    except Exception as e:
-        logger.error(f"[SSHD Check] Error: {e}")
-        return JSONResponse(
-            content={"success": False, "error": str(e), "installed": False, "running": False},
-            status_code=500
-        )
+    except HTTPException:
+        logger.warning(f"[SSHD Check] Cannot connect to {device_host}")
+        return JSONResponse(content={
+            "success": True,
+            "installed": False,
+            "running": False,
+            "error": "无法连接到SSH服务，请检查网络连接和Windows客户端状态"
+        })
 
 @app.post("/api/ssh/sshd-install")
 async def install_ssh_sshd():
@@ -4957,84 +5031,81 @@ async def install_ssh_sshd():
 
 
 @app.get("/api/ssh/route")
+@handle_api_errors
 async def check_ssh_route(request: Request):
     """检查网络路由 - 检查测试主机和设备主机是否在同一网段"""
-    try:
-        config = config_manager.load_config()
+    config = config_manager.load_config()
 
-        ubuntu_host = config.get("ubuntu_host", "")
-        client_ip = get_client_ip_from_request_headers(request)
+    ubuntu_host = config.get("ubuntu_host", "")
+    client_ip = get_client_ip_from_request_headers(request)
 
-        if not ubuntu_host or client_ip == 'unknown':
-            return JSONResponse(content={
-                'success': False,
-                'error': '无法获取主机IP地址'
-            }, status_code=400)
+    if not ubuntu_host or client_ip == 'unknown':
+        return JSONResponse(content={
+            'success': False,
+            'error': '无法获取主机IP地址'
+        }, status_code=400)
 
-        ubuntu_ip = extract_ip_from_host(ubuntu_host)
-        device_ip = extract_ip_from_host(client_ip)
+    ubuntu_ip = extract_ip_from_host(ubuntu_host)
+    device_ip = extract_ip_from_host(client_ip)
 
-        same_network = are_same_network(ubuntu_ip, device_ip)
-        need_route = not same_network
+    same_network = are_same_network(ubuntu_ip, device_ip)
+    need_route = not same_network
 
-        if need_route:
-            try:
-                ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
-                device_network_obj = ipaddress.IPv4Network(f"{device_ip}/24", strict=False)
-                ubuntu_network = str(ubuntu_network_obj.network_address)
-                device_network = str(device_network_obj.network_address)
-            except (ipaddress.AddressValueError, ValueError):
-                ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
-                device_network = '.'.join(device_ip.split('.')[:3]) + '.0'
+    if need_route:
+        try:
+            ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
+            device_network_obj = ipaddress.IPv4Network(f"{device_ip}/24", strict=False)
+            ubuntu_network = str(ubuntu_network_obj.network_address)
+            device_network = str(device_network_obj.network_address)
+        except (ipaddress.AddressValueError, ValueError):
+            ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
+            device_network = '.'.join(device_ip.split('.')[:3]) + '.0'
 
-            route_commands = {
-                'windows': [
-                    f"route add {ubuntu_network} mask 255.255.255.0 {device_ip}",
-                    f"route add {device_network} mask 255.255.255.0 {ubuntu_ip}",
-                    "# 检查路由表: route print",
-                    f"# 删除路由表: route delete {ubuntu_network}",
-                    f"# 删除路由表: route delete {device_network}"
-                ],
-                'linux': [
-                    f"sudo ip route add {ubuntu_network}/24 via {device_ip}",
-                    f"sudo ip route add {device_network}/24 via {ubuntu_ip}",
-                    "# 检查路由表: ip route show",
-                    f"# 删除路由表: sudo ip route del {ubuntu_network}/24",
-                    f"# 删除路由表: sudo ip route del {device_network}/24"
-                ]
-            }
+        route_commands = {
+            'windows': [
+                f"route add {ubuntu_network} mask 255.255.255.0 {device_ip}",
+                f"route add {device_network} mask 255.255.255.0 {ubuntu_ip}",
+                "# 检查路由表: route print",
+                f"# 删除路由表: route delete {ubuntu_network}",
+                f"# 删除路由表: route delete {device_network}"
+            ],
+            'linux': [
+                f"sudo ip route add {ubuntu_network}/24 via {device_ip}",
+                f"sudo ip route add {device_network}/24 via {ubuntu_ip}",
+                "# 检查路由表: ip route show",
+                f"# 删除路由表: sudo ip route del {ubuntu_network}/24",
+                f"# 删除路由表: sudo ip route del {device_network}/24"
+            ]
+        }
 
-            return JSONResponse(content={
-                'success': True,
-                'same_network': False,
-                'need_route': True,
-                'message': f'⚠️ 网段不同: {ubuntu_ip} (网段: {ubuntu_network}/24) ↔ {device_ip} (网段: {device_network}/24)',
-                'ubuntu_ip': ubuntu_ip,
-                'device_ip': device_ip,
-                'ubuntu_network': ubuntu_network,
-                'device_network': device_network,
-                'route_commands': route_commands,
-                'warning': '测试主机和设备主机不在同一网段，可能影响网络通信，建议添加路由表'
-            })
-        else:
-            try:
-                ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
-                ubuntu_network = str(ubuntu_network_obj.network_address)
-            except (ipaddress.AddressValueError, ValueError):
-                ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
+        return JSONResponse(content={
+            'success': True,
+            'same_network': False,
+            'need_route': True,
+            'message': f'⚠️ 网段不同: {ubuntu_ip} (网段: {ubuntu_network}/24) ↔ {device_ip} (网段: {device_network}/24)',
+            'ubuntu_ip': ubuntu_ip,
+            'device_ip': device_ip,
+            'ubuntu_network': ubuntu_network,
+            'device_network': device_network,
+            'route_commands': route_commands,
+            'warning': '测试主机和设备主机不在同一网段，可能影响网络通信，建议添加路由表'
+        })
+    else:
+        try:
+            ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
+            ubuntu_network = str(ubuntu_network_obj.network_address)
+        except (ipaddress.AddressValueError, ValueError):
+            ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
 
-            return JSONResponse(content={
-                'success': True,
-                'same_network': True,
-                'need_route': False,
-                'message': f'✅ 网段相同: {ubuntu_ip} ↔ {device_ip}',
-                'ubuntu_ip': ubuntu_ip,
-                'device_ip': device_ip,
-                'network': ubuntu_network
-            })
-
-    except Exception as e:
-        logger.error(f"Error checking routing: {e}")
+        return JSONResponse(content={
+            'success': True,
+            'same_network': True,
+            'need_route': False,
+            'message': f'✅ 网段相同: {ubuntu_ip} ↔ {device_ip}',
+            'ubuntu_ip': ubuntu_ip,
+            'device_ip': device_ip,
+            'network': ubuntu_network
+        })
         return JSONResponse(
             content={"success": False, "error": str(e)},
             status_code=500
@@ -5316,52 +5387,40 @@ def _is_safe_route_command(command: str) -> bool:
 
 
 @app.get("/api/vpn/status")
+@handle_api_errors
 async def get_vpn_status():
     """获取VPN连接状态（多次ping提高可靠性）"""
-    try:
-        config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return JSONResponse(
-                content={"success": False, "error": "SSH连接失败"},
-                status_code=500
-            )
-
-        try:
-            vpn_target = config.get('vpn_target', 'www.google.com')
-            if isinstance(vpn_target, list):
-                vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
-
-            # 多次ping测试，只要一次成功即认为已连接
-            max_attempts = 2
-            for attempt in range(max_attempts):
-                output, error, code = ssh_manager.execute_command(
-                    ssh,
-                    f"ping -c 1 -W 2 {vpn_target} 2>&1",
-                    timeout=5
-                )
-
-                # 检查ping结果（成功则立即返回）
-                if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
-                    ssh_manager.return_connection(ssh)
-                    logger.info(f"[VPN Status] {vpn_target}: connected (attempt {attempt + 1})")
-                    return JSONResponse(content={"success": True, "connected": True})
-
-            # 所有尝试都失败
-            ssh_manager.return_connection(ssh)
-            logger.info(f"[VPN Status] {vpn_target}: disconnected (0/{max_attempts} successful)")
-            return JSONResponse(content={"success": True, "connected": False})
-
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            raise
-
-    except Exception as e:
-        logger.error(f"Error getting VPN status: {e}")
+    config = config_manager.load_config()
+    ssh = ssh_manager.get_connection(config)
+    if not ssh:
         return JSONResponse(
-            content={"success": False, "error": str(e)},
+            content={"success": False, "error": "SSH连接失败"},
             status_code=500
         )
+
+    vpn_target = config.get('vpn_target', 'www.google.com')
+    if isinstance(vpn_target, list):
+        vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
+
+    # 多次ping测试，只要一次成功即认为已连接
+    max_attempts = 2
+    for attempt in range(max_attempts):
+        output, error, code = ssh_manager.execute_command(
+            ssh,
+            f"ping -c 1 -W 2 {vpn_target} 2>&1",
+            timeout=5
+        )
+
+        # 检查ping结果（成功则立即返回）
+        if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
+            ssh_manager.return_connection(ssh)
+            logger.info(f"[VPN Status] {vpn_target}: connected (attempt {attempt + 1})")
+            return JSONResponse(content={"success": True, "connected": True})
+
+    # 所有尝试都失败
+    ssh_manager.return_connection(ssh)
+    logger.info(f"[VPN Status] {vpn_target}: disconnected (0/{max_attempts} successful)")
+    return JSONResponse(content={"success": True, "connected": False})
 
 @app.post("/api/vpn/connect")
 async def connect_vpn(
@@ -6687,8 +6746,53 @@ def find_device_host_password(config, device_host):
     return None
 
 
+class DeviceSSHConnection:
+    """设备SSH连接上下文管理器，自动处理连接获取和归还（连接池）"""
+
+    def __init__(self, config=None):
+        self.config = config or config_manager.load_config()
+        self.ssh = None
+        self._pool_key = None
+
+    def _get_pool_key(self):
+        """生成连接池的键值，基于设备主机地址"""
+        device_host = self.config.get('device_host', '')
+        if not device_host:
+            return None
+
+        if '@' in device_host:
+            # 格式: username@hostname
+            return device_host
+        return device_host
+
+    def __enter__(self):
+        self._pool_key = self._get_pool_key()
+        if not self._pool_key:
+            raise HTTPException(
+                status_code=500,
+                detail="无效的设备主机配置"
+            )
+
+        # 从连接池获取或创建连接
+        self.ssh = global_state.device_ssh_pool_get(self._pool_key, self.config)
+        if not self.ssh:
+            raise HTTPException(
+                status_code=500,
+                detail=f"无法连接到设备主机: {self._pool_key}"
+            )
+        return self.ssh
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.ssh and self._pool_key:
+            try:
+                global_state.device_ssh_pool_return(self._pool_key, self.ssh)
+            except Exception as e:
+                logger.error(f"Failed to return device SSH connection: {e}")
+
+
 def create_device_ssh_connection(config):
-    """创建设备主机的SSH连接（Windows）"""
+    """创建设备主机的SSH连接（Windows）- 已废弃，请使用 DeviceSSHConnection 上下文管理器"""
+    logger.warning("[DEPRECATED] create_device_ssh_connection 已废弃，请使用 DeviceSSHConnection 上下文管理器")
     device_host = config.get('device_host', '')
     if not device_host:
         return None
@@ -7665,7 +7769,7 @@ API_DOCS_LIST = [
 
 @app.get("/api/system/docs")
 async def get_api_docs():
-    """获取所有API文档（使用预定义列表，性能优化）"""
+    """获取所有API文档"""
     try:
         # 直接返回预定义的API列表，避免每次请求重新构建
         return JSONResponse(
@@ -7760,7 +7864,7 @@ async def get_api_help_detail(api_path: str, help: Optional[str] = None):
 
 
 def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
-    """为指定API生成详细帮助文本（优化格式）
+    """为指定API生成详细帮助文本
 
     Args:
         method: HTTP方法 (GET/POST/DELETE等)
@@ -7909,7 +8013,7 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
 
     params = api_details.get('params', [])
 
-    # 构建帮助文本（优化格式）
+    # 构建帮助文本
     help_text = ""
 
     # 固定的边框线（70个字符宽，包含左右边框）
