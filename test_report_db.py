@@ -4,12 +4,13 @@
 import json
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+from collections import defaultdict
 
 
 class TestReportDB:
-    """测试报告数据库 - 使用 JSON 文件存储"""
+    """测试报告数据库 - 使用 JSON 文件存储 + 内存索引"""
 
     def __init__(self, db_path: str = None):
         """
@@ -25,6 +26,18 @@ class TestReportDB:
 
         self.db_path = db_path
         self.lock = threading.Lock()
+        self._cache = None  # 数据缓存
+        self._cache_dirty = True  # 缓存是否脏
+
+        # 内存索引
+        self._indexes = {
+            'timestamp': {},  # timestamp -> report
+            'test_type': defaultdict(list),  # test_type -> [timestamps]
+            'client_id': defaultdict(list),  # client_id -> [timestamps]
+            'status': defaultdict(list),  # status -> [timestamps]
+            'created_at': defaultdict(list)  # date -> [timestamps]
+        }
+        self._indexes_dirty = True  # 索引是否需要重建
 
         # 确保数据目录存在
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
@@ -38,21 +51,96 @@ class TestReportDB:
             self._save_data({'reports': [], 'last_update': None})
 
     def _load_data(self) -> Dict:
-        """加载数据"""
+        """加载数据(带缓存)"""
+        # 如果缓存有效,直接返回
+        if not self._cache_dirty and self._cache is not None:
+            return self._cache
+
         try:
             with open(self.db_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                self._cache = data
+                self._cache_dirty = False
+                return data
         except Exception as e:
             print(f"[ERROR] 加载数据库失败: {e}")
-            return {'reports': [], 'last_update': None}
+            data = {'reports': [], 'last_update': None}
+            self._cache = data
+            self._cache_dirty = False
+            return data
 
-    def _save_data(self, data: Dict):
+    def _save_data(self, data: Dict, invalidate_indexes: bool = True):
         """保存数据"""
         try:
             with open(self.db_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+            # 更新缓存
+            self._cache = data
+            self._cache_dirty = False
+            # 只在需要时标记索引需要重建
+            if invalidate_indexes:
+                self._indexes_dirty = True
         except Exception as e:
             print(f"[ERROR] 保存数据库失败: {e}")
+
+    def _build_indexes(self):
+        """构建内存索引"""
+        if not self._indexes_dirty:
+            return
+
+        try:
+            # 清空索引
+            self._indexes = {
+                'timestamp': {},
+                'test_type': defaultdict(list),
+                'client_id': defaultdict(list),
+                'status': defaultdict(list),
+                'created_at': defaultdict(list)
+            }
+
+            data = self._load_data()
+            reports = data.get('reports', [])
+
+            for report in reports:
+                timestamp = report.get('timestamp')
+                if not timestamp:
+                    continue
+
+                # 时间戳索引
+                self._indexes['timestamp'][timestamp] = report
+
+                # 测试类型索引
+                test_type = report.get('test_type', 'UNKNOWN')
+                self._indexes['test_type'][test_type].append(timestamp)
+
+                # 客户端ID索引
+                client_id = report.get('client_id')
+                if client_id:
+                    self._indexes['client_id'][client_id].append(timestamp)
+
+                # 状态索引
+                status = report.get('status', 'unknown')
+                self._indexes['status'][status].append(timestamp)
+
+                # 创建日期索引
+                created_at = report.get('created_at')
+                if created_at:
+                    try:
+                        date = created_at.split('T')[0]  # 提取日期部分
+                        self._indexes['created_at'][date].append(timestamp)
+                    except:
+                        pass
+
+            self._indexes_dirty = False
+        except Exception as e:
+            print(f"[ERROR] 构建索引失败: {e}")
+            # 即使索引构建失败,也要标记为已尝试,避免重复构建
+            self._indexes_dirty = False
+
+    def _invalidate_cache(self):
+        """使缓存失效"""
+        self._cache_dirty = True
+        self._indexes_dirty = True
 
     def add_report(self, report_info: Dict) -> bool:
         """
@@ -103,23 +191,57 @@ class TestReportDB:
             print(f"[ERROR] 添加报告失败: {e}")
             return False
 
-    def get_reports(self, limit: int = 50, test_type: str = None) -> List[Dict]:
+    def get_reports(
+        self,
+        limit: int = 50,
+        test_type: str = None,
+        client_id: str = None,
+        status: str = None
+    ) -> List[Dict]:
         """
         获取测试报告列表
 
         Args:
             limit: 返回数量限制
             test_type: 过滤测试类型 (可选)
+            client_id: 过滤客户端ID (可选)
+            status: 过滤状态 (可选)
 
         Returns:
             List[Dict]: 报告列表
         """
         try:
-            data = self._load_data()
-            reports = data.get('reports', [])
+            # 如果没有过滤条件,直接返回(避免构建索引)
+            if not test_type and not client_id and not status:
+                data = self._load_data()
+                return data.get('reports', [])[:limit]
+
+            # 有过滤条件时才构建和使用索引
+            self._build_indexes()
+
+            # 使用索引查找
+            timestamps = None
 
             if test_type:
-                reports = [r for r in reports if r.get('test_type') == test_type]
+                type_timestamps = set(self._indexes['test_type'].get(test_type, []))
+                timestamps = type_timestamps if timestamps is None else timestamps & type_timestamps
+
+            if client_id:
+                client_timestamps = set(self._indexes['client_id'].get(client_id, []))
+                timestamps = client_timestamps if timestamps is None else timestamps & client_timestamps
+
+            if status:
+                status_timestamps = set(self._indexes['status'].get(status, []))
+                timestamps = status_timestamps if timestamps is None else timestamps & status_timestamps
+
+            if timestamps is None:
+                return []
+
+            # 根据时间戳获取报告
+            reports = [self._indexes['timestamp'][ts] for ts in timestamps if ts in self._indexes['timestamp']]
+
+            # 按时间倒序排序
+            reports.sort(key=lambda x: x.get('created_at', ''), reverse=True)
 
             return reports[:limit]
 
@@ -138,8 +260,11 @@ class TestReportDB:
             Optional[Dict]: 报告信息，不存在返回 None
         """
         try:
-            data = self._load_data()
-            return next((r for r in data['reports'] if r['timestamp'] == timestamp), None)
+            # 确保索引已构建
+            self._build_indexes()
+
+            # 直接从索引获取
+            return self._indexes['timestamp'].get(timestamp)
 
         except Exception as e:
             print(f"[ERROR] 获取报告失败: {e}")
@@ -163,12 +288,23 @@ class TestReportDB:
                 report = next((r for r in data['reports'] if r['timestamp'] == timestamp), None)
 
                 if report:
+                    old_status = report.get('status')
+                    old_test_type = report.get('test_type')
+                    old_client_id = report.get('client_id')
+
                     report['status'] = status
                     report['updated_at'] = datetime.now().isoformat()
                     report.update(kwargs)
 
                     data['last_update'] = datetime.now().isoformat()
-                    self._save_data(data)
+
+                    # 检查索引字段是否改变
+                    indexed_fields_changed = (
+                        old_status != status or
+                        old_test_type != report.get('test_type') or
+                        old_client_id != report.get('client_id')
+                    )
+                    self._save_data(data, invalidate_indexes=indexed_fields_changed)
                     return True
 
                 return False
@@ -213,26 +349,36 @@ class TestReportDB:
             Dict: 统计信息
         """
         try:
-            data = self._load_data()
-            reports = data.get('reports', [])
+            # 确保索引已构建
+            self._build_indexes()
 
-            total = len(reports)
+            # 使用索引统计,避免重复加载
+            total = len(self._indexes['timestamp'])
 
-            # 按测试类型统计
+            # 使用索引统计测试类型
             type_counts = {}
-            for r in reports:
-                t = r.get('test_type', 'UNKNOWN')
-                type_counts[t] = type_counts.get(t, 0) + 1
+            for test_type, timestamps in self._indexes['test_type'].items():
+                type_counts[test_type] = len(timestamps)
 
             # 最近7天的报告
-            from datetime import timedelta
             week_ago = datetime.now() - timedelta(days=7)
-            recent_reports = [r for r in reports if datetime.fromisoformat(r.get('created_at', '')) > week_ago]
+            recent_count = 0
+
+            for date_str, timestamps in self._indexes['created_at'].items():
+                try:
+                    date_obj = datetime.fromisoformat(date_str)
+                    if date_obj > week_ago:
+                        recent_count += len(timestamps)
+                except:
+                    pass
+
+            # 获取last_update需要重新加载数据
+            data = self._load_data()
 
             return {
                 'total_reports': total,
-                'type_counts': type_counts,
-                'recent_week': len(recent_reports),
+                'type_counts': dict(type_counts),
+                'recent_week': recent_count,
                 'last_update': data.get('last_update')
             }
 

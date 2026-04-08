@@ -1,9 +1,8 @@
 """
 GMS测试报告分析器 - 统一的报告解析模块
-简化重构版本，整合了XML解析、文件处理和分析功能
+整合了XML解析、文件处理和分析功能
 """
 
-import xml.etree.ElementTree as ET
 import os
 import zipfile
 import tarfile
@@ -13,9 +12,20 @@ import glob
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
+# 优先使用lxml,如果不可用则回退到ElementTree
+try:
+    from lxml import etree
+    USE_LXML = True
+    logger = logging.getLogger(__name__)
+    logger.info("使用lxml进行XML解析(高性能模式)")
+except ImportError:
+    import xml.etree.ElementTree as ET
+    USE_LXML = False
+    logger = logging.getLogger(__name__)
+    logger.warning("lxml不可用,使用ElementTree(标准库模式)")
+
 # 配置日志
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -50,8 +60,16 @@ class XMLReportParser:
     def parse_file(self, xml_path: str) -> Optional[TestReport]:
         """解析XML文件"""
         try:
-            tree = ET.parse(xml_path)
-            root = tree.getroot()
+            if USE_LXML:
+                # 使用lxml解析,支持更大的文件和更快的速度
+                tree = etree.parse(xml_path, etree.XMLParser(remove_blank_text=True))
+                root = tree.getroot()
+            else:
+                # 回退到ElementTree
+                import xml.etree.ElementTree as ET
+                tree = ET.parse(xml_path)
+                root = tree.getroot()
+
             return self._parse_root(root)
         except Exception as e:
             logger.error(f"XML解析失败: {e}")
@@ -60,16 +78,24 @@ class XMLReportParser:
     def parse_content(self, xml_content: str) -> Optional[TestReport]:
         """解析XML内容字符串"""
         try:
-            root = ET.fromstring(xml_content)
+            if USE_LXML:
+                root = etree.fromstring(xml_content.encode('utf-8'), etree.XMLParser(remove_blank_text=True))
+            else:
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(xml_content)
+
             return self._parse_root(root)
         except Exception as e:
             logger.error(f"XML内容解析失败: {e}")
             return None
 
-    def _parse_root(self, root: ET.Element) -> Optional[TestReport]:
+    def _parse_root(self, root) -> Optional[TestReport]:
         """解析XML根节点"""
         # 构建父节点映射
-        self.parent_map = {c: p for p in root.iter() for c in p}
+        if USE_LXML:
+            self.parent_map = {c: p for p in root.iter() for c in p}
+        else:
+            self.parent_map = {c: p for p in root.iter() for c in p}
 
         # 提取基本信息
         test_type = self._get_test_type(root)
@@ -98,7 +124,7 @@ class XMLReportParser:
             failures=failures
         )
 
-    def _get_test_type(self, root: ET.Element) -> str:
+    def _get_test_type(self, root) -> str:
         """获取测试类型"""
         # 从Result属性获取（优先检查suite_name）
         for attr in ['suite_name', 'suite', 'test_type', 'testType', 'type', 'Type']:
@@ -106,13 +132,18 @@ class XMLReportParser:
                 return root.get(attr)
 
         # 从Build节点获取
-        build = root.find('.//Build')
-        if build is not None:
-            return build.get('test_type', build.get('testType', 'GTS'))
+        if USE_LXML:
+            build = root.xpath('.//Build')
+            if build:
+                return build[0].get('test_type', build[0].get('testType', 'GTS'))
+        else:
+            build = root.find('.//Build')
+            if build is not None:
+                return build.get('test_type', build.get('testType', 'GTS'))
 
         return 'GTS'
 
-    def _get_device_info(self, root: ET.Element) -> str:
+    def _get_device_info(self, root) -> str:
         """获取设备信息"""
         # 优先从Result节点获取
         device = root.get('devices', '')
@@ -120,15 +151,22 @@ class XMLReportParser:
             return device
 
         # 从Build节点获取
-        build = root.find('.//Build')
-        if build is not None:
-            device = build.get('device_serial', build.get('serial', ''))
-            if device:
-                return device
+        if USE_LXML:
+            build = root.xpath('.//Build')
+            if build:
+                device = build[0].get('device_serial', build[0].get('serial', ''))
+                if device:
+                    return device
+        else:
+            build = root.find('.//Build')
+            if build is not None:
+                device = build.get('device_serial', build.get('serial', ''))
+                if device:
+                    return device
 
         return '未知设备'
 
-    def _get_android_version(self, root: ET.Element) -> str:
+    def _get_android_version(self, root) -> str:
         """获取测试套件版本（suite_version）"""
         # 优先从Result根节点获取suite_version
         for attr in ['suite_version', 'android_version', 'AndroidVersion']:
@@ -136,42 +174,66 @@ class XMLReportParser:
                 return root.get(attr)
 
         # 从Build节点获取
-        build = root.find('.//Build')
-        if build is not None:
-            return build.get('version', build.get('sdk', '15'))
+        if USE_LXML:
+            build = root.xpath('.//Build')
+            if build:
+                return build[0].get('version', build[0].get('sdk', '15'))
+        else:
+            build = root.find('.//Build')
+            if build is not None:
+                return build.get('version', build.get('sdk', '15'))
+
         return '15'
 
-    def _get_start_time(self, root: ET.Element) -> str:
+    def _get_start_time(self, root) -> str:
         """获取开始时间"""
         for attr in ['start_display', 'end_display', 'start_time', 'StartTime']:
             if root.get(attr):
                 return root.get(attr)
         return '未知时间'
 
-    def _get_summary(self, root: ET.Element) -> Tuple[int, int, int]:
+    def _get_summary(self, root) -> Tuple[int, int, int]:
         """获取摘要统计信息"""
-        summary = root.find('.//Summary')
-        if summary is not None:
-            # Summary节点有 pass 和 failed 属性，total需要计算
-            passed = int(summary.get('pass', summary.get('Passed', 0)))
-            failed = int(summary.get('failed', summary.get('Failed', 0)))
-            total = passed + failed
-            return total, passed, failed
+        if USE_LXML:
+            summary = root.xpath('.//Summary')
+            if summary:
+                # Summary节点有 pass 和 failed 属性，total需要计算
+                passed = int(summary[0].get('pass', summary[0].get('Passed', 0)))
+                failed = int(summary[0].get('failed', summary[0].get('Failed', 0)))
+                total = passed + failed
+                return total, passed, failed
+        else:
+            summary = root.find('.//Summary')
+            if summary is not None:
+                passed = int(summary.get('pass', summary.get('Passed', 0)))
+                failed = int(summary.get('failed', summary.get('Failed', 0)))
+                total = passed + failed
+                return total, passed, failed
 
         # 如果没有Summary，手动统计
         return self._count_tests(root)
 
-    def _count_tests(self, root: ET.Element) -> Tuple[int, int, int]:
+    def _count_tests(self, root) -> Tuple[int, int, int]:
         """手动统计测试用例"""
-        test_cases = root.findall('.//Test')
-        passed = sum(1 for tc in test_cases if tc.get('result', 'pass').lower() == 'pass')
-        failed = sum(1 for tc in test_cases if tc.get('result', 'pass').lower() == 'fail')
-        return len(test_cases), passed, failed
+        if USE_LXML:
+            test_cases = root.xpath('.//Test')
+            passed = sum(1 for tc in test_cases if tc.get('result', 'pass').lower() == 'pass')
+            failed = sum(1 for tc in test_cases if tc.get('result', 'pass').lower() == 'fail')
+            return len(test_cases), passed, failed
+        else:
+            test_cases = root.findall('.//Test')
+            passed = sum(1 for tc in test_cases if tc.get('result', 'pass').lower() == 'pass')
+            failed = sum(1 for tc in test_cases if tc.get('result', 'pass').lower() == 'fail')
+            return len(test_cases), passed, failed
 
-    def _parse_failures(self, root: ET.Element) -> List[TestFailure]:
+    def _parse_failures(self, root) -> List[TestFailure]:
         """解析失败的测试用例"""
         failures = []
-        test_cases = root.findall('.//Test')
+
+        if USE_LXML:
+            test_cases = root.xpath('.//Test')
+        else:
+            test_cases = root.findall('.//Test')
 
         for test_case in test_cases:
             result_attr = test_case.get('result', test_case.get('Result', 'pass'))
@@ -199,7 +261,7 @@ class XMLReportParser:
 
         return failures
 
-    def _get_module_name(self, test_case: ET.Element) -> str:
+    def _get_module_name(self, test_case) -> str:
         """获取测试所属模块"""
         current = test_case
         while current is not None:
@@ -211,7 +273,7 @@ class XMLReportParser:
                 break
         return '未知模块'
 
-    def _get_test_name(self, test_case: ET.Element) -> str:
+    def _get_test_name(self, test_case) -> str:
         """获取测试用例完整名称"""
         test_name = test_case.get('name', '未知用例')
 
@@ -225,31 +287,65 @@ class XMLReportParser:
 
         return test_name
 
-    def _get_failure_info(self, test_case: ET.Element) -> Tuple[str, str]:
+    def _get_failure_info(self, test_case) -> Tuple[str, str]:
         """获取失败信息"""
         reason = ''
         stack_trace = ''
 
-        # 从Failure节点获取
-        failure = test_case.find('Failure')
-        if failure is not None:
-            reason = failure.get('message', '')
-            if failure.text:
-                stack_trace = failure.text.strip()
+        if USE_LXML:
+            failure = test_case.find('Failure') if test_case.find('Failure') is not None else None
+            if failure is None:
+                failures = test_case.xpath('.//Failure')
+                if failures:
+                    failure = failures[0]
 
-        # 从Error节点获取
-        if not reason:
-            error = test_case.find('Error')
-            if error is not None:
-                reason = error.get('message', '')
-                if error.text:
-                    stack_trace = error.text.strip()
+            if failure is not None:
+                reason = failure.get('message', '')
+                if failure.text:
+                    stack_trace = failure.text.strip()
 
-        # 从StackTrace子节点获取
-        if not stack_trace:
-            stack_elem = test_case.find('.//StackTrace')
-            if stack_elem is not None and stack_elem.text:
-                stack_trace = stack_elem.text.strip()
+            # 从Error节点获取
+            if not reason:
+                error = test_case.find('Error') if test_case.find('Error') is not None else None
+                if error is None:
+                    errors = test_case.xpath('.//Error')
+                    if errors:
+                        error = errors[0]
+
+                if error is not None:
+                    reason = error.get('message', '')
+                    if error.text:
+                        stack_trace = error.text.strip()
+
+            # 从StackTrace子节点获取
+            if not stack_trace:
+                stack_elem = test_case.find('.//StackTrace')
+                if stack_elem is None:
+                    stacks = test_case.xpath('.//StackTrace')
+                    if stacks:
+                        stack_elem = stacks[0]
+
+                if stack_elem is not None and stack_elem.text:
+                    stack_trace = stack_elem.text.strip()
+        else:
+            # 使用ElementTree
+            failure = test_case.find('Failure')
+            if failure is not None:
+                reason = failure.get('message', '')
+                if failure.text:
+                    stack_trace = failure.text.strip()
+
+            if not reason:
+                error = test_case.find('Error')
+                if error is not None:
+                    reason = error.get('message', '')
+                    if error.text:
+                        stack_trace = error.text.strip()
+
+            if not stack_trace:
+                stack_elem = test_case.find('.//StackTrace')
+                if stack_elem is not None and stack_elem.text:
+                    stack_trace = stack_elem.text.strip()
 
         return reason or '无失败原因', stack_trace
 

@@ -4,10 +4,6 @@ USB设备监控模块 - 监听USB插拔事件并自动刷新设备列表
 支持两种模式:
 1. udev模式: 通过pyudev库监听Linux内核的udev事件 (推荐，实时性高，CPU占用低)
 2. 轮询模式: 定期轮询adb设备变化 (兼容性好，无需额外依赖)
-
-性能优化:
-- udev模式: 事件驱动，零CPU占用（仅在USB事件时唤醒）
-- 轮询模式: 智能防抖，仅在确认变化时触发回调
 """
 import logging
 import asyncio
@@ -22,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 class USBMonitor:
     """
-    USB设备监控器（高性能版本）
+    USB设备监控器
 
     特性:
     - 监听USB设备插拔事件
