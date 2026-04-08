@@ -18,6 +18,7 @@ import time
 import re
 import json
 import shlex
+import queue
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -5403,7 +5404,7 @@ async def get_vpn_status():
         vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
 
     # 多次ping测试，只要一次成功即认为已连接
-    max_attempts = 2
+    max_attempts = 3
     for attempt in range(max_attempts):
         output, error, code = ssh_manager.execute_command(
             ssh,
@@ -5416,6 +5417,22 @@ async def get_vpn_status():
             ssh_manager.return_connection(ssh)
             logger.info(f"[VPN Status] {vpn_target}: connected (attempt {attempt + 1})")
             return JSONResponse(content={"success": True, "connected": True})
+
+    # 所有尝试都失败，尝试通过nmcli检查VPN连接状态
+    try:
+        nmcli_output, _, _ = ssh_manager.execute_command(
+            ssh,
+            "nmcli -t -f NAME,TYPE,STATE connection show --active 2>&1",
+            timeout=5
+        )
+
+        # 检查是否有VPN类型的活跃连接
+        if 'vpn' in nmcli_output.lower() or 'tun' in nmcli_output.lower() or 'tap' in nmcli_output.lower():
+            ssh_manager.return_connection(ssh)
+            logger.info(f"[VPN Status] VPN detected via nmcli: {nmcli_output.strip()}")
+            return JSONResponse(content={"success": True, "connected": True})
+    except Exception as e:
+        logger.warning(f"[VPN Status] nmcli check failed: {e}")
 
     # 所有尝试都失败
     ssh_manager.return_connection(ssh)
