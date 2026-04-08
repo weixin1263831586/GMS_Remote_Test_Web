@@ -1,16 +1,21 @@
 {
     "client_hosts": {
+        "172.16.14.68": "hcq",
         "172.16.14.65": "cp2-share",
-        "172.16.14.68": "hcq"
+        "172.16.14.50": "admin"
     },
     "client_ssh_credentials": [
         {
-            "username": "hcq",
-            "password": "20240120"
+            "username": "admin",
+            "password": "    "
         },
         {
             "username": "cp2-share",
             "password": "Rockchip@2025"
+        },
+        {
+            "username": "hcq",
+            "password": "20240120"
         }
     ]
 }

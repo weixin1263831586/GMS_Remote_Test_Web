@@ -62,14 +62,16 @@ class ClientManager:
 
                 # 保存凭据
                 self.client_hosts[client_ip] = detected_username
-                config['client_hosts'] = self.client_hosts
 
                 if not any(c.get('username') == username for c in self.ssh_credentials):
                     self.ssh_credentials.insert(0, {'username': username, 'password': password})
-                config['client_ssh_credentials'] = self.ssh_credentials
 
-                config['device_host'] = f'{detected_username}@{client_ip}'
-                self.save_client_info(config)
+                # 只保存客户端相关配置
+                dynamic_config = {
+                    'client_hosts': self.client_hosts,
+                    'client_ssh_credentials': self.ssh_credentials
+                }
+                self.save_client_info(dynamic_config)
 
                 return True, detected_username, None
             except Exception as e:
@@ -78,8 +80,6 @@ class ClientManager:
         # 检查已保存的映射
         if client_ip in self.client_hosts:
             detected_username = self.client_hosts[client_ip]
-            config['device_host'] = f'{detected_username}@{client_ip}'
-            self.save_client_info(config)
             return True, detected_username, None
 
         # 尝试已保存的SSH凭据
@@ -98,9 +98,13 @@ class ClientManager:
                 ssh.close()
 
                 self.client_hosts[client_ip] = detected_username
-                config['client_hosts'] = self.client_hosts
-                config['device_host'] = f'{detected_username}@{client_ip}'
-                self.save_client_info(config)
+
+                # 只保存客户端相关配置
+                dynamic_config = {
+                    'client_hosts': self.client_hosts,
+                    'client_ssh_credentials': self.ssh_credentials
+                }
+                self.save_client_info(dynamic_config)
 
                 return True, detected_username, None
             except Exception:

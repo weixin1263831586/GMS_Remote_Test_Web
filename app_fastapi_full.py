@@ -1133,16 +1133,16 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
             "error": "用户名不能为空或unknown"
         }, status_code=400)
 
-    # 加载配置
-    config = config_manager.load_config()
-    client_hosts = config.get('client_hosts', {})
-
-    # 保存映射
+    # 加载现有动态配置
+    existing_dynamic = config_manager._load_dynamic_config() or {}
+    client_hosts = existing_dynamic.get('client_hosts', {})
     client_hosts[client_ip] = username
-    config['client_hosts'] = client_hosts
+
+    # 只保存客户端相关配置
+    dynamic_config = config_manager.prepare_client_config({'client_hosts': client_hosts})
 
     # 保存到配置文件
-    if config_manager.save_dynamic_config(config):
+    if config_manager.save_dynamic_config(dynamic_config):
         # 更新内存中的映射
         client_manager.client_hosts = client_hosts
 
@@ -1297,26 +1297,24 @@ async def update_config(req: dict):
     existing_dynamic = config_manager._load_dynamic_config() or {}
 
     # 动态配置字段（保存在 config_dynamic.json）
-    # 所有可修改的配置项都在这里
+    # 只保存客户端相关的动态配置
     # 注意：client_ip 和 client_username 是运行时状态，不应保存到配置文件
     dynamic_keys = {
-        'device_host', 'device_pswd',
-        'client_hosts', 'client_ssh_credentials',
-        'ubuntu_user', 'ubuntu_host', 'ubuntu_pswd',
-        'local_server', 'suites_path', 'usbip_vid_pid'
+        'client_hosts', 'client_ssh_credentials'
     }
 
-    # 更新动态配置
-    dynamic_updates = existing_dynamic.copy()
+    # 只保留客户端相关的动态配置
+    dynamic_updates = {
+        k: existing_dynamic[k]
+        for k in dynamic_keys
+        if k in existing_dynamic
+    }
 
-    for key, value in req.items():
-        if key in dynamic_keys:
-            # 空字符串不覆盖现有值（用于密码字段）
-            if value != '' or key not in existing_dynamic:
-                dynamic_updates[key] = value
+    # 更新请求中的动态配置字段
+    dynamic_updates.update({k: v for k, v in req.items() if k in dynamic_keys})
         # 忽略不在dynamic_keys中的字段（不允许修改config.json）
 
-    # 只保存动态配置，不修改config.json
+    # 只保存客户端相关的动态配置
     if config_manager.save_dynamic_config(dynamic_updates):
         return JSONResponse(content={'success': True})
     else:
@@ -2362,6 +2360,11 @@ async def run_test_background(
         else:
             await log_callback("⚠️ local_server为空，测试可能失败", 'warning')
 
+        # 添加进程组ID（用于多用户隔离的精确进程停止）
+        if process_group_id:
+            cmd_parts.extend(["--pgid", process_group_id])
+            await log_callback(f"🏷️ 进程组ID参数: {process_group_id}", 'info')
+
         # 构建最终命令
         import shlex
         command = ' '.join(shlex.quote(part) for part in cmd_parts)
@@ -2579,20 +2582,10 @@ async def stop_test(
                 ssh_manager.return_connection(ssh)
                 return JSONResponse(content={"success": True, "message": "测试已停止"})
 
-        # 方法2: 回退到传统方法（杀死tradefed进程）
-        test_type = user_state.get('test_type', 'cts')
-        tradefed_bin = TRADEFED_BINARY_MAP.get(test_type, 'tradefed')
-        kill_cmd = f"pkill -f '[./]?{tradefed_bin}.*run commandAndExit'"
-
-        output, error, code = ssh_manager.execute_command(ssh, kill_cmd, timeout=10)
+        # 如果没有进程组ID或查找失败，记录警告但不强制终止（避免误杀手动测试）
+        user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ 未找到测试进程（可能已停止或手动测试）")
         ssh_manager.return_connection(ssh)
-
-        if code == 0:
-            user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ {test_type.upper()} tradefed 进程已终止")
-            return JSONResponse(content={"success": True, "message": "测试已停止"})
-        else:
-            user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ 未找到运行中的测试进程")
-            return JSONResponse(content={"success": True, "message": "测试已停止"})
+        return JSONResponse(content={"success": True, "message": "测试已停止（未找到运行中的测试进程）"})
 
     except Exception as e:
         ssh_manager.return_connection(ssh)
@@ -5016,20 +5009,32 @@ async def check_ssh_sshd(request: Request):
             "success": True,
             "installed": False,
             "running": False,
+            "install_guide": SSHD_INSTALL_GUIDE,
             "error": "无法连接到SSH服务，请检查网络连接和Windows客户端状态"
+        })
+    except Exception as e:
+        logger.error(f"[SSHD Check] Error: {e}")
+        return JSONResponse(content={
+            "success": True,
+            "installed": False,
+            "running": False,
+            "install_guide": SSHD_INSTALL_GUIDE,
+            "error": f"检查SSHD状态时发生错误: {str(e)}"
         })
 
 @app.post("/api/ssh/sshd-install")
 async def install_ssh_sshd():
-    """获取SSHD安装说明
+    """获取SSHD安装说明（已废弃，使用 /api/ssh/sshd-guide）"""
+    return await get_sshd_install_guide()
 
-    SSHD需要在Windows客户端上手动安装,返回安装指南供用户参考。
-    """
+@app.get("/api/ssh/sshd-guide")
+@handle_api_errors
+async def get_sshd_install_guide():
+    """获取 SSHD 安装指南"""
+    from core.ssh import SSHD_INSTALL_GUIDE
     return JSONResponse(content={
-        'success': False,
-        'error': 'SSHD 需要在 Windows 客户端上手动安装',
-        'install_guide': SSHD_INSTALL_GUIDE,
-        'manual_install': True
+        'success': True,
+        'install_guide': SSHD_INSTALL_GUIDE
     })
 
 

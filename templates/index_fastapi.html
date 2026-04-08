@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=20260324-3">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260408-22">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- Socket.IO not used in FastAPI version, using native WebSocket -->
     <script src="/static/vendor/xterm/xterm.min.js"></script>
     <script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260404-24"></script>
+    <script src="/static/js/app.js?v=20260408-24"></script>
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
@@ -964,6 +964,37 @@
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeDevicePasswordModal()">取消</button>
                     <button class="btn-xxs btn-primary" onclick="submitDevicePassword()">确定</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Username Detection Modal -->
+    <div id="username-detect-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">👤 客户端用户名识别</span>
+                <span class="modal-close" onclick="closeUsernameDetectModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row">
+                    <label>客户端IP:</label>
+                    <input type="text" id="username-detect-ip" readonly />
+                </div>
+                <div class="modal-form-row">
+                    <label>用户名:</label>
+                    <input type="text" id="username-detect-username" placeholder="请输入SSH用户名" onkeypress="handleUsernameDetectKeyPress(event)" autocomplete="username" />
+                </div>
+                <div class="modal-form-row">
+                    <label>SSH密码:</label>
+                    <input type="password" id="username-detect-password" placeholder="请输入SSH密码进行验证" onkeypress="handleUsernameDetectKeyPress(event)" autocomplete="current-password" />
+                </div>
+                <div class="modal-ssh-info">
+                    <small>💡 系统将通过SSH连接验证用户名，验证成功后会自动保存您的身份信息。</small>
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeUsernameDetectModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitUsernameDetect()">验证并保存</button>
                 </div>
             </div>
         </div>

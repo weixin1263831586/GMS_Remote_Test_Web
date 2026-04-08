@@ -17,6 +17,7 @@ SSHD_CHECK_CMD = 'Get-WindowsCapability -Online | Where-Object Name -like \'Open
 SSHD_START_CMD = 'Start-Service sshd'
 SSHD_ENABLE_CMD = 'Set-Service -Name sshd -StartupType \'Automatic\''
 
+# SSHD 安装指南（Windows PowerShell 命令）
 SSHD_INSTALL_GUIDE = """以【管理员身份】运行 PowerShell, 按照下面步骤安装:
 
 1️⃣ 安装sshd
