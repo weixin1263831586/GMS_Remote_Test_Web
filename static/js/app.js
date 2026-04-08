@@ -1422,8 +1422,11 @@ async function setupUsbipForward() {
                 btn.textContent = '📱 本地设备';
                 btn.disabled = false;
 
-                // 检查是否是 SSH 连接失败
-                if (result.error && result.error.includes('SSH连接失败')) {
+                // 检查是否需要SSH密码
+                if (result.need_password && result.device_host) {
+                    showDevicePasswordModal(result.device_host);
+                    addLogEntry('需要输入SSH密码以连接到 ' + result.device_host, 'warning');
+                } else if (result.error && result.error.includes('SSH连接失败')) {
                     addLogEntry('⚠️ SSH 连接失败，请点击 "📡 检查SSHD" 按钮检查SSH服务状态', 'warning');
                 } else if (result.install_guide) {
                     // 显示友好的安装指南弹窗
@@ -1437,8 +1440,11 @@ async function setupUsbipForward() {
             btn.textContent = '📱 本地设备';
             btn.disabled = false;
 
-            // 检查错误对象中是否有安装指南
-            if (error.installGuide) {
+            // 检查是否需要SSH密码
+            if (error.needPassword && error.deviceHost) {
+                showDevicePasswordModal(error.deviceHost);
+                addLogEntry('需要输入SSH密码以连接到 ' + error.deviceHost, 'warning');
+            } else if (error.installGuide) {
                 showInstallGuide('usbipd 安装指南', error.installGuide);
             }
             addLogEntry('启动 USB/IP 失败: ' + error.message, 'error');
