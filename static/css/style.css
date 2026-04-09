@@ -959,7 +959,7 @@ select option {
 
 /* ==================== Progress Bar ==================== */
 .progress-container {
-    display: flex;
+    display: flex !important;
     flex-direction: column;
     gap: 4px;
 }

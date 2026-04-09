@@ -26,6 +26,7 @@ let apiDocsCache = null;
 let apiDocsCacheTime = 0;
 let allApiDocs = []; // 所有API文档数据（已排序）
 const API_DOCS_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存（生产环境）
+const FIRMWARE_UPLOAD_TIMEOUT = 10 * 60 * 1000; // 10分钟上传超时
 
 // 辅助函数
 function validateDeviceSelection() {
@@ -168,6 +169,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     await checkInitialTestStatus();
     startStatusPolling();
 
+    // 检查是否有未完成的固件上传
+    checkPendingFirmwareUpload();
+
     // 延迟执行耗时操作，不阻塞页面加载
     setTimeout(async () => {
         // 立即获取客户端信息（使用/api/users/current）
@@ -205,6 +209,63 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }, 100);  // 减少延迟时间，更快获取客户端信息
 });
+
+// ==================== Firmware Upload Recovery ====================
+/**
+ * 检查是否有未完成的固件上传
+ */
+function checkPendingFirmwareUpload() {
+    const uploadInProgress = sessionStorage.getItem('firmwareUploadInProgress');
+    if (uploadInProgress === 'true') {
+        const fileName = sessionStorage.getItem('firmwareUploadFileName');
+        const fileSize = sessionStorage.getItem('firmwareUploadFileSize');
+        const startTime = parseInt(sessionStorage.getItem('firmwareUploadStartTime') || '0');
+        const elapsed = Date.now() - startTime;
+
+        const progress = parseFloat(sessionStorage.getItem('firmwareUploadProgress') || '0');
+        const uploadedSize = parseInt(sessionStorage.getItem('firmwareUploadedSize') || '0');
+        const totalSize = parseInt(sessionStorage.getItem('firmwareTotalSize') || '0');
+
+        // 如果超过超时时间，认为上传已失败/过期
+        if (elapsed > FIRMWARE_UPLOAD_TIMEOUT) {
+            clearFirmwareUploadState();
+            return;
+        }
+
+        // 显示警告：上传已中断
+        const message = `⚠️ 固件上传已中断: ${fileName}\n` +
+                       `上次进度: ${progress.toFixed(1)}% (${formatBytes(uploadedSize)}/${formatBytes(totalSize)})\n` +
+                       `中断时间: ${Math.floor(elapsed / 1000)}秒前\n\n` +
+                       `请重新开始上传。\n\n` +
+                       `💡 提示：上传过程中请勿刷新页面，可以使用以下文件分块上传功能：\n` +
+                       `   http://172.16.14.233:5001/static/chunk-upload-simple.html`;
+
+        addLogEntry(message, 'warning');
+        showToast('固件上传已中断，请重新上传', 'warning');
+
+        // 显示进度条为警告状态（黄色）
+        if (progress > 0 && totalSize > 0) {
+            const progressFill = document.getElementById('upload-progress-fill');
+            const progressInfo = document.getElementById('progress-info');
+
+            if (progressFill && progressInfo) {
+                progressFill.style.width = progress + '%';
+                progressFill.style.background = 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)'; // 黄色
+                progressInfo.textContent = `⚠️ ${fileName} 上传中断于 ${progress.toFixed(1)}%`;
+
+                // 10秒后重置进度条
+                setTimeout(() => {
+                    progressFill.style.width = '0%';
+                    progressFill.style.background = ''; // 恢复默认颜色
+                    progressInfo.textContent = '';
+                }, 10000);
+            }
+        }
+
+        // 清理状态
+        clearFirmwareUploadState();
+    }
+}
 
 // ==================== Configuration ====================
 async function loadConfig() {
@@ -634,7 +695,8 @@ async function apiCall(url, method = 'GET', data = null) {
             headers['X-Client-Username'] = username;
             console.log(`[apiCall] Adding X-Client-Username: ${username} for URL: ${url}`);
         } else {
-            console.warn(`[apiCall] No valid clientId available. state.clientId: ${state.clientId}, URL: ${url}`);
+            // 降低日志级别，避免过多的控制台输出
+            console.debug(`[apiCall] No valid clientId available. state.clientId: ${state.clientId}, URL: ${url}`);
         }
 
         const options = {
@@ -866,12 +928,32 @@ function selectAllDevices() {
         // Deselect all
         state.selectedDevices.clear();
     } else {
-        // Select all - handle both string and object device formats
+        // Select all - skip devices locked by other users
+        let selectedCount = 0;
+        let skippedLocked = 0;
+
         state.devices.forEach(device => {
             // Extract device_id from object or use string directly
             const deviceId = typeof device === 'string' ? device : device.device_id;
-            state.selectedDevices.add(deviceId);
+            const deviceObj = typeof device === 'string' ?
+                state.devices.find(d => d.device_id === deviceId) : device;
+
+            // 检查设备是否被锁定
+            if (deviceObj && deviceObj.locked && !deviceObj.locked_by_self) {
+                // 设备被其他用户锁定，跳过
+                skippedLocked++;
+                console.log(`[SelectAll] Skipping locked device: ${deviceId} (locked by: ${deviceObj.locked_by})`);
+            } else {
+                // 设备未被锁定或被自己锁定，可以选择
+                state.selectedDevices.add(deviceId);
+                selectedCount++;
+            }
         });
+
+        if (skippedLocked > 0) {
+            showToast(`跳过 ${skippedLocked} 台被其他用户锁定的设备`, 'warning');
+            addLogEntry(`全选设备：已选择 ${selectedCount} 台，跳过 ${skippedLocked} 台被锁定的设备`, 'warning');
+        }
     }
     renderDevices();
     addLogEntry(`已选择 ${state.selectedDevices.size} 台设备`, 'info');
@@ -1041,6 +1123,13 @@ async function submitFirmwareBurn() {
         return;
     }
 
+    // 获取文件输入框
+    const fileInput = document.getElementById('firmware-file-input');
+    if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+        showToast('请选择固件文件', 'error');
+        return;
+    }
+
     const devices = Array.from(state.selectedDevices);
     try {
         closeFirmwareModal();
@@ -1050,21 +1139,89 @@ async function submitFirmwareBurn() {
         // 立即在UI上标记设备为锁定状态
         lockDevicesInUI(devices);
 
+        // 设置上传状态标记，防止刷新导致进度丢失
+        saveFirmwareUploadState(
+            fileInput.files[0].name,
+            fileInput.files[0].size,
+            Date.now()
+        );
+
+        // 添加beforeunload事件监听，警告用户不要刷新
+        const warnBeforeRefresh = (e) => {
+            e.preventDefault();
+            e.returnValue = '固件上传中，刷新将中断上传！确定要离开吗？';
+            return e.returnValue;
+        };
+        window.addEventListener('beforeunload', warnBeforeRefresh);
+
         // 准备FormData
         const formData = new FormData();
         formData.append('firmware_path', firmwarePath);
-        const fileInput = document.getElementById('firmware-file-input');
-        if (fileInput && fileInput.files && fileInput.files[0]) {
-            formData.append('firmware_file', fileInput.files[0]);
-        }
+        formData.append('firmware_file', fileInput.files[0]);
 
-        // 发送请求
-        const response = await fetch(`/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`, {
-            method: 'POST',
-            body: formData
+        // 使用XMLHttpRequest以显示上传进度
+        const uploadResult = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+
+            // 监听上传进度
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const progress = (e.loaded / e.total) * 100;
+                    // 保存进度到sessionStorage（用于刷新后恢复）
+                    // 使用统一的状态管理函数
+                    const startTime = parseInt(sessionStorage.getItem('firmwareUploadStartTime') || Date.now());
+                    saveFirmwareUploadState(
+                        fileInput.files[0].name,
+                        fileInput.files[0].size,
+                        startTime,
+                        progress,
+                        e.loaded,
+                        e.total
+                    );
+
+                    // 复用现有的上传进度条显示
+                    updateUploadProgress(progress, fileInput.files[0].name, e.loaded, e.total);
+                }
+            });
+
+            xhr.addEventListener('load', () => {
+                // 上传完成，移除警告并清理状态
+                window.removeEventListener('beforeunload', warnBeforeRefresh);
+                clearFirmwareUploadState();
+
+                if (xhr.status === 200) {
+                    try {
+                        const result = JSON.parse(xhr.responseText);
+                        resolve(result);
+                    } catch (e) {
+                        reject(new Error('Invalid response'));
+                    }
+                } else {
+                    reject(new Error(`HTTP ${xhr.status}`));
+                }
+            });
+
+            xhr.addEventListener('error', () => {
+                // 上传失败，移除警告并清理状态
+                window.removeEventListener('beforeunload', warnBeforeRefresh);
+                clearFirmwareUploadState();
+
+                reject(new Error('Network error'));
+            });
+
+            xhr.addEventListener('abort', () => {
+                // 上传中断，移除警告并清理状态
+                window.removeEventListener('beforeunload', warnBeforeRefresh);
+                clearFirmwareUploadState();
+
+                reject(new Error('Upload aborted'));
+            });
+
+            xhr.open('POST', `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`);
+            xhr.send(formData);
         });
 
-        const result = await response.json();
+        const result = uploadResult;
         if (result.success) {
             showToast('固件烧写任务已启动', 'success');
             addLogEntry(`固件烧写任务已启动，设备: ${devices.join(', ')}`, 'success');
@@ -2054,7 +2211,7 @@ async function handleUploadFile() {
                 const speed = elapsed > 0 ? formatBytes(e.loaded / elapsed) + '/s' : '';
 
                 progressFill.style.width = percentage + '%';
-                progressInfo.textContent = `上传中... ${percentage}% (${transferred}/${total}) ${speed}`;
+                progressInfo.textContent = `上传中... ${percentage.toFixed(1)}% (${transferred}/${total}) ${speed}`;
             }
         });
 
@@ -2120,6 +2277,43 @@ function formatBytes(bytes, hideIfZero = false) {
     return parseFloat((numBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// 导出到全局，供其他模块使用
+window.formatBytes = formatBytes;
+
+// ==================== Firmware Upload State Management ====================
+
+/**
+ * 保存固件上传状态到 sessionStorage
+ */
+function saveFirmwareUploadState(fileName, fileSize, startTime, progress = 0, uploadedSize = 0, totalSize = 0) {
+    sessionStorage.setItem('firmwareUploadInProgress', 'true');
+    sessionStorage.setItem('firmwareUploadFileName', fileName);
+    sessionStorage.setItem('firmwareUploadFileSize', fileSize);
+    sessionStorage.setItem('firmwareUploadStartTime', startTime.toString());
+    if (progress > 0) {
+        sessionStorage.setItem('firmwareUploadProgress', progress.toString());
+        sessionStorage.setItem('firmwareUploadedSize', uploadedSize.toString());
+        sessionStorage.setItem('firmwareTotalSize', totalSize.toString());
+    }
+}
+
+/**
+ * 清理固件上传状态
+ */
+function clearFirmwareUploadState() {
+    sessionStorage.removeItem('firmwareUploadInProgress');
+    sessionStorage.removeItem('firmwareUploadFileName');
+    sessionStorage.removeItem('firmwareUploadFileSize');
+    sessionStorage.removeItem('firmwareUploadStartTime');
+    sessionStorage.removeItem('firmwareUploadProgress');
+    sessionStorage.removeItem('firmwareUploadedSize');
+    sessionStorage.removeItem('firmwareTotalSize');
+}
+
+// 导出到全局
+window.saveFirmwareUploadState = saveFirmwareUploadState;
+window.clearFirmwareUploadState = clearFirmwareUploadState;
+
 // 通用上传进度更新函数（用于固件上传等）
 function updateUploadProgress(percentage, filename, uploadedSize, totalSize) {
     console.log('[updateUploadProgress] Called with:', { percentage, filename, uploadedSize, totalSize });
@@ -2145,7 +2339,7 @@ function updateUploadProgress(percentage, filename, uploadedSize, totalSize) {
                 progressInfo.textContent = '';
             }, 3000);
         } else {
-            progressInfo.textContent = `📤 ${filename} 上传中... ${percentage}% (${transferred}/${total})`;
+            progressInfo.textContent = `📤 ${filename} 上传中... ${percentage.toFixed(1)}% (${transferred}/${total})`;
         }
     } else {
         console.error('[updateUploadProgress] Progress elements not found!');
@@ -2154,7 +2348,7 @@ function updateUploadProgress(percentage, filename, uploadedSize, totalSize) {
 
 // ==================== Browse Remote File ====================
 async function browseRemoteFile(mode) {
-    const targetInputId = mode === 'suite' ? 'suite-path' : 'retry-result';
+    const targetInputId = mode === 'suite' ? 'test-suite' : 'retry-result';
     const title = mode === 'suite' ? '选择测试套件' : '选择测试报告';
 
     // Set file browser state
@@ -2343,7 +2537,7 @@ async function autoCompleteSuitePath(selectedPath) {
         });
 
         if (result.success) {
-            const suitePathInput = document.getElementById('suite-path');
+            const suitePathInput = document.getElementById('test-suite');
             if (suitePathInput) {
                 suitePathInput.value = result.path;
 
@@ -2363,7 +2557,7 @@ async function autoCompleteSuitePath(selectedPath) {
     } catch (error) {
         addLogEntry('自动补齐路径失败: ' + error.message, 'error');
         // Even if auto-completion fails, still use the selected path
-        const suitePathInput = document.getElementById('suite-path');
+        const suitePathInput = document.getElementById('test-suite');
         if (suitePathInput) {
             suitePathInput.value = selectedPath;
             addLogEntry(`使用选定路径: ${selectedPath}`, 'warning');
@@ -2407,7 +2601,7 @@ async function startTest() {
     const testModule = document.getElementById('test-module').value.trim();
     const testCase = document.getElementById('test-case').value.trim();
     const retryResult = document.getElementById('retry-result').value.trim();
-    const suitePath = document.getElementById('suite-path')?.value?.trim() || '';
+    const suitePath = document.getElementById('test-suite')?.value?.trim() || '';
 
     if (!suitePath) {
         showToast('请先选择测试套件路径（点击"浏览"按钮）', 'warning');
@@ -2488,7 +2682,7 @@ function updateTestToggleButton(isTesting) {
         'test-type',      // 测试类型
         'test-module',    // 测试模块
         'test-case',      // 测试用例
-        'suite-path',     // 测试套件
+        'test-suite',     // 测试套件
         'retry-result'    // 测试报告
     ];
 
@@ -2727,7 +2921,7 @@ function updateProgressBar(percentage, message = '', title = '进度') {
     progressFill.style.width = `${percentage}%`;
 
     // 显示标题和百分比在进度条右侧
-    progressInfo.textContent = `${title} ${percentage}%`;
+    progressInfo.textContent = `${title} ${percentage.toFixed(1)}%`;
 
     // 如果有消息，显示在日志中
     if (message) {
@@ -2748,11 +2942,6 @@ function updateProgressBar(percentage, message = '', title = '进度') {
 }
 
 // 上传文件进度
-function updateUploadProgress(percentage, filename, uploadedSize, totalSize) {
-    // 只更新进度条，不显示日志消息
-    updateProgressBar(percentage, '', `上传文件`);
-}
-
 // ==================== Status Polling ====================
 function startStatusPolling() {
     // 轮询状态和日志（同时支持Socket.IO和WebSocket）
@@ -3296,7 +3485,7 @@ async function retryReport(timestamp, testType) {
             }
 
             // 根据测试类型填入测试套件路径
-            const suitePathInput = document.getElementById('suite-path');
+            const suitePathInput = document.getElementById('test-suite');
             if (suitePathInput) {
                 // 根据测试类型设置默认路径
                 const suitePaths = {
@@ -3316,14 +3505,14 @@ async function retryReport(timestamp, testType) {
                     console.warn(`[Retry] testType=${testType} 没有对应的套件路径`);
                 }
             } else {
-                console.error('[Retry] 未找到 suite-path 元素');
+                console.error('[Retry] 未找到 test-suite 元素');
             }
 
             // 打印所有相关元素的值以便调试
             console.log('[Retry] 当前字段值:', {
                 reportName: document.getElementById('retry-result')?.value,
                 testType: document.getElementById('test-type')?.value,
-                suitePath: document.getElementById('suite-path')?.value
+                suitePath: document.getElementById('test-suite')?.value
             });
         }, 200);
 
@@ -3371,7 +3560,7 @@ async function retryReportWithSuite(timestamp, testType, suitePath) {
             }
 
             // 填入测试套件路径（优先使用原始路径，否则使用默认路径）
-            const suitePathInput = document.getElementById('suite-path');
+            const suitePathInput = document.getElementById('test-suite');
             if (suitePathInput) {
                 if (suitePath && suitePath !== 'null' && suitePath !== '') {
                     // 使用报告中的原始测试套件路径
@@ -3396,14 +3585,14 @@ async function retryReportWithSuite(timestamp, testType, suitePath) {
                     }
                 }
             } else {
-                console.error('[Retry] 未找到 suite-path 元素');
+                console.error('[Retry] 未找到 test-suite 元素');
             }
 
             // 打印所有相关元素的值以便调试
             console.log('[Retry] 当前字段值:', {
                 reportName: document.getElementById('retry-result')?.value,
                 testType: document.getElementById('test-type')?.value,
-                suitePath: document.getElementById('suite-path')?.value
+                suitePath: document.getElementById('test-suite')?.value
             });
         }, 200);
 
