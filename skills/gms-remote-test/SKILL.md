@@ -1,6 +1,6 @@
 ---
 name: gms-remote-test
-version: "2026.04.09-200000"
+version: "2026.04.09-1.0.0"
 description: >-
   GMS Remote Test Web Platform & API Skill for FastAPI (Port 5001).
   **Complete web interface** with device management, test execution, desktop VNC, terminal access,
