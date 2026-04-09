@@ -241,6 +241,13 @@ class ConfigManager:
             'client_hosts': updates.get('client_hosts', existing.get('client_hosts', {})),
             'client_ssh_credentials': updates.get('client_ssh_credentials', existing.get('client_ssh_credentials', []))
         }
+
+        # 只有在明确提供local_server时才保存（避免空值覆盖）
+        if 'local_server' in updates and updates['local_server']:
+            dynamic_config['local_server'] = updates['local_server']
+        elif 'local_server' in existing:
+            dynamic_config['local_server'] = existing['local_server']
+
         return dynamic_config
 
     def get_device_hosts(self, config: Dict[str, Any] = None) -> list:
