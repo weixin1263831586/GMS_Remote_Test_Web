@@ -64,6 +64,11 @@ class LogLevel(str, Enum):
 
 # ==================== 常量定义 ====================
 
+# 上传进度相关常量
+UPLOAD_PROGRESS_QUERY_TIMEOUT = 5  # 查询超时（秒）
+UPLOAD_PROGRESS_EXPIRATION = 10  # 进度过期时间（秒）
+UPLOAD_PROGRESS_CLEANUP_INTERVAL = 60  # 清理间隔（秒）
+
 # TRADEFED二进制文件映射
 TRADEFED_BINARY_MAP = {
     'cts': 'cts-tradefed',
@@ -276,6 +281,8 @@ class GlobalState:
         self.device_cache_lock = threading.Lock()  # 设备缓存锁
         self.websocket_connections = {}  # {client_id: websocket}
         self.websocket_connections_lock = threading.Lock()  # WebSocket连接锁
+        self.firmware_upload_progress = {}  # {client_id: {'progress': float, 'filename': str, 'uploaded_size': int, 'total_size': int, 'timestamp': float}}
+        self.firmware_upload_progress_lock = threading.Lock()  # 上传进度锁
         self.usbip_states = {}  # {client_id: {'connected': bool, 'timestamp': float}}
         self.usbip_devices_source = {}  # {device_id: {'source': device_host, 'timestamp': float}}
         self.terminal_ssh_sessions = {}  # {session_id: {'ssh': ssh, 'channel': channel, 'websocket': websocket}}
@@ -1738,7 +1745,7 @@ async def devices_management():
                     'source_host': source_host,
                     'status': 'online',
                     'locked_by': lock_info.get('client_id', '') if device_id in locks else '',
-                    'locked_by_self': lock_info.get('client_id') == client_id if device_id in locks else False
+                    'locked_by_self': (lock_info.get('client_id') == client_id) if device_id in locks else False
                 }
                 devices_info.append(device_info)
 
@@ -5558,17 +5565,63 @@ async def disconnect_vpn():
 # ==================== 文件上传 ====================
 
 @app.post("/api/files/upload")
+@app.head("/api/files/upload")
 async def upload_file(
-    file: UploadFile = File(...),
-    path: str = Form("")
+    request: Request,
+    file: Optional[UploadFile] = File(None),
+    path: str = Form(""),
+    chunk_index: Optional[int] = Form(None),
+    total_chunks: Optional[int] = Form(None),
+    upload_id: Optional[str] = Form(None),
+    file_name: Optional[str] = Form(None),
+    file_size: Optional[int] = Form(None),
+    resume: Optional[str] = Form(None),
+    check_chunks: Optional[str] = Form(None)
 ):
     """
-    文件上传 - 与Flask版本一致，上传到远程服务器
+    文件上传 - 支持分块上传和断点续传
 
-    接收浏览器上传的文件，保存到临时目录，然后通过SFTP上传到远程测试主机
+    1. 普通上传：接收完整文件并上传到远程服务器
+    2. 分块上传：接收文件块，保存到临时目录，所有块上传完成后合并
+    3. 断点续传：记录已上传的块，支持从断点继续
     """
     import tempfile
+    import os
+    import json
 
+    # HEAD 请求：检查已上传的块（断点续传）
+    if check_chunks and upload_id:
+        session_dir = os.path.join(tempfile.gettempdir(), 'gms_uploads', upload_id)
+        chunks_file = os.path.join(session_dir, 'uploaded_chunks.json')
+
+        if os.path.exists(chunks_file):
+            with open(chunks_file, 'r') as f:
+                uploaded_chunks = json.load(f)
+            return JSONResponse(content={
+                'success': True,
+                'uploaded_chunks': uploaded_chunks
+            })
+        else:
+            return JSONResponse(content={
+                'success': True,
+                'uploaded_chunks': []
+            })
+
+    # 检查文件参数（分块上传时文件是必需的）
+    if chunk_index is not None and not file:
+        return JSONResponse(
+            content={'success': False, 'error': 'No file provided for chunk upload'},
+            status_code=400
+        )
+
+    # 分块上传模式
+    if chunk_index is not None and total_chunks is not None:
+        return await upload_file_chunk(
+            file, chunk_index, total_chunks, upload_id,
+            file_name or file.filename, file_size, resume
+        )
+
+    # 普通上传模式
     try:
         # 检查文件
         if not file or file.filename == '':
@@ -5627,6 +5680,150 @@ async def upload_file(
                 status_code=500,
                 detail=str(e)
             )
+
+
+async def upload_file_chunk(
+    file: UploadFile,
+    chunk_index: int,
+    total_chunks: int,
+    upload_id: str,
+    file_name: str,
+    file_size: Optional[int] = None,
+    resume: Optional[str] = None
+):
+    """
+    处理分块上传
+
+    Args:
+        file: 上传的文件块
+        chunk_index: 当前块的索引
+        total_chunks: 总块数
+        upload_id: 上传会话ID
+        file_name: 原始文件名
+        file_size: 文件总大小
+        resume: 是否支持断点续传
+    """
+    import tempfile
+    import os
+    import json
+
+    try:
+        import time
+        start_time = time.time()
+        logger.info(f"[ChunkUpload] Received chunk {chunk_index}/{total_chunks} for {upload_id}")
+
+        # 创建上传会话目录
+        session_dir = os.path.join(tempfile.gettempdir(), 'gms_uploads', upload_id)
+        os.makedirs(session_dir, exist_ok=True)
+
+        # 保存文件块
+        chunk_filename = f"chunk_{chunk_index:05d}"
+        chunk_path = os.path.join(session_dir, chunk_filename)
+
+        content = await file.read()
+        write_time = time.time()
+        with open(chunk_path, 'wb') as f:
+            f.write(content)
+
+        elapsed = time.time() - start_time
+        speed = len(content) / elapsed / (1024 * 1024) if elapsed > 0 else 0
+        logger.info(f"[ChunkUpload] Saved chunk {chunk_index} ({len(content)} bytes) in {elapsed:.2f}s ({speed:.2f} MB/s)")
+
+        # 记录已上传的块
+        chunks_file = os.path.join(session_dir, 'uploaded_chunks.json')
+        uploaded_chunks = set()
+
+        if resume and os.path.exists(chunks_file):
+            with open(chunks_file, 'r') as f:
+                uploaded_chunks = set(json.load(f))
+            logger.info(f"[ChunkUpload] Resuming with {len(uploaded_chunks)} chunks already uploaded")
+
+        uploaded_chunks.add(chunk_index)
+
+        with open(chunks_file, 'w') as f:
+            json.dump(list(uploaded_chunks), f)
+
+        # 检查是否所有块都已上传
+        if len(uploaded_chunks) == total_chunks:
+            merge_start = time.time()
+            logger.info(f"[ChunkUpload] All chunks received for {upload_id}, merging...")
+
+            # 合并所有块
+            merged_file = os.path.join(session_dir, file_name)
+            with open(merged_file, 'wb') as outfile:
+                for i in range(total_chunks):
+                    chunk_path = os.path.join(session_dir, f"chunk_{i:05d}")
+                    with open(chunk_path, 'rb') as infile:
+                        outfile.write(infile.read())
+
+            merge_time = time.time() - merge_start
+            logger.info(f"[ChunkUpload] Merged {total_chunks} chunks in {merge_time:.2f}s")
+
+            # 上传完整文件到远程服务器
+            config = config_manager.load_config()
+            ssh = ssh_manager.get_connection(config)
+
+            if ssh:
+                try:
+                    remote_path = f"/home/{config['ubuntu_user']}/{file_name}"
+                    upload_start = time.time()
+
+                    with ssh.open_sftp() as sftp:
+                        # 使用 SSHManager 的 SFTP 性能优化方法
+                        ssh_manager.optimize_sftp_performance(sftp)
+                        sftp.put(merged_file, remote_path, confirm=True)
+
+                    upload_time = time.time() - upload_start
+                    file_size_mb = os.path.getsize(merged_file) / (1024 * 1024)
+                    upload_speed = file_size_mb / upload_time if upload_time > 0 else 0
+                    logger.info(f"[ChunkUpload] Uploaded {file_size_mb:.2f}MB to remote in {upload_time:.2f}s ({upload_speed:.2f} MB/s)")
+
+                    ssh_manager.return_connection(ssh)
+
+                    # 清理临时文件
+                    import shutil
+                    shutil.rmtree(session_dir)
+
+                    return JSONResponse(content={
+                        'success': True,
+                        'upload_complete': True,
+                        'remote_path': remote_path,
+                        'message': f'文件已上传到 {remote_path}'
+                    })
+                except Exception as e:
+                    ssh_manager.return_connection(ssh)
+                    logger.error(f"Error uploading merged file: {e}")
+                    return JSONResponse(content={
+                        'success': False,
+                        'error': f'上传失败: {str(e)}',
+                        'chunks_uploaded': len(uploaded_chunks),
+                        'total_chunks': total_chunks
+                    }, status_code=500)
+            else:
+                return JSONResponse(content={
+                    'success': False,
+                    'error': 'SSH connection failed',
+                    'chunks_uploaded': len(uploaded_chunks),
+                    'total_chunks': total_chunks
+                }, status_code=500)
+
+        # 返回当前进度
+        return JSONResponse(content={
+            'success': True,
+            'chunk_index': chunk_index,
+            'chunks_uploaded': len(uploaded_chunks),
+            'total_chunks': total_chunks,
+            'upload_complete': False,
+            'progress': round((len(uploaded_chunks) / total_chunks) * 100, 2)
+        })
+
+    except Exception as e:
+        logger.error(f"Error uploading chunk {chunk_index}: {e}")
+        return JSONResponse(content={
+            'success': False,
+            'error': str(e),
+            'chunk_index': chunk_index
+        }, status_code=500)
 
 @app.post("/api/files/install")
 async def upload_files(files: List[UploadFile] = File(...), file_path: str = Form(None)):
@@ -5740,6 +5937,39 @@ async def get_upload_progress_legacy(req: dict):
     return await get_upload_progress(upload_id)
 
 # ==================== 固件管理 ====================
+@app.get("/api/burn/upload-progress")
+async def get_firmware_upload_progress(request: Request):
+    """
+    查询固件上传进度
+
+    返回当前客户端的固件上传状态
+    """
+    client_id = get_client_id_from_request(request)
+    logger.debug(f"[Upload Progress] Query progress for client_id: {client_id}")
+
+    with global_state.firmware_upload_progress_lock:
+        logger.debug(f"[Upload Progress] Current tracked uploads: {list(global_state.firmware_upload_progress.keys())}")
+
+        if client_id in global_state.firmware_upload_progress:
+            progress_data = global_state.firmware_upload_progress[client_id]
+            logger.debug(f"[Upload Progress] Found progress data: {progress_data}")
+
+            # 检查进度是否过期
+            if time.time() - progress_data['timestamp'] > UPLOAD_PROGRESS_QUERY_TIMEOUT:
+                logger.debug(f"[Upload Progress] Progress expired, removing")
+                del global_state.firmware_upload_progress[client_id]
+                return JSONResponse(content={'in_progress': False})
+            return JSONResponse(content={
+                'in_progress': True,
+                'progress': progress_data['progress'],
+                'filename': progress_data['filename'],
+                'uploaded_size': progress_data['uploaded_size'],
+                'total_size': progress_data['total_size']
+            })
+        else:
+            logger.debug(f"[Upload Progress] No progress found for client: {client_id}")
+            return JSONResponse(content={'in_progress': False})
+
 @app.post("/api/burn/firmware")
 async def burn_firmware(
     request: Request,
@@ -5868,21 +6098,80 @@ async def burn_firmware(
             import tempfile
 
             if firmware_file:
-                # 用户上传了文件 - 直接在内存中处理，不写磁盘
+                # 用户上传了文件 - 流式处理并实时报告进度
                 logger.info(f"[Firmware Burn] Processing uploaded file: {firmware_file.filename}")
 
-                # 使用BytesIO在内存中处理文件，避免写磁盘
+                # 立即初始化上传状态（供前端查询）
+                firmware_name = firmware_file.filename
+                total_size = 0  # 初始未知
+
+                with global_state.firmware_upload_progress_lock:
+                    global_state.firmware_upload_progress[client_id] = {
+                        'progress': 0.0,
+                        'filename': firmware_name,
+                        'uploaded_size': 0,
+                        'total_size': total_size,
+                        'timestamp': time.time(),
+                        'stage': 'receiving'  # 接收阶段
+                    }
+                logger.info(f"[Firmware Burn] Initialized upload progress tracking for {client_id}")
+
+                # 流式读取文件（边读边保存进度）
                 import io
-                firmware_content = await firmware_file.read()
-                firmware_size = len(firmware_content)
+                firmware_chunks = []
+                received_size = 0
+                chunk_size = 1024 * 1024  # 1MB chunks
+
+                # 首先获取文件总大小
+                # 注意：在FastAPI中，我们需要先读取一些数据来获取大小
+                # 或者使用SpooledTemporaryFile
+
+                logger.info(f"[Firmware Burn] Starting to receive file in chunks...")
+
+                # 使用临时文件接收上传
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                    temp_path = temp_file.name
+
+                    while chunk := await firmware_file.read(chunk_size):
+                        temp_file.write(chunk)
+                        received_size += len(chunk)
+
+                        # 更新接收进度
+                        with global_state.firmware_upload_progress_lock:
+                            if client_id in global_state.firmware_upload_progress:
+                                global_state.firmware_upload_progress[client_id].update({
+                                    'uploaded_size': received_size,
+                                    'total_size': received_size,  # 接收期间，已接收=总大小
+                                    'timestamp': time.time()
+                                })
+
+                        logger.debug(f"[Firmware Burn] Received chunk: {received_size} bytes")
+
+                # 文件接收完成
+                firmware_size = received_size
+                logger.info(f"[Firmware Burn] File fully received: {firmware_size} bytes")
+
+                # 读取完整文件到内存
+                with open(temp_path, 'rb') as f:
+                    firmware_content = f.read()
+
+                # 删除临时文件
+                os.unlink(temp_path)
+
                 firmware_bytes = io.BytesIO(firmware_content)
 
-                logger.info(f"[Firmware Burn] File loaded into memory: {firmware_size} bytes")
+                # 更新状态：准备SCP上传
+                with global_state.firmware_upload_progress_lock:
+                    if client_id in global_state.firmware_upload_progress:
+                        global_state.firmware_upload_progress[client_id].update({
+                            'total_size': firmware_size,
+                            'stage': 'uploading_to_server',
+                            'uploaded_size': 0  # 重置为0，开始追踪SCP上传
+                        })
 
                 # 直接上传到测试主机
-                firmware_name = firmware_file.filename
                 remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_name}"
-
                 logger.info(f"[Firmware Burn] Directly uploading to test host: {remote_firmware}")
 
                 # 用于存储上传进度的全局变量（供回调访问）
@@ -5893,6 +6182,20 @@ async def burn_firmware(
                     percentage = (sent / size) * 100 if size > 0 else 0
                     upload_progress_data['current_percentage'] = percentage
                     logger.info(f"[Firmware Burn] Upload progress: {percentage:.2f}%")
+
+                    # 更新全局进度状态（供前端查询）
+                    try:
+                        with global_state.firmware_upload_progress_lock:
+                            global_state.firmware_upload_progress[client_id] = {
+                                'progress': percentage,
+                                'filename': firmware_name,
+                                'uploaded_size': sent,
+                                'total_size': firmware_size,
+                                'timestamp': time.time()
+                            }
+                            logger.debug(f"[Firmware Burn] Updated global progress for {client_id}: {percentage:.2f}%")
+                    except Exception as e:
+                        logger.error(f"[Firmware Burn] Failed to update global progress: {e}")
 
                 # 使用线程执行SCP上传
                 import threading
@@ -5956,6 +6259,11 @@ async def burn_firmware(
 
                 # 检查上传是否成功
                 if upload_error[0]:
+                    # 清理全局进度状态
+                    with global_state.firmware_upload_progress_lock:
+                        if client_id in global_state.firmware_upload_progress:
+                            del global_state.firmware_upload_progress[client_id]
+
                     ssh_manager.return_connection(ssh)
                     return JSONResponse(
                         content={'success': False, 'error': f'Upload failed: {upload_error[0]}'}
@@ -5978,6 +6286,11 @@ async def burn_firmware(
                         })
                     except (WebSocketDisconnect, ConnectionError, KeyError):
                         pass
+
+                # 清理全局进度状态
+                with global_state.firmware_upload_progress_lock:
+                    if client_id in global_state.firmware_upload_progress:
+                        del global_state.firmware_upload_progress[client_id]
 
                 logger.info(f"[Firmware Burn] Firmware uploaded successfully, skipping local file check")
 
@@ -6305,7 +6618,9 @@ async def burn_firmware(
             )
 
     except Exception as e:
+        import traceback
         logger.error(f"Error in burn_firmware: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return JSONResponse(
             content={'success': False, 'error': str(e)},
             status_code=500
@@ -7807,8 +8122,20 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/files/upload",
-        "description": "上传文件到服务器",
-        "params": [{"name": "file", "type": "file", "required": True}, {"name": "path", "type": "string", "required": False, "desc": "目标路径"}],
+        "description": "上传文件到服务器（支持分块上传和断点续传）",
+        "params": [
+            {"name": "file", "type": "file", "required": False, "desc": "文件（分块上传时必需）"},
+            {"name": "path", "type": "string", "required": False, "desc": "目标路径"},
+            {"name": "chunk_index", "type": "integer", "required": False, "desc": "当前块索引（分块上传）"},
+            {"name": "total_chunks", "type": "integer", "required": False, "desc": "总块数（分块上传）"},
+            {"name": "upload_id", "type": "string", "required": False, "desc": "上传会话ID"},
+            {"name": "file_name", "type": "string", "required": False, "desc": "原始文件名"},
+            {"name": "file_size", "type": "integer", "required": False, "desc": "文件总大小"},
+            {"name": "resume", "type": "string", "required": False, "desc": "是否支持断点续传"},
+            {"name": "check_chunks", "type": "string", "required": False, "desc": "检查已上传的块"}
+        ],
+        "usage": "普通上传: curl -X POST -F \"file=@/path/to/file\" -F \"path=/target\" http://server:5001/api/files/upload\n分块上传: curl -X POST -F \"file=@chunk1\" -F \"chunk_index=0\" -F \"total_chunks=10\" -F \"upload_id=abc123\" http://server:5001/api/files/upload",
+        "note": "支持大文件分块上传（32MB/块），最多8个并发上传，支持断点续传",
         "category": "file",
         "skill": "gms-rt-files-upload"
     },
@@ -7840,9 +8167,19 @@ API_DOCS_LIST = [
             {"name": "wipe_data", "type": "boolean", "required": False, "desc": "是否清除数据（默认true）"}
         ],
         "usage": "curl -X POST \"http://server:5001/api/burn/firmware\" -F \"firmware_file=@/path/to/firmware.img\" -F \"devices=rk3572cai\" -F \"wipe_data=true\"",
-        "note": "⚠️ 危险操作：刷入固件会重启设备并清除数据",
+        "note": "⚠️ 危险操作：刷入固件会重启设备并清除数据。支持实时进度显示（通过WebSocket）",
         "category": "burn",
         "skill": "gms-rt-burn-firmware"
+    },
+    {
+        "method": "GET",
+        "path": "/api/burn/upload-progress",
+        "description": "查询固件上传进度",
+        "params": [],
+        "response": '{"in_progress": true, "progress": 45.5, "filename": "update.img", "uploaded_size": 1807400702, "total_size": 3972008704}',
+        "note": "用于页面刷新后恢复上传进度显示。进度过期时间为5秒",
+        "category": "burn",
+        "skill": "gms-rt-burn-upload-progress"
     },
     {
         "method": "POST",
@@ -8610,10 +8947,38 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     logger.info("")
 
+    # 启动后台清理任务
+    def cleanup_expired_upload_progress():
+        """定期清理过期的上传进度记录，防止内存泄漏"""
+        while True:
+            try:
+                time.sleep(UPLOAD_PROGRESS_CLEANUP_INTERVAL)
+                current_time = time.time()
+                with global_state.firmware_upload_progress_lock:
+                    expired_clients = [
+                        client_id for client_id, data in global_state.firmware_upload_progress.items()
+                        if current_time - data['timestamp'] > UPLOAD_PROGRESS_EXPIRATION
+                    ]
+                    for client_id in expired_clients:
+                        del global_state.firmware_upload_progress[client_id]
+                        logger.debug(f"[Cleanup] Removed expired upload progress for {client_id}")
+                    if expired_clients:
+                        logger.info(f"[Cleanup] Removed {len(expired_clients)} expired upload progress entries")
+            except Exception as e:
+                logger.error(f"[Cleanup] Error in cleanup task: {e}")
+
+    cleanup_thread = threading.Thread(target=cleanup_expired_upload_progress, daemon=True)
+    cleanup_thread.start()
+    logger.info("[Cleanup] Upload progress cleanup task started")
+
     # 运行FastAPI应用
     uvicorn.run(
         app,
         host=SERVER_HOST,
         port=SERVER_PORT,
-        log_level='info'
+        log_level='info',
+        # 优化大文件上传
+        timeout_keep_alive=600,  # 10分钟保持连接
+        # 工作进程配置
+        workers=1,  # 单进程模式（适合长连接和WebSocket）
     )

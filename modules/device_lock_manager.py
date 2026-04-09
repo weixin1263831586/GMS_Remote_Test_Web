@@ -87,6 +87,8 @@ class DeviceLockManager:
                 'device_id': device_id,
                 'locked': True,
                 'locked_by': lock_info['client_id'],
+                'client_id': lock_info['client_id'],  # 添加 client_id 键以保持一致性
+                'username': lock_info['username'],
                 'locked_at': lock_info['timestamp']
             }
 

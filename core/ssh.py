@@ -9,6 +9,12 @@ import queue
 
 logger = logging.getLogger(__name__)
 
+# SFTP 性能优化常量
+SFTP_TIMEOUT_SECONDS = 300  # 5分钟超时
+SFTP_WINDOW_SIZE = 2147483647  # 2GB 最大窗口大小
+SFTP_REKEY_BYTES = pow(2, 40)  # 减少重新密钥协商频率
+SFTP_REKEY_PACKETS = pow(2, 40)
+
 # Windows SSHD 安装命令常量
 SSHD_UNINSTALL_CMD = 'Get-Service sshd | Stop-Service -Force; Remove-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0'
 SSHD_REMOVE_FILES_CMD = 'Remove-Item -Path "C:\\ProgramData\\ssh" -Recurse -Force -ErrorAction SilentlyContinue'
@@ -99,7 +105,10 @@ class SSHManager:
                     host,
                     username=username,
                     password=password,
-                    timeout=10
+                    timeout=10,
+                    # 优化连接参数
+                    banner_timeout=10,
+                    auth_timeout=10
                 )
 
             logger.info(f"[SSH] Connected to {host}")
@@ -305,6 +314,23 @@ class SSHManager:
             yield ssh
         finally:
             self.return_connection(ssh)
+
+    def optimize_sftp_performance(self, sftp):
+        """
+        优化SFTP传输性能
+
+        Args:
+            sftp: Paramiko SFTPClient对象
+
+        优化内容包括：
+        - 增加超时时间
+        - 使用更大的窗口大小提高传输速度
+        - 减少重新密钥协商频率
+        """
+        sftp.get_channel().settimeout(SFTP_TIMEOUT_SECONDS)
+        sftp.get_channel().transport.window_size = SFTP_WINDOW_SIZE
+        sftp.get_channel().transport.packetizer.REKEY_BYTES = SFTP_REKEY_BYTES
+        sftp.get_channel().transport.packetizer.REKEY_PACKETS = SFTP_REKEY_PACKETS
 
 
 # 全局SSH管理器实例

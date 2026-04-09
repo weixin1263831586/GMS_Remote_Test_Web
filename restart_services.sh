@@ -178,7 +178,7 @@ if echo "$TARGET_PORTS" | grep -q "5001"; then
     sleep 2
 
     if wait_for_port 5001; then
-        if health_check 5001 "/api/health"; then
+        if health_check 5001 "/api/system/health"; then
             echo -e "${GREEN}  ✓ FastAPI 启动成功（健康检查通过）${NC}"
         else
             echo -e "${YELLOW}  ⚠ FastAPI 启动成功但健康检查失败，请检查日志${NC}"

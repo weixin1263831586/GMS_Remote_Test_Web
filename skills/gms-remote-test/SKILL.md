@@ -1,11 +1,11 @@
 ---
 name: gms-remote-test
-version: "2026.04.05-200000"
+version: "2026.04.09-200000"
 description: >-
   GMS Remote Test Web Platform & API Skill for FastAPI (Port 5001).
   **Complete web interface** with device management, test execution, desktop VNC, terminal access,
   user management, device locking, report analysis, and route diagnostics.
-  **Latest**: Route check terminal with auto-execute commands, O(n) buffer optimization, memory leak fixes.
+  **Latest**: Chunked file upload with resume support, firmware upload progress tracking, device lock improvements.
 ---
 
 # GMS Remote Test Platform - Complete Guide
@@ -21,7 +21,7 @@ description: >-
 | **Web Interface** | http://172.16.14.233:5001 |
 | **API Docs (Swagger)** | http://172.16.14.233:5001/docs |
 | **API Help** | http://172.16.14.233:5001/api/help |
-| **Skill Version** | `2026.04.05-200000` |
+| **Skill Version** | `2026.04.09-200000` |
 | **Performance** | 75-85% faster multi-device operations (parallel execution) |
 
 ---
@@ -38,6 +38,8 @@ The web platform provides **8 integrated pages** for complete test management:
    - Real-time log streaming
    - File upload to test host
    - VPN/USB/IP connectivity
+   - **NEW**: Firmware upload with real-time progress
+   - **NEW**: Chunked file upload support (32MB chunks, 8 concurrent uploads)
 
 2. **🖥️ 主机桌面 (Desktop VNC)** - Remote desktop access
    - VNC viewer for test host desktop
@@ -55,6 +57,7 @@ The web platform provides **8 integrated pages** for complete test management:
    - Sortable columns
    - Lock/unlock status tracking
    - Source type identification (local/USB/IP)
+   - **FIXED**: Proper "locked_by_self" detection for device selection
 
 5. **👥 用户管理 (User Management)** - Multi-user support
    - Online user monitoring
@@ -78,23 +81,34 @@ The web platform provides **8 integrated pages** for complete test management:
    - Category filtering (test, device, desktop, VPN, etc.)
    - Copy-to-clipboard functionality
    - Usage examples
+   - **NEW**: Chunked upload and firmware upload progress APIs
 
 ---
 
-## What's New (2026.04.05)
+## What's New (2026.04.09)
 
 ### Latest Features
+- ✅ **Chunked File Upload**: Support for large files with 32MB chunks and 8 concurrent uploads
+- ✅ **Firmware Upload Progress**: Real-time progress tracking with query API for resume after refresh
+- ✅ **Device Lock Fix**: Correct `locked_by_self` detection in device selection
+- ✅ **SFTP Optimization**: Centralized performance tuning helper in SSHManager
+- ✅ **Named Constants**: Replaced magic numbers with named constants for maintainability
+- ✅ **Clean Startup**: No initialization messages on page refresh (F5)
+- ✅ **Memory Leak Prevention**: Background cleanup task for expired upload progress entries
+- ✅ **Code Quality**: Removed duplicate code, improved code reuse
+
+### API Updates
+- ✅ **POST /api/files/upload**: Enhanced with chunked upload support (chunk_index, total_chunks, upload_id, etc.)
+- ✅ **GET /api/burn/upload-progress**: New endpoint for querying firmware upload progress
+- ✅ **HEAD /api/files/upload**: For checking uploaded chunks in resume scenarios
+
+### Previous Improvements
 - ✅ **Route Check Terminal**: Auto-execute route commands with cross-page navigation
 - ✅ **Performance Optimization**: O(n) buffer handling (was O(n²))
 - ✅ **Memory Leak Fix**: Proper cleanup of `last_saved_log_file` entries
-- ✅ **Sticky Dialog Headers**: Close button (X) on route check dialog
-- ✅ **Terminal Command Auto-fill**: Seamless command input from route check
-
-### Previous Improvements
 - ✅ **API Naming**: `/api/config` → `/api/config/read` and `/api/config/update`
 - ✅ **Desktop VNC**: Unified endpoints `/api/desktop/vnc/*`
 - ✅ **Parallel Operations**: 75-85% faster multi-device execution
-- ✅ **Client Tracking**: Improved client information management
 
 ---
 
@@ -483,7 +497,68 @@ curl -s http://172.16.14.233:5001/api/test/logs/download -o test.log
 
 ---
 
-### 6. Test Reports & Results
+### 6. File Upload & Firmware Burning
+
+#### Upload File (Simple)
+```bash
+curl -sX POST http://172.16.14.233:5001/api/files/upload \
+  -F "file=@/path/to/file.txt" \
+  -F "path=/home/hcq/uploads" | jq '.'
+```
+
+#### Upload File (Chunked - for Large Files)
+```bash
+# Generate upload ID
+UPLOAD_ID="upload_$(date +%s)"
+
+# Upload file in 32MB chunks
+CHUNK_SIZE=33554432  # 32MB
+FILE="/path/to/large_file.img"
+TOTAL_CHUNKS=$(($(stat -f%z "$FILE" 2>/dev/null || stat -c%s "$FILE") / CHUNK_SIZE + 1))
+
+for i in $(seq 0 $((TOTAL_CHUNKS - 1))); do
+  dd if="$FILE" bs=$CHUNK_SIZE skip=$((i * 1)) count=1 2>/dev/null | \
+  curl -sX POST http://172.16.14.233:5001/api/files/upload \
+    -F "file=@-;filename=chunk_$i" \
+    -F "chunk_index=$i" \
+    -F "total_chunks=$TOTAL_CHUNKS" \
+    -F "upload_id=$UPLOAD_ID" \
+    -F "file_name=$(basename "$FILE")" \
+    -F "file_size=$(stat -f%z "$FILE" 2>/dev/null || stat -c%s "$FILE")" | jq '.'
+done
+```
+
+#### Check Uploaded Chunks (for Resume)
+```bash
+curl -sX POST "http://172.16.14.233:5001/api/files/upload?check_chunks=1&upload_id=$UPLOAD_ID" | jq '.'
+```
+
+#### Burn Firmware
+```bash
+curl -sX POST "http://172.16.14.233:5001/api/burn/firmware?devices=RK3588-DEVICE" \
+  -F "firmware_file=@/path/to/update.img" \
+  -F "wipe_data=true" | jq '.'
+```
+
+#### Query Firmware Upload Progress
+```bash
+curl -s http://172.16.14.233:5001/api/burn/upload-progress | jq '.'
+```
+
+**Response:**
+```json
+{
+  "in_progress": true,
+  "progress": 45.5,
+  "filename": "update.img",
+  "uploaded_size": 1807400702,
+  "total_size": 3972008704
+}
+```
+
+---
+
+### 7. Test Reports & Results
 
 #### List All Reports
 ```bash
@@ -522,7 +597,7 @@ curl -O "http://172.16.14.233:5001/api/reports/download/2026-04-05_10-39-00/repo
 
 ---
 
-### 7. Device Operations
+### 8. Device Operations
 
 #### Lock Bootloader
 ```bash
@@ -574,7 +649,7 @@ curl -sX POST http://172.16.14.233:5001/api/devices/connect-wifi \
 
 ---
 
-### 8. Network Diagnostics
+### 9. Network Diagnostics
 
 #### Test Client-Host Connectivity
 ```bash
@@ -616,7 +691,7 @@ curl -sX POST http://172.16.14.233:5001/api/ssh/route/ping \
 
 ---
 
-### 9. Client Information
+### 10. Client Information
 
 #### Get Client IP
 ```bash
@@ -653,7 +728,7 @@ curl -sX POST http://172.16.14.233:5001/api/client-info/detect \
 
 ---
 
-### 10. Configuration Management
+### 11. Configuration Management
 
 #### Get Current Config
 ```bash
@@ -678,7 +753,7 @@ curl -sX POST http://172.16.14.233:5001/api/config/update \
 
 ---
 
-### 11. VPN Management
+### 12. VPN Management
 
 #### Connect to VPN
 ```bash
@@ -715,7 +790,7 @@ curl -s http://172.16.14.233:5001/api/vpn/status | jq '.'
 
 ---
 
-### 12. File Management
+### 13. File Management
 
 #### Upload File
 ```bash
@@ -739,7 +814,7 @@ curl -sX POST http://172.16.14.233:5001/api/files/install \
 
 ---
 
-### 13. Firmware Burning
+### 14. Firmware Burning
 
 #### Burn Firmware to Device
 ```bash
