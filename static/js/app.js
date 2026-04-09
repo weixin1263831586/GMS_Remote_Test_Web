@@ -2482,6 +2482,30 @@ function updateTestToggleButton(isTesting) {
         btn.textContent = '▶ 开始测试';
         btn.className = 'btn-primary btn-lg';
     }
+
+    // 禁用/启用测试相关输入框
+    const testInputs = [
+        'test-type',      // 测试类型
+        'test-module',    // 测试模块
+        'test-case',      // 测试用例
+        'suite-path',     // 测试套件
+        'retry-result'    // 测试报告
+    ];
+
+    testInputs.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.disabled = isTesting;
+        }
+    });
+
+    // 禁用/启用浏览按钮
+    const browseButtons = document.querySelectorAll('button[onclick*="browseRemoteFile"]');
+    browseButtons.forEach(btn => {
+        if (btn.getAttribute('onclick').includes('suite') || btn.getAttribute('onclick').includes('retry')) {
+            btn.disabled = isTesting;
+        }
+    });
 }
 
 async function cleanTest() {
@@ -6543,7 +6567,7 @@ function showUsageExamples() {
     const modal = document.getElementById('usage-examples-modal');
     if (modal) {
         // 获取当前服务器地址
-        const serverUrl = window.location.origin || 'http://172.16.14.233:5001';
+        const serverUrl = window.location.origin || BASE_URL;
 
         // 替换弹框中的硬编码IP为动态服务器地址
         const currentContent = modal.innerHTML;

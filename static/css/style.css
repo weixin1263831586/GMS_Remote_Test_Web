@@ -812,6 +812,61 @@ log-system { color: var(--info-color); }
     border-color: var(--border-color);
 }
 
+.entry-field:disabled,
+select:disabled {
+    background: var(--darker-bg) !important;
+    color: var(--text-secondary) !important;
+    cursor: not-allowed;
+    border-color: var(--border-color);
+    opacity: 0.6;
+}
+
+/* 修复浏览器自动填充导致的白色背景 */
+.entry-field:-webkit-autofill,
+.entry-field:-webkit-autofill:hover,
+.entry-field:-webkit-autofill:focus,
+.entry-field:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 30px var(--darker-bg) inset !important;
+    -webkit-text-fill-color: #ffffff !important;
+    transition: background-color 5000s ease-in-out 0s;
+}
+
+/* 修复禁用状态下的自动填充 */
+.entry-field:disabled:-webkit-autofill,
+.entry-field:disabled:-webkit-autofill:hover,
+.entry-field:disabled:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 30px var(--darker-bg) inset !important;
+    -webkit-text-fill-color: var(--text-secondary) !important;
+}
+
+.entry-field:disabled:focus,
+select:disabled:focus {
+    outline: none;
+    border-color: var(--border-color);
+    box-shadow: none;
+}
+
+/* 禁用状态下的按钮 */
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 确保 select 元素在各种状态下保持正确的背景色 */
+select {
+    background-color: var(--darker-bg) !important;
+    color: #ffffff !important;
+}
+
+select:focus {
+    background-color: var(--light-bg) !important;
+}
+
+select option {
+    background-color: var(--darker-bg);
+    color: #ffffff;
+}
+
 /* ==================== Drop Zone ==================== */
 .drop-zone {
     flex: 1;
