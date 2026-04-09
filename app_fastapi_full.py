@@ -6239,12 +6239,14 @@ async def burn_firmware(
 
                 # 定期更新进度到前端
                 last_percentage = 0
+                last_update_time = time.time()
                 while not upload_complete.is_set():
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(1.0)  # 增加到1秒间隔
                     current_percentage = upload_progress_data.get('current_percentage', 0)
+                    current_time = time.time()
 
-                    # 只有当百分比变化时才发送更新
-                    if abs(current_percentage - last_percentage) > 0.1:
+                    # 只有当百分比变化超过1%且距离上次更新超过2秒时才发送更新
+                    if abs(current_percentage - last_percentage) > 1.0 and (current_time - last_update_time) > 2.0:
                         if client_id in global_state.websocket_connections:
                             try:
                                 sent_size = int((current_percentage / 100) * firmware_size)
@@ -6257,7 +6259,8 @@ async def burn_firmware(
                                 })
                             except (WebSocketDisconnect, ConnectionError, KeyError):
                                 pass
-                        last_percentage = current_percentage
+                            last_percentage = current_percentage
+                            last_update_time = current_time
 
                 # 等待线程完成
                 upload_thread.join(timeout=300)  # 5分钟超时
@@ -6357,12 +6360,14 @@ async def burn_firmware(
 
                     # 定期更新进度到前端
                     last_percentage = 0
+                    last_update_time = time.time()
                     while not upload_complete.is_set():
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(1.0)  # 增加到1秒间隔
                         current_percentage = upload_progress_data.get('current_percentage', 0)
+                        current_time = time.time()
 
-                        # 只有当百分比变化时才发送更新
-                        if abs(current_percentage - last_percentage) > 0.1:
+                        # 只有当百分比变化超过1%且距离上次更新超过2秒时才发送更新
+                        if abs(current_percentage - last_percentage) > 1.0 and (current_time - last_update_time) > 2.0:
                             if client_id in global_state.websocket_connections:
                                 try:
                                     sent_size = int((current_percentage / 100) * file_size)
@@ -6375,7 +6380,8 @@ async def burn_firmware(
                                     })
                                 except (WebSocketDisconnect, ConnectionError, KeyError):
                                     pass
-                            last_percentage = current_percentage
+                                last_percentage = current_percentage
+                                last_update_time = current_time
 
                     # 等待线程完成
                     upload_thread.join(timeout=300)
@@ -6440,10 +6446,11 @@ async def burn_firmware(
             check_cmd = f"cd {gms_suite_dir} && ./upgrade_tool ld"
             output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
 
-            if "List of rockusb connected" not in output:
+            # 检查是否有设备进入 loader 模式（0设备=失败）
+            if "List of rockusb connected(0)" in output or "List of rockusb connected" not in output:
                 ssh_manager.return_connection(ssh)
                 return JSONResponse(
-                    content={'success': False, 'error': 'No Loader devices detected'}
+                    content={'success': False, 'error': f'No Loader devices detected. Output:\n{output}'}
                 )
 
             logger.info(f"[Firmware Burn] Loader devices detected:\n{output}")
@@ -7179,10 +7186,23 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
     try:
         while True:
-            # 接收消息
-            data = await websocket.receive_json()
-            message_type = data.get('type')
+            # 接收消息（添加30秒超时，用于心跳检测）
+            try:
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
+                message_type = data.get('type')
+            except asyncio.TimeoutError:
+                # 超时后发送心跳包，保持连接活跃
+                try:
+                    await websocket.send_json({
+                        'type': 'heartbeat',
+                        'timestamp': datetime.now().isoformat()
+                    })
+                    continue  # 继续下一次心跳检测
+                except Exception as e:
+                    logger.warning(f"[WebSocket] Failed to send heartbeat for {client_id}: {e}")
+                    break
 
+            # 处理接收到的消息
             if message_type == 'ping':
                 await websocket.send_json({
                     'type': 'pong',

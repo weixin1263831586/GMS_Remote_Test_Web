@@ -1,6 +1,12 @@
 {
     "client_hosts": {
+        "172.16.14.68": "hcq",
+        "172.16.14.233": "hcq"
     },
     "client_ssh_credentials": [
+        {
+            "username": "hcq",
+            "password": "20240120"
+        }
     ]
 }

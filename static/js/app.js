@@ -443,7 +443,8 @@ function initWebSocket() {
 
                     case 'file_upload_progress':
                         // 文件上传进度更新（通用，用于固件上传等）
-                        console.log('[WebSocket] file_upload_progress:', data);
+                        // 移除频繁的调试日志，减少控制台噪音
+                        // console.log('[WebSocket] file_upload_progress:', data);
                         updateUploadProgress(data.percentage, data.filename, data.uploaded_size, data.total_size);
                         break;
 
@@ -461,6 +462,14 @@ function initWebSocket() {
                         if (state.websocket.readyState === WebSocket.OPEN) {
                             state.websocket.send(JSON.stringify({ type: 'pong' }));
                         }
+                        break;
+
+                    case 'heartbeat':
+                        // 服务器端心跳包，不需要响应
+                        break;
+
+                    case 'pong':
+                        // 心跳响应，不需要处理
                         break;
 
                     default:
@@ -2316,12 +2325,13 @@ window.clearFirmwareUploadState = clearFirmwareUploadState;
 
 // 通用上传进度更新函数（用于固件上传等）
 function updateUploadProgress(percentage, filename, uploadedSize, totalSize) {
-    console.log('[updateUploadProgress] Called with:', { percentage, filename, uploadedSize, totalSize });
+    // 移除频繁的调试日志，减少控制台噪音
+    // console.log('[updateUploadProgress] Called with:', { percentage, filename, uploadedSize, totalSize });
 
     const progressFill = document.getElementById('upload-progress-fill');
     const progressInfo = document.getElementById('progress-info');
 
-    console.log('[updateUploadProgress] Elements:', { progressFill, progressInfo });
+    // console.log('[updateUploadProgress] Elements:', { progressFill, progressInfo });
 
     if (progressFill && progressInfo) {
         progressFill.style.width = percentage + '%';
@@ -2329,7 +2339,8 @@ function updateUploadProgress(percentage, filename, uploadedSize, totalSize) {
         const transferred = formatBytes(uploadedSize);
         const total = formatBytes(totalSize);
 
-        console.log('[updateUploadProgress] Updating UI:', { percentage, transferred, total });
+        // 移除频繁的UI更新日志，减少控制台噪音
+        // console.log('[updateUploadProgress] Updating UI:', { percentage, transferred, total });
 
         if (percentage >= 100) {
             progressInfo.textContent = `✅ ${filename} 上传完成 (${total})`;
@@ -2953,9 +2964,10 @@ function startStatusPolling() {
             const hasRealtimeConnection = (state.socket && typeof io !== 'undefined') ||
                                         (state.websocket && state.websocket.readyState === WebSocket.OPEN);
 
-            console.log('[Poll] hasRealtimeConnection:', hasRealtimeConnection,
-                       'Socket.IO:', !!state.socket,
-                       'WebSocket:', state.websocket ? state.websocket.readyState : 'none');
+            // 移除频繁的调试日志，减少控制台噪音
+            // console.log('[Poll] hasRealtimeConnection:', hasRealtimeConnection,
+            //            'Socket.IO:', !!state.socket,
+            //            'WebSocket:', state.websocket ? state.websocket.readyState : 'none');
 
             // 如果没有实时连接，获取日志；否则只获取状态
             const status = await apiCall(hasRealtimeConnection ? '/api/test/status?logs=false' : '/api/test/status');
@@ -2979,13 +2991,13 @@ function startStatusPolling() {
             }
 
             // 更新测试状态按钮
-            console.log('[Poll] Status:', status.running, 'State.testing:', state.testing);
+            // console.log('[Poll] Status:', status.running, 'State.testing:', state.testing);
             if (status.running && !state.testing) {
-                console.log('[Poll] Setting testing = TRUE');
+                // console.log('[Poll] Setting testing = TRUE');
                 state.testing = true;
                 updateTestToggleButton(true);
             } else if (!status.running && state.testing) {
-                console.log('[Poll] Setting testing = FALSE');
+                // console.log('[Poll] Setting testing = FALSE');
                 state.testing = false;
                 updateTestToggleButton(false);
             }
