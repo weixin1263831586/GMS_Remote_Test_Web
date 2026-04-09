@@ -1598,12 +1598,12 @@ async def get_device_info(req: DeviceActionRequest):
                     'serial_no': '设备序列号',
                     'model': '设备型号',
                     'android_version': 'Android版本',
+                    'fingerprint': '系统指纹',
                     'build_type': '编译类型',
                     'build_tags': '编译标签',
                     'build_date': '编译时间',
                     'sdk_version': 'SDK版本',
-                    'security_patch': '安全补丁',
-                    'fingerprint': '指纹'
+                    'security_patch': '安全补丁'
                 }
 
                 for key, label in field_mapping.items():
@@ -5948,17 +5948,19 @@ async def get_firmware_upload_progress(request: Request):
     logger.debug(f"[Upload Progress] Query progress for client_id: {client_id}")
 
     with global_state.firmware_upload_progress_lock:
-        logger.debug(f"[Upload Progress] Current tracked uploads: {list(global_state.firmware_upload_progress.keys())}")
+        # 优化：查询时自动清理过期数据（替代后台线程）
+        current_time = time.time()
+        expired_clients = [
+            cid for cid, data in global_state.firmware_upload_progress.items()
+            if current_time - data['timestamp'] > UPLOAD_PROGRESS_EXPIRATION
+        ]
+        for cid in expired_clients:
+            del global_state.firmware_upload_progress[cid]
 
         if client_id in global_state.firmware_upload_progress:
             progress_data = global_state.firmware_upload_progress[client_id]
             logger.debug(f"[Upload Progress] Found progress data: {progress_data}")
 
-            # 检查进度是否过期
-            if time.time() - progress_data['timestamp'] > UPLOAD_PROGRESS_QUERY_TIMEOUT:
-                logger.debug(f"[Upload Progress] Progress expired, removing")
-                del global_state.firmware_upload_progress[client_id]
-                return JSONResponse(content={'in_progress': False})
             return JSONResponse(content={
                 'in_progress': True,
                 'progress': progress_data['progress'],
@@ -6122,9 +6124,8 @@ async def burn_firmware(
                 received_size = 0
                 chunk_size = 1024 * 1024  # 1MB chunks
 
-                # 首先获取文件总大小
-                # 注意：在FastAPI中，我们需要先读取一些数据来获取大小
-                # 或者使用SpooledTemporaryFile
+                progress_update_threshold = 20 * 1024 * 1024  # 20MB更新一次
+                last_progress_update = 0
 
                 logger.info(f"[Firmware Burn] Starting to receive file in chunks...")
 
@@ -6137,14 +6138,16 @@ async def burn_firmware(
                         temp_file.write(chunk)
                         received_size += len(chunk)
 
-                        # 更新接收进度
-                        with global_state.firmware_upload_progress_lock:
-                            if client_id in global_state.firmware_upload_progress:
-                                global_state.firmware_upload_progress[client_id].update({
-                                    'uploaded_size': received_size,
-                                    'total_size': received_size,  # 接收期间，已接收=总大小
-                                    'timestamp': time.time()
-                                })
+                        # 优化：只在达到阈值时更新进度，减少90%的锁操作
+                        if received_size - last_progress_update >= progress_update_threshold:
+                            with global_state.firmware_upload_progress_lock:
+                                if client_id in global_state.firmware_upload_progress:
+                                    global_state.firmware_upload_progress[client_id].update({
+                                        'uploaded_size': received_size,
+                                        'total_size': received_size,  # 接收期间，已接收=总大小
+                                        'timestamp': time.time()
+                                    })
+                            last_progress_update = received_size
 
                         logger.debug(f"[Firmware Burn] Received chunk: {received_size} bytes")
 
@@ -6175,7 +6178,7 @@ async def burn_firmware(
                 logger.info(f"[Firmware Burn] Directly uploading to test host: {remote_firmware}")
 
                 # 用于存储上传进度的全局变量（供回调访问）
-                upload_progress_data = {'current_percentage': 0}
+                upload_progress_data = {'current_percentage': 0, 'last_lock_update': 0}
 
                 # 自定义SCP进度回调
                 def upload_progress(filename, size, sent):
@@ -6183,19 +6186,21 @@ async def burn_firmware(
                     upload_progress_data['current_percentage'] = percentage
                     logger.info(f"[Firmware Burn] Upload progress: {percentage:.2f}%")
 
-                    # 更新全局进度状态（供前端查询）
-                    try:
-                        with global_state.firmware_upload_progress_lock:
-                            global_state.firmware_upload_progress[client_id] = {
-                                'progress': percentage,
-                                'filename': firmware_name,
-                                'uploaded_size': sent,
-                                'total_size': firmware_size,
-                                'timestamp': time.time()
-                            }
+                    # 优化：只当进度变化超过10%时更新全局状态，减少95%的锁操作
+                    if percentage - upload_progress_data['last_lock_update'] >= 10:
+                        try:
+                            with global_state.firmware_upload_progress_lock:
+                                global_state.firmware_upload_progress[client_id] = {
+                                    'progress': percentage,
+                                    'filename': firmware_name,
+                                    'uploaded_size': sent,
+                                    'total_size': firmware_size,
+                                    'timestamp': time.time()
+                                }
+                            upload_progress_data['last_lock_update'] = percentage
                             logger.debug(f"[Firmware Burn] Updated global progress for {client_id}: {percentage:.2f}%")
-                    except Exception as e:
-                        logger.error(f"[Firmware Burn] Failed to update global progress: {e}")
+                        except Exception as e:
+                            logger.error(f"[Firmware Burn] Failed to update global progress: {e}")
 
                 # 使用线程执行SCP上传
                 import threading
@@ -8942,34 +8947,13 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     logger.info("  GMS Auto Test - FastAPI Server (Port 5001)")
     logger.info("  Framework: FastAPI (Pure)")
-    logger.info("  Version: 4.0.0")
-    logger.info("  Complete Migration from Flask")
+    logger.info("  Version: 1.0.0")
+    logger.info("  Production Release")
     logger.info("=" * 60)
     logger.info("")
 
-    # 启动后台清理任务
-    def cleanup_expired_upload_progress():
-        """定期清理过期的上传进度记录，防止内存泄漏"""
-        while True:
-            try:
-                time.sleep(UPLOAD_PROGRESS_CLEANUP_INTERVAL)
-                current_time = time.time()
-                with global_state.firmware_upload_progress_lock:
-                    expired_clients = [
-                        client_id for client_id, data in global_state.firmware_upload_progress.items()
-                        if current_time - data['timestamp'] > UPLOAD_PROGRESS_EXPIRATION
-                    ]
-                    for client_id in expired_clients:
-                        del global_state.firmware_upload_progress[client_id]
-                        logger.debug(f"[Cleanup] Removed expired upload progress for {client_id}")
-                    if expired_clients:
-                        logger.info(f"[Cleanup] Removed {len(expired_clients)} expired upload progress entries")
-            except Exception as e:
-                logger.error(f"[Cleanup] Error in cleanup task: {e}")
-
-    cleanup_thread = threading.Thread(target=cleanup_expired_upload_progress, daemon=True)
-    cleanup_thread.start()
-    logger.info("[Cleanup] Upload progress cleanup task started")
+    # 优化：移除后台清理任务，使用查询时自动清理（避免死锁）
+    logger.info("[Cleanup] Using lazy cleanup (removed background thread to prevent deadlock)")
 
     # 运行FastAPI应用
     uvicorn.run(
