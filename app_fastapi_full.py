@@ -32,6 +32,7 @@ from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconn
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.websockets import WebSocketState
 from enum import Enum
+import socket  # 用于TCP连接优化
 
 # ==================== 枚举定义 ====================
 
@@ -243,6 +244,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 性能优化中间件：HTTP连接池和响应头优化
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
+
+class PerformanceMiddleware(BaseHTTPMiddleware):
+    """性能优化中间件"""
+    async def dispatch(self, request, call_next):
+        # 添加连接保持和缓存控制头
+        response = await call_next(request)
+
+        # 优化响应头
+        response.headers["Connection"] = "keep-alive"
+        response.headers["Keep-Alive"] = "timeout=300, max=1000"  # 5分钟超时，最多1000个请求
+        response.headers["X-Content-Type-Options"] = "nosniff"
+
+        # 添加缓存控制（静态资源）
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "public, max-age=86400"  # 1天缓存
+
+        return response
+
+# 添加GZip压缩中间件
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# 添加性能优化中间件
+app.add_middleware(PerformanceMiddleware)
 
 # 挂载静态文件
 static_dir = os.path.join(os.path.dirname(__file__), 'static')
@@ -1291,18 +1319,56 @@ async def list_users():
         'users': users
     })
 
+# ==================== 辅助函数 ====================
+
+def hide_sensitive_info(config: dict) -> dict:
+    """隐藏配置中的敏感信息"""
+    sensitive_fields = ['password', 'pswd', 'api_key', 'secret', 'token', 'private_key']
+
+    if not isinstance(config, dict):
+        return config
+
+    safe_config = {}
+    for key, value in config.items():
+        # 检查是否是敏感字段
+        is_sensitive = any(sensitive in key.lower() for sensitive in sensitive_fields)
+
+        if is_sensitive and isinstance(value, str) and value:
+            # 保留前4个字符，其余用*替代
+            if len(value) > 4:
+                safe_config[key] = value[:4] + '*' * (len(value) - 4)
+            else:
+                safe_config[key] = '****'
+        elif isinstance(value, dict):
+            # 递归处理嵌套字典
+            safe_config[key] = hide_sensitive_info(value)
+        elif isinstance(value, list):
+            # 处理列表中的字典项
+            safe_list = []
+            for item in value:
+                if isinstance(item, dict):
+                    safe_list.append(hide_sensitive_info(item))
+                else:
+                    safe_list.append(item)
+            safe_config[key] = safe_list
+        else:
+            safe_config[key] = value
+
+    return safe_config
+
 # ==================== 配置管理 ====================
 
 @app.get("/api/config/read")
 async def get_config(request: Request):
-    """获取配置 - 与Flask版本一致，直接返回配置对象"""
+    """获取配置 - 隐藏敏感信息后返回配置对象"""
     # 跟踪用户访问
     client_id = get_client_id_from_request(request)
     get_or_create_user_state(client_id)
 
     config = config_manager.load_config()
-    # 直接返回配置对象，与Flask版本一致
-    return JSONResponse(content=config)
+    # 隐藏敏感信息
+    safe_config = hide_sensitive_info(config.copy())
+    return JSONResponse(content=safe_config)
 
 @app.post("/api/config/update")
 async def update_config(req: dict):
@@ -1313,7 +1379,7 @@ async def update_config(req: dict):
     # 只保存客户端相关的动态配置
     # 注意：client_ip 和 client_username 是运行时状态，不应保存到配置文件
     dynamic_keys = {
-        'client_hosts', 'client_ssh_credentials'
+        'client_hosts', 'client_ssh_credentials', 'local_server'
     }
 
     # 只保留客户端相关的动态配置
@@ -7710,17 +7776,13 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/config/update",
-        "description": "更新配置（修改动态配置字段，保存在config_dynamic.json）",
+        "description": "更新配置（仅修改动态配置字段，保存在config_dynamic.json）",
         "params": [
-            {"name": "ubuntu_user", "type": "string", "required": False, "desc": "Ubuntu用户名"},
-            {"name": "ubuntu_host", "type": "string", "required": False, "desc": "Ubuntu主机地址"},
-            {"name": "ubuntu_pswd", "type": "string", "required": False, "desc": "Ubuntu密码"},
-            {"name": "device_host", "type": "string", "required": False, "desc": "设备主机地址"},
-            {"name": "device_pswd", "type": "string", "required": False, "desc": "设备密码"},
             {"name": "local_server", "type": "string", "required": False, "desc": "本地服务器地址"},
-            {"name": "suites_path", "type": "string", "required": False, "desc": "测试套件路径"},
-            {"name": "usbip_vid_pid", "type": "string", "required": False, "desc": "USB/IP的VID:PID"}
+            {"name": "client_hosts", "type": "object", "required": False, "desc": "客户端主机映射 {ip: username}"},
+            {"name": "client_ssh_credentials", "type": "array", "required": False, "desc": "客户端SSH凭证列表"}
         ],
+        "note": "注意：此API只能修改动态配置字段（local_server、client_hosts、client_ssh_credentials），不能修改系统核心配置（ubuntu_user、ubuntu_host等）。如需修改核心配置，请直接编辑config.json文件。",
         "category": "config",
         "skill": "gms-rt-config-update"
     },
@@ -8975,14 +9037,26 @@ if __name__ == "__main__":
     # 优化：移除后台清理任务，使用查询时自动清理（避免死锁）
     logger.info("[Cleanup] Using lazy cleanup (removed background thread to prevent deadlock)")
 
-    # 运行FastAPI应用
+    logger.info("[Performance] Multi-worker mode enabled (4 workers)")
+    logger.info("[Performance] Using uvloop for high performance")
+    logger.info("[Performance] Using httptools for fast HTTP parsing")
+    logger.info("[Performance] HTTP connection pooling and GZip compression enabled")
+
+    # 运行FastAPI应用（使用字符串导入以支持多worker）
     uvicorn.run(
-        app,
+        "app_fastapi_full:app",  # 使用字符串导入
         host=SERVER_HOST,
         port=SERVER_PORT,
         log_level='info',
         # 优化大文件上传
         timeout_keep_alive=600,  # 10分钟保持连接
-        # 工作进程配置
-        workers=1,  # 单进程模式（适合长连接和WebSocket）
+        # 性能优化配置
+        workers=4,  # 多worker模式提升并发性能
+        loop='uvloop',  # 使用uvloop高性能事件循环
+        http='httptools',  # 使用httptools C扩展HTTP解析
+        access_log=True,  # 启用访问日志
+        limit_concurrency=1000,  # 最大并发连接数
+        limit_max_requests=10000,  # 每个worker最大请求数后重启（防止内存泄漏）
+        # TCP优化
+        backlog=2048,  # TCP连接队列大小
     )

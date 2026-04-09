@@ -172,6 +172,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 检查是否有未完成的固件上传
     checkPendingFirmwareUpload();
 
+    // 检查URL参数，如果refresh=true则强制刷新API文档
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('refresh') === 'true') {
+        debugLog('[Init] Force refresh API docs due to URL parameter');
+        if (window.loadApiDocs) {
+            await window.loadApiDocs(true);
+        }
+    }
+
     // 延迟执行耗时操作，不阻塞页面加载
     setTimeout(async () => {
         // 立即获取客户端信息（使用/api/users/current）
@@ -5595,8 +5604,9 @@ function filterApiDocs() {
 
 /**
  * 加载API文档列表（带缓存优化）
+ * @param {boolean} forceRefresh - 强制刷新，绕过缓存
  */
-async function loadApiDocs() {
+async function loadApiDocs(forceRefresh = false) {
     debugLog('[API Docs] ===== loadApiDocs called =====');
     try {
         // 检查DOM元素是否存在
@@ -5605,9 +5615,9 @@ async function loadApiDocs() {
             return;
         }
 
-        // 检查缓存
+        // 检查缓存（除非强制刷新）
         const now = Date.now();
-        if (apiDocsCache && (now - apiDocsCacheTime) < API_DOCS_CACHE_DURATION) {
+        if (!forceRefresh && apiDocsCache && (now - apiDocsCacheTime) < API_DOCS_CACHE_DURATION) {
             displayApiDocs(apiDocsCache);
             updateApiStats(apiDocsCache);
             return;
@@ -5910,16 +5920,15 @@ const API_DETAILS_MAP = {
     },
     '/api/config/update': {
         title: '更新配置',
-        description: '更新系统配置（修改动态配置字段）',
+        description: '更新系统配置（仅修改动态配置字段）',
         method: 'POST',
         params: [
-            { name: 'ubuntu_user', type: 'string', required: false, desc: 'Ubuntu用户名' },
-            { name: 'ubuntu_host', type: 'string', required: false, desc: 'Ubuntu主机地址' },
-            { name: 'device_host', type: 'string', required: false, desc: '设备主机地址' },
-            { name: 'local_server', type: 'string', required: false, desc: '本地服务器地址' }
+            { name: 'local_server', type: 'string', required: false, desc: '本地服务器地址' },
+            { name: 'client_hosts', type: 'object', required: false, desc: '客户端主机映射 {ip: username}' },
+            { name: 'client_ssh_credentials', type: 'array', required: false, desc: '客户端SSH凭证列表' }
         ],
-        response: '{ "success": true, "message": "配置已保存" }',
-        usage: '修改服务器连接配置'
+        response: '{ "success": true }',
+        usage: '⚠️ 只能修改动态配置，不能修改ubuntu_user、ubuntu_host等核心配置'
     },
     '/api/users/current': {
         title: '获取客户端信息',
