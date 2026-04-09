@@ -203,6 +203,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ==================== 服务器配置常量 ====================
+SERVER_PORT = 5001
+SERVER_HOST = os.getenv('GMS_SERVER_HOST', '0.0.0.0')
+# 用于文档和示例的默认URL（使用占位符而非硬编码IP）
+DEFAULT_SERVER_URL = os.getenv('GMS_SERVER_URL', 'http://server:5001')
+
 # ==================== FastAPI应用 ====================
 
 # 自定义JSONResponse类，确保UTF-8编码
@@ -7935,9 +7941,9 @@ async def get_api_help():
         # 添加使用示例
         text_content += "\n" + "=" * 60 + "\n"
         text_content += "Usage Examples:\n"
-        text_content += '  curl -s "http://172.16.14.233:5001/api/devices?help=1"           \n'
-        text_content += '  curl -s "http://172.16.14.233:5001/api/test/status?help=1"       \n'
-        text_content += '  curl -sX POST "http://172.16.14.233:5001/api/test/start?help=1"  \n'
+        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/devices?help=1"           \n'
+        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/test/status?help=1"       \n'
+        text_content += f'  curl -sX POST "{DEFAULT_SERVER_URL}/api/test/start?help=1"  \n'
 
         return PlainTextResponse(
             content=text_content,
@@ -8021,7 +8027,7 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
         else:  # left
             return text + ' ' * padding
 
-    base_url = "http://172.16.14.233:5001"
+    base_url = DEFAULT_SERVER_URL
 
     # 详细的API参数映射（与前端保持一致）
     API_DETAILS_MAP = {
@@ -8353,7 +8359,7 @@ def generate_curl_example(api):
     method = api['method']
     path = api['path']
     params = api.get('params', [])
-    base_url = "http://172.16.14.233:5001"
+    base_url = DEFAULT_SERVER_URL
 
     if method == 'GET':
         if params:
@@ -8411,7 +8417,7 @@ def generate_api_example(api):
     path = api['path']
     params = api.get('params', [])
 
-    base_url = "http://172.16.14.233:5001"
+    base_url = DEFAULT_SERVER_URL
 
     if method == 'GET':
         if params:
@@ -8607,7 +8613,7 @@ if __name__ == "__main__":
     # 运行FastAPI应用
     uvicorn.run(
         app,
-        host='0.0.0.0',
-        port=5001,
+        host=SERVER_HOST,
+        port=SERVER_PORT,
         log_level='info'
     )

@@ -5,7 +5,8 @@
 # ==============================================================================
 
 # Default configuration
-SERVER_URL="${GMS_REMOTE_TEST_SERVER:-http://172.16.14.233:5001}"
+# Use environment variable GMS_REMOTE_TEST_SERVER or default to server:5001
+SERVER_URL="${GMS_REMOTE_TEST_SERVER:-http://server:5001}"
 API_BASE="${SERVER_URL}/api"
 
 # Colors for output
