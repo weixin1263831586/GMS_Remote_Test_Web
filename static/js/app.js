@@ -5632,7 +5632,6 @@ async function loadApiDocs(forceRefresh = false) {
         const data = await resp.json();
 
         if (data.apis && Array.isArray(data.apis)) {
-            // 过滤掉根路径（返回HTML，不是真正的API接口）
             const filteredApis = data.apis.filter(api => api.path !== '/');
 
             // 为每个API添加分类信息
@@ -5694,9 +5693,9 @@ function updateApiStats(apis) {
 // API表格列宽配置 (与HTML模板保持一致: 25%, 18%, 17%, 40%)
 const API_TABLE_COLUMNS = {
     INTERFACE: 25,    // 百分比 - API接口
-    DESCRIPTION: 18,  // 百分比 - 接口说明
-    SKILL: 17,        // 百分比 - skill使用
-    USAGE: 40         // 百分比 - 使用方法
+    DESCRIPTION: 20,  // 百分比 - 接口说明
+    SKILL: 20,        // 百分比 - skill使用
+    USAGE: 35         // 百分比 - 使用方法
 };
 
 // HTTP方法类型
@@ -5812,7 +5811,7 @@ function formatJsonResponse(response) {
 const API_DETAILS_MAP = {
     '/api/test/start': {
         title: '启动测试',
-        description: '启动兼容性测试(CTS/VTS/GTS等)',
+        description: '启动GMS测试(CTS/GSI/GTS/STS/VTS/APTS)',
         params: [
             { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' },
             { name: 'test_type', type: 'string', required: true, desc: '测试类型: CTS|VTS|STS|GTS|CTS_VERIFIER' },
@@ -5822,25 +5821,25 @@ const API_DETAILS_MAP = {
             { name: 'test_suite', type: 'string', required: false, desc: '测试套件路径(可选)' }
         ],
         response: '{ "success": true, "message": "测试已启动" }',
-        usage: '⭐核心接口 - 启动CTS/VTS/GTS等兼容性测试'
+        usage: '启动GMS测试(CTS/GSI/GTS/STS/VTS/APTS)'
     },
     '/api/test/stop': {
         title: '停止测试',
-        description: '停止当前正在运行的测试',
+        description: '停止测试',
         params: [],
         response: '{ "success": true, "message": "测试已停止" }',
-        usage: '紧急停止正在运行的测试'
+        usage: '停止测试'
     },
     '/api/test/clean': {
         title: '清理测试环境',
-        description: '清理测试环境并释放资源',
+        description: '清理测试环境',
         params: [],
         response: '{ "success": true, "message": "测试环境已清理" }',
-        usage: '测试完成后清理临时文件和进程'
+        usage: '清理测试临时文件'
     },
     '/api/reports/analyze-source': {
         title: '分析源码',
-        description: '分析测试用例的源代码',
+        description: '分析测试用例源码',
         params: [
             { name: 'test_name', type: 'string', required: true, desc: '测试用例名称' },
             { name: 'error_message', type: 'string', required: true, desc: '错误信息' }
@@ -5850,7 +5849,7 @@ const API_DETAILS_MAP = {
     },
     '/api/test/logs/current': {
         title: '下载当前日志',
-        description: '下载当前单个测试日志文件',
+        description: '下载当前测试日志',
         method: 'GET',
         params: [],
         response: '日志文件下载 (.log格式)',
@@ -5858,7 +5857,7 @@ const API_DETAILS_MAP = {
     },
     '/api/test/logs/batch': {
         title: '批量下载日志',
-        description: '批量下载多个测试日志文件（ZIP压缩包）',
+        description: '批量下载测试日志',
         method: 'POST',
         params: [
             { name: 'files', type: 'array', required: true, desc: '日志文件路径数组' }
@@ -5880,19 +5879,45 @@ const API_DETAILS_MAP = {
         response: '{ "logs": [{ "filename": "console_20260326_100000.log" }] }',
         usage: '查看历史日志文件'
     },
+    '/api/test/logs/stream': {
+        title: '实时流式日志',
+        description: '实时流式输出测试日志',
+        method: 'GET',
+        params: [],
+        response: '实时文本流',
+        usage: '实时查看测试日志输出'
+    },
     '/api/test/status': {
         title: '获取测试状态',
         description: '获取当前测试运行状态',
         params: [],
         response: '{ "running": false, "test_type": "CTS", "devices": ["RF8TC2W4JNH"] }',
-        usage: '⭐核心接口 - 查看测试是否正在运行及进度'
+        usage: '查看测试运行状态'
     },
     '/api/system/health': {
         title: '系统管理',
         description: '检查服务器运行状态',
         params: [],
         response: '{ "status": "healthy", "timestamp": "2026-03-26T10:30:00" }',
-        usage: '用于监控服务器健康状态,建议每分钟调用一次'
+        usage: '监控服务器健康状态'
+    },
+    '/api/system/websocket/{client_id}': {
+        title: 'WebSocket连接',
+        description: '建立WebSocket连接用于实时通信',
+        method: 'WebSocket',
+        params: [
+            { name: 'client_id', type: 'string', required: true, desc: '客户端ID' }
+        ],
+        response: 'WebSocket连接',
+        usage: '实时通信'
+    },
+    '/api/system/docs': {
+        title: '获取API文档',
+        description: '获取系统API文档列表',
+        method: 'GET',
+        params: [],
+        response: '{ "apis": [...] }',
+        usage: '查看所有可用API'
     },
     '/api/config/validate': {
         title: '验证配置',
@@ -5908,7 +5933,7 @@ const API_DETAILS_MAP = {
         method: 'GET',
         params: [],
         response: '{ "success": true, "data": {"script_path": "...", "ubuntu_user": "..."}}',
-        usage: '前端页面初始化使用，不暴露密码'
+        usage: '获取前端配置信息'
     },
     '/api/config/read': {
         title: '获取完整配置',
@@ -5916,7 +5941,7 @@ const API_DETAILS_MAP = {
         method: 'GET',
         params: [],
         response: '{ "ubuntu_user": "hcq", "ubuntu_host": "172.16.14.233", "ubuntu_pswd": "..."}',
-        usage: '管理员查看完整配置，包含密码等敏感信息'
+        usage: '查看完整配置信息'
     },
     '/api/config/update': {
         title: '更新配置',
@@ -5928,25 +5953,25 @@ const API_DETAILS_MAP = {
             { name: 'client_ssh_credentials', type: 'array', required: false, desc: '客户端SSH凭证列表' }
         ],
         response: '{ "success": true }',
-        usage: '⚠️ 只能修改动态配置，不能修改ubuntu_user、ubuntu_host等核心配置'
+        usage: '修改动态配置字段'
     },
     '/api/users/current': {
         title: '获取客户端信息',
-        description: '获取当前客户端ID和主机名',
+        description: '获取客户端信息',
         params: [],
         response: '{ "client_id": "172.16.14.248_1234567890", "hostname": "172.16.14.248" }',
-        usage: '初始化客户端身份,用于多用户隔离'
+        usage: '获取客户端身份信息'
     },
     '/api/users/detect': {
         title: '检测客户端信息',
-        description: '自动检测客户端用户名和身份（通过SSH）',
+        description: '检测客户端信息',
         params: [
             { name: 'ip', type: 'string', required: false, desc: '客户端IP地址(可选)' },
             { name: 'username', type: 'string', required: false, desc: '用户名(可选)' },
             { name: 'password', type: 'string', required: false, desc: '密码(可选)' }
         ],
         response: '{ "success": true, "username": "hcq" }',
-        usage: '自动识别当前登录用户,首次使用需要提供SSH凭据'
+        usage: '自动识别当前用户'
     },
     '/api/users/set-username': {
         title: '设置客户端用户名',
@@ -5956,7 +5981,7 @@ const API_DETAILS_MAP = {
             { name: 'ip', type: 'string', required: false, desc: '客户端IP地址（可选，默认自动获取）' }
         ],
         response: '{ "success": true, "username": "hjf", "ip": "10.10.10.206", "client_id": "hjf@10.10.10.206" }',
-        usage: '手动设置当前用户的用户名，保存后自动识别'
+        usage: '手动设置用户名'
     },
     '/api/users/list': {
         title: '获取在线用户',
@@ -5967,30 +5992,30 @@ const API_DETAILS_MAP = {
     },
     '/api/devices/list': {
         title: '获取设备列表',
-        description: '获取所有已连接的Android设备',
+        description: '获取Android设备列表',
         params: [
             { name: 'force_refresh', type: 'number', required: false, desc: '是否强制刷新,默认0' }
         ],
         response: '[{ "device_id": "RF8TC2W4JNH", "serial": "RF8TC2W4JNH", "status": "device" }]',
-        usage: '查看可用设备列表,包括设备锁定状态'
+        usage: '查看可用设备列表'
     },
     '/api/devices/bootloader-lock': {
         title: '锁定Bootloader',
-        description: '锁定设备的Bootloader(使用run_Device_Lock.sh脚本)',
+        description: '锁定设备Bootloader',
         params: [
             { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],
         response: '{ "success": true, "results": [{ "device": "RF8TC2W4JNH", "success": true }] }',
-        usage: '⚠️危险操作 - 锁定设备Bootloader,启用安全启动'
+        usage: '锁定设备Bootloader'
     },
     '/api/devices/bootloader-unlock': {
         title: '解锁Bootloader',
-        description: '解锁设备的Bootloader(快捷方式,等同于bootloader-lock的unlock操作)',
+        description: '解锁设备Bootloader',
         params: [
             { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],
         response: '{ "success": true, "results": [{ "device": "RF8TC2W4JNH", "success": true }] }',
-        usage: '⚠️危险操作 - 解锁设备Bootloader,将允许刷入自定义系统'
+        usage: '解锁设备Bootloader'
     },
     '/api/devices/bootloader-status': {
         title: '检查Bootloader锁状态',
@@ -5999,7 +6024,7 @@ const API_DETAILS_MAP = {
             { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],
         response: '[{ "device": "RF8TC2W4JNH", "locked": true, "state": "GREEN", "status": "已锁定" }]',
-        usage: '检查设备Bootloader是否被锁定,通过ro.boot.verifiedbootstate属性判断'
+        usage: '检查Bootloader锁定状态'
     },
     '/api/devices/info': {
         title: '获取设备详细信息',
@@ -6008,25 +6033,25 @@ const API_DETAILS_MAP = {
             { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],
         response: '{ "serial": "RF8TC2W4JNH", "product": "takku", "android_version": "14" }',
-        usage: '查看设备详细配置信息,包括Android版本、安全补丁等'
+        usage: '查看设备详细信息'
     },
     '/api/devices/management': {
         title: '设备管理信息',
         description: '获取所有设备的详细管理信息(设备列表、电池、来源等)',
         params: [],
         response: '[{ "device_id": "xxx", "serial_no": "xxx", "model": "xxx", "android_version": "14", "battery_level": "85", "source_type": "usbip", "source_host": "172.16.14.68", "status": "online", "locked_by": "", "locked_by_self": false }]',
-        usage: '查看设备详细信息，包括电池电量、设备型号、Android版本、设备来源(本地/USB/IP)、锁定状态等'
+        usage: '查看设备管理信息'
     },
     '/api/devices/user-locked': {
         title: '列出用户锁定设备',
-        description: '列出所有被用户锁定的设备(多用户环境下的设备占用状态)',
+        description: '列出用户锁定设备',
         params: [],
         response: '{ "success": true, "data": { "RF8TC2W4JNH": { "client_id": "hcq@172.16.14.68", "username": "hcq", "timestamp": "2026-04-04T15:30:00" } } }',
-        usage: '查看哪些设备被其他用户占用,避免多用户冲突'
+        usage: '查看设备占用状态'
     },
     '/api/devices/reboot': {
         title: '重启设备',
-        description: '重启指定的Android设备',
+        description: '重启设备',
         params: [
             { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],
@@ -6060,7 +6085,7 @@ const API_DETAILS_MAP = {
             { name: 'serial_no', type: 'string', required: true, desc: '设备序列号' }
         ],
         response: '{ "success": true, "output": "命令输出..." }',
-        usage: '为终端页面准备设备连接,建立ADB Shell会话'
+        usage: '建立ADB Shell会话'
     },
     '/api/devices/screen': {
         title: '显示设备屏幕',
@@ -6069,7 +6094,7 @@ const API_DETAILS_MAP = {
             { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],
         response: '{ "success": true, "screens": [{ "device_id": "RF8TC2W4JNH", "port": 5900 }] }',
-        usage: '批量查看多个设备屏幕,用于远程监控'
+        usage: '批量查看设备屏幕'
     },
     '/api/reports/list': {
         title: '获取报告列表',
@@ -6089,7 +6114,7 @@ const API_DETAILS_MAP = {
     },
     '/api/reports/analyze/{report_timestamp}': {
         title: '分析报告',
-        description: '分析测试报告并给出统计信息',
+        description: '分析测试报告',
         params: [
             { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
         ],
@@ -6103,7 +6128,7 @@ const API_DETAILS_MAP = {
             { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
         ],
         response: 'HTML报告页面',
-        usage: '在浏览器中查看详细测试报告'
+        usage: '查看HTML测试报告'
     },
     '/api/reports/download/{report_timestamp}': {
         title: '下载报告ZIP',
@@ -6112,7 +6137,7 @@ const API_DETAILS_MAP = {
             { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
         ],
         response: 'ZIP文件下载',
-        usage: '下载完整报告ZIP包,包含所有测试结果'
+        usage: '下载完整报告ZIP包'
     },
     '/api/reports/delete': {
         title: '删除报告',
@@ -6121,18 +6146,18 @@ const API_DETAILS_MAP = {
             { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳（如20260330-120000）' }
         ],
         response: '{ "success": true, "message": "报告已删除" }',
-        usage: '⚠️ 危险操作 - 删除后无法恢复',
+        usage: '删除测试报告',
         curl_example: 'curl -X DELETE "http://server:5001/api/reports/delete" -G -d "report_timestamp=20260330-120000"'
     },
     '/api/reports/analyze': {
         title: 'AI分析报告',
-        description: '使用AI分析测试失败原因',
+        description: 'AI分析测试报告',
         params: [
             { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' },
             { name: 'use_ai', type: 'boolean', required: false, desc: '是否使用AI分析' }
         ],
         response: '{ "analysis": "基于AI分析...", "suggestions": [] }',
-        usage: 'AI智能分析测试失败原因并给出修复建议'
+        usage: 'AI分析测试失败原因'
     },
     '/api/reports/analyze-ai': {
         title: 'AI深度分析',
@@ -6155,59 +6180,59 @@ const API_DETAILS_MAP = {
         description: '启动VNC服务',
         params: [],
         response: '{ "success": true, "port": 5900 }',
-        usage: '启动VNC服务以远程查看主机桌面'
+        usage: '启动VNC服务'
     },
     '/api/vnc/stop': {
         title: '停止VNC',
         description: '停止VNC服务',
         params: [],
         response: '{ "success": true, "message": "VNC已停止" }',
-        usage: '停止VNC服务释放资源'
+        usage: '停止VNC服务'
     },
     '/api/desktop/validate': {
-        title: '验证桌面主机',
+        title: '验证Ubuntu主机桌面',
         description: '验证Ubuntu主机SSH连接并检查VNC服务可用性',
         params: [
             { name: 'host', type: 'string', required: true, desc: '主机地址（格式：user@ip，如hcq@172.16.14.233）' },
             { name: 'password', type: 'string', required: false, desc: 'SSH登录密码（可选）' }
         ],
         response: '{ "success": true, "message": "SSH连接成功，VNC服务可用" }',
-        usage: '连接Ubuntu桌面主机前验证SSH连接和VNC服务状态'
+        usage: '验证SSH和VNC连接'
     },
     '/api/desktop/vnc/status': {
-        title: '查询桌面VNC状态',
+        title: '查询Ubuntu主机桌面VNC状态',
         description: '查询Ubuntu主机桌面VNC服务状态',
         params: [],
         response: '{ "success": true, "running": true, "url": "http://172.16.14.233:6080/vnc.html" }',
-        usage: '检查Ubuntu桌面VNC服务是否正在运行，获取远程访问URL'
+        usage: '检查VNC服务运行状态'
     },
     '/api/desktop/vnc/start': {
-        title: '启动桌面VNC',
+        title: '启动Ubuntu主机桌面VNC',
         description: '启动Ubuntu主机桌面VNC服务',
         params: [
-            { name: 'host', type: 'string', required: false, desc: '桌面主机地址，格式：user@ip' },
+            { name: 'host', type: 'string', required: false, desc: 'Ubuntu主机桌面地址，格式：user@ip' },
             { name: 'password', type: 'string', required: false, desc: 'SSH登录密码' },
             { name: 'vnc_password', type: 'string', required: false, desc: 'VNC访问密码（可选）' }
         ],
         response: '{ "success": true, "url": "http://172.16.14.233:6080/vnc.html" }',
-        usage: '启动Ubuntu桌面的VNC服务，通过浏览器远程访问图形化桌面'
+        usage: '启动Ubuntu主机桌面VNC服务'
     },
     '/api/desktop/vnc/stop': {
-        title: '停止桌面VNC',
+        title: '停止Ubuntu主机桌面VNC',
         description: '停止Ubuntu主机桌面VNC服务',
         params: [],
-        response: '{ "success": true, "message": "桌面VNC已停止" }',
-        usage: '停止Ubuntu桌面VNC服务，释放系统资源'
+        response: '{ "success": true, "message": "Ubuntu主机桌面VNC已停止" }',
+        usage: '停止Ubuntu主机桌面VNC服务'
     },
     '/api/adb-forward/start': {
         title: '启动ADB端口转发',
-        description: '通过USB/IP启动ADB端口转发',
+        description: '启动ADB端口转发',
         params: [
             { name: 'device_host', type: 'string', required: true, desc: '设备主机地址' },
             { name: 'device_password', type: 'string', required: true, desc: '设备SSH密码' }
         ],
         response: '{ "success": true, "forwarding": [] }',
-        usage: '通过USB/IP连接远程设备进行ADB调试'
+        usage: '启动ADB端口转发'
     },
     '/api/adb-forward/stop': {
         title: '停止ADB端口转发',
@@ -6223,7 +6248,7 @@ const API_DETAILS_MAP = {
         description: '检查USB/IP服务状态',
         params: [],
         response: '{ "installed": true, "running": false }',
-        usage: '检查USB/IP服务是否已安装和运行'
+        usage: '检查USB/IP服务状态'
     },
     '/api/usbip/start': {
         title: '启动USB/IP',
@@ -6233,7 +6258,7 @@ const API_DETAILS_MAP = {
             { name: 'device_password', type: 'string', required: false, desc: '设备主机SSH密码（可选）' }
         ],
         response: '{ "success": true, "message": "USB/IP已启动" }',
-        usage: '通过IP网络共享USB设备，连接远程测试主机的USB设备'
+        usage: '启动USB/IP服务'
     },
     '/api/usbip/stop': {
         title: '停止USB/IP',
@@ -6261,7 +6286,7 @@ const API_DETAILS_MAP = {
         description: '获取SSHD安装指南',
         params: [],
         response: '{ "success": false, "error": "SSHD需要在Windows客户端手动安装", "install_guide": "安装步骤...", "manual_install": true }',
-        usage: '💡 提示：使用 jq -r \'.install_guide\' 查看换行内容\n命令：curl -sX POST "..." | jq -r \'.install_guide\''
+        usage: '安装Windows SSHD服务'
     },
     '/api/ssh/route': {
         title: '检查路由',
@@ -6324,37 +6349,45 @@ const API_DETAILS_MAP = {
         usage: '查看文件上传进度'
     },
     '/api/burn/firmware': {
-        title: '刷入固件',
-        description: '上传固件文件并刷入设备',
+        title: '烧写固件',
+        description: '烧写固件',
         params: [
             { name: 'firmware_file', type: 'file', required: true, desc: '固件文件（.img格式）' },
             { name: 'devices', type: 'string', required: true, desc: '设备序列号（多个用逗号分隔）' },
             { name: 'wipe_data', type: 'boolean', required: false, desc: '是否清除数据（默认true）' }
         ],
-        response: '{ "success": true, "message": "固件刷入成功" }',
-        usage: '⚠️危险操作 - 刷入固件会重启设备',
+        response: '{ "success": true, "message": "固件烧写成功" }',
+        usage: '烧写固件',
         curl_example: 'curl -X POST "http://server:5001/api/burn/firmware" -F "devices=rk3572cai" -F "firmware_file=@/path/to/firmware.img" -F "wipe_data=true"'
     },
     '/api/burn/gsi': {
-        title: '刷入GSI',
-        description: '刷入GSI镜像',
+        title: '烧写GSI',
+        description: '烧写GSI',
         params: [
             { name: 'gsi_image', type: 'file', required: true, desc: 'GSI镜像文件（.img格式）' },
             { name: 'devices', type: 'string', required: true, desc: '设备序列号（多个用逗号分隔）' },
             { name: 'wipe_data', type: 'boolean', required: false, desc: '是否清除数据（默认true）' }
         ],
-        response: '{ "success": true, "message": "GSI刷入成功" }',
-        usage: '⚠️危险操作 - 刷入GSI镜像'
+        response: '{ "success": true, "message": "GSI烧写成功" }',
+        usage: '⚠️危险操作 - 烧写GSI镜像'
     },
     '/api/burn/serial': {
-        title: '修改序列号',
-        description: '修改设备序列号',
+        title: '烧写设备序列号',
+        description: '烧写设备序列号',
         params: [
             { name: 'device_id', type: 'string', required: true, desc: '当前设备序列号' },
             { name: 'new_serial', type: 'string', required: true, desc: '新的序列号' }
         ],
         response: '{ "success": true, "message": "序列号已修改" }',
-        usage: '⚠️危险操作 - 修改设备序列号'
+        usage: '修改设备序列号'
+    },
+    '/api/burn/upload-progress': {
+        title: '固件上传进度',
+        description: '查询固件上传进度',
+        method: 'GET',
+        params: [],
+        response: '{ "in_progress": true, "progress": 45.5, "filename": "update.img" }',
+        usage: '查看固件上传进度'
     },
     '/api/files/list': {
         title: '列出文件',
@@ -6372,7 +6405,7 @@ const API_DETAILS_MAP = {
             { name: 'command', type: 'string', required: true, desc: '要执行的命令' }
         ],
         response: '{ "success": true, "output": "命令输出..." }',
-        usage: '在Web终端中执行命令'
+        usage: '执行SSH命令'
     },
     '/api/opengrok/search': {
         title: 'OpenGrok搜索',
@@ -6382,7 +6415,7 @@ const API_DETAILS_MAP = {
             { name: 'full', type: 'boolean', required: false, desc: '是否全文搜索' }
         ],
         response: '{ "results": [{ "file": "/path/to/Test.java", "line": 10 }] }',
-        usage: '在Android源码中搜索代码'
+usage: '搜索Android源码'
     }
 };
 
@@ -6614,7 +6647,7 @@ function displayApiDocs(apis) {
                 <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 20%;">
                     <div style="display: flex; flex-direction: column; gap: 4px;">
                         <div style="font-size: 11px; color: var(--text-primary); font-weight: 600; line-height: 1.3;">
-                            ${escapeHtml(details.title)}(${escapeHtml(details.description)})
+                            ${escapeHtml(details.title)}
                         </div>
                     </div>
                 </td>

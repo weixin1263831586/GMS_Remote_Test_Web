@@ -4554,7 +4554,7 @@ async def get_desktop_vnc_status():
 
 @app.post("/api/desktop/vnc/start")
 async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None)):
-    """启动桌面VNC（Ubuntu桌面的VNC服务）"""
+    """启动Ubuntu主机桌面VNC（Ubuntu桌面的VNC服务）"""
     if req is None:
         # 如果没有提供请求体，使用配置文件的默认值
         config = config_manager.load_config()
@@ -4571,14 +4571,14 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
 
 @app.post("/api/desktop/vnc/stop")
 async def stop_desktop_vnc():
-    """停止桌面VNC"""
+    """停止Ubuntu主机桌面VNC"""
     result = vnc_manager.stop_vnc()
     return JSONResponse(content=result)
 
 
 @app.post("/api/desktop/validate")
 async def validate_desktop_host(req: dict = Body(...)):
-    """验证桌面主机连接并检查VNC服务"""
+    """验证Ubuntu主机桌面连接并检查VNC服务"""
     try:
         host_connection = req.get('host', '')
         password = req.get('password', '')
@@ -7923,7 +7923,7 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/test/start",
-        "description": "启动测试 ⭐核心接口",
+        "description": "启动兼容性测试",
         "params": [{"name": "devices", "type": "array", "required": True}, {"name": "test_type", "type": "string", "required": True}, {"name": "test_module", "type": "string", "required": True}],
         "category": "test",
         "skill": "gms-rt-test-start"
@@ -7995,7 +7995,7 @@ API_DOCS_LIST = [
     {
         "method": "GET",
         "path": "/api/test/logs/stream",
-        "description": "流式输出测试日志（实时）⭐",
+        "description": "实时流式输出测试日志",
         "params": [],
         "category": "test",
         "usage": "curl -N http://server:5001/api/test/logs/stream",
@@ -8004,14 +8004,6 @@ API_DOCS_LIST = [
     },
 
     # ==================== 报告管理 ====================
-    {
-        "method": "GET",
-        "path": "/api/test/status",
-        "description": "获取测试状态",
-        "params": [],
-        "category": "test",
-        "skill": "gms-rt-test-status"
-    },
     {
         "method": "GET",
         "path": "/api/reports/list",
@@ -8255,14 +8247,14 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/burn/firmware",
-        "description": "刷入固件（上传固件文件并刷入设备）",
+        "description": "烧写固件（上传固件文件并烧写设备）",
         "params": [
             {"name": "firmware_file", "type": "file", "required": True, "desc": "固件文件（.img格式）"},
             {"name": "devices", "type": "string", "required": True, "desc": "设备序列号（多个用逗号分隔）"},
             {"name": "wipe_data", "type": "boolean", "required": False, "desc": "是否清除数据（默认true）"}
         ],
         "usage": "curl -X POST \"http://server:5001/api/burn/firmware\" -F \"firmware_file=@/path/to/firmware.img\" -F \"devices=rk3572cai\" -F \"wipe_data=true\"",
-        "note": "⚠️ 危险操作：刷入固件会重启设备并清除数据。支持实时进度显示（通过WebSocket）",
+        "note": "⚠️ 危险操作：烧写固件会重启设备并清除数据。支持实时进度显示（通过WebSocket）",
         "category": "burn",
         "skill": "gms-rt-burn-firmware"
     },
@@ -8279,7 +8271,7 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/burn/gsi",
-        "description": "刷入GSI镜像",
+        "description": "烧写GSI镜像",
         "params": [
             {"name": "gsi_image", "type": "file", "required": True, "desc": "GSI镜像文件（.img格式）"},
             {"name": "devices", "type": "string", "required": True, "desc": "设备序列号（多个用逗号分隔）"},
@@ -8291,7 +8283,7 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/burn/serial",
-        "description": "修改序列号",
+        "description": "烧写设备序列号",
         "params": [{"name": "device_id", "type": "string", "required": True}, {"name": "new_serial", "type": "string", "required": True}],
         "category": "burn",
         "skill": "gms-rt-burn-serial"
@@ -8311,7 +8303,7 @@ API_DOCS_LIST = [
     {
         "method": "WebSocket",
         "path": "/api/system/websocket/{client_id}",
-        "description": "WebSocket实时通信",
+        "description": "建立WebSocket连接用于实时通信",
         "params": [{"name": "client_id", "type": "string", "required": True}],
         "category": "health",
         "skill": "gms-rt-system-websocket"
@@ -8321,7 +8313,7 @@ API_DOCS_LIST = [
     {
         "method": "GET",
         "path": "/api/system/docs",
-        "description": "获取API文档列表",
+        "description": "获取系统API文档列表",
         "params": [],
         "category": "config",
         "skill": "gms-rt-system-docs"
@@ -8503,21 +8495,14 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             'usage': ''
         },
         '/api/burn/firmware': {
-            'title': '刷入固件',
-            'description': '上传固件文件并刷入设备',
+            'title': '烧写固件',
+            'description': '上传固件文件并烧写设备',
             'params': [
                 {'name': 'firmware_file', 'type': 'file', 'required': True, 'desc': '固件文件（.img格式）'},
                 {'name': 'devices', 'type': 'string', 'required': True, 'desc': '设备序列号（多个用逗号分隔）'},
                 {'name': 'wipe_data', 'type': 'boolean', 'required': False, 'desc': '是否清除数据（默认true）'}
             ],
-            'response': '{"success": true, "message": "固件刷入完成"}',
-            'usage': ''
-        },
-        '/api/test/status': {
-            'title': '获取测试状态',
-            'description': '获取当前测试运行状态',
-            'params': [],
-            'response': '{"running": false, "devices": []}',
+            'response': '{"success": true, "message": "固件烧写完成"}',
             'usage': ''
         },
         '/api/usbip/start': {
@@ -8531,17 +8516,17 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             'usage': ''
         },
         '/api/desktop/vnc/status': {
-            'title': '查询桌面VNC状态',
+            'title': '查询Ubuntu主机桌面VNC状态',
             'description': '查询Ubuntu桌面VNC服务状态（运行中/已停止）和远程访问地址',
             'params': [],
             'response': '{"success": true, "running": true, "url": "http://xxx:6080/vnc.html"}',
             'usage': '检查Ubuntu桌面VNC服务是否正在运行，获取远程访问URL'
         },
         '/api/desktop/vnc/start': {
-            'title': '启动桌面VNC',
+            'title': '启动Ubuntu主机桌面VNC',
             'description': '启动Ubuntu桌面VNC服务，返回VNC访问URL用于远程桌面连接',
             'params': [
-                {'name': 'host', 'type': 'string', 'required': False, 'desc': '桌面主机地址，格式：user@ip（可选，使用配置默认值）'},
+                {'name': 'host', 'type': 'string', 'required': False, 'desc': 'Ubuntu主机桌面地址，格式：user@ip（可选，使用配置默认值）'},
                 {'name': 'password', 'type': 'string', 'required': False, 'desc': 'SSH登录密码（可选）'},
                 {'name': 'vnc_password', 'type': 'string', 'required': False, 'desc': 'VNC访问密码（可选）'}
             ],
@@ -8549,21 +8534,21 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             'usage': '启动Ubuntu桌面的VNC服务，通过浏览器远程访问图形化桌面'
         },
         '/api/desktop/vnc/stop': {
-            'title': '停止桌面VNC',
+            'title': '停止Ubuntu主机桌面VNC',
             'description': '停止Ubuntu桌面VNC服务，断开所有远程桌面连接',
             'params': [],
-            'response': '{"success": true, "message": "桌面VNC已停止"}',
+            'response': '{"success": true, "message": "Ubuntu主机桌面VNC已停止"}',
             'usage': '停止Ubuntu桌面VNC服务，释放系统资源'
         },
         '/api/desktop/validate': {
-            'title': '验证桌面主机',
+            'title': '验证Ubuntu主机',
             'description': '验证Ubuntu主机SSH连接并检查VNC服务可用性（host格式：user@ip）',
             'params': [
                 {'name': 'host', 'type': 'string', 'required': True, 'desc': '主机地址（格式：user@ip，如hcq@172.16.14.233）'},
                 {'name': 'password', 'type': 'string', 'required': False, 'desc': 'SSH登录密码（可选）'}
             ],
             'response': '{"success": true, "message": "SSH连接成功，VNC服务可用"}',
-            'usage': '连接Ubuntu桌面主机前验证SSH连接和VNC服务状态'
+            'usage': '连接Ubuntu主机桌面前验证SSH连接和VNC服务状态'
         }
     }
 

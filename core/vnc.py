@@ -553,7 +553,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
         vnc_password: str = None
     ) -> Dict[str, Any]:
         """
-        启动桌面VNC
+        启动Ubuntu主机桌面VNC
 
         Args:
             host: 主机地址
