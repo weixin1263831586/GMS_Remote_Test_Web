@@ -474,14 +474,21 @@ gms-rt-client-detect() {
     fi
 }
 
-# Test network connectivity
-gms-rt-network-ping() {
+# Check SSH route
+gms-rt-ssh-route() {
+    check_jq
+    echo "🛣️  Checking SSH route..."
+    api_call "/ssh/route" | jq '.'
+}
+
+# Test SSH ping between test host and client
+gms-rt-ssh-ping() {
     local test_host_ip="$1"
     local client_ip="$2"
     [ -z "$test_host_ip" ] && error "Test host IP required. Usage: gms-rt-network-ping <test_host_ip> <client_ip>"
     [ -z "$client_ip" ] && error "Client IP required. Usage: gms-rt-network-ping <test_host_ip> <client_ip>"
     check_jq
-    echo "🌐 Testing network connectivity..."
+    echo "🌐 Testing SSH connectivity..."
     local data="{\"test_host_ip\":\"$test_host_ip\", \"client_ip\":\"$client_ip\"}"
     local response=$(api_call "/ssh/route/ping" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
@@ -1032,12 +1039,6 @@ gms-rt-ssh-sshd-install() {
 }
 
 # Check SSH route
-gms-rt-ssh-route() {
-    check_jq
-    echo "🛣️  Checking SSH route..."
-    api_call "/ssh/route" | jq '.'
-}
-
 # ==============================================================================
 # VPN Commands
 # ==============================================================================
@@ -1306,9 +1307,10 @@ ${YELLOW}Reports:${NC}
   gms-rt-reports-analyze-ai   - AI analyze report
 
 ${YELLOW}SSH Management:${NC}
+  gms-rt-ssh-route             - Check SSH route
+  gms-rt-ssh-ping              - Test SSH connectivity
   gms-rt-ssh-sshd-check        - Check SSHD status
   gms-rt-ssh-sshd-install      - Install SSHD
-  gms-rt-ssh-route             - Check SSH route
 
 ${YELLOW}VPN Management:${NC}
   gms-rt-vpn-status           - Check VPN status
