@@ -5830,6 +5830,15 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "测试已停止" }',
         usage: '停止测试'
     },
+    '/api/test/suites': {
+        title: '列出测试套件',
+        description: '列出可用的测试套件',
+        params: [
+            { name: 'base_path', type: 'string', required: false, desc: '搜索路径，默认使用配置的 suites_path' }
+        ],
+        response: '{ "success": true, "suites": [{"test_type": "cts", "version": "android-cts-16_r4", "tools_path": "...", "full_path": "...", "binary": "cts-tradefed"}], "count": 9, "base_path": "/home/hcq/GMS-Suite" }',
+        usage: 'gms-rt-test-suites'
+    },
     '/api/test/clean': {
         title: '清理测试环境',
         description: '清理测试环境',

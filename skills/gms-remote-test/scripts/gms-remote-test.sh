@@ -19,7 +19,6 @@ NC=$(printf '\033[0m')
 # Print functions
 error() {
     echo -e "${RED}Error:${NC} $1" >&2
-    exit 1
 }
 
 success() {
@@ -282,6 +281,7 @@ gms-rt-test-start() {
 
     if [ -z "$device_serial" ]; then
         error "Device serial required. Usage: gms-rt-test-start <DEVICE> [TYPE] [MODULE] [CASE] [SUITE]"
+        return 1
     fi
 
     check_jq
@@ -303,6 +303,7 @@ gms-rt-test-start() {
     else
         local msg=$(echo "$response" | jq -r '.message // .detail // "Unknown error"')
         error "Failed to start test: $msg"
+        return 1
     fi
 }
 
@@ -805,6 +806,35 @@ gms-rt-opengrok-search() {
 # Test Commands
 # ==============================================================================
 
+# List available test suites
+gms-rt-test-suites() {
+    local base_path="${1:-}"
+    check_jq
+    if [ -n "$base_path" ]; then
+        echo "📋 Listing test suites under $base_path..."
+    else
+        echo "📋 Listing test suites..."
+    fi
+    local data="{}"
+    [ -n "$base_path" ] && data="{\"base_path\":\"$base_path\"}"
+    local response=$(api_call "/test/suites" "POST" "$data")
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        local count=$(echo "$response" | jq '.count')
+        success "Found $count test suite(s)"
+        # Format output in 3 fixed-width columns
+        echo ""
+        printf "%-12s %-25s %-70s\n" "TYPE" "VERSION" "PATH"
+        printf "%s\n" "$(printf '=%.0s' {1..107})"
+        echo "$response" | jq -r '.suites[] | "\(.test_type)\t\(.version)\t\(.tools_path)"' | while IFS=$'\t' read -r type version path; do
+            printf "%-12s %-25s %-70s\n" "$type" "$version" "$path"
+        done
+        echo ""
+    else
+        error "Failed to list test suites"
+        echo "$response" | jq '.'
+    fi
+}
+
 # Clean test environment
 gms-rt-test-clean() {
     check_jq
@@ -1289,6 +1319,7 @@ ${YELLOW}Test Management:${NC}
   gms-rt-test-stop            - Stop currently running test
   gms-rt-test-clean           - Clean test environment
   gms-rt-test-status          - Check test status
+  gms-rt-test-suites          - List available test suites
   gms-rt-test-logs-current    - Download current log
   gms-rt-test-logs-batch      - Batch download logs
   gms-rt-test-logs-save-current - Save current logs
