@@ -5,8 +5,8 @@
 # ==============================================================================
 
 # Default configuration
-# Use environment variable GMS_REMOTE_TEST_SERVER or default to server:5001
-SERVER_URL="${GMS_REMOTE_TEST_SERVER:-http://server:5001}"
+# Use environment variable GMS_REMOTE_TEST_SERVER or default to localhost:5001
+SERVER_URL="${GMS_REMOTE_TEST_SERVER:-http://172.16.14.233:5001}"
 API_BASE="${SERVER_URL}/api"
 
 # Colors for output
@@ -1244,14 +1244,42 @@ gms-rt-burn-firmware() {
     [ -z "$devices" ] && error "Devices required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data]"
     [ ! -f "$firmware_path" ] && error "Firmware file not found: $firmware_path"
 
-    check_jq
     echo "🔥 Burning firmware: $firmware_path to devices: $devices..."
+    echo "⏳ Uploading firmware (this may take a few minutes)..."
 
-    curl -X POST "${API_BASE}/burn/firmware" \
+    # Get terminal width for progress bars
+    local term_width=${COLUMNS:-$(tput cols 2>/dev/null || echo 80)}
+    local bar_width=$((term_width * 60 / 100))
+
+    # Upload with progress bar and capture response
+    local tmp_response=$(mktemp)
+
+    # Set COLUMNS for curl progress bar width (60% of terminal)
+    export COLUMNS=$bar_width
+    curl -# -X POST "${API_BASE}/burn/firmware" \
         -F "firmware_file=@$firmware_path" \
         -F "devices=$devices" \
         -F "wipe_data=$wipe_data" \
-        | jq '.'
+        -o "$tmp_response" \
+        -w "\nHTTP_STATUS:%{http_code}\n"
+
+    unset COLUMNS
+    local http_status=$(grep "HTTP_STATUS:" "$tmp_response" | cut -d: -f2)
+    local response=$(cat "$tmp_response" | grep -v "HTTP_STATUS:")
+
+    rm -f "$tmp_response"
+
+    echo ""  # Add newline after progress bar
+
+    # Check response
+    if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then
+        success "Firmware burn completed successfully"
+        echo "$response" | jq '.'
+    else
+        error "Firmware burn failed (HTTP $http_status)"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        return 1
+    fi
 }
 
 # Burn GSI
@@ -1266,12 +1294,20 @@ gms-rt-burn-gsi() {
 
     check_jq
     echo "🔥 Burning GSI: $gsi_path to devices: $devices..."
+    echo "⏳ Uploading and burning (this may take a few minutes)..."
 
-    curl -X POST "${API_BASE}/burn/gsi" \
+    local response=$(curl -s -X POST "${API_BASE}/burn/gsi" \
         -F "gsi_image=@$gsi_path" \
         -F "devices=$devices" \
-        -F "wipe_data=$wipe_data" \
-        | jq '.'
+        -F "wipe_data=$wipe_data")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        success "GSI burn completed successfully"
+        echo "$response" | jq '.'
+    else
+        error "GSI burn failed"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+    fi
 }
 
 # Burn serial
