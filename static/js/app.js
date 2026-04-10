@@ -627,10 +627,10 @@ function onTestTypeChange() {
 
 function onDeviceHostConfirm() {
     const deviceHost = $('device-host').value.trim();
-    addLogEntry(`设备主机地址已更新: ${deviceHost}`, 'info');
-    showToast('设备主机地址已更新', 'success');
-    // Save to backend
-    apiCall('/api/config/update', 'POST', { device_host: deviceHost });
+    addLogEntry(`设备主机地址暂不支持动态更新: ${deviceHost}`, 'warning');
+    showToast('设备主机地址需要直接编辑config.json文件', 'warning');
+    // 注意：device_host不是动态配置字段，无法通过API更新
+    // 如需修改，请直接编辑configs/config.json文件
 }
 
 function onLocalServerConfirm() {

@@ -7945,6 +7945,14 @@ API_DOCS_LIST = [
         "skill": "gms-rt-test-clean"
     },
     {
+        "method": "GET",
+        "path": "/api/test/status",
+        "description": "获取测试状态",
+        "params": [{"name": "logs", "type": "boolean", "required": False, "desc": "是否返回日志内容"}],
+        "category": "test",
+        "skill": "gms-rt-test-status"
+    },
+    {
         "method": "POST",
         "path": "/api/reports/analyze-source",
         "description": "分析测试源码",
