@@ -3025,6 +3025,9 @@ async def list_suites(req: ListTestSuitesRequest):
                     # Extract version directory (e.g., android-cts-16_r4, android-gsi-xxx)
                     # For 'gsi' type, look for 'android-cts' prefix since GSI uses CTS suite
                     version_dir = next((p for p in parts if p.startswith('android-') and (test_type in p or (test_type == 'gsi' and 'cts' in p))), "")
+                    # For GSI, use the actual test type from the version directory (e.g., 'cts' from 'android-cts-xxx')
+                    if test_type == 'gsi' and version_dir:
+                        test_type = 'cts'
 
                     suites.append({
                         'test_type': test_type,
