@@ -89,22 +89,7 @@ convert_devices_to_json() {
     fi
 }
 
-# List all connected devices
-gms-rt-devices() {
-    check_jq
-    echo "📱 Listing connected devices..."
-    api_call "/devices/list" | jq '.'
-}
-
 # Get device details
-gms-rt-device-details() {
-    local device_id="$1"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-device-details <DEVICE_ID>"
-    check_jq
-    echo "📱 Getting details for $device_id..."
-    api_call "/devices/details/$device_id" | jq '.'
-}
-
 # Get device info for multiple devices (parallel)
 gms-rt-devices-info() {
     local devices="$1"
@@ -217,42 +202,6 @@ gms-rt-devices-bootloader-status() {
 # ==============================================================================
 # Desktop VNC Commands
 # ==============================================================================
-
-# Start desktop VNC
-gms-rt-vnc-start() {
-    local host="$1"
-    local username="${2:-hcq}"
-    [ -z "$host" ] && error "Host required. Usage: gms-rt-vnc-start <host> [username]"
-    check_jq
-    echo "🖥️  Starting VNC for $host..."
-    local data="{\"host\":\"$host\",\"username\":\"$username\"}"
-    local response=$(api_call "/desktop/vnc/start" "POST" "$data")
-    if echo "$response" | jq -e '.success' > /dev/null; then
-        success "VNC started"
-        echo "$response" | jq '.'
-    else
-        error "Failed to start VNC"
-    fi
-}
-
-# Stop desktop VNC
-gms-rt-vnc-stop() {
-    check_jq
-    echo "🖥️  Stopping VNC..."
-    local response=$(api_call "/desktop/vnc/stop" "POST")
-    if echo "$response" | jq -e '.success' > /dev/null; then
-        success "VNC stopped"
-    else
-        warning "Failed to stop VNC or not running"
-    fi
-}
-
-# Check VNC status
-gms-rt-vnc-status() {
-    check_jq
-    echo "🖥️  Checking VNC status..."
-    api_call "/desktop/vnc/status" | jq '.'
-}
 
 # Validate desktop host
 gms-rt-desktop-validate() {
@@ -415,7 +364,7 @@ gms-rt-test-logs-download() {
 # ==============================================================================
 
 # Get latest test report
-gms-rt-latest-report() {
+gms-rt-reports-latest() {
     check_jq
     echo "📄 Fetching latest report..."
     local response=$(api_call "/reports/list")
@@ -450,13 +399,6 @@ gms-rt-reports-files() {
 # ==============================================================================
 # Configuration Commands
 # ==============================================================================
-
-# Get current config
-gms-rt-config() {
-    check_jq
-    echo "⚙️  Getting current configuration..."
-    api_call "/config/read" | jq '.'
-}
 
 # Update config
 gms-rt-config-update() {
@@ -617,41 +559,6 @@ gms-rt-vpn-status() {
 }
 
 # ==============================================================================
-# File Management Commands
-# ==============================================================================
-
-# Upload file
-gms-rt-file-upload() {
-    local file_path="$1"
-    local target_path="${2:-/tmp}"
-    [ -z "$file_path" ] && error "File path required. Usage: gms-rt-file-upload <file> [target_path]"
-    [ ! -f "$file_path" ] && error "File not found: $file_path"
-    echo "📤 Uploading file $file_path to $target_path..."
-    local response=$(curl -s -F "file=@$file_path" -F "file_path=$target_path" "${API_BASE}/files/upload")
-    if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then
-        success "File uploaded successfully"
-        echo "$response" | jq '.'
-    else
-        warning "Upload completed (check server for details)"
-        echo "$response"
-    fi
-}
-
-# List files
-gms-rt-file-list() {
-    local path="${1:-/}"
-    check_jq
-    echo "📁 Listing files in $path..."
-    local data="{\"path\":\"$path\"}"
-    local response=$(api_call "/files/list" "POST" "$data")
-    if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then
-        echo "$response" | jq '.'
-    else
-        echo "$response"
-    fi
-}
-
-# ==============================================================================
 # Firmware Burning Commands
 # ==============================================================================
 
@@ -714,19 +621,10 @@ gms-rt-burn-serial() {
 # ==============================================================================
 
 # Health check
-gms-rt-health() {
+gms-rt-system-health() {
     check_jq
     echo "🏥 Checking server health..."
     api_call "/system/health" | jq '.'
-}
-
-# Show API docs URL
-gms-rt-docs() {
-    echo "📚 Interactive API Documentation:"
-    echo "   ${GREEN}${SERVER_URL}/docs${NC}"
-    echo ""
-    echo "📖 API Help:"
-    echo "   ${GREEN}${SERVER_URL}/api/help${NC}"
 }
 
 # System docs
@@ -1338,14 +1236,13 @@ gms-rt-system-websocket() {
 # Help Function
 # ==============================================================================
 
-gms-rt-help() {
+gms-rt-system-help() {
     cat << EOF
 ${BLUE}GMS Remote Test API Helper (FastAPI Port 5001)${NC}
 ========================================
 
 ${YELLOW}System:${NC}
-  gms-rt-health             - Check server health
-  gms-rt-docs               - Show API documentation URLs
+  gms-rt-system-health      - Check server health
   gms-rt-system-docs        - Get API documentation
 
 ${YELLOW}Configuration:${NC}
@@ -1398,6 +1295,7 @@ ${YELLOW}Test Management:${NC}
   gms-rt-test-logs-stream     - Stream logs in real-time
 
 ${YELLOW}Reports:${NC}
+  gms-rt-reports-latest       - Get latest test report
   gms-rt-reports-list         - List all test reports
   gms-rt-reports-files        - Get report files
   gms-rt-reports-analyze      - Analyze report
@@ -1464,7 +1362,7 @@ EOF
 
 # Main command dispatcher
 if [ $# -eq 0 ]; then
-    gms-rt-help
+    gms-rt-system-help
 else
     "$@"
 fi
