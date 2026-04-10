@@ -1,11 +1,11 @@
 ---
 name: gms-remote-test
-version: "2026.04.09-1.0.0"
+version: "2026.04.10-1.0.0"
 description: >-
   GMS Remote Test Web Platform & API Skill for FastAPI (Port 5001).
   **Complete web interface** with device management, test execution, desktop VNC, terminal access,
   user management, device locking, report analysis, and route diagnostics.
-  **Latest**: Chunked file upload with resume support, firmware upload progress tracking, device lock improvements.
+  **Latest**: Improved CLI command naming consistency, removed duplicate functions, enhanced firmware burn progress.
 ---
 
 # GMS Remote Test Platform - Complete Guide
@@ -1257,3 +1257,164 @@ For complete API documentation with try-it-out functionality:
 **http://172.16.14.233:5001/docs** (Swagger UI)
 
 **http://172.16.14.233:5001/api/help** (API Help)
+
+---
+
+## CLI Commands Reference
+
+### System Commands
+- `gms-rt-system-health` - Check server health status
+- `gms-rt-system-docs` - Get API documentation
+- `gms-rt-system-help` - Show command help
+- `gms-rt-system-websocket` - WebSocket connection info
+
+### Device Management
+- `gms-rt-devices-list` - List all connected devices
+- `gms-rt-devices-info` - Get detailed device information
+- `gms-rt-devices-reboot` - Reboot devices
+- `gms-rt-devices-remount` - Remount filesystem as RW
+- `gms-rt-devices-connect-wifi` - Connect devices to WiFi
+- `gms-rt-devices-shell` - Execute shell command on device
+- `gms-rt-devices-screen` - Show device screen
+- `gms-rt-devices-bootloader-lock` - Lock device bootloader
+- `gms-rt-devices-bootloader-unlock` - Unlock device bootloader
+- `gms-rt-devices-bootloader-status` - Check bootloader status
+- `gms-rt-devices-user-locked` - List user-locked devices
+
+### Test Management
+- `gms-rt-test-start` - Start a test execution
+- `gms-rt-test-stop` - Stop running test
+- `gms-rt-test-status` - Check test status
+- `gms-rt-test-monitor` - Monitor test progress
+- `gms-rt-test-clean` - Clean test environment
+
+### Test Logs
+- `gms-rt-test-logs-current` - Download current test logs
+- `gms-rt-test-logs-download` - Download specific log file
+- `gms-rt-test-logs-batch` - Batch download logs
+- `gms-rt-test-logs-list` - List available test logs
+- `gms-rt-test-logs-stream` - Stream logs in real-time
+- `gms-rt-test-logs-save-current` - Save current logs
+
+### Reports
+- `gms-rt-reports-latest` - Get latest test report
+- `gms-rt-reports-list` - List all test reports
+- `gms-rt-reports-files` - Get report files
+- `gms-rt-reports-view` - View specific report
+- `gms-rt-reports-download` - Download report
+- `gms-rt-reports-delete` - Delete report
+- `gms-rt-reports-analyze` - Analyze report
+- `gms-rt-reports-analyze-ai` - AI-powered report analysis
+- `gms-rt-reports-analyze-source` - Analyze test source code
+
+### Firmware Burning
+- `gms-rt-burn-firmware` - Burn firmware image to device
+- `gms-rt-burn-gsi` - Burn GSI image
+- `gms-rt-burn-serial` - Burn serial number
+
+### File Management
+- `gms-rt-files-upload` - Upload file to server
+- `gms-rt-files-list` - List files on server
+- `gms-rt-files-install` - Upload and install APK
+- `gms-rt-files-progress` - Check upload progress
+
+### Desktop VNC
+- `gms-rt-desktop-vnc-start` - Start VNC session
+- `gms-rt-desktop-vnc-stop` - Stop VNC session
+- `gms-rt-desktop-vnc-status` - Check VNC status
+- `gms-rt-desktop-validate` - Validate desktop host
+
+### USB/IP Connection
+- `gms-rt-adb-forward-start` - Start ADB port forwarding
+- `gms-rt-adb-forward-stop` - Stop ADB port forwarding
+- `gms-rt-usbip-start` - Start USB/IP connection
+- `gms-rt-usbip-stop` - Stop USB/IP connection
+- `gms-rt-usbip-status` - Check USB/IP status
+- `gms-rt-usbip-auto-install` - Auto-install USB/IP
+
+### Network & VPN
+- `gms-rt-network-ping` - Test network connectivity
+- `gms-rt-vpn-connect` - Connect to VPN
+- `gms-rt-vpn-disconnect` - Disconnect from VPN
+- `gms-rt-vpn-status` - Check VPN status
+
+### SSH Management
+- `gms-rt-ssh-sshd-check` - Check SSHD status
+- `gms-rt-ssh-sshd-install` - Install SSHD
+- `gms-rt-ssh-route` - Check SSH routing
+
+### User Management
+- `gms-rt-users-current` - Get current user info
+- `gms-rt-users-detect` - Auto-detect username
+- `gms-rt-users-set-username` - Set username manually
+- `gms-rt-users-list` - List all users
+
+### Configuration
+- `gms-rt-config-read` - Read configuration
+- `gms-rt-config-update` - Update configuration
+- `gms-rt-config-validate` - Validate configuration
+- `gms-rt-config-values` - Get config values
+
+### Client Network
+- `gms-rt-client-info` - Get client information
+- `gms-rt-client-record` - Record client info
+- `gms-rt-client-detect` - Auto-detect client
+
+### Tools & Utilities
+- `gms-rt-terminal-push` - Push command to terminal
+- `gms-rt-opengrok-search` - Search OpenGrok code
+
+---
+
+## Command Usage Examples
+
+### Device Management
+```bash
+# List all devices
+gms-rt-devices-list
+
+# Get device info
+gms-rt-devices-info RK3572GMS1
+
+# Reboot device
+gms-rt-devices-reboot RK3572GMS1
+```
+
+### Test Execution
+```bash
+# Start CTS test
+gms-rt-test-start RK3572GMS1 CTS CtsPermissionTestCases
+
+# Monitor test progress
+gms-rt-test-monitor
+
+# Check test status
+gms-rt-test-status
+```
+
+### Firmware Operations
+```bash
+# Burn firmware with progress bar
+gms-rt-burn-firmware /path/to/update.img RK3572GMS1 wipe_data
+
+# Burn GSI image
+gms-rt-burn-gsi /path/to/system.img RK3572GMS1
+```
+
+### File Operations
+```bash
+# Upload file
+gms-rt-files-upload ./test.apk /data/local/tmp
+
+# List files
+gms-rt-files-list /data/local/tmp
+
+# Install APK
+gms-rt-files-install ./app.apk RK3572GMS1
+```
+
+---
+
+**Server**: http://172.16.14.233:5001
+**Docs**: http://172.16.14.233:5001/docs
+**Help**: http://172.16.14.233:5001/api/help
