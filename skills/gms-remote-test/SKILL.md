@@ -963,6 +963,7 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 | `/api/test/start` | POST | Start a test |
 | `/api/test/stop` | POST | Stop running test |
 | `/api/test/status` | GET | Get test status |
+| `/api/test/suites` | POST | List available test suites |
 | `/api/test/logs/stream` | GET | Stream logs (plain text) |
 | `/api/test/logs/download` | GET | Download current log |
 | `/api/test/logs/list` | GET | List test logs |
@@ -1287,6 +1288,7 @@ For complete API documentation with try-it-out functionality:
 - `gms-rt-test-status` - Check test status
 - `gms-rt-test-monitor` - Monitor test progress
 - `gms-rt-test-clean` - Clean test environment
+- `gms-rt-test-suites` - List available test suites
 
 ### Test Logs
 - `gms-rt-test-logs-current` - Download current test logs
@@ -1384,6 +1386,9 @@ gms-rt-devices-reboot RK3572GMS1
 ```bash
 # Start CTS test
 gms-rt-test-start RK3572GMS1 CTS CtsPermissionTestCases
+
+# List available test suites
+gms-rt-test-suites
 
 # Monitor test progress
 gms-rt-test-monitor

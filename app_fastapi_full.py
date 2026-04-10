@@ -80,6 +80,31 @@ TRADEFED_BINARY_MAP = {
     'xts': 'xts-tradefed'
 }
 
+# 特殊测试类型（不在主映射中）
+SPECIAL_TEST_TYPES = {
+    'cts-v-host-tradefed': 'cts-v-host',
+    'apts-tradefed': 'apts',
+}
+
+# 预计算反向映射，避免每次调用函数时重复创建
+TRADEFED_BINARY_REVERSE_MAP = {v: k for k, v in TRADEFED_BINARY_MAP.items()}
+
+def get_test_type_from_binary(binary_name: str) -> str:
+    """从二进制文件名获取测试类型
+
+    优先检查特殊类型，
+    然后从预计算的反向映射查找，
+    最后移除 -tradefed 后缀。
+    """
+    # 先检查特殊类型
+    if result := SPECIAL_TEST_TYPES.get(binary_name):
+        return result
+    # 使用预计算的反向映射
+    if result := TRADEFED_BINARY_REVERSE_MAP.get(binary_name):
+        return result
+    # 默认处理：移除 -tradefed 后缀
+    return binary_name.replace('-tradefed', '')
+
 # ==================== Lifespan 事件处理 ====================
 
 @asynccontextmanager
@@ -971,8 +996,12 @@ class AutocompleteSuiteRequest(BaseModel):
     test_type: str
     base_path: str
 
+class ListTestSuitesRequest(BaseModel):
+    """列出测试套件请求"""
+    base_path: Optional[str] = None
+
 class VPNConnectRequest(BaseModel):
-    """VPN连接请求（所有字段可选，兼容前端无参数调用）"""
+    """VPN 连接请求（所有字段可选，兼容前端无参数调用）"""
     host: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
@@ -2944,6 +2973,80 @@ async def autocomplete_suite(req: AutocompleteSuiteRequest):
             raise
     except Exception as e:
         logger.error(f"Error autocompleting suite: {e}")
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+
+@app.post("/api/test/suites")
+async def list_suites(req: ListTestSuitesRequest):
+    """List all available test suites under the specified path
+
+    Request:
+        base_path: Optional - Path to search for test suites (defaults to config.suites_path)
+
+    Response:
+        success: bool
+        suites: List of test suite info
+            - test_type: str (cts, gts, vts, sts, gsi, apts)
+            - version: str (e.g., android-cts-16_r4)
+            - tools_path: str (path to tools directory)
+            - full_path: str (full path to tradefed binary)
+            - binary: str (e.g., cts-tradefed)
+        count: int - Number of suites found
+        base_path: str - The path that was searched
+    """
+    try:
+        config = config_manager.load_config()
+        # Use base_path from request or get from config
+        base_path = req.base_path or config.get('suites_path', '/home/hcq/GMS-Suite')
+
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return JSONResponse(content={'success': False, 'error': 'SSH connection failed'}, status_code=500)
+
+        try:
+            # Find all *-tradefed executables
+            find_cmd = f"find '{base_path}' -maxdepth 5 -type f -executable -name '*-tradefed' 2>/dev/null | sort"
+            output, _, _ = ssh_manager.execute_command(ssh, find_cmd, timeout=30)
+
+            suites = []
+            stripped_output = output.strip()
+            if stripped_output:
+                for line in stripped_output.split('\n'):
+                    full_path = line.strip()
+                    parts = full_path.split('/')
+                    tradefed_name = parts[-1]
+                    test_type = get_test_type_from_binary(tradefed_name)
+                    # Skip cts-v-host (it's a verifier variant, not a standalone suite)
+                    if test_type == 'cts-v-host':
+                        continue
+                    tools_dir = '/'.join(parts[:-1])
+                    # Extract version directory (e.g., android-cts-16_r4, android-gsi-xxx)
+                    # For 'gsi' type, look for 'android-cts' prefix since GSI uses CTS suite
+                    version_dir = next((p for p in parts if p.startswith('android-') and (test_type in p or (test_type == 'gsi' and 'cts' in p))), "")
+
+                    suites.append({
+                        'test_type': test_type,
+                        'version': version_dir,
+                        'tools_path': tools_dir,
+                        'full_path': full_path,
+                        'binary': tradefed_name
+                    })
+
+            ssh_manager.return_connection(ssh)
+            return JSONResponse(content={
+                'success': True,
+                'suites': suites,
+                'count': len(suites),
+                'base_path': base_path
+            })
+
+        except Exception as e:
+            ssh_manager.return_connection(ssh)
+            raise
+    except Exception as e:
+        logger.error(f"Error listing suites: {e}")
         return JSONResponse(
             content={'success': False, 'error': str(e)},
             status_code=500
@@ -7945,6 +8048,23 @@ API_DOCS_LIST = [
         "skill": "gms-rt-test-clean"
     },
     {
+        "method": "POST",
+        "path": "/api/test/suites",
+        "title": "列出测试套件",
+        "description": "列出可用的测试套件",
+        "params": [{"name": "base_path", "type": "string", "required": False, "desc": "搜索路径，默认使用配置的 suites_path"}],
+        "category": "test",
+        "skill": "gms-rt-test-suites",
+        "response_example": {
+            "success": True,
+            "suites": [
+                {"test_type": "cts", "version": "android-cts-16_r4", "tools_path": "/home/hcq/GMS-Suite/android-cts-16_r4/android-cts/tools", "full_path": ".../cts-tradefed", "binary": "cts-tradefed"}
+            ],
+            "count": 9,
+            "base_path": "/home/hcq/GMS-Suite"
+        }
+    },
+    {
         "method": "GET",
         "path": "/api/test/status",
         "description": "获取测试状态",
@@ -8475,6 +8595,15 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             'params': [],
             'response': '{"success": true, "message": "测试已停止"}',
             'usage': ''
+        },
+        '/api/test/suites': {
+            'title': '列出测试套件',
+            'description': '列出指定路径下所有可用的测试套件',
+            'params': [
+                {'name': 'base_path', 'type': 'string', 'required': False, 'desc': '搜索路径，默认使用配置的 suites_path'}
+            ],
+            'response': '{"success": true, "suites": [{"test_type": "cts", "version": "android-cts-16_r4", "tools_path": "...", "full_path": "...", "binary": "cts-tradefed"}], "count": 9, "base_path": "/home/hcq/GMS-Suite"}',
+            'usage': 'gms-rt-test-suites'
         },
         '/api/devices': {
             'title': '获取设备列表',
