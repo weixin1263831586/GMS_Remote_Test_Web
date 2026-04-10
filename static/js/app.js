@@ -5833,9 +5833,8 @@ const API_DETAILS_MAP = {
     '/api/test/suites': {
         title: '列出测试套件',
         description: '列出可用的测试套件',
-        params: [
-            { name: 'base_path', type: 'string', required: false, desc: '搜索路径，默认使用配置的 suites_path' }
-        ],
+        method: 'GET',
+        params: [],
         response: '{ "success": true, "suites": [{"test_type": "cts", "version": "android-cts-16_r4", "tools_path": "...", "full_path": "...", "binary": "cts-tradefed"}], "count": 9, "base_path": "/home/hcq/GMS-Suite" }',
         usage: 'gms-rt-test-suites'
     },
@@ -6476,7 +6475,7 @@ function generateCurlCommand(api, details) {
         // Add query parameter example
         if (details.params && details.params.length > 0) {
             const queryParams = details.params.filter(p =>
-                !p.required || p.name === 'force_refresh' || p.name === 'log_type' || p.name === 'report_timestamp'
+                p.required && p.name !== 'force_refresh' || p.name === 'log_type' || p.name === 'report_timestamp'
             );
             if (queryParams.length > 0) {
                 cmd += ` \\\n  -G \\\n  -d "${queryParams[0].name}=VALUE"`;

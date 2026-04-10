@@ -963,7 +963,7 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 | `/api/test/start` | POST | Start a test |
 | `/api/test/stop` | POST | Stop running test |
 | `/api/test/status` | GET | Get test status |
-| `/api/test/suites` | POST | List available test suites |
+| `/api/test/suites` | GET | List available test suites |
 | `/api/test/logs/stream` | GET | Stream logs (plain text) |
 | `/api/test/logs/download` | GET | Download current log |
 | `/api/test/logs/list` | GET | List test logs |

@@ -1310,10 +1310,7 @@ async def list_users():
             # 过滤本地地址和VPN网关地址
             if ip in local_addresses or ip in vpn_gateway_addresses:
                 continue
-
             # 过滤unknown用户（用户名识别失败的情况）
-            if username == 'unknown':
-                continue
 
             # 如果同一个IP有多个用户记录，优先保留非unknown的用户
             if ip in temp_users:
@@ -2978,8 +2975,8 @@ async def autocomplete_suite(req: AutocompleteSuiteRequest):
             status_code=500
         )
 
-@app.post("/api/test/suites")
-async def list_suites(req: ListTestSuitesRequest):
+@app.get("/api/test/suites")
+async def list_suites(base_path: str = None):
     """List all available test suites under the specified path
 
     Request:
@@ -2999,7 +2996,7 @@ async def list_suites(req: ListTestSuitesRequest):
     try:
         config = config_manager.load_config()
         # Use base_path from request or get from config
-        base_path = req.base_path or config.get('suites_path', '/home/hcq/GMS-Suite')
+        base_path = base_path or config.get('suites_path', '/home/hcq/GMS-Suite')
 
         ssh = ssh_manager.get_connection(config)
         if not ssh:
@@ -8051,7 +8048,7 @@ API_DOCS_LIST = [
         "skill": "gms-rt-test-clean"
     },
     {
-        "method": "POST",
+        "method": "GET",
         "path": "/api/test/suites",
         "title": "列出测试套件",
         "description": "列出可用的测试套件",

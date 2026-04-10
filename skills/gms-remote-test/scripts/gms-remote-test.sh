@@ -815,9 +815,9 @@ gms-rt-test-suites() {
     else
         echo "📋 Listing test suites..."
     fi
-    local data="{}"
-    [ -n "$base_path" ] && data="{\"base_path\":\"$base_path\"}"
-    local response=$(api_call "/test/suites" "POST" "$data")
+    local url="/test/suites"
+    [ -n "$base_path" ] && url="/test/suites?base_path=$base_path"
+    local response=$(api_call "$url" "GET")
     if echo "$response" | jq -e '.success' > /dev/null; then
         local count=$(echo "$response" | jq '.count')
         success "Found $count test suite(s)"
