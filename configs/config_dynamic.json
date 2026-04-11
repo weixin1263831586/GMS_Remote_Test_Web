@@ -8,5 +8,11 @@
             "username": "hcq",
             "password": "20240120"
         }
-    ]
+    ],
+    "usbip_devices_source": {
+        "c3d9b8674f4b94f6": {
+            "source": "hcq@172.16.14.68",
+            "timestamp": 1775896275.0503902
+        }
+    }
 }

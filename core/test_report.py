@@ -14,8 +14,8 @@ import xml.etree.ElementTree as ET
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from test_report_db import test_report_db
-from report_analyzer import ReportAnalyzer
+from .test_report_db import test_report_db
+from .report_analyzer import ReportAnalyzer
 
 logger = logging.getLogger(__name__)
 

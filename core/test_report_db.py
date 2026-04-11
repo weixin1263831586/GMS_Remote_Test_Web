@@ -435,7 +435,7 @@ class TestReportDB:
                         if os.path.exists(xml_path):
                             # 解析 XML 获取详细信息
                             try:
-                                from report_analyzer import analyzer
+                                from .report_analyzer import analyzer
                                 result = analyzer.analyze_file(xml_path)
                                 if result:
                                     report_info.update({

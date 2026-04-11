@@ -211,8 +211,8 @@ from core.usbip import usbip_manager
 from core.claude_report_analyzer import ClaudeReportAnalyzer
 from core.common_utils import CommonUtils
 from core.device_utils import DeviceUtils
-from report_analyzer import ReportAnalyzer
-from test_report_db import test_report_db
+from core.report_analyzer import ReportAnalyzer
+from core.test_report_db import test_report_db
 
 # 导入管理模块
 from modules.client_manager import client_manager
@@ -1764,14 +1764,17 @@ async def devices_management():
             devices_to_remove = [dev_id for dev_id in all_usbip_sources if dev_id not in current_device_set]
 
             if devices_to_remove:
-                logger.info(f"[Device Management] Cleaning up removed devices: {devices_to_remove}")
-                # 从全局状态中清除
+                logger.info(f"[Device Management] Cleaning up removed devices from memory: {devices_to_remove}")
+                # 只从全局状态（内存）中清除，保留持久化数据
+                # 这样设备重连后仍能识别为USB/IP设备
                 with global_state.usbip_devices_source_lock:
                     for dev_id in devices_to_remove:
                         global_state.usbip_devices_source.pop(dev_id, None)
-                # 从usbip_manager中清除
+                # 从usbip_manager中清除（内存）
                 for dev_id in devices_to_remove:
                     usbip_manager.device_sources.pop(dev_id, None)
+                # 注意：不从 persisted_usbip_sources 中删除，保留持久化记录
+
 
             for device_id in device_ids:
                 props = device_data.get(device_id, {})
@@ -5034,6 +5037,26 @@ async def start_usbip(
                             'timestamp': time.time()
                         }
                 logger.info(f"[USB/IP Start] Recorded device source: {windows_device_host} for devices: {device_list}")
+
+                # 持久化USB/IP设备来源到配置文件（修复长时间连接后来源类型丢失的问题）
+                try:
+                    existing_dynamic = config_manager._load_dynamic_config() or {}
+                    usbip_sources = existing_dynamic.get('usbip_devices_source', {})
+
+                    # 更新设备来源
+                    for device_id in device_list:
+                        usbip_sources[device_id] = {
+                            'source': windows_device_host,
+                            'timestamp': time.time()
+                        }
+
+                    # 保存到配置文件
+                    existing_dynamic['usbip_devices_source'] = usbip_sources
+                    if config_manager.save_dynamic_config(existing_dynamic):
+                        logger.info(f"[USB/IP Start] Persisted device sources for {len(device_list)} devices")
+                except Exception as e:
+                    logger.warning(f"[USB/IP Start] Failed to persist device sources: {e}")
+
 
         return JSONResponse(content=result)
 
