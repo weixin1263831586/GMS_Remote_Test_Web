@@ -93,9 +93,11 @@ class ConfigManager:
         # 检查文件是否被修改
         try:
             static_mtime = os.path.getmtime(self.config_path)
-            dynamic_mtime = 0
-            if os.path.exists(self.dynamic_config_path):
+            # 直接使用 try/except 处理文件不存在，避免 TOCTOU 竞争条件
+            try:
                 dynamic_mtime = os.path.getmtime(self.dynamic_config_path)
+            except FileNotFoundError:
+                dynamic_mtime = 0
 
             # 如果文件修改时间变化，缓存失效
             if static_mtime != self._static_mtime or dynamic_mtime != self._dynamic_mtime:
@@ -118,8 +120,11 @@ class ConfigManager:
         # 更新文件修改时间
         try:
             self._static_mtime = os.path.getmtime(self.config_path)
-            if os.path.exists(self.dynamic_config_path):
+            # 直接使用 try/except 处理文件不存在，避免 TOCTOU 竞争条件
+            try:
                 self._dynamic_mtime = os.path.getmtime(self.dynamic_config_path)
+            except FileNotFoundError:
+                self._dynamic_mtime = 0
         except Exception as e:
             logger.warning(f"Error updating file mtime: {e}")
 

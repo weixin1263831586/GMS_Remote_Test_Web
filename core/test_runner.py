@@ -161,15 +161,15 @@ class TestRunner:
         """上传测试脚本到远程服务器"""
         try:
             # 检查本地脚本
-            local_script = os.path.join(
+            local_script = os.path.realpath(os.path.join(
                 os.path.dirname(__file__),
                 '..',
-                'tools',
-                'run_GMS_Test_Auto.sh'
+                'scripts',
+                'run_GMS_Test_Auto.sh')
             )
 
             if not os.path.exists(local_script):
-                logger.warning(f"Script not found: {local_script}, using fallback")
+                logger.info(f"Checking local script: {local_script}"); logger.warning(f"Script not found: {local_script}, using remote fallback")
                 # 脚本不存在，直接返回True（使用已有脚本）
                 return True
 
