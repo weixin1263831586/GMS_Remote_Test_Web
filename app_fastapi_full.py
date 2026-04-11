@@ -2366,13 +2366,8 @@ async def run_test_background(
         # 修复：将testcases路径转换为tools路径（因为cts-tradefed在tools目录）
         if test_suite and 'testcases' in test_suite:
             test_suite_tools = test_suite.replace('/testcases', '/tools')
-            await log_callback(f"🔧 转换测试套件路径: testcases -> tools", 'info')
         else:
             test_suite_tools = test_suite
-
-        # 调试：打印test_params和config中的local_server
-        await log_callback(f"🔍 test_params中的local_server: '{test_params.get('local_server', 'KEY_NOT_FOUND')}'", 'info')
-        await log_callback(f"🔍 config中的local_server: '{config.get('local_server', 'NOT_FOUND')}'", 'info')
 
         # 修复：只有当test_params中没有local_server时才从config读取
         local_server = test_params.get('local_server') or config.get('local_server', '')
@@ -2388,39 +2383,31 @@ async def run_test_background(
         if retry_dir:
             timestamp = os.path.basename(retry_dir.strip().rstrip('/'))
             cmd_parts.extend([test_type, "retry", timestamp])
-            await log_callback(f"Retry mode: {timestamp}", 'info')
         else:
             cmd_parts.append(test_type)
             if test_module:
                 cmd_parts.append(test_module)
-                await log_callback(f"Test module: {test_module}", 'info')
             if test_case:
                 cmd_parts.append(test_case)
-                await log_callback(f"Test case: {test_case}", 'info')
 
         # 添加设备参数
         if devices:
             device_args_list = []
             if len(devices) > 1:
                 device_args_list.extend(["--shard-count", str(len(devices))])
-                await log_callback(f"Sharding across {len(devices)} devices", 'info')
             for device in devices:
                 device_args_list.extend(["-s", device])
 
             device_args_str = " ".join(device_args_list)
             cmd_parts.extend(["--device-args", device_args_str])
-            await log_callback(f"Devices: {', '.join(devices)}", 'info')
 
         # 添加测试套件（使用tools路径）
         if test_suite_tools:
             cmd_parts.extend(["--test-suite", test_suite_tools])
-            await log_callback(f"📂 测试套件: {test_suite_tools}", 'info')
 
-        # 添加本地服务器
         await log_callback(f"🔍 local_server参数值: '{local_server}'", 'info')
         if local_server:
             cmd_parts.extend(["--local-server", local_server])
-            await log_callback(f"🌐 本地主机: {local_server}", 'info')
         else:
             await log_callback("⚠️ local_server为空，测试可能失败", 'warning')
 
