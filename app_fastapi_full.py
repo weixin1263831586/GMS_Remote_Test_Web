@@ -1757,7 +1757,7 @@ async def devices_management():
             ubuntu_user = config.get("ubuntu_user", "")
 
             # 合并所有USB/IP设备来源字典（包括持久化的）
-            all_usbip_sources = {**global_state.usbip_devices_source, **usbip_manager.device_sources, **persisted_usbip_sources}
+            all_usbip_sources = {**global_state.usbip_devices_source, **usbip_manager.device_sources}
 
             # 清理已不存在的设备来源记录（与Flask版本一致）
             current_device_set = set(device_ids)
@@ -1765,7 +1765,6 @@ async def devices_management():
 
             if devices_to_remove:
                 logger.info(f"[Device Management] Cleaning up removed devices from memory: {devices_to_remove}")
-                # 只从全局状态（内存）中清除，保留持久化数据
                 # 这样设备重连后仍能识别为USB/IP设备
                 with global_state.usbip_devices_source_lock:
                     for dev_id in devices_to_remove:
