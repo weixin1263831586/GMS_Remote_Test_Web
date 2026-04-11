@@ -90,19 +90,11 @@ SPECIAL_TEST_TYPES = {
 TRADEFED_BINARY_REVERSE_MAP = {v: k for k, v in TRADEFED_BINARY_MAP.items()}
 
 def get_test_type_from_binary(binary_name: str) -> str:
-    """从二进制文件名获取测试类型
-
-    优先检查特殊类型，
-    然后从预计算的反向映射查找，
-    最后移除 -tradefed 后缀。
-    """
-    # 先检查特殊类型
+    """从二进制文件名获取测试类型"""
     if result := SPECIAL_TEST_TYPES.get(binary_name):
         return result
-    # 使用预计算的反向映射
     if result := TRADEFED_BINARY_REVERSE_MAP.get(binary_name):
         return result
-    # 默认处理：移除 -tradefed 后缀
     return binary_name.replace('-tradefed', '')
 
 # ==================== Lifespan 事件处理 ====================
@@ -995,10 +987,6 @@ class AutocompleteSuiteRequest(BaseModel):
     """自动完成测试套件请求"""
     test_type: str
     base_path: str
-
-class ListTestSuitesRequest(BaseModel):
-    """列出测试套件请求"""
-    base_path: Optional[str] = None
 
 class VPNConnectRequest(BaseModel):
     """VPN 连接请求（所有字段可选，兼容前端无参数调用）"""
@@ -3015,14 +3003,10 @@ async def list_suites(base_path: str = None):
                     parts = full_path.split('/')
                     tradefed_name = parts[-1]
                     test_type = get_test_type_from_binary(tradefed_name)
-                    # Skip cts-v-host (it's a verifier variant, not a standalone suite)
                     if test_type == 'cts-v-host':
                         continue
                     tools_dir = '/'.join(parts[:-1])
-                    # Extract version directory (e.g., android-cts-16_r4, android-gsi-xxx)
-                    # For 'gsi' type, look for 'android-cts' prefix since GSI uses CTS suite
                     version_dir = next((p for p in parts if p.startswith('android-') and (test_type in p or (test_type == 'gsi' and 'cts' in p))), "")
-                    # For GSI, use the actual test type from the version directory (e.g., 'cts' from 'android-cts-xxx')
                     if test_type == 'gsi' and version_dir:
                         test_type = 'cts'
 
