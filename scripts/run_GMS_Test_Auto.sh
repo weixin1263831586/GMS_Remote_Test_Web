@@ -90,12 +90,10 @@ parse_args() {
                     die "--test-suite 缺少路径参数"
                 fi
                 SUITE_PATH="$1"
-                log "📁 测试套件路径: $SUITE_PATH"
                 shift
                 ;;
             --device-args)
                 shift
-                log "📌 处理 --device-args 参数..."
                 if [[ $# -gt 0 ]]; then
                     DEVICE_ARGS="$1"
                     shift
@@ -112,7 +110,6 @@ parse_args() {
                 if [[ ! "$DEVICE_ARGS" =~ -s[[:space:]]+[^[:space:]]+ ]]; then
                     die "⚠️ 设备参数格式可能不正确，应为: -s DEVICE1 [-s DEVICE2 ...]"
                 fi
-                log "📱 设备参数: '$DEVICE_ARGS'"
                 ;;
             --copy-remote)
                 COPY_TO_REMOTE="true"
@@ -162,7 +159,6 @@ parse_args() {
         log "🔄 Retry 模式: $RESULT_TIMESTAMP"
     else
         MODE="run"
-        log "🧪 测试配置: 类型=$Test_Type, 模块=$Test_Module, 用例=$Test_Case"
     fi
 
     case "${Test_Type}" in
