@@ -653,7 +653,7 @@ curl -sX POST http://172.16.14.233:5001/api/devices/connect-wifi \
 
 #### Test Client-Host Connectivity
 ```bash
-curl -sX POST http://172.16.14.233:5001/api/ssh/route/ping \
+curl -sX POST http://172.16.14.233:5001/api/ssh/ping \
   -H "Content-Type: application/json" \
   -d '{
     "test_host_ip": "172.16.14.233",
@@ -984,7 +984,7 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 | `/api/client-info` | GET | Get client IP |
 | `/api/client-info` | POST | Record client info |
 | `/api/client-info/detect` | POST | Auto-detect username |
-| `/api/ssh/route/ping` | POST | Test connectivity |
+| `/api/ssh/ping` | POST | Test connectivity |
 | `/api/ssh/route` | GET | Check SSH route |
 | `/api/ssh/sshd-check` | GET | Check SSH server |
 | `/api/ssh/sshd-install` | POST | Install SSH server |
@@ -1160,7 +1160,7 @@ fi
 2. **Log Streaming**: Use `/api/test/logs/stream` for real-time monitoring (plain text)
 3. **Result Analysis**: Reports are stored with timestamps and accessible via `/api/reports/list`
 4. **Performance**: Use batch device operations for 75-85% performance improvement
-5. **Network Diagnostics**: Use `/api/ssh/route/ping` before testing to verify connectivity
+5. **Network Diagnostics**: Use `/api/ssh/ping` before testing to verify connectivity
 6. **Config Management**: Use `/api/config/read` and `/api/config/update` endpoints
 7. **Error Handling**: Always check `success` field in API responses
 8. **Parallel Operations**: Send device arrays to batch endpoints for speed improvement

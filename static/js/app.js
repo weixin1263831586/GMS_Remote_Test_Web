@@ -6443,7 +6443,17 @@ const API_DETAILS_MAP = {
         ],
         response: '{ "results": [{ "file": "/path/to/Test.java", "line": 10 }] }',
 usage: '搜索Android源码'
-    }
+    },
+    '/api/ssh/ping': {
+        title: '测试网络连通性',
+        description: '测试测试主机和客户端之间的网络连通性（ping 测试）',
+        params: [
+            { name: 'test_host_ip', type: 'string', required: true, desc: '测试主机 IP 地址' },
+            { name: 'client_ip', type: 'string', required: true, desc: '客户端 IP 地址' }
+        ],
+        response: '{ "success": true, "reachable": true, "latency": "0.301ms", "same_network": false }',
+        usage: 'gms-rt-ssh-ping'
+    },
 };
 
 /**
