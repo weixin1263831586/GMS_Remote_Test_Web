@@ -2763,7 +2763,7 @@
                     <div style="margin-bottom: 16px;">
                         <div style="color: #333; font-weight: 600; margin-bottom: 6px; font-size: 13px;">1.获取客户端ID</div>
                         <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
-                            <code id="cmd-1" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-1')">curl -s http://172.16.14.233:5001/api/client-info | jq '.'</code>
+                            <code id="cmd-1" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-1')">curl -s http://172.16.14.233:5001/api/users/current | jq '.'</code>
                             <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
@@ -2771,7 +2771,7 @@
                     <div style="margin-bottom: 16px;">
                         <div style="color: #333; font-weight: 600; margin-bottom: 6px; font-size: 13px;">2.获取设备列表</div>
                         <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
-                            <code id="cmd-2" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-2')">curl -s http://172.16.14.233:5001/api/devices | jq '.'</code>
+                            <code id="cmd-2" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-2')">curl -s http://172.16.14.233:5001/api/devices/list | jq '.'</code>
                             <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-2')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
@@ -2782,10 +2782,10 @@
                             <code id="cmd-3" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-3')">curl -sX POST http://172.16.14.233:5001/api/test/start \
   -H "Content-Type: application/json" \
   -d '{
-    "devices": ["rk3572cai"],
+    "devices": ["RK3562GMS1"],
     "test_type": "CTS",
-    "test_module": "CtsPermissionTestCases",
-    "test_case": "android.permission.cts.AccessibilityPrivacySourceTest#testJobDoesNotSendNotificationInSecondRunForSameService",
+    "test_module": "CtsKeystoreTestCases",
+    "test_case": "android.keystore.cts.KeyAttestationTest#testRsaAttestation",
     "test_suite": "/home/hcq/GMS-Suite/android-cts-16_r4/android-cts/tools"
   }' | jq '.'</code>
                             <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-3')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
@@ -2814,19 +2814,19 @@
 # 自动化测试脚本示例
 
 BASE_URL="http://172.16.14.233:5001"
-DEVICE_ID="rk3572cai"
+DEVICE_ID="RK3562GMS1"
 TEST_TYPE="CTS"
-TEST_MODULE="CtsPermissionTestCases"
-TEST_CASE="android.permission.cts.AccessibilityPrivacySourceTest#testJobDoesNotSendNotificationInSecondRunForSameService"
+TEST_MODULE="CtsKeystoreTestCases"
+TEST_CASE="android.keystore.cts.KeyAttestationTest#testRsaAttestation"
 TEST_SUITE="/home/hcq/GMS-Suite/android-cts-16_r4/android-cts/tools"
 
 # 步骤1: 获取客户端信息
 echo "步骤1: 获取客户端信息..."
-curl -s "$BASE_URL/api/client-info" | jq "."
+curl -s "$BASE_URL/api/users/current" | jq "."
 
 # 步骤2: 检查设备状态
 echo "步骤2: 检查设备状态..."
-curl -s "$BASE_URL/api/devices" | jq "."
+curl -s "$BASE_URL/api/devices/list" | jq "."
 
 # 步骤3: 启动测试（自动锁定设备）
 echo "步骤3: 启动测试（会自动锁定设备）..."
