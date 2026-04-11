@@ -1218,17 +1218,17 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
             "error": "保存配置失败"
         }, status_code=500)
 
-@app.get("/api/client-info")
+@app.get("/api/users/current")
 @handle_api_errors
 async def handle_client_info_get(request: Request):
-    """获取客户端IP（兼容Flask路由）"""
+    """获取当前用户信息"""
     client_ip = get_client_ip(request)
     return JSONResponse(content={'ip': client_ip})
 
-@app.post("/api/client-info")
+@app.post("/api/users/current")
 @handle_api_errors
 async def handle_client_info_post(req: ClientInfoRequest, request: Request):
-    """记录客户端信息（兼容Flask路由）"""
+    """记录当前用户信息"""
     client_ip = get_client_ip(request, req.ip)
     username = req.username
 
@@ -1252,12 +1252,6 @@ async def handle_client_info_post(req: ClientInfoRequest, request: Request):
     logger.info(f"[ClientInfo] IP: {client_ip} | Username: {username} | ClientID: {client_id}")
 
     return ApiResponse.success({'client_id': client_id})
-
-@app.post("/api/client-info/detect")
-@handle_api_errors
-async def detect_client_info(req: ClientInfoRequest, request: Request):
-    """自动检测客户端用户名（兼容Flask路由）"""
-    return await detect_client(req, request)
 
 @app.get("/api/users/list")
 @handle_api_errors
@@ -8483,7 +8477,7 @@ async def get_api_help():
         # 添加使用示例
         text_content += "\n" + "=" * 60 + "\n"
         text_content += "Usage Examples:\n"
-        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/devices?help=1"           \n'
+        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/devices/list?help=1"     \n'
         text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/test/status?help=1"       \n'
         text_content += f'  curl -sX POST "{DEFAULT_SERVER_URL}/api/test/start?help=1"  \n'
 
@@ -8603,7 +8597,7 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             'response': '{"success": true, "suites": [{"test_type": "cts", "version": "android-cts-16_r4", "tools_path": "...", "full_path": "...", "binary": "cts-tradefed"}], "count": 9, "base_path": "/home/hcq/GMS-Suite"}',
             'usage': 'gms-rt-test-suites'
         },
-        '/api/devices': {
+        '/api/devices/list': {
             'title': '获取设备列表',
             'description': '获取所有已连接的设备列表',
             'params': [],

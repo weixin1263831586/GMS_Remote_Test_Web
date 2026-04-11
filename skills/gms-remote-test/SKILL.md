@@ -693,9 +693,9 @@ curl -sX POST http://172.16.14.233:5001/api/ssh/ping \
 
 ### 10. Client Information
 
-#### Get Client IP
+#### Get Current User Info
 ```bash
-curl -s http://172.16.14.233:5001/api/client-info | jq '.'
+curl -s http://172.16.14.233:5001/api/users/current | jq '.'
 ```
 
 **Response:**
@@ -707,7 +707,7 @@ curl -s http://172.16.14.233:5001/api/client-info | jq '.'
 
 #### Record Client Info
 ```bash
-curl -sX POST http://172.16.14.233:5001/api/client-info \
+curl -sX POST http://172.16.14.233:5001/api/users/current \
   -H "Content-Type: application/json" \
   -d '{
     "ip": "172.16.14.68",
@@ -717,7 +717,7 @@ curl -sX POST http://172.16.14.233:5001/api/client-info \
 
 #### Auto-Detect Client Username
 ```bash
-curl -sX POST http://172.16.14.233:5001/api/client-info/detect \
+curl -sX POST http://172.16.14.233:5001/api/users/detect \
   -H "Content-Type: application/json" \
   -d '{
     "ip": "172.16.14.68",
@@ -981,9 +981,9 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 ### Network & Client
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/client-info` | GET | Get client IP |
-| `/api/client-info` | POST | Record client info |
-| `/api/client-info/detect` | POST | Auto-detect username |
+| `/api/users/current` | GET | Get current user info |
+| `/api/users/current` | POST | Record client info |
+| `/api/users/detect` | POST | Auto-detect username |
 | `/api/ssh/ping` | POST | Test connectivity |
 | `/api/ssh/route` | GET | Check SSH route |
 | `/api/ssh/sshd-check` | GET | Check SSH server |

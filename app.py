@@ -881,9 +881,9 @@ def handle_config():
             return jsonify({'success': True})
         return jsonify({'success': False, 'error': 'Failed to save config'}), 500
 
-@app.route('/api/client-info', methods=['GET', 'POST'])
+@app.route('/api/users/current', methods=['GET', 'POST'])
 def handle_client_info():
-    """获取客户端IP或记录客户端信息"""
+    """获取当前用户信息或记录客户端信息"""
     # 获取客户端IP
     client_ip = request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or \
                 request.headers.get('X-Real-IP') or request.remote_addr
@@ -908,7 +908,7 @@ def handle_client_info():
     print(f"[ClientInfo] IP: {client_ip} | Username: {client_username}")
     return jsonify({'success': True, 'client_id': get_client_id()})
 
-@app.route('/api/client-info/detect', methods=['POST'])
+@app.route('/api/users/detect', methods=['POST'])
 def detect_client():
     """自动检测客户端用户名（支持手动SSH凭据）"""
     data = request.json
@@ -1016,7 +1016,7 @@ def list_users():
         })
 
 
-@app.route('/api/devices')
+@app.route('/api/devices/list')
 def list_devices():
     """Get list of connected devices with lock status"""
     config = load_config()
@@ -5335,86 +5335,6 @@ def start_screen_mirroring():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== VPN ====================
-@app.route('/api/vpn/check-sshd', methods=['GET'])
-def check_sshd():
-    """Check SSH daemon status"""
-    config = load_config()
-    ssh = get_ssh_connection(config)
-    if not ssh:
-        return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
-
-    try:
-        output, error, code = execute_ssh_command(ssh, "ps aux | grep sshd | grep -v grep")
-        return_ssh_connection(ssh)
-        running = len(output.strip()) > 0
-        return jsonify({'success': True, 'running': running})
-    except Exception as e:
-        return_ssh_connection(ssh)
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/vpn/check-routing', methods=['GET'])
-def check_routing():
-    """Check VPN routing by pinging targets - matches GUI implementation"""
-    config = load_config()
-    ssh = get_ssh_connection(config)
-    if not ssh:
-        return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
-
-    try:
-        # Get VPN targets from config (matching GUI lines 1218-1247)
-        vpn_target = config.get("vpn_target", [])
-        if isinstance(vpn_target, str):
-            vpn_target = [t.strip() for t in vpn_target.split(',')]
-
-        if not vpn_target:
-            return_ssh_connection(ssh)
-            return jsonify({
-                'success': True,
-                'message': '未配置VPN目标',
-                'results': []
-            })
-
-        results = []
-        success_count = 0
-        failed_targets = []
-
-        # Ping each target (matching GUI implementation)
-        for target in vpn_target:
-            cmd = f"ping -c 1 -W 2 {target} 2>&1"
-            output, error, code = execute_ssh_command(ssh, cmd)
-
-            # Check if ping was successful
-            is_reachable = '1 packets transmitted, 1 received' in output or '1 received' in output
-
-            result = {
-                'target': target,
-                'reachable': is_reachable,
-                'output': output[:200]  # Truncate output
-            }
-            results.append(result)
-
-            if is_reachable:
-                success_count += 1
-            else:
-                failed_targets.append(target)
-
-        return_ssh_connection(ssh)
-
-        return jsonify({
-            'success': True,
-            'results': results,
-            'summary': {
-                'total': len(vpn_target),
-                'success': success_count,
-                'failed': len(failed_targets),
-                'success_rate': f"{success_count}/{len(vpn_target)}"
-            },
-            'failed_targets': failed_targets
-        })
-    except Exception as e:
-        return_ssh_connection(ssh)
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 @app.route('/api/vpn/connect', methods=['POST'])
 def connect_vpn():
     """Connect VPN using nmcli (matches GUI implementation)"""
