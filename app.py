@@ -21,9 +21,9 @@ import paramiko
 from paramiko import AuthenticationException, SSHException
 
 # 导入新的报告分析器模块
-from report_analyzer import ReportAnalyzer
+from core.report_analyzer import ReportAnalyzer
 # 导入测试报告数据库模块
-from test_report_db import test_report_db
+from core.test_report_db import test_report_db
 
 # Flask 应用
 app = Flask(__name__)
