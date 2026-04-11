@@ -6663,7 +6663,11 @@ function displayApiDocs(apis) {
                 <!-- Column 3: Skill Usage -->
                 <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 20%;">
                     <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <div style="font-size: 11px; color: var(--primary-color); font-weight: 600; line-height: 1.3;">
+                        <div style="font-size: 11px; color: var(--primary-color); font-weight: 600; line-height: 1.3; cursor: pointer; transition: all 0.2s;"
+                             onclick="copySkillCommand(this)"
+                             onmouseover="this.style.color='var(--success-color)';"
+                             onmouseout="this.style.color='var(--primary-color)';"
+                             title="点击复制 skill 命令">
                             ${api.skill ? escapeHtml(api.skill) : '<span style="color: var(--text-secondary);">-</span>'}
                         </div>
                     </div>
@@ -6680,7 +6684,7 @@ function displayApiDocs(apis) {
                                  onclick="copyCurlCommandFromData(this)"
                                  onmouseover="this.style.color='var(--primary-color)';"
                                  onmouseout="this.style.color='var(--success-color)';"
-                                 title="点击复制curl命令">${escapeHtml(displayCurlCmd)}</pre>
+                                 title="点击复制 curl 命令">${escapeHtml(displayCurlCmd)}</pre>
                             <button
                                 id="expand-btn-${index}"
                                 onclick="toggleApiDetails('${index}')"
@@ -6795,20 +6799,7 @@ window.copyCurlCommandFromData = function(element) {
         successMessage = '✓ curl命令已复制 (含jq格式化)';
     }
 
-    // 方法1: 使用现代Clipboard API
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(commandToCopy).then(() => {
-            console.log('[Copy] Success with Clipboard API');
-            showToast(successMessage, 'success');
-        }).catch(err => {
-            console.error('[Copy] Clipboard API failed:', err);
-            // 尝试备用方法
-            fallbackCopyTextToClipboard(commandToCopy);
-        });
-    } else {
-        console.log('[Copy] Clipboard API not available, using fallback');
-        fallbackCopyTextToClipboard(commandToCopy);
-    }
+    copyText(commandToCopy, { successMsg: successMessage });
 };
 
 /**
@@ -6841,26 +6832,62 @@ function closeUsageExamplesModal() {
 /**
  * 复制文本到剪贴板（统一函数）
  * @param {string} text - 要复制的文本
- * @param {Object} options - 配置选项 { addJq: boolean, successMsg: string }
+ * @param {Object} options - 配置选项 { addJq: boolean, successMsg: string, element: HTMLElement }
  */
 function copyText(text, options = {}) {
-    const { addJq = false, successMsg = '✓ 命令已复制到剪贴板' } = options;
+    const {
+        addJq = false,
+        successMsg = '✓ 命令已复制到剪贴板',
+        element = null
+    } = options;
     const textToCopy = addJq ? text + ' | jq "."' : text;
 
     console.log('[Copy] Copying text:', textToCopy);
 
-    // 使用现代Clipboard API
+    const onSuccess = () => {
+        console.log('[Copy] Success');
+        showToast(successMsg, 'success');
+        if (element) {
+            const originalColor = element.style.color;
+            element.style.color = 'var(--success-color)';
+            setTimeout(() => {
+                if (element) {
+                    element.style.color = originalColor || 'var(--primary-color)';
+                }
+            }, 500);
+        }
+    };
+
+    const doFallback = () => {
+        try {
+            const textArea = document.createElement('textarea');
+            textArea.value = textToCopy;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.select();
+            const successful = document.execCommand('copy');
+            document.body.removeChild(textArea);
+            if (successful) {
+                onSuccess();
+            } else {
+                showToast('✗ 复制失败，请手动复制', 'error');
+            }
+        } catch (err) {
+            console.error('[Copy] Fallback error:', err);
+            showToast('✗ 复制失败：' + err.message, 'error');
+        }
+    };
+
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(textToCopy).then(() => {
-            console.log('[Copy] Success with Clipboard API');
-            showToast(successMsg, 'success');
+            onSuccess();
         }).catch(err => {
             console.error('[Copy] Clipboard API failed:', err);
-            fallbackCopyTextToClipboard(textToCopy, successMsg);
+            doFallback();
         });
     } else {
-        console.log('[Copy] Clipboard API not available, using fallback');
-        fallbackCopyTextToClipboard(textToCopy, successMsg);
+        doFallback();
     }
 }
 
@@ -6872,32 +6899,6 @@ window.copyCurlCommand = function(text) {
 };
 
 /**
- * 备用复制方法（使用传统textarea方法）
- * @param {string} text - 要复制的文本
- * @param {string} successMsg - 成功提示消息
- */
-function fallbackCopyTextToClipboard(text, successMsg = '✓ 已复制到剪贴板') {
-    console.log('[Copy] Using fallback method');
-    try {
-        const textArea = document.createElement('textarea');
-        textArea.value = text;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-999999px';
-        textArea.style.top = '-999999px';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-
-        const successful = document.execCommand('copy');
-        document.body.removeChild(textArea);
-
-        if (successful) {
-            console.log('[Copy] Fallback method successful');
-            showToast(successMsg, 'success');
-        } else {
-            console.error('[Copy] Fallback method failed');
-            showToast('✗ 复制失败，请手动复制', 'error');
-        }
     } catch (err) {
         console.error('[Copy] Fallback method error:', err);
         showToast('✗ 复制失败: ' + err.message, 'error');
@@ -6925,3 +6926,35 @@ window.copyCommand = function(elementId) {
 window.loadApiDocs = loadApiDocs;
 window.filterApiDocs = filterApiDocs;
 window.autoInstallSshd = autoInstallSshd;
+
+/**
+ * 复制 skill 命令到剪贴板
+ */
+window.copySkillCommand = function(element) {
+    const text = element.textContent.trim();
+    if (!text || text === '-') {
+        showToast('✗ 无内容可复制', 'error');
+        return;
+    }
+    copyText(text, {
+        successMsg: '✓ 已复制：' + text,
+        element: element
+    });
+};
+
+/**
+ * 复制文本到剪贴板（通用方法，用于 skill 命令等）
+ * @param {string} text - 要复制的文本
+ * @param {HTMLElement} element - 触发复制的元素
+ */
+window.copyToClipboard = function(text, element) {
+    if (!text || text === '-') {
+        showToast('✗ 无内容可复制', 'error');
+        return;
+    }
+    copyText(text, {
+        successMsg: '✓ 已复制：' + text,
+        element: element
+    });
+};
+
