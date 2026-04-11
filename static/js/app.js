@@ -5986,7 +5986,7 @@ const API_DETAILS_MAP = {
         title: '获取客户端信息',
         description: '获取客户端信息',
         params: [],
-        response: '{ "client_id": "172.16.14.248_1234567890", "hostname": "172.16.14.248" }',
+        response: '{ "ip": "172.16.14.248", "client_id": "hcq@172.16.14.248", "username": "hcq" }',
         usage: '获取客户端身份信息'
     },
     '/api/users/detect': {
@@ -6837,16 +6837,10 @@ window.copyCurlCommandFromData = function(element) {
 function showUsageExamples() {
     const modal = document.getElementById('usage-examples-modal');
     if (modal) {
-        // 获取当前服务器地址
-        const serverUrl = window.location.origin || BASE_URL;
-
-        // 替换弹框中的硬编码IP为动态服务器地址
-        const currentContent = modal.innerHTML;
-        const updatedContent = currentContent.replace(/172\.16\.14\.233:5001/g, serverUrl);
-        modal.innerHTML = updatedContent;
         modal.style.display = 'flex';
     }
 }
+
 
 /**
  * 关闭使用实例弹窗
