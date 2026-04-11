@@ -1773,8 +1773,6 @@ async def devices_management():
                 # 从usbip_manager中清除（内存）
                 for dev_id in devices_to_remove:
                     usbip_manager.device_sources.pop(dev_id, None)
-                # 注意：不从 persisted_usbip_sources 中删除，保留持久化记录
-
 
             for device_id in device_ids:
                 props = device_data.get(device_id, {})
@@ -2331,10 +2329,8 @@ async def run_test_background(
         await log_callback("✅ SSH 连接成功", 'success')
 
         # 上传测试脚本
-        local_script = os.path.join(
-            os.path.dirname(__file__),
-            'tools',
-            'run_GMS_Test_Auto.sh'
+        local_script = os.path.realpath(
+            os.path.join(os.path.dirname(__file__), 'scripts', 'run_GMS_Test_Auto.sh')
         )
 
         if os.path.exists(local_script):
@@ -3687,7 +3683,7 @@ import ipaddress
 
 def extract_ip_from_host(host_string: str) -> str:
     """从user@host或host字符串中提取IP地址"""
-    return host_string.split('@')[-1] if '@' in host_string else host_string
+    return host_string.split('@', 1)[1] if '@' in host_string else host_string
 
 def get_client_ip_from_request_headers(request: Request) -> str:
     """从请求头中提取客户端IP，支持代理"""

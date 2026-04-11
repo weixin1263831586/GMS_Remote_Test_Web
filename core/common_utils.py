@@ -183,3 +183,24 @@ class CommonUtils:
         if exit_code != 0:
             output.append(f"Exit Code: {exit_code}")
         return '\n'.join(output) if output else '(no output)'
+
+    @staticmethod
+    def extract_ip_from_host(host: str) -> str:
+        """
+        从主机地址中提取 IP 部分
+
+        Args:
+            host: 主机地址，可能包含 username@ 前缀
+
+        Returns:
+            IP 地址部分
+
+        Examples:
+            >>> extract_ip_from_host('user@192.168.1.1')
+            '192.168.1.1'
+            >>> extract_ip_from_host('192.168.1.1')
+            '192.168.1.1'
+        """
+        if '@' in host:
+            return host.split('@', 1)[1]
+        return host
