@@ -1389,13 +1389,16 @@ ${YELLOW}Performance Notes:${NC}
 
 Server: ${GREEN}$SERVER_URL${NC}
 Docs:   ${GREEN}${SERVER_URL}/docs${NC}
-Help:   ${GREEN}${SERVER_URL}/api/help${NC}
+Help:   ${GREEN}${SERVER_URL}/api/system/help${NC}
 EOF
 }
 
 # Main command dispatcher
-if [ $# -eq 0 ]; then
-    gms-rt-system-help
-else
-    "$@"
+# Only execute when run directly, not when sourced
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    if [ $# -eq 0 ]; then
+        gms-rt-system-help
+    else
+        "$@"
+    fi
 fi

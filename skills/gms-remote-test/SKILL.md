@@ -20,7 +20,7 @@ description: >-
 |------|-------|
 | **Web Interface** | http://172.16.14.233:5001 |
 | **API Docs (Swagger)** | http://172.16.14.233:5001/docs |
-| **API Help** | http://172.16.14.233:5001/api/help |
+| **API Help** | http://172.16.14.233:5001/api/system/help |
 | **Skill Version** | `2026.04.09-200000` |
 | **Performance** | 75-85% faster multi-device operations (parallel execution) |
 
@@ -925,7 +925,7 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 |----------|--------|-------------|
 | `/api/system/health` | GET | Health check |
 | `/api/system/docs` | GET | API documentation |
-| `/api/help` | GET | API help |
+| `/api/system/help` | GET | API help |
 
 ### Device Management
 | Endpoint | Method | Description |
@@ -1257,7 +1257,7 @@ For complete API documentation with try-it-out functionality:
 
 **http://172.16.14.233:5001/docs** (Swagger UI)
 
-**http://172.16.14.233:5001/api/help** (API Help)
+**http://172.16.14.233:5001/api/system/help** (API Help)
 
 ---
 
@@ -1422,4 +1422,4 @@ gms-rt-files-install ./app.apk RK3572GMS1
 
 **Server**: http://172.16.14.233:5001
 **Docs**: http://172.16.14.233:5001/docs
-**Help**: http://172.16.14.233:5001/api/help
+**Help**: http://172.16.14.233:5001/api/system/help

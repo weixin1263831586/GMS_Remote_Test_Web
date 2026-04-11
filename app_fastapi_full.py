@@ -8445,7 +8445,7 @@ async def get_api_docs():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/help")
+@app.get("/api/system/help")
 async def get_api_help():
     """获取API列表（纯文本格式，只显示方法名和路径）"""
     try:
@@ -8485,7 +8485,7 @@ async def get_api_help():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/help/{api_path:path}")
+@app.get("/api/system/help/{api_path:path}")
 async def get_api_help_detail(api_path: str, help: Optional[str] = None):
     """获取单个API的详细帮助信息（通过GET请求）"""
     try:
