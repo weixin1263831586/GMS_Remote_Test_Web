@@ -5386,7 +5386,7 @@ def _generate_route_commands(test_network: str, target_network: str, test_host_i
     }
 
 
-@app.post("/api/ssh/route/ping")
+@app.post("/api/ssh/ping")
 async def ping_route_test(request: Request):
     """测试测试主机和客户端的网络连通性"""
     try:
@@ -8288,6 +8288,17 @@ API_DOCS_LIST = [
         "skill": "gms-rt-ssh-route"
     },
     {
+        "method": "POST",
+        "path": "/api/ssh/ping",
+        "description": "测试测试主机和客户端的网络连通性",
+        "params": [
+            {"name": "test_host_ip", "type": "string", "required": True, "desc": "测试主机 IP"},
+            {"name": "client_ip", "type": "string", "required": True, "desc": "客户端 IP"}
+        ],
+        "category": "ssh",
+        "skill": "gms-rt-ssh-ping"
+    },
+    {
         "method": "GET",
         "path": "/api/vpn/status",
         "description": "获取VPN状态",
@@ -8665,10 +8676,19 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             ],
             'response': '{"success": true, "message": "SSH连接成功，VNC服务可用"}',
             'usage': '连接Ubuntu主机桌面前验证SSH连接和VNC服务状态'
+        },
+        '/api/ssh/ping': {
+            'title': '测试网络连通性',
+            'description': '测试测试主机和客户端之间的网络连通性（ping 测试）',
+            'params': [
+                {'name': 'test_host_ip', 'type': 'string', 'required': True, 'desc': '测试主机 IP 地址'},
+                {'name': 'client_ip', 'type': 'string', 'required': True, 'desc': '客户端 IP 地址'}
+            ],
+            'response': '{"success": true, "reachable": true, "latency": "0.301ms", "same_network": false}',
+            'usage': 'gms-rt-ssh-ping'
         }
     }
-
-    # 查找API详情
+    # 查找 API 详情
     api_details = API_DETAILS_MAP.get(path)
     if not api_details:
         return None

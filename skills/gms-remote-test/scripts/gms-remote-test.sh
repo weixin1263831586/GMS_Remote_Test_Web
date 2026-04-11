@@ -491,7 +491,7 @@ gms-rt-ssh-ping() {
     check_jq
     echo "🌐 Testing SSH connectivity..."
     local data="{\"test_host_ip\":\"$test_host_ip\", \"client_ip\":\"$client_ip\"}"
-    local response=$(api_call "/ssh/route/ping" "POST" "$data")
+    local response=$(api_call "/ssh/ping" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         local reachable=$(echo "$response" | jq -r '.reachable')
         local latency=$(echo "$response" | jq -r '.latency')
