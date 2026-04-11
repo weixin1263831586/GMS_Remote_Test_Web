@@ -1,0 +1,713 @@
+"""
+API_DOCS_LIST - API文档列表定义
+
+此文件包含所有API端点的文档信息，用于：
+1. 生成 /api/system/docs 接口的响应
+2. 提供API帮助文本
+3. 技能命令参考
+
+与前端 static/js/api-constants.js 中的 API_DETAILS_MAP 保持对应关系。
+"""
+
+# ==================== 常量定义 ====================
+
+SKILL_COMMAND_PREFIX = "gms-rt-"
+
+# ==================== API文档列表 ====================
+
+API_DOCS_LIST = [
+    # ==================== 基础接口 ====================
+    {
+        "method": "GET",
+        "path": "/",
+        "description": "获取首页（Web界面）",
+        "params": [],
+        "skill": f"{SKILL_COMMAND_PREFIX}docs"
+    },
+    {
+        "method": "GET",
+        "path": "/api/system/health",
+        "description": "系统管理",
+        "params": [],
+        "category": "health",
+        "skill": f"{SKILL_COMMAND_PREFIX}health"
+    },
+
+    # ==================== 配置管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/config/validate",
+        "description": "验证配置文件正确性（检查必要字段和路径）",
+        "params": [],
+        "category": "config",
+        "skill": "gms-rt-config-validate"
+    },
+    {
+        "method": "GET",
+        "path": "/api/config/values",
+        "description": "获取前端配置（仅返回前端需要的字段，不含敏感信息）",
+        "params": [],
+        "category": "config",
+        "skill": "gms-rt-config-values"
+    },
+    {
+        "method": "GET",
+        "path": "/api/config/read",
+        "description": "获取完整系统配置（包含所有字段和敏感信息）",
+        "params": [],
+        "category": "config",
+        "skill": "gms-rt-config-read"
+    },
+    {
+        "method": "POST",
+        "path": "/api/config/update",
+        "description": "更新系统配置（仅修改动态配置字段）",
+        "params": [
+            {"name": "local_server", "type": "string", "required": False, "desc": "本地服务器地址"},
+            {"name": "client_hosts", "type": "object", "required": False, "desc": "客户端主机映射 {ip: username}"},
+            {"name": "client_ssh_credentials", "type": "array", "required": False, "desc": "客户端SSH凭证列表"}
+        ],
+        "category": "config",
+        "skill": "gms-rt-config-update"
+    },
+
+    # ==================== 用户管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/users/current",
+        "description": "获取当前用户信息（返回client_id用于WebSocket连接）",
+        "params": [],
+        "category": "users",
+        "skill": "gms-rt-users-current"
+    },
+    {
+        "method": "POST",
+        "path": "/api/users/detect",
+        "description": "检测客户端用户信息（通过SSH自动识别）",
+        "params": [
+            {"name": "ip", "type": "string", "required": False, "desc": "客户端IP地址（可选）"},
+            {"name": "username", "type": "string", "required": False, "desc": "用户名（可选）"},
+            {"name": "password", "type": "string", "required": False, "desc": "密码（可选）"}
+        ],
+        "category": "users",
+        "skill": "gms-rt-users-detect"
+    },
+    {
+        "method": "POST",
+        "path": "/api/users/set-username",
+        "description": "手动设置客户端用户名（无需SSH密码）",
+        "params": [
+            {"name": "username", "type": "string", "required": True, "desc": "用户名（不能为unknown）"},
+            {"name": "ip", "type": "string", "required": False, "desc": "客户端IP地址（可选，默认自动获取）"}
+        ],
+        "category": "users",
+        "skill": "gms-rt-users-set-username"
+    },
+    {
+        "method": "GET",
+        "path": "/api/users/list",
+        "description": "获取所有在线用户列表",
+        "params": [],
+        "category": "users",
+        "skill": "gms-rt-users-list"
+    },
+
+    # ==================== 设备管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/devices/list",
+        "description": "获取Android设备列表",
+        "params": [
+            {"name": "force_refresh", "type": "number", "required": False, "desc": "是否强制刷新，默认0"}
+        ],
+        "category": "device",
+        "skill": "gms-rt-devices-list"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/bootloader-lock",
+        "description": "锁定设备Bootloader",
+        "params": [
+            {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"}
+        ],
+        "category": "device",
+        "skill": "gms-rt-devices-bootloader-lock"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/bootloader-unlock",
+        "description": "解锁设备Bootloader",
+        "params": [
+            {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"}
+        ],
+        "category": "device",
+        "skill": "gms-rt-devices-bootloader-unlock"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/bootloader-status",
+        "description": "检查设备的Verified Boot锁定状态(GREEN=锁定, ORANGE=未锁定)",
+        "params": [
+            {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"}
+        ],
+        "category": "device",
+        "skill": "gms-rt-devices-bootloader-status"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/info",
+        "description": "获取设备的详细硬件和软件信息",
+        "params": [
+            {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"}
+        ],
+        "category": "device",
+        "skill": "gms-rt-devices-info"
+    },
+    {
+        "method": "GET",
+        "path": "/api/devices/management",
+        "description": "获取所有设备的详细管理信息(设备列表、电池、来源等)",
+        "params": [],
+        "category": "device",
+        "skill": "gms-rt-devices-management"
+    },
+    {
+        "method": "GET",
+        "path": "/api/devices/user-locked",
+        "description": "列出用户锁定设备",
+        "params": [],
+        "category": "device",
+        "skill": "gms-rt-devices-user-locked"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/reboot",
+        "description": "重启设备",
+        "params": [
+            {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"}
+        ],
+        "category": "device",
+        "skill": "gms-rt-devices-reboot"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/remount",
+        "description": "将设备重新挂载为读写模式",
+        "params": [
+            {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"}
+        ],
+        "category": "device",
+        "skill": "gms-rt-devices-remount"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/connect-wifi",
+        "description": "让设备连接到指定的WiFi网络",
+        "params": [
+            {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"},
+            {"name": "ssid", "type": "string", "required": False, "desc": "WiFi名称，默认AndroidWifi"},
+            {"name": "password", "type": "string", "required": False, "desc": "WiFi密码，默认1234567890"}
+        ],
+        "category": "device",
+        "skill": "gms-rt-devices-connect-wifi"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/shell",
+        "description": "在设备上执行ADB Shell命令",
+        "params": [
+            {"name": "serial_no", "type": "string", "required": True, "desc": "设备序列号"}
+        ],
+        "category": "device",
+        "skill": "gms-rt-devices-shell"
+    },
+    {
+        "method": "POST",
+        "path": "/api/devices/screen",
+        "description": "启动设备屏幕显示(VNC)",
+        "params": [
+            {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"}
+        ],
+        "category": "device",
+        "skill": "gms-rt-devices-screen"
+    },
+
+    # ==================== 测试管理 ====================
+    {
+        "method": "POST",
+        "path": "/api/test/start",
+        "description": "启动兼容性测试(CTS/VTS/GTS等)",
+        "params": [
+            {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"},
+            {"name": "test_type", "type": "string", "required": True, "desc": "测试类型: CTS|VTS|STS|GTS|CTS_VERIFIER"},
+            {"name": "test_module", "type": "string", "required": True, "desc": "测试模块名称"},
+            {"name": "test_case", "type": "string", "required": False, "desc": "具体测试用例(可选)"},
+            {"name": "retry_dir", "type": "string", "required": False, "desc": "重试目录(可选)"},
+            {"name": "test_suite", "type": "string", "required": False, "desc": "测试套件路径(可选)"}
+        ],
+        "category": "test",
+        "skill": "gms-rt-test-start"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/stop",
+        "description": "停止测试",
+        "params": [],
+        "category": "test",
+        "skill": "gms-rt-test-stop"
+    },
+    {
+        "method": "GET",
+        "path": "/api/test/suites",
+        "description": "列出可用的测试套件",
+        "params": [],
+        "category": "test",
+        "skill": "gms-rt-test-suites"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/clean",
+        "description": "清理测试环境",
+        "params": [],
+        "category": "test",
+        "skill": "gms-rt-test-clean"
+    },
+    {
+        "method": "GET",
+        "path": "/api/test/status",
+        "description": "获取当前测试运行状态",
+        "params": [],
+        "category": "test",
+        "skill": "gms-rt-test-status"
+    },
+    {
+        "method": "GET",
+        "path": "/api/test/logs/current",
+        "description": "下载当前测试日志",
+        "params": [],
+        "category": "test",
+        "skill": "gms-rt-test-logs-current"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/logs/batch",
+        "description": "批量下载测试日志",
+        "params": [
+            {"name": "files", "type": "array", "required": True, "desc": "日志文件路径数组"}
+        ],
+        "category": "test",
+        "skill": "gms-rt-test-logs-batch"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/logs/save-current",
+        "description": "保存当前正在运行的日志",
+        "params": [],
+        "category": "test",
+        "skill": "gms-rt-test-logs-save-current"
+    },
+    {
+        "method": "GET",
+        "path": "/api/test/logs/list",
+        "description": "获取所有保存的日志文件列表",
+        "params": [],
+        "category": "test",
+        "skill": "gms-rt-test-logs-list"
+    },
+    {
+        "method": "GET",
+        "path": "/api/test/logs/stream",
+        "description": "实时流式输出测试日志",
+        "params": [],
+        "category": "test",
+        "skill": "gms-rt-test-logs-stream"
+    },
+
+    # ==================== 报告管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/reports/list",
+        "description": "获取所有历史测试报告",
+        "params": [],
+        "category": "report",
+        "skill": "gms-rt-reports-list"
+    },
+    {
+        "method": "GET",
+        "path": "/api/reports/analyze/{report_timestamp}",
+        "description": "分析测试报告",
+        "params": [
+            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"}
+        ],
+        "category": "report",
+        "skill": "gms-rt-reports-analyze"
+    },
+    {
+        "method": "GET",
+        "path": "/api/reports/files/{report_timestamp}",
+        "description": "下载指定时间戳的报告文件",
+        "params": [
+            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"}
+        ],
+        "category": "report",
+        "skill": "gms-rt-reports-files"
+    },
+    {
+        "method": "GET",
+        "path": "/api/reports/view",
+        "description": "在浏览器中查看HTML报告",
+        "params": [
+            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"}
+        ],
+        "category": "report",
+        "skill": "gms-rt-reports-view"
+    },
+    {
+        "method": "GET",
+        "path": "/api/reports/download/{report_timestamp}",
+        "description": "下载测试报告的ZIP压缩包",
+        "params": [
+            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"}
+        ],
+        "category": "report",
+        "skill": "gms-rt-reports-download"
+    },
+    {
+        "method": "DELETE",
+        "path": "/api/reports/delete",
+        "description": "删除指定的测试报告",
+        "params": [
+            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"}
+        ],
+        "category": "report",
+        "skill": "gms-rt-reports-delete"
+    },
+    {
+        "method": "GET",
+        "path": "/api/reports/analyze",
+        "description": "AI分析测试报告",
+        "params": [
+            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"},
+            {"name": "use_ai", "type": "boolean", "required": False, "desc": "是否使用AI分析"}
+        ],
+        "category": "report",
+        "skill": "gms-rt-reports-analyze-ai"
+    },
+    {
+        "method": "GET",
+        "path": "/api/reports/analyze-ai",
+        "description": "使用AI进行深度分析",
+        "params": [
+            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"}
+        ],
+        "category": "report",
+        "skill": "gms-rt-reports-analyze-ai-deep"
+    },
+    {
+        "method": "POST",
+        "path": "/api/reports/analyze-source",
+        "description": "分析测试用例源码",
+        "params": [
+            {"name": "test_name", "type": "string", "required": True, "desc": "测试用例名称"},
+            {"name": "error_message", "type": "string", "required": True, "desc": "错误信息"}
+        ],
+        "category": "report",
+        "skill": "gms-rt-reports-analyze-source"
+    },
+
+    # ==================== 桌面管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/desktop/vnc/status",
+        "description": "查询Ubuntu主机桌面VNC状态",
+        "params": [],
+        "category": "desktop",
+        "skill": "gms-rt-desktop-vnc-status"
+    },
+    {
+        "method": "POST",
+        "path": "/api/desktop/vnc/start",
+        "description": "启动Ubuntu主机桌面VNC服务",
+        "params": [
+            {"name": "host", "type": "string", "required": False, "desc": "Ubuntu主机桌面地址，格式：user@ip"},
+            {"name": "password", "type": "string", "required": False, "desc": "SSH登录密码"},
+            {"name": "vnc_password", "type": "string", "required": False, "desc": "VNC访问密码（可选）"}
+        ],
+        "category": "desktop",
+        "skill": "gms-rt-desktop-vnc-start"
+    },
+    {
+        "method": "POST",
+        "path": "/api/desktop/vnc/stop",
+        "description": "停止Ubuntu主机桌面VNC服务",
+        "params": [],
+        "category": "desktop",
+        "skill": "gms-rt-desktop-vnc-stop"
+    },
+    {
+        "method": "POST",
+        "path": "/api/desktop/validate",
+        "description": "验证Ubuntu主机SSH连接并检查VNC服务可用性",
+        "params": [
+            {"name": "host", "type": "string", "required": True, "desc": "主机地址（格式：user@ip，如hcq@172.16.14.233）"},
+            {"name": "password", "type": "string", "required": False, "desc": "SSH登录密码（可选）"}
+        ],
+        "category": "desktop",
+        "skill": "gms-rt-desktop-validate"
+    },
+
+    # ==================== SSH管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/ssh/sshd-check",
+        "description": "检查SSH服务状态",
+        "params": [],
+        "category": "ssh",
+        "skill": "gms-rt-ssh-sshd-check"
+    },
+    {
+        "method": "POST",
+        "path": "/api/ssh/sshd-install",
+        "description": "获取SSHD安装指南",
+        "params": [],
+        "category": "ssh",
+        "skill": "gms-rt-ssh-sshd-install"
+    },
+    {
+        "method": "POST",
+        "path": "/api/ssh/ping",
+        "description": "测试测试主机和客户端之间的网络连通性（ping 测试）",
+        "params": [
+            {"name": "test_host_ip", "type": "string", "required": True, "desc": "测试主机 IP 地址"},
+            {"name": "client_ip", "type": "string", "required": True, "desc": "客户端 IP 地址"}
+        ],
+        "category": "ssh",
+        "skill": "gms-rt-ssh-ping"
+    },
+    {
+        "method": "GET",
+        "path": "/api/ssh/route",
+        "description": "检查系统路由表",
+        "params": [],
+        "category": "ssh",
+        "skill": "gms-rt-ssh-route"
+    },
+
+    # ==================== VPN管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/vpn/status",
+        "description": "检查VPN连接状态",
+        "params": [],
+        "category": "vpn",
+        "skill": "gms-rt-vpn-status"
+    },
+    {
+        "method": "POST",
+        "path": "/api/vpn/connect",
+        "description": "连接到默认VPN服务器（无需参数）",
+        "params": [],
+        "category": "vpn",
+        "skill": "gms-rt-vpn-connect"
+    },
+    {
+        "method": "POST",
+        "path": "/api/vpn/disconnect",
+        "description": "断开VPN连接",
+        "params": [],
+        "category": "vpn",
+        "skill": "gms-rt-vpn-disconnect"
+    },
+
+    # ==================== USB/IP管理 ====================
+    {
+        "method": "POST",
+        "path": "/api/adb-forward/start",
+        "description": "启动ADB端口转发",
+        "params": [
+            {"name": "device_host", "type": "string", "required": True, "desc": "设备主机地址"},
+            {"name": "device_password", "type": "string", "required": True, "desc": "设备SSH密码"}
+        ],
+        "category": "usbip",
+        "skill": "gms-rt-adb-forward-start"
+    },
+    {
+        "method": "POST",
+        "path": "/api/adb-forward/stop",
+        "description": "停止ADB端口转发",
+        "params": [
+            {"name": "device_id", "type": "string", "required": True, "desc": "设备序列号"}
+        ],
+        "category": "usbip",
+        "skill": "gms-rt-adb-forward-stop"
+    },
+    {
+        "method": "GET",
+        "path": "/api/usbip/status",
+        "description": "检查USB/IP服务状态",
+        "params": [],
+        "category": "usbip",
+        "skill": "gms-rt-usbip-status"
+    },
+    {
+        "method": "POST",
+        "path": "/api/usbip/start",
+        "description": "启动USB/IP设备共享",
+        "params": [
+            {"name": "device_host", "type": "string", "required": False, "desc": "设备主机地址，如172.16.14.233"},
+            {"name": "device_password", "type": "string", "required": False, "desc": "设备主机SSH密码（可选）"}
+        ],
+        "category": "usbip",
+        "skill": "gms-rt-usbip-start"
+    },
+    {
+        "method": "POST",
+        "path": "/api/usbip/stop",
+        "description": "停止USB/IP服务",
+        "params": [],
+        "category": "usbip",
+        "skill": "gms-rt-usbip-stop"
+    },
+    {
+        "method": "POST",
+        "path": "/api/usbip/auto-install",
+        "description": "自动安装USB/IP服务",
+        "params": [],
+        "category": "usbip",
+        "skill": "gms-rt-usbip-auto-install"
+    },
+
+    # ==================== 文件管理 ====================
+    {
+        "method": "POST",
+        "path": "/api/files/upload",
+        "description": "上传文件到服务器",
+        "params": [
+            {"name": "file", "type": "file", "required": True, "desc": "要上传的文件"},
+            {"name": "path", "type": "string", "required": False, "desc": "目标路径"}
+        ],
+        "category": "file",
+        "skill": "gms-rt-files-upload"
+    },
+    {
+        "method": "POST",
+        "path": "/api/files/install",
+        "description": "上传APK并安装到设备",
+        "params": [
+            {"name": "file", "type": "file", "required": True, "desc": "APK文件"},
+            {"name": "device_id", "type": "string", "required": True, "desc": "目标设备序列号"}
+        ],
+        "category": "file",
+        "skill": "gms-rt-files-install"
+    },
+    {
+        "method": "GET",
+        "path": "/api/files/progress",
+        "description": "获取当前文件上传进度",
+        "params": [
+            {"name": "upload_id", "type": "string", "required": False, "desc": "上传任务ID"}
+        ],
+        "category": "file",
+        "skill": "gms-rt-files-progress"
+    },
+    {
+        "method": "POST",
+        "path": "/api/files/list",
+        "description": "列出设备指定目录的文件",
+        "params": [
+            {"name": "path", "type": "string", "required": True, "desc": "目录路径，如/sdcard"}
+        ],
+        "category": "file",
+        "skill": "gms-rt-files-list"
+    },
+
+    # ==================== 固件烧写 ====================
+    {
+        "method": "POST",
+        "path": "/api/burn/firmware",
+        "description": "烧写固件",
+        "params": [
+            {"name": "firmware_file", "type": "file", "required": True, "desc": "固件文件（.img格式）"},
+            {"name": "devices", "type": "string", "required": True, "desc": "设备序列号（多个用逗号分隔）"},
+            {"name": "wipe_data", "type": "boolean", "required": False, "desc": "是否清除数据（默认true）"}
+        ],
+        "category": "burn",
+        "skill": "gms-rt-burn-firmware"
+    },
+    {
+        "method": "POST",
+        "path": "/api/burn/gsi",
+        "description": "烧写GSI镜像",
+        "params": [
+            {"name": "gsi_image", "type": "file", "required": True, "desc": "GSI镜像文件（.img格式）"},
+            {"name": "devices", "type": "string", "required": True, "desc": "设备序列号（多个用逗号分隔）"},
+            {"name": "wipe_data", "type": "boolean", "required": False, "desc": "是否清除数据（默认true）"}
+        ],
+        "category": "burn",
+        "skill": "gms-rt-burn-gsi"
+    },
+    {
+        "method": "POST",
+        "path": "/api/burn/serial",
+        "description": "烧写设备序列号",
+        "params": [
+            {"name": "device_id", "type": "string", "required": True, "desc": "当前设备序列号"},
+            {"name": "new_serial", "type": "string", "required": True, "desc": "新的序列号"}
+        ],
+        "category": "burn",
+        "skill": "gms-rt-burn-serial"
+    },
+    {
+        "method": "GET",
+        "path": "/api/burn/upload-progress",
+        "description": "查询固件上传进度",
+        "params": [],
+        "category": "burn",
+        "skill": "gms-rt-burn-upload-progress"
+    },
+
+    # ==================== 终端命令 ====================
+    {
+        "method": "POST",
+        "path": "/api/terminal/push",
+        "description": "向终端推送命令执行",
+        "params": [
+            {"name": "command", "type": "string", "required": True, "desc": "要执行的命令"}
+        ],
+        "category": "file",
+        "skill": "gms-rt-terminal-push"
+    },
+
+    # ==================== 源码搜索 ====================
+    {
+        "method": "GET",
+        "path": "/api/opengrok/search",
+        "description": "在源码中搜索代码",
+        "params": [
+            {"name": "query", "type": "string", "required": True, "desc": "搜索关键词"},
+            {"name": "full", "type": "boolean", "required": False, "desc": "是否全文搜索"}
+        ],
+        "category": "file",
+        "skill": "gms-rt-opengrok-search"
+    },
+
+    # ==================== WebSocket ====================
+    {
+        "method": "WebSocket",
+        "path": "/api/system/websocket/{client_id}",
+        "description": "建立WebSocket连接用于实时通信",
+        "params": [{"name": "client_id", "type": "string", "required": True}],
+        "category": "health",
+        "skill": "gms-rt-system-websocket"
+    },
+
+    # ==================== API文档 ====================
+    {
+        "method": "GET",
+        "path": "/api/system/docs",
+        "description": "获取系统API文档列表",
+        "params": [],
+        "category": "config",
+        "skill": "gms-rt-system-docs"
+    }
+]
