@@ -192,9 +192,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                     state.clientId = userData.client_id;
                     debugLog('[Init] Set state.clientId from /api/users/current:', state.clientId);
 
-                    // 检查是否是unknown用户（apiCall中会统一处理弹框）
+                    // 检查是否是 unknown 用户（apiCall 中会统一处理弹框）
                     if (userData.client_id.startsWith('unknown@')) {
                         console.warn('[Init] Detected unknown client, will show username modal via apiCall');
+                    } else {
+                        // 已获取到正确的用户名，检查 USB/IP 和 VPN 状态
+                        await Promise.all([
+                            checkUsbipStatus(),
+                            checkVpnStatus()
+                        ]);
                     }
                 }
             } else {
@@ -203,12 +209,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (error) {
             console.warn('[Init] Error getting current user:', error);
         }
-
-        // 检查状态
-        await Promise.all([
-            checkUsbipStatus(),
-            checkVpnStatus()
-        ]);
 
         // 自动启动 VNC 服务
         try {

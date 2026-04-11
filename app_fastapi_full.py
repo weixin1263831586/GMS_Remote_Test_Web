@@ -1543,6 +1543,12 @@ async def lock_bootloader(
         if not devices:
             return ApiResponse.error("未选择设备", status_code=400)
 
+        # 验证设备 ID 格式，防止命令注入（只允许字母、数字、横杠、冒号、点）
+        valid_device_pattern = re.compile(r'^[a-zA-Z0-9.:-]+$')
+        for device_id in devices:
+            if not valid_device_pattern.match(device_id):
+                return ApiResponse.error(f"无效的设备 ID 格式：{device_id}", status_code=400)
+
         # 固定为锁定操作
         action = "lock"
         config = config_manager.load_config()
@@ -2598,7 +2604,17 @@ async def stop_test(
     user_state = get_or_create_user_state(client_id)
     process_group_id = user_state.get('process_group_id')
 
-    # 立即设置running=False（与Flask版本一致）
+    # 检查是否有正在运行的测试
+    running = user_state.get('running', False)
+    devices_to_release = user_state.get('devices', [])
+
+    if not running and not devices_to_release:
+        return JSONResponse(
+            content={'success': False, 'error': '没有正在运行的测试'},
+            status_code=400
+        )
+
+    # 设置 running=False
     update_user_state_field(client_id, {'running': False})
 
     # 添加停止日志
@@ -2608,18 +2624,19 @@ async def stop_test(
         user_state['logs'] = []
     user_state['logs'].append(log_str)
 
-    # 立即释放设备锁（与Flask版本一致）
-    devices_to_release = user_state.get('devices', [])
-    logger.info(f"[TestStop] Releasing device locks for: {devices_to_release}")
-    for device_id in devices_to_release:
-        device_lock_manager.unlock_device(device_id, client_id)
-
-    # 广播设备解锁状态更新
+    # 释放设备锁
     if devices_to_release:
+        logger.info(f"[TestStop] Releasing device locks for: {devices_to_release}")
+        for device_id in devices_to_release:
+            device_lock_manager.unlock_device(device_id, client_id)
+
+        # 广播设备解锁状态更新
         logger.info(f"[TestStop] Broadcasting device unlock for: {devices_to_release}")
         await broadcast_device_lock_update(devices_to_release)
 
     update_user_state_field(client_id, {'devices': []})
+
+
 
     # 通过SSH杀死测试进程
     config = config_manager.load_config()

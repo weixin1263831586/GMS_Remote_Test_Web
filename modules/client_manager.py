@@ -55,7 +55,14 @@ class ClientManager:
             try:
                 ssh = paramiko.SSHClient()
                 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(client_ip, username=username, password=password, timeout=10)
+                ssh.connect(
+                    client_ip,
+                    username=username,
+                    password=password,
+                    timeout=30,
+                    banner_timeout=30,
+                    auth_timeout=30
+                )
                 stdout = ssh.exec_command('whoami')[1]
                 detected_username = stdout.read().decode().strip().split('\\')[-1]
                 ssh.close()
@@ -75,7 +82,15 @@ class ClientManager:
 
                 return True, detected_username, None
             except Exception as e:
-                return False, '', str(e)
+                error_msg = str(e)
+                # 提供更友好的错误提示
+                if 'banner' in error_msg.lower() or 'timeout' in error_msg.lower():
+                    return False, '', f'SSH 连接超时：请检查 {client_ip} 是否开启 SSH 服务，或网络是否通畅'
+                elif 'authentication' in error_msg.lower() or 'password' in error_msg.lower():
+                    return False, '', 'SSH 认证失败：请检查用户名和密码是否正确'
+                elif 'connection refused' in error_msg.lower():
+                    return False, '', f'SSH 连接被拒绝：{client_ip} 未开启 SSH 服务（端口 22）'
+                return False, '', error_msg
 
         # 检查已保存的映射
         if client_ip in self.client_hosts:
@@ -91,7 +106,9 @@ class ClientManager:
                     client_ip,
                     username=cred['username'],
                     password=cred['password'],
-                    timeout=5
+                    timeout=30,
+                    banner_timeout=30,
+                    auth_timeout=30
                 )
                 stdout = ssh.exec_command('whoami')[1]
                 detected_username = stdout.read().decode().strip().split('\\')[-1]
@@ -120,7 +137,14 @@ class ClientManager:
                     try:
                         ssh = paramiko.SSHClient()
                         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                        ssh.connect(client_ip, username=cred['username'], password=cred['password'], timeout=3)
+                        ssh.connect(
+                            client_ip,
+                            username=cred['username'],
+                            password=cred['password'],
+                            timeout=30,
+                            banner_timeout=30,
+                            auth_timeout=30
+                        )
                         stdout = ssh.exec_command('whoami')[1]
                         real_username = stdout.read().decode().strip()
                         ssh.close()
