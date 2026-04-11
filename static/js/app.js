@@ -432,6 +432,25 @@ function initWebSocket() {
                                 message += `，断开: ${disconnected.join(' ')}`;
                             }
                             showToast(message, 'success');
+
+                            // 检查 USB/IP 设备是否断开，如果是则重置按钮状态
+                            // 注意：使用 oldDevices 检查，因为 state.devices 已被更新
+                            if (state.usbipConnected && disconnected.length > 0) {
+                                // 使用 oldDevices 来检查哪些设备之前是 USB/IP 设备
+                                const usbipDevicesWereConnected = [...oldDevices].some(deviceId => {
+                                    return disconnected.includes(deviceId);
+                                });
+                                if (usbipDevicesWereConnected) {
+                                    // USB/IP 设备已断开，重置按钮状态
+                                    const btn = $('usbip-btn');
+                                    if (btn) {
+                                        btn.textContent = '📱 本地设备';
+                                        btn.disabled = false;
+                                        state.usbipConnected = false;
+                                        console.log('[USB/IP] Button reset due to device disconnect');
+                                    }
+                                }
+                            }
                         }).catch(err => {
                             console.error('Failed to refresh devices:', err);
                         });
@@ -1625,8 +1644,8 @@ async function setupUsbipForward() {
 
             const result = await apiCall('/api/usbip/start', 'POST', {});
 
-            // 只有确认成功后才设置状态
-            if (result.success || result.devices) {
+            // 检查是否成功（支持多种响应格式）
+            if (result.success || result.devices || (result.message && result.message.includes('成功连接'))) {
                 state.usbipConnected = true;
                 btn.textContent = '📱 断开设备';
                 btn.disabled = false;
