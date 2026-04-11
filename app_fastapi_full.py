@@ -1618,8 +1618,8 @@ async def unlock_bootloader(
     else:
         req = DeviceLockRequest(devices=[], action='unlock')
 
-    # 调用lock_bootliner函数
-    return await lock_bootliner(request, None, False, req)
+    # 调用lock_bootloader函数
+    return await lock_bootloader(request, None, False, req)
 
 @app.post("/api/devices/bootloader-status")
 async def check_bootloader_status(req: DeviceActionRequest):
@@ -2351,6 +2351,8 @@ async def run_test_background(
         if not ssh:
             await log_callback("❌ SSH连接失败", 'error')
             update_user_state_field(client_id, {'running': False})
+            # 释放设备锁
+            await release_device_locks(client_id, locked_devices)
             return
 
         await log_callback("✅ SSH 连接成功", 'success')
@@ -2568,14 +2570,10 @@ async def run_test_background(
         # 更新状态为停止
         update_user_state_field(client_id, {'running': False, 'devices': []})
 
-        # 发送test_complete事件
-        if client_id in global_state.websocket_connections:
-            try:
-                await global_state.websocket_connections[client_id].send_json({
-                    'type': 'test_complete'
-                })
-            except Exception as e:
-                logger.debug(f"WebSocket send failed (client disconnected): {e}")
+        # 发送 test_complete 事件
+        await safe_websocket_send(client_id, {
+            'type': 'test_complete'
+        })
 
 @app.post("/api/test/stop")
 async def stop_test(
@@ -6374,17 +6372,13 @@ async def burn_firmware(
                         upload_complete.set()
 
                 # 发送上传开始消息
-                if client_id in global_state.websocket_connections:
-                    try:
-                        await global_state.websocket_connections[client_id].send_json({
-                            'type': 'file_upload_progress',
-                            'filename': firmware_name,
-                            'percentage': 0,
-                            'total_size': firmware_size,
-                            'uploaded_size': 0
-                        })
-                    except (WebSocketDisconnect, ConnectionError):
-                        pass  # WebSocket disconnected, continue with upload
+                await safe_websocket_send(client_id, {
+                    'type': 'file_upload_progress',
+                    'filename': firmware_name,
+                    'percentage': 0,
+                    'total_size': firmware_size,
+                    'uploaded_size': 0
+                })
 
                 # 启动上传线程
                 upload_thread = threading.Thread(target=upload_file_thread)
@@ -6400,20 +6394,16 @@ async def burn_firmware(
 
                     # 只有当百分比变化超过1%且距离上次更新超过2秒时才发送更新
                     if abs(current_percentage - last_percentage) > 1.0 and (current_time - last_update_time) > 2.0:
-                        if client_id in global_state.websocket_connections:
-                            try:
-                                sent_size = int((current_percentage / 100) * firmware_size)
-                                await global_state.websocket_connections[client_id].send_json({
-                                    'type': 'file_upload_progress',
-                                    'filename': firmware_name,
-                                    'percentage': round(current_percentage, 2),
-                                    'total_size': firmware_size,
-                                    'uploaded_size': sent_size
-                                })
-                            except (WebSocketDisconnect, ConnectionError, KeyError):
-                                pass
-                            last_percentage = current_percentage
-                            last_update_time = current_time
+                        sent_size = int((current_percentage / 100) * firmware_size)
+                        await safe_websocket_send(client_id, {
+                            'type': 'file_upload_progress',
+                            'filename': firmware_name,
+                            'percentage': round(current_percentage, 2),
+                            'total_size': firmware_size,
+                            'uploaded_size': sent_size
+                        })
+                        last_percentage = current_percentage
+                        last_update_time = current_time
 
                 # 等待线程完成
                 upload_thread.join(timeout=300)  # 5分钟超时
@@ -6431,22 +6421,18 @@ async def burn_firmware(
                     )
 
                 # 发送上传完成消息
-                if client_id in global_state.websocket_connections:
-                    try:
-                        await global_state.websocket_connections[client_id].send_json({
-                            'type': 'file_upload_progress',
-                            'filename': firmware_name,
-                            'percentage': 100,
-                            'total_size': firmware_size,
-                            'uploaded_size': firmware_size
-                        })
-                        await global_state.websocket_connections[client_id].send_json({
-                            'type': 'log_update',
-                            'log': '✅ 固件文件上传完成',
-                            'log_type': 'success'
-                        })
-                    except (WebSocketDisconnect, ConnectionError, KeyError):
-                        pass
+                await safe_websocket_send(client_id, {
+                    'type': 'file_upload_progress',
+                    'filename': firmware_name,
+                    'percentage': 100,
+                    'total_size': firmware_size,
+                    'uploaded_size': firmware_size
+                })
+                await safe_websocket_send(client_id, {
+                    'type': 'log_update',
+                    'log': '✅ 固件文件上传完成',
+                    'log_type': 'success'
+                })
 
                 # 清理全局进度状态
                 with global_state.firmware_upload_progress_lock:
@@ -6497,7 +6483,7 @@ async def burn_firmware(
                     # 发送上传开始消息
                     if client_id in global_state.websocket_connections:
                         try:
-                            await global_state.websocket_connections[client_id].send_json({
+                            await safe_websocket_send(client_id, {
                                 'type': 'file_upload_progress',
                                 'filename': firmware_name,
                                 'percentage': 0,
@@ -6524,7 +6510,7 @@ async def burn_firmware(
                             if client_id in global_state.websocket_connections:
                                 try:
                                     sent_size = int((current_percentage / 100) * file_size)
-                                    await global_state.websocket_connections[client_id].send_json({
+                                    await safe_websocket_send(client_id, {
                                         'type': 'file_upload_progress',
                                         'filename': firmware_name,
                                         'percentage': round(current_percentage, 2),
@@ -6549,14 +6535,14 @@ async def burn_firmware(
                     # 发送上传完成消息
                     if client_id in global_state.websocket_connections:
                         try:
-                            await global_state.websocket_connections[client_id].send_json({
+                            await safe_websocket_send(client_id, {
                                 'type': 'file_upload_progress',
                                 'filename': firmware_name,
                                 'percentage': 100,
                                 'total_size': file_size,
                                 'uploaded_size': file_size
                             })
-                            await global_state.websocket_connections[client_id].send_json({
+                            await safe_websocket_send(client_id, {
                                 'type': 'log_update',
                                 'log': '✅ 固件文件上传完成',
                                 'log_type': 'success'
@@ -6615,7 +6601,7 @@ async def burn_firmware(
             # 发送开始消息
             if client_id in global_state.websocket_connections:
                 try:
-                    await global_state.websocket_connections[client_id].send_json({
+                    await safe_websocket_send(client_id, {
                         'type': 'log_update',
                         'log': '🔥 开始烧写固件...',
                         'log_type': 'info'
@@ -6664,7 +6650,7 @@ async def burn_firmware(
                                     if firmware_burn_start:
                                         # 只显示错误信息
                                         if any(keyword in line.lower() for keyword in ['error', 'failed', 'fail', '错误', '失败']):
-                                            await global_state.websocket_connections[client_id].send_json({
+                                            await safe_websocket_send(client_id, {
                                                 'type': 'log_update',
                                                 'log': line,
                                                 'log_type': 'error'
@@ -6672,7 +6658,7 @@ async def burn_firmware(
                                         continue
 
                                     # 其他正常日志
-                                    await global_state.websocket_connections[client_id].send_json({
+                                    await safe_websocket_send(client_id, {
                                         'type': 'log_update',
                                         'log': line,
                                         'log_type': 'info'
@@ -6689,7 +6675,7 @@ async def burn_firmware(
                     # 发送进度更新到前端（只更新进度条，不显示在日志）
                     if client_id in global_state.websocket_connections:
                         try:
-                            await global_state.websocket_connections[client_id].send_json({
+                            await safe_websocket_send(client_id, {
                                 'type': 'firmware_progress',
                                 'percentage': current_progress
                             })
@@ -6710,7 +6696,7 @@ async def burn_firmware(
                 # 发送100%完成进度
                 if client_id in global_state.websocket_connections:
                     try:
-                        await global_state.websocket_connections[client_id].send_json({
+                        await safe_websocket_send(client_id, {
                             'type': 'firmware_progress',
                             'percentage': 100
                         })
@@ -6720,7 +6706,7 @@ async def burn_firmware(
                 # 发送完成消息
                 if client_id in global_state.websocket_connections:
                     try:
-                        await global_state.websocket_connections[client_id].send_json({
+                        await safe_websocket_send(client_id, {
                             'type': 'log_update',
                             'log': '✅ 固件烧写完成！',
                             'log_type': 'success'
@@ -6747,14 +6733,14 @@ async def burn_firmware(
                 # 发送失败消息（显示详细错误）
                 if client_id in global_state.websocket_connections:
                     try:
-                        await global_state.websocket_connections[client_id].send_json({
+                        await safe_websocket_send(client_id, {
                             'type': 'log_update',
                             'log': f'❌ 固件烧写失败 (exit code: {exit_status})',
                             'log_type': 'error'
                         })
                         # 如果有详细错误信息，也发送
                         if error_output and len(error_output) < 500:  # 限制长度
-                            await global_state.websocket_connections[client_id].send_json({
+                            await safe_websocket_send(client_id, {
                                 'type': 'log_update',
                                 'log': f'错误详情: {error_output[:200]}',
                                 'log_type': 'error'
@@ -6933,7 +6919,7 @@ async def burn_gsi(request: Request):
             # 发送开始消息
             if client_id in global_state.websocket_connections:
                 try:
-                    await global_state.websocket_connections[client_id].send_json({
+                    await safe_websocket_send(client_id, {
                         'type': 'log_update',
                         'log': f'🔥 开始烧写GSI镜像到 {len(devices)} 台设备...',
                         'log_type': 'info'
@@ -6954,7 +6940,7 @@ async def burn_gsi(request: Request):
                 # 发送设备开始消息
                 if client_id in global_state.websocket_connections:
                     try:
-                        await global_state.websocket_connections[client_id].send_json({
+                        await safe_websocket_send(client_id, {
                             'type': 'log_update',
                             'log': f'📱 正在烧写设备: {device}',
                             'log_type': 'info'
@@ -6982,7 +6968,7 @@ async def burn_gsi(request: Request):
                                 for line in clean_chunk.split('\n'):
                                     line = line.strip()
                                     if line and len(line) > 0:
-                                        await global_state.websocket_connections[client_id].send_json({
+                                        await safe_websocket_send(client_id, {
                                             'type': 'log_update',
                                             'log': line,
                                             'log_type': 'info'
@@ -7017,7 +7003,7 @@ async def burn_gsi(request: Request):
                     # 发送成功消息
                     if client_id in global_state.websocket_connections:
                         try:
-                            await global_state.websocket_connections[client_id].send_json({
+                            await safe_websocket_send(client_id, {
                                 'type': 'log_update',
                                 'log': f'✅ 设备 {device} GSI烧写完成',
                                 'log_type': 'success'
@@ -7046,7 +7032,7 @@ async def burn_gsi(request: Request):
                                     if error_detail and len(error_detail) < 200:
                                         error_msg = error_detail
 
-                            await global_state.websocket_connections[client_id].send_json({
+                            await safe_websocket_send(client_id, {
                                 'type': 'log_update',
                                 'log': f'❌ 设备 {device} GSI烧写失败: {error_msg}',
                                 'log_type': 'error'
