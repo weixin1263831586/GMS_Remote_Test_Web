@@ -1204,7 +1204,7 @@
         async function initClientInfo() {
             try {
                 // 获取IP
-                const ipResp = await fetch('/api/client-info');
+                const ipResp = await fetch('/api/users/current');
                 const ipData = await ipResp.json();
                 clientInfo.ip = ipData.ip;
                 updateClientDisplay();
@@ -1214,7 +1214,7 @@
                 if (savedUser && savedUser !== 'guest' && savedUser !== 'unknown') {
                     clientInfo.username = savedUser;
                 } else {
-                    const detectResp = await fetch('/api/client-info/detect', {
+                    const detectResp = await fetch('/api/users/detect', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ ip: clientInfo.ip })
@@ -1232,7 +1232,7 @@
                 updateClientDisplay();
 
                 // 记录到服务器
-                const recordResp = await fetch('/api/client-info', {
+                const recordResp = await fetch('/api/users/current', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(clientInfo)
@@ -1274,7 +1274,7 @@
             showToast('正在连接...', 'info');
 
             try {
-                const resp = await fetch('/api/client-info/detect', {
+                const resp = await fetch('/api/users/detect', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ip: clientInfo.ip, username, password })
@@ -1289,7 +1289,7 @@
                     showToast(`已识别: ${data.username}`, 'success');
 
                     // 记录到服务器
-                    await fetch('/api/client-info', {
+                    await fetch('/api/users/current', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(clientInfo)

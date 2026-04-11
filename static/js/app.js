@@ -1981,10 +1981,10 @@ async function checkRouting() {
         pingResult.innerHTML = '<div class="ping-testing">🔄 正在测试连通性，请稍候...</div>';
 
         try {
-            // 首先尝试使用新的POST API
+            // 首先尝试使用SSH ping API
             let result;
             try {
-                result = await apiCall('/api/ssh/route/ping', 'POST', {
+                result = await apiCall('/api/ssh/ping', 'POST', {
                     test_host_ip: testHostIp,
                     client_ip: clientIp
                 });
@@ -6195,23 +6195,27 @@ const API_DETAILS_MAP = {
         response: '{ "ai_analysis": "...", "root_cause": "...", "fix_suggestions": [] }',
         usage: 'AI深度分析,找出根本原因'
     },
-    '/api/vnc/status': {
-        title: '获取VNC状态',
-        description: '检查VNC服务运行状态',
+    '/api/desktop/vnc/status': {
+        title: '获取桌面VNC状态',
+        description: '检查桌面VNC服务运行状态',
         params: [],
         response: '{ "running": false, "port": 5900 }',
         usage: '检查VNC服务是否正在运行'
     },
-    '/api/vnc/start': {
-        title: '启动VNC',
-        description: '启动VNC服务',
-        params: [],
-        response: '{ "success": true, "port": 5900 }',
-        usage: '启动VNC服务'
+    '/api/desktop/vnc/start': {
+        title: '启动桌面VNC',
+        description: '启动桌面VNC服务',
+        params: [
+            { name: 'host', type: 'string', required: false, desc: '主机地址 (user@ip)' },
+            { name: 'password', type: 'string', required: false, desc: 'SSH密码' },
+            { name: 'vnc_password', type: 'string', required: false, desc: 'VNC密码' }
+        ],
+        response: '{ "success": true, "port": 5900, "url": "..." }',
+        usage: 'gms-rt-desktop-vnc-start'
     },
-    '/api/vnc/stop': {
-        title: '停止VNC',
-        description: '停止VNC服务',
+    '/api/desktop/vnc/stop': {
+        title: '停止桌面VNC',
+        description: '停止桌面VNC服务',
         params: [],
         response: '{ "success": true, "message": "VNC已停止" }',
         usage: '停止VNC服务'
@@ -6314,6 +6318,16 @@ const API_DETAILS_MAP = {
         params: [],
         response: '{ "success": false, "error": "SSHD需要在Windows客户端手动安装", "install_guide": "安装步骤...", "manual_install": true }',
         usage: '安装Windows SSHD服务'
+    },
+    '/api/ssh/ping': {
+        title: 'SSH连通性测试',
+        description: '测试客户端到测试主机的网络连通性',
+        params: [
+            { name: 'test_host_ip', type: 'string', required: true, desc: '测试主机IP' },
+            { name: 'client_ip', type: 'string', required: true, desc: '客户端IP' }
+        ],
+        response: '{ "success": true, "reachable": true, "latency": "<1ms", "route_commands": {...} }',
+        usage: 'gms-rt-network-ping'
     },
     '/api/ssh/route': {
         title: '检查路由',
