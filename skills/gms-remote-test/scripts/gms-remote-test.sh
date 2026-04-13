@@ -1239,12 +1239,12 @@ gms-rt-system-websocket() {
 }
 
 # Download skills ZIP
-gms-rt-system-skills-download() {
+gms-rt-system-skills() {
     local skill_name="${1:-gms-remote-test}"
     echo "📁 Downloading skills directory as ZIP..."
-    echo "URL: ${API_BASE}/system/skills/download?skill_name=${skill_name}"
+    echo "URL: ${API_BASE}/system/skills?skill_name=${skill_name}"
     echo "Saving to: ${skill_name}-skills.zip"
-    curl -o "${skill_name}-skills.zip" "${API_BASE}/system/skills/download?skill_name=${skill_name}"
+    curl -o "${skill_name}-skills.zip" "${API_BASE}/system/skills?skill_name=${skill_name}"
     if [ $? -eq 0 ]; then
         success "Skills ZIP downloaded successfully"
         ls -lh "${skill_name}-skills.zip"
@@ -1265,7 +1265,7 @@ ${BLUE}GMS Remote Test API Helper (FastAPI Port 5001)${NC}
 ${YELLOW}System:${NC}
   gms-rt-system-health             - Check server health
   gms-rt-system-docs               - Get API documentation
-  gms-rt-system-skills-download    - Download skills directory as ZIP
+  gms-rt-system-skills             - Download skills directory as ZIP
 
 ${YELLOW}Configuration:${NC}
   gms-rt-config-validate    - Validate configuration

@@ -3509,7 +3509,7 @@ async def download_report(request: Request, report_timestamp: str):
             status_code=500
         )
 
-@app.get("/api/system/skills/download")
+@app.get("/api/system/skills")
 async def download_skills_zip(request: Request, skill_name: str = Query("gms-remote-test", description="技能名称")):
     """下载指定技能目录的 zip 文件
 
@@ -8224,7 +8224,7 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
     # 完整curl命令
     if method == 'GET':
         # 特殊处理文件下载端点
-        if '/skills/download' in path:
+        if '/skills' in path:
             help_text += f'curl -s -OJ "{base_url}{path}"\n\n'
         else:
             help_text += f'curl -s "{base_url}{path}"\n\n'

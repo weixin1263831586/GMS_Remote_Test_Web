@@ -704,11 +704,11 @@ API_DOCS_LIST = [
     # ==================== 技能管理 ====================
     {
         "method": "GET",
-        "path": "/api/system/skills/download",
+        "path": "/api/system/skills",
         "description": "下载技能ZIP压缩包（默认下载gms-remote-test技能包）",
         "params": [],
         "category": "system",
-        "skill": "gms-rt-system-skills-download"
+        "skill": "gms-rt-system-skills"
     },
 
     # ==================== API文档 ====================

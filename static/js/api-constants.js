@@ -46,7 +46,7 @@ const API_CATEGORIES = {
     '/api/files': 'file',
     '/api/burn': 'burn',
     '/api/system/websocket/': 'system',
-    '/api/system/skills/download': 'system'
+    '/api/system/skills': 'system'
 };
 
 /**
@@ -247,14 +247,14 @@ const API_DETAILS_MAP = {
         response: 'WebSocket连接',
         usage: '实时通信'
     },
-    '/api/system/skills/download': {
+    '/api/system/skills': {
         title: '下载技能包',
         description: '下载技能ZIP压缩包（默认下载gms-remote-test技能包）',
         method: 'GET',
         params: [],
         response: 'ZIP文件下载',
         usage: '下载技能包用于离线部署或备份',
-        curl_example: 'curl -s -OJ "http://172.16.14.233:5001/api/system/skills/download"'
+        curl_example: 'curl -s -OJ "http://172.16.14.233:5001/api/system/skills"'
     },
     '/api/system/docs': {
         title: '获取API文档',
