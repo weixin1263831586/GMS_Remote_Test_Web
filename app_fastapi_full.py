@@ -7830,13 +7830,10 @@ def generate_skill_name(api_path: str) -> str:
     - 添加gms-rt-前缀
 
     特殊情况:
-    - / → gms-rt-docs
-    - /api/system/health → gms-rt-health
+    - / → gms-rt-docs (根路径特殊处理)
     """
     if api_path == "/":
         return f"{SKILL_COMMAND_PREFIX}docs"
-    if api_path == "/api/system/health":
-        return f"{SKILL_COMMAND_PREFIX}health"
 
     # 移除/api/前缀
     path_without_api = api_path.replace("/api/", "")

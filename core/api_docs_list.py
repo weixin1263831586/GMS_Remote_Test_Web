@@ -30,7 +30,7 @@ API_DOCS_LIST = [
         "description": "系统管理",
         "params": [],
         "category": "health",
-        "skill": f"{SKILL_COMMAND_PREFIX}health"
+        "skill": f"{SKILL_COMMAND_PREFIX}system-health"
     },
 
     # ==================== 配置管理 ====================
