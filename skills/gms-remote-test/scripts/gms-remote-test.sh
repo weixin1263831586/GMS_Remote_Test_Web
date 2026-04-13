@@ -448,8 +448,22 @@ gms-rt-reports-list() {
     echo "📋 Listing all reports..."
     local response=$(api_call "/reports/list")
     local count=$(echo "$response" | jq '.reports | length')
+
+    if [ "$count" -eq 0 ]; then
+        warning "No reports found"
+        return
+    fi
+
     echo "Found $count report(s):"
-    echo "$response" | jq -r '.reports[] | "\(.timestamp // "N/A") | \(.client_id // "N/A") | \(.test_type // "N/A") | \(.result // "N/A")"'
+    echo ""
+    printf "%-30s %-20s %-8s %-8s %-8s %-8s %-10s\n" "CLIENT" "TYPE" "PASS" "FAIL" "TOTAL" "RATE%" "TIMESTAMP"
+    printf "%-30s %-20s %-8s %-8s %-8s %-8s %-10s\n" "------" "----" "----" "----" "-----" "-----" "---------"
+
+    echo "$response" | jq -r '.reports[] |
+        "\(.client_id // "N/A") \(.test_type // "N/A") \(.pass // 0) \(.fail // 0) \(.total // 0) \(.pass_rate // "N/A") \(.timestamp // "N/A")"' |
+        while read -r client type pass fail total rate timestamp; do
+            printf "%-30s %-20s %-8s %-8s %-8s %-10s %s\n" "$client" "$type" "$pass" "$fail" "$total" "$rate" "$timestamp"
+        done
 }
 
 # Get report files
@@ -631,64 +645,6 @@ gms-rt-vpn-status() {
 }
 
 # ==============================================================================
-# Firmware Burning Commands
-# ==============================================================================
-
-# Burn firmware
-gms-rt-burn-firmware() {
-    local firmware_path="$1"
-    local device_id="$2"
-    [ -z "$firmware_path" ] && error "Firmware path required. Usage: gms-rt-burn-firmware <firmware.img> <device_id>"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-burn-firmware <firmware.img> <device_id>"
-    [ ! -f "$firmware_path" ] && error "Firmware file not found: $firmware_path"
-    echo "🔥 Burning firmware to $device_id..."
-    local response=$(curl -s -F "firmware=@$firmware_path" -F "device_id=$device_id" "${API_BASE}/burn/firmware")
-    if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then
-        success "Firmware burning started"
-        echo "$response" | jq '.'
-    else
-        warning "Burn command sent (check server for details)"
-        echo "$response"
-    fi
-}
-
-# Burn GSI image
-gms-rt-burn-gsi() {
-    local gsi_path="$1"
-    local device_id="$2"
-    [ -z "$gsi_path" ] && error "GSI path required. Usage: gms-rt-burn-gsi <gsi.img> <device_id>"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-burn-gsi <gsi.img> <device_id>"
-    [ ! -f "$gsi_path" ] && error "GSI file not found: $gsi_path"
-    echo "🔥 Burning GSI to $device_id..."
-    local response=$(curl -s -F "gsi=@$gsi_path" -F "device_id=$device_id" "${API_BASE}/burn/gsi")
-    if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then
-        success "GSI burning started"
-        echo "$response" | jq '.'
-    else
-        warning "Burn command sent (check server for details)"
-        echo "$response"
-    fi
-}
-
-# Burn serial number
-gms-rt-burn-serial() {
-    local device_id="$1"
-    local serial="$2"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-burn-serial <device_id> <serial>"
-    [ -z "$serial" ] && error "Serial required. Usage: gms-rt-burn-serial <device_id> <serial>"
-    check_jq
-    echo "🔥 Burning serial $serial to $device_id..."
-    local data="{\"device_id\":\"$device_id\",\"serial\":\"$serial\"}"
-    local response=$(api_call "/burn/serial" "POST" "$data")
-    if echo "$response" | jq -e '.success' > /dev/null; then
-        success "Serial burned successfully"
-        echo "$response" | jq '.'
-    else
-        error "Failed to burn serial"
-    fi
-}
-
-# ==============================================================================
 # System Commands
 # ==============================================================================
 
@@ -711,11 +667,6 @@ gms-rt-system-docs() {
 # ==============================================================================
 
 # Validate configuration
-gms-rt-config-validate() {
-    check_jq
-    echo "✅ Validating configuration..."
-    api_call "/config/validate" | jq '.'
-}
 
 # Get config values
 gms-rt-config-values() {
@@ -1057,18 +1008,6 @@ gms-rt-desktop-vnc-stop() {
 }
 
 # Validate desktop
-gms-rt-desktop-validate() {
-    local host="$1"
-    local password="${2:-}"
-    [ -z "$host" ] && error "Host required. Usage: gms-rt-desktop-validate <host> [password]"
-    check_jq
-    echo "✅ Validating desktop: $host..."
-    local data="{\"host\":\"$host\""
-    [ -n "$password" ] && data="$data,\"password\":\"$password\""
-    data="$data}"
-    local response=$(api_call "/desktop/validate" "POST" "$data")
-    echo "$response" | jq '.'
-}
 
 # ==============================================================================
 # USB/IP Commands
@@ -1099,11 +1038,6 @@ gms-rt-adb-forward-stop() {
 }
 
 # Get USB/IP status
-gms-rt-usbip-status() {
-    check_jq
-    echo "📡 Getting USB/IP status..."
-    api_call "/usbip/status" | jq '.'
-}
 
 # Auto install USB/IP
 gms-rt-usbip-auto-install() {
@@ -1129,34 +1063,6 @@ gms-rt-ssh-sshd-install() {
     check_jq
     echo "🔧 Installing SSHD..."
     local response=$(api_call "/ssh/sshd-install" "POST" "{}")
-    echo "$response" | jq '.'
-}
-
-# Check SSH route
-# ==============================================================================
-# VPN Commands
-# ==============================================================================
-
-# Get VPN status
-gms-rt-vpn-status() {
-    check_jq
-    echo "📡 Getting VPN status..."
-    api_call "/vpn/status" | jq '.'
-}
-
-# Connect VPN
-gms-rt-vpn-connect() {
-    check_jq
-    echo "🔗 Connecting to VPN..."
-    local response=$(api_call "/vpn/connect" "POST" "{}")
-    echo "$response" | jq '.'
-}
-
-# Disconnect VPN
-gms-rt-vpn-disconnect() {
-    check_jq
-    echo "🔌 Disconnecting VPN..."
-    local response=$(api_call "/vpn/disconnect" "POST" "{}")
     echo "$response" | jq '.'
 }
 
@@ -1303,17 +1209,22 @@ gms-rt-burn-gsi() {
     fi
 }
 
-# Burn serial
+# Burn serial number
 gms-rt-burn-serial() {
     local device_id="$1"
-    local new_serial="$2"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-burn-serial <device_id> <new_serial>"
-    [ -z "$new_serial" ] && error "New serial required. Usage: gms-rt-burn-serial <device_id> <new_serial>"
+    local serial="$2"
+    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-burn-serial <device_id> <serial>"
+    [ -z "$serial" ] && error "Serial required. Usage: gms-rt-burn-serial <device_id> <serial>"
     check_jq
-    echo "🔥 Burning serial $new_serial to $device_id..."
-    local data="{\"device_id\":\"$device_id\",\"new_serial\":\"$new_serial\"}"
+    echo "🔥 Burning serial $serial to $device_id..."
+    local data="{\"device_id\":\"$device_id\",\"serial\":\"$serial\"}"
     local response=$(api_call "/burn/serial" "POST" "$data")
-    echo "$response" | jq '.'
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        success "Serial burned successfully"
+        echo "$response" | jq '.'
+    else
+        error "Failed to burn serial"
+    fi
 }
 
 # ==============================================================================
