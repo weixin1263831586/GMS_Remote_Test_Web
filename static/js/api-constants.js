@@ -16,7 +16,9 @@
  * Used for grouping and filtering endpoints in the API documentation
  */
 const API_CATEGORIES = {
-    '/api/system/health': 'health',
+    '/api/system/health': 'system',
+    '/api/system/help': 'system',
+    '/api/system/docs': 'system',
     '/api/config/read': 'config',
     '/api/config/update': 'config',
     '/api/config/validate': 'config',
@@ -43,8 +45,8 @@ const API_CATEGORIES = {
     '/api/usbip': 'usbip',
     '/api/files': 'file',
     '/api/burn': 'burn',
-    '/api/system/websocket/': 'health',
-    '/api/system/skills/download': 'health'
+    '/api/system/websocket/': 'system',
+    '/api/system/skills/download': 'system'
 };
 
 /**
@@ -80,7 +82,7 @@ function getCategoryName(category) {
         'usbip': '📡 USB/IP',
         'burn': '🔥 固件烧写',
         'file': '📁 文件管理',
-        'health': '💚 系统管理',
+        'system': '💚 系统管理',
         'other': '📋 其他'
     };
     return names[category] || '📋 其他';
@@ -105,7 +107,7 @@ function getCategoryOrder(category) {
         'usbip': 9,
         'burn': 10,
         'file': 11,
-        'health': 13,
+        'system': 13,
         'other': 999
     };
     return order[category] || 999;
@@ -261,6 +263,14 @@ const API_DETAILS_MAP = {
         params: [],
         response: '{ "apis": [...] }',
         usage: '查看所有可用API'
+    },
+    '/api/system/help': {
+        title: '获取API帮助',
+        description: '获取API帮助信息（纯文本格式）',
+        method: 'GET',
+        params: [],
+        response: 'GMS Auto Test API List\n\nTotal: 72 APIs...',
+        usage: '查看API列表和使用示例'
     },
     '/api/config/validate': {
         title: '验证配置',
