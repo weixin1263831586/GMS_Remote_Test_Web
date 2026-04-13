@@ -92,7 +92,7 @@ convert_devices_to_json() {
 # Get device info for multiple devices (parallel)
 gms-rt-devices-info() {
     local devices="$1"
-    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-info DEVICE1 [DEVICE2 ...]"
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-info DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     echo "📱 获取设备信息..."
 
@@ -111,7 +111,7 @@ gms-rt-devices-info() {
 # Reboot multiple devices (parallel)
 gms-rt-devices-reboot() {
     local devices="$1"
-    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-reboot DEVICE1 [DEVICE2 ...]"
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-reboot DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     echo "🔄 重启设备..."
 
@@ -129,7 +129,7 @@ gms-rt-devices-reboot() {
 # Remount multiple devices (parallel)
 gms-rt-devices-remount() {
     local devices="$1"
-    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-remount DEVICE1 [DEVICE2 ...]"
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-remount DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     echo "🔄 重新挂载设备..."
 
@@ -147,7 +147,7 @@ gms-rt-devices-remount() {
 # Lock bootloader
 gms-rt-devices-bootloader-lock() {
     local devices="$1"
-    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-bootloader-lock DEVICE1 [DEVICE2 ...]"
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-lock DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     echo "🔒 锁定Bootloader..."
 
@@ -165,7 +165,7 @@ gms-rt-devices-bootloader-lock() {
 # Unlock bootloader
 gms-rt-devices-bootloader-unlock() {
     local devices="$1"
-    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-bootloader-unlock DEVICE1 [DEVICE2 ...]"
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-unlock DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     echo "🔓 解锁Bootloader..."
 
@@ -183,7 +183,7 @@ gms-rt-devices-bootloader-unlock() {
 # Check bootloader status
 gms-rt-devices-bootloader-status() {
     local devices="$1"
-    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-bootloader-status DEVICE1 [DEVICE2 ...]"
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-status DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     echo "🔐 检查Bootloader状态..."
 
@@ -205,7 +205,7 @@ gms-rt-devices-bootloader-status() {
 # Validate desktop host
 gms-rt-desktop-validate() {
     local host="$1"
-    [ -z "$host" ] && error "Host required. Usage: gms-rt-desktop-validate <host>"
+    [ -z "$host" ] && { error "Host required. Usage: gms-rt-desktop-validate <host>"; return 1; }
     check_jq
     echo "🔍 Validating desktop host $host..."
     local data="{\"host\":\"$host\"}"
@@ -469,7 +469,7 @@ gms-rt-reports-list() {
 # Get report files
 gms-rt-reports-files() {
     local timestamp="$1"
-    [ -z "$timestamp" ] && error "Timestamp required. Usage: gms-rt-reports-files <TIMESTAMP>"
+    [ -z "$timestamp" ] && { error "Timestamp required. Usage: gms-rt-reports-files <TIMESTAMP>"; return 1; }
     check_jq
     echo "📄 Fetching report files for $timestamp..."
     api_call "/reports/files/$timestamp" | jq '.'
@@ -483,7 +483,7 @@ gms-rt-reports-files() {
 gms-rt-config-update() {
     local key="$1"
     local value="$2"
-    [ -z "$key" ] && error "Key required. Usage: gms-rt-config-update <key> <value>"
+    [ -z "$key" ] && { error "Key required. Usage: gms-rt-config-update <key> <value>"; return 1; }
     check_jq
     echo "⚙️  Updating configuration: $key = $value"
     local data="{\"$key\":\"$value\"}"
@@ -517,7 +517,7 @@ gms-rt-client-info() {
 gms-rt-client-record() {
     local ip="$1"
     local username="$2"
-    [ -z "$ip" ] && error "IP required. Usage: gms-rt-client-record <ip> [username]"
+    [ -z "$ip" ] && { error "IP required. Usage: gms-rt-client-record <ip> [username]"; return 1; }
     check_jq
     echo "📝 Recording client info..."
     local data="{\"ip\":\"$ip\""
@@ -537,7 +537,7 @@ gms-rt-client-detect() {
     local ip="$1"
     local username="$2"
     local password="$3"
-    [ -z "$ip" ] && error "IP required. Usage: gms-rt-client-detect <ip> [username] [password]"
+    [ -z "$ip" ] && { error "IP required. Usage: gms-rt-client-detect <ip> [username] [password]"; return 1; }
     check_jq
     echo "🔍 Detecting client username..."
     local data="{\"ip\":\"$ip\""
@@ -564,8 +564,8 @@ gms-rt-ssh-route() {
 gms-rt-ssh-ping() {
     local test_host_ip="$1"
     local client_ip="$2"
-    [ -z "$test_host_ip" ] && error "Test host IP required. Usage: gms-rt-network-ping <test_host_ip> <client_ip>"
-    [ -z "$client_ip" ] && error "Client IP required. Usage: gms-rt-network-ping <test_host_ip> <client_ip>"
+    [ -z "$test_host_ip" ] && { error "Test host IP required. Usage: gms-rt-network-ping <test_host_ip> <client_ip>"; return 1; }
+    [ -z "$client_ip" ] && { error "Client IP required. Usage: gms-rt-network-ping <test_host_ip> <client_ip>"; return 1; }
     check_jq
     echo "🌐 Testing SSH connectivity..."
     local data="{\"test_host_ip\":\"$test_host_ip\", \"client_ip\":\"$client_ip\"}"
@@ -711,7 +711,7 @@ gms-rt-users-detect() {
 # Set username
 gms-rt-users-set-username() {
     local username="$1"
-    [ -z "$username" ] && error "Username required. Usage: gms-rt-users-set-username <username>"
+    [ -z "$username" ] && { error "Username required. Usage: gms-rt-users-set-username <username>"; return 1; }
     check_jq
     echo "👤 Setting username to $username..."
     local data="{\"username\":\"$username\"}"
@@ -750,9 +750,9 @@ gms-rt-devices-connect-wifi() {
     local ssid="$2"
     local password="$3"
 
-    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"
-    [ -z "$ssid" ] && error "SSID必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"
-    [ -z "$password" ] && error "密码必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
+    [ -z "$ssid" ] && { error "SSID必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
+    [ -z "$password" ] && { error "密码必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
 
     check_jq
     echo "📶 连接WiFi: $ssid..."
@@ -773,7 +773,7 @@ gms-rt-devices-connect-wifi() {
 # Execute shell command
 gms-rt-devices-shell() {
     local device_id="$1"
-    [ -z "$device_id" ] && error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID"
+    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID"; return 1; }
     check_jq
     echo "💻 打开设备Shell: $device_id..."
     local data="{\"serial_no\":\"$device_id\"}"
@@ -784,7 +784,7 @@ gms-rt-devices-shell() {
 # Show device screen
 gms-rt-devices-screen() {
     local devices="$1"
-    [ -z "$devices" ] && error "设备ID必填. 用法: gms-rt-devices-screen DEVICE1 [DEVICE2 ...]"
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-screen DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     echo "📺 显示设备屏幕..."
 
@@ -797,7 +797,7 @@ gms-rt-devices-screen() {
 # Terminal push command
 gms-rt-terminal-push() {
     local command="$1"
-    [ -z "$command" ] && error "Command required. Usage: gms-rt-terminal-push <command>"
+    [ -z "$command" ] && { error "Command required. Usage: gms-rt-terminal-push <command>"; return 1; }
     check_jq
     echo "⌨️  Pushing command to terminal..."
     local data="{\"command\":\"$command\"}"
@@ -809,7 +809,7 @@ gms-rt-terminal-push() {
 gms-rt-opengrok-search() {
     local query="$1"
     local full="${2:-false}"
-    [ -z "$query" ] && error "Query required. Usage: gms-rt-opengrok-search <query> [full]"
+    [ -z "$query" ] && { error "Query required. Usage: gms-rt-opengrok-search <query> [full]"; return 1; }
     check_jq
     echo "🔍 Searching OpenGrok for: $query..."
     local data="{\"query\":\"$query\",\"full\":$full}"
@@ -873,7 +873,7 @@ gms-rt-test-logs-current() {
 # Batch download logs
 gms-rt-test-logs-batch() {
     local files="$1"
-    [ -z "$files" ] && error "Files required. Usage: gms-rt-test-logs-batch <FILES_ARRAY>"
+    [ -z "$files" ] && { error "Files required. Usage: gms-rt-test-logs-batch <FILES_ARRAY>"; return 1; }
     check_jq
     echo "📦 Batch downloading logs..."
     local data="{\"files\":$files}"
@@ -910,7 +910,7 @@ gms-rt-test-logs-stream() {
 gms-rt-reports-analyze-source() {
     local test_name="$1"
     local error_message="${2:-}"
-    [ -z "$test_name" ] && error "Test name required. Usage: gms-rt-reports-analyze-source <test_name> [error_message]"
+    [ -z "$test_name" ] && { error "Test name required. Usage: gms-rt-reports-analyze-source <test_name> [error_message]"; return 1; }
     check_jq
     echo "🔍 Analyzing test source: $test_name..."
     local data="{\"test_name\":\"$test_name\""
@@ -923,7 +923,7 @@ gms-rt-reports-analyze-source() {
 # View report
 gms-rt-reports-view() {
     local report_timestamp="$1"
-    [ -z "$report_timestamp" ] && error "Report timestamp required. Usage: gms-rt-reports-view <report_timestamp>"
+    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-view <report_timestamp>"; return 1; }
     check_jq
     echo "📊 Viewing report: $report_timestamp..."
     api_call "/reports/view?report_timestamp=$report_timestamp" | jq '.'
@@ -932,7 +932,7 @@ gms-rt-reports-view() {
 # Download report
 gms-rt-reports-download() {
     local report_timestamp="$1"
-    [ -z "$report_timestamp" ] && error "Report timestamp required. Usage: gms-rt-reports-download <report_timestamp>"
+    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-download <report_timestamp>"; return 1; }
     check_jq
     echo "📥 Downloading report: $report_timestamp..."
     api_call "/reports/download/$report_timestamp" -o "report_${report_timestamp}.zip"
@@ -941,7 +941,7 @@ gms-rt-reports-download() {
 # Delete report
 gms-rt-reports-delete() {
     local report_timestamp="$1"
-    [ -z "$report_timestamp" ] && error "Report timestamp required. Usage: gms-rt-reports-delete <report_timestamp>"
+    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-delete <report_timestamp>"; return 1; }
     check_jq
     echo "🗑️  Deleting report: $report_timestamp..."
     local data="{\"report_timestamp\":\"$report_timestamp\"}"
@@ -953,7 +953,7 @@ gms-rt-reports-delete() {
 gms-rt-reports-analyze() {
     local report_timestamp="$1"
     local use_ai="${2:-true}"
-    [ -z "$report_timestamp" ] && error "Report timestamp required. Usage: gms-rt-reports-analyze <report_timestamp> [use_ai]"
+    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-analyze <report_timestamp> [use_ai]"; return 1; }
     check_jq
     echo "🔍 Analyzing report: $report_timestamp..."
     local data="{\"report_timestamp\":\"$report_timestamp\",\"use_ai\":$use_ai}"
@@ -964,7 +964,7 @@ gms-rt-reports-analyze() {
 # AI analyze report
 gms-rt-reports-analyze-ai() {
     local report_timestamp="$1"
-    [ -z "$report_timestamp" ] && error "Report timestamp required. Usage: gms-rt-reports-analyze-ai <report_timestamp>"
+    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-analyze-ai <report_timestamp>"; return 1; }
     check_jq
     echo "🤖 AI analyzing report: $report_timestamp..."
     local data="{\"report_timestamp\":\"$report_timestamp\"}"
@@ -1017,8 +1017,8 @@ gms-rt-desktop-vnc-stop() {
 gms-rt-adb-forward-start() {
     local device_host="$1"
     local device_password="$2"
-    [ -z "$device_host" ] && error "Device host required. Usage: gms-rt-adb-forward-start <device_host> <device_password>"
-    [ -z "$device_password" ] && error "Device password required. Usage: gms-rt-adb-forward-start <device_host> <device_password>"
+    [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-adb-forward-start <device_host> <device_password>"; return 1; }
+    [ -z "$device_password" ] && { error "Device password required. Usage: gms-rt-adb-forward-start <device_host> <device_password>"; return 1; }
     check_jq
     echo "🔌 Starting ADB forward..."
     local data="{\"device_host\":\"$device_host\",\"device_password\":\"$device_password\"}"
@@ -1029,7 +1029,7 @@ gms-rt-adb-forward-start() {
 # Stop ADB forward
 gms-rt-adb-forward-stop() {
     local device_host="$1"
-    [ -z "$device_host" ] && error "Device host required. Usage: gms-rt-adb-forward-stop <device_host>"
+    [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-adb-forward-stop <device_host>"; return 1; }
     check_jq
     echo "🛑 Stopping ADB forward..."
     local data="{\"device_host\":\"$device_host\"}"
@@ -1074,8 +1074,8 @@ gms-rt-ssh-sshd-install() {
 gms-rt-files-upload() {
     local file_path="$1"
     local target_path="${2:-}"
-    [ -z "$file_path" ] && error "File path required. Usage: gms-rt-files-upload <file_path> [target_path]"
-    [ ! -f "$file_path" ] && error "File not found: $file_path"
+    [ -z "$file_path" ] && { error "File path required. Usage: gms-rt-files-upload <file_path> [target_path]"; return 1; }
+    [ ! -f "$file_path" ] && { error "File not found: $file_path"; return 1; }
 
     check_jq
     echo "📤 Uploading file: $file_path..."
@@ -1096,9 +1096,9 @@ gms-rt-files-upload() {
 gms-rt-files-install() {
     local file_path="$1"
     local device_id="$2"
-    [ -z "$file_path" ] && error "File path required. Usage: gms-rt-files-install <file_path> <device_id>"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-files-install <file_path> <device_id>"
-    [ ! -f "$file_path" ] && error "File not found: $file_path"
+    [ -z "$file_path" ] && { error "File path required. Usage: gms-rt-files-install <file_path> <device_id>"; return 1; }
+    [ -z "$device_id" ] && { error "Device ID required. Usage: gms-rt-files-install <file_path> <device_id>"; return 1; }
+    [ ! -f "$file_path" ] && { error "File not found: $file_path"; return 1; }
 
     check_jq
     echo "📦 Installing APK: $file_path to $device_id..."
@@ -1139,9 +1139,9 @@ gms-rt-burn-firmware() {
     local devices="$2"
     local wipe_data="${3:-true}"
 
-    [ -z "$firmware_path" ] && error "Firmware path required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data]"
-    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data]"
-    [ ! -f "$firmware_path" ] && error "Firmware file not found: $firmware_path"
+    [ -z "$firmware_path" ] && { error "Firmware path required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data]"; return 1; }
+    [ -z "$devices" ] && { error "Devices required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data]"; return 1; }
+    [ ! -f "$firmware_path" ] && { error "Firmware file not found: $firmware_path"; return 1; }
 
     echo "🔥 Burning firmware: $firmware_path to devices: $devices..."
     echo "⏳ Uploading firmware (this may take a few minutes)..."
@@ -1187,25 +1187,58 @@ gms-rt-burn-gsi() {
     local devices="$2"
     local wipe_data="${3:-true}"
 
-    [ -z "$gsi_path" ] && error "GSI path required. Usage: gms-rt-burn-gsi <gsi_path> <devices> [wipe_data]"
-    [ -z "$devices" ] && error "Devices required. Usage: gms-rt-burn-gsi <gsi_path> <devices> [wipe_data]"
-    [ ! -f "$gsi_path" ] && error "GSI file not found: $gsi_path"
+    [ -z "$gsi_path" ] && { error "GSI path required. Usage: gms-rt-burn-gsi <gsi_path> <devices> [wipe_data]"; return 1; }
+    [ -z "$devices" ] && { error "Devices required. Usage: gms-rt-burn-gsi <gsi_path> <devices> [wipe_data]"; return 1; }
+    [ ! -f "$gsi_path" ] && { error "GSI file not found: $gsi_path"; return 1; }
 
     check_jq
     echo "🔥 Burning GSI: $gsi_path to devices: $devices..."
-    echo "⏳ Uploading and burning (this may take a few minutes)..."
+
+    # Get absolute path of GSI image
+    local absolute_path=$(realpath "$gsi_path")
+
+    # Get absolute path of burn script (on local machine)
+    # Use fixed path relative to web_app directory
+    local local_script="/home/hcq/GMS_Auto_Test/web_app/scripts/run_GSI_Burn.sh"
+
+    # Check if script exists
+    if [ ! -f "$local_script" ]; then
+        error "GSI burn script not found: $local_script"
+        return 1
+    fi
+
+    # Convert devices to JSON array if needed
+    local devices_json
+    if [[ "$devices" == \[* ]]; then
+        devices_json="$devices"
+    else
+        devices_json=$(echo "$devices" | jq -R -c 'split(" ") | map(select(length>0))')
+    fi
+
+    # Build JSON payload with script_path
+    local json_payload=$(jq -n \
+        --arg system_img "$absolute_path" \
+        --arg script_path "$local_script" \
+        --argjson devices "$devices_json" \
+        '{system_img: $system_img, script_path: $script_path, devices: $devices}')
 
     local response=$(curl -s -X POST "${API_BASE}/burn/gsi" \
-        -F "gsi_image=@$gsi_path" \
-        -F "devices=$devices" \
-        -F "wipe_data=$wipe_data")
+        -H "Content-Type: application/json" \
+        -d "$json_payload")
 
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "GSI burn completed successfully"
-        echo "$response" | jq '.'
+        echo ""
+        echo "$response" | jq -r '.results[]? | "📱 \(.device): ✅ Success"' 2>/dev/null
+        echo ""
+        echo "📋 Detailed output:"
+        echo "$response" | jq -r '.results[]? | .output' 2>/dev/null | head -20
+        echo "..."
+        echo "(Full output available in response JSON)"
     else
         error "GSI burn failed"
         echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        return 1
     fi
 }
 
@@ -1213,8 +1246,8 @@ gms-rt-burn-gsi() {
 gms-rt-burn-serial() {
     local device_id="$1"
     local serial="$2"
-    [ -z "$device_id" ] && error "Device ID required. Usage: gms-rt-burn-serial <device_id> <serial>"
-    [ -z "$serial" ] && error "Serial required. Usage: gms-rt-burn-serial <device_id> <serial>"
+    [ -z "$device_id" ] && { error "Device ID required. Usage: gms-rt-burn-serial <device_id> <serial>"; return 1; }
+    [ -z "$serial" ] && { error "Serial required. Usage: gms-rt-burn-serial <device_id> <serial>"; return 1; }
     check_jq
     echo "🔥 Burning serial $serial to $device_id..."
     local data="{\"device_id\":\"$device_id\",\"serial\":\"$serial\"}"

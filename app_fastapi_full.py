@@ -1487,7 +1487,7 @@ async def lock_bootloader(
     help: bool = Query(False),
     req: DeviceLockRequest = Body(None)
 ):
-    """锁定设备Bootloader（使用run_Device_Lock.sh脚本）"""
+    """锁定设备Bootloader"""
     # 检查是否需要显示帮助
     if help:
         help_text = generate_per_api_help_text("POST", "/api/devices/bootloader-lock")
@@ -1522,8 +1522,8 @@ async def lock_bootloader(
         with ssh_manager.connection(config) as ssh:
             results = []
 
-            # 本地脚本路径 - 使用tools目录
-            local_script = os.path.join(os.path.dirname(__file__), 'tools', 'run_Device_Lock.sh')
+            # 本地脚本路径
+            local_script = os.path.join(os.path.dirname(__file__), 'scripts', 'run_Device_Lock.sh')
             # 远程脚本路径
             remote_script = f"/home/{config['ubuntu_user']}/GMS-Suite/run_Device_Lock.sh"
 
@@ -1583,7 +1583,7 @@ async def unlock_bootloader(
     help: bool = Query(False),
     req: DeviceLockRequest = Body(None)
 ):
-    """解锁设备Bootloader（使用run_Device_Lock.sh脚本）"""
+    """解锁设备Bootloader"""
     # 强制设置action为unlock
     if req:
         req.action = 'unlock'
@@ -6986,8 +6986,8 @@ async def burn_gsi(request: Request):
             # 1. 上传必要文件到测试主机
             logger.info("[GSI Burn] Uploading necessary files...")
 
-            # 上传脚本（从tools目录）
-            local_script = os.path.join(os.path.dirname(__file__), "tools", "run_GSI_Burn.sh")
+            # 上传脚本
+            local_script = os.path.join(os.path.dirname(__file__), "scripts", "run_GSI_Burn.sh")
             remote_script = f"/home/{config['ubuntu_user']}/GMS-Suite/run_GSI_Burn.sh"
 
             if os.path.exists(local_script):
