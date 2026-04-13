@@ -2391,11 +2391,6 @@ async def run_test_background(
                 test_type_lower = type_mapping.get(detected_type, detected_type)
                 await log_callback(f"🔍 从套件路径检测到测试类型: {test_type_lower}", 'info')
 
-        # 如果仍然没有test_type，使用默认值
-        if not test_type_lower:
-            test_type_lower = 'cts'
-            await log_callback(f"⚠️ 未检测到测试类型，使用默认值: cts", 'warning')
-
         # 修复：只有当test_params中没有local_server时才从config读取
         local_server = test_params.get('local_server') or config.get('local_server', '')
         devices = test_params.get('devices', [])
@@ -2409,6 +2404,26 @@ async def run_test_background(
         # 添加测试类型
         if retry_dir:
             timestamp = os.path.basename(retry_dir.strip().rstrip('/'))
+
+            # 在重试模式下，如果没有提供test_type，尝试从数据库中查找原始报告的测试类型
+            if not test_type_lower:
+                await log_callback(f"🔍 从数据库查找报告 {timestamp} 的测试类型...", 'info')
+                try:
+                    report = test_report_db.get_report_by_timestamp(timestamp)
+                    if report and report.get('test_type'):
+                        original_type = report['test_type'].lower()
+                        test_type_lower = original_type
+                        await log_callback(f"✓ 从报告检测到测试类型: {test_type_lower}", 'info')
+                    else:
+                        await log_callback(f"⚠️ 数据库中未找到报告 {timestamp}", 'warning')
+                except Exception as e:
+                    await log_callback(f"⚠️ 从数据库读取测试类型失败: {e}", 'warning')
+
+            # 如果仍然没有test_type，使用默认值
+            if not test_type_lower:
+                test_type_lower = 'cts'
+                await log_callback(f"⚠️ 未检测到测试类型，使用默认值: cts", 'warning')
+
             cmd_parts.extend([test_type_lower, "retry", timestamp])
             await log_callback(f"🔄 Retry模式: test_type={test_type_lower}, timestamp={timestamp}", 'info')
 
