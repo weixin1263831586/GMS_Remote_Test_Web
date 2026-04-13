@@ -273,18 +273,81 @@ gms-rt-usbip-status() {
 
 # Start a test
 gms-rt-test-start() {
+    check_jq
+
+    # 检测模式：通过第一个参数判断
+    local first_param="$1"
+
+    if [ -z "$first_param" ]; then
+        error "Usage:"
+        error "  Mode 1 (Direct test): gms-rt-test-start <DEVICE> [TYPE] [MODULE] [CASE] [SUITE]"
+        error "  Mode 2 (Retry report): gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE|SUITE]"
+        error ""
+        error "Examples:"
+        error "  gms-rt-test-start RF8TC2W4JNH CTS CtsPermissionTestCases"
+        error "  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 RF8TC2W4JNH GTS"
+        error "  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 RF8TC2W4JNH /path/to/suite"
+        return 1
+    fi
+
+    # 模式2: 重试模式
+    if [ "$first_param" = "--retry" ]; then
+        local report_timestamp="$2"
+        local device_serial="${3:-}"
+        local third_param="${4:-}"
+
+        if [ -z "$report_timestamp" ]; then
+            error "Report timestamp required for retry mode"
+            error "Usage: gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE|SUITE]"
+            return 1
+        fi
+
+        echo "🔄 Starting test retry..."
+        echo "  Report: $report_timestamp"
+
+        local data="{\"retry_dir\":\"$report_timestamp\"}"
+        if [ -n "$device_serial" ]; then
+            data=$(echo "$data" | jq ". + {\"devices\":[\"$device_serial\"]}")
+            echo "  Device: $device_serial"
+        fi
+
+        # 智能检测第三个参数：如果是路径则作为test_suite，否则作为test_type
+        if [ -n "$third_param" ]; then
+            if [[ "$third_param" == */* ]]; then
+                # 是路径，作为 test_suite
+                data=$(echo "$data" | jq ". + {\"test_suite\":\"$third_param\"}")
+                echo "  Suite: $third_param"
+                echo "  ℹ️  Test type will be auto-detected from suite path"
+            else
+                # 不是路径，作为 test_type
+                data=$(echo "$data" | jq ". + {\"test_type\":\"$third_param\"}")
+                echo "  Type: $third_param"
+            fi
+        else
+            echo "  ⚠️  Warning: Neither test type nor suite specified"
+            echo "  Will try to auto-detect from report or config"
+        fi
+
+        local response=$(api_call "/test/start" "POST" "$data")
+
+        if echo "$response" | jq -e '.success' > /dev/null; then
+            success "Test retry started successfully"
+            echo "$response" | jq '.'
+        else
+            local msg=$(echo "$response" | jq -r '.error // .message // .detail // "Unknown error"')
+            error "Failed to start test retry: $msg"
+            return 1
+        fi
+        return
+    fi
+
+    # 模式1: 直接测试模式
     local device_serial="$1"
     local test_type="${2:-CTS}"
     local test_module="${3:-CtsPermissionTestCases}"
     local test_case="${4:-}"
     local test_suite="${5:-/home/hcq/GMS-Suite/android-cts-16_r4/android-cts/tools}"
 
-    if [ -z "$device_serial" ]; then
-        error "Device serial required. Usage: gms-rt-test-start <DEVICE> [TYPE] [MODULE] [CASE] [SUITE]"
-        return 1
-    fi
-
-    check_jq
     echo "🚀 Starting test..."
     echo "  Device: $device_serial"
     echo "  Type: $test_type"
@@ -293,6 +356,7 @@ gms-rt-test-start() {
     local data="{\"devices\":[\"$device_serial\"],\"test_type\":\"$test_type\",\"test_module\":\"$test_module\",\"test_suite\":\"$test_suite\"}"
     if [ -n "$test_case" ]; then
         data=$(echo "$data" | jq ". + {\"test_case\":\"$test_case\"}")
+        echo "  Case: $test_case"
     fi
 
     local response=$(api_call "/test/start" "POST" "$data")
@@ -301,7 +365,7 @@ gms-rt-test-start() {
         success "Test started successfully"
         echo "$response" | jq '.'
     else
-        local msg=$(echo "$response" | jq -r '.message // .detail // "Unknown error"')
+        local msg=$(echo "$response" | jq -r '.error // .message // .detail // "Unknown error"')
         error "Failed to start test: $msg"
         return 1
     fi
@@ -1331,7 +1395,7 @@ ${YELLOW}USB/IP Connection:${NC}
   gms-rt-usbip-auto-install    - Auto-install USB/IP
 
 ${YELLOW}Test Management:${NC}
-  gms-rt-test-start           - Start a test
+  gms-rt-test-start           - Start test or retry report
   gms-rt-test-stop            - Stop currently running test
   gms-rt-test-clean           - Clean test environment
   gms-rt-test-status          - Check test status
@@ -1398,6 +1462,17 @@ ${YELLOW}Examples:${NC}
 
   # Check reports
   gms-rt-reports-list
+
+${YELLOW}Test Start Examples:${NC}
+  # Direct test mode
+  gms-rt-test-start RF8TC2W4JNH CTS CtsPermissionTestCases
+
+  # Retry mode - specify test suite path (recommended)
+  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 c3d9b8674f4b94f6 \
+    /home/hcq/GMS-Suite/android-gts-13.1-R2/android-gts/tools
+
+  # Retry mode - specify test type only
+  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 c3d9b8674f4b94f6 GTS
 
 ${YELLOW}Performance Notes:${NC}
   - All skill commands match API paths exactly

@@ -17,12 +17,12 @@ class TestReportDB:
         初始化数据库
 
         Args:
-            db_path: 数据库文件路径，默认为 web_app/data/test_reports.json
+            db_path: 数据库文件路径，默认为 reports/test_reports.json
         """
         if db_path is None:
-            # 默认路径：web_app/data/test_reports.json
-            base_dir = os.path.dirname(__file__)
-            db_path = os.path.join(base_dir, 'data', 'test_reports.json')
+            # 默认路径：reports/test_reports.json
+            base_dir = os.path.dirname(os.path.dirname(__file__))
+            db_path = os.path.join(base_dir, 'reports', 'test_reports.json')
 
         self.db_path = db_path
         self.lock = threading.Lock()
