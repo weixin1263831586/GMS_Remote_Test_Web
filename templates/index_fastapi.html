@@ -14,7 +14,7 @@
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260411"></script>
+    <script src="/static/js/app.js?v=20260411-02"></script>
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
@@ -883,8 +883,12 @@
                     <button class="filter-btn" data-category="usbip" onclick="filterByCategory('usbip')">
                         📡 USB/IP
                     </button>
+                    <div style="flex: 1;"></div>
                     <button class="filter-btn" onclick="showUsageExamples()" style="background: var(--primary-color); color: white;">
                         📖 使用实例
+                    </button>
+                    <button class="filter-btn" onclick="downloadSkillsZip()" style="background: var(--success-color); color: white;">
+                        📁 skill下载
                     </button>
                 </div>
             </div>

@@ -701,6 +701,16 @@ API_DOCS_LIST = [
         "skill": "gms-rt-system-websocket"
     },
 
+    # ==================== 技能管理 ====================
+    {
+        "method": "GET",
+        "path": "/api/system/skills/download",
+        "description": "下载技能ZIP压缩包（默认下载gms-remote-test技能包）",
+        "params": [],
+        "category": "health",
+        "skill": "gms-rt-system-skills-download"
+    },
+
     # ==================== API文档 ====================
     {
         "method": "GET",

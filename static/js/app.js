@@ -5763,7 +5763,15 @@ function generateCurlCommand(api, details) {
     if (api.method === 'GET') {
         // 特殊处理stream端点：使用 -N 而不是 -s
         const isStreamEndpoint = api.path.includes('/api/test/logs/stream');
-        const curlOptions = isStreamEndpoint ? 'curl -N' : 'curl -s';
+        // 特殊处理文件下载端点：使用 -OJ
+        const isDownloadEndpoint = api.path.includes('/api/system/skills/download');
+
+        let curlOptions = 'curl -s';
+        if (isStreamEndpoint) {
+            curlOptions = 'curl -N';
+        } else if (isDownloadEndpoint) {
+            curlOptions = 'curl -s -OJ';
+        }
 
         let cmd = `${curlOptions} "${BASE_URL}${api.path}"`;
         // Add query parameter example
@@ -6114,6 +6122,31 @@ function closeUsageExamplesModal() {
     const modal = document.getElementById('usage-examples-modal');
     if (modal) {
         modal.style.display = 'none';
+    }
+}
+
+/**
+ * 下载 skills zip 文件（直接下载，不跳转）
+ */
+async function downloadSkillsZip() {
+    try {
+        const response = await fetch('/api/system/skills/download');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || '下载失败');
+        }
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'gms-remote-test-skills.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (e) {
+        console.error('[downloadSkillsZip] Error:', e);
+        alert('下载失败：' + e.message);
     }
 }
 

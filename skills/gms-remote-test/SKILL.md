@@ -5,7 +5,7 @@ description: >-
   GMS Remote Test Web Platform & API Skill for FastAPI (Port 5001).
   **Complete web interface** with device management, test execution, desktop VNC, terminal access,
   user management, device locking, report analysis, and route diagnostics.
-  **Latest**: Improved CLI command naming consistency, removed duplicate functions, enhanced firmware burn progress.
+  **Latest**: Improved CLI command naming consistency, removed duplicate functions, enhanced firmware burn progress, **skills ZIP download**.
 ---
 
 # GMS Remote Test Platform - Complete Guide
@@ -96,6 +96,7 @@ The web platform provides **8 integrated pages** for complete test management:
 - ✅ **Clean Startup**: No initialization messages on page refresh (F5)
 - ✅ **Memory Leak Prevention**: Background cleanup task for expired upload progress entries
 - ✅ **Code Quality**: Removed duplicate code, improved code reuse
+- ✅ **Skills Download**: New endpoint for downloading skill files as ZIP
 
 ### API Updates
 - ✅ **POST /api/files/upload**: Enhanced with chunked upload support (chunk_index, total_chunks, upload_id, etc.)
@@ -812,6 +813,16 @@ curl -sX POST http://172.16.14.233:5001/api/files/install \
   -F "files=@/path/to/app.apk" | jq '.'
 ```
 
+#### Download Skills ZIP
+```bash
+# Download complete skills directory as ZIP file
+curl -O http://172.16.14.233:5001/api/system/skills/download
+```
+
+**Response**: ZIP file `gms-remote-test-skills.zip` containing:
+- `SKILL.md` - Skill documentation
+- `scripts/gms-remote-test.sh` - Shell scripts
+
 ---
 
 ### 14. Firmware Burning
@@ -1011,6 +1022,11 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 | `/api/files/install` | POST | Upload files for install |
 | `/api/files/progress` | GET | Get upload progress |
 | `/api/files/list` | POST | List files |
+
+### Skills Download
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/system/skills/download` | GET | Download skills directory as ZIP |
 
 ### Firmware Burning
 | Endpoint | Method | Description |

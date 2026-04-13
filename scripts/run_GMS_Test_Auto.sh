@@ -81,7 +81,6 @@ parse_args() {
                 fi
                 REMOTE_USER="${local_server%@*}"
                 REMOTE_HOST="${local_server#*@}"
-                log "📁 本地主机: ${REMOTE_USER}@${REMOTE_HOST}"
                 shift
                 ;;
             --test-suite)

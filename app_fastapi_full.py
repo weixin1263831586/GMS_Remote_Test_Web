@@ -22,6 +22,8 @@ import queue
 import urllib.request
 import urllib.parse
 import urllib.error
+import io
+import zipfile
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Union
 from contextlib import asynccontextmanager
@@ -2404,7 +2406,7 @@ async def run_test_background(
         if test_suite_tools:
             cmd_parts.extend(["--test-suite", test_suite_tools])
 
-        await log_callback(f"🔍 local_server参数值: '{local_server}'", 'info')
+        await log_callback(f"🌐 本地主机: '{local_server}'", 'info')
         if local_server:
             cmd_parts.extend(["--local-server", local_server])
         else:
@@ -3198,7 +3200,6 @@ async def list_report_files(report_timestamp: str):
                 status_code=404
             )
 
-        # 获取 result_dir 路径
         report_dir = report.get('result_dir')
         if not report_dir or not os.path.exists(report_dir):
             return JSONResponse(
@@ -3256,7 +3257,6 @@ async def analyze_report(report_timestamp: str):
                 status_code=404
             )
 
-        # 获取 result_dir 路径
         result_dir = report.get('result_dir')
         if not result_dir or not await asyncio.to_thread(os.path.exists, result_dir):
             return JSONResponse(
@@ -3383,7 +3383,6 @@ async def download_report(request: Request, report_timestamp: str):
                 status_code=404
             )
 
-        # 获取 result_dir 路径
         report_dir = report.get('result_dir')
         logger.info(f"[DOWNLOAD] 报告目录: {report_dir}, 存在: {os.path.exists(report_dir) if report_dir else False}")
 
@@ -3403,7 +3402,6 @@ async def download_report(request: Request, report_timestamp: str):
             for root, dirs, filenames in os.walk(report_dir):
                 for filename in filenames:
                     file_path = os.path.join(root, filename)
-                    # 计算相对路径，保持目录结构
                     arcname = os.path.relpath(file_path, os.path.dirname(report_dir))
 
                     try:
@@ -3417,7 +3415,7 @@ async def download_report(request: Request, report_timestamp: str):
         # 获取ZIP数据
         zip_data = zip_buffer.getvalue()
 
-        if len(zip_data) == 0:
+        if file_count == 0:
             return JSONResponse(
                 content={'success': False, 'error': 'ZIP文件创建失败'},
                 status_code=500
@@ -3434,6 +3432,70 @@ async def download_report(request: Request, report_timestamp: str):
 
     except Exception as e:
         logger.error(f"Error downloading report: {e}", exc_info=True)
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+
+@app.get("/api/system/skills/download")
+async def download_skills_zip(request: Request, skill_name: str = Query("gms-remote-test", description="技能名称")):
+    """下载指定技能目录的 zip 文件
+
+    Args:
+        skill_name: 技能名称，默认为 gms-remote-test
+
+    Returns:
+        ZIP 文件下载
+    """
+    try:
+        logger.info(f"[SKILLS_DOWNLOAD] 请求下载技能包: {skill_name}")
+
+        skills_base_dir = "/home/hcq/GMS_Auto_Test/web_app/skills"
+        skills_dir = os.path.join(skills_base_dir, skill_name)
+
+        if not os.path.exists(skills_dir):
+            logger.error(f"[SKILLS_DOWNLOAD] 技能目录不存在：{skills_dir}")
+            return JSONResponse(
+                content={'success': False, 'error': f'技能目录不存在：{skill_name}'},
+                status_code=404
+            )
+
+        zip_buffer = io.BytesIO()
+        zip_filename = f"{skill_name}-skills.zip"
+        file_count = 0
+
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for root, dirs, filenames in os.walk(skills_dir):
+                for filename in filenames:
+                    file_path = os.path.join(root, filename)
+                    arcname = os.path.relpath(file_path, skills_dir)
+
+                    try:
+                        zip_file.write(file_path, arcname)
+                        file_count += 1
+                    except Exception as e:
+                        logger.warning(f"[SKILLS_DOWNLOAD] 无法添加文件到 ZIP: {file_path}, 错误：{e}")
+
+        logger.info(f"[SKILLS_DOWNLOAD] 成功创建 ZIP 文件 {zip_filename}，包含 {file_count} 个文件")
+
+        zip_data = zip_buffer.getvalue()
+
+        if file_count == 0:
+            return JSONResponse(
+                content={'success': False, 'error': 'ZIP 文件创建失败：目录为空'},
+                status_code=500
+            )
+
+        return Response(
+            content=zip_data,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{zip_filename}\""
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"[SKILLS_DOWNLOAD] Error: {e}", exc_info=True)
         return JSONResponse(
             content={'success': False, 'error': str(e)},
             status_code=500
@@ -8092,7 +8154,11 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
 
     # 完整curl命令
     if method == 'GET':
-        help_text += f'curl -s "{base_url}{path}"\n\n'
+        # 特殊处理文件下载端点
+        if '/skills/download' in path:
+            help_text += f'curl -s -OJ "{base_url}{path}"\n\n'
+        else:
+            help_text += f'curl -s "{base_url}{path}"\n\n'
     elif method == 'POST':
         has_file = any(p.get('type') == 'file' for p in params)
         if has_file:
