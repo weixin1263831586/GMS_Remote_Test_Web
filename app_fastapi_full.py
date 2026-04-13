@@ -2358,17 +2358,43 @@ async def run_test_background(
             await log_callback("⚠️ 本地脚本不存在，使用远程脚本", 'warning')
 
         # 构建测试命令
-        test_type = test_params.get('test_type', 'cts')
+        test_type = test_params.get('test_type', '')
         test_module = test_params.get('test_module', '')
         test_case = test_params.get('test_case', '')
         retry_dir = test_params.get('retry_dir', '')
         test_suite = test_params.get('test_suite', '')
+
+        # 统一将 test_type 转换为小写
+        test_type_lower = test_type.lower() if test_type else ''
 
         # 修复：将testcases路径转换为tools路径（因为cts-tradefed在tools目录）
         if test_suite and 'testcases' in test_suite:
             test_suite_tools = test_suite.replace('/testcases', '/tools')
         else:
             test_suite_tools = test_suite
+
+        # 如果没有指定test_type，尝试从test_suite路径中自动检测
+        if not test_type_lower and test_suite_tools:
+            import re
+            # 从路径中提取测试类型，如 android-gts -> gts
+            suite_match = re.search(r'/android-([a-z]+)', test_suite_tools.lower())
+            if suite_match:
+                detected_type = suite_match.group(1)
+                # 映射一些特殊情况
+                type_mapping = {
+                    'cts': 'cts',
+                    'gts': 'gts',
+                    'sts': 'sts',
+                    'vts': 'vts',
+                    'apts': 'apts'
+                }
+                test_type_lower = type_mapping.get(detected_type, detected_type)
+                await log_callback(f"🔍 从套件路径检测到测试类型: {test_type_lower}", 'info')
+
+        # 如果仍然没有test_type，使用默认值
+        if not test_type_lower:
+            test_type_lower = 'cts'
+            await log_callback(f"⚠️ 未检测到测试类型，使用默认值: cts", 'warning')
 
         # 修复：只有当test_params中没有local_server时才从config读取
         local_server = test_params.get('local_server') or config.get('local_server', '')
@@ -2383,9 +2409,39 @@ async def run_test_background(
         # 添加测试类型
         if retry_dir:
             timestamp = os.path.basename(retry_dir.strip().rstrip('/'))
-            cmd_parts.extend([test_type, "retry", timestamp])
+            cmd_parts.extend([test_type_lower, "retry", timestamp])
+            await log_callback(f"🔄 Retry模式: test_type={test_type_lower}, timestamp={timestamp}", 'info')
+
+            # 在重试模式下，如果没有提供test_suite，自动查找对应的测试套件
+            if not test_suite_tools:
+                await log_callback(f"🔍 自动查找 {test_type_lower.upper()} 测试套件...", 'info')
+                try:
+                    # 在 suites_path 中查找对应的测试套件
+                    import glob
+                    # 查找匹配的套件目录，如 android-gts-*
+                    suite_pattern = os.path.join(suites_path, f'android-{test_type_lower}-*')
+                    # 只获取目录，排除文件（如zip文件）
+                    suite_dirs = sorted(
+                        [d for d in glob.glob(suite_pattern) if os.path.isdir(d)],
+                        reverse=True
+                    )  # 按名称倒序排列，获取最新的
+
+                    if suite_dirs:
+                        # 使用找到的第一个（最新的）套件
+                        suite_dir = suite_dirs[0]
+                        # 尝试找到 tools 目录
+                        tools_dir = os.path.join(suite_dir, f'android-{test_type_lower}', 'tools')
+                        if os.path.isdir(tools_dir):
+                            test_suite_tools = tools_dir
+                            await log_callback(f"✓ 找到测试套件: {test_suite_tools}", 'info')
+                        else:
+                            await log_callback(f"⚠️ 未找到 tools 目录: {tools_dir}", 'warning')
+                    else:
+                        await log_callback(f"⚠️ 未找到 {test_type_lower.upper()} 测试套件", 'warning')
+                except Exception as e:
+                    await log_callback(f"❌ 查找测试套件失败: {e}", 'error')
         else:
-            cmd_parts.append(test_type)
+            cmd_parts.append(test_type_lower)
             if test_module:
                 cmd_parts.append(test_module)
             if test_case:
@@ -2401,6 +2457,7 @@ async def run_test_background(
 
             device_args_str = " ".join(device_args_list)
             cmd_parts.extend(["--device-args", device_args_str])
+            await log_callback(f"📱 设备参数: {device_args_str}", 'info')
 
         # 添加测试套件（使用tools路径）
         if test_suite_tools:
