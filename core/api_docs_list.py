@@ -29,7 +29,7 @@ API_DOCS_LIST = [
         "path": "/api/system/health",
         "description": "系统管理",
         "params": [],
-        "category": "health",
+        "category": "system",
         "skill": f"{SKILL_COMMAND_PREFIX}system-health"
     },
 
@@ -697,7 +697,7 @@ API_DOCS_LIST = [
         "path": "/api/system/websocket/{client_id}",
         "description": "建立WebSocket连接用于实时通信",
         "params": [{"name": "client_id", "type": "string", "required": True}],
-        "category": "health",
+        "category": "system",
         "skill": "gms-rt-system-websocket"
     },
 
@@ -707,7 +707,7 @@ API_DOCS_LIST = [
         "path": "/api/system/skills/download",
         "description": "下载技能ZIP压缩包（默认下载gms-remote-test技能包）",
         "params": [],
-        "category": "health",
+        "category": "system",
         "skill": "gms-rt-system-skills-download"
     },
 
@@ -717,7 +717,15 @@ API_DOCS_LIST = [
         "path": "/api/system/docs",
         "description": "获取系统API文档列表",
         "params": [],
-        "category": "config",
+        "category": "system",
         "skill": "gms-rt-system-docs"
+    },
+    {
+        "method": "GET",
+        "path": "/api/system/help",
+        "description": "获取API帮助信息（纯文本格式）",
+        "params": [],
+        "category": "system",
+        "skill": "gms-rt-system-help"
     }
 ]
