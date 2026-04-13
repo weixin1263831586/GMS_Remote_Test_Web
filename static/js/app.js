@@ -216,6 +216,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (error) {
             console.warn('[Init] Failed to auto-start VNC:', error);
         }
+
+        // 加载用户列表
+        try {
+            await loadUsers();
+        } catch (error) {
+            console.warn('[Init] Failed to load users:', error);
+        }
     }, 100);  // 减少延迟时间，更快获取客户端信息
 });
 
@@ -832,8 +839,61 @@ async function loadDevices(forceRefresh = false) {
     }
 }
 
+// 用户列表管理
+async function loadUsers(forceRefresh = false) {
+    if (state.isRefreshingUsers) {
+        return;
+    }
+
+    state.isRefreshingUsers = true;
+
+    try {
+        const url = forceRefresh ? '/api/users/list?force_refresh=1' : '/api/users/list';
+        const response = await apiCall(url);
+
+        console.log('[loadUsers] API response:', response);
+
+        // 处理不同的响应格式
+        let users = [];
+        if (Array.isArray(response)) {
+            users = response;
+            console.log('[loadUsers] Response is array, length:', users.length);
+        } else if (response && response.users && Array.isArray(response.users)) {
+            users = response.users;
+            console.log('[loadUsers] Response has users array, length:', users.length);
+        } else if (response && response.data && Array.isArray(response.data)) {
+            users = response.data;
+            console.log('[loadUsers] Response has data array, length:', users.length);
+        } else {
+            console.warn('[loadUsers] Unexpected user list format:', response);
+        }
+
+        state.users = users;
+        console.log('[loadUsers] state.users set to:', state.users);
+        // renderUsers() 已移除，使用 HTML 中的 displayUsersList() 避免重复渲染
+    } catch (error) {
+        console.error('加载用户列表失败:', error);
+    } finally {
+        state.isRefreshingUsers = false;
+    }
+}
+
+
+function formatTime(timestamp) {
+    if (!timestamp) return '-';
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000); // 秒
+
+    if (diff < 60) return '刚刚';
+    if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
+    return `${Math.floor(diff / 86400)}天前`;
+}
+
 // 防抖版本的刷新函数
 const debouncedRefreshDevices = debounce(() => loadDevices(false), 500);
+const debouncedRefreshUsers = debounce(() => loadUsers(false), 500);
 
 function renderDevices() {
     const leftContainer = $('device-list-left');
@@ -3064,6 +3124,7 @@ function startStatusPolling() {
                     state.lastLogCount = status.logs.length;
                 }
             }
+
         } catch (error) {
             console.error('Status polling error:', error);
         }

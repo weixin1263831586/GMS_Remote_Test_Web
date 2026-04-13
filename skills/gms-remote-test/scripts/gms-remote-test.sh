@@ -710,8 +710,8 @@ gms-rt-users-detect() {
 
 # Set username
 gms-rt-users-set-username() {
-    local username="$1"
-    [ -z "$username" ] && { error "Username required. Usage: gms-rt-users-set-username <username>"; return 1; }
+    local username="${1:-$(whoami)}"
+    [ -z "$username" ] && { error "Username required. Usage: gms-rt-users-set-username [username]"; return 1; }
     check_jq
     echo "👤 Setting username to $username..."
     local data="{\"username\":\"$username\"}"

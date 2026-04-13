@@ -1209,13 +1209,34 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
         # 更新内存中的映射
         client_manager.client_hosts = client_hosts
 
+        # 同时更新 global_state.user_states 中的用户名
+        old_client_id = f"unknown@{client_ip}"
+        new_client_id = f"{username}@{client_ip}"
+
+        with global_state.user_states_lock:
+            # 如果存在 unknown@IP 的记录，更新为新用户名
+            if old_client_id in global_state.user_states:
+                old_state = global_state.user_states.pop(old_client_id)
+                old_state['client_username'] = username
+                global_state.user_states[new_client_id] = old_state
+            # 或者更新已存在的 client_id 的用户名
+            elif client_ip in [k.split('@')[1] for k in global_state.user_states.keys()]:
+                for key in list(global_state.user_states.keys()):
+                    if key.endswith(f"@{client_ip}"):
+                        global_state.user_states[key]['client_username'] = username
+                        # 如果需要，也可以更新 client_id
+                        if key != new_client_id:
+                            state = global_state.user_states.pop(key)
+                            global_state.user_states[new_client_id] = state
+                        break
+
         logger.info(f"[Set Username] {client_ip} -> {username}")
 
         return JSONResponse(content={
             "success": True,
             "username": username,
             "ip": client_ip,
-            "client_id": f"{username}@{client_ip}"
+            "client_id": new_client_id
         })
     else:
         return JSONResponse(content={

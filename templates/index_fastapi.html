@@ -14,7 +14,7 @@
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260411-02"></script>
+    <script src="/static/js/app.js?v=20260413-04"></script>
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
@@ -1768,17 +1768,26 @@
                 if (data.users) {
                     displayUsersList(data.users);
                 }
-
-                // 启动自动刷新（每10秒）
-                if (!usersRefreshInterval) {
-                    usersRefreshInterval = setInterval(() => {
-                        if (currentPage === 'users') {
-                            loadUsersList();
-                        }
-                    }, 10000);
-                }
             } catch (e) {
                 console.error('[Users] Error loading users:', e);
+            }
+        }
+
+        // 启动用户列表自动刷新（仅当在 users 页面时）
+        function startUsersAutoRefresh() {
+            if (usersRefreshInterval) return;
+            usersRefreshInterval = setInterval(() => {
+                if (currentPage === 'users') {
+                    loadUsersList();
+                }
+            }, 10000);
+        }
+
+        // 停止用户列表自动刷新
+        function stopUsersAutoRefresh() {
+            if (usersRefreshInterval) {
+                clearInterval(usersRefreshInterval);
+                usersRefreshInterval = null;
             }
         }
 
@@ -2194,9 +2203,13 @@
                 }
             }
 
-            // 如果切换到用户管理页面，加载用户列表
+            // 如果切换到用户管理页面，加载用户列表并启动自动刷新
             if (pageName === 'users') {
                 loadUsersList();
+                startUsersAutoRefresh();
+            } else {
+                // 离开用户页面时停止自动刷新
+                stopUsersAutoRefresh();
             }
 
             // 如果切换到设备管理页面，加载设备列表
