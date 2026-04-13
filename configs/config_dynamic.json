@@ -1,18 +1,12 @@
 {
     "client_hosts": {
         "172.16.14.68": "hcq",
-        "172.16.14.233": "hcq"
+        "10.10.10.206": "hcq"
     },
     "client_ssh_credentials": [
         {
             "username": "hcq",
             "password": "20240120"
         }
-    ],
-    "usbip_devices_source": {
-        "c3d9b8674f4b94f6": {
-            "source": "hcq@172.16.14.68",
-            "timestamp": 1775896275.0503902
-        }
-    }
+    ]
 }
