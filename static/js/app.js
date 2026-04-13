@@ -5764,7 +5764,7 @@ function generateCurlCommand(api, details) {
         // 特殊处理stream端点：使用 -N 而不是 -s
         const isStreamEndpoint = api.path.includes('/api/test/logs/stream');
         // 特殊处理文件下载端点：使用 -OJ
-        const isDownloadEndpoint = api.path.includes('/api/system/skills/download');
+        const isDownloadEndpoint = api.path.includes('/api/system/skills');
 
         let curlOptions = 'curl -s';
         if (isStreamEndpoint) {
@@ -6130,7 +6130,7 @@ function closeUsageExamplesModal() {
  */
 async function downloadSkillsZip() {
     try {
-        const response = await fetch('/api/system/skills/download');
+        const response = await fetch('/api/system/skills');
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || '下载失败');

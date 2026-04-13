@@ -816,7 +816,7 @@ curl -sX POST http://172.16.14.233:5001/api/files/install \
 #### Download Skills ZIP
 ```bash
 # Download complete skills directory as ZIP file
-curl -O http://172.16.14.233:5001/api/system/skills/download
+curl -O http://172.16.14.233:5001/api/system/skills
 ```
 
 **Response**: ZIP file `gms-remote-test-skills.zip` containing:
@@ -1026,7 +1026,7 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 ### Skills Download
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/system/skills/download` | GET | Download skills directory as ZIP |
+| `/api/system/skills` | GET | Download skills directory as ZIP |
 
 ### Firmware Burning
 | Endpoint | Method | Description |
