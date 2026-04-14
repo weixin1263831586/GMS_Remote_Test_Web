@@ -1291,7 +1291,7 @@ For complete API documentation with try-it-out functionality:
 - `gms-rt-devices-reboot` - Reboot devices
 - `gms-rt-devices-remount` - Remount filesystem as RW
 - `gms-rt-devices-connect-wifi` - Connect devices to WiFi
-- `gms-rt-devices-shell` - Execute shell command on device
+- `gms-rt-devices-shell` - Open interactive ADB shell (direct local command)
 - `gms-rt-devices-screen` - Show device screen
 - `gms-rt-devices-bootloader-lock` - Lock device bootloader
 - `gms-rt-devices-bootloader-unlock` - Unlock device bootloader
