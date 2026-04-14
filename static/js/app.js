@@ -28,6 +28,16 @@ let allApiDocs = []; // 所有API文档数据（已排序）
 const API_DOCS_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存（生产环境）
 const FIRMWARE_UPLOAD_TIMEOUT = 10 * 60 * 1000; // 10分钟上传超时
 
+// ==================== 轮询间隔配置 ====================
+// GSI 固件烧写进度轮询间隔（毫秒）
+const GSI_PROGRESS_POLL_INTERVAL = 2000; // 2 秒
+// 状态轮询间隔（毫秒）
+const STATUS_POLL_INTERVAL = 2000; // 2 秒
+// 报告列表刷新间隔（毫秒）
+const REPORTS_REFRESH_INTERVAL = 15000; // 15 秒
+// 最大进度轮询错误次数
+const MAX_PROGRESS_ERRORS = 3;
+
 // 辅助函数
 function validateDeviceSelection() {
     if (state.selectedDevices.size === 0) {
@@ -3247,7 +3257,7 @@ async function loadTestReports(userOnly = false) {
                 if (currentPage === 'reports') {
                     loadTestReports(currentUserFilter);
                 }
-            }, 15000);
+            }, REPORTS_REFRESH_INTERVAL);
         }
     } catch (e) {
         console.error('[Reports] Error loading reports:', e);
