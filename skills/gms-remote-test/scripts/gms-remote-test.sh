@@ -120,9 +120,20 @@ gms-rt-devices-reboot() {
     local response=$(api_call "/devices/reboot" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "设备重启成功"
-        echo "$response" | jq '.'
+
+        # 美化输出格式
+        local count=$(echo "$response" | jq -r '.data.summary.total // 0')
+        local success=$(echo "$response" | jq -r '.data.summary.success // 0')
+        local failed=$(echo "$response" | jq -r '.data.summary.failed // 0')
+
+        echo "📊 操作统计: 成功 $success 台, 失败 $failed 台"
+        echo ""
+
+        # 显示每个设备的详细结果
+        echo "$response" | jq -r '.data.results[]? | "📱 \(.device): 重启完成 (耗时: \(.wait_time // "N/A")秒)"' 2>/dev/null || echo "$response" | jq '.'
     else
         error "设备重启失败"
+        echo "$response" | jq '.'
     fi
 }
 
@@ -133,14 +144,101 @@ gms-rt-devices-remount() {
     check_jq
     echo "🔄 重新挂载设备..."
 
+    # 首先检查 bootloader 状态
+    echo "🔐 检查 Bootloader 状态..."
+    local bootloader_check=$(api_call "/devices/bootloader-status" "POST" "$(build_devices_json_data "$devices")")
+
+    # 检查是否有锁定的设备
+    local locked_devices=$(echo "$bootloader_check" | jq -r '.data.results[]? | select(.locked == true) | .device' 2>/dev/null)
+
+    if [ -n "$locked_devices" ]; then
+        error "以下设备 Bootloader 已锁定，无法 remount:"
+        echo "$locked_devices" | while read -r device; do
+            echo "  • $device (状态: $(echo "$bootloader_check" | jq -r ".data.results[]? | select(.device == \"$device\") | .status"))"
+        done
+        echo ""
+        echo "💡 解决方案:"
+        echo "   1. 使用 gms-rt-devices-bootloader-unlock <device> 解锁设备"
+        echo "   2. 解锁后重新执行 remount"
+        return 1
+    fi
+
+    echo "✅ Bootloader 检查通过，开始 remount..."
+
     local data=$(build_devices_json_data "$devices")
 
     local response=$(api_call "/devices/remount" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "设备重新挂载成功"
-        echo "$response" | jq '.'
+
+        # 美化输出格式
+        local count=$(echo "$response" | jq -r '.data.summary.total // 0')
+        local success_count=$(echo "$response" | jq -r '.data.summary.success // 0')
+        local failed=$(echo "$response" | jq -r '.data.summary.failed // 0')
+
+        echo "📊 操作统计: 成功 $success_count 台, 失败 $failed 台"
+        echo ""
+
+        # 检查 verity_mode，只有当设备真正需要重启时才提示
+        local needs_reboot_list=()
+        local already_rw_list=()
+
+        while IFS= read -r result; do
+            local device=$(echo "$result" | jq -r '.device // empty')
+            local verity_mode=$(echo "$result" | jq -r '.verity_mode // empty')
+            local success=$(echo "$result" | jq -r '.success // false')
+
+            if [ "$success" = "true" ]; then
+                if [ "$verity_mode" = "enforcing" ]; then
+                    needs_reboot_list+=("$device")
+                elif [ "$verity_mode" = "disabled" ]; then
+                    already_rw_list+=("$device")
+                fi
+            fi
+        done < <(echo "$response" | jq -c '.data.results[]?' 2>/dev/null)
+
+        # 显示已经 RW 的设备
+        if [ ${#already_rw_list[@]} -gt 0 ]; then
+            success "以下设备已处于读写模式，无需重启:"
+            for device in "${already_rw_list[@]}"; do
+                echo "  ✅ $device (verity: disabled)"
+            done
+            echo ""
+        fi
+
+        # 显示需要重启的设备
+        if [ ${#needs_reboot_list[@]} -gt 0 ]; then
+            warning "以下设备需要重启才能使 remount 生效:"
+            for device in "${needs_reboot_list[@]}"; do
+                echo "  • $device (当前: enforcing)"
+            done
+            echo ""
+
+            # 询问是否自动重启
+            echo "💡 提示: 是否自动重启这些设备? (y/n)"
+            read -r -t 10 auto_reboot || auto_reboot="n"
+
+            if [ "$auto_reboot" = "y" ] || [ "$auto_reboot" = "Y" ]; then
+                echo "🔄 自动重启设备..."
+                for device in "${needs_reboot_list[@]}"; do
+                    echo "  重启 $device..."
+                    gms-rt-devices-reboot "$device" > /dev/null 2>&1
+                done
+                echo "✅ 重启完成"
+            else
+                echo "💡 使用以下命令手动重启:"
+                for device in "${needs_reboot_list[@]}"; do
+                    echo "   gms-rt-devices-reboot $device"
+                done
+            fi
+        fi
+
+        # 显示每个设备的详细结果
+        echo ""
+        echo "$response" | jq -r '.data.results[]? | "📱 \(.device): \(.output // .message // "完成")"' 2>/dev/null || echo "$response" | jq '.'
     else
         error "设备重新挂载失败"
+        echo "$response" | jq '.'
     fi
 }
 
@@ -156,9 +254,20 @@ gms-rt-devices-bootloader-lock() {
     local response=$(api_call "/devices/bootloader-lock" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "Bootloader锁定成功"
-        echo "$response" | jq '.'
+
+        # 美化输出格式
+        local count=$(echo "$response" | jq -r '.data.summary.total // 0')
+        local success=$(echo "$response" | jq -r '.data.summary.success // 0')
+        local failed=$(echo "$response" | jq -r '.data.summary.failed // 0')
+
+        echo "📊 操作统计: 成功 $success 台, 失败 $failed 台"
+        echo ""
+
+        # 显示每个设备的详细结果
+        echo "$response" | jq -r '.data.results[]? | "📱 \(.device // .device_id): \(.output // .message // "完成")"' 2>/dev/null || echo "$response" | jq '.'
     else
         error "Bootloader锁定失败"
+        echo "$response" | jq '.'
     fi
 }
 
@@ -170,13 +279,39 @@ gms-rt-devices-bootloader-unlock() {
     echo "🔓 解锁Bootloader..."
 
     local data=$(build_devices_json_data "$devices")
-
     local response=$(api_call "/devices/bootloader-unlock" "POST" "$data")
-    if echo "$response" | jq -e '.success' > /dev/null; then
-        success "Bootloader解锁成功"
-        echo "$response" | jq '.'
+
+    # 检查响应是否有效
+    if [ -z "$response" ]; then
+        error "API 无响应"
+        return 1
+    fi
+
+    # 尝试解析 JSON，如果失败则显示原始响应
+    if echo "$response" | jq -e '.' > /dev/null 2>&1; then
+        if echo "$response" | jq -e '.success' > /dev/null; then
+            success "Bootloader解锁成功"
+
+            # 美化输出格式
+            local count=$(echo "$response" | jq -r '.data.summary.total // 0')
+            local success_count=$(echo "$response" | jq -r '.data.summary.success // 0')
+            local failed=$(echo "$response" | jq -r '.data.summary.failed // 0')
+
+            echo "📊 操作统计: 成功 $success_count 台, 失败 $failed 台"
+            echo ""
+
+            # 显示每个设备的详细结果
+            echo "$response" | jq -r '.data.results[]? | "📱 \(.device // .device_id): \(.output // .message // "完成")"' 2>/dev/null || echo "$response" | jq '.'
+        else
+            local error_msg=$(echo "$response" | jq -r '.error // .message // .detail // "未知错误"')
+            error "Bootloader解锁失败: $error_msg"
+            echo "📋 响应详情:"
+            echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        fi
     else
-        error "Bootloader解锁失败"
+        error "Bootloader解锁失败: 无效的JSON响应"
+        echo "📋 原始响应:"
+        echo "$response"
     fi
 }
 
@@ -1335,7 +1470,7 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-bootloader-status   - Check bootloader status
   gms-rt-devices-user-locked         - List user-locked devices
   gms-rt-devices-reboot              - Reboot devices
-  gms-rt-devices-remount             - Remount RW
+  gms-rt-devices-remount             - Remount RW (with auto-reboot prompt)
   gms-rt-devices-connect-wifi        - Connect to WiFi
   gms-rt-devices-shell               - Open interactive ADB shell
   gms-rt-devices-screen              - Show device screen
