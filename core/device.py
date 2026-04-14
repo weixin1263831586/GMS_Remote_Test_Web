@@ -238,32 +238,43 @@ class DeviceManager:
             time.sleep(2)
 
             # 执行 remount
-            output, error, code = self.ssh_manager.execute_command(
+            remount_output, error, code = self.ssh_manager.execute_command(
                 ssh,
                 f"adb -s {device_id} remount",
                 timeout=15
             )
 
             # 检查 veritymode
-            output, _, _ = self.ssh_manager.execute_command(
+            verity_output, _, _ = self.ssh_manager.execute_command(
                 ssh,
                 f"adb -s {device_id} shell getprop ro.boot.veritymode",
                 timeout=10
             )
-            verity_mode = output.strip()
+            verity_mode = verity_output.strip()
 
-            # 判断是否需要重启
-            needs_reboot = 'enforcing' in verity_mode or verity_mode not in ['disabled', '']
+            # 判断是否需要重启 - 基于实际的 remount 输出
+            # 关键指示：如果输出包含 "Now reboot your device" 则需要重启
+            # 如果输出包含 "Overlayfs enabled" 或 "Remount succeeded" (无重启提示) 则已完成
+            needs_reboot = 'Now reboot your device' in remount_output
+            overlayfs_enabled = 'Overlayfs enabled' in remount_output or 'overlayfs' in remount_output.lower()
+
+            # 如果启用了 overlayfs，说明已经完成 remount，不需要重启
+            if overlayfs_enabled:
+                needs_reboot = False
+                verity_mode = 'disabled'  # 逻辑上设置为 disabled
 
             result = {
                 'success': code == 0,
                 'verity_mode': verity_mode,
                 'needs_reboot': needs_reboot,
-                'output': output[-200:] if output else error
+                'overlayfs_enabled': overlayfs_enabled,
+                'output': remount_output[-500:] if remount_output else error
             }
 
             if needs_reboot:
-                result['warning'] = '设备处于 enforcing 模式，需要重启才能使 remount 生效'
+                result['warning'] = '设备需要重启才能使 remount 生效'
+            elif overlayfs_enabled:
+                result['info'] = '设备已启用 overlayfs，处于读写模式'
 
             return result
 

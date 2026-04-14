@@ -186,12 +186,16 @@ gms-rt-devices-remount() {
         while IFS= read -r result; do
             local device=$(echo "$result" | jq -r '.device // empty')
             local verity_mode=$(echo "$result" | jq -r '.verity_mode // empty')
+            local needs_reboot=$(echo "$result" | jq -r '.needs_reboot // false')
+            local overlayfs_enabled=$(echo "$result" | jq -r '.overlayfs_enabled // false')
             local success=$(echo "$result" | jq -r '.success // false')
 
             if [ "$success" = "true" ]; then
-                if [ "$verity_mode" = "enforcing" ]; then
+                if [ "$needs_reboot" = "true" ]; then
+                    # 第一次 remount，需要重启
                     needs_reboot_list+=("$device")
-                elif [ "$verity_mode" = "disabled" ]; then
+                elif [ "$overlayfs_enabled" = "true" ] || [ "$verity_mode" = "disabled" ]; then
+                    # 已经完成 remount，overlayfs 已启用
                     already_rw_list+=("$device")
                 fi
             fi
@@ -201,7 +205,7 @@ gms-rt-devices-remount() {
         if [ ${#already_rw_list[@]} -gt 0 ]; then
             success "以下设备已处于读写模式，无需重启:"
             for device in "${already_rw_list[@]}"; do
-                echo "  ✅ $device (verity: disabled)"
+                echo "  ✅ $device (overlayfs: enabled)"
             done
             echo ""
         fi
@@ -210,7 +214,7 @@ gms-rt-devices-remount() {
         if [ ${#needs_reboot_list[@]} -gt 0 ]; then
             warning "以下设备需要重启才能使 remount 生效:"
             for device in "${needs_reboot_list[@]}"; do
-                echo "  • $device (当前: enforcing)"
+                echo "  • $device (第一次 remount 完成)"
             done
             echo ""
 
