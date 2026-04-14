@@ -607,7 +607,7 @@ const API_DETAILS_MAP = {
         response: '{ "installed": true, "running": false }',
         usage: '检查USB/IP服务状态'
     },
-    '/api/usbip/start': {
+    '/api/usbip/connect': {
         title: '启动USB/IP',
         description: '启动USB/IP设备共享',
         params: [
@@ -617,7 +617,7 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "USB/IP已启动" }',
         usage: '启动USB/IP服务'
     },
-    '/api/usbip/stop': {
+    '/api/usbip/disconnect': {
         title: '停止USB/IP',
         description: '停止USB/IP服务',
         params: [],

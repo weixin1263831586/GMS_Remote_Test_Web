@@ -384,7 +384,7 @@ curl -sX POST http://172.16.14.233:5001/api/desktop/validate \
 
 #### Start USB/IP Connection
 ```bash
-curl -sX POST http://172.16.14.233:5001/api/usbip/start \
+curl -sX POST http://172.16.14.233:5001/api/usbip/connect \
   -H "Content-Type: application/json" \
   -d '{
     "device_host": "username@windows-ip",
@@ -410,7 +410,7 @@ curl -sX POST http://172.16.14.233:5001/api/usbip/start \
 
 #### Stop USB/IP Connection
 ```bash
-curl -sX POST http://172.16.14.233:5001/api/usbip/stop | jq '.'
+curl -sX POST http://172.16.14.233:5001/api/usbip/disconnect | jq '.'
 ```
 
 #### Check USB/IP Status
@@ -891,7 +891,7 @@ TEST_MODULE="CtsPermissionTestCases"
 
 # 1. Connect via USB/IP
 echo "🔌 Connecting via USB/IP..."
-curl -sX POST http://172.16.14.233:5001/api/usbip/start \
+curl -sX POST http://172.16.14.233:5001/api/usbip/connect \
   -H "Content-Type: application/json" \
   -d '{"device_host": "user@windows-ip", "device_password": "password"}'
 echo
@@ -963,8 +963,8 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 ### USB/IP Connection
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/usbip/start` | POST | Start USB/IP connection |
-| `/api/usbip/stop` | POST | Stop USB/IP connection |
+| `/api/usbip/connect` | POST | Start USB/IP connection |
+| `/api/usbip/disconnect` | POST | Stop USB/IP connection |
 | `/api/usbip/status` | GET | Check USB/IP status |
 | `/api/usbip/auto-install` | POST | Auto-install usbipd |
 
@@ -1345,8 +1345,8 @@ For complete API documentation with try-it-out functionality:
 ### USB/IP Connection
 - `gms-rt-adb-forward-start` - Start ADB port forwarding
 - `gms-rt-adb-forward-stop` - Stop ADB port forwarding
-- `gms-rt-usbip-start` - Start USB/IP connection
-- `gms-rt-usbip-stop` - Stop USB/IP connection
+- `gms-rt-usbip-connect` - Start USB/IP connection
+- `gms-rt-usbip-disconnect` - Stop USB/IP connection
 - `gms-rt-usbip-status` - Check USB/IP status
 - `gms-rt-usbip-auto-install` - Auto-install USB/IP
 

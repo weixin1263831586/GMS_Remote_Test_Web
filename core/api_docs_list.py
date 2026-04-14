@@ -551,22 +551,22 @@ API_DOCS_LIST = [
     },
     {
         "method": "POST",
-        "path": "/api/usbip/start",
+        "path": "/api/usbip/connect",
         "description": "启动USB/IP设备共享",
         "params": [
             {"name": "device_host", "type": "string", "required": False, "desc": "设备主机地址，如172.16.14.233"},
             {"name": "device_password", "type": "string", "required": False, "desc": "设备主机SSH密码（可选）"}
         ],
         "category": "usbip",
-        "skill": "gms-rt-usbip-start"
+        "skill": "gms-rt-usbip-connect"
     },
     {
         "method": "POST",
-        "path": "/api/usbip/stop",
+        "path": "/api/usbip/disconnect",
         "description": "停止USB/IP服务",
         "params": [],
         "category": "usbip",
-        "skill": "gms-rt-usbip-stop"
+        "skill": "gms-rt-usbip-disconnect"
     },
     {
         "method": "POST",
