@@ -2768,7 +2768,7 @@ class USBIPManager:
             time.sleep(1)
 
 
-@app.route('/api/usbip/start', methods=['POST'])
+@app.route('/api/usbip/connect', methods=['POST'])
 def start_usbip():
     """启动 USB/IP 转发"""
     config = load_config()
@@ -2897,7 +2897,7 @@ def start_usbip():
         win_ssh.close()
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/usbip/stop', methods=['POST'])
+@app.route('/api/usbip/disconnect', methods=['POST'])
 def stop_usbip():
     """停止 USB/IP 转发"""
     config = load_config()

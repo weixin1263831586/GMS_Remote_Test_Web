@@ -1694,7 +1694,7 @@ async function setupUsbipForward() {
             btn.textContent = '📱 断开中...';
             btn.disabled = true;
 
-            const result = await apiCall('/api/usbip/stop', 'POST', {});
+            const result = await apiCall('/api/usbip/disconnect', 'POST', {});
             state.usbipConnected = false;
             btn.textContent = '📱 本地设备';
             btn.disabled = false;
@@ -1712,7 +1712,7 @@ async function setupUsbipForward() {
             btn.textContent = '📱 连接中...';
             btn.disabled = true;
 
-            const result = await apiCall('/api/usbip/start', 'POST', {});
+            const result = await apiCall('/api/usbip/connect', 'POST', {});
 
             // 检查是否成功（支持多种响应格式）
             if (result.success || result.devices || (result.message && result.message.includes('成功连接'))) {
@@ -1889,7 +1889,7 @@ async function submitDevicePassword() {
         // 立即关闭模态框
         closeDevicePasswordModal();
 
-        const result = await apiCall('/api/usbip/start', 'POST', {
+        const result = await apiCall('/api/usbip/connect', 'POST', {
             device_password: password
         });
 

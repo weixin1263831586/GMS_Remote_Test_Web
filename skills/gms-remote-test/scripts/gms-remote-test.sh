@@ -223,12 +223,12 @@ gms-rt-desktop-validate() {
 # ==============================================================================
 
 # Start USB/IP connection
-gms-rt-usbip-start() {
+gms-rt-usbip-connect() {
     local device_host="$1"
     local device_password="$2"
 
     if [ -z "$device_host" ]; then
-        error "Device host required. Usage: gms-rt-usbip-start <user@ip> [password]"
+        error "Device host required. Usage: gms-rt-usbip-connect <user@ip> [password]"
     fi
 
     check_jq
@@ -237,7 +237,7 @@ gms-rt-usbip-start() {
     local data="{\"device_host\":\"$device_host\"}"
     [ -n "$device_password" ] && data=$(echo "$data" | jq ". + {\"device_password\":\"$device_password\"}")
 
-    local response=$(api_call "/usbip/start" "POST" "$data")
+    local response=$(api_call "/usbip/connect" "POST" "$data")
 
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "USB/IP connection started"
@@ -249,10 +249,10 @@ gms-rt-usbip-start() {
 }
 
 # Stop USB/IP connection
-gms-rt-usbip-stop() {
+gms-rt-usbip-disconnect() {
     check_jq
     echo "🔌 Stopping USB/IP connection..."
-    local response=$(api_call "/usbip/stop" "POST")
+    local response=$(api_call "/usbip/disconnect" "POST")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "USB/IP stopped"
     else
@@ -1334,8 +1334,8 @@ ${YELLOW}USB/IP Connection:${NC}
   gms-rt-adb-forward-start    - Start ADB port forwarding
   gms-rt-adb-forward-stop     - Stop ADB port forwarding
   gms-rt-usbip-status          - Check USB/IP status
-  gms-rt-usbip-start          - Start USB/IP connection
-  gms-rt-usbip-stop           - Stop USB/IP connection
+  gms-rt-usbip-connect          - Start USB/IP connection
+  gms-rt-usbip-disconnect       - Stop USB/IP connection
   gms-rt-usbip-auto-install    - Auto-install USB/IP
 
 ${YELLOW}Test Management:${NC}

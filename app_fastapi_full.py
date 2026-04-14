@@ -5116,7 +5116,7 @@ async def get_usbip_status(request: Request):
     logger.info(f"[USB/IP Status] client_id={client_id}, connected={connected}, device_count={len(global_state.usbip_devices_source)}")
     return JSONResponse(content={'connected': connected})
 
-@app.post("/api/usbip/start")
+@app.post("/api/usbip/connect")
 async def start_usbip(
     req: Optional[USBIPStartRequest] = Body(default=None),
     request: Request = None,
@@ -5125,7 +5125,7 @@ async def start_usbip(
     """启动 USB/IP 转发（使用usbip_manager.start_usbip高级封装方法 - 与Flask版本一致）"""
     # 检查是否需要显示帮助
     if help:
-        help_text = generate_per_api_help_text("POST", "/api/usbip/start")
+        help_text = generate_per_api_help_text("POST", "/api/usbip/connect")
         if help_text:
             return PlainTextResponse(
                 content=help_text,
@@ -5208,7 +5208,7 @@ async def start_usbip(
         logger.error(f"Error starting USB/IP: {e}")
         return ApiResponse.error(str(e), status_code=500)
 
-@app.post("/api/usbip/stop")
+@app.post("/api/usbip/disconnect")
 async def stop_usbip(request: Request):
     """停止 USB/IP 转发（与5000端口完全一致）"""
     config = config_manager.load_config()
@@ -8139,7 +8139,7 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             'response': '{"success": true, "message": "固件烧写完成"}',
             'usage': ''
         },
-        '/api/usbip/start': {
+        '/api/usbip/connect': {
             'title': '启动 USB/IP 连接',
             'description': '通过 USB/IP 连接到远程设备',
             'params': [
