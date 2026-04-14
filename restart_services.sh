@@ -84,7 +84,7 @@ clean_old_logs() {
 
 # ==================== 1. 清理缓存 ====================
 if [ "$FAST_MODE" = false ]; then
-    echo -e "${YELLOW}[1/4] 清理 Python 缓存...${NC}"
+    echo -e "${YELLOW}[1/5] 清理 Python 缓存...${NC}"
     find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
     find . -type f -name "*.pyc" -delete 2>/dev/null || true
     echo -e "${GREEN}✓ Python 缓存已清理${NC}"
@@ -98,7 +98,7 @@ if [ "$CLEAN_LOGS" = true ]; then
 fi
 
 # ==================== 2. 停止现有服务 ====================
-echo -e "${YELLOW}[2/4] 停止现有服务...${NC}"
+echo -e "${YELLOW}[2/5] 停止现有服务...${NC}"
 
 for port in $TARGET_PORTS; do
     if lsof -i :"$port" >/dev/null 2>&1; then
@@ -123,7 +123,7 @@ done
 echo ""
 
 # ==================== 3. 清理日志文件 ====================
-echo -e "${YELLOW}[3/4] 清理日志文件...${NC}"
+echo -e "${YELLOW}[3/5] 清理日志文件...${NC}"
 for port in 5001 5000; do
     if echo "$TARGET_PORTS" | grep -q "$port"; then
         log_file=$([ "$port" = "5001" ] && echo "fastapi.log" || echo "flask.log")
@@ -133,8 +133,21 @@ done
 echo -e "${GREEN}✓ 日志已清理${NC}"
 echo ""
 
-# ==================== 4. 启动服务 ====================
-echo -e "${YELLOW}[4/4] 启动服务...${NC}"
+# ==================== 4. 添加路由规则 ====================
+echo -e "${YELLOW}[4/5] 添加路由规则...${NC}"
+if sudo ip route add 10.10.10.0/24 via 172.16.14.1 2>/dev/null; then
+    echo -e "${GREEN}  ✓ 路由规则添加成功: 10.10.10.0/24 via 172.16.14.1${NC}"
+else
+    if sudo ip route show | grep -q "10.10.10.0/24 via 172.16.14.1"; then
+        echo -e "${BLUE}  ℹ 路由规则已存在: 10.10.10.0/24 via 172.16.14.1${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ 路由规则添加失败，请检查权限${NC}"
+    fi
+fi
+echo ""
+
+# ==================== 5. 启动服务 ====================
+echo -e "${YELLOW}[5/5] 启动服务...${NC}"
 
 # 等待端口可用的函数
 wait_for_port() {
