@@ -75,6 +75,11 @@ UPLOAD_PROGRESS_QUERY_TIMEOUT = 5  # 查询超时（秒）
 UPLOAD_PROGRESS_EXPIRATION = 10  # 进度过期时间（秒）
 UPLOAD_PROGRESS_CLEANUP_INTERVAL = 60  # 清理间隔（秒）
 
+# GSI 固件烧写进度轮询配置
+GSI_PROGRESS_POLL_INTERVAL = 0.5  # 服务器端进度更新间隔（秒）
+GSI_PROGRESS_INCREMENT = 5  # 每次增加的百分比
+GSI_PROGRESS_MAX = 95  # 最大进度百分比（等待完成前）
+
 # TRADEFED二进制文件映射
 TRADEFED_BINARY_MAP = {
     'cts': 'cts-tradefed',
@@ -6808,9 +6813,9 @@ async def burn_firmware(
                             logger.error(f"[Firmware Burn] 发送日志失败: {e}")
 
                 # 如果固件烧写开始，每0.5秒更新一次进度
-                if firmware_burn_start and (current_time - last_progress_time > 0.5):
+                if firmware_burn_start and (current_time - last_progress_time > GSI_PROGRESS_POLL_INTERVAL):
                     # 进度条从0%到95%，每0.5秒增加5%
-                    current_progress = min(current_progress + 5, 95)
+                    current_progress = min(current_progress + GSI_PROGRESS_INCREMENT, GSI_PROGRESS_MAX)
                     last_progress_time = current_time
 
                     # 发送进度更新到前端（只更新进度条，不显示在日志）
