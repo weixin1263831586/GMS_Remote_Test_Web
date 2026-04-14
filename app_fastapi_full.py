@@ -1507,31 +1507,18 @@ async def get_connected_devices(
     # 直接返回数组（与Flask一致）
     return JSONResponse(content=devices_with_status)
 
-@app.post("/api/devices/bootloader-lock")
-async def lock_bootloader(
-    request: Request,
-    help: bool = Query(False),
-    req: DeviceLockRequest = Body(None)
-):
-    """锁定设备Bootloader"""
-    # 检查是否需要显示帮助
-    if help:
-        help_text = generate_per_api_help_text("POST", "/api/devices/bootloader-lock")
-        if help_text:
-            return PlainTextResponse(
-                content=help_text,
-                headers={
-                    "Content-Type": "text/plain; charset=utf-8",
-                    "Cache-Control": "public, max-age=300"
-                }
-            )
+async def _manage_bootloader_lock(devices: List[str], action: str) -> JSONResponse:
+    """
+    通用的 bootloader 锁定/解锁处理函数
 
+    Args:
+        devices: 设备ID列表
+        action: 操作类型 ("lock" 或 "unlock")
+
+    Returns:
+        JSONResponse with operation results
+    """
     try:
-        # 兼容两种请求格式：单设备（device_id）和批量（devices）
-        devices = req.devices if req.devices else []
-        if req.device_id:
-            devices = [req.device_id]
-
         if not devices:
             return ApiResponse.error("未选择设备", status_code=400)
 
@@ -1541,8 +1528,6 @@ async def lock_bootloader(
             if not valid_device_pattern.match(device_id):
                 return ApiResponse.error(f"无效的设备 ID 格式：{device_id}", status_code=400)
 
-        # 固定为锁定操作
-        action = "lock"
         config = config_manager.load_config()
 
         with ssh_manager.connection(config) as ssh:
@@ -1569,7 +1554,7 @@ async def lock_bootloader(
             # 对每个设备执行锁定/解锁操作
             for device_id in devices:
                 try:
-                    # 执行脚本
+                    # 执行脚本，传递 action 参数
                     cmd = f"bash '{remote_script}' '{device_id}' '{action}'"
                     output, error, code = ssh_manager.execute_command(ssh, cmd)
 
@@ -1595,13 +1580,54 @@ async def lock_bootloader(
                         'error': str(e)
                     })
 
-            return ApiResponse.success({'results': results}, '设备锁定操作完成')
+            # 计算统计信息
+            success_count = sum(1 for r in results if r.get('success', False))
+            failed_count = len(results) - success_count
+
+            response_data = {
+                'results': results,
+                'summary': {
+                    'total': len(results),
+                    'success': success_count,
+                    'failed': failed_count
+                }
+            }
+
+            action_text = "锁定" if action == "lock" else "解锁"
+            return ApiResponse.success(response_data, f'设备{action_text}操作完成')
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error managing device lock: {e}")
         return ApiResponse.error(str(e), status_code=500)
+
+@app.post("/api/devices/bootloader-lock")
+async def lock_bootloader(
+    request: Request,
+    help: bool = Query(False),
+    req: DeviceLockRequest = Body(None)
+):
+    """锁定设备Bootloader"""
+    # 检查是否需要显示帮助
+    if help:
+        help_text = generate_per_api_help_text("POST", "/api/devices/bootloader-lock")
+        if help_text:
+            return PlainTextResponse(
+                content=help_text,
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=300"
+                }
+            )
+
+    # 兼容两种请求格式：单设备（device_id）和批量（devices）
+    devices = req.devices if req.devices else []
+    if req.device_id:
+        devices = [req.device_id]
+
+    # 调用通用函数，执行锁定操作
+    return await _manage_bootloader_lock(devices, "lock")
 
 @app.post("/api/devices/bootloader-unlock")
 async def unlock_bootloader(
@@ -1610,14 +1636,25 @@ async def unlock_bootloader(
     req: DeviceLockRequest = Body(None)
 ):
     """解锁设备Bootloader"""
-    # 强制设置action为unlock
-    if req:
-        req.action = 'unlock'
-    else:
-        req = DeviceLockRequest(devices=[], action='unlock')
+    # 检查是否需要显示帮助
+    if help:
+        help_text = generate_per_api_help_text("POST", "/api/devices/bootloader-unlock")
+        if help_text:
+            return PlainTextResponse(
+                content=help_text,
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=300"
+                }
+            )
 
-    # 调用lock_bootloader函数
-    return await lock_bootloader(request, None, False, req)
+    # 兼容两种请求格式：单设备（device_id）和批量（devices）
+    devices = req.devices if req.devices else []
+    if req.device_id:
+        devices = [req.device_id]
+
+    # 调用通用函数，执行解锁操作
+    return await _manage_bootloader_lock(devices, "unlock")
 
 @app.post("/api/devices/bootloader-status")
 async def check_bootloader_status(req: DeviceActionRequest):
