@@ -770,15 +770,31 @@ gms-rt-devices-connect-wifi() {
     fi
 }
 
-# Execute shell command
+# Execute shell command (direct local adb shell)
 gms-rt-devices-shell() {
     local device_id="$1"
     [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID"; return 1; }
-    check_jq
+
+    # Check if adb is available
+    if ! command -v adb &> /dev/null; then
+        error "adb 命令未找到. 请确保 Android SDK 已安装并配置 PATH"
+        return 1
+    fi
+
+    # Check if device is connected
+    if ! adb devices | grep -q "$device_id"; then
+        error "设备 $device_id 未找到或未连接"
+        echo "📱 当前连接的设备:"
+        adb devices
+        return 1
+    fi
+
     echo "💻 打开设备Shell: $device_id..."
-    local data="{\"serial_no\":\"$device_id\"}"
-    local response=$(api_call "/devices/shell" "POST" "$data")
-    echo "$response" | jq '.'
+    echo "🔌 使用 Ctrl+D 退出 shell"
+    echo ""
+
+    # Execute adb shell directly (interactive)
+    adb -s "$device_id" shell
 }
 
 # Show device screen
@@ -1321,7 +1337,7 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-reboot              - Reboot devices
   gms-rt-devices-remount             - Remount RW
   gms-rt-devices-connect-wifi        - Connect to WiFi
-  gms-rt-devices-shell               - Execute shell command
+  gms-rt-devices-shell               - Open interactive ADB shell
   gms-rt-devices-screen              - Show device screen
 
 ${YELLOW}Desktop VNC:${NC}
