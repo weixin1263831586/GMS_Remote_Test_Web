@@ -201,7 +201,7 @@ API_DOCS_LIST = [
     },
     {
         "method": "POST",
-        "path": "/api/devices/connect-wifi",
+        "path": "/api/devices/wifi-connect",
         "description": "让设备连接到指定的WiFi网络",
         "params": [
             {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"},
@@ -209,7 +209,7 @@ API_DOCS_LIST = [
             {"name": "password", "type": "string", "required": False, "desc": "WiFi密码，默认1234567890"}
         ],
         "category": "device",
-        "skill": "gms-rt-devices-connect-wifi"
+        "skill": "gms-rt-devices-wifi-connect"
     },
     {
         "method": "POST",
@@ -236,7 +236,7 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/test/start",
-        "description": "启动兼容性测试(CTS/VTS/GTS等)",
+        "description": "启动GMS测试(CTS/VTS/GTS等)",
         "params": [
             {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"},
             {"name": "test_type", "type": "string", "required": True, "desc": "测试类型: CTS|VTS|STS|GTS|CTS_VERIFIER"},
@@ -282,11 +282,11 @@ API_DOCS_LIST = [
     },
     {
         "method": "GET",
-        "path": "/api/test/logs/current",
-        "description": "下载当前测试日志",
+        "path": "/api/test/logs/get",
+        "description": "获取当前测试日志（查看或下载）",
         "params": [],
         "category": "test",
-        "skill": "gms-rt-test-logs-current"
+        "skill": "gms-rt-test-logs-get"
     },
     {
         "method": "POST",
@@ -300,11 +300,11 @@ API_DOCS_LIST = [
     },
     {
         "method": "POST",
-        "path": "/api/test/logs/save-current",
+        "path": "/api/test/logs/save",
         "description": "保存当前正在运行的日志",
         "params": [],
         "category": "test",
-        "skill": "gms-rt-test-logs-save-current"
+        "skill": "gms-rt-test-logs-save"
     },
     {
         "method": "GET",
@@ -354,23 +354,14 @@ API_DOCS_LIST = [
     },
     {
         "method": "GET",
-        "path": "/api/reports/view",
-        "description": "在浏览器中查看HTML报告",
+        "path": "/api/reports/get",
+        "description": "获取报告（查看或下载）",
         "params": [
-            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"}
+            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"},
+            {"name": "output_file", "type": "string", "required": False, "desc": "输出文件名（可选）"}
         ],
         "category": "report",
-        "skill": "gms-rt-reports-view"
-    },
-    {
-        "method": "GET",
-        "path": "/api/reports/download/{report_timestamp}",
-        "description": "下载测试报告的ZIP压缩包",
-        "params": [
-            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"}
-        ],
-        "category": "report",
-        "skill": "gms-rt-reports-download"
+        "skill": "gms-rt-reports-get"
     },
     {
         "method": "DELETE",

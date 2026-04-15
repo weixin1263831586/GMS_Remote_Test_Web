@@ -21,8 +21,9 @@ async function uploadFileInChunks(file, url, options = {}) {
     const totalChunks = Math.ceil(fileSize / chunkSize);
     const uploadId = `${file.name}_${Date.now()}`;
 
-    console.log(`[ChunkUpload] Starting: ${file.name} (${formatFileSize(fileSize)})`);
-    console.log(`[ChunkUpload] Chunk size: ${formatFileSize(chunkSize)}, Total chunks: ${totalChunks}`);
+    const formatBytes = getFormatBytes();
+    console.log(`[ChunkUpload] Starting: ${file.name} (${formatBytes(fileSize)})`);
+    console.log(`[ChunkUpload] Chunk size: ${formatBytes(chunkSize)}, Total chunks: ${totalChunks}`);
     console.log(`[ChunkUpload] Concurrent uploads: ${concurrent}`);
 
     // 已上传的块
@@ -165,20 +166,24 @@ async function uploadFileInChunks(file, url, options = {}) {
 }
 
 /**
- * 格式化文件大小 - 使用 app.js 中的 formatBytes 函数
- * 此函数保留作为别名，保持向后兼容
+ * 本地格式化字节大小函数 (fallback)
  */
-function formatFileSize(bytes) {
-    // 委托给 app.js 中的 formatBytes 函数
-    if (typeof window.formatBytes === 'function') {
-        return window.formatBytes(bytes);
-    }
-    // 降级处理
+function formatBytesLocal(bytes, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
+    if (!bytes && bytes !== 0) return bytes + ' bytes';
+
     const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+/**
+ * 获取格式化字节函数 (优先使用全局，否则使用本地)
+ */
+function getFormatBytes() {
+    return window.formatBytes || formatBytesLocal;
 }
 
 /**
@@ -267,4 +272,3 @@ async function uploadFileRegular(file, url, options = {}) {
 // 导出到全局
 window.uploadFileInChunks = uploadFileInChunks;
 window.uploadFileWithProgress = uploadFileWithProgress;
-window.formatFileSize = formatFileSize;

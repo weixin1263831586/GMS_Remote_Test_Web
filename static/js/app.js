@@ -169,13 +169,42 @@ async function callDeviceApi(endpoint, additionalData = {}) {
 
 // ==================== Initialization ====================
 document.addEventListener('DOMContentLoaded', async () => {
-    initSocket();
     initEventListeners();
+    initDragDrop();
 
-    // 立即加载配置
+    // 🚀 优先加载客户端信息，确保所有API调用都有正确的clientId
+    try {
+        const currentUserResponse = await fetch('/api/users/current');
+        if (currentUserResponse.ok) {
+            const userData = await currentUserResponse.json();
+            if (userData.client_id) {
+                state.clientId = userData.client_id;
+                debugLog('[Init] ✅ Set state.clientId from /api/users/current:', state.clientId);
+
+                // 检查是否是 unknown 用户（apiCall 中会统一处理弹框）
+                if (userData.client_id.startsWith('unknown@')) {
+                    console.warn('[Init] Detected unknown client, will show username modal via apiCall');
+                } else {
+                    // 已获取到正确的用户名，检查 USB/IP 和 VPN 状态
+                    await Promise.all([
+                        checkUsbipStatus(),
+                        checkVpnStatus()
+                    ]);
+                }
+            }
+        } else {
+            console.warn('[Init] Failed to call /api/users/current');
+        }
+    } catch (error) {
+        console.warn('[Init] Error getting current user:', error);
+    }
+
+    // 🔌 现在初始化WebSocket（需要clientId）
+    initSocket();
+
+    // ⚙️ 加载配置和设备
     await loadConfig();
     loadDevices();
-    initDragDrop();
     await checkInitialTestStatus();
     startStatusPolling();
 
@@ -193,32 +222,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 延迟执行耗时操作，不阻塞页面加载
     setTimeout(async () => {
-        // 立即获取客户端信息（使用/api/users/current）
-        try {
-            const currentUserResponse = await fetch('/api/users/current');
-            if (currentUserResponse.ok) {
-                const userData = await currentUserResponse.json();
-                if (userData.client_id) {
-                    state.clientId = userData.client_id;
-                    debugLog('[Init] Set state.clientId from /api/users/current:', state.clientId);
-
-                    // 检查是否是 unknown 用户（apiCall 中会统一处理弹框）
-                    if (userData.client_id.startsWith('unknown@')) {
-                        console.warn('[Init] Detected unknown client, will show username modal via apiCall');
-                    } else {
-                        // 已获取到正确的用户名，检查 USB/IP 和 VPN 状态
-                        await Promise.all([
-                            checkUsbipStatus(),
-                            checkVpnStatus()
-                        ]);
-                    }
-                }
-            } else {
-                console.warn('[Init] Failed to call /api/users/current');
-            }
-        } catch (error) {
-            console.warn('[Init] Error getting current user:', error);
-        }
 
         // 自动启动 VNC 服务
         try {
@@ -491,11 +494,6 @@ function initWebSocket() {
                         // 移除频繁的调试日志，减少控制台噪音
                         // console.log('[WebSocket] file_upload_progress:', data);
                         updateUploadProgress(data.percentage, data.filename, data.uploaded_size, data.total_size);
-                        break;
-
-                    case 'upload_progress':
-                        // 固件上传进度更新（已弃用，保留以防兼容性）
-                        console.log('[WebSocket] upload_progress:', data);
                         break;
 
                     case 'vpn_status_update':
@@ -1113,7 +1111,7 @@ async function submitWifiConfig() {
         addLogEntry(`正在连接 Wi-Fi (${ssid})...`, 'info');
         showToast('正在连接 Wi-Fi...', 'info');
 
-        await apiCall('/api/devices/connect-wifi', 'POST', {
+        await apiCall('/api/devices/wifi-connect', 'POST', {
             devices: Array.from(state.selectedDevices),
             ssid: ssid,
             password: password
@@ -2846,7 +2844,7 @@ async function downloadTestLog() {
 
             // 然后触发下载
             const link = document.createElement('a');
-            link.href = '/api/test/logs/current';
+            link.href = '/api/test/logs/get';
             link.download = saveResult.filename;
             document.body.appendChild(link);
             link.click();
@@ -3914,7 +3912,7 @@ function closeReportDetailsModal() {
 
 async function viewReportFile(filePath, fileName) {
     try {
-        const resp = await fetch(`/api/reports/view?path=${encodeURIComponent(filePath)}`);
+        const resp = await fetch(`/api/reports/get?path=${encodeURIComponent(filePath)}`);
         const data = await resp.json();
 
         if (!data.success) {
@@ -6284,7 +6282,7 @@ function copyText(text, options = {}) {
 }
 
 /**
- * 复制curl命令到剪贴板（自动添加jq格式化）- 兼容旧代码
+ * 复制curl命令到剪贴板（自动添加jq格式化）
  */
 window.copyCurlCommand = function(text) {
     copyText(text, { addJq: true, successMsg: '✓ curl命令已复制 (含jq格式化)' });

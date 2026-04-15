@@ -1248,9 +1248,9 @@ def clean_test():
     user_state['logs'] = []
     return jsonify({'success': True})
 
-@app.route('/api/test/logs/download')
-def download_logs():
-    """下载当前测试日志文件"""
+@app.route('/api/test/logs/get')
+def get_test_logs():
+    """获取测试日志（查看或下载）"""
     user_state = get_user_state()
 
     log_file = user_state.get('log_file')
@@ -1496,7 +1496,7 @@ def remount_devices():
         return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/devices/connect-wifi', methods=['POST'])
+@app.route('/api/devices/wifi-connect', methods=['POST'])
 def connect_wifi():
     """Connect devices to WiFi"""
     data = request.json
@@ -3140,9 +3140,9 @@ def list_report_files(report_timestamp):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/reports/view')
-def view_report_file():
-    """View a test report file content"""
+@app.route('/api/reports/get')
+def get_report_file():
+    """获取报告文件内容（查看或下载）"""
     file_path = request.args.get('path')
     if not file_path:
         return jsonify({'success': False, 'error': 'File path is required'}), 400
