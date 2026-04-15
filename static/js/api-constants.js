@@ -33,7 +33,7 @@ const API_CATEGORIES = {
     '/api/devices/user-locked': 'device',
     '/api/devices/reboot': 'device',
     '/api/devices/remount': 'device',
-    '/api/devices/connect-wifi': 'device',
+    '/api/devices/wifi-connect': 'device',
     '/api/devices/shell': 'device',
     '/api/devices/screen': 'device',
     '/api/desktop': 'desktop',
@@ -183,13 +183,13 @@ const API_DETAILS_MAP = {
         response: '{ "source_code": "...", "analysis": "..." }',
         usage: '测试失败时分析源代码找出原因'
     },
-    '/api/test/logs/current': {
-        title: '下载当前日志',
-        description: '下载当前测试日志',
+    '/api/test/logs/get': {
+        title: '获取测试日志',
+        description: '获取测试日志（查看或下载）',
         method: 'GET',
         params: [],
         response: '日志文件下载 (.log格式)',
-        usage: '快速下载当前正在运行的测试日志'
+        usage: '获取当前正在运行的测试日志'
     },
     '/api/test/logs/batch': {
         title: '批量下载日志',
@@ -201,7 +201,7 @@ const API_DETAILS_MAP = {
         response: 'ZIP压缩包下载',
         usage: '批量下载和归档多个日志文件'
     },
-    '/api/test/logs/save-current': {
+    '/api/test/logs/save': {
         title: '保存当前日志',
         description: '保存当前正在运行的日志',
         params: [],
@@ -420,7 +420,7 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "设备已重新挂载为读写模式" }',
         usage: '需要修改系统文件时使用'
     },
-    '/api/devices/connect-wifi': {
+    '/api/devices/wifi-connect': {
         title: '连接WiFi',
         description: '让设备连接到指定的WiFi网络',
         params: [
@@ -474,23 +474,15 @@ const API_DETAILS_MAP = {
         response: '{ "summary": { "passed": 150, "failed": 5 }, "failed_tests": [] }',
         usage: '快速查看测试结果统计和失败用例'
     },
-    '/api/reports/view': {
-        title: '查看报告',
-        description: '在浏览器中查看HTML报告',
+    '/api/reports/get': {
+        title: '获取报告',
+        description: '获取测试报告（查看或下载）',
         params: [
-            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
+            { name: 'path', type: 'string', required: false, desc: '报告文件路径' },
+            { name: 'report_timestamp', type: 'string', required: false, desc: '报告时间戳（用于下载）' }
         ],
-        response: 'HTML报告页面',
-        usage: '查看HTML测试报告'
-    },
-    '/api/reports/download/{report_timestamp}': {
-        title: '下载报告ZIP',
-        description: '下载测试报告的ZIP压缩包',
-        params: [
-            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
-        ],
-        response: 'ZIP文件下载',
-        usage: '下载完整报告ZIP包'
+        response: '报告内容或ZIP文件',
+        usage: '查看或下载测试报告'
     },
     '/api/reports/delete': {
         title: '删除报告',

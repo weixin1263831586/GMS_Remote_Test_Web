@@ -639,7 +639,7 @@ curl -sX POST http://172.16.14.233:5001/api/devices/remount \
 
 #### Connect to WiFi
 ```bash
-curl -sX POST http://172.16.14.233:5001/api/devices/connect-wifi \
+curl -sX POST http://172.16.14.233:5001/api/devices/wifi-connect \
   -H "Content-Type: application/json" \
   -d '{
     "device_id": "RK3588-DEVICE",
@@ -948,7 +948,7 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 | `/api/devices/bootloader-lock` | POST | Lock bootloader |
 | `/api/devices/bootloader-unlock` | POST | Unlock bootloader |
 | `/api/devices/bootloader-status` | POST | Check bootloader status |
-| `/api/devices/connect-wifi` | POST | Connect to WiFi |
+| `/api/devices/wifi-connect` | POST | Connect to WiFi |
 | `/api/devices/management` | GET | Device management page |
 | `/api/devices/user-locked` | GET | List user locks |
 
@@ -1034,12 +1034,6 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 | `/api/burn/firmware` | POST | Burn firmware |
 | `/api/burn/gsi` | POST | Burn GSI image |
 | `/api/burn/serial` | POST | Burn serial number |
-
-### Legacy Endpoints (Backward Compatible)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/config` | GET | Get config (legacy) |
-| `/api/config` | POST | Update config (legacy) |
 
 ---
 
@@ -1290,7 +1284,7 @@ For complete API documentation with try-it-out functionality:
 - `gms-rt-devices-info` - Get detailed device information
 - `gms-rt-devices-reboot` - Reboot devices
 - `gms-rt-devices-remount` - Remount filesystem as RW
-- `gms-rt-devices-connect-wifi` - Connect devices to WiFi
+- `gms-rt-devices-wifi-connect` - Connect devices to WiFi
 - `gms-rt-devices-shell` - Open interactive ADB shell (direct local command)
 - `gms-rt-devices-screen` - Show device screen
 - `gms-rt-devices-bootloader-lock` - Lock device bootloader
@@ -1307,19 +1301,15 @@ For complete API documentation with try-it-out functionality:
 - `gms-rt-test-suites` - List available test suites
 
 ### Test Logs
-- `gms-rt-test-logs-current` - Download current test logs
-- `gms-rt-test-logs-download` - Download specific log file
+- `gms-rt-test-logs-get` - Get test logs (view/download)
 - `gms-rt-test-logs-batch` - Batch download logs
 - `gms-rt-test-logs-list` - List available test logs
 - `gms-rt-test-logs-stream` - Stream logs in real-time
-- `gms-rt-test-logs-save-current` - Save current logs
 
 ### Reports
-- `gms-rt-reports-latest` - Get latest test report
 - `gms-rt-reports-list` - List all test reports
+- `gms-rt-reports-get` - Get report (view/download)
 - `gms-rt-reports-files` - Get report files
-- `gms-rt-reports-view` - View specific report
-- `gms-rt-reports-download` - Download report
 - `gms-rt-reports-delete` - Delete report
 - `gms-rt-reports-analyze` - Analyze report
 - `gms-rt-reports-analyze-ai` - AI-powered report analysis
@@ -1372,11 +1362,6 @@ For complete API documentation with try-it-out functionality:
 - `gms-rt-config-update` - Update configuration
 - `gms-rt-config-validate` - Validate configuration
 - `gms-rt-config-values` - Get config values
-
-### Client Network
-- `gms-rt-client-info` - Get client information
-- `gms-rt-client-record` - Record client info
-- `gms-rt-client-detect` - Auto-detect client
 
 ### Tools & Utilities
 - `gms-rt-terminal-push` - Push command to terminal

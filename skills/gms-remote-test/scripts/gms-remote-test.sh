@@ -551,35 +551,21 @@ gms-rt-test-monitor() {
     done
 }
 
-# Download current log
-gms-rt-test-logs-download() {
-    local output_file="${1:-test.log}"
-    echo "📥 Downloading current log to $output_file..."
-    curl -s "${API_BASE}/test/logs/download" -o "$output_file"
+# Get test logs (replaces gms-rt-test-logs-download and gms-rt-test-logs-current)
+gms-rt-test-logs-get() {
+    local output_file="${1:-test_logs_$(date +%Y%m%d_%H%M%S).log}"
+    echo "📥 Downloading test logs to $output_file..."
+    curl -s "${API_BASE}/test/logs/get" -o "$output_file"
     if [ $? -eq 0 ]; then
-        success "Log downloaded to $output_file"
+        success "Logs downloaded to $output_file"
     else
-        error "Failed to download log"
+        error "Failed to download logs"
     fi
 }
 
 # ==============================================================================
 # Report Commands
 # ==============================================================================
-
-# Get latest test report
-gms-rt-reports-latest() {
-    check_jq
-    echo "📄 Fetching latest report..."
-    local response=$(api_call "/reports/list")
-    local latest=$(echo "$response" | jq '.reports[0]')
-
-    if [ "$latest" != "null" ]; then
-        echo "$latest" | jq '.'
-    else
-        warning "No reports found"
-    fi
-}
 
 # List all reports
 gms-rt-reports-list() {
@@ -642,55 +628,8 @@ gms-rt-config-validate() {
 }
 
 # ==============================================================================
-# Network & Client Commands
+# User Management Commands
 # ==============================================================================
-
-# Get client IP
-gms-rt-client-info() {
-    check_jq
-    echo "🖥️  Getting client information..."
-    api_call "/client-info" | jq '.'
-}
-
-# Record client info
-gms-rt-client-record() {
-    local ip="$1"
-    local username="$2"
-    [ -z "$ip" ] && { error "IP required. Usage: gms-rt-client-record <ip> [username]"; return 1; }
-    check_jq
-    echo "📝 Recording client info..."
-    local data="{\"ip\":\"$ip\""
-    [ -n "$username" ] && data=$(echo "$data" | jq ". + {\"username\":\"$username\"}")
-    data=$(echo "$data" | jq '.')
-    local response=$(api_call "/client-info" "POST" "$data")
-    if echo "$response" | jq -e '.success' > /dev/null; then
-        success "Client info recorded"
-        echo "$response" | jq '.'
-    else
-        error "Failed to record client info"
-    fi
-}
-
-# Auto-detect client username
-gms-rt-client-detect() {
-    local ip="$1"
-    local username="$2"
-    local password="$3"
-    [ -z "$ip" ] && { error "IP required. Usage: gms-rt-client-detect <ip> [username] [password]"; return 1; }
-    check_jq
-    echo "🔍 Detecting client username..."
-    local data="{\"ip\":\"$ip\""
-    [ -n "$username" ] && data=$(echo "$data" | jq ". + {\"username\":\"$username\"}")
-    [ -n "$password" ] && data=$(echo "$data" | jq ". + {\"password\":\"$password\"}")
-    data=$(echo "$data" | jq '.')
-    local response=$(api_call "/client-info/detect" "POST" "$data")
-    if echo "$response" | jq -e '.success' > /dev/null; then
-        success "Client detected"
-        echo "$response" | jq '.'
-    else
-        error "Failed to detect client"
-    fi
-}
 
 # Check SSH route
 gms-rt-ssh-route() {
@@ -884,21 +823,21 @@ gms-rt-devices-user-locked() {
 }
 
 # Connect WiFi
-gms-rt-devices-connect-wifi() {
+gms-rt-devices-wifi-connect() {
     local devices="$1"
     local ssid="$2"
     local password="$3"
 
-    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
-    [ -z "$ssid" ] && { error "SSID必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
-    [ -z "$password" ] && { error "密码必填. 用法: gms-rt-devices-connect-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-wifi-connect DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
+    [ -z "$ssid" ] && { error "SSID必填. 用法: gms-rt-devices-wifi-connect DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
+    [ -z "$password" ] && { error "密码必填. 用法: gms-rt-devices-wifi-connect DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
 
     check_jq
     echo "📶 连接WiFi: $ssid..."
 
     local device_array=$(convert_devices_to_json "$devices")
     local data=$(echo "{\"devices\":$device_array,\"ssid\":\"$ssid\",\"password\":\"$password\"}" | jq -c '.')
-    local response=$(api_call "/devices/connect-wifi" "POST" "$data")
+    local response=$(api_call "/devices/wifi-connect" "POST" "$data")
 
     if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then
         success "WiFi连接已启动"
@@ -1013,18 +952,6 @@ gms-rt-test-clean() {
     echo "$response" | jq '.'
 }
 
-# Get current test logs
-gms-rt-test-logs-current() {
-    local output_file="${1:-test_logs_$(date +%Y%m%d_%H%M%S).log}"
-    echo "📥 Downloading current test logs to $output_file..."
-    curl -s "${API_BASE}/test/logs/current" -o "$output_file"
-    if [ $? -eq 0 ]; then
-        success "Logs downloaded to $output_file"
-    else
-        error "Failed to download logs"
-    fi
-}
-
 # Batch download logs
 gms-rt-test-logs-batch() {
     local files="$1"
@@ -1033,14 +960,6 @@ gms-rt-test-logs-batch() {
     echo "📦 Batch downloading logs..."
     local data="{\"files\":$files}"
     local response=$(api_call "/test/logs/batch" "POST" "$data")
-    echo "$response" | jq '.'
-}
-
-# Save current logs
-gms-rt-test-logs-save-current() {
-    check_jq
-    echo "💾 Saving current logs..."
-    local response=$(api_call "/test/logs/save-current" "POST" "{}")
     echo "$response" | jq '.'
 }
 
@@ -1075,22 +994,25 @@ gms-rt-reports-analyze-source() {
     echo "$response" | jq '.'
 }
 
-# View report
-gms-rt-reports-view() {
+# Get report (replaces gms-rt-reports-view and gms-rt-reports-download)
+gms-rt-reports-get() {
     local report_timestamp="$1"
-    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-view <report_timestamp>"; return 1; }
-    check_jq
-    echo "📊 Viewing report: $report_timestamp..."
-    api_call "/reports/view?report_timestamp=$report_timestamp" | jq '.'
-}
+    local output_file="${2:-}"
+    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-get <report_timestamp> [output_file]"; return 1; }
 
-# Download report
-gms-rt-reports-download() {
-    local report_timestamp="$1"
-    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-download <report_timestamp>"; return 1; }
     check_jq
-    echo "📥 Downloading report: $report_timestamp..."
-    api_call "/reports/download/$report_timestamp" -o "report_${report_timestamp}.zip"
+    if [ -n "$output_file" ]; then
+        echo "📥 Downloading report: $report_timestamp to $output_file..."
+        curl -s "${API_BASE}/reports/get/$report_timestamp" -o "$output_file"
+        if [ $? -eq 0 ]; then
+            success "Report downloaded to $output_file"
+        else
+            error "Failed to download report"
+        fi
+    else
+        echo "📊 Viewing report: $report_timestamp..."
+        api_call "/reports/get?report_timestamp=$report_timestamp" | jq '.'
+    fi
 }
 
 # Delete report
@@ -1475,7 +1397,7 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-user-locked         - List user-locked devices
   gms-rt-devices-reboot              - Reboot devices
   gms-rt-devices-remount             - Remount RW (with auto-reboot prompt)
-  gms-rt-devices-connect-wifi        - Connect to WiFi
+  gms-rt-devices-wifi-connect        - Connect to WiFi
   gms-rt-devices-shell               - Open interactive ADB shell
   gms-rt-devices-screen              - Show device screen
 
@@ -1499,20 +1421,16 @@ ${YELLOW}Test Management:${NC}
   gms-rt-test-clean           - Clean test environment
   gms-rt-test-status          - Check test status
   gms-rt-test-suites          - List available test suites
-  gms-rt-test-logs-current    - Download current log
+  gms-rt-test-logs-get        - Get test logs (view/download)
   gms-rt-test-logs-batch      - Batch download logs
-  gms-rt-test-logs-save-current - Save current logs
   gms-rt-test-logs-list       - List test logs
   gms-rt-test-logs-stream     - Stream logs in real-time
 
 ${YELLOW}Reports:${NC}
-  gms-rt-reports-latest       - Get latest test report
   gms-rt-reports-list         - List all test reports
   gms-rt-reports-files        - Get report files
+	  gms-rt-reports-get          - Get report (view/download)
   gms-rt-reports-analyze      - Analyze report
-  gms-rt-reports-view         - View report
-  gms-rt-reports-download     - Download report
-  gms-rt-reports-delete       - Delete report
   gms-rt-reports-analyze-source - Analyze test source
   gms-rt-reports-analyze-ai   - AI analyze report
 

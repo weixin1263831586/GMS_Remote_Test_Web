@@ -1405,17 +1405,6 @@ async def update_config(req: dict):
     else:
         raise HTTPException(status_code=500, detail="保存配置失败")
 
-# 向后兼容别名
-@app.get("/api/config")
-async def get_config_legacy(request: Request):
-    """获取配置（向后兼容别名）"""
-    return await get_config(request)
-
-@app.post("/api/config")
-async def update_config_legacy(req: dict):
-    """更新配置（向后兼容别名）"""
-    return await update_config(req)
-
 # ==================== 设备管理 ====================
 
 @app.get("/api/devices/list")
@@ -1943,7 +1932,7 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
         results = await asyncio.gather(*[remount_single_device(d) for d in req.devices])
         return ApiResponse.device_results(results, "设备Remount")
 
-@app.post("/api/devices/connect-wifi")
+@app.post("/api/devices/wifi-connect")
 async def connect_wifi(req: WifiConnectRequest):
     """连接WiFi"""
     try:
@@ -2814,9 +2803,9 @@ async def clean_test_logs(request: Request):
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
 
-@app.get("/api/test/logs/current")
-async def download_current_log(request: Request):
-    """下载当前测试日志"""
+@app.get("/api/test/logs/get")
+async def get_test_logs(request: Request):
+    """获取测试日志（查看或下载）"""
     try:
         client_id = get_client_id_from_request(request)
         log_file = global_state.last_saved_log_file.get(client_id)
@@ -2850,17 +2839,11 @@ async def download_current_log(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error downloading current log: {e}")
+        logger.error(f"Error getting test logs: {e}")
         raise HTTPException(
             status_code=500,
             detail=str(e)
         )
-
-# 向后兼容别名
-@app.get("/api/test/logs/download")
-async def download_current_log_legacy(request: Request):
-    """下载当前测试日志（向后兼容别名）"""
-    return await download_current_log(request)
 
 @app.post("/api/test/logs/batch")
 async def download_test_logs(req: dict):
@@ -2888,12 +2871,6 @@ async def download_test_logs(req: dict):
                 status_code=500,
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
-
-# 向后兼容别名
-@app.post("/api/test/logs/download")
-async def download_test_logs_legacy(req: dict):
-    """批量下载测试日志（向后兼容别名）"""
-    return await download_test_logs(req)
 
 @app.post("/api/test/logs/save-current")
 async def save_current_log(req: dict):
@@ -3440,9 +3417,9 @@ async def analyze_report(report_timestamp: str):
             detail=str(e)
         )
 
-@app.get("/api/reports/view")
-async def view_report_file(request: Request):
-    """查看报告文件内容（与Flask版本一致，通过SSH读取远程文件）"""
+@app.get("/api/reports/get")
+async def get_report(request: Request):
+    """获取报告（查看或下载）"""
     try:
         file_path = request.query_params.get('path')
         if not file_path:
@@ -3488,41 +3465,41 @@ async def view_report_file(request: Request):
             raise
 
     except Exception as e:
-        logger.error(f"Error viewing report file: {e}")
+        logger.error(f"Error getting report file: {e}")
         return JSONResponse(
             content={'success': False, 'error': str(e)},
             status_code=500
         )
 
-@app.get("/api/reports/download/{report_timestamp}")
-async def download_report(request: Request, report_timestamp: str):
-    """下载测试报告（打包为ZIP文件）"""
+@app.get("/api/reports/get/{report_timestamp}")
+async def get_report_by_timestamp(request: Request, report_timestamp: str):
+    """获取报告（查看或下载）"""
     import io
     import zipfile
     from fastapi.responses import Response
 
     try:
-        logger.info(f"[DOWNLOAD] 请求下载报告: timestamp='{report_timestamp}'")
+        logger.info(f"[GET] 请求获取报告: timestamp='{report_timestamp}'")
 
         # 从数据库获取报告信息
         report = test_report_db.get_report_by_timestamp(report_timestamp)
-        logger.info(f"[DOWNLOAD] 查询报告结果: {report is not None}")
+        logger.info(f"[GET] 查询报告结果: {report is not None}")
 
         if not report:
-            logger.error(f"[DOWNLOAD] 报告不存在: {report_timestamp}")
+            logger.error(f"[GET] 报告不存在: {report_timestamp}")
             # 尝试列出所有报告以供调试
             all_reports = test_report_db.get_reports(limit=10)
-            logger.info(f"[DOWNLOAD] 数据库中的报告列表: {[r['timestamp'] for r in all_reports]}")
+            logger.info(f"[GET] 数据库中的报告列表: {[r['timestamp'] for r in all_reports]}")
             return JSONResponse(
                 content={'success': False, 'error': f'报告不存在: {report_timestamp}'},
                 status_code=404
             )
 
         report_dir = report.get('result_dir')
-        logger.info(f"[DOWNLOAD] 报告目录: {report_dir}, 存在: {os.path.exists(report_dir) if report_dir else False}")
+        logger.info(f"[GET] 报告目录: {report_dir}, 存在: {os.path.exists(report_dir) if report_dir else False}")
 
         if not report_dir or not os.path.exists(report_dir):
-            logger.error(f"[DOWNLOAD] 报告目录不存在: {report_dir}")
+            logger.error(f"[GET] 报告目录不存在: {report_dir}")
             return JSONResponse(
                 content={'success': False, 'error': f'报告目录不存在: {report_dir}'},
                 status_code=404
@@ -3566,7 +3543,7 @@ async def download_report(request: Request, report_timestamp: str):
         )
 
     except Exception as e:
-        logger.error(f"Error downloading report: {e}", exc_info=True)
+        logger.error(f"Error getting report: {e}", exc_info=True)
         return JSONResponse(
             content={'success': False, 'error': str(e)},
             status_code=500
@@ -4459,7 +4436,6 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
         )
 
         if result['success']:
-            # 转换为旧格式以保持兼容性
             provider_name = result.get('provider', 'unknown')
             provider_display = {
                 'zhipu': 'GLM-4 (智谱AI)',
@@ -6252,23 +6228,6 @@ async def get_upload_progress(upload_id: Optional[str] = None):
                 status_code=500,
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
-
-# 向后兼容别名
-@app.post("/api/upload/file")
-async def upload_file_legacy(file: UploadFile = File(...), path: str = Form("")):
-    """文件上传（向后兼容别名）"""
-    return await upload_file(file, path)
-
-@app.post("/api/upload")
-async def upload_files_legacy(files: List[UploadFile] = File(...), file_path: str = Form(None)):
-    """文件上传并安装（向后兼容别名）"""
-    return await upload_files(files, file_path)
-
-@app.post("/api/upload/progress")
-async def get_upload_progress_legacy(req: dict):
-    """获取上传进度（向后兼容别名）"""
-    upload_id = req.get('upload_id')
-    return await get_upload_progress(upload_id)
 
 # ==================== 固件管理 ====================
 @app.get("/api/burn/upload-progress")
@@ -8119,7 +8078,7 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
     API_DETAILS_MAP = {
         '/api/test/start': {
             'title': '启动测试',
-            'description': '启动兼容性测试(CTS/VTS/GTS等)',
+            'description': '启动GMS测试(CTS/VTS/GTS等)',
             'params': [
                 {'name': 'devices', 'type': 'array', 'required': True, 'desc': '设备序列号数组'},
                 {'name': 'test_type', 'type': 'string', 'required': True, 'desc': '测试类型: CTS|VTS|STS|GTS|CTS_VERIFIER'},

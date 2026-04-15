@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/css/style.css?v=20260409-01-02">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- Socket.IO not used in FastAPI version, using native WebSocket -->
@@ -2264,9 +2265,7 @@
             isReconnecting: false
         };
 
-        // 兼容旧代码的别名（将在后续版本移除）
         let adbSilentMode = false;
-        let adbBuffer = [];
         let isReconnecting = false;
         let routeCommandMode = false;
         let pendingRouteCommand = null;
@@ -2369,7 +2368,6 @@
                             // 静默模式:缓冲输出,等待提示符
                             if (silentMode.active) {
                                 silentMode.buffer.push(msg.data);
-                                adbBuffer.push(msg.data);  // 兼容旧代码
 
                                 // 优化：只检查最后10条消息，避免O(n²)性能问题
                                 const recentText = silentMode.buffer.length > 10
