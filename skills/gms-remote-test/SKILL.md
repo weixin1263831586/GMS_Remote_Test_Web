@@ -996,7 +996,6 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 |----------|--------|-------------|
 | `/api/config/read` | GET | Get current config |
 | `/api/config/update` | POST | Update dynamic config |
-| `/api/config/validate` | GET | Validate config |
 | `/api/config/values` | GET | Get config values |
 
 ### VPN Management
@@ -1344,7 +1343,6 @@ For complete API documentation with try-it-out functionality:
 ### Configuration
 - `gms-rt-config-read` - Read configuration
 - `gms-rt-config-update` - Update configuration
-- `gms-rt-config-validate` - Validate configuration
 - `gms-rt-config-values` - Get config values
 
 ### Tools & Utilities

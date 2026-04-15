@@ -21,7 +21,6 @@ const API_CATEGORIES = {
     '/api/system/docs': 'system',
     '/api/config/read': 'config',
     '/api/config/update': 'config',
-    '/api/config/validate': 'config',
     '/api/config/values': 'config',
     '/api/users': 'users',
     '/api/devices/list': 'device',
@@ -236,14 +235,6 @@ const API_DETAILS_MAP = {
         params: [],
         response: 'GMS Auto Test API List\n\nTotal: 72 APIs...',
         usage: '查看API列表和使用示例'
-    },
-    '/api/config/validate': {
-        title: '验证配置',
-        description: '验证系统配置文件的正确性（检查必要字段和路径）',
-        method: 'GET',
-        params: [],
-        response: '{ "valid": true, "errors": [], "warnings": [] }',
-        usage: '在修改配置后验证配置是否正确'
     },
     '/api/config/values': {
         title: '获取前端配置',

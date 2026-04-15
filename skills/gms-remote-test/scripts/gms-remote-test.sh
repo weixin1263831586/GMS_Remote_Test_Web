@@ -578,13 +578,6 @@ gms-rt-config-update() {
     fi
 }
 
-# Validate config
-gms-rt-config-validate() {
-    check_jq
-    echo "⚙️  Validating configuration..."
-    api_call "/config/validate" | jq '.'
-}
-
 # ==============================================================================
 # User Management Commands
 # ==============================================================================
@@ -1288,7 +1281,6 @@ ${YELLOW}System:${NC}
   gms-rt-system-skills             - Download skills directory as ZIP
 
 ${YELLOW}Configuration:${NC}
-  gms-rt-config-validate    - Validate configuration
   gms-rt-config-values      - Get frontend config values
   gms-rt-config-read        - Read full configuration
   gms-rt-config-update      - Update configuration
