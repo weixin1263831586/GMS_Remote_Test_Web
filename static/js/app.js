@@ -5697,15 +5697,26 @@ function updateApiStats(apis) {
     const getCount = apis.filter(api => api.method === 'GET').length;
     const postCount = apis.filter(api => api.method === 'POST').length;
 
+    // 统计唯一的技能数量
+    const uniqueSkills = new Set();
+    apis.forEach(api => {
+        if (api.skill && api.skill.trim()) {
+            uniqueSkills.add(api.skill.trim());
+        }
+    });
+    const skillsCount = uniqueSkills.size;
+
     const totalEl = $('total-apis-count');
     const getEl = $('get-apis-count');
     const postEl = $('post-apis-count');
     const filteredEl = $('filtered-apis-count');
+    const skillsCountEl = $('skills-count');
 
     if (totalEl) totalEl.textContent = totalCount;
     if (getEl) getEl.textContent = getCount;
     if (postEl) postEl.textContent = postCount;
     if (filteredEl) filteredEl.textContent = totalCount;
+    if (skillsCountEl) skillsCountEl.textContent = skillsCount;
 }
 
 // ==================== 常量定义 ====================

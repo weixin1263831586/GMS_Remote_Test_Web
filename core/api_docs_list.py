@@ -168,8 +168,7 @@ API_DOCS_LIST = [
         "path": "/api/devices/management",
         "description": "获取所有设备的详细管理信息(设备列表、电池、来源等)",
         "params": [],
-        "category": "device",
-        "skill": "gms-rt-devices-management"
+        "category": "device"
     },
     {
         "method": "GET",
@@ -285,8 +284,7 @@ API_DOCS_LIST = [
         "path": "/api/test/logs/save",
         "description": "保存当前正在运行的日志",
         "params": [],
-        "category": "test",
-        "skill": "gms-rt-test-logs-save"
+        "category": "test"
     },
     {
         "method": "GET",
@@ -585,8 +583,7 @@ API_DOCS_LIST = [
         "path": "/api/burn/upload-progress",
         "description": "查询固件上传进度",
         "params": [],
-        "category": "burn",
-        "skill": "gms-rt-burn-upload-progress"
+        "category": "burn"
     },
 
     # ==================== 终端命令 ====================
@@ -635,14 +632,6 @@ API_DOCS_LIST = [
     },
 
     # ==================== API文档 ====================
-    {
-        "method": "GET",
-        "path": "/api/system/health",
-        "description": "检查服务器健康状态",
-        "params": [],
-        "category": "system",
-        "skill": "gms-rt-system-health"
-    },
     {
         "method": "GET",
         "path": "/api/system/docs",
