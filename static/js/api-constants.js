@@ -173,47 +173,12 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "测试环境已清理" }',
         usage: '清理测试临时文件'
     },
-    '/api/reports/analyze-source': {
-        title: '分析源码',
-        description: '分析测试用例源码',
-        params: [
-            { name: 'test_name', type: 'string', required: true, desc: '测试用例名称' },
-            { name: 'error_message', type: 'string', required: true, desc: '错误信息' }
-        ],
-        response: '{ "source_code": "...", "analysis": "..." }',
-        usage: '测试失败时分析源代码找出原因'
-    },
-    '/api/test/logs/get': {
-        title: '获取测试日志',
-        description: '获取测试日志（查看或下载）',
-        method: 'GET',
-        params: [],
-        response: '日志文件下载 (.log格式)',
-        usage: '获取当前正在运行的测试日志'
-    },
-    '/api/test/logs/batch': {
-        title: '批量下载日志',
-        description: '批量下载测试日志',
-        method: 'POST',
-        params: [
-            { name: 'files', type: 'array', required: true, desc: '日志文件路径数组' }
-        ],
-        response: 'ZIP压缩包下载',
-        usage: '批量下载和归档多个日志文件'
-    },
     '/api/test/logs/save': {
         title: '保存当前日志',
         description: '保存当前正在运行的日志',
         params: [],
         response: '{ "success": true, "log_path": "/logs/saved_20260326_110000.log" }',
         usage: '测试运行中保存当前日志快照'
-    },
-    '/api/test/logs/list': {
-        title: '获取日志列表',
-        description: '获取所有保存的日志文件列表',
-        params: [],
-        response: '{ "logs": [{ "filename": "console_20260326_100000.log" }] }',
-        usage: '查看历史日志文件'
     },
     '/api/test/logs/stream': {
         title: '实时流式日志',
@@ -456,15 +421,6 @@ const API_DETAILS_MAP = {
         response: '{ "reports": [{ "timestamp": "20260326_100000", "test_type": "CTS" }] }',
         usage: '查看所有历史测试报告'
     },
-    '/api/reports/files/{report_timestamp}': {
-        title: '获取报告文件',
-        description: '下载指定时间戳的报告文件',
-        params: [
-            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳,如20260326_100000' }
-        ],
-        response: '报告文件下载',
-        usage: '下载完整测试报告'
-    },
     '/api/reports/analyze/{report_timestamp}': {
         title: '分析报告',
         description: '分析测试报告',
@@ -474,7 +430,7 @@ const API_DETAILS_MAP = {
         response: '{ "summary": { "passed": 150, "failed": 5 }, "failed_tests": [] }',
         usage: '快速查看测试结果统计和失败用例'
     },
-    '/api/reports/get': {
+    '/api/reports/download': {
         title: '获取报告',
         description: '获取测试报告（查看或下载）',
         params: [
@@ -493,25 +449,6 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "报告已删除" }',
         usage: '删除测试报告',
         curl_example: 'curl -X DELETE "http://server:5001/api/reports/delete" -G -d "report_timestamp=20260330-120000"'
-    },
-    '/api/reports/analyze': {
-        title: 'AI分析报告',
-        description: 'AI分析测试报告',
-        params: [
-            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' },
-            { name: 'use_ai', type: 'boolean', required: false, desc: '是否使用AI分析' }
-        ],
-        response: '{ "analysis": "基于AI分析...", "suggestions": [] }',
-        usage: 'AI分析测试失败原因'
-    },
-    '/api/reports/analyze-ai': {
-        title: 'AI深度分析',
-        description: '使用AI进行深度分析',
-        params: [
-            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
-        ],
-        response: '{ "ai_analysis": "...", "root_cause": "...", "fix_suggestions": [] }',
-        usage: 'AI深度分析,找出根本原因'
     },
     '/api/desktop/vnc/status': {
         title: '获取桌面VNC状态',

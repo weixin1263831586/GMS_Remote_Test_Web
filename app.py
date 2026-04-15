@@ -187,6 +187,17 @@ def get_user_state_by_id(client_id):
     with user_states_lock:
         return user_states.get(client_id)
 
+MAX_LOG_ENTRIES = 10000  # 防止内存无限增长
+
+def add_log_entry(log_message):
+    """添加日志条目，带自动轮转以防止内存无限增长"""
+    user_state = get_user_state()
+    user_state['logs'].append(log_message)
+
+    # 如果日志条目超过最大值，删除最旧的条目
+    if len(user_state['logs']) > MAX_LOG_ENTRIES:
+        user_state['logs'] = user_state['logs'][-MAX_LOG_ENTRIES:]
+
 def cleanup_old_sessions():
     """清理超过 24 小时的旧会话"""
     with user_states_lock:
@@ -663,8 +674,8 @@ def run_test_suite(config, test_params, client_id):
     process_group_id = f"gms_test_{client_id.replace('@', '_')}_{int(time.time() * 1000)}"
     user_state['process_group_id'] = process_group_id
     user_state['running'] = True
-    user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] Starting test suite...")
-    user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🔖 进程组ID: {process_group_id}")
+    add_log_entry(f"[{datetime.now().strftime('%H:%M:%S')}] Starting test suite...")
+    add_log_entry(f"[{datetime.now().strftime('%H:%M:%S')}] 🔖 进程组ID: {process_group_id}")
     emit_log_update(client_id, 'Starting test suite...')
 
     try:
@@ -1248,31 +1259,7 @@ def clean_test():
     user_state['logs'] = []
     return jsonify({'success': True})
 
-@app.route('/api/test/logs/get')
-def get_test_logs():
-    """获取测试日志（查看或下载）"""
-    user_state = get_user_state()
-
-    log_file = user_state.get('log_file')
-    if not log_file or not os.path.exists(log_file):
-        return jsonify({'success': False, 'error': 'No log file available'}), 404
-
-    try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            log_content = f.read()
-
-        filename = os.path.basename(log_file)
-        return Response(
-            log_content,
-            mimetype='text/plain',
-            headers={
-                'Content-Disposition': f'attachment; filename="{filename}"'
-            }
-        )
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/test/logs/save-current', methods=['POST'])
+@app.route('/api/test/logs/save', methods=['POST'])
 def save_current_logs():
     """立即保存当前测试日志（从前端获取实际日志内容）"""
     user_state = get_user_state()
@@ -1317,28 +1304,38 @@ def save_current_logs():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/test/logs/list')
-def list_logs():
-    """列出所有可用的测试日志文件"""
+@app.route('/api/test/logs/download')
+def download_test_log():
+    """下载已保存的测试日志文件"""
     try:
+        filename = request.args.get('filename')
+        if not filename:
+            return jsonify({'success': False, 'error': 'Filename parameter required'}), 400
+
+        # 安全检查：确保文件名不包含路径遍历
+        if '..' in filename or '/' in filename or '\\' in filename:
+            return jsonify({'success': False, 'error': 'Invalid filename'}), 400
+
         logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
-        if not os.path.exists(logs_dir):
-            return jsonify({'logs': []})
+        file_path = os.path.join(logs_dir, filename)
 
-        log_files = []
-        for filename in os.listdir(logs_dir):
-            if filename.endswith('.log'):
-                filepath = os.path.join(logs_dir, filename)
-                stat = os.stat(filepath)
-                log_files.append({
-                    'filename': filename,
-                    'size': stat.st_size,
-                    'modified': stat.st_mtime
-                })
+        # 直接尝试打开文件，处理错误而不是预先检查
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                log_content = f.read()
 
-        # 按修改时间降序排列
-        log_files.sort(key=lambda x: x['modified'], reverse=True)
-        return jsonify({'logs': log_files})
+            return Response(
+                log_content,
+                mimetype='text/plain',
+                headers={
+                    'Content-Disposition': f'attachment; filename="{filename}"'
+                }
+            )
+        except FileNotFoundError:
+            return jsonify({'success': False, 'error': 'Log file not found'}), 404
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -3091,56 +3088,7 @@ def list_test_reports():
         print(f"[ERROR] 获取报告列表失败: {e}")
         return jsonify({'reports': []})
 
-@app.route('/api/reports/files/<path:report_timestamp>')
-def list_report_files(report_timestamp):
-    """从数据库获取报告目录并列出文件"""
-    try:
-        # 从数据库获取报告信息
-        report = test_report_db.get_report_by_timestamp(report_timestamp)
-
-        if not report:
-            return jsonify({'success': False, 'error': '报告不存在'}), 404
-
-        # 获取 result_dir 路径
-        report_dir = report.get('result_dir')
-        if not report_dir or not os.path.exists(report_dir):
-            return jsonify({'success': False, 'error': '报告目录不存在'}), 404
-
-        # 列出文件
-        files = []
-
-        for root, dirs, filenames in os.walk(report_dir):
-            for filename in filenames:
-                file_path = os.path.join(root, filename)
-                # 相对于报告目录的路径，不包括时间戳目录名
-                rel_path = os.path.relpath(file_path, report_dir)
-
-                # 获取文件大小
-                try:
-                    file_size = os.path.getsize(file_path)
-                except:
-                    file_size = 0
-
-                files.append({
-                    'name': filename,
-                    'path': file_path,
-                    'relative_path': rel_path,
-                    'size': file_size
-                })
-
-                # 限制返回数量
-                if len(files) >= 50:
-                    break
-
-            if len(files) >= 50:
-                break
-
-        return jsonify({'success': True, 'files': files})
-
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/reports/get')
+@app.route('/api/reports/download')
 def get_report_file():
     """获取报告文件内容（查看或下载）"""
     file_path = request.args.get('path')
@@ -3730,117 +3678,6 @@ def find_xml_file(directory):
 
     return None
 
-@app.route('/api/reports/analyze', methods=['POST'])
-def analyze_report():
-    """
-    分析上传的测试报告文件或文件夹（使用新的简化分析器模块）
-
-    Request: multipart/form-data
-        - 'file': 单个文件上传（XML、ZIP、TAR.GZ）
-        - 'files[]': 多文件上传（文件夹模式）
-        - 'folder': 文件夹上传
-
-    Response:
-        {
-            "success": true,
-            "data": {
-                "test_type": "GTS",
-                "device": "device_serial",
-                "android_version": "15",
-                "start_time": "2025-12-02 09:35:01",
-                "total": 100,
-                "pass_count": 95,
-                "fail_count": 5,
-                "pass_rate": "95.00%",
-                "failures": [
-                    {
-                        "name": "com.example.Test#testMethod",
-                        "reason": "Failure reason...",
-                        "module": "ModuleName"
-                    }
-                ]
-            }
-        }
-    """
-    # 检查是否有文件上传
-    files = request.files.getlist('file')
-    folder_files = request.files.getlist('files[]')
-
-    # 支持多种上传方式
-    all_files = files if files else folder_files
-
-    if not all_files or len(all_files) == 0:
-        return jsonify({'success': False, 'error': '没有上传文件'}), 400
-
-    if len(all_files) == 1 and all_files[0].filename == '':
-        return jsonify({'success': False, 'error': '文件名为空'}), 400
-
-    try:
-        # 保存上传文件到临时位置
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # 如果是单文件（XML、ZIP、TAR.GZ）
-            if len(all_files) == 1:
-                file = all_files[0]
-                temp_file_path = os.path.join(temp_dir, file.filename)
-                file.save(temp_file_path)
-
-                # 使用 ReportAnalyzer 分析报告
-                analyzer = ReportAnalyzer(temp_dir=temp_dir)
-                result = analyzer.analyze_file(temp_file_path)
-
-                if result:
-                    return jsonify({'success': True, 'data': result})
-                else:
-                    return jsonify({
-                        'success': False,
-                        'error': '无法解析报告文件',
-                        'message': '请确保文件是有效的XML或压缩包格式'
-                    }), 400
-
-            # 如果是多文件（文件夹上传）
-            else:
-                # 保存所有文件到临时目录
-                for file in all_files:
-                    if file.filename:
-                        # 保持相对路径结构
-                        file_path = os.path.join(temp_dir, file.filename)
-                        # 确保目录存在
-                        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                        file.save(file_path)
-
-                # 查找 test_result.xml
-                analyzer = ReportAnalyzer(temp_dir=temp_dir)
-                xml_path = analyzer.file_handler.find_xml_file()
-
-                if not xml_path:
-                    return jsonify({
-                        'success': False,
-                        'error': '未找到 test_result.xml 文件',
-                        'message': f'已接收 {len(all_files)} 个文件，但在文件夹中未找到 test_result.xml'
-                    }), 400
-
-                # 分析报告（使用 analyze_file 方法来获得正确的字典格式）
-                result = analyzer.analyze_file(xml_path)
-
-                if result:
-                    return jsonify({'success': True, 'data': result})
-                else:
-                    return jsonify({
-                        'success': False,
-                        'error': '无法解析报告文件',
-                        'message': 'test_result.xml 文件格式无效或损坏'
-                    }), 400
-
-    except Exception as e:
-        logger.error(f"报告分析失败: {e}")
-        return jsonify({
-            'success': False,
-            'error': f'分析失败: {str(e)}'
-        }), 500
-
-
-# ==================== 旧版解析函数保留用于参考 ====================
-# 以下函数已被 ReportAnalyzer 模块替代，但暂时保留以备参考
 
 def parse_directory_fallback(directory_path):
     """Fallback parser: scan directory for log files when test_result.xml is not found"""
@@ -4583,443 +4420,6 @@ def analyze_test_source():
         }), 500
 
 
-@app.route('/api/reports/analyze-ai', methods=['POST'])
-def ai_analyze_test_failure():
-    """
-    使用大模型分析测试失败并给出解决建议
-
-    Request body:
-        {
-            "test_name": "com.google.android.gts.multiuser.RestrictedProfileHostTest#testUserIsRestricted",
-            "error_message": "java.lang.AssertionError: ...",
-            "stack_trace": "...",  // 可选
-            "module": "GtsGmscoreHostTestCases"  // 可选
-        }
-
-    Response:
-        {
-            "success": true,
-            "data": {
-                "analysis": "...",  // AI分析结果
-                "suggestions": [...],  // 解决建议
-                "root_cause": "...",  // 根本原因
-                "related_docs": [...]  // 相关文档链接
-            }
-        }
-    """
-    try:
-        data = request.get_json()
-
-        if not data:
-            return jsonify({'success': False, 'error': '请求数据为空'}), 400
-
-        test_name = data.get('test_name', '')
-        error_message = data.get('error_message', '')
-        stack_trace = data.get('stack_trace', '')
-        module = data.get('module', '')
-
-        if not test_name:
-            return jsonify({'success': False, 'error': '缺少test_name参数'}), 400
-
-        # 调用AI分析
-        result = analyze_with_ai(test_name, error_message, stack_trace, module)
-
-        return jsonify({'success': True, 'data': result})
-
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'traceback': traceback.format_exc()[:500]
-        }), 500
-
-
-def analyze_with_ai(test_name, error_message, stack_trace='', module=''):
-    """
-    调用大模型API分析测试失败
-
-    Args:
-        test_name: 测试用例名称
-        error_message: 错误消息
-        stack_trace: 堆栈跟踪
-        module: 测试模块名称
-
-    Returns:
-        dict: AI分析结果
-    """
-    import subprocess
-    import json
-    import logging
-
-    logger = logging.getLogger(__name__)
-
-    # 构建分析提示词
-    prompt = f"""请分析以下CTS测试失败信息，给出详细的原因分析和解决方案：
-
-测试用例: {test_name}
-测试模块: {module if module else '未知'}
-错误信息: {error_message}
-
-{f'''堆栈跟踪:
-{stack_trace}
-''' if stack_trace else ''}
-
-请提供：
-1. 问题根本原因分析
-2. 具体的解决方案和修复步骤
-3. 需要检查的系统配置或代码位置
-4. 相关的Android源码模块或类
-
-请用中文回答，格式清晰，包含具体的操作步骤。"""
-
-    try:
-        # 尝试调用本地安装的AI模型（如通过ollama）
-        # 首先检查配置中是否有AI API设置
-        config = load_config()
-        ai_api_key = config.get('ai_api_key', '')
-        ai_api_url = config.get('ai_api_url', '')
-        ai_model = config.get('ai_model', '')
-
-        logger.info(f"AI配置检查: api_url={ai_api_url}, api_key_set={bool(ai_api_key)}, model={ai_model}")
-
-        # 如果配置了API，使用API调用
-        if ai_api_url and ai_api_key:
-            logger.info("使用AI API进行分析")
-            return call_ai_api(ai_api_url, ai_api_key, ai_model, prompt)
-        else:
-            # 尝试使用本地ollama
-            logger.info("尝试使用本地ollama进行分析")
-            return call_ollama(prompt)
-    except Exception as e:
-        # 如果AI调用失败，返回基于规则的分析
-        logger.warning(f"AI调用失败，使用基于规则的分析: {str(e)}")
-        try:
-            return rule_based_analysis(test_name, error_message, stack_trace, module)
-        except Exception as rule_error:
-            logger.error(f"规则分析也失败: {str(rule_error)}")
-            # 最后的兜底响应
-            return {
-                'analysis': f'测试分析遇到错误: {str(e)}',
-                'suggestions': ['检查服务器日志了解详细错误信息'],
-                'root_cause': '分析服务异常',
-                'related_docs': [],
-                'ai_enabled': False
-            }
-
-
-def call_ai_api(api_url, api_key, model, prompt):
-    """调用AI API进行分析"""
-    import urllib.request
-
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {api_key}'
-    }
-
-    # 根据不同的API提供商构建请求体
-    if 'openai' in api_url.lower():
-        data = {
-            'model': model or 'gpt-3.5-turbo',
-            'messages': [
-                {'role': 'system', 'content': '你是一个专业的Android测试分析专家，精通CTS/GTS测试和Android系统开发。'},
-                {'role': 'user', 'content': prompt}
-            ],
-            'temperature': 0.7
-        }
-    elif 'anthropic' in api_url.lower():
-        data = {
-            'model': model or 'claude-3-sonnet-20240229',
-            'max_tokens': 2000,
-            'messages': [
-                {'role': 'user', 'content': prompt}
-            ]
-        }
-    else:
-        # 通用格式
-        data = {
-            'model': model,
-            'prompt': prompt,
-            'max_tokens': 2000
-        }
-
-    req = urllib.request.Request(
-        api_url,
-        data=json.dumps(data).encode('utf-8'),
-        headers=headers,
-        method='POST'
-    )
-
-    with urllib.request.urlopen(req, timeout=30) as response:
-        result = json.loads(response.read().decode('utf-8'))
-
-    # 解析返回结果
-    if 'choices' in result:  # OpenAI格式
-        ai_response = result['choices'][0]['message']['content']
-    elif 'completion' in result:  # 其他格式
-        ai_response = result['completion']
-    else:
-        ai_response = str(result)
-
-    return parse_ai_response(ai_response)
-
-
-def call_ollama(prompt):
-    """
-    调用本地ollama模型进行分析
-    """
-    import subprocess
-    import json
-    import logging
-    import urllib.request
-    import urllib.error
-
-    logger = logging.getLogger(__name__)
-
-    try:
-        # 检查ollama是否安装
-        check_cmd = ['which', 'ollama']
-        result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=5)
-
-        if result.returncode != 0:
-            logger.info("Ollama未安装")
-            raise Exception('Ollama未安装')
-
-        # 使用ollama API（默认运行在localhost:11434）
-        data = {
-            'model': 'llama2',  # 默认模型
-            'prompt': prompt,
-            'stream': False
-        }
-
-        req = urllib.request.Request(
-            'http://localhost:11434/api/generate',
-            data=json.dumps(data).encode('utf-8'),
-            headers={'Content-Type': 'application/json'},
-            method='POST'
-        )
-
-        with urllib.request.urlopen(req, timeout=10) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            ai_response = result.get('response', '')
-
-        return parse_ai_response(ai_response)
-
-    except subprocess.TimeoutExpired:
-        logger.warning("Ollama检查超时")
-        raise Exception('Ollama检查超时')
-    except FileNotFoundError:
-        logger.info("Ollama命令未找到")
-        raise Exception('Ollama未安装')
-    except urllib.error.URLError as e:
-        logger.warning(f"Ollama服务连接失败: {str(e)}")
-        raise Exception(f'Ollama服务不可用: {str(e)}')
-    except Exception as e:
-        logger.warning(f"Ollama调用失败: {str(e)}")
-        raise Exception(f'Ollama调用失败: {str(e)}')
-
-
-def parse_ai_response(ai_response):
-    """
-    解析AI的响应，结构化返回
-
-    Args:
-        ai_response: AI返回的文本
-
-    Returns:
-        dict: 结构化的分析结果
-    """
-    result = {
-        'raw_response': ai_response,
-        'analysis': '',
-        'suggestions': [],
-        'root_cause': '',
-        'related_docs': []
-    }
-
-    # 尝试从AI响应中提取结构化信息
-    lines = ai_response.split('\n')
-    current_section = None
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        # 识别章节
-        if '根本原因' in line or '问题分析' in line:
-            current_section = 'root_cause'
-            result['root_cause'] = line.split(':', 1)[1].strip() if ':' in line else ''
-        elif '解决' in line or '修复' in line or '方案' in line:
-            current_section = 'suggestions'
-        elif '分析' in line and '根本原因' not in line:
-            current_section = 'analysis'
-        elif line.startswith(('-', '*', '•')) or line[0].isdigit() and '.' in line:
-            # 列表项
-            item = line.lstrip('-*•0123456789. ').strip()
-            if current_section == 'suggestions' and item:
-                result['suggestions'].append(item)
-            elif current_section == 'root_cause' and item:
-                result['root_cause'] += ' ' + item
-            elif current_section == 'analysis' and item:
-                result['analysis'] += ' ' + item
-        else:
-            # 普通文本
-            if current_section == 'analysis':
-                result['analysis'] += line + '\n'
-            elif current_section == 'root_cause':
-                result['root_cause'] += line + '\n'
-            else:
-                result['analysis'] += line + '\n'
-
-    # 如果没有提取到结构化信息，将整个响应作为分析
-    if not result['analysis'] and not result['root_cause']:
-        result['analysis'] = ai_response
-
-    # 如果没有建议，从分析中提取
-    if not result['suggestions']:
-        result['suggestions'] = extract_suggestions_from_text(ai_response)
-
-    return result
-
-
-def extract_suggestions_from_text(text):
-    """从文本中提取建议"""
-    suggestions = []
-    lines = text.split('\n')
-
-    for i, line in enumerate(lines):
-        line = line.strip()
-        # 查找包含建议关键词的行
-        if any(keyword in line for keyword in ['建议', '应该', '需要', '可以', '解决', '修复', '检查']):
-            suggestions.append(line)
-            # 包含后续几行（如果它们是详细的说明）
-            for j in range(i + 1, min(i + 3, len(lines))):
-                next_line = lines[j].strip()
-                if next_line and (next_line.startswith(' ') or next_line.startswith('\t')):
-                    suggestions[-1] += ' ' + next_line
-                elif next_line:
-                    break
-
-    return suggestions[:5]  # 最多返回5条建议
-
-
-def rule_based_analysis(test_name, error_message, stack_trace, module):
-    """
-    基于规则的分析（当AI不可用时）
-
-    Args:
-        test_name: 测试用例名称
-        error_message: 错误消息
-        stack_trace: 堆栈跟踪
-        module: 测试模块
-
-    Returns:
-        dict: 分析结果
-    """
-    # 解析失败信息
-    failure_info = parse_cts_failure_info(test_name, error_message)
-
-    analysis_parts = []
-    suggestions = []
-    root_cause = ""
-    related_docs = []
-
-    # 根据错误类型分析
-    if 'Process crashed' in error_message or 'Instrumentation run failed' in error_message:
-        root_cause = "测试进程崩溃，可能是由于目标应用或服务异常退出导致"
-        analysis_parts.append("测试执行过程中进程异常终止")
-        suggestions.extend([
-            "检查设备日志（logcat）查找崩溃原因",
-            "验证被测试的应用是否正常安装和运行",
-            "检查设备内存是否充足",
-            "查看系统日志中是否有ANR或FC信息"
-        ])
-        related_docs.append({
-            'title': 'Android调试指南',
-            'url': 'https://source.android.com/docs/core/debug'
-        })
-
-    elif 'Permission' in error_message or 'SecurityException' in error_message:
-        root_cause = "权限相关错误，缺少必要的权限声明或配置"
-        analysis_parts.append("测试用例需要特定权限但未获得授权")
-        suggestions.extend([
-            "检查AndroidManifest.xml中的权限声明",
-            "验证runtime permission是否正确请求",
-            "检查签名是否匹配",
-            "确认premission-level是否正确"
-        ])
-        related_docs.append({
-            'title': 'Android权限文档',
-            'url': 'https://developer.android.com/guide/topics/permissions/overview'
-        })
-
-    elif 'AssertionError' in error_message:
-        root_cause = "断言失败，测试条件不满足"
-        analysis_parts.append("测试断言检查失败")
-
-        if 'multiuser' in test_name.lower():
-            analysis_parts.append("多用户功能测试失败")
-            suggestions.extend([
-                "检查UserManager服务是否正常",
-                "验证多用户配置是否正确",
-                "确认restricted profile功能已实现",
-                "检查用户切换相关API"
-            ])
-            related_docs.append({
-                'title': 'Android多用户文档',
-                'url': 'https://source.android.com/docs/core/architecture/configuration/multi-user'
-            })
-
-        if 'GmsCore' in test_name or 'gmscore' in test_name.lower():
-            analysis_parts.append("GMS Core相关测试失败")
-            suggestions.extend([
-                "检查GMS Core包是否正确安装",
-                "验证GMS服务权限配置",
-                "检查Google Play Services版本",
-                "确认GMS证书配置正确"
-            ])
-            related_docs.append({
-                'title': 'GMS Core文档',
-                'url': 'https://developer.android.com/google/play/services'
-            })
-
-    elif 'package not found' in error_message.lower():
-        root_cause = "目标包未找到或未安装"
-        suggestions.extend([
-            "确认目标应用已正确安装",
-            "检查包名是否正确",
-            "验证应用是否与当前Android版本兼容"
-        ])
-
-    # 通用建议
-    if not suggestions:
-        suggestions = [
-            "查看完整的测试日志了解详细错误信息",
-            "检查设备状态是否正常",
-            "验证测试环境配置",
-            "查阅CTS/GTS测试文档了解测试要求"
-        ]
-
-    # 组合分析结果
-    analysis = "\n".join(analysis_parts) if analysis_parts else "测试执行失败，请查看详细错误信息"
-
-    # 如果没有根本原因，从错误消息中推断
-    if not root_cause:
-        if failure_info.get('error_type'):
-            root_cause = f"错误类型: {failure_info['error_type']}"
-        else:
-            root_cause = "测试执行过程中出现异常"
-
-    return {
-        'analysis': analysis,
-        'suggestions': suggestions[:8],  # 最多8条建议
-        'root_cause': root_cause,
-        'related_docs': related_docs,
-        'ai_enabled': False  # 标记这不是AI分析
-    }
-
-# ==================== Advanced Screen Mirroring ====================
 def calculate_window_positions(devices, screen_width=1920, screen_height=1080):
     """
     计算投屏窗口的位置和大小

@@ -529,40 +529,6 @@ gms-rt-test-status() {
     api_call "/test/status" | jq '.'
 }
 
-# Monitor test progress
-gms-rt-test-monitor() {
-    check_jq
-    echo "⏳ Monitoring test progress (Ctrl+C to stop)..."
-
-    while true; do
-        local response=$(api_call "/test/status")
-        local running=$(echo "$response" | jq -r '.running')
-
-        if [ "$running" = "false" ]; then
-            echo ""
-            success "Test completed!"
-            echo "$response" | jq '.'
-            break
-        fi
-
-        local current_test=$(echo "$response" | jq -r '.current_test // "Unknown"')
-        echo -ne "\r⏳ Running: $current_test ($(date '+%H:%M:%S')) "
-        sleep 5
-    done
-}
-
-# Get test logs (replaces gms-rt-test-logs-download and gms-rt-test-logs-current)
-gms-rt-test-logs-get() {
-    local output_file="${1:-test_logs_$(date +%Y%m%d_%H%M%S).log}"
-    echo "📥 Downloading test logs to $output_file..."
-    curl -s "${API_BASE}/test/logs/get" -o "$output_file"
-    if [ $? -eq 0 ]; then
-        success "Logs downloaded to $output_file"
-    else
-        error "Failed to download logs"
-    fi
-}
-
 # ==============================================================================
 # Report Commands
 # ==============================================================================
@@ -591,14 +557,6 @@ gms-rt-reports-list() {
         done
 }
 
-# Get report files
-gms-rt-reports-files() {
-    local timestamp="$1"
-    [ -z "$timestamp" ] && { error "Timestamp required. Usage: gms-rt-reports-files <TIMESTAMP>"; return 1; }
-    check_jq
-    echo "📄 Fetching report files for $timestamp..."
-    api_call "/reports/files/$timestamp" | jq '.'
-}
 
 # ==============================================================================
 # Configuration Commands
@@ -952,24 +910,6 @@ gms-rt-test-clean() {
     echo "$response" | jq '.'
 }
 
-# Batch download logs
-gms-rt-test-logs-batch() {
-    local files="$1"
-    [ -z "$files" ] && { error "Files required. Usage: gms-rt-test-logs-batch <FILES_ARRAY>"; return 1; }
-    check_jq
-    echo "📦 Batch downloading logs..."
-    local data="{\"files\":$files}"
-    local response=$(api_call "/test/logs/batch" "POST" "$data")
-    echo "$response" | jq '.'
-}
-
-# List test logs
-gms-rt-test-logs-list() {
-    check_jq
-    echo "📋 Listing test logs..."
-    api_call "/test/logs/list" | jq '.'
-}
-
 # Stream test logs
 gms-rt-test-logs-stream() {
     echo "📡 Streaming test logs (Ctrl+C to stop)..."
@@ -979,41 +919,6 @@ gms-rt-test-logs-stream() {
 # ==============================================================================
 # Report Commands
 # ==============================================================================
-
-# Analyze report source
-gms-rt-reports-analyze-source() {
-    local test_name="$1"
-    local error_message="${2:-}"
-    [ -z "$test_name" ] && { error "Test name required. Usage: gms-rt-reports-analyze-source <test_name> [error_message]"; return 1; }
-    check_jq
-    echo "🔍 Analyzing test source: $test_name..."
-    local data="{\"test_name\":\"$test_name\""
-    [ -n "$error_message" ] && data="$data,\"error_message\":\"$error_message\""
-    data="$data}"
-    local response=$(api_call "/reports/analyze-source" "POST" "$data")
-    echo "$response" | jq '.'
-}
-
-# Get report (replaces gms-rt-reports-view and gms-rt-reports-download)
-gms-rt-reports-get() {
-    local report_timestamp="$1"
-    local output_file="${2:-}"
-    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-get <report_timestamp> [output_file]"; return 1; }
-
-    check_jq
-    if [ -n "$output_file" ]; then
-        echo "📥 Downloading report: $report_timestamp to $output_file..."
-        curl -s "${API_BASE}/reports/get/$report_timestamp" -o "$output_file"
-        if [ $? -eq 0 ]; then
-            success "Report downloaded to $output_file"
-        else
-            error "Failed to download report"
-        fi
-    else
-        echo "📊 Viewing report: $report_timestamp..."
-        api_call "/reports/get?report_timestamp=$report_timestamp" | jq '.'
-    fi
-}
 
 # Delete report
 gms-rt-reports-delete() {
@@ -1026,28 +931,36 @@ gms-rt-reports-delete() {
     echo "$response" | jq '.'
 }
 
+# Get/download report
+gms-rt-reports-download() {
+    local report_timestamp="$1"
+    local output_file="${2:-}"
+    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-download <report_timestamp> [output_file]"; return 1; }
+    check_jq
+    if [ -n "$output_file" ]; then
+        echo "📥 Downloading report: $report_timestamp to $output_file..."
+        curl -s "${API_BASE}/reports/download?report_timestamp=$report_timestamp" -o "$output_file"
+        if [ $? -eq 0 ]; then
+            success "Report downloaded to $output_file"
+        else
+            error "Failed to download report"
+        fi
+    else
+        echo "📊 Viewing report: $report_timestamp..."
+        api_call "/reports/download?report_timestamp=$report_timestamp" | jq '.'
+    fi
+}
+
 # Analyze report
 gms-rt-reports-analyze() {
     local report_timestamp="$1"
-    local use_ai="${2:-true}"
-    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-analyze <report_timestamp> [use_ai]"; return 1; }
+    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-analyze <report_timestamp>"; return 1; }
     check_jq
     echo "🔍 Analyzing report: $report_timestamp..."
-    local data="{\"report_timestamp\":\"$report_timestamp\",\"use_ai\":$use_ai}"
-    local response=$(api_call "/reports/analyze" "POST" "$data")
+    local response=$(api_call "/reports/analyze/$report_timestamp" "GET")
     echo "$response" | jq '.'
 }
 
-# AI analyze report
-gms-rt-reports-analyze-ai() {
-    local report_timestamp="$1"
-    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-analyze-ai <report_timestamp>"; return 1; }
-    check_jq
-    echo "🤖 AI analyzing report: $report_timestamp..."
-    local data="{\"report_timestamp\":\"$report_timestamp\"}"
-    local response=$(api_call "/reports/analyze-ai" "POST" "$data")
-    echo "$response" | jq '.'
-}
 
 # ==============================================================================
 # Desktop Commands
@@ -1056,7 +969,7 @@ gms-rt-reports-analyze-ai() {
 # Get VNC status
 gms-rt-desktop-vnc-status() {
     check_jq
-    echo "🖥️  Getting VNC status..."
+    echo "🖥️ Getting VNC status..."
     api_call "/desktop/vnc/status" | jq '.'
 }
 
@@ -1085,9 +998,6 @@ gms-rt-desktop-vnc-stop() {
 }
 
 # Validate desktop
-
-# ==============================================================================
-# USB/IP Commands
 # ==============================================================================
 
 # Start ADB forward
@@ -1421,18 +1331,14 @@ ${YELLOW}Test Management:${NC}
   gms-rt-test-clean           - Clean test environment
   gms-rt-test-status          - Check test status
   gms-rt-test-suites          - List available test suites
-  gms-rt-test-logs-get        - Get test logs (view/download)
-  gms-rt-test-logs-batch      - Batch download logs
-  gms-rt-test-logs-list       - List test logs
   gms-rt-test-logs-stream     - Stream logs in real-time
 
 ${YELLOW}Reports:${NC}
   gms-rt-reports-list         - List all test reports
-  gms-rt-reports-files        - Get report files
-	  gms-rt-reports-get          - Get report (view/download)
-  gms-rt-reports-analyze      - Analyze report
-  gms-rt-reports-analyze-source - Analyze test source
-  gms-rt-reports-analyze-ai   - AI analyze report
+  gms-rt-reports-download        - Get report (view/download)
+  gms-rt-reports-analyze    - Analyze report
+  gms-rt-reports-delete     - Delete report
+
 
 ${YELLOW}SSH Management:${NC}
   gms-rt-ssh-route             - Check SSH route

@@ -281,38 +281,12 @@ API_DOCS_LIST = [
         "skill": "gms-rt-test-status"
     },
     {
-        "method": "GET",
-        "path": "/api/test/logs/get",
-        "description": "获取当前测试日志（查看或下载）",
-        "params": [],
-        "category": "test",
-        "skill": "gms-rt-test-logs-get"
-    },
-    {
-        "method": "POST",
-        "path": "/api/test/logs/batch",
-        "description": "批量下载测试日志",
-        "params": [
-            {"name": "files", "type": "array", "required": True, "desc": "日志文件路径数组"}
-        ],
-        "category": "test",
-        "skill": "gms-rt-test-logs-batch"
-    },
-    {
         "method": "POST",
         "path": "/api/test/logs/save",
         "description": "保存当前正在运行的日志",
         "params": [],
         "category": "test",
         "skill": "gms-rt-test-logs-save"
-    },
-    {
-        "method": "GET",
-        "path": "/api/test/logs/list",
-        "description": "获取所有保存的日志文件列表",
-        "params": [],
-        "category": "test",
-        "skill": "gms-rt-test-logs-list"
     },
     {
         "method": "GET",
@@ -344,24 +318,14 @@ API_DOCS_LIST = [
     },
     {
         "method": "GET",
-        "path": "/api/reports/files/{report_timestamp}",
-        "description": "下载指定时间戳的报告文件",
-        "params": [
-            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"}
-        ],
-        "category": "report",
-        "skill": "gms-rt-reports-files"
-    },
-    {
-        "method": "GET",
-        "path": "/api/reports/get",
+        "path": "/api/reports/download",
         "description": "获取报告（查看或下载）",
         "params": [
             {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"},
             {"name": "output_file", "type": "string", "required": False, "desc": "输出文件名（可选）"}
         ],
         "category": "report",
-        "skill": "gms-rt-reports-get"
+        "skill": "gms-rt-reports-download"
     },
     {
         "method": "DELETE",
@@ -372,38 +336,6 @@ API_DOCS_LIST = [
         ],
         "category": "report",
         "skill": "gms-rt-reports-delete"
-    },
-    {
-        "method": "GET",
-        "path": "/api/reports/analyze",
-        "description": "AI分析测试报告",
-        "params": [
-            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"},
-            {"name": "use_ai", "type": "boolean", "required": False, "desc": "是否使用AI分析"}
-        ],
-        "category": "report",
-        "skill": "gms-rt-reports-analyze-ai"
-    },
-    {
-        "method": "GET",
-        "path": "/api/reports/analyze-ai",
-        "description": "使用AI进行深度分析",
-        "params": [
-            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"}
-        ],
-        "category": "report",
-        "skill": "gms-rt-reports-analyze-ai-deep"
-    },
-    {
-        "method": "POST",
-        "path": "/api/reports/analyze-source",
-        "description": "分析测试用例源码",
-        "params": [
-            {"name": "test_name", "type": "string", "required": True, "desc": "测试用例名称"},
-            {"name": "error_message", "type": "string", "required": True, "desc": "错误信息"}
-        ],
-        "category": "report",
-        "skill": "gms-rt-reports-analyze-source"
     },
 
     # ==================== 桌面管理 ====================
@@ -703,6 +635,14 @@ API_DOCS_LIST = [
     },
 
     # ==================== API文档 ====================
+    {
+        "method": "GET",
+        "path": "/api/system/health",
+        "description": "检查服务器健康状态",
+        "params": [],
+        "category": "system",
+        "skill": "gms-rt-system-health"
+    },
     {
         "method": "GET",
         "path": "/api/system/docs",
