@@ -1292,7 +1292,6 @@ For complete API documentation with try-it-out functionality:
 
 ### Test Logs
 - `gms-rt-test-logs-stream` - Stream logs in real-time
-- `gms-rt-test-logs-save` - Save current log
 
 ### Reports
 - `gms-rt-reports-list` - List all test reports
