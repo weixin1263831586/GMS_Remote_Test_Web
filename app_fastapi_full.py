@@ -1076,46 +1076,6 @@ async def health_check():
 
 # ==================== 客户端管理 ====================
 
-
-
-@app.get("/api/config/validate")
-@handle_api_errors
-async def validate_config():
-    """验证配置文件"""
-    config = config_manager.load_config()
-
-    errors = []
-    warnings = []
-
-    # 检查必要字段
-    required_fields = ['ubuntu_host', 'ubuntu_user', 'ubuntu_pswd', 'suites_path', 'script_path']
-    for field in required_fields:
-        if field not in config or not config[field]:
-            errors.append(f"缺少必要字段: {field}")
-
-    # 检查ubuntu_host
-    ubuntu_host = config.get('ubuntu_host', '')
-    if ubuntu_host in ['test', 'localhost', '127.0.0.1']:
-        warnings.append(f"ubuntu_host '{ubuntu_host}' 可能无法从远程访问")
-
-    # 检查路径是否存在
-    for path_field in ['suites_path', 'script_path']:
-        path = config.get(path_field, '')
-        if path and not os.path.exists(path):
-            warnings.append(f"路径不存在: {path_field} = {path}")
-
-    # 检查SSH凭据
-    if not config.get('ubuntu_pswd'):
-        warnings.append("未设置ubuntu_pswd，可能影响SSH连接")
-
-    return JSONResponse(content={
-        "success": len(errors) == 0,
-        "valid": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings
-    })
-
-
 @app.get("/api/config/values")
 @handle_api_errors
 async def get_config_values():
