@@ -2834,7 +2834,7 @@ async function downloadTestLog() {
         }
 
         // 发送日志内容到后端保存
-        const saveResult = await apiCall('/api/test/logs/save-current', 'POST', {
+        const saveResult = await apiCall('/api/test/logs/save', 'POST', {
             content: logContent,
             test_type: state.testType || 'unknown'
         });
@@ -2842,9 +2842,9 @@ async function downloadTestLog() {
         if (saveResult.success) {
             addLogEntry(`✅ 日志已保存: ${saveResult.filename}`, 'success');
 
-            // 然后触发下载
+            // 直接下载保存的日志文件
             const link = document.createElement('a');
-            link.href = '/api/test/logs/get';
+            link.href = `/api/test/logs/download?filename=${encodeURIComponent(saveResult.filename)}`;
             link.download = saveResult.filename;
             document.body.appendChild(link);
             link.click();
@@ -3053,8 +3053,11 @@ function updateProgressBar(percentage, message = '', title = '进度') {
 function startStatusPolling() {
     // 轮询状态和日志（同时支持Socket.IO和WebSocket）
     let shownPyudevWarning = false;  // 标记是否已显示过 pyudev 警告
+    let pollInterval = 2000;  // 初始轮询间隔：2秒
+    const maxPollInterval = 30000;  // 最大轮询间隔：30秒
+    let pollTimer = null;
 
-    setInterval(async () => {
+    const pollStatus = async () => {
         try {
             // 检查是否有实时连接（Socket.IO 或 WebSocket）
             const hasRealtimeConnection = (state.socket && typeof io !== 'undefined') ||
@@ -3133,10 +3136,24 @@ function startStatusPolling() {
                 }
             }
 
+            // 动态调整轮询间隔：如果测试正在运行，使用快速轮询；否则退避
+            if (status.running) {
+                pollInterval = 2000;  // 测试运行时：2秒
+            } else {
+                pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);  // 测试未运行时：逐渐增加到30秒
+            }
+
         } catch (error) {
             console.error('Status polling error:', error);
         }
-    }, 2000);  // FastAPI版本使用更短的轮询间隔（2秒）
+
+        // 使用动态间隔重新调度
+        if (pollTimer) clearTimeout(pollTimer);
+        pollTimer = setTimeout(pollStatus, pollInterval);
+    };
+
+    // 启动轮询
+    pollStatus();
 }
 
 async function checkInitialTestStatus() {
@@ -3249,11 +3266,28 @@ async function loadTestReports(userOnly = false) {
             displayTestReports(data.reports);
         }
 
-        // 启动自动刷新（每15秒）
+        // 启动自动刷新（每15秒）带变更检测
         if (!reportsRefreshInterval) {
-            reportsRefreshInterval = setInterval(() => {
+            let lastReportsHash = null;
+
+            reportsRefreshInterval = setInterval(async () => {
                 if (currentPage === 'reports') {
-                    loadTestReports(currentUserFilter);
+                    try {
+                        const url = currentUserFilter ? '/api/reports/list?user_only=true' : '/api/reports/list';
+                        const response = await fetch(url);
+                        const data = await response.json();
+
+                        // 计算报告列表的哈希值以检测变更
+                        const reportsHash = JSON.stringify(data.reports);
+
+                        // 只有在报告列表发生变化时才更新DOM
+                        if (reportsHash !== lastReportsHash) {
+                            lastReportsHash = reportsHash;
+                            displayTestReports(data.reports);
+                        }
+                    } catch (error) {
+                        console.error('[Reports] Error refreshing reports:', error);
+                    }
                 }
             }, REPORTS_REFRESH_INTERVAL);
         }
@@ -3836,7 +3870,7 @@ async function analyzeReport(timestamp) {
 
 async function viewReportDetails(timestamp) {
     try {
-        const resp = await fetch(`/api/reports/files/${timestamp}`);
+        const resp = await fetch(`/api/reports/download?report_timestamp=${timestamp}`);
         const data = await resp.json();
 
         if (!data.success) {
@@ -3912,7 +3946,7 @@ function closeReportDetailsModal() {
 
 async function viewReportFile(filePath, fileName) {
     try {
-        const resp = await fetch(`/api/reports/get?path=${encodeURIComponent(filePath)}`);
+        const resp = await fetch(`/api/reports/download?path=${encodeURIComponent(filePath)}`);
         const data = await resp.json();
 
         if (!data.success) {
@@ -5726,7 +5760,6 @@ const CURL_PLACEHOLDERS = Object.freeze({
  * Path parameter normalization patterns
  */
 const PATH_PATTERNS = [
-    { pattern: /^\/api\/reports\/files\//, template: '/api/reports/files/{report_timestamp}' },
     { pattern: /^\/api\/reports\/analyze\//, template: '/api/reports/analyze/{report_timestamp}' },
     { pattern: /^\/api\/reports\/download\//, template: '/api/reports/download/{report_timestamp}' }
 ];

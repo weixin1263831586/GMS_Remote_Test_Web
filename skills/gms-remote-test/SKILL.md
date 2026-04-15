@@ -248,7 +248,7 @@ The web platform provides **8 integrated pages** for complete test management:
 - **Report listing** - All test reports with timestamps
 - **Statistics** - Pass/fail counts and pass rate
 - **Per-user filtering** - Show only current user's reports
-- **Report download** - Download full report archives
+- **Report analysis** - Analyze test results from saved reports
 - **Delete reports** - Remove old reports
 
 #### Report Columns
@@ -259,29 +259,22 @@ The web platform provides **8 integrated pages** for complete test management:
 - **失败** - Failed test count
 - **总计** - Total test count
 - **通过率** - Pass percentage
-- **操作** - Action buttons (download/delete)
+- **操作** - Action buttons (analyze/delete)
 
 ---
 
 ### Report Analysis (报告分析)
 
 #### Features
-- **Drag-and-drop upload** - Drop XML/ZIP/TAR.GZ reports
-- **Automatic parsing** - Extract test results from XML
+- **Analyze saved reports** - Analyze test reports from database
 - **Statistics summary** - Overall pass/fail statistics
 - **Failure list** - Detailed failure case listing
 - **Re-run support** - Generate re-run commands for failed cases
-
-#### Upload Options
-- **Single file** - Upload .xml report file
-- **Archive** - Upload .zip or .tar.gz archives
-- **Folder** - Upload entire report folder
 
 #### Analysis Results
 - **Summary cards** - Total tests, passed, failed, pass rate
 - **Module breakdown** - Results per test module
 - **Failure details** - Test name, failure reason
-- **Copy to clipboard** - One-click failure list copy
 
 ---
 
@@ -580,20 +573,20 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.'
 }
 ```
 
-#### Get Report Files
-```bash
-curl -s "http://172.16.14.233:5001/api/reports/files/2026-04-05_10-39-00" | jq '.'
-```
-
 #### Analyze Report
 ```bash
 curl -s "http://172.16.14.233:5001/api/reports/analyze/2026-04-05_10-39-00" | jq '.'
 ```
 
-#### Download Report File
+#### Get Report
 ```bash
-# Download specific report file
-curl -O "http://172.16.14.233:5001/api/reports/download/2026-04-05_10-39-00/report.xml"
+# Get report content
+curl -s "http://172.16.14.233:5001/api/reports/download?report_timestamp=2026-04-05_10-39-00" | jq '.'
+```
+
+#### Delete Report
+```bash
+curl -sX DELETE "http://172.16.14.233:5001/api/reports/delete?report_timestamp=2026-04-05_10-39-00" | jq '.'
 ```
 
 ---
@@ -976,17 +969,15 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 | `/api/test/status` | GET | Get test status |
 | `/api/test/suites` | GET | List available test suites |
 | `/api/test/logs/stream` | GET | Stream logs (plain text) |
-| `/api/test/logs/download` | GET | Download current log |
-| `/api/test/logs/list` | GET | List test logs |
+| `/api/test/logs/save` | POST | Save current log |
 | `/api/test/clean` | POST | Clean test logs |
 
 ### Reports
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/reports/list` | GET | List all reports |
-| `/api/reports/files/{ts}` | GET | Get report files |
-| `/api/reports/analyze/{ts}` | GET | Analyze report |
-| `/api/reports/download/{ts}` | GET | Download report file |
+| `/api/reports/analyze/{ts}` | GET | Analyze saved report |
+| `/api/reports/download` | GET | Get report (view/download) |
 | `/api/reports/delete` | DELETE | Delete report |
 
 ### Network & Client
@@ -1296,24 +1287,18 @@ For complete API documentation with try-it-out functionality:
 - `gms-rt-test-start` - Start a test execution
 - `gms-rt-test-stop` - Stop running test
 - `gms-rt-test-status` - Check test status
-- `gms-rt-test-monitor` - Monitor test progress
 - `gms-rt-test-clean` - Clean test environment
 - `gms-rt-test-suites` - List available test suites
 
 ### Test Logs
-- `gms-rt-test-logs-get` - Get test logs (view/download)
-- `gms-rt-test-logs-batch` - Batch download logs
-- `gms-rt-test-logs-list` - List available test logs
 - `gms-rt-test-logs-stream` - Stream logs in real-time
+- `gms-rt-test-logs-save` - Save current log
 
 ### Reports
 - `gms-rt-reports-list` - List all test reports
-- `gms-rt-reports-get` - Get report (view/download)
-- `gms-rt-reports-files` - Get report files
+- `gms-rt-reports-download` - Get report (view/download)
 - `gms-rt-reports-delete` - Delete report
-- `gms-rt-reports-analyze` - Analyze report
-- `gms-rt-reports-analyze-ai` - AI-powered report analysis
-- `gms-rt-reports-analyze-source` - Analyze test source code
+- `gms-rt-reports-analyze` - Analyze saved report from database
 
 ### Firmware Burning
 - `gms-rt-burn-firmware` - Burn firmware image to device
@@ -1390,9 +1375,6 @@ gms-rt-test-start RK3572GMS1 CTS CtsPermissionTestCases
 
 # List available test suites
 gms-rt-test-suites
-
-# Monitor test progress
-gms-rt-test-monitor
 
 # Check test status
 gms-rt-test-status

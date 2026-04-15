@@ -2872,7 +2872,7 @@ async def download_test_logs(req: dict):
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
 
-@app.post("/api/test/logs/save-current")
+@app.post("/api/test/logs/save")
 async def save_current_log(req: dict):
     """保存当前日志"""
     log_content = req.get('content', '')
@@ -5104,7 +5104,7 @@ async def stop_adb_forward():
 @handle_api_errors
 async def get_usbip_status(request: Request):
     """
-    获取 USB/IP 状态（与5000端口完全一致）
+    获取 USB/IP 状态
 
     通过检查多个维度来判断 USB/IP 连接状态：
     1. 检查当前客户端的连接状态记录
@@ -5223,7 +5223,7 @@ async def start_usbip(
 
 @app.post("/api/usbip/disconnect")
 async def stop_usbip(request: Request):
-    """停止 USB/IP 转发（与5000端口完全一致）"""
+    """停止 USB/IP 转发"""
     config = config_manager.load_config()
     client_id = get_client_id_from_request(request)
     device_host = client_id
@@ -7355,7 +7355,7 @@ async def list_files(req: dict):
             status_code=500
         )
 
-# ==================== USB/IP辅助函数（与5000端口一致）====================
+# ==================== USB/IP辅助函数 ====================
 
 def is_windows_host(ssh):
     """检查SSH主机是否为Windows"""
