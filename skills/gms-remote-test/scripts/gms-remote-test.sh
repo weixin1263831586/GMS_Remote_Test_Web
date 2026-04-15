@@ -48,6 +48,12 @@ api_call() {
     fi
 }
 
+# Extract error message from API response
+extract_api_error() {
+    local response="$1"
+    echo "$response" | jq -r '.detail // .error // .message // "Unknown error"' 2>/dev/null || echo "Unknown error"
+}
+
 # Check if jq is installed
 check_jq() {
     if ! command -v jq &> /dev/null; then
@@ -344,7 +350,7 @@ gms-rt-devices-bootloader-status() {
 # Validate desktop host
 gms-rt-desktop-validate() {
     local host="$1"
-    [ -z "$host" ] && { error "Host required. Usage: gms-rt-desktop-validate <host>"; return 1; }
+    [ -z "$host" ] && { error "Host required. Usage: gms-rt-desktop-validate <user@ip>"; return 1; }
     check_jq
     echo "🔍 Validating desktop host $host..."
     local data="{\"host\":\"$host\"}"
@@ -353,7 +359,9 @@ gms-rt-desktop-validate() {
         success "Desktop host is valid"
         echo "$response" | jq '.'
     else
-        error "Desktop host validation failed"
+        local error_msg=$(extract_api_error "$response")
+        error "Desktop host validation failed: $error_msg"
+        return 1
     fi
 }
 
@@ -574,7 +582,10 @@ gms-rt-config-update() {
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "Configuration updated"
     else
-        error "Failed to update configuration"
+        # 提取详细错误信息
+        local error_msg=$(echo "$response" | jq -r '.detail // .error // "Unknown error"' 2>/dev/null)
+        error "Failed to update configuration: $error_msg"
+        return 1
     fi
 }
 
@@ -637,7 +648,9 @@ gms-rt-vpn-connect() {
         success "VPN connected"
         echo "$response" | jq '.'
     else
-        error "Failed to connect VPN"
+        local error_msg=$(extract_api_error "$response")
+        error "Failed to connect VPN: $error_msg"
+        return 1
     fi
 }
 
@@ -650,7 +663,9 @@ gms-rt-vpn-disconnect() {
         success "VPN disconnected"
         echo "$response" | jq '.'
     else
-        error "Failed to disconnect VPN"
+        local error_msg=$(extract_api_error "$response")
+        error "Failed to disconnect VPN: $error_msg"
+        return 1
     fi
 }
 
@@ -907,6 +922,49 @@ gms-rt-test-clean() {
 gms-rt-test-logs-stream() {
     echo "📡 Streaming test logs (Ctrl+C to stop)..."
     curl -N "${API_BASE}/test/logs/stream"
+}
+
+# List test suite results (tradefed list results) - Using HTTP API
+gms-rt-test-suites-result() {
+    local suite_path="$1"
+    [ -z "$suite_path" ] && { error "Suite path required. Usage: gms-rt-test-suites-result ~/GMS-Suite/android-gts-13.1-R2/android-gts/tools"; return 1; }
+    check_jq
+
+    # Expand tilde to home directory
+    suite_path="${suite_path/#\~/$HOME}"
+
+    echo "📋 Listing test results for suite: $suite_path..."
+
+    # Find tradefed binary (optional - API can auto-detect)
+    local tradefed_bin=$(find "$suite_path" -maxdepth 1 -type f -executable -name '*-tradefed' 2>/dev/null | head -1)
+
+    # Build request data
+    local data="{\"suite_path\":\"$suite_path\"}"
+    if [ -n "$tradefed_bin" ]; then
+        data=$(echo "$data" | jq --arg bin "$tradefed_bin" '. + {tradefed_bin: $bin}')
+    fi
+
+    # Call HTTP API endpoint
+    local response=$(api_call "/test/suites/result" "POST" "$data")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        local count=$(echo "$response" | jq '.count')
+        success "Found $count test result(s)"
+        echo ""
+        printf "%-8s %-6s %-6s %-10s %-10s %-26s %-10s %-20s %-20s %-15s\n" "SESSION" "PASS" "FAIL" "MODULES" "COMPLETE" "RESULT_DIR" "TEST_PLAN" "DEVICE_SERIAL" "BUILD_ID" "PRODUCT"
+        printf "%s\n" "$(printf '=%.0s' {1..140})"
+        echo "$response" | jq -r '.results[] |
+            "\(.session)\t\(.pass)\t\(.fail)\t\(.modules)\t\(.complete)\t\(.result_directory)\t\(.test_plan)\t\(.device_serial)\t\(.build_id)\t\(.product)"' | \
+        while IFS=$'\t' read -r session pass fail modules complete result_dir test_plan device_serial build_id product; do
+            printf "%-8s %-6s %-6s %-10s %-10s %-26s %-10s %-20s %-20s %-15s\n" "$session" "$pass" "$fail" "$modules" "$complete" "$result_dir" "$test_plan" "$device_serial" "$build_id" "$product"
+        done
+        echo ""
+    else
+        local msg=$(echo "$response" | jq -r '.error // .message // "Unknown error"')
+        error "Failed to list test results: $msg"
+        echo "$response" | jq '.'
+        return 1
+    fi
 }
 
 # ==============================================================================
@@ -1323,6 +1381,7 @@ ${YELLOW}Test Management:${NC}
   gms-rt-test-clean           - Clean test environment
   gms-rt-test-status          - Check test status
   gms-rt-test-suites          - List available test suites
+  gms-rt-test-suites-result   - List test results (tradefed list results)
   gms-rt-test-logs-stream     - Stream logs in real-time
 
 ${YELLOW}Reports:${NC}

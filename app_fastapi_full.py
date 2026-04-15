@@ -870,7 +870,6 @@ async def broadcast_device_lock_update(device_ids: list = None):
             for device_id in device_ids:
                 if device_id in all_locks:
                     lock_info = all_locks[device_id]
-                    # 直接使用client_id (username@ip格式)
                     locked_by = lock_info['client_id']
                     device_updates.append({
                         'device_id': device_id,
@@ -889,7 +888,6 @@ async def broadcast_device_lock_update(device_ids: list = None):
             # 更新所有锁定的设备
             logger.debug(f"[Broadcast Device Lock] 更新所有锁定设备")
             for device_id, lock_info in all_locks.items():
-                # 直接使用client_id (username@ip格式)
                 locked_by = lock_info['client_id']
                 device_updates.append({
                     'device_id': device_id,
@@ -1237,7 +1235,7 @@ async def list_users():
                 except (ValueError, TypeError):
                     continue
 
-            # 解析client_id (username@ip)
+            # 解析client_id (user@ip)
             parts = client_id.split('@')
             username_from_id = parts[0] if len(parts) > 0 else 'unknown'
             ip = parts[1] if len(parts) > 1 else 'unknown'
@@ -1348,16 +1346,20 @@ async def update_config(req: dict):
         'client_hosts', 'client_ssh_credentials', 'local_server'
     }
 
-    # 只保留客户端相关的动态配置
-    dynamic_updates = {
-        k: existing_dynamic[k]
-        for k in dynamic_keys
-        if k in existing_dynamic
-    }
+    # 检查是否有不允许修改的字段
+    invalid_fields = set(req.keys()) - dynamic_keys
+    if invalid_fields:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不允许修改以下字段: {', '.join(invalid_fields)}. 可修改的字段: {', '.join(dynamic_keys)}"
+        )
 
-    # 更新请求中的动态配置字段
-    dynamic_updates.update({k: v for k, v in req.items() if k in dynamic_keys})
-        # 忽略不在dynamic_keys中的字段（不允许修改config.json）
+    # 合并现有配置和请求配置（单次遍历）
+    dynamic_updates = {
+        k: req.get(k, existing_dynamic.get(k))
+        for k in dynamic_keys
+        if k in existing_dynamic or k in req
+    }
 
     # 只保存客户端相关的动态配置
     if config_manager.save_dynamic_config(dynamic_updates):
@@ -2913,7 +2915,7 @@ async def autocomplete_suite(req: AutocompleteSuiteRequest):
         config = config_manager.load_config()
         ssh = ssh_manager.get_connection(config)
         if not ssh:
-            return JSONResponse(content={'success': False, 'error': 'SSH connection failed'}, status_code=500)
+            return ssh_connection_failed_response()
 
         try:
             if not base_path:
@@ -3026,7 +3028,7 @@ async def list_suites(base_path: str = None):
 
         ssh = ssh_manager.get_connection(config)
         if not ssh:
-            return JSONResponse(content={'success': False, 'error': 'SSH connection failed'}, status_code=500)
+            return ssh_connection_failed_response()
 
         try:
             # Find all *-tradefed executables
@@ -3069,6 +3071,113 @@ async def list_suites(base_path: str = None):
             raise
     except Exception as e:
         logger.error(f"Error listing suites: {e}")
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+
+
+class TradefedListResultsRequest(BaseModel):
+    """Request model for tradefed list results"""
+    suite_path: str
+    tradefed_bin: Optional[str] = None
+
+
+@app.post("/api/test/suites/result")
+async def list_tradefed_results(
+    h: Optional[str] = Query(None),
+    help: bool = Query(False),
+    req: TradefedListResultsRequest = Body(None)
+):
+    """Execute tradefed list results command and return test results
+
+    Request:
+        suite_path: str - Path to test suite tools directory
+        tradefed_bin: Optional[str] - Tradefed binary name (auto-detected if not provided)
+
+    Response:
+        success: bool
+        results: List of test result entries
+            - session: str
+            - pass: int
+            - fail: int
+            - modules: str
+            - complete: str
+            - result_directory: str
+            - test_plan: str
+            - device_serial: str
+            - build_id: str
+            - product: str
+        raw_output: str - Raw command output
+    """
+    # 检查是否需要显示帮助
+    if help:
+        help_text = generate_per_api_help_text("POST", "/api/test/suites/result")
+        if help_text:
+            return PlainTextResponse(
+                content=help_text,
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=300"
+                }
+            )
+
+    if req is None:
+        return JSONResponse(
+            content={'success': False, 'error': 'Missing request body'},
+            status_code=400
+        )
+
+    try:
+        config = config_manager.load_config()
+        suite_path = req.suite_path
+        tradefed_bin = req.tradefed_bin
+
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return ssh_connection_failed_response()
+
+        try:
+            # Auto-detect tradefed binary if not provided
+            if not tradefed_bin:
+                tradefed_bin = find_tradefed_binary(ssh, suite_path)
+                if not tradefed_bin:
+                    ssh_manager.return_connection(ssh)
+                    return JSONResponse(
+                        content={'success': False, 'error': f'No tradefed binary found in {suite_path}'},
+                        status_code=404
+                    )
+
+            # Execute tradefed list results
+            output, error, code = execute_tradefed_command(ssh, suite_path, tradefed_bin)
+
+            ssh_manager.return_connection(ssh)
+
+            if code != 0:
+                return JSONResponse(
+                    content={
+                        'success': False,
+                        'error': error or f'Command failed with exit code: {code}',
+                        'raw_output': output
+                    },
+                    status_code=500
+                )
+
+            # Parse results using shared utility
+            results = parse_tradefed_list_results(output)
+
+            return JSONResponse(content={
+                'success': True,
+                'results': results,
+                'count': len(results),
+                'raw_output': output
+            })
+
+        except Exception as e:
+            ssh_manager.return_connection(ssh)
+            raise
+    except Exception as e:
+        logger.error(f"Error listing tradefed results: {e}")
         return JSONResponse(
             content={'success': False, 'error': str(e)},
             status_code=500
@@ -4769,7 +4878,7 @@ async def validate_desktop_host(req: dict = Body(...)):
 
         if not host_connection or '@' not in host_connection:
             return JSONResponse(
-                content={'success': False, 'error': '无效的主机格式'},
+                content={'success': False, 'error': '无效的主机格式 user@ip'},
                 status_code=400
             )
 
@@ -4865,7 +4974,7 @@ async def show_device_screens(req: DeviceActionRequest):
 
         ssh = ssh_manager.get_connection(config)
         if not ssh:
-            return JSONResponse(content={'success': False, 'error': 'SSH connection failed'}, status_code=500)
+            return ssh_connection_failed_response()
 
         try:
             # Check VNC service status
@@ -7252,7 +7361,7 @@ async def list_files(req: dict):
 
         ssh = ssh_manager.get_connection(config)
         if not ssh:
-            return JSONResponse(content={'success': False, 'error': 'SSH connection failed'}, status_code=500)
+            return ssh_connection_failed_response()
 
         try:
             # Check if path exists
@@ -7415,6 +7524,75 @@ def create_device_ssh_connection(config):
         logger.error(f"[USB/IP] Failed to connect to device host: {e}")
         return None
 
+# ==================== 辅助函数 ====================
+
+def ssh_connection_failed_response():
+    """SSH连接失败的标准错误响应"""
+    return JSONResponse(
+        content={'success': False, 'error': 'SSH connection failed'},
+        status_code=500
+    )
+
+def find_tradefed_binary(ssh, suite_path: str) -> Optional[str]:
+    """在指定目录中查找 tradefed 二进制文件"""
+    find_cmd = f"find '{suite_path}' -maxdepth 1 -type f -executable -name '*-tradefed' 2>/dev/null | head -1"
+    output, _, _ = ssh_manager.execute_command(ssh, find_cmd, timeout=10)
+    result = output.strip()
+    return result if result else None
+
+
+def parse_tradefed_list_results(output: str) -> List[Dict[str, Any]]:
+    """解析 tradefed list results 命令输出"""
+    results = []
+    lines = output.strip().split('\n')
+
+    # 跳过表头后开始解析（表头包含 "Session  Pass  Fail"）
+    header_found = False
+
+    for line in lines:
+        if not header_found:
+            if 'Session' in line and 'Pass' in line and 'Fail' in line:
+                header_found = True
+            continue
+
+        line = line.strip()
+        if not line or line.startswith('=====') or line.startswith('------'):
+            continue
+
+        parts = line.split()
+        if len(parts) >= 10:
+            try:
+                result_entry = {
+                    'session': parts[0],
+                    'pass': int(parts[1]),
+                    'fail': int(parts[2]),
+                    'modules': parts[3],
+                    'complete': parts[4],
+                    'result_directory': parts[5],
+                    'test_plan': parts[6],
+                    'device_serial': parts[7],
+                    'build_id': parts[8],
+                    'product': parts[9] if len(parts) > 9 else ''
+                }
+                results.append(result_entry)
+            except (ValueError, IndexError):
+                logger.debug(f"[TRADEFED] 跳过格式不匹配的行: {line}")
+                continue
+
+    return results
+
+
+def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: str = "list results") -> tuple:
+    """执行 tradefed 命令（使用登录 shell 加载环境变量）"""
+    # 使用 bash -l 登录 shell 以加载 .bashrc 中的 PATH 等环境变量
+    # 显式设置 PATH 以确保 aapt 工具可被找到
+    # 使用 printf 将命令传递给 tradefed，避免 here-string 转义问题
+    platform_tools_path = "/home/hcq/Software/platform-tools"
+    cmd = f'bash -l -c "export PATH={platform_tools_path}:$PATH && cd {suite_path} && printf \\"{command}\\\\nexit\\\\n\\" | {tradefed_bin}"'
+    logger.info(f"[TRADEFED] Executing: {cmd}")
+    return ssh_manager.execute_command(ssh, cmd, timeout=120)
+
+
 # ==================== WebSocket ====================
 
 @app.websocket("/api/system/websocket/{client_id}")
@@ -7461,6 +7639,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
             elif message_type == 'terminal_resize':
                 await handle_terminal_resize(client_id, websocket, data)
+
+            elif message_type == 'tradefed_list_results':
+                await handle_tradefed_list_results(client_id, websocket, data)
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket client disconnected: {client_id}")
@@ -7540,6 +7721,64 @@ async def refresh_devices_websocket(client_id: str, websocket: WebSocket):
         await websocket.send_json({
             'type': 'error',
             'message': str(e)
+        })
+
+async def handle_tradefed_list_results(client_id: str, websocket: WebSocket, data: dict):
+    """处理 tradefed list results 命令 - 通过 SSH 执行*-tradefed list results"""
+    try:
+        config = config_manager.load_config()
+        ssh = ssh_manager.get_connection(config)
+
+        if not ssh:
+            await websocket.send_json({
+                'type': 'tradefed_list_results_error',
+                'error': 'SSH 连接失败'
+            })
+            return
+
+        # 获取参数
+        suite_path = data.get('suite_path', '')
+        tradefed_bin = data.get('tradefed_bin', '')
+
+        if not suite_path or not tradefed_bin:
+            await websocket.send_json({
+                'type': 'tradefed_list_results_error',
+                'error': '缺少参数：suite_path 或 tradefed_bin'
+            })
+            ssh_manager.return_connection(ssh)
+            return
+
+        # 执行 tradefed list results 命令（使用共享函数）
+        output, error, code = execute_tradefed_command(ssh, suite_path, tradefed_bin)
+
+        ssh_manager.return_connection(ssh)
+
+        if code == 0:
+            # 解析结果（使用共享函数）
+            results = parse_tradefed_list_results(output)
+
+            await websocket.send_json({
+                'type': 'tradefed_list_results',
+                'success': True,
+                'output': output,
+                'results': results,
+                'count': len(results),
+                'command': f"cd '{suite_path}' && {tradefed_bin} list results"
+            })
+        else:
+            await websocket.send_json({
+                'type': 'tradefed_list_results_error',
+                'success': False,
+                'error': error or f'命令执行失败，退出代码：{code}',
+                'command': f"cd '{suite_path}' && {tradefed_bin} list results"
+            })
+
+    except Exception as e:
+        logger.error(f"[TRADEFED_LIST_RESULTS] Error: {e}")
+        await websocket.send_json({
+            'type': 'tradefed_list_results_error',
+            'success': False,
+            'error': str(e)
         })
 
 async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_no: str, config: dict):
