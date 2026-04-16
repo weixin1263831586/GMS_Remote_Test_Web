@@ -994,11 +994,6 @@ class USBIPStartRequest(BaseModel):
     device_host: Optional[str] = None
     device_password: Optional[str] = Field(default="", description="设备主机SSH密码")
 
-class AutocompleteSuiteRequest(BaseModel):
-    """自动完成测试套件请求"""
-    test_type: str
-    base_path: str
-
 class VPNConnectRequest(BaseModel):
     """VPN 连接请求（所有字段可选，兼容前端无参数调用）"""
     host: Optional[str] = None
@@ -2857,103 +2852,6 @@ async def list_test_logs():
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
 
-@app.post("/api/test/autocomplete-suite")
-async def autocomplete_suite(req: AutocompleteSuiteRequest):
-    """Auto-complete test suite path with tools subdirectory"""
-    try:
-        test_type = req.test_type.lower()
-        base_path = req.base_path
-
-        config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return ssh_connection_failed_response()
-
-        try:
-            if not base_path:
-                ssh_manager.return_connection(ssh)
-                return JSONResponse(content={'success': False, 'error': 'Base path is required'}, status_code=400)
-
-            # Map test types to their suite directories and binaries (same as GUI)
-            suite_map = {
-                'cts': {'subdir': 'android-cts', 'binary': 'cts-tradefed'},
-                'gsi': {'subdir': 'android-cts', 'binary': 'cts-tradefed'},
-                'gts': {'subdir': 'android-gts', 'binary': 'gts-tradefed'},
-                'sts': {'subdir': 'android-sts', 'binary': 'sts-tradefed'},
-                'vts': {'subdir': 'android-vts', 'binary': 'vts-tradefed'},
-                'apts': {'subdir': 'android-gts', 'binary': 'gts-tradefed'}
-            }
-
-            config_info = suite_map.get(test_type)
-            if not config_info:
-                ssh_manager.return_connection(ssh)
-                return JSONResponse(content={'success': False, 'error': f'不支持的测试类型: {test_type}'}, status_code=400)
-
-            subdir = config_info['subdir']
-            binary = config_info['binary']
-
-            # Try multiple path patterns to find the test suite
-            candidates = []
-
-            # Pattern 1: {base_path}/{subdir}/tools (standard structure)
-            candidates.append(f"{base_path}/{subdir}/tools")
-
-            # Pattern 2: Search for {subdir} in subdirectories of base_path
-            # This handles structures like: base_path/android-gts-13.1-R1/android-gts/tools
-            find_cmd = f"find '{base_path}' -maxdepth 3 -type d -name '{subdir}' 2>/dev/null | head -5"
-            find_output, _, _ = ssh_manager.execute_command(ssh, find_cmd, timeout=10)
-
-            if find_output.strip():
-                for line in find_output.strip().split('\n'):
-                    # Add tools subdirectory to each found subdir
-                    candidates.append(f"{line}/tools")
-
-            # Pattern 3: Check if base_path itself is already the tools directory
-            # Check for binary directly in base_path
-            check_direct = f"[ -x '{base_path}/{binary}' ] && echo '{base_path}' || echo ''"
-            direct_output, _, _ = ssh_manager.execute_command(ssh, check_direct)
-            if direct_output.strip():
-                ssh_manager.return_connection(ssh)
-                return JSONResponse(content={
-                    'success': True,
-                    'path': base_path,
-                    'binary': binary,
-                    'autocompleted': True
-                })
-
-            # Try each candidate path
-            for candidate in candidates:
-                check_cmd = f"[ -x '{candidate}/{binary}' ] && echo '{candidate}' || echo ''"
-                output, error, code = ssh_manager.execute_command(ssh, check_cmd)
-
-                if output.strip():
-                    final_path = output.strip()
-                    ssh_manager.return_connection(ssh)
-                    return JSONResponse(content={
-                        'success': True,
-                        'path': final_path,
-                        'binary': binary,
-                        'autocompleted': True
-                    })
-
-            # If binary not found, return original path with warning (GUI behavior)
-            ssh_manager.return_connection(ssh)
-            return JSONResponse(content={
-                'success': True,
-                'path': base_path,
-                'autocompleted': False,
-                'warning': f'未找到 {binary}，请确认路径正确'
-            })
-
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            raise
-    except Exception as e:
-        logger.error(f"Error autocompleting suite: {e}")
-        return JSONResponse(
-            content={'success': False, 'error': str(e)},
-            status_code=500
-        )
 
 @app.get("/api/test/suites")
 async def list_suites(base_path: str = None):
