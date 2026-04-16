@@ -168,6 +168,18 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "suites": [{"test_type": "cts", "version": "android-cts-16_r4", "tools_path": "...", "full_path": "...", "binary": "cts-tradefed"}], "count": 9, "base_path": "/home/hcq/GMS-Suite" }',
         usage: 'gms-rt-test-suites'
     },
+    '/api/test/suites/result': {
+        title: '查询测试套件结果',
+        description: '查询指定测试套件的测试结果（Tradefed list results命令）',
+        method: 'POST',
+        params: [
+            { name: 'suite_path', type: 'string', required: true, desc: '测试套件tools目录路径，如 /home/hcq/GMS-Suite/android-cts-16.1_r2-1/android-cts/tools' },
+            { name: 'tradefed_bin', type: 'string', required: false, desc: 'Tradefed二进制文件名（可选，自动检测）' }
+        ],
+        response: '{ "success": true, "results": [{"session": "0", "pass": "93608", "fail": "22", "modules": "128 of 131", "result_directory": "2026.04.04_17.05.42", "test_plan": "cts", "device_serial": "RK3572GMS1", "build_id": "BP4A.251205.006", "product": "rk3572_a16"}], "count": 18, "raw_output": "Session...", "cached": false, "query_time": 5.4 }',
+        usage: 'gms-rt-test-suites-result ~/GMS-Suite/android-cts-16.1_r2-1/android-cts/tools',
+        curl_example: 'curl -X POST "http://172.16.14.233:5001/api/test/suites/result" -H "Content-Type: application/json" -d \'{"suite_path": "/home/hcq/GMS-Suite/android-cts-16.1_r2-1/android-cts/tools"}\''
+    },
     '/api/test/clean': {
         title: '清理测试环境',
         description: '清理测试环境',

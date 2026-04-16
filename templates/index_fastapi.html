@@ -407,7 +407,8 @@
                                 <div class="form-row">
                                     <label>测试类型:</label>
                                     <select id="test-type" class="combo-box">
-                                        <option value="CTS" selected>CTS</option>
+                                        <option value="" disabled selected></option>
+                                        <option value="CTS">CTS</option>
                                         <option value="GSI">GSI</option>
                                         <option value="GTS">GTS</option>
                                         <option value="STS">STS</option>
@@ -435,10 +436,10 @@
                                 </div>
                                 <div class="form-row">
                                     <label>测试套件:</label>
-                                    <div class="input-with-btn">
-                                        <input type="text" id="test-suite" class="entry-field" value="{{ config.suites_path }}" />
-                                        <button class="btn-small" onclick="browseRemoteFile('suite')">📁 选择套件</button>
-                                    </div>
+                                    <select id="test-suite" class="combo-box">
+                                        <option value="" disabled selected></option>
+                                    </select>
+                                    <button class="btn-small" onclick="loadTestSuites()">🔄 刷新套件</button>
                                 </div>
                                 <div class="form-row">
                                     <label>测试报告:</label>

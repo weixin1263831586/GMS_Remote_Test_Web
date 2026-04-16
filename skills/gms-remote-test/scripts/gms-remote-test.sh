@@ -1075,7 +1075,8 @@ gms-rt-test-logs-stream() {
 # List test suite results (tradefed list results) - Using HTTP API
 gms-rt-test-suites-result() {
     local suite_path="$1"
-    [ -z "$suite_path" ] && { error "Suite path required. Usage: gms-rt-test-suites-result ~/GMS-Suite/android-gts-13.1-R2/android-gts/tools"; return 1; }
+    local force_refresh="$2"
+    [ -z "$suite_path" ] && { error "Suite path required. Usage: gms-rt-test-suites-result ~/GMS-Suite/android-gts-13.1-R2/android-gts/tools [--force-refresh]"; return 1; }
     check_jq
 
     # Expand tilde to home directory
@@ -1092,21 +1093,33 @@ gms-rt-test-suites-result() {
         data=$(echo "$data" | jq --arg bin "$tradefed_bin" '. + {tradefed_bin: $bin}')
     fi
 
-    # Call HTTP API endpoint
-    local response=$(api_call "/test/suites/result" "POST" "$data")
+    # Call HTTP API endpoint with optional force_refresh parameter
+    local url="/test/suites/result"
+    if [ "$force_refresh" = "--force-refresh" ] || [ "$force_refresh" = "-f" ]; then
+        url="$url?force_refresh=true"
+        echo "🔄 Force refresh requested (bypassing cache)..."
+    fi
+
+    local start_time=$(date +%s.%3N)
+    local response=$(api_call "$url" "POST" "$data")
+    local end_time=$(date +%s.%3N)
+    local elapsed=$(echo "$end_time - $start_time" | bc)
 
     if echo "$response" | jq -e '.success' > /dev/null; then
         local count=$(echo "$response" | jq '.count')
-        success "Found $count test result(s)"
+        local cached=$(echo "$response" | jq -r '.cached // false')
+
+        if [ "$cached" = "true" ]; then
+            local cache_age=$(echo "$response" | jq -r '.cache_age // 0')
+            success "Found $count test result(s) (from cache, ${cache_age}s old)"
+        else
+            success "Found $count test result(s)"
+        fi
+
+        echo "⏱️  Query time: ${elapsed}s"
         echo ""
-        printf "%-8s %-6s %-6s %-10s %-10s %-26s %-10s %-20s %-20s %-15s\n" "SESSION" "PASS" "FAIL" "MODULES" "COMPLETE" "RESULT_DIR" "TEST_PLAN" "DEVICE_SERIAL" "BUILD_ID" "PRODUCT"
-        printf "%s\n" "$(printf '=%.0s' {1..140})"
-        echo "$response" | jq -r '.results[] |
-            "\(.session)\t\(.pass)\t\(.fail)\t\(.modules)\t\(.complete)\t\(.result_directory)\t\(.test_plan)\t\(.device_serial)\t\(.build_id)\t\(.product)"' | \
-        while IFS=$'\t' read -r session pass fail modules complete result_dir test_plan device_serial build_id product; do
-            printf "%-8s %-6s %-6s %-10s %-10s %-26s %-10s %-20s %-20s %-15s\n" "$session" "$pass" "$fail" "$modules" "$complete" "$result_dir" "$test_plan" "$device_serial" "$build_id" "$product"
-        done
-        echo ""
+        # Output raw format (same as tradefed list results) - fast processing
+        echo "$response" | jq -r '.raw_output' | grep -E 'Session|^[ ]*[0-9]' | grep -v '^04-' | grep -v '^D/' | grep -v 'DeviceManager'
     else
         local msg=$(echo "$response" | jq -r '.error // .message // "Unknown error"')
         error "Failed to list test results: $msg"
