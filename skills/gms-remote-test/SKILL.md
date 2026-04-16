@@ -99,9 +99,9 @@ The web platform provides **8 integrated pages** for complete test management:
 - ✅ **Skills Download**: New endpoint for downloading skill files as ZIP
 
 ### API Updates
-- ✅ **POST /api/files/upload**: Enhanced with chunked upload support (chunk_index, total_chunks, upload_id, etc.)
+- ✅ **POST /api/terminal/push**: Enhanced with chunked upload support (chunk_index, total_chunks, upload_id, etc.)
 - ✅ **GET /api/burn/upload-progress**: New endpoint for querying firmware upload progress
-- ✅ **HEAD /api/files/upload**: For checking uploaded chunks in resume scenarios
+- ✅ **HEAD /api/terminal/push**: For checking uploaded chunks in resume scenarios
 
 ### Previous Improvements
 - ✅ **Route Check Terminal**: Auto-execute route commands with cross-page navigation
@@ -495,7 +495,7 @@ curl -s http://172.16.14.233:5001/api/test/logs/download -o test.log
 
 #### Upload File (Simple)
 ```bash
-curl -sX POST http://172.16.14.233:5001/api/files/upload \
+curl -sX POST http://172.16.14.233:5001/api/terminal/push \
   -F "file=@/path/to/file.txt" \
   -F "path=/home/hcq/uploads" | jq '.'
 ```
@@ -512,7 +512,7 @@ TOTAL_CHUNKS=$(($(stat -f%z "$FILE" 2>/dev/null || stat -c%s "$FILE") / CHUNK_SI
 
 for i in $(seq 0 $((TOTAL_CHUNKS - 1))); do
   dd if="$FILE" bs=$CHUNK_SIZE skip=$((i * 1)) count=1 2>/dev/null | \
-  curl -sX POST http://172.16.14.233:5001/api/files/upload \
+  curl -sX POST http://172.16.14.233:5001/api/terminal/push \
     -F "file=@-;filename=chunk_$i" \
     -F "chunk_index=$i" \
     -F "total_chunks=$TOTAL_CHUNKS" \
@@ -524,7 +524,7 @@ done
 
 #### Check Uploaded Chunks (for Resume)
 ```bash
-curl -sX POST "http://172.16.14.233:5001/api/files/upload?check_chunks=1&upload_id=$UPLOAD_ID" | jq '.'
+curl -sX POST "http://172.16.14.233:5001/api/terminal/push?check_chunks=1&upload_id=$UPLOAD_ID" | jq '.'
 ```
 
 #### Burn Firmware
@@ -788,7 +788,7 @@ curl -s http://172.16.14.233:5001/api/vpn/status | jq '.'
 
 #### Upload File
 ```bash
-curl -sX POST http://172.16.14.233:5001/api/files/upload \
+curl -sX POST http://172.16.14.233:5001/api/terminal/push \
   -F "file=@/path/to/file.txt" \
   -F "file_path=/tmp" | jq '.'
 ```
@@ -1008,7 +1008,7 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 ### File Management
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/files/upload` | POST | Upload file |
+| `/api/terminal/push` | POST | Upload file |
 | `/api/files/install` | POST | Upload files for install |
 | `/api/files/progress` | GET | Get upload progress |
 | `/api/files/list` | POST | List files |

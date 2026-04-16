@@ -1983,55 +1983,6 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
             status_code=500
         )
 
-@app.post("/api/terminal/push")
-async def push_terminal_file(request: Request, file: UploadFile = File(...)):
-    """终端文件上传 - 上传到远程主机/tmp目录,供用户手动执行adb push"""
-    try:
-        config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return JSONResponse(
-                content={"success": False, "error": "SSH连接失败"},
-                status_code=500
-            )
-
-        try:
-            # 读取文件内容
-            file_content = await file.read()
-
-            # 上传到远程主机的/tmp目录
-            remote_path = f"/tmp/{file.filename}"
-            with ssh.open_sftp() as sftp:
-                with sftp.file(remote_path, 'w') as remote_file:
-                    remote_file.write(file_content)
-
-            ssh_manager.return_connection(ssh)
-
-            logger.info(f"[Terminal Upload] File uploaded: {file.filename} -> {remote_path} ({len(file_content)} bytes)")
-
-            return JSONResponse(content={
-                "success": True,
-                "remote_path": remote_path,
-                "filename": file.filename,
-                "size": len(file_content),
-                "message": f"文件已上传到 {remote_path}"
-            })
-
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            logger.error(f"[Terminal Upload] Upload failed: {e}")
-            return JSONResponse(
-                content={"success": False, "error": f"上传失败: {str(e)}"},
-                status_code=500
-            )
-
-    except Exception as e:
-        logger.error(f"[Terminal Upload] Error: {e}")
-        return JSONResponse(
-            content={"success": False, "error": f"服务器错误: {str(e)}"},
-            status_code=500
-        )
-
 # ==================== OpenGrok源码搜索 ====================
 
 @app.post("/api/opengrok/search")
@@ -2672,8 +2623,6 @@ async def stop_test(
         await broadcast_device_lock_update(devices_to_release)
 
     update_user_state_field(client_id, {'devices': []})
-
-
 
     # 通过SSH杀死测试进程
     config = config_manager.load_config()
@@ -5565,7 +5514,6 @@ def _parse_ping_output(ping_output: str, exit_status: int) -> tuple[bool, str]:
         else:
             return False, 'N/A'
 
-
 def _generate_route_commands(test_network: str, target_network: str, test_host_ip: str) -> dict:
     """生成路由命令
 
@@ -5595,7 +5543,6 @@ def _generate_route_commands(test_network: str, target_network: str, test_host_i
             f"# 删除路由: sudo ip route del {target_network}/24"
         ]
     }
-
 
 @app.post("/api/ssh/ping")
 async def ping_route_test(request: Request):
@@ -5684,106 +5631,40 @@ async def ping_route_test(request: Request):
             status_code=500
         )
 
-@app.post("/api/ssh/terminal/open")
-async def open_terminal_with_command(request: Request):
-    """在测试主机上打开终端并准备执行命令
+@app.get("/api/terminal/open")
+async def get_ssh_terminal_info():
+    """获取SSH终端连接信息
 
-    该API会：
-    1. 将命令复制到剪贴板（通过SSH连接）
-    2. 返回操作说明给用户
-    3. 用户需要手动在终端中粘贴并执行命令
+    返回测试主机的SSH连接信息，方便用户手动建立SSH连接
     """
     try:
-        # 获取请求数据
-        data = await request.json()
-        command = data.get('command', '').strip()
-        auto_confirm = data.get('auto_confirm', False)
-
-        if not command:
-            return JSONResponse(
-                content={'success': False, 'error': '命令不能为空'},
-                status_code=400
-            )
-
-        # 获取SSH连接
         config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return JSONResponse(
-                content={'success': False, 'error': 'SSH连接失败，无法连接到测试主机'},
-                status_code=500
-            )
 
-        try:
-            # 由于SSH限制，无法直接在远程主机上打开GUI终端
-            # 但我们可以提供命令让用户手动执行
-            # 这里我们模拟"准备"命令的过程
+        # Cache config values to avoid redundant get() calls
+        ssh_host = config.get('ubuntu_host', '172.16.14.233')
+        ssh_user = config.get('ubuntu_user', 'hcq')
+        connection_string = f"ssh {ssh_user}@{ssh_host}"
 
-            # 验证命令格式（安全性检查）
-            if not _is_safe_route_command(command):
-                return JSONResponse(
-                    content={'success': False, 'error': '命令格式不安全，拒绝执行'},
-                    status_code=400
-                )
-
-            # 记录命令到日志
-            logger.info(f"准备在测试主机上执行路由命令: {command}")
-
-            # 返回成功响应，包含命令和操作说明
-            ssh_manager.return_connection(ssh)
-
-            return JSONResponse(content={
-                'success': True,
-                'command': command,
-                'message': '命令已准备就绪',
-                'instructions': {
-                    'step1': '命令已复制到剪贴板（模拟）',
-                    'step2': '请在测试主机的终端中按 Ctrl+Shift+V 粘贴命令',
-                    'step3': '按回车键执行命令',
-                    'step4': '如需要，请输入sudo密码',
-                    'note': '由于SSH限制，无法自动打开GUI终端，请手动操作'
-                },
-                'auto_confirm': auto_confirm
-            })
-
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            raise e
+        return JSONResponse(content={
+            'success': True,
+            'host': ssh_host,
+            'user': ssh_user,
+            'port': 22,
+            'connection_command': connection_string,
+            'instructions': [
+                f"1. 复制连接命令: {connection_string}",
+                f"2. 在终端中粘贴并执行连接命令",
+                f"3. 输入密码或使用SSH密钥认证",
+                f"4. 连接成功后，您将获得测试主机的终端访问权限"
+            ]
+        })
 
     except Exception as e:
-        logger.error(f"Error opening terminal with command: {e}")
+        logger.error(f"Error getting SSH terminal info: {e}")
         return JSONResponse(
             content={'success': False, 'error': str(e)},
             status_code=500
         )
-
-
-def _is_safe_route_command(command: str) -> bool:
-    """验证路由命令是否安全
-
-    只允许特定的路由命令格式，防止命令注入
-    """
-    # 允许的安全命令前缀
-    safe_prefixes = [
-        'sudo ip route add',
-        'sudo ip route del',
-        'route add',
-        'route delete',
-        'ip route add',
-        'ip route del'
-    ]
-
-    # 检查命令是否以安全前缀开头
-    command = command.strip()
-    for prefix in safe_prefixes:
-        if command.startswith(prefix):
-            # 进一步检查命令格式，防止注入
-            # 基本检查：不包含管道、重定向、分号等危险字符
-            dangerous_chars = ['|', '&', ';', '$', '`', '>', '<', '\n', '\r']
-            if not any(char in command for char in dangerous_chars):
-                return True
-
-    return False
 
 
 @app.get("/api/vpn/status")
@@ -5943,8 +5824,8 @@ async def disconnect_vpn():
 
 # ==================== 文件上传 ====================
 
-@app.post("/api/files/upload")
-@app.head("/api/files/upload")
+@app.post("/api/terminal/push")
+@app.head("/api/terminal/push")
 async def upload_file(
     request: Request,
     file: Optional[UploadFile] = File(None),
@@ -6032,9 +5913,31 @@ async def upload_file(
                 )
 
             # 上传到远程服务器
-            remote_path = f"/home/{config['ubuntu_user']}/{file.filename}"
-            with ssh.open_sftp() as sftp:
-                sftp.put(temp_path, remote_path)
+            # 如果指定了path参数，使用指定路径；否则使用默认路径
+            if path and path.strip():
+                # 确保路径存在
+                target_dir = path.rstrip('/')
+                try:
+                    with ssh.open_sftp() as sftp:
+                        try:
+                            sftp.stat(target_dir)
+                        except IOError:
+                            # 目录不存在，创建目录
+                            sftp.mkdir(target_dir)
+                        remote_path = f"{target_dir}/{file.filename}"
+                        sftp.put(temp_path, remote_path)
+                except Exception as e:
+                    logger.error(f"Failed to upload to specified path: {e}")
+                    # 如果指定路径失败，回退到默认路径
+                    remote_path = f"/home/{config['ubuntu_user']}/{file.filename}"
+                    with ssh.open_sftp() as sftp:
+                        sftp.put(temp_path, remote_path)
+            else:
+                # 使用默认路径
+                remote_path = f"/home/{config['ubuntu_user']}/{file.filename}"
+                with ssh.open_sftp() as sftp:
+                    sftp.put(temp_path, remote_path)
+
             ssh_manager.return_connection(ssh)
 
             # 清理临时文件
