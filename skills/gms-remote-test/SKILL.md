@@ -1323,13 +1323,13 @@ For complete API documentation with try-it-out functionality:
 - `gms-rt-usbip-status` - Check USB/IP status
 - `gms-rt-usbip-auto-install` - Auto-install USB/IP
 
-### Network & VPN
-- `gms-rt-network-ping` - Test network connectivity
+### VPN Connection
 - `gms-rt-vpn-connect` - Connect to VPN
 - `gms-rt-vpn-disconnect` - Disconnect from VPN
 - `gms-rt-vpn-status` - Check VPN status
 
 ### SSH Management
+- `gms-rt-ssh-ping` - Test connectivity
 - `gms-rt-ssh-sshd-check` - Check SSHD status
 - `gms-rt-ssh-sshd-install` - Install SSHD
 - `gms-rt-ssh-route` - Check SSH routing

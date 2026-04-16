@@ -378,9 +378,7 @@ gms-rt-usbip-connect() {
     local device_host="$1"
     local device_password="$2"
 
-    if [ -z "$device_host" ]; then
-        error "Device host required. Usage: gms-rt-usbip-connect <user@ip> [password]"
-    fi
+    [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-usbip-connect <user@ip> [password]"; return 1; }
 
     check_jq
     echo "🔌 Starting USB/IP connection to $device_host..."
@@ -625,8 +623,8 @@ gms-rt-ssh-route() {
 gms-rt-ssh-ping() {
     local test_host_ip="$1"
     local client_ip="$2"
-    [ -z "$test_host_ip" ] && { error "Test host IP required. Usage: gms-rt-network-ping <test_host_ip> <client_ip>"; return 1; }
-    [ -z "$client_ip" ] && { error "Client IP required. Usage: gms-rt-network-ping <test_host_ip> <client_ip>"; return 1; }
+    [ -z "$test_host_ip" ] && { error "Test host IP required. Usage: gms-rt-ssh-ping <test_host_ip> <client_ip>"; return 1; }
+    [ -z "$client_ip" ] && { error "Client IP required. Usage: gms-rt-ssh-ping <test_host_ip> <client_ip>"; return 1; }
     check_jq
     echo "🌐 Testing SSH connectivity..."
     local data="{\"test_host_ip\":\"$test_host_ip\", \"client_ip\":\"$client_ip\"}"

@@ -588,7 +588,7 @@ const API_DETAILS_MAP = {
             { name: 'client_ip', type: 'string', required: true, desc: '客户端IP' }
         ],
         response: '{ "success": true, "reachable": true, "latency": "<1ms", "route_commands": {...} }',
-        usage: 'gms-rt-network-ping'
+        usage: '检查主机间网络连通性'
     },
     '/api/ssh/route': {
         title: '检查路由',
