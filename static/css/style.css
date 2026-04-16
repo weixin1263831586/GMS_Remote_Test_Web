@@ -434,11 +434,11 @@ body {
 
 .input-table td:first-child {
     padding-left: 0;
-    width: 50%;
+    width: 40%;
 }
 
 .input-table td:nth-child(2) {
-    width: 35%;
+    width: 45%;
 }
 
 .input-table td:last-child {
@@ -769,12 +769,12 @@ log-system { color: var(--info-color); }
 .form-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
     min-height: 30px;
 }
 
 .form-row label {
-    min-width: 75px;
+    width: auto;
     color: var(--text-secondary);
     font-size: 12px;
     text-align: left;
@@ -783,11 +783,13 @@ log-system { color: var(--info-color); }
     line-height: 30px;
     display: flex;
     align-items: center;
+    margin: 0;
+    padding: 0;
 }
 
 .entry-field {
     flex: 1;
-    padding: 6px 10px;
+    padding: 6px 4px;
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -796,6 +798,7 @@ log-system { color: var(--info-color); }
     transition: var(--transition-normal);
     height: 30px;
     box-sizing: border-box;
+    margin: 0;
 }
 
 .entry-field:focus {

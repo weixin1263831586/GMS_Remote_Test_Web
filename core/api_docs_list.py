@@ -264,6 +264,14 @@ API_DOCS_LIST = [
         "skill": "gms-rt-test-clean"
     },
     {
+        "method": "POST",
+        "path": "/api/test/suites/result",
+        "description": "列出测试套件结果（tradefed list results）- 使用原生输出格式",
+        "params": ["suite_path", "tradefed_bin"],
+        "category": "test",
+        "skill": "gms-rt-test-suites-result"
+    },
+    {
         "method": "GET",
         "path": "/api/test/status",
         "description": "获取当前测试运行状态",

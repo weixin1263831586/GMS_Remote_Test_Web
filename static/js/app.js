@@ -205,6 +205,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ⚙️ 加载配置和设备
     await loadConfig();
     loadDevices();
+    await loadTestSuites();  // 加载测试套件列表
     await checkInitialTestStatus();
     startStatusPolling();
 
@@ -657,6 +658,101 @@ function onInputChange() {
 function onTestTypeChange() {
     const testType = $('test-type').value;
     addLogEntry(`测试类型已更改为: ${testType}`, 'info');
+
+    // 获取所有匹配的测试套件
+    // 特殊处理：GSI使用CTS的测试套件
+    let matchingSuites;
+    if (testType.toLowerCase() === 'gsi') {
+        // GSI使用CTS套件
+        matchingSuites = testSuitesCache.filter(suite =>
+            suite.test_type.toLowerCase() === 'cts'
+        );
+        addLogEntry('GSI使用CTS测试套件', 'info');
+    } else {
+        matchingSuites = testSuitesCache.filter(suite =>
+            suite.test_type.toLowerCase() === testType.toLowerCase()
+        );
+    }
+
+    console.log(`[onTestTypeChange] 测试类型: ${testType}, 找到 ${matchingSuites.length} 个匹配套件`);
+
+    if (matchingSuites.length > 0) {
+        // 按版本号排序，选择版本号最大的
+        matchingSuites.sort((a, b) => {
+            // 更精确的版本号提取和比较
+            // 支持多种格式:
+            // android-cts-16.1_r2 -> 主版本: 16.1, 修订版: 2
+            // android-gts-13.1-R1 -> 主版本: 13.1, 修订版: 1
+            const extractVersion = (version) => {
+                // 移除前缀，保留版本部分
+                let versionStr = version.replace(/^[^-]+-[^-]+-/, '');
+
+                let mainVersion = versionStr;
+                let revision = 0;
+
+                // 分离主版本和修订版 (支持 _r 和 -R 格式)
+                // 先尝试 _r 格式 (CTS格式)
+                if (versionStr.includes('_r')) {
+                    const parts = versionStr.split('_r');
+                    mainVersion = parts[0];
+                    revision = parseInt(parts[1]) || 0;
+                }
+                // 再尝试 -R 格式 (GTS格式)
+                else if (versionStr.includes('-R')) {
+                    const parts = versionStr.split('-R');
+                    mainVersion = parts[0];
+                    revision = parseInt(parts[1]) || 0;
+                }
+
+                // 解析主版本号 (支持 "16.1", "16" 等格式)
+                let mainParts;
+                if (mainVersion.includes('.')) {
+                    mainParts = mainVersion.split('.').map(Number);
+                } else {
+                    const num = parseInt(mainVersion);
+                    mainParts = isNaN(num) ? [0] : [num];
+                }
+
+                return {
+                    main: mainParts,
+                    revision: revision
+                };
+            };
+
+            const versionA = extractVersion(a.version);
+            const versionB = extractVersion(b.version);
+
+            console.log(`[版本比较] ${a.version} ->`, versionA, `vs ${b.version} ->`, versionB);
+
+            // 先比较主版本号
+            const maxMainLength = Math.max(versionA.main.length, versionB.main.length);
+            for (let i = 0; i < maxMainLength; i++) {
+                const numA = versionA.main[i] || 0;
+                const numB = versionB.main[i] || 0;
+                if (numA !== numB) {
+                    return numB - numA; // 降序排列
+                }
+            }
+
+            // 主版本相同，比较修订版
+            return versionB.revision - versionA.revision; // 降序排列
+        });
+
+        // 选择版本号最大的
+        const latestSuite = matchingSuites[0];
+        $('test-suite').value = latestSuite.tools_path;
+        addLogEntry(`自动选择最新测试套件: ${latestSuite.version}`, 'info');
+
+        console.log(`[onTestTypeChange] 已选择套件:`, {
+            version: latestSuite.version,
+            path: latestSuite.tools_path,
+            all_suites: matchingSuites.map(s => ({ version: s.version, path: s.tools_path }))
+        });
+    } else {
+        addLogEntry(`未找到 ${testType} 类型的测试套件`, 'warning');
+        // 清空测试套件选择
+        $('test-suite').value = '';
+    }
 }
 
 function onDeviceHostConfirm() {
@@ -845,6 +941,74 @@ async function loadDevices(forceRefresh = false) {
     } finally {
         state.isRefreshingDevices = false;
     }
+}
+
+// 测试套件管理
+let testSuitesCache = [];
+let isRefreshingTestSuites = false;
+
+async function loadTestSuites(forceRefresh = false) {
+    if (isRefreshingTestSuites) {
+        return;
+    }
+
+    isRefreshingTestSuites = true;
+
+    try {
+        const response = await apiCall('/api/test/suites');
+
+        if (response.success && response.suites) {
+            testSuitesCache = response.suites;
+            renderTestSuitesDropdown();
+            console.log('[loadTestSuites] 已加载测试套件:', response.count, '个');
+        } else {
+            showToast('加载测试套件失败', 'error');
+        }
+    } catch (error) {
+        console.error('[loadTestSuites] 错误:', error);
+        showToast('加载测试套件失败: ' + error.message, 'error');
+    } finally {
+        isRefreshingTestSuites = false;
+    }
+}
+
+function renderTestSuitesDropdown() {
+    const selectElement = document.getElementById('test-suite');
+
+    // 清空现有选项
+    selectElement.innerHTML = '';
+
+    // 添加空选项作为默认值
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = '';
+    emptyOption.disabled = true;
+    emptyOption.selected = true;
+    selectElement.appendChild(emptyOption);
+
+    // 按测试类型分组
+    const groupedSuites = {};
+    testSuitesCache.forEach(suite => {
+        if (!groupedSuites[suite.test_type]) {
+            groupedSuites[suite.test_type] = [];
+        }
+        groupedSuites[suite.test_type].push(suite);
+    });
+
+    // 添加分组选项
+    Object.keys(groupedSuites).sort().forEach(testType => {
+        const group = document.createElement('optgroup');
+        group.label = testType.toUpperCase();
+
+        groupedSuites[testType].forEach(suite => {
+            const option = document.createElement('option');
+            option.value = suite.tools_path;
+            option.textContent = `${suite.version} - ${suite.tools_path}`;
+            group.appendChild(option);
+        });
+
+        selectElement.appendChild(group);
+    });
 }
 
 // 用户列表管理
@@ -2455,8 +2619,13 @@ function updateUploadProgress(percentage, filename, uploadedSize, totalSize) {
 
 // ==================== Browse Remote File ====================
 async function browseRemoteFile(mode) {
-    const targetInputId = mode === 'suite' ? 'test-suite' : 'retry-result';
-    const title = mode === 'suite' ? '选择测试套件' : '选择测试报告';
+    if (mode !== 'retry') {
+        showToast('该功能暂不支持', 'warning');
+        return;
+    }
+
+    const targetInputId = 'retry-result';
+    const title = '选择测试报告';
 
     // Set file browser state
     state.fileBrowser.mode = mode;
@@ -2470,7 +2639,7 @@ async function browseRemoteFile(mode) {
     const modal = document.getElementById('file-browser-modal');
     modal.classList.add('show');
 
-    // Load initial directory - use GMS-Suite for both suite and retry
+    // Load initial directory - use GMS-Suite for retry results
     const defaultUser = state.config?.ubuntu_user || 'hcq';
     const defaultPath = `/home/${defaultUser}/GMS-Suite`;
     await loadFileDirectory(defaultPath);
@@ -2711,7 +2880,7 @@ async function startTest() {
     const suitePath = document.getElementById('test-suite')?.value?.trim() || '';
 
     if (!suitePath) {
-        showToast('请先选择测试套件路径（点击"浏览"按钮）', 'warning');
+        showToast('请先选择测试套件', 'warning');
         return;
     }
 

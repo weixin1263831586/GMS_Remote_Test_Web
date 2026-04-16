@@ -334,6 +334,9 @@ class GlobalState:
         self.scrcpy_sessions = {}  # {device_id: session_info}
         self.device_cache = {'devices': [], 'timestamp': 0}  # 3秒TTL
         self.device_cache_lock = threading.Lock()  # 设备缓存锁
+        self.test_suite_results_cache = {}  # {suite_path: {'results': [], 'timestamp': float, 'raw_output': str}}
+        self.test_suite_results_cache_lock = threading.Lock()  # 测试套件结果缓存锁
+        self.TEST_SUITE_RESULTS_CACHE_TTL = 60  # 测试套件结果缓存60秒（增加缓存时间以提高命中率）
         self.websocket_connections = {}  # {client_id: websocket}
         self.websocket_connections_lock = threading.Lock()  # WebSocket连接锁
         self.firmware_upload_progress = {}  # {client_id: {'progress': float, 'filename': str, 'uploaded_size': int, 'total_size': int, 'timestamp': float}}
@@ -3036,13 +3039,15 @@ class TradefedListResultsRequest(BaseModel):
 async def list_tradefed_results(
     h: Optional[str] = Query(None),
     help: bool = Query(False),
-    req: TradefedListResultsRequest = Body(None)
+    req: TradefedListResultsRequest = Body(None),
+    force_refresh: bool = Query(False)  # 添加强制刷新参数
 ):
     """Execute tradefed list results command and return test results
 
     Request:
         suite_path: str - Path to test suite tools directory
         tradefed_bin: Optional[str] - Tradefed binary name (auto-detected if not provided)
+        force_refresh: bool - Force cache refresh (default: False)
 
     Response:
         success: bool
@@ -3058,6 +3063,7 @@ async def list_tradefed_results(
             - build_id: str
             - product: str
         raw_output: str - Raw command output
+        cached: bool - Whether results were served from cache
     """
     # 检查是否需要显示帮助
     if help:
@@ -3081,6 +3087,24 @@ async def list_tradefed_results(
         config = config_manager.load_config()
         suite_path = req.suite_path
         tradefed_bin = req.tradefed_bin
+        current_time = time.time()
+
+        # 检查缓存（除非强制刷新）
+        if not force_refresh:
+            with global_state.test_suite_results_cache_lock:
+                if suite_path in global_state.test_suite_results_cache:
+                    cached_data = global_state.test_suite_results_cache[suite_path]
+                    cache_age = current_time - cached_data['timestamp']
+                    if cache_age < global_state.TEST_SUITE_RESULTS_CACHE_TTL:
+                        logger.info(f"Using cached test suite results for {suite_path} (age: {cache_age:.1f}s)")
+                        return JSONResponse(content={
+                            'success': True,
+                            'results': cached_data['results'],
+                            'count': len(cached_data['results']),
+                            'raw_output': cached_data['raw_output'],
+                            'cached': True,
+                            'cache_age': cache_age
+                        })
 
         ssh = ssh_manager.get_connection(config)
         if not ssh:
@@ -3097,7 +3121,7 @@ async def list_tradefed_results(
                         status_code=404
                     )
 
-            # Execute tradefed list results
+            # Execute tradefed list results (使用优化后的函数)
             output, error, code = execute_tradefed_command(ssh, suite_path, tradefed_bin)
 
             ssh_manager.return_connection(ssh)
@@ -3115,11 +3139,20 @@ async def list_tradefed_results(
             # Parse results using shared utility
             results = parse_tradefed_list_results(output)
 
+            # 更新缓存
+            with global_state.test_suite_results_cache_lock:
+                global_state.test_suite_results_cache[suite_path] = {
+                    'results': results,
+                    'raw_output': output,
+                    'timestamp': current_time
+                }
+
             return JSONResponse(content={
                 'success': True,
                 'results': results,
                 'count': len(results),
-                'raw_output': output
+                'raw_output': output,
+                'cached': False
             })
 
         except Exception as e:
@@ -7445,11 +7478,9 @@ def find_tradefed_binary(ssh, suite_path: str) -> Optional[str]:
 
 
 def parse_tradefed_list_results(output: str) -> List[Dict[str, Any]]:
-    """解析 tradefed list results 命令输出"""
+    """解析 tradefed list results 命令输出，支持 STS 和 VTS/CTS 两种格式"""
     results = []
     lines = output.strip().split('\n')
-
-    # 跳过表头后开始解析（表头包含 "Session  Pass  Fail"）
     header_found = False
 
     for line in lines:
@@ -7462,38 +7493,143 @@ def parse_tradefed_list_results(output: str) -> List[Dict[str, Any]]:
         if not line or line.startswith('=====') or line.startswith('------'):
             continue
 
+        if '>' in line and 'Session' not in line:
+            continue
+
         parts = line.split()
         if len(parts) >= 10:
             try:
-                result_entry = {
-                    'session': parts[0],
-                    'pass': int(parts[1]),
-                    'fail': int(parts[2]),
-                    'modules': parts[3],
-                    'complete': parts[4],
-                    'result_directory': parts[5],
-                    'test_plan': parts[6],
-                    'device_serial': parts[7],
-                    'build_id': parts[8],
-                    'product': parts[9] if len(parts) > 9 else ''
-                }
+                has_of_keyword = len(parts) > 4 and parts[4] == 'of'
+
+                if has_of_keyword:
+                    result_entry = {
+                        'session': parts[0],
+                        'pass': int(parts[1]),
+                        'fail': int(parts[2]),
+                        'modules': parts[3],
+                        'modules_total': parts[5],
+                        'result_directory': parts[6],
+                        'test_plan': parts[7],
+                        'device_serial': parts[8],
+                        'build_id': parts[9],
+                        'product': parts[10] if len(parts) > 10 else ''
+                    }
+                else:
+                    result_entry = {
+                        'session': parts[0],
+                        'pass': int(parts[1]),
+                        'fail': int(parts[2]),
+                        'modules': parts[3],
+                        'modules_total': parts[4],
+                        'result_directory': parts[5],
+                        'test_plan': parts[6],
+                        'device_serial': parts[7],
+                        'build_id': parts[8],
+                        'product': parts[9] if len(parts) > 9 else ''
+                    }
                 results.append(result_entry)
-            except (ValueError, IndexError):
-                logger.debug(f"[TRADEFED] 跳过格式不匹配的行: {line}")
+            except (ValueError, IndexError) as e:
+                logger.debug(f"[TRADEFED] 跳过格式不匹配的行：{line} - 错误：{e}")
                 continue
 
     return results
 
 
+
 def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: str = "list results") -> tuple:
-    """执行 tradefed 命令（使用登录 shell 加载环境变量）"""
-    # 使用 bash -l 登录 shell 以加载 .bashrc 中的 PATH 等环境变量
-    # 显式设置 PATH 以确保 aapt 工具可被找到
-    # 使用 printf 将命令传递给 tradefed，避免 here-string 转义问题
+    """
+    执行 tradefed 命令（使用登录 shell 加载环境变量）
+
+    使用 invoke_shell 交互式方式执行命令，适用于所有测试套件类型
+
+    性能优化：使用智能等待替代固定延迟，大幅减少查询时间
+    """
+    import time
+    import re
     platform_tools_path = "/home/hcq/Software/platform-tools"
-    cmd = f'bash -l -c "export PATH={platform_tools_path}:$PATH && cd {suite_path} && printf \\"{command}\\\\nexit\\\\n\\" | {tradefed_bin}"'
-    logger.info(f"[TRADEFED] Executing: {cmd}")
-    return ssh_manager.execute_command(ssh, cmd, timeout=120)
+
+    def wait_for_prompt(shell, prompt_patterns, timeout=10, poll_interval=0.05):
+        """
+        智能等待 shell 提示符出现（优化版）
+        :param prompt_patterns: 提示符模式列表，如 ['$', '#', '>', '>']
+        :param timeout: 超时时间（秒）
+        :param poll_interval: 轮询间隔（秒）- 减少到 0.05 秒以更快响应
+        :return: 接收到的所有输出
+        """
+        output = ""
+        start_time = time.time()
+        last_output_time = start_time
+
+        while time.time() - start_time < timeout:
+            try:
+                chunk = shell.recv(8192).decode('utf-8', errors='ignore')  # 增加缓冲区
+                if chunk:
+                    output += chunk
+                    last_output_time = time.time()
+                    # 检查是否出现任何提示符模式
+                    for pattern in prompt_patterns:
+                        current_line = output.split('\n')[-1:][0] if output.split('\n') else ''
+                        if re.search(pattern, current_line):
+                            return output
+            except:
+                # 如果超过 1 秒没有新输出，认为命令已完成
+                if time.time() - last_output_time > 1.0:
+                    return output
+            time.sleep(poll_interval)
+
+        return output
+
+    # 使用 invoke_shell 交互式执行
+    try:
+        shell = ssh.invoke_shell()
+        shell.settimeout(3)  # 减少超时时间
+
+        # 清空欢迎消息
+        try:
+            shell.recv(1024)
+        except:
+            pass
+
+        # 发送命令序列，使用智能等待（优化超时）
+        shell.send(f"export PATH={platform_tools_path}:$PATH\n")
+        wait_for_prompt(shell, ['\$ ', '\# ', '> '], timeout=2, poll_interval=0.05)
+
+        shell.send(f"cd {suite_path}\n")
+        wait_for_prompt(shell, ['\$ ', '\# ', '> '], timeout=2, poll_interval=0.05)
+
+        shell.send(f"{tradefed_bin}\n")
+        # 等待 tradefed 启动（查找 tradefed 提示符）
+        tradefed_output = wait_for_prompt(shell, ['> ', 'tf> ', r'\(tf\)'], timeout=6, poll_interval=0.1)
+
+        shell.send(f"{command}\n")
+        # 等待命令执行完成（查找命令提示符或结果表格）
+        command_output = wait_for_prompt(shell, ['> ', 'tf> ', r'\(tf\)', 'Session ', r'^[ ]*[0-9]'],
+                                        timeout=15, poll_interval=0.1)
+
+        shell.send("exit\n")
+        wait_for_prompt(shell, ['\$ ', '\# '], timeout=1, poll_interval=0.05)
+
+        # 读取所有剩余输出
+        output = tradefed_output + command_output
+        while True:
+            try:
+                chunk = shell.recv(4096).decode('utf-8', errors='ignore')
+                if not chunk:
+                    break
+                output += chunk
+            except:
+                break
+
+        try:
+            shell.close()
+        except:
+            pass
+
+        return output, "", 0
+
+    except Exception as e:
+        logger.error(f"[TRADEFED] Failed to execute command: {e}")
+        return "", str(e), -1
 
 
 # ==================== WebSocket ====================
