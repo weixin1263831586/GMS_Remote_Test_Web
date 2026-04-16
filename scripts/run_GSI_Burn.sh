@@ -42,8 +42,6 @@ echo "🔄 重启设备 $DEVICE 进入 bootloader..."
 adb -s "$DEVICE" reboot bootloader
 sleep 5
 
-echo "🔓 解锁 vboot..."
-fastboot -s "$DEVICE" oem at-unlock-vboot
 fastboot -s "$DEVICE" reboot fastboot
 sleep 3
 

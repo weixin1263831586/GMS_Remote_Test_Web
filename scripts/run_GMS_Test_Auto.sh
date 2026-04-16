@@ -173,6 +173,10 @@ parse_args() {
             SUITE_PREFIX="gts"
             TEST_COMMAND="gts"
             ;;
+        gts-root)
+            SUITE_PREFIX="gts"
+            TEST_COMMAND="gts-root"
+            ;;
         sts)
             SUITE_PREFIX="sts"
             TEST_COMMAND="sts-dynamic-full"
@@ -186,7 +190,7 @@ parse_args() {
             TEST_COMMAND="apts"
             ;;
         *)
-            die "不支持的测试类型: $Test_Type (目前仅支持: cts, gsi, gts, sts, vts, apts)"
+            die "不支持的测试类型: $Test_Type (目前仅支持: cts, gsi, gts, gts-root, sts, vts, apts)"
             ;;
     esac
 }
