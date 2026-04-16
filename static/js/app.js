@@ -2742,13 +2742,6 @@ function closeFileBrowserModal() {
 function confirmFileSelection() {
     const targetInput = document.getElementById(state.fileBrowser.targetInputId);
 
-    // For suite path selection, use current directory (not file selection)
-    if (state.fileBrowser.mode === 'suite') {
-        // Use current directory path as base for auto-completion
-        autoCompleteSuitePath(state.fileBrowser.currentPath);
-        return;
-    }
-
     // For other modes, require file selection
     if (!state.fileBrowser.selectedFile) {
         showToast('请先选择一个文件', 'warning');
@@ -2796,47 +2789,6 @@ function confirmFileSelection() {
         if (targetInput) {
             targetInput.value = fullPath;
             addLogEntry(`已选择文件: ${fullPath}`, 'info');
-        }
-        closeFileBrowserModal();
-    }
-}
-
-async function autoCompleteSuitePath(selectedPath) {
-    const testType = document.getElementById('test-type').value;
-
-    try {
-        addLogEntry(`正在验证测试套件路径: ${selectedPath}`, 'info');
-
-        const result = await apiCall('/api/test/autocomplete-suite', 'POST', {
-            test_type: testType,
-            base_path: selectedPath
-        });
-
-        if (result.success) {
-            const suitePathInput = document.getElementById('test-suite');
-            if (suitePathInput) {
-                suitePathInput.value = result.path;
-
-                if (result.autocompleted) {
-                    addLogEntry(`✅ 测试套件路径已自动补齐: ${result.path}`, 'success');
-                    if (result.binary) {
-                        addLogEntry(`   测试二进制: ${result.binary}`, 'info');
-                    }
-                    showToast(`已自动补齐到: ${result.path}`, 'success');
-                } else {
-                    addLogEntry(`⚠️ ${result.warning || '未找到tools目录，使用原始路径'}`, 'warning');
-                    showToast(`已选择: ${result.path}`, 'warning');
-                }
-            }
-            closeFileBrowserModal();
-        }
-    } catch (error) {
-        addLogEntry('自动补齐路径失败: ' + error.message, 'error');
-        // Even if auto-completion fails, still use the selected path
-        const suitePathInput = document.getElementById('test-suite');
-        if (suitePathInput) {
-            suitePathInput.value = selectedPath;
-            addLogEntry(`使用选定路径: ${selectedPath}`, 'warning');
         }
         closeFileBrowserModal();
     }
