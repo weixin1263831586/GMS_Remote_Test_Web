@@ -1230,7 +1230,23 @@ function selectAllDevices() {
 
 async function rebootDevices() {
     if (!validateDeviceSelection()) return;
-    if (!confirm(`确定要重启选中的 ${state.selectedDevices.size} 台设备吗？`)) return;
+
+    // 获取选中设备的序列号
+    const selectedDeviceSerials = Array.from(state.selectedDevices).map(deviceId => {
+        const device = state.devices.find(d =>
+            (d.device_id && d.device_id === deviceId) ||
+            (d.serial && d.serial === deviceId) ||
+            d === deviceId
+        );
+        return device ? (device.device_id || device.serial || deviceId) : deviceId;
+    });
+
+    const confirmed = await showConfirmDialog(
+        '重启设备',
+        `确定要重启以下 ${state.selectedDevices.size} 台设备吗？\n\n${selectedDeviceSerials.join('\n')}`
+    );
+
+    if (!confirmed) return;
 
     try {
         await apiCall('/api/devices/reboot', 'POST', {
@@ -3329,6 +3345,50 @@ function updateConnectionStatus(connected) {
     addLogEntry(connected ? '已连接到服务器' : '与服务器断开连接', connected ? 'success' : 'error');
 }
 
+// 统一确认对话框
+function showConfirmDialog(title, message, onConfirm, onCancel) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('confirm-modal');
+        const titleEl = document.getElementById('confirm-title');
+        const messageEl = document.getElementById('confirm-message');
+        const okBtn = document.getElementById('confirm-ok-btn');
+        const cancelBtn = document.getElementById('confirm-cancel-btn');
+
+        // 设置标题和消息
+        titleEl.textContent = title;
+        messageEl.textContent = message;
+
+        // 显示模态框
+        modal.classList.add('show');
+
+        // 确定按钮事件
+        const handleOk = () => {
+            modal.classList.remove('show');
+            cleanup();
+            resolve(true);
+            if (onConfirm) onConfirm();
+        };
+
+        // 取消按钮事件
+        const handleCancel = () => {
+            modal.classList.remove('show');
+            cleanup();
+            resolve(false);
+            if (onCancel) onCancel();
+        };
+
+        // 清理事件监听器
+        const cleanup = () => {
+            okBtn.removeEventListener('click', handleOk);
+            cancelBtn.removeEventListener('click', handleCancel);
+        };
+
+        // 绑定事件
+        okBtn.addEventListener('click', handleOk);
+        cancelBtn.addEventListener('click', handleCancel);
+    });
+}
+
 function showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
     toast.textContent = message;
@@ -3510,9 +3570,12 @@ function displayTestReports(reports) {
 }
 
 async function deleteReport(timestamp) {
-    if (!confirm(`确定要删除报告 ${timestamp} 吗？此操作不可恢复。`)) {
-        return;
-    }
+    const confirmed = await showConfirmDialog(
+        '删除报告',
+        `确定要删除报告 ${timestamp} 吗？此操作不可恢复。`
+    );
+
+    if (!confirmed) return;
 
     try {
         const response = await fetch(`/api/reports/delete?timestamp=${encodeURIComponent(timestamp)}`, {
@@ -3545,7 +3608,10 @@ async function claudeAnalyzeReport(timestamp) {
 
     try {
         // 询问是否使用Claude API
-        const useClaudeApi = confirm('是否使用Claude API进行深度分析？\n\n确定 = 使用Claude API (需要API密钥)\n取消 = 仅基础分析 (免费)');
+        const useClaudeApi = await showConfirmDialog(
+            'Claude API 分析',
+            '是否使用Claude API进行深度分析？\n\n确定 = 使用Claude API (需要API密钥)\n取消 = 仅基础分析 (免费)'
+        );
 
         let apiUrl = `/api/reports/claude-analyze/${encodeURIComponent(timestamp)}`;
 

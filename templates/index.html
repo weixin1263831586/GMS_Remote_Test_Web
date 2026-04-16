@@ -356,10 +356,10 @@
                                 </div>
                                 <div class="form-row">
                                     <label>测试套件:</label>
-                                    <div class="input-with-btn">
-                                        <input type="text" id="test-suite" class="entry-field" value="{{ config.suites_path }}" />
-                                        <button class="btn-small" onclick="browseRemoteFile('suite')">📁 选择套件</button>
-                                    </div>
+                                    <select id="test-suite" class="combo-box">
+                                        <option value="" disabled selected>加载中...</option>
+                                    </select>
+                                    <button class="btn-small" onclick="loadTestSuites()">🔄 刷新</button>
                                 </div>
                                 <div class="form-row">
                                     <label>测试报告:</label>

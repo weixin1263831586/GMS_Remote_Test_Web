@@ -890,16 +890,26 @@ gms-rt-terminal-push() {
     echo "📁 Target path: $target_path"
 
     # 使用curl上传文件
-    local response=$(curl -s -X POST "${API_BASE}/terminal/push" \
+    local response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${API_BASE}/terminal/push" \
         -F "file=@$file_path" \
         -F "path=$target_path" \
         -F "auto_rename=true")
 
-    if echo "$response" | jq -e '.success' > /dev/null; then
+    local http_status=$(echo "$response" | grep "HTTP_STATUS:" | cut -d: -f2)
+    local body=$(echo "$response" | grep -v "HTTP_STATUS:")
+
+    # Check HTTP status first
+    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]]; then
+        error "Failed to push file - HTTP status: $http_status"
+        echo "$body" | jq '.' 2>/dev/null || echo "$body"
+        return 1
+    fi
+
+    if echo "$body" | jq -e '.success' > /dev/null; then
         success "File pushed successfully"
-        echo "$response" | jq '.'
+        echo "$body" | jq '.'
     else
-        local msg=$(echo "$response" | jq -r '.error // .message // "Unknown error"')
+        local msg=$(echo "$body" | jq -r '.error // .message // "Unknown error"')
         error "Failed to push file: $msg"
         return 1
     fi
@@ -1279,16 +1289,27 @@ gms-rt-files-upload() {
     check_jq
     echo "📤 Uploading file: $file_path..."
 
+    local response
     if [ -n "$target_path" ]; then
-        curl -X POST "${API_BASE}/files/upload" \
+        response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${API_BASE}/files/upload" \
             -F "file=@$file_path" \
-            -F "path=$target_path" \
-            | jq '.'
+            -F "path=$target_path")
     else
-        curl -X POST "${API_BASE}/files/upload" \
-            -F "file=@$file_path" \
-            | jq '.'
+        response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${API_BASE}/files/upload" \
+            -F "file=@$file_path")
     fi
+
+    local http_status=$(echo "$response" | grep "HTTP_STATUS:" | cut -d: -f2)
+    local body=$(echo "$response" | grep -v "HTTP_STATUS:")
+
+    # Check HTTP status first
+    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]]; then
+        error "Failed to upload file - HTTP status: $http_status"
+        echo "$body" | jq '.' 2>/dev/null || echo "$body"
+        return 1
+    fi
+
+    echo "$body" | jq '.'
 }
 
 # Install APK
@@ -1302,10 +1323,21 @@ gms-rt-files-install() {
     check_jq
     echo "📦 Installing APK: $file_path to $device_id..."
 
-    curl -X POST "${API_BASE}/files/install" \
+    local response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${API_BASE}/files/install" \
         -F "file=@$file_path" \
-        -F "device_id=$device_id" \
-        | jq '.'
+        -F "device_id=$device_id")
+
+    local http_status=$(echo "$response" | grep "HTTP_STATUS:" | cut -d: -f2)
+    local body=$(echo "$response" | grep -v "HTTP_STATUS:")
+
+    # Check HTTP status first
+    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]]; then
+        error "Failed to install APK - HTTP status: $http_status"
+        echo "$body" | jq '.' 2>/dev/null || echo "$body"
+        return 1
+    fi
+
+    echo "$body" | jq '.'
 }
 
 # Get upload progress
@@ -1370,11 +1402,19 @@ gms-rt-burn-firmware() {
     echo ""  # Add newline after progress bar
 
     # Check response
+    # First check if HTTP status is successful (200-299)
+    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]]; then
+        error "Firmware burn failed - HTTP status: $http_status"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        return 1
+    fi
+
+    # Then check if response contains success field
     if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then
         success "Firmware burn completed successfully"
         echo "$response" | jq '.'
     else
-        error "Firmware burn failed (HTTP $http_status)"
+        error "Firmware burn failed - API returned error"
         echo "$response" | jq '.' 2>/dev/null || echo "$response"
         return 1
     fi
@@ -1421,22 +1461,32 @@ gms-rt-burn-gsi() {
         --argjson devices "$devices_json" \
         '{system_img: $system_img, script_path: $script_path, devices: $devices}')
 
-    local response=$(curl -s -X POST "${API_BASE}/burn/gsi" \
+    local response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${API_BASE}/burn/gsi" \
         -H "Content-Type: application/json" \
         -d "$json_payload")
 
-    if echo "$response" | jq -e '.success' > /dev/null; then
+    local http_status=$(echo "$response" | grep "HTTP_STATUS:" | cut -d: -f2)
+    local body=$(echo "$response" | grep -v "HTTP_STATUS:")
+
+    # Check HTTP status first
+    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]]; then
+        error "GSI burn failed - HTTP status: $http_status"
+        echo "$body" | jq '.' 2>/dev/null || echo "$body"
+        return 1
+    fi
+
+    if echo "$body" | jq -e '.success' > /dev/null; then
         success "GSI burn completed successfully"
         echo ""
-        echo "$response" | jq -r '.results[]? | "📱 \(.device): ✅ Success"' 2>/dev/null
+        echo "$body" | jq -r '.results[]? | "📱 \(.device): ✅ Success"' 2>/dev/null
         echo ""
         echo "📋 Detailed output:"
-        echo "$response" | jq -r '.results[]? | .output' 2>/dev/null | head -20
+        echo "$body" | jq -r '.results[]? | .output' 2>/dev/null | head -20
         echo "..."
         echo "(Full output available in response JSON)"
     else
-        error "GSI burn failed"
-        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        error "GSI burn failed - API returned error"
+        echo "$body" | jq '.' 2>/dev/null || echo "$body"
         return 1
     fi
 }
