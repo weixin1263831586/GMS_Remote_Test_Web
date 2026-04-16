@@ -2445,13 +2445,11 @@ async def run_test_background(
 
             device_args_str = " ".join(device_args_list)
             cmd_parts.extend(["--device-args", device_args_str])
-            await log_callback(f"📱 设备参数: {device_args_str}", 'info')
 
         # 添加测试套件（使用tools路径）
         if test_suite_tools:
             cmd_parts.extend(["--test-suite", test_suite_tools])
 
-        await log_callback(f"🌐 本地主机: '{local_server}'", 'info')
         if local_server:
             cmd_parts.extend(["--local-server", local_server])
         else:
@@ -2460,7 +2458,6 @@ async def run_test_background(
         # 添加进程组ID（用于多用户隔离的精确进程停止）
         if process_group_id:
             cmd_parts.extend(["--pgid", process_group_id])
-            await log_callback(f"🏷️ 进程组ID参数: {process_group_id}", 'info')
 
         # 构建最终命令
         import shlex
@@ -5341,7 +5338,25 @@ async def check_ssh_route(request: Request):
     same_network = are_same_network(ubuntu_ip, device_ip)
     need_route = not same_network
 
-    if need_route:
+    # 先测试实际连通性
+    connectivity_ok = False
+    latency = None
+    try:
+        import subprocess
+        result = subprocess.run(['ping', '-c', '1', '-W', '2', ubuntu_ip],
+                               capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            connectivity_ok = True
+            # 提取延迟时间
+            import re
+            match = re.search(r'time=([\d.]+)', result.stdout)
+            if match:
+                latency = f"{match.group(1)}ms"
+    except Exception as e:
+        logger.warning(f"Ping test failed: {e}")
+
+    # 只有网段不同且实际不通时才提示添加路由
+    if need_route and not connectivity_ok:
         try:
             ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
             device_network_obj = ipaddress.IPv4Network(f"{device_ip}/24", strict=False)
@@ -5372,15 +5387,37 @@ async def check_ssh_route(request: Request):
             'success': True,
             'same_network': False,
             'need_route': True,
-            'message': f'⚠️ 网段不同: {ubuntu_ip} (网段: {ubuntu_network}/24) ↔ {device_ip} (网段: {device_network}/24)',
+            'connectivity_ok': False,
+            'message': f'⚠️ 网段不同且无法连通: {ubuntu_ip} (网段: {ubuntu_network}/24) ↔ {device_ip} (网段: {device_network}/24)',
             'ubuntu_ip': ubuntu_ip,
             'device_ip': device_ip,
             'ubuntu_network': ubuntu_network,
             'device_network': device_network,
             'route_commands': route_commands,
-            'warning': '测试主机和设备主机不在同一网段，可能影响网络通信，建议添加路由表'
+            'warning': '测试主机和设备主机不在同一网段且无法连通，建议添加路由表'
+        })
+    elif need_route and connectivity_ok:
+        # 网段不同但已连通，路由已配置
+        try:
+            ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
+            ubuntu_network = str(ubuntu_network_obj.network_address)
+        except (ipaddress.AddressValueError, ValueError):
+            ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
+
+        return JSONResponse(content={
+            'success': True,
+            'same_network': False,
+            'need_route': False,
+            'connectivity_ok': True,
+            'latency': latency,
+            'message': f'✅ 网段不同但已连通: {ubuntu_ip} (延迟: {latency}) ↔ {device_ip}',
+            'ubuntu_ip': ubuntu_ip,
+            'device_ip': device_ip,
+            'network': ubuntu_network,
+            'note': '网段不同但路由已配置，网络通信正常'
         })
     else:
+        # 同网段
         try:
             ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
             ubuntu_network = str(ubuntu_network_obj.network_address)
@@ -5391,7 +5428,9 @@ async def check_ssh_route(request: Request):
             'success': True,
             'same_network': True,
             'need_route': False,
-            'message': f'✅ 网段相同: {ubuntu_ip} ↔ {device_ip}',
+            'connectivity_ok': connectivity_ok,
+            'latency': latency,
+            'message': f'✅ 网段相同: {ubuntu_ip} ↔ {device_ip}' + (f' (延迟: {latency})' if latency else ''),
             'ubuntu_ip': ubuntu_ip,
             'device_ip': device_ip,
             'network': ubuntu_network
