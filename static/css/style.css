@@ -434,11 +434,11 @@ body {
 
 .input-table td:first-child {
     padding-left: 0;
-    width: 40%;
+    width: 45%;
 }
 
 .input-table td:nth-child(2) {
-    width: 45%;
+    width: 40%;
 }
 
 .input-table td:last-child {
