@@ -493,17 +493,6 @@ API_DOCS_LIST = [
     # ==================== 文件管理 ====================
     {
         "method": "POST",
-        "path": "/api/files/upload",
-        "description": "上传文件到服务器",
-        "params": [
-            {"name": "file", "type": "file", "required": True, "desc": "要上传的文件"},
-            {"name": "path", "type": "string", "required": False, "desc": "目标路径"}
-        ],
-        "category": "file",
-        "skill": "gms-rt-files-upload"
-    },
-    {
-        "method": "POST",
         "path": "/api/files/install",
         "description": "上传APK并安装到设备",
         "params": [
@@ -578,18 +567,6 @@ API_DOCS_LIST = [
         "category": "burn"
     },
 
-    # ==================== 终端命令 ====================
-    {
-        "method": "POST",
-        "path": "/api/terminal/push",
-        "description": "向终端推送命令执行",
-        "params": [
-            {"name": "command", "type": "string", "required": True, "desc": "要执行的命令"}
-        ],
-        "category": "file",
-        "skill": "gms-rt-terminal-push"
-    },
-
     # ==================== 源码搜索 ====================
     {
         "method": "GET",
@@ -601,6 +578,48 @@ API_DOCS_LIST = [
         ],
         "category": "file",
         "skill": "gms-rt-opengrok-search"
+    },
+
+    # ==================== 主机终端 ====================
+    {
+        "method": "GET",
+        "path": "/api/terminal/open",
+        "description": "获取SSH终端连接信息，用于建立SSH连接到测试主机",
+        "params": [],
+        "category": "terminal",
+        "skill": "gms-rt-terminal-open",
+        "response_example": {
+            "success": True,
+            "host": "172.16.14.233",
+            "user": "hcq",
+            "port": 22,
+            "connection_command": "ssh hcq@172.16.14.233",
+            "instructions": [
+                "1. 复制连接命令: ssh hcq@172.16.14.233",
+                "2. 在终端中粘贴并执行连接命令",
+                "3. 输入密码或使用SSH密钥认证",
+                "4. 连接成功后，您将获得测试主机的终端访问权限"
+            ]
+        }
+    },
+    {
+        "method": "POST",
+        "path": "/api/terminal/push",
+        "description": "上传文件到测试主机的指定目录（默认 /home/hcq/GMS-Suite/tmp，支持分块上传和断点续传）",
+        "params": [
+            {"name": "file", "type": "file", "required": True, "desc": "要上传的文件"},
+            {"name": "path", "type": "string", "required": False, "desc": "目标路径，默认 /home/hcq/GMS-Suite/tmp"},
+            {"name": "chunk_index", "type": "int", "required": False, "desc": "分块索引（分块上传时使用）"},
+            {"name": "total_chunks", "type": "int", "required": False, "desc": "总分块数（分块上传时使用）"},
+            {"name": "upload_id", "type": "string", "required": False, "desc": "上传任务ID（分块上传时使用）"}
+        ],
+        "category": "terminal",
+        "skill": "gms-rt-terminal-push",
+        "response_example": {
+            "success": True,
+            "remote_path": "/home/hcq/GMS-Suite/tmp/filename.ext",
+            "message": "文件已上传到 /home/hcq/GMS-Suite/tmp/filename.ext"
+        }
     },
 
     # ==================== WebSocket ====================

@@ -9,6 +9,10 @@
 SERVER_URL="${GMS_REMOTE_TEST_SERVER:-http://172.16.14.233:5001}"
 API_BASE="${SERVER_URL}/api"
 
+# GMS Web App Configuration Directory
+# Can be overridden by environment variable
+GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-/home/hcq/GMS_Auto_Test/web_app}"
+
 # Colors for output
 RED=$(printf '\033[0;31m')
 GREEN=$(printf '\033[0;32m')
@@ -854,15 +858,159 @@ gms-rt-devices-screen() {
     echo "$response" | jq '.'
 }
 
-# Terminal push command
+# Terminal push command - Push file to test host
 gms-rt-terminal-push() {
-    local command="$1"
-    [ -z "$command" ] && { error "Command required. Usage: gms-rt-terminal-push <command>"; return 1; }
+    local file_path="$1"
+    local target_path="${2:-/home/hcq/GMS-Suite/tmp}"
+
+    # 显示帮助信息
+    if [[ "$file_path" == "-h" ]] || [[ "$file_path" == "--help" ]]; then
+        echo "📤 Push file to test host directory"
+        echo ""
+        echo "Usage: gms-rt-terminal-push <file_path> [target_path]"
+        echo ""
+        echo "Parameters:"
+        echo "  file_path    - Path to local file to upload (required)"
+        echo "  target_path  - Target directory on test host (default: /home/hcq/GMS-Suite/tmp)"
+        echo ""
+        echo "Examples:"
+        echo "  gms-rt-terminal-push ./config.json                    # Use default target"
+        echo "  gms-rt-terminal-push ./script.sh /tmp/scripts         # Custom target"
+        echo "  gms-rt-terminal-push ./firmware.zip /home/hcq/GMS-Suite # Absolute path"
+        echo ""
+        return 0
+    fi
+
+    [ -z "$file_path" ] && { error "File path required. Usage: gms-rt-terminal-push <file_path> [target_path]"; return 1; }
+    [ ! -f "$file_path" ] && { error "File not found: $file_path"; return 1; }
+
     check_jq
-    echo "⌨️  Pushing command to terminal..."
-    local data="{\"command\":\"$command\"}"
-    local response=$(api_call "/terminal/push" "POST" "$data")
-    echo "$response" | jq '.'
+    local filename=$(basename "$file_path")
+    echo "📤 Pushing file to terminal: $filename"
+    echo "📁 Target path: $target_path"
+
+    # 使用curl上传文件
+    local response=$(curl -s -X POST "${API_BASE}/terminal/push" \
+        -F "file=@$file_path" \
+        -F "path=$target_path" \
+        -F "auto_rename=true")
+
+    if echo "$response" | jq -e '.success' > /dev/null; then
+        success "File pushed successfully"
+        echo "$response" | jq '.'
+    else
+        local msg=$(echo "$response" | jq -r '.error // .message // "Unknown error"')
+        error "Failed to push file: $msg"
+        return 1
+    fi
+}
+
+# Open terminal on test host (SSH connection)
+gms-rt-terminal-open() {
+    local host="${1:-}"
+    local user="${2:-}"
+    local port="${3:-}"
+
+    # 显示帮助信息
+    if [[ "$host" == "-h" ]] || [[ "$host" == "--help" ]]; then
+        echo "🖥️  Open SSH terminal on test host"
+        echo ""
+        echo "Usage: gms-rt-terminal-open [host] [user] [port]"
+        echo ""
+        echo "Parameters:"
+        echo "  host  - Test host IP address (default: from API config)"
+        echo "  user  - SSH username (default: from API config)"
+        echo "  port  - SSH port (default: from API config)"
+        echo ""
+        echo "Examples:"
+        echo "  gms-rt-terminal-open                    # Use API config"
+        echo "  gms-rt-terminal-open 172.16.14.233     # Specify host"
+        echo "  gms-rt-terminal-open 172.16.14.233 hcq # Full parameters"
+        echo ""
+        return 0
+    fi
+
+    # 如果没有提供参数，优先使用本地配置，回退到API获取SSH连接信息
+    if [ -z "$host" ] && [ -z "$user" ] && [ -z "$port" ]; then
+        echo "🖥️  Opening terminal on test host (using config)..."
+
+        # 优先尝试本地配置文件（更快，避免网络调用）
+        local config_host=""
+        local config_files=(
+            "${GMS_WEB_APP_DIR}/configs/config.json"
+            "${HOME}/GMS_Auto_Test/web_app/configs/config.json"
+            "/home/hcq/GMS_Auto_Test/web_app/configs/config.json"
+        )
+
+        for config_file in "${config_files[@]}"; do
+            if [ -f "$config_file" ]; then
+                config_host=$(grep -o '"ubuntu_host": *"[^"]*"' "$config_file" 2>/dev/null | cut -d'"' -f4)
+                if [ -n "$config_host" ]; then
+                    host="$config_host"
+                    user="hcq"
+                    port="22"
+                    echo "📂 Using local config: $config_file"
+                    break
+                fi
+            fi
+        done
+
+        # 如果本地配置未找到，回退到API调用
+        if [ -z "$host" ]; then
+            echo "📡 Fetching SSH connection info from API..."
+
+            local api_response=$(api_call "/terminal/open" 2>/dev/null)
+
+            if [ $? -ne 0 ] || [ -z "$api_response" ]; then
+                error "Failed to connect to API server at ${SERVER_URL}"
+                echo ""
+                echo "💡 Troubleshooting:"
+                echo "   1. Check if the API server is running: systemctl status gms-web-app"
+                echo "   2. Verify server URL: echo \$GMS_REMOTE_TEST_SERVER"
+                echo "   3. Test connection: curl -s ${API_BASE}/terminal/open"
+                return 1
+            fi
+
+            # 检查API响应是否成功并一次性提取所有字段（优化jq性能）
+            local parsed_data=$(echo "$api_response" | jq -r 'if .success then "\(.host)|\(.user)|\(.port // 22)" else empty end' 2>/dev/null)
+
+            if [ -z "$parsed_data" ]; then
+                local error_msg=$(echo "$api_response" | jq -r '.error // "Unknown error"' 2>/dev/null)
+                error "API returned error: $error_msg"
+                return 1
+            fi
+
+            # 从解析的数据中提取字段（避免多次jq调用）
+            IFS='|' read -r host user port <<< "$parsed_data"
+
+            if [ -z "$host" ] || [ -z "$user" ]; then
+                error "Failed to extract SSH connection info from API response"
+                return 1
+            fi
+
+            echo "✓ API config loaded successfully"
+        fi
+
+        echo "🐧 Host: $user@$host"
+        echo "🔌 Port: $port"
+        echo ""
+    else
+        # 使用用户提供的参数（优先级高于API配置）
+        user="${user:-hcq}"
+        port="${port:-22}"
+        echo "🖥️  Opening terminal on test host: $user@$host:$port"
+    fi
+
+    echo "🔐 Establishing SSH connection..."
+    echo ""
+
+    # 直接使用ssh命令打开终端
+    if command -v ssh &> /dev/null; then
+        ssh -p "$port" "$user@$host"
+    else
+        error "ssh command not found. Please install OpenSSH client"
+        return 1
+    fi
 }
 
 # OpenGrok search
@@ -1413,10 +1561,9 @@ ${YELLOW}Firmware Burning:${NC}
   gms-rt-burn-gsi             - Burn GSI image
   gms-rt-burn-serial          - Burn serial number
 
-${YELLOW}Other:${NC}
-  gms-rt-terminal-push        - Push command to terminal
-  gms-rt-opengrok-search      - Search OpenGrok code
-  gms-rt-system-websocket     - WebSocket connection info
+${YELLOW}Terminal:${NC}
+  gms-rt-terminal-open        - Open SSH terminal on test host
+  gms-rt-terminal-push        - Push file to test host directory
 
 ${YELLOW}Examples:${NC}
   # List devices
@@ -1448,6 +1595,19 @@ ${YELLOW}Test Start Examples:${NC}
   # Retry mode - specify test type only
   gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 c3d9b8674f4b94f6 GTS
 
+${YELLOW}Terminal Examples:${NC}
+  # Open SSH terminal on test host (using default config)
+  gms-rt-terminal-open
+
+  # Open SSH terminal with specific host
+  gms-rt-terminal-open 172.16.14.233 hcq
+
+  # Push file to default directory (/home/hcq/GMS-Suite/tmp)
+  gms-rt-terminal-push ./test_config.json
+
+  # Push file to custom directory
+  gms-rt-terminal-push ./firmware.zip /tmp/firmware
+
 ${YELLOW}Performance Notes:${NC}
   - All skill commands match API paths exactly
   - Multi-device operations use parallel execution (75-85% faster)
@@ -1460,7 +1620,19 @@ EOF
 
 # Main command dispatcher
 # Only execute when run directly, not when sourced
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+_is_sourced() {
+    if [ -n "$BASH_SOURCE" ]; then
+        [[ "${BASH_SOURCE[0]}" != "$0" ]]
+    else
+        # Fallback for shells without BASH_SOURCE
+        case ${0##*/} in
+            sh|bash|dash) return 1 ;;
+            *) return 0 ;;
+        esac
+    fi
+}
+
+if ! _is_sourced; then
     if [ $# -eq 0 ]; then
         gms-rt-system-help
     else

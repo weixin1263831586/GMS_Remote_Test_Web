@@ -40,6 +40,7 @@ const API_CATEGORIES = {
     '/api/reports': 'report',
     '/api/vpn': 'vpn',
     '/api/ssh': 'ssh',
+    '/api/terminal': 'terminal',
     '/api/adb-forward': 'usbip',
     '/api/usbip': 'usbip',
     '/api/files': 'file',
@@ -78,6 +79,7 @@ function getCategoryName(category) {
         'vpn': '🔐 VPN管理',
         'ssh': '🔑 SSH管理',
         'desktop': '🖥️ 主机桌面',
+        'terminal': '🐧 主机终端',
         'usbip': '📡 USB/IP',
         'burn': '🔥 固件烧写',
         'file': '📁 文件管理',
@@ -103,10 +105,11 @@ function getCategoryOrder(category) {
         'vpn': 6,
         'ssh': 7,
         'desktop': 8,
-        'usbip': 9,
-        'burn': 10,
-        'file': 11,
-        'system': 13,
+        'terminal': 9,
+        'usbip': 10,
+        'burn': 11,
+        'file': 12,
+        'system': 14,
         'other': 999
     };
     return order[category] || 999;
@@ -603,17 +606,6 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "VPN已断开" }',
         usage: '断开当前VPN连接'
     },
-    '/api/files/upload': {
-        title: '上传文件',
-        description: '上传文件到服务器',
-        method: 'POST',
-        params: [
-            { name: 'file', type: 'file', required: true, desc: '要上传的文件' },
-            { name: 'path', type: 'string', required: false, desc: '目标路径' }
-        ],
-        response: '{ "success": true, "filename": "test.apk" }',
-        usage: '上传任意文件到服务器'
-    },
     '/api/files/install': {
         title: '上传并安装',
         description: '上传APK并安装到设备',
@@ -686,13 +678,28 @@ const API_DETAILS_MAP = {
         usage: '浏览设备文件系统'
     },
     '/api/terminal/push': {
-        title: '终端推送命令',
-        description: '向终端推送命令执行',
+        title: '推送文件到主机终端',
+        description: '上传文件到测试主机的指定目录（默认 /home/hcq/GMS-Suite/tmp，支持分块上传和断点续传）',
+        method: 'POST',
         params: [
-            { name: 'command', type: 'string', required: true, desc: '要执行的命令' }
+            { name: 'file', type: 'file', required: true, desc: '要上传的文件' },
+            { name: 'path', type: 'string', required: false, desc: '目标路径，默认 /home/hcq/GMS-Suite/tmp' },
+            { name: 'chunk_index', type: 'int', required: false, desc: '分块索引（分块上传时使用）' },
+            { name: 'total_chunks', type: 'int', required: false, desc: '总分块数（分块上传时使用）' },
+            { name: 'upload_id', type: 'string', required: false, desc: '上传任务ID（分块上传时使用）' }
         ],
-        response: '{ "success": true, "output": "命令输出..." }',
-        usage: '执行SSH命令'
+        response: '{ "success": true, "remote_path": "/home/hcq/GMS-Suite/tmp/filename.ext", "message": "文件已上传到 /home/hcq/GMS-Suite/tmp/filename.ext" }',
+        usage: 'gms-rt-terminal-push filename.ext',
+        curl_example: 'curl -X POST "http://172.16.14.233:5001/api/terminal/push" -F "file=@localfile.txt" -F "path=/home/hcq/GMS-Suite/tmp"'
+    },
+    '/api/terminal/open': {
+        title: '打开主机终端',
+        description: '获取SSH终端连接信息，用于建立SSH连接到测试主机',
+        method: 'GET',
+        params: [],
+        response: '{ "success": true, "host": "172.16.14.233", "user": "hcq", "port": 22, "connection_command": "ssh hcq@172.16.14.233", "instructions": ["1. 复制连接命令: ssh hcq@172.16.14.233", "2. 在终端中粘贴并执行连接命令", "3. 输入密码或使用SSH密钥认证", "4. 连接成功后，您将获得测试主机的终端访问权限"] }',
+        usage: 'gms-rt-terminal-open',
+        curl_example: 'curl -s "http://172.16.14.233:5001/api/terminal/open" | jq \'.connection_command\''
     },
     '/api/opengrok/search': {
         title: 'OpenGrok搜索',

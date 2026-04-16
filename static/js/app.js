@@ -2357,7 +2357,7 @@ async function handleUploadFile() {
         });
 
         // Start upload
-        xhr.open('POST', '/api/files/upload');
+        xhr.open('POST', '/api/terminal/push');
         xhr.send(formData);
     } catch (error) {
         addLogEntry('文件上传失败: ' + error.message, 'error');
