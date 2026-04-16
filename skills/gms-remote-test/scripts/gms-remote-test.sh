@@ -434,8 +434,18 @@ gms-rt-test-start() {
         error "  Mode 1 (Direct test): gms-rt-test-start <DEVICE> [TYPE] [MODULE] [CASE] [SUITE]"
         error "  Mode 2 (Retry report): gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE|SUITE]"
         error ""
+        error "Supported Test Types:"
+        error "  CTS      - Compatibility Test Suite"
+        error "  GTS      - Google Mobile Services Test Suite"
+        error "  GTS-ROOT - GTS with root permissions"
+        error "  STS      - Security Test Suite"
+        error "  VTS      - Vendor Test Suite"
+        error "  APTS     - Android Peripheral Test Suite"
+        error "  GSI      - Generic System Image tests (uses CTS suite)"
+        error ""
         error "Examples:"
         error "  gms-rt-test-start RF8TC2W4JNH CTS CtsPermissionTestCases"
+        error "  gms-rt-test-start RF8TC2W4JNH GTS-ROOT"
         error "  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 RF8TC2W4JNH GTS"
         error "  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 RF8TC2W4JNH /path/to/suite"
         return 1
@@ -450,6 +460,7 @@ gms-rt-test-start() {
         if [ -z "$report_timestamp" ]; then
             error "Report timestamp required for retry mode"
             error "Usage: gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE|SUITE]"
+            error "Supported types: CTS, GSI, GTS, GTS-ROOT, STS, VTS, APTS"
             return 1
         fi
 
@@ -494,10 +505,10 @@ gms-rt-test-start() {
 
     # 模式1: 直接测试模式
     local device_serial="$1"
-    local test_type="${2:-CTS}"
-    local test_module="${3:-CtsPermissionTestCases}"
+    local test_type="${2:-}"
+    local test_module="${3:-}"
     local test_case="${4:-}"
-    local test_suite="${5:-/home/hcq/GMS-Suite/android-cts-16_r4/android-cts/tools}"
+    local test_suite="${5:-}"
 
     echo "🚀 Starting test..."
     echo "  Device: $device_serial"
@@ -518,6 +529,12 @@ gms-rt-test-start() {
     else
         local msg=$(echo "$response" | jq -r '.error // .message // .detail // "Unknown error"')
         error "Failed to start test: $msg"
+        echo ""
+        echo "💡 Troubleshooting tips:"
+        echo "  • Make sure you have selected a test suite in the web interface first"
+        echo "  • Or specify test suite path using: gms-rt-test-start <DEVICE> <TYPE> --suite <PATH>"
+        echo "  • Check if the test suite path exists and is accessible"
+        echo "  • Verify device connection: adb devices"
         return 1
     fi
 }

@@ -2358,6 +2358,16 @@ async def run_test_background(
         local_server = test_params.get('local_server') or config.get('local_server', '')
         devices = test_params.get('devices', [])
 
+        # 验证测试套件路径（非重试模式下必需）
+        if not retry_dir and not test_suite_tools:
+            await log_callback("❌ 缺少测试套件路径", 'error')
+            await log_callback("💡 请使用 --test-suite 参数指定测试套件路径", 'info')
+            await log_callback("💡 或在Web界面中选择测试套件", 'info')
+            update_user_state_field(client_id, {'running': False})
+            # 释放设备锁
+            await release_device_locks(client_id, locked_devices)
+            return
+
         suites_path = config.get('suites_path', '/home/hcq/GMS-Suite')
         remote_script = os.path.join(suites_path, 'run_GMS_Test_Auto.sh')
 

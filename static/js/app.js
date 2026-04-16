@@ -660,17 +660,25 @@ function onTestTypeChange() {
     addLogEntry(`测试类型已更改为: ${testType}`, 'info');
 
     // 获取所有匹配的测试套件
-    // 特殊处理：GSI使用CTS的测试套件
+    // 特殊处理：GSI使用CTS的测试套件，GTS-ROOT使用GTS的测试套件
     let matchingSuites;
-    if (testType.toLowerCase() === 'gsi') {
+    const testTypeLower = testType.toLowerCase();
+
+    if (testTypeLower === 'gsi') {
         // GSI使用CTS套件
         matchingSuites = testSuitesCache.filter(suite =>
             suite.test_type.toLowerCase() === 'cts'
         );
         addLogEntry('GSI使用CTS测试套件', 'info');
+    } else if (testTypeLower === 'gts-root') {
+        // GTS-ROOT使用GTS套件
+        matchingSuites = testSuitesCache.filter(suite =>
+            suite.test_type.toLowerCase() === 'gts'
+        );
+        addLogEntry('GTS-ROOT使用GTS测试套件', 'info');
     } else {
         matchingSuites = testSuitesCache.filter(suite =>
-            suite.test_type.toLowerCase() === testType.toLowerCase()
+            suite.test_type.toLowerCase() === testTypeLower
         );
     }
 
