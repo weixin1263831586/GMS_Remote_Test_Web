@@ -334,9 +334,6 @@ class GlobalState:
         self.scrcpy_sessions = {}  # {device_id: session_info}
         self.device_cache = {'devices': [], 'timestamp': 0}  # 3秒TTL
         self.device_cache_lock = threading.Lock()  # 设备缓存锁
-        self.test_suite_results_cache = {}  # {suite_path: {'results': [], 'timestamp': float, 'raw_output': str}}
-        self.test_suite_results_cache_lock = threading.Lock()  # 测试套件结果缓存锁
-        self.TEST_SUITE_RESULTS_CACHE_TTL = 60  # 测试套件结果缓存60秒（增加缓存时间以提高命中率）
         self.websocket_connections = {}  # {client_id: websocket}
         self.websocket_connections_lock = threading.Lock()  # WebSocket连接锁
         self.firmware_upload_progress = {}  # {client_id: {'progress': float, 'filename': str, 'uploaded_size': int, 'total_size': int, 'timestamp': float}}
@@ -2994,22 +2991,7 @@ async def list_tradefed_results(
         tradefed_bin = req.tradefed_bin
         current_time = time.time()
 
-        # 检查缓存（除非强制刷新）
-        if not force_refresh:
-            with global_state.test_suite_results_cache_lock:
-                if suite_path in global_state.test_suite_results_cache:
-                    cached_data = global_state.test_suite_results_cache[suite_path]
-                    cache_age = current_time - cached_data['timestamp']
-                    if cache_age < global_state.TEST_SUITE_RESULTS_CACHE_TTL:
-                        logger.info(f"Using cached test suite results for {suite_path} (age: {cache_age:.1f}s)")
-                        return JSONResponse(content={
-                            'success': True,
-                            'results': cached_data['results'],
-                            'count': len(cached_data['results']),
-                            'raw_output': cached_data['raw_output'],
-                            'cached': True,
-                            'cache_age': cache_age
-                        })
+        logger.info(f"Querying test suite results for {suite_path} (no cache)")
 
         ssh = ssh_manager.get_connection(config)
         if not ssh:
@@ -3043,14 +3025,6 @@ async def list_tradefed_results(
 
             # Parse results using shared utility
             results = parse_tradefed_list_results(output)
-
-            # 更新缓存
-            with global_state.test_suite_results_cache_lock:
-                global_state.test_suite_results_cache[suite_path] = {
-                    'results': results,
-                    'raw_output': output,
-                    'timestamp': current_time
-                }
 
             return JSONResponse(content={
                 'success': True,
