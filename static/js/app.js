@@ -659,6 +659,18 @@ function onTestTypeChange() {
     const testType = $('test-type').value;
     addLogEntry(`测试类型已更改为: ${testType}`, 'info');
 
+    // 清空测试报告输入框
+    const retryResultInput = $('retry-result');
+    if (retryResultInput) {
+        retryResultInput.value = '';
+        addLogEntry('测试类型已更改，清空测试报告', 'info');
+    }
+
+    autoSelectTestSuite(testType);
+}
+
+// 自动选择测试套件的函数
+function autoSelectTestSuite(testType) {
     // 获取所有匹配的测试套件
     // 特殊处理：GSI使用CTS的测试套件，GTS-ROOT使用GTS的测试套件
     let matchingSuites;
@@ -682,7 +694,7 @@ function onTestTypeChange() {
         );
     }
 
-    console.log(`[onTestTypeChange] 测试类型: ${testType}, 找到 ${matchingSuites.length} 个匹配套件`);
+    console.log(`[autoSelectTestSuite] 测试类型: ${testType}, 找到 ${matchingSuites.length} 个匹配套件`);
 
     if (matchingSuites.length > 0) {
         // 按版本号排序，选择版本号最大的
@@ -751,7 +763,7 @@ function onTestTypeChange() {
         $('test-suite').value = latestSuite.tools_path;
         addLogEntry(`自动选择最新测试套件: ${latestSuite.version}`, 'info');
 
-        console.log(`[onTestTypeChange] 已选择套件:`, {
+        console.log(`[autoSelectTestSuite] 已选择套件:`, {
             version: latestSuite.version,
             path: latestSuite.tools_path,
             all_suites: matchingSuites.map(s => ({ version: s.version, path: s.tools_path }))
@@ -1017,6 +1029,12 @@ function renderTestSuitesDropdown() {
 
         selectElement.appendChild(group);
     });
+
+    // 渲染完成后，自动根据当前选择的测试类型来选择合适的测试套件
+    const currentTestType = $('test-type')?.value;
+    if (currentTestType) {
+        autoSelectTestSuite(currentTestType);
+    }
 }
 
 // 用户列表管理
@@ -2663,9 +2681,27 @@ async function browseRemoteFile(mode) {
     const modal = document.getElementById('file-browser-modal');
     modal.classList.add('show');
 
-    // Load initial directory - use GMS-Suite for retry results
+    // Load initial directory - use test suite results directory
     const defaultUser = state.config?.ubuntu_user || 'hcq';
-    const defaultPath = `/home/${defaultUser}/GMS-Suite`;
+    let defaultPath = `/home/${defaultUser}/GMS-Suite`;
+
+    // Get current test suite selection
+    const testSuiteSelect = document.getElementById('test-suite');
+    if (!testSuiteSelect || !testSuiteSelect.value) {
+        addLogEntry(`未选择测试套件，使用默认路径: ${defaultPath}`, 'info');
+        await loadFileDirectory(defaultPath);
+        return;
+    }
+
+    // Convert tools path to results path
+    const toolsPath = testSuiteSelect.value;
+    if (toolsPath.includes('/tools')) {
+        defaultPath = toolsPath.replace('/tools', '/results');
+        addLogEntry(`自动导航到测试套件results目录: ${defaultPath}`, 'info');
+    } else {
+        addLogEntry(`测试套件路径格式异常，使用默认路径: ${defaultPath}`, 'warning');
+    }
+
     await loadFileDirectory(defaultPath);
 }
 
@@ -2714,7 +2750,7 @@ function renderFileList(files) {
 
 function selectFileForSelection(name, type) {
     // Select file/directory (highlight it)
-    state.fileBrowser.selectedFile = name;
+    state.fileBrowser.selectedFile = { name, type };
 
     // Update UI to show selection
     document.querySelectorAll('.file-browser-item').forEach(item => {
@@ -2772,17 +2808,41 @@ function confirmFileSelection() {
         return;
     }
 
-    const fullPath = `${state.fileBrowser.currentPath}/${state.fileBrowser.selectedFile}`;
+    // Get selected item info
+    const selectedItem = state.fileBrowser.selectedFile;
+    const isDirectory = selectedItem.type === 'directory';
 
+    // For retry mode, handle directory and file differently
+    let fullPath;
     if (state.fileBrowser.mode === 'retry') {
-        // For retry result, use the selected path directly
+        if (isDirectory) {
+            // For directory selection in retry mode, use current path (already the directory)
+            fullPath = state.fileBrowser.currentPath;
+        } else {
+            // For file selection, include the filename
+            fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
+        }
+
         if (targetInput) {
             targetInput.value = fullPath;
             addLogEntry(`已选择测试报告: ${fullPath}`, 'info');
         }
+
+        // Clear test module and test case inputs when retry report is selected
+        const testModuleInput = $('test-module');
+        const testCaseInput = $('test-case');
+        if (testModuleInput) {
+            testModuleInput.value = '';
+        }
+        if (testCaseInput) {
+            testCaseInput.value = '';
+        }
+        addLogEntry('已清空测试模块和测试用例', 'info');
+
         closeFileBrowserModal();
     } else if (state.fileBrowser.mode === 'gsi' || state.fileBrowser.mode === 'gsi-system') {
         // For GSI system image, use the selected path directly
+        fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
             addLogEntry(`已选择System镜像: ${fullPath}`, 'info');
@@ -2790,6 +2850,7 @@ function confirmFileSelection() {
         closeFileBrowserModal();
     } else if (state.fileBrowser.mode === 'gsi-script') {
         // For GSI script, use the selected path directly
+        fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
             addLogEntry(`已选择GSI脚本: ${fullPath}`, 'info');
@@ -2797,6 +2858,7 @@ function confirmFileSelection() {
         closeFileBrowserModal();
     } else if (state.fileBrowser.mode === 'gsi-vendor') {
         // For GSI vendor image, use the selected path directly
+        fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
             addLogEntry(`已选择Vendor镜像: ${fullPath}`, 'info');
@@ -2804,12 +2866,15 @@ function confirmFileSelection() {
         closeFileBrowserModal();
     } else if (state.fileBrowser.mode === 'firmware') {
         // For firmware, use the selected path directly
+        fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
             addLogEntry(`已选择固件文件: ${fullPath}`, 'info');
         }
         closeFileBrowserModal();
     } else {
+        // Default behavior
+        fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
             addLogEntry(`已选择文件: ${fullPath}`, 'info');
@@ -2822,11 +2887,33 @@ function confirmFileSelection() {
 function navigateToParent() {
     const currentPath = state.fileBrowser.currentPath;
     if (currentPath === '/' || !currentPath.includes('/')) {
+        showToast('已到达根目录', 'info');
         return;  // Already at root
     }
 
     const parentPath = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/';
     loadFileDirectory(parentPath);
+}
+
+// Navigate to root directory
+function navigateToRoot() {
+    const defaultUser = state.config?.ubuntu_user || 'hcq';
+    const rootPath = `/home/${defaultUser}/GMS-Suite`;
+
+    // Always navigate to GMS-Suite root directory
+    loadFileDirectory(rootPath);
+    addLogEntry(`导航到根目录: ${rootPath}`, 'info');
+}
+
+// Refresh current directory
+function refreshCurrentDirectory() {
+    const currentPath = state.fileBrowser.currentPath;
+    if (currentPath) {
+        loadFileDirectory(currentPath);
+        addLogEntry(`刷新目录: ${currentPath}`, 'info');
+    } else {
+        showToast('没有可刷新的目录', 'warning');
+    }
 }
 
 // ==================== Test Control ====================
