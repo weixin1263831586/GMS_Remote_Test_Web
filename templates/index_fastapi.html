@@ -505,7 +505,7 @@
                     <div class="vnc-button-frame">
                         <button class="btn-xxs" onclick="burnFirmware()">🔥 烧写固件</button>
                         <button class="btn-xxs" onclick="burnGsiImage()">🔥 烧写GSI</button>
-                        <button class="btn-xxs" onclick="burnSerialNumber()">🔥 烧写SN</button>
+                        <button class="btn-xxs" onclick="burnSerialNumber()" disabled>🔥 烧写SN</button>
                         <button class="btn-xxs" onclick="initAndStartVnc()">🚀 启动VNC</button>
                         <button class="btn-xxs" onclick="showDeviceScreen()">📺 设备投屏</button>
                         <button class="btn-xxs" id="adb-forward-btn" onclick="setupAdbPortForward()" disabled>🔌 端口转发</button>
@@ -1116,16 +1116,20 @@
                 <span class="modal-close" onclick="closeFileBrowserModal()">&times;</span>
             </div>
             <div class="modal-body">
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                    <button class="btn-xxs" onclick="navigateToParent()" title="上级目录">⬆️</button>
-                    <div class="file-browser-path" id="file-browser-current-path" style="flex: 1; cursor: pointer;" onclick="navigateToParent()" title="点击返回上级目录"></div>
-                </div>
+                <div class="file-browser-path" id="file-browser-current-path" style="margin-bottom: 10px;"></div>
                 <div class="file-browser-list" id="file-browser-list">
                     <!-- 文件列表将动态生成 -->
                 </div>
-                <div class="modal-buttons">
-                    <button class="btn-xxs" onclick="closeFileBrowserModal()">取消</button>
-                    <button class="btn-xxs btn-primary" onclick="confirmFileSelection()">选择</button>
+                <div class="modal-buttons" style="justify-content: space-between;">
+                    <div style="display: flex; gap: 5px;">
+                        <button class="btn-xxs" onclick="navigateToRoot()" title="根目录">🏠 根目录</button>
+                        <button class="btn-xxs" onclick="navigateToParent()" title="返回上级">🔙 返回上级</button>
+                        <button class="btn-xxs" onclick="refreshCurrentDirectory()" title="刷新">🔄 刷新</button>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="btn-xxs" onclick="closeFileBrowserModal()">取消</button>
+                        <button class="btn-xxs btn-primary" onclick="confirmFileSelection()">选择</button>
+                    </div>
                 </div>
             </div>
         </div>
