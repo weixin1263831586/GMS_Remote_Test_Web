@@ -121,7 +121,6 @@ parse_args() {
                     die "--pgid 缺少ID参数"
                 fi
                 PROCESS_GROUP_ID="$1"
-                log "🏷️ 进程组ID: $PROCESS_GROUP_ID"
                 shift
                 ;;
             -*)
@@ -155,7 +154,7 @@ parse_args() {
             die "retry 必须指定 RESULT_TIMESTAMP"
         fi
         Test_Module=""; Test_Case=""
-        log "🔄 Retry 模式: $RESULT_TIMESTAMP"
+        log "🔄 Retry模式: $RESULT_TIMESTAMP"
     else
         MODE="run"
     fi
@@ -206,8 +205,34 @@ run_tradefed() {
     local command="$tradefed_bin run commandAndExit"
     if [[ "$mode" == "retry" ]]; then
         [[ -n "$RESULT_TIMESTAMP" ]] || die "retry 模式缺少 RESULT_TIMESTAMP"
-        command="$command retry --retry-result-dir $RESULT_TIMESTAMP"
-        log "🔄 Retry 模式, 结果目录: $RESULT_TIMESTAMP"
+
+        # 根据测试类型使用不同的retry参数
+        case "$Test_Type" in
+            vts)
+                # VTS使用 --retry 参数，需要找到对应的session ID
+                local session_id=""
+
+                log "🔍 查找VTS session ID..."
+                local list_output=$("./$SUITE_PREFIX-tradefed" list results 2>/dev/null | grep "$RESULT_TIMESTAMP")
+
+                if [[ -n "$list_output" ]]; then
+                    # 提取session ID（第一列）
+                    session_id=$(echo "$list_output" | awk '{print $1}')
+                    log "✓ 找到session ID: $session_id"
+                else
+                    die "未找到VTS session ID，请检查结果目录: $RESULT_TIMESTAMP"
+                fi
+
+                # 构建VTS retry命令
+                command="$command retry --retry $session_id"
+                log "🔄 VTS Retry模式, session ID: $session_id, 结果目录: $RESULT_TIMESTAMP"
+                ;;
+            *)
+                # CTS/GTS/STS使用 --retry-result-dir 参数
+                command="$command retry --retry-result-dir $RESULT_TIMESTAMP"
+                log "🔄 Retry模式, 结果目录: $RESULT_TIMESTAMP"
+                ;;
+        esac
     else
         command="$command $TEST_COMMAND"
         if [[ -n "$Test_Module" ]]; then
@@ -225,7 +250,7 @@ run_tradefed() {
     # 如果设置了进程组ID，将其导出为环境变量，便于进程识别和管理
     if [[ -n "$PROCESS_GROUP_ID" ]]; then
         export GMS_TEST_PGID="$PROCESS_GROUP_ID"
-        log "🔖 进程组标记已设置: GMS_TEST_PGID=$PROCESS_GROUP_ID"
+        log "🔖 进程组ID: GMS_TEST_PGID=$PROCESS_GROUP_ID"
     fi
 
     # 执行命令并实时输出
