@@ -213,7 +213,7 @@
         }
         .host-select {
             padding: 6px 10px;
-            font-size: 13px;
+            font-size: 15px;
             border: 1px solid var(--border-color);
             border-radius: 4px;
             background: var(--darker-bg);
@@ -247,7 +247,7 @@
             border-radius: 4px;
             background: var(--darker-bg);
             color: var(--text-primary);
-            font-size: 13px;
+            font-size: 15px;
             font-family: monospace;
         }
         .host-input:focus {
@@ -297,10 +297,10 @@
             box-sizing: border-box;
         }
         #usage-examples-modal .modal-content {
-            background: #ffffff !important;
-            border: 1px solid #e0e0e0 !important;
+            background: #1e1e1e !important;
+            border: 1px solid #333 !important;
             border-radius: 8px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
             max-width: 90%;
             max-height: 90%;
             overflow: hidden;
@@ -308,30 +308,31 @@
             flex-direction: column;
         }
         #usage-examples-modal .modal-header {
-            background: #f8f9fa !important;
-            border-bottom: 1px solid #e0e0e0 !important;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            border-bottom: 1px solid #333 !important;
             padding: 16px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
         #usage-examples-modal .modal-title {
-            color: #333 !important;
+            color: #ffffff !important;
             font-size: 16px;
             font-weight: 600;
         }
         #usage-examples-modal .modal-close {
-            color: #666 !important;
+            color: #ffffff !important;
             font-size: 24px;
             cursor: pointer;
             line-height: 1;
         }
         #usage-examples-modal .modal-close:hover {
-            color: #333 !important;
+            color: #cccccc !important;
         }
         #usage-examples-modal .modal-body {
             padding: 20px;
             overflow-y: auto;
+            background: #1e1e1e;
         }
         #usage-examples-modal.modal.show {
             display: flex !important;
@@ -617,7 +618,7 @@
             <div class="section-title">👥 用户管理</div>
 
             <!-- 用户统计卡片 -->
-            <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+            <div style="display: flex; gap: 15px; margin-bottom: 10px;">
                 <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-users-count">-</div>
                     <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">在线用户数</div>
@@ -637,12 +638,12 @@
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">用户标识</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">IP地址</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">状态</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">连接时间</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">最后活跃</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">占用设备</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">用户标识</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">IP地址</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">状态</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">连接时间</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">最后活跃</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary);">占用设备</th>
                         </tr>
                     </thead>
                     <tbody id="users-table-body">
@@ -661,7 +662,7 @@
             <div class="section-title">📱 设备管理</div>
 
             <!-- 设备统计卡片 -->
-            <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+            <div style="display: flex; gap: 15px; margin-bottom: 10px;">
                 <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-devices-count">-</div>
                     <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">总设备数</div>
@@ -681,31 +682,31 @@
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('serial_no')">
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('serial_no')">
                                 设备序列号 <span id="sort-serial_no">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('model')">
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('model')">
                                 设备型号 <span id="sort-model">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('android_version')">
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('android_version')">
                                 Android版本 <span id="sort-android_version">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('battery_level')">
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('battery_level')">
                                 电池电量 <span id="sort-battery_level">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('status')">
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('status')">
                                 状态 <span id="sort-status">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('source_type')">
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('source_type')">
                                 来源类型 <span id="sort-source_type">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('source_host')">
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('source_host')">
                                 来源主机 <span id="sort-source_host">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('locked_by')">
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('locked_by')">
                                 占用用户 <span id="sort-locked_by">↕</span>
                             </th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
                         </tr>
                     </thead>
                     <tbody id="devices-table-body">
@@ -723,7 +724,7 @@
         <div class="container page-content" id="page-reports">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <div class="section-title" style="margin: 0;">📊 报告管理</div>
-                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary); cursor: pointer;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--text-primary); cursor: pointer;">
                     <input type="checkbox" id="filter-user-checkbox" onchange="toggleUserReports()" style="cursor: pointer;">
                     查看本用户报告
                 </label>
@@ -734,14 +735,14 @@
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead style="position: sticky; top: 0; z-index: 10;">
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">客户端</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">类型</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">时间戳</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">通过</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">失败</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">总计</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">通过率</th>
-                            <th style="padding: 12px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">客户端</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">类型</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">时间戳</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">通过</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">失败</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">总计</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">通过率</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
                         </tr>
                     </thead>
                     <tbody id="reports-table-body">
@@ -760,7 +761,7 @@
             <div class="section-title">📈 报告分析</div>
 
             <!-- 拖拽上传区域 -->
-            <div style="margin-bottom: 20px;">
+            <div style="margin-bottom: 10px;">
                 <div id="report-upload-zone" class="report-upload-zone">
                     <input type="file" id="report-file-input" accept=".xml,.zip,.tar,.tar.gz" style="display: none;" />
                     <input type="file" id="report-folder-input" webkitdirectory directory style="display: none;" />
@@ -781,14 +782,14 @@
 
             <!-- 分析结果区域 -->
             <div id="report-analysis-result" style="display: none;">
-                <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 20px;">
+                <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 10px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                         <div style="font-size: 16px; font-weight: 600;">📊 分析结果</div>
                         <button class="btn-xs" onclick="resetReportAnalysis()">清除</button>
                     </div>
 
                     <!-- 总体统计 -->
-                    <div id="report-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px;">
+                    <div id="report-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 10px;">
                         <!-- 动态生成 -->
                     </div>
 
@@ -818,7 +819,7 @@
             <div class="section-title">📡 系统API</div>
 
             <!-- API统计卡片 -->
-            <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+            <div style="display: flex; gap: 15px; margin-bottom: 10px;">
                 <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-apis-count">-</div>
                     <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">API总数</div>
@@ -842,14 +843,14 @@
             </div>
 
             <!-- 搜索栏 -->
-            <div style="margin-bottom: 20px;">
+            <div style="margin-bottom: 10px;">
                 <input type="text" id="api-search-input" placeholder="🔍 搜索API路径或说明..."
                        style="width: 100%; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 14px;"
                        oninput="debounceFilterApiDocs()">
             </div>
 
             <!-- 分类筛选 - 按钮组 -->
-            <div style="margin-bottom: 20px;">
+            <div style="margin-bottom: 10px;">
                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                     <button class="filter-btn active" data-category="all" onclick="filterByCategory('all')">
                         📁 全部分类
@@ -1212,7 +1213,7 @@
                     <label>SSH密码:</label>
                     <input type="password" id="ssh-password" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;" onkeypress="handleSshKeyPress(event)" autocomplete="current-password" />
                 </div>
-                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 8px;">
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
                     💡 密码将被加密保存,下次访问自动使用
                 </div>
                 <div class="modal-buttons" style="margin-top: 20px;">
@@ -1231,13 +1232,13 @@
                 <span class="modal-close" onclick="closeInstallGuide()">&times;</span>
             </div>
             <div class="modal-body">
-                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin-bottom: 15px; border-radius: 4px; color: #856404;">
+                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 4px; color: #856404;">
                     📋 检测到 Windows 主机缺少必要组件，需要安装 usbipd
                 </div>
 
                 <div style="margin-bottom: 15px;">
                     <div style="font-weight: 600; margin-bottom: 10px; color: var(--text-primary);">🔧 手动安装步骤：</div>
-                    <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 12px;">
+                    <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px;">
                         <ol style="margin: 0; padding-left: 20px; color: var(--text-secondary); line-height: 1.8;">
                             <li>在 Windows 电脑上以<strong style="color: var(--danger-color);">【管理员身份】</strong>打开 PowerShell</li>
                             <li>安装命令：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; color: var(--primary-color);">winget install dorssel.usbipd-win --source winget</code></li>
@@ -1251,7 +1252,7 @@
                     <div style="background: var(--border-color); border-radius: 4px; height: 6px; overflow: hidden;">
                         <div id="install-progress-bar" style="background: var(--primary-color); height: 100%; width: 0%; transition: width 0.3s;"></div>
                     </div>
-                    <div id="install-status" style="margin-top: 8px; font-size: 13px; color: var(--text-secondary);">准备安装...</div>
+                    <div id="install-status" style="margin-top: 4px; font-size: 15px; color: var(--text-secondary);">准备安装...</div>
                 </div>
 
                 <div class="modal-buttons">
@@ -1270,14 +1271,14 @@
                 <span class="modal-close" onclick="closeSshdInstallGuide()">&times;</span>
             </div>
             <div class="modal-body">
-                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin-bottom: 15px; border-radius: 4px; color: #856404;">
+                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 4px; color: #856404;">
                     📋 未检测到 SSHD 服务，需要手动安装
                 </div>
 
                 <div style="margin-bottom: 15px;">
                     <div style="font-weight: 600; margin-bottom: 10px; color: var(--text-primary);">🔧 手动安装步骤：</div>
-                    <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 12px; max-height: 400px; overflow-y: auto;">
-                        <pre id="sshd-guide-content" style="white-space: pre-wrap; word-wrap: break-word; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.6; color: var(--text-secondary); margin: 0;"></pre>
+                    <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; max-height: 400px; overflow-y: auto;">
+                        <pre id="sshd-guide-content" style="white-space: pre-wrap; word-wrap: break-word; font-family: 'Consolas', 'Monaco', monospace; font-size: 15px; line-height: 1.6; color: var(--text-secondary); margin: 0;"></pre>
                     </div>
                 </div>
 
@@ -1856,23 +1857,23 @@
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
-                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${user.client_id}
                         </td>
-                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${user.ip}
                         </td>
-                        <td style="padding: 12px; text-align: center;">
+                        <td style="padding: 10px; text-align: center;">
                             <span style="color: ${statusColor}; font-weight: 600; font-size: 11px;">●</span>
                             <span style="margin-left: 6px; font-size: 11px;">${statusText}</span>
                         </td>
-                        <td style="padding: 12px; text-align: center; font-size: 11px;">
+                        <td style="padding: 10px; text-align: center; font-size: 11px;">
                             ${createdAt}
                         </td>
-                        <td style="padding: 12px; text-align: center; font-size: 11px;">
+                        <td style="padding: 10px; text-align: center; font-size: 11px;">
                             ${lastSeen}
                         </td>
-                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${devices}
                         </td>
                     </tr>
@@ -2036,31 +2037,31 @@
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
-                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${device.serial_no || '-'}
                         </td>
-                        <td style="padding: 12px; text-align: center; font-size: 11px;">
+                        <td style="padding: 10px; text-align: center; font-size: 11px;">
                             ${device.model || '-'}
                         </td>
-                        <td style="padding: 12px; text-align: center; font-size: 11px;">
+                        <td style="padding: 10px; text-align: center; font-size: 11px;">
                             ${device.android_version || '-'}
                         </td>
-                        <td style="padding: 12px; text-align: center;">
+                        <td style="padding: 10px; text-align: center;">
                             ${batteryDisplay}
                         </td>
-                        <td style="padding: 12px; text-align: center;">
+                        <td style="padding: 10px; text-align: center;">
                             ${statusBadge}
                         </td>
-                        <td style="padding: 12px; text-align: center;">
+                        <td style="padding: 10px; text-align: center;">
                             ${sourceTypeBadge}
                         </td>
-                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${device.source_host || '-'}
                         </td>
-                        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${device.locked_by || '-'}
                         </td>
-                        <td style="padding: 12px; text-align: center;">
+                        <td style="padding: 10px; text-align: center;">
                             <button class="btn-xxs" onclick="openDeviceShell('${device.serial_no}')" style="background: var(--primary-color); font-size: 14px; padding: 8px 12px;">🐧 adb shell</button>
                         </td>
                     </tr>
@@ -2795,124 +2796,179 @@
 
     <!-- 使用实例弹框 -->
     <div id="usage-examples-modal" class="modal">
-        <div class="modal-content" style="max-width: 900px;">
+        <div class="modal-content" style="max-width: 1000px;">
             <div class="modal-header">
-                <span class="modal-title">📖 测试接口使用实例</span>
+                <span class="modal-title">📖 GMS测试流程指南</span>
                 <span class="modal-close" onclick="closeUsageExamplesModal()">&times;</span>
             </div>
-            <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
-                <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; line-height: 1.6; color: var(--text-primary);">
-                    <h3 style="color: var(--primary-color); margin-bottom: 16px;">启动CTS测试完整流程</h3>
+            <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
+                <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; line-height: 1.6; color: var(--text-primary);">
+                    <h3 style="color: var(--primary-color); margin-bottom: 16px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">🚀 完整测试流程指南</h3>
 
-                    <div style="margin-bottom: 16px;">
-                        <div style="color: #333; font-weight: 600; margin-bottom: 6px; font-size: 13px;">1.获取客户端ID</div>
-                        <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
-                            <code id="cmd-1" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-1')">curl -s http://172.16.14.233:5001/api/users/current | jq '.'</code>
-                            <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                    <!-- Step 1: 下载Skills包 -->
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📦 步骤1: 下载Skills包 (可在编译服务器205/206执行)</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">curl -s -OJ "http://172.16.14.233:5001/api/system/skills"</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
 
-                    <div style="margin-bottom: 16px;">
-                        <div style="color: #333; font-weight: 600; margin-bottom: 6px; font-size: 13px;">2.获取设备列表</div>
-                        <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
-                            <code id="cmd-2" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-2')">curl -s http://172.16.14.233:5001/api/devices/list | jq '.'</code>
-                            <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-2')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-1-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">source ./gms-remote-test/scripts/gms-remote-test.sh</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1-5')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 加载 gms-rt-* 命令，每次新开终端都需要执行</div>
+                    </div>
+
+                    <!-- Step 2: 系统健康检查 -->
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">🏥 步骤2: 测试主机网络连通性检查</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-2" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-ssh-ping</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-2')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
 
-                    <div style="margin-bottom: 20px;">
-                        <div style="color: #333; font-weight: 600; margin-bottom: 8px; font-size: 13px;">3.启动测试（会自动锁定设备）</div>
-                        <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
-                            <code id="cmd-3" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-3')">curl -sX POST http://172.16.14.233:5001/api/test/start \
-  -H "Content-Type: application/json" \
-  -d '{
-    "devices": ["RK3562GMS1"],
-    "test_type": "CTS",
-    "test_module": "CtsKeystoreTestCases",
-    "test_case": "android.keystore.cts.KeyAttestationTest#testRsaAttestation",
-    "test_suite": "/home/hcq/GMS-Suite/android-cts-16_r4/android-cts/tools"
-  }' | jq '.'</code>
-                            <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-3')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-vpn-status</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 检查VPN连接状态（如果需要VPN访问设备）</div>
+                    </div>
+
+                    <!-- Step 3: 设备检查 -->
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📱 步骤3: 设备检查</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-4" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-devices-list</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-4')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有可用的测试设备，确认目标设备在列表中</div>
+                    </div>
+
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-usbip-connect</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 12px; color: #999;">💡 可连接本地 Windows 电脑的ADB设备用于测试</div>
+                    </div>
+
+                    <!-- Step 4: WiFi连接配置 (可选) -->
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📶 步骤4: WiFi连接配置 (可选)</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-devices-wifi-connect RK3572GMS4 SSID password</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-5')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 如果设备需要WiFi连接执行测试时使用</div>
+                    </div>
+
+                    <!-- Step 5: 查看测试套件 -->
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📚 步骤5: 查看测试套件</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-6" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-suites</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-6')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有配置的测试套件</div>
+                    </div>
+
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-7" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-suites-result /home/hcq/GMS-Suite/android-vts-16.1_r2/android-vts/tools</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-7')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 查看指定套件的测试结果历史</div>
+                    </div>
+
+                    <!-- Step 6: 启动测试 -->
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">▶️  步骤6: 启动测试</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-8" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; padding-right: 70px; display: block;">gms-rt-test-start RK3572GMS4 CTS /home/hcq/GMS-Suite/android-cts/tools</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-8')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 启动CTS测试，会自动锁定设备</div>
+                    </div>
+
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-9" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; padding-right: 70px; display: block;">gms-rt-test-start RK3572GMS4 CTS CtsKeystoreTestCases android.keystore.cts.KeyAttestationTest#testRsaAttestation</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-9')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 运行指定模块和用例</div>
+                    </div>
+
+                    <!-- Step 7: 实时查看日志 -->
+                    <div style="margin-bottom: 12px;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📊 步骤7: 实时查看测试日志</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-10" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-logs-stream</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-10')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 实时流式显示测试日志输出（使用Ctrl+C退出）</div>
+                    </div>
+
+
+                    <!-- Step 8: 查看测试结果 -->
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📈 步骤 8: 查看测试结果</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-11" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-reports-list</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-11')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有测试报告，查看最新测试结果</div>
+                    </div>
+
+                    <!-- Step 9: 清理测试环境（可选） -->
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">🧹 步骤 9: 清理测试环境 <span style="color: #999; font-size: 11px;">(可选)</span></div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-13" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-clean</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-13')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 清理测试日志和临时文件，释放磁盘空间</div>
+                    </div>
+
+                    <h3 style="color: var(--primary-color); margin-bottom: 16px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">🔄 retry测试流程指南</h3>
+
+                    <!-- VTS Retry Workflow -->
+                    <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 600; margin-bottom: 4px; font-size: 15px;">步骤1: 查看测试结果</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-vts-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-suites-result /home/hcq/GMS-Suite/android-vts-16.1_r2/android-vts/tools</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-1')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
 
-                    <div style="margin-bottom: 16px;">
-                        <div style="color: #333; font-weight: 600; margin-bottom: 6px; font-size: 13px;">4.检查测试状态</div>
-                        <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
-                            <code id="cmd-4" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-4')">curl -s http://172.16.14.233:5001/api/test/status | jq '.'</code>
-                            <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-4')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                    <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 600; margin-bottom: 4px; font-size: 15px;">步骤2: 启动VTS重试</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-vts-2" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-start --retry 2026.04.17_14.32.32 RK3572GMS4 VTS</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-2')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
 
-                    <div style="margin-bottom: 16px;">
-                        <div style="color: #333; font-weight: 600; margin-bottom: 6px; font-size: 13px;">5.停止测试（会自动解锁设备）</div>
-                        <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; position: relative;">
-                            <code id="cmd-5" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; cursor: pointer; padding-right: 70px; display: block;" onclick="copyCommand('cmd-5')">curl -sX POST http://172.16.14.233:5001/api/test/stop | jq '.'</code>
-                            <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-5')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                    <div style="margin-bottom: 10px;">
+                        <div style="color: var(--primary-color); font-weight: 600; margin-bottom: 4px; font-size: 15px;">步骤3: 查看日志</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-vts-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-logs-stream</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
 
-                    <h4 style="color: var(--primary-color); margin: 20px 0 12px 0;">完整脚本示例</h4>
-                    <div style="background: #1e1e1e; padding: 12px; border-radius: 6px; margin-bottom: 16px; position: relative;">
-                        <code id="cmd-full-script" style="color: #4ec9b0; word-break: break-all; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; padding-right: 70px; display: block;">#!/bin/bash
-# 自动化测试脚本示例
-
-BASE_URL="http://172.16.14.233:5001"
-DEVICE_ID="RK3562GMS1"
-TEST_TYPE="CTS"
-TEST_MODULE="CtsKeystoreTestCases"
-TEST_CASE="android.keystore.cts.KeyAttestationTest#testRsaAttestation"
-TEST_SUITE="/home/hcq/GMS-Suite/android-cts-16_r4/android-cts/tools"
-
-# 步骤1: 获取客户端信息
-echo "步骤1: 获取客户端信息..."
-curl -s "$BASE_URL/api/users/current" | jq "."
-
-# 步骤2: 检查设备状态
-echo "步骤2: 检查设备状态..."
-curl -s "$BASE_URL/api/devices/list" | jq "."
-
-# 步骤3: 启动测试（自动锁定设备）
-echo "步骤3: 启动测试（会自动锁定设备）..."
-START_RESULT=$(curl -s -X POST "$BASE_URL/api/test/start" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"devices\": [\"$DEVICE_ID\"],
-    \"test_type\": \"$TEST_TYPE\",
-    \"test_module\": \"$TEST_MODULE\",
-    \"test_case\": \"$TEST_CASE\",
-    \"test_suite\": \"$TEST_SUITE\"
-  }")
-
-echo "$START_RESULT" | jq "."
-
-# 检查是否启动成功
-if echo "$START_RESULT" | jq -e '.success' > /dev/null; then
-    echo "✅ 测试已启动"
-
-    # 步骤4: 轮询测试状态
-    echo "步骤4: 等待测试完成..."
-    while true; do
-        STATUS=$(curl -s "$BASE_URL/api/test/status")
-        RUNNING=$(echo "$STATUS" | jq -r '.running')
-
-        if [ "$RUNNING" = "false" ]; then
-            echo "✅ 测试已完成"
-            break
-        fi
-
-        echo "⏳ 测试运行中... $(date '+%H:%M:%S')"
-        sleep 10
-    done
-
-    # 步骤5: 查看结果
-    echo "步骤5: 查看测试结果..."
-    curl -s "$BASE_URL/api/reports/list" | jq ".reports[0]"
-else
-    echo "❌ 测试启动失败"
-    exit 1
-fi</code>
-                        <span style="position: absolute; right: 8px; top: 8px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-full-script')" title="点击复制" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                    <h3 style="color: var(--primary-color); margin-bottom: 16px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">💡 常用命令快速参考</h3>
+                    <div style="margin-top: 24px; padding: 12px; background: rgba(78, 205, 176, 0.1); border-left: 4px solid var(--primary-color); border-radius: 4px;">
+                        <div style="font-size: 11px; color: var(--text-secondary);">
+                            <div style="margin-bottom: 4px;">• <code style="color: #4ec9b0;">gms-rt-devices-info</code> - 获取详细设备信息</div>
+                            <div style="margin-bottom: 4px;">• <code style="color: #4ec9b0;">gms-rt-devices-user-locked</code> - 检查设备锁状态</div>
+                            <div style="margin-bottom: 4px;">• <code style="color: #4ec9b0;">gms-rt-reports-list</code> - 列出所有测试报告</div>
+                            <div style="margin-bottom: 4px;">• <code style="color: #4ec9b0;">gms-rt-files-list</code> - 列出远程文件</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2987,4 +3043,34 @@ fi</code>
     </div>
 </div> <!-- End of main-container -->
 </body>
-</html>
+                    <!-- Step 8: 查看测试结果 -->
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📈 步骤 8: 查看测试结果</div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-11" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-reports-list</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-11')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有测试报告，查看最新测试结果</div>
+                    </div>
+
+                    <!-- Step 9: 解锁设备（测试完成后） -->
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">🔓 步骤 9: 解锁设备 <span style="color: #ffc107; font-size: 11px;">(测试完成后)</span></div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-12" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-devices-bootloader-unlock RK3572GMS4</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-12')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 测试完成后解锁设备 Bootloader，恢复设备到初始状态</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #4ec9b0;">✅ 良好习惯：测试完成后及时解锁设备</div>
+                    </div>
+
+                    <!-- Step 10: 清理测试环境（可选） -->
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">🧹 步骤 10: 清理测试环境 <span style="color: #999; font-size: 11px;">(可选)</span></div>
+                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-13" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-clean</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-13')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        </div>
+                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 清理测试日志和临时文件，释放磁盘空间</div>
+                    </div>
+

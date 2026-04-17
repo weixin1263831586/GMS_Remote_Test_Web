@@ -2973,9 +2973,6 @@ def get_usbip_status():
     return jsonify({'connected': connected})
 
 
-# ==================== Advanced Test Features ====================
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 # ==================== Test Reports ====================
 @app.route('/api/reports/list')
 def list_test_reports():
