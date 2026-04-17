@@ -99,6 +99,16 @@ SPECIAL_TEST_TYPES = {
 # 预计算反向映射，避免每次调用函数时重复创建
 TRADEFED_BINARY_REVERSE_MAP = {v: k for k, v in TRADEFED_BINARY_MAP.items()}
 
+# 预编译正则表达式，避免重复编译
+import re
+SUITE_TYPE_PATTERN = re.compile(r'/android-([a-z]+)')
+
+# 预计算tradefed文件列表，避免在循环中重复计算
+TRADEFED_BINARY_LIST = list(set(TRADEFED_BINARY_MAP.values()))
+
+# 测试类型检测优先级（VTS优先于CTS，避免误匹配）
+TEST_TYPE_DETECTION_PRIORITY = ['vts', 'gts', 'sts', 'cts']
+
 def get_test_type_from_binary(binary_name: str) -> str:
     """从二进制文件名获取测试类型"""
     if result := SPECIAL_TEST_TYPES.get(binary_name):
@@ -106,6 +116,48 @@ def get_test_type_from_binary(binary_name: str) -> str:
     if result := TRADEFED_BINARY_REVERSE_MAP.get(binary_name):
         return result
     return binary_name.replace('-tradefed', '')
+
+def detect_test_type_from_suite_path(suite_path: str) -> Optional[str]:
+    """从测试套件路径检测测试类型
+
+    Args:
+        suite_path: 测试套件路径，如 /path/to/android-gts/tools
+
+    Returns:
+        检测到的测试类型（小写），如 'gts'，如果无法检测则返回 None
+    """
+    if not suite_path:
+        return None
+
+    suite_match = SUITE_TYPE_PATTERN.search(suite_path.lower())
+    if suite_match:
+        detected_type = suite_match.group(1)
+        # 验证是否为已知的测试类型
+        if detected_type in TRADEFED_BINARY_MAP or detected_type in SPECIAL_TEST_TYPES:
+            return detected_type
+    return None
+
+def detect_test_type_from_dir_path(dir_path: str) -> Optional[str]:
+    """从目录路径检测测试类型（用于重试目录）
+
+    Args:
+        dir_path: 目录路径，如 /path/to/20240101_120000/android-vts-results
+
+    Returns:
+        检测到的测试类型（小写），如 'vts'，如果无法检测则返回 None
+    """
+    if not dir_path:
+        return None
+
+    dir_lower = dir_path.lower()
+    # 按优先级检测（VTS优先于CTS，避免误匹配）
+    for test_type in TEST_TYPE_DETECTION_PRIORITY:
+        if test_type in dir_lower:
+            # 特殊处理：CTS不能匹配到GTS
+            if test_type == 'cts' and 'gts' in dir_lower:
+                continue
+            return test_type
+    return None
 
 # ==================== Lifespan 事件处理 ====================
 
@@ -957,7 +1009,7 @@ class DeviceLockRequest(BaseModel):
 
 class TestStartRequest(BaseModel):
     """测试启动请求"""
-    test_type: str = "cts"
+    test_type: str = ""  # 改为空字符串，后面会自动检测
     test_module: str = ""
     test_case: str = ""
     retry_dir: str = ""
@@ -2335,20 +2387,8 @@ async def run_test_background(
 
         # 如果没有指定test_type，尝试从test_suite路径中自动检测
         if not test_type_lower and test_suite_tools:
-            import re
-            # 从路径中提取测试类型，如 android-gts -> gts
-            suite_match = re.search(r'/android-([a-z]+)', test_suite_tools.lower())
-            if suite_match:
-                detected_type = suite_match.group(1)
-                # 映射一些特殊情况
-                type_mapping = {
-                    'cts': 'cts',
-                    'gts': 'gts',
-                    'sts': 'sts',
-                    'vts': 'vts',
-                    'apts': 'apts'
-                }
-                test_type_lower = type_mapping.get(detected_type, detected_type)
+            test_type_lower = detect_test_type_from_suite_path(test_suite_tools)
+            if test_type_lower:
                 await log_callback(f"🔍 从套件路径检测到测试类型: {test_type_lower}", 'info')
 
         # 修复：只有当test_params中没有local_server时才从config读取
@@ -2375,7 +2415,17 @@ async def run_test_background(
         if retry_dir:
             timestamp = os.path.basename(retry_dir.strip().rstrip('/'))
 
-            # 在重试模式下，如果没有提供test_type，尝试从数据库中查找原始报告的测试类型
+            # 在重试模式下，如果没有提供test_type，按优先级检测：
+            # 1. 从test_suite路径检测（最准确）
+            # 2. 从数据库查找原始报告的测试类型
+            # 3. 从retry_dir目录名检测
+            if not test_type_lower and test_suite_tools:
+                await log_callback(f"🔍 从test_suite路径检测测试类型...", 'info')
+                test_type_lower = detect_test_type_from_suite_path(test_suite_tools)
+                if test_type_lower:
+                    await log_callback(f"✓ 从test_suite检测到测试类型: {test_type_lower}", 'info')
+
+            # 如果仍然没有test_type，尝试从数据库查找
             if not test_type_lower:
                 await log_callback(f"🔍 从数据库查找报告 {timestamp} 的测试类型...", 'info')
                 try:
@@ -2385,20 +2435,27 @@ async def run_test_background(
                         test_type_lower = original_type
                         await log_callback(f"✓ 从报告检测到测试类型: {test_type_lower}", 'info')
                     else:
-                        await log_callback(f"⚠️ 数据库中未找到报告 {timestamp}", 'warning')
+                        await log_callback(f"⚠️ 数据库中未找到报告 {timestamp}，尝试从目录名检测", 'warning')
                 except Exception as e:
-                    await log_callback(f"⚠️ 从数据库读取测试类型失败: {e}", 'warning')
+                    await log_callback(f"⚠️ 从数据库读取测试类型失败: {e}，尝试从目录名检测", 'warning')
 
-            # 如果仍然没有test_type，使用默认值
+            # 如果仍然没有test_type，尝试从retry_dir目录名检测
+            if not test_type_lower and retry_dir:
+                await log_callback(f"🔍 从目录名检测测试类型...", 'info')
+                test_type_lower = detect_test_type_from_dir_path(retry_dir)
+                if test_type_lower:
+                    await log_callback(f"✓ 从路径检测到{test_type_lower.upper()}测试", 'info')
+
+            # 如果仍然没有test_type，置空（让脚本自动检测或报错）
             if not test_type_lower:
-                test_type_lower = 'cts'
-                await log_callback(f"⚠️ 未检测到测试类型，使用默认值: cts", 'warning')
+                test_type_lower = ''
+                await log_callback(f"⚠️ 未检测到测试类型，将由脚本自动检测", 'warning')
 
             cmd_parts.extend([test_type_lower, "retry", timestamp])
-            await log_callback(f"🔄 Retry模式: test_type={test_type_lower}, timestamp={timestamp}", 'info')
+            await log_callback(f"🔄 Retry模式: test_type={test_type_lower or '(自动检测)'}, timestamp={timestamp}", 'info')
 
-            # 在重试模式下，如果没有提供test_suite，自动查找对应的测试套件
-            if not test_suite_tools:
+            # 在重试模式下，如果没有提供test_suite，且已知test_type，自动查找对应的测试套件
+            if not test_suite_tools and test_type_lower:
                 await log_callback(f"🔍 自动查找 {test_type_lower.upper()} 测试套件...", 'info')
                 try:
                     # 在 suites_path 中查找对应的测试套件
@@ -2406,21 +2463,37 @@ async def run_test_background(
                     # 查找匹配的套件目录，如 android-gts-*
                     suite_pattern = os.path.join(suites_path, f'android-{test_type_lower}-*')
                     # 只获取目录，排除文件（如zip文件）
-                    suite_dirs = sorted(
-                        [d for d in glob.glob(suite_pattern) if os.path.isdir(d)],
-                        reverse=True
-                    )  # 按名称倒序排列，获取最新的
+                    suite_dirs = [d for d in glob.glob(suite_pattern) if os.path.isdir(d)]
 
                     if suite_dirs:
-                        # 使用找到的第一个（最新的）套件
-                        suite_dir = suite_dirs[0]
-                        # 尝试找到 tools 目录
-                        tools_dir = os.path.join(suite_dir, f'android-{test_type_lower}', 'tools')
-                        if os.path.isdir(tools_dir):
-                            test_suite_tools = tools_dir
-                            await log_callback(f"✓ 找到测试套件: {test_suite_tools}", 'info')
-                        else:
-                            await log_callback(f"⚠️ 未找到 tools 目录: {tools_dir}", 'warning')
+                        # 使用max()代替sort()获取最新的套件（O(n) vs O(n log n)）
+                        suite_dir = max(suite_dirs, key=os.path.getmtime)
+                        await log_callback(f"✓ 找到测试套件目录: {suite_dir}", 'info')
+                        # 尝试找到 tools 目录，处理不同的目录结构
+                        # 可能的结构: android-vts-*/android-vts/tools 或 android-vts-*/tools
+                        possible_tools_dirs = [
+                            os.path.join(suite_dir, f'android-{test_type_lower}', 'tools'),
+                            os.path.join(suite_dir, 'tools'),
+                            suite_dir  # 有时tools目录直接在套件目录下
+                        ]
+
+                        for tools_dir in possible_tools_dirs:
+                            if os.path.isdir(tools_dir):
+                                # 快速检查：先检查最常见的tradefed文件
+                                tradefed_path = os.path.join(tools_dir, f'{test_type_lower}-tradefed')
+                                if os.path.exists(tradefed_path):
+                                    test_suite_tools = tools_dir
+                                    await log_callback(f"✓ 找到tools目录: {test_suite_tools}", 'info')
+                                    break
+                                # 回退：检查所有tradefed可执行文件
+                                has_tradefed = any(os.path.exists(os.path.join(tools_dir, tf)) for tf in TRADEFED_BINARY_LIST)
+                                if has_tradefed or os.path.exists(os.path.join(tools_dir, 'test.xml')):
+                                    test_suite_tools = tools_dir
+                                    await log_callback(f"✓ 找到tools目录: {test_suite_tools}", 'info')
+                                    break
+
+                        if not test_suite_tools:
+                            await log_callback(f"⚠️ 未找到有效的tools目录，已尝试: {possible_tools_dirs}", 'warning')
                     else:
                         await log_callback(f"⚠️ 未找到 {test_type_lower.upper()} 测试套件", 'warning')
                 except Exception as e:
@@ -7400,8 +7473,11 @@ def find_tradefed_binary(ssh, suite_path: str) -> Optional[str]:
 
 def parse_tradefed_list_results(output: str) -> List[Dict[str, Any]]:
     """解析 tradefed list results 命令输出，支持 STS 和 VTS/CTS 两种格式"""
+    # 清理 ANSI 转义序列（使用现有函数）
+    cleaned_output = strip_ansi_codes(output)
+
     results = []
-    lines = output.strip().split('\n')
+    lines = cleaned_output.strip().split('\n')
     header_found = False
 
     for line in lines:
@@ -7480,6 +7556,8 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
         output = ""
         start_time = time.time()
         last_output_time = start_time
+        last_output_length = 0
+        stable_count = 0  # 输出长度稳定的计数器
 
         while time.time() - start_time < timeout:
             try:
@@ -7487,14 +7565,25 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
                 if chunk:
                     output += chunk
                     last_output_time = time.time()
+
                     # 检查是否出现任何提示符模式
                     for pattern in prompt_patterns:
                         current_line = output.split('\n')[-1:][0] if output.split('\n') else ''
                         if re.search(pattern, current_line):
                             return output
+
+                    # 检查输出是否稳定（连续3次长度没有变化）
+                    current_length = len(output)
+                    if current_length == last_output_length:
+                        stable_count += 1
+                        if stable_count >= 3:  # 输出稳定了0.15秒（3 × 0.05）
+                            return output
+                    else:
+                        stable_count = 0
+                        last_output_length = current_length
             except:
-                # 如果超过 1 秒没有新输出，认为命令已完成
-                if time.time() - last_output_time > 1.0:
+                # 如果超过 2 秒没有新输出，认为命令已完成
+                if time.time() - last_output_time > 2.0:
                     return output
             time.sleep(poll_interval)
 
@@ -7518,26 +7607,33 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
         shell.send(f"cd {suite_path}\n")
         wait_for_prompt(shell, ['\$ ', '\# ', '> '], timeout=2, poll_interval=0.05)
 
-        shell.send(f"{tradefed_bin}\n")
+        # 设置 TERM 为 dumb 以禁用 readline 功能，避免 ANSI 转义序列
+        shell.send(f"TERM=dumb {tradefed_bin}\n")
         # 等待 tradefed 启动（查找 tradefed 提示符）
         tradefed_output = wait_for_prompt(shell, ['> ', 'tf> ', r'\(tf\)'], timeout=6, poll_interval=0.1)
 
         shell.send(f"{command}\n")
         # 等待命令执行完成（查找命令提示符或结果表格）
-        command_output = wait_for_prompt(shell, ['> ', 'tf> ', r'\(tf\)', 'Session ', r'^[ ]*[0-9]'],
-                                        timeout=15, poll_interval=0.1)
+        # 对于 list results 命令，需要等待更长时间以确保所有结果都输出完毕
+        command_output = wait_for_prompt(shell, ['> ', 'tf> ', r'\(tf\)', 'All done'],
+                                        timeout=20, poll_interval=0.1)
+
+        # 额外等待一小段时间，确保所有输出都被接收
+        time.sleep(0.5)
 
         shell.send("exit\n")
-        wait_for_prompt(shell, ['\$ ', '\# '], timeout=1, poll_interval=0.05)
+        wait_for_prompt(shell, ['\$ ', '\# '], timeout=2, poll_interval=0.05)
 
-        # 读取所有剩余输出
+        # 读取所有剩余输出（使用更大的缓冲区和更多尝试）
         output = tradefed_output + command_output
-        while True:
+        max_retries = 10  # 增加重试次数
+        for _ in range(max_retries):
             try:
-                chunk = shell.recv(4096).decode('utf-8', errors='ignore')
+                chunk = shell.recv(16384).decode('utf-8', errors='ignore')  # 增大缓冲区
                 if not chunk:
                     break
                 output += chunk
+                time.sleep(0.1)  # 短暂等待，确保所有数据都被接收
             except:
                 break
 

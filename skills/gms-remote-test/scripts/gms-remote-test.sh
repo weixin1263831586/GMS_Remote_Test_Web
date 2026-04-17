@@ -429,8 +429,18 @@ gms-rt-test-start() {
 
     if [ -z "$first_param" ]; then
         error "Usage:"
-        error "  Mode 1 (Direct test): gms-rt-test-start <DEVICE> [TYPE] [MODULE] [CASE] [SUITE]"
-        error "  Mode 2 (Retry report): gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE|SUITE]"
+        error "  Mode 1 (Direct test): gms-rt-test-start <DEVICE> [TYPE] [MODULE/SUITE] [CASE/SUITE] [SUITE]"
+        error "  Mode 2 (Retry report): gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE] [SUITE]"
+        error ""
+        error "智能参数识别："
+        error "  - 包含 '/' 的参数自动识别为路径（test_suite）"
+        error "  - 其他参数按位置识别为 test_module, test_case"
+        error ""
+        error "示例:"
+        error "  gms-rt-test-start RK3572GMS4 CTS /path/to/android-cts/tools"
+        error "  gms-rt-test-start RK3572GMS4 CTS TestModuleName"
+        error "  gms-rt-test-start RK3572GMS4 CTS TestModuleName TestCaseName"
+        error "  gms-rt-test-start RK3572GMS4 CTS TestModuleName TestCaseName /path/to/suite"
         error ""
         error "Supported Test Types:"
         error "  CTS      - Compatibility Test Suite"
@@ -454,11 +464,13 @@ gms-rt-test-start() {
         local report_timestamp="$2"
         local device_serial="${3:-}"
         local third_param="${4:-}"
+        local fourth_param="${5:-}"  # 添加第四个参数支持
 
         if [ -z "$report_timestamp" ]; then
             error "Report timestamp required for retry mode"
-            error "Usage: gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE|SUITE]"
+            error "Usage: gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE] [SUITE]"
             error "Supported types: CTS, GSI, GTS, GTS-ROOT, STS, VTS, APTS"
+            error "Example: gms-rt-test-start --retry 2026.03.25_09.49.10 RK3572GMS4 CTS /path/to/android-cts/tools"
             return 1
         fi
 
@@ -471,17 +483,27 @@ gms-rt-test-start() {
             echo "  Device: $device_serial"
         fi
 
-        # 智能检测第三个参数：如果是路径则作为test_suite，否则作为test_type
+        # 处理第三个参数（test_type）和第四个参数（test_suite，可选）
         if [ -n "$third_param" ]; then
             if [[ "$third_param" == */* ]]; then
-                # 是路径，作为 test_suite
+                # 第三个参数是路径，作为 test_suite
                 data=$(echo "$data" | jq ". + {\"test_suite\":\"$third_param\"}")
                 echo "  Suite: $third_param"
                 echo "  ℹ️  Test type will be auto-detected from suite path"
             else
-                # 不是路径，作为 test_type
+                # 第三个参数不是路径，作为 test_type
                 data=$(echo "$data" | jq ". + {\"test_type\":\"$third_param\"}")
                 echo "  Type: $third_param"
+
+                # 检查第四个参数是否为test_suite路径
+                if [ -n "$fourth_param" ]; then
+                    if [[ "$fourth_param" == */* ]]; then
+                        data=$(echo "$data" | jq ". + {\"test_suite\":\"$fourth_param\"}")
+                        echo "  Suite: $fourth_param"
+                    else
+                        echo "  ⚠️  Warning: Fourth parameter ignored (expected suite path, got: $fourth_param)"
+                    fi
+                fi
             fi
         else
             echo "  ⚠️  Warning: Neither test type nor suite specified"
@@ -501,22 +523,77 @@ gms-rt-test-start() {
         return
     fi
 
-    # 模式1: 直接测试模式
+    # 模式1: 直接测试模式（支持智能参数识别）
     local device_serial="$1"
     local test_type="${2:-}"
-    local test_module="${3:-}"
-    local test_case="${4:-}"
-    local test_suite="${5:-}"
+    local param3="${3:-}"
+    local param4="${4:-}"
+    local param5="${5:-}"
+
+    # 初始化变量
+    local test_module=""
+    local test_case=""
+    local test_suite=""
 
     echo "🚀 Starting test..."
     echo "  Device: $device_serial"
     echo "  Type: $test_type"
-    echo "  Module: $test_module"
 
+    # 智能识别参数3：可能是test_module或test_suite路径
+    if [ -n "$param3" ]; then
+        if [[ "$param3" == */* ]]; then
+            # 是路径，作为 test_suite
+            test_suite="$param3"
+            echo "  Suite: $test_suite"
+        else
+            # 不是路径，作为 test_module
+            test_module="$param3"
+            echo "  Module: $test_module"
+        fi
+    fi
+
+    # 智能识别参数4：在已有test_suite时忽略，否则可能是test_case或test_suite路径
+    if [ -n "$param4" ]; then
+        if [ -n "$test_suite" ]; then
+            # 已经有test_suite，param4是test_case
+            test_case="$param4"
+            echo "  Case: $test_case"
+        else
+            # 还没有test_suite，检查param4是否是路径
+            if [[ "$param4" == */* ]]; then
+                # 是路径，作为 test_suite
+                test_suite="$param4"
+                echo "  Suite: $test_suite"
+            else
+                # 不是路径，作为 test_case
+                test_case="$param4"
+                echo "  Case: $test_case"
+            fi
+        fi
+    fi
+
+    # 智能识别参数5：只在没有test_suite时检查是否为路径
+    if [ -n "$param5" ] && [ -z "$test_suite" ]; then
+        if [[ "$param5" == */* ]]; then
+            # 是路径，作为 test_suite
+            test_suite="$param5"
+            echo "  Suite: $test_suite"
+        else
+            # 不是路径但有test_module和test_case时的额外参数，忽略
+            if [ -n "$test_case" ]; then
+                echo "  ⚠️  Warning: Fifth parameter ignored (unexpected: $param5)"
+            else
+                # 没有test_case，将param5作为test_case
+                test_case="$param5"
+                echo "  Case: $test_case"
+            fi
+        fi
+    fi
+
+    # 构建JSON数据
     local data="{\"devices\":[\"$device_serial\"],\"test_type\":\"$test_type\",\"test_module\":\"$test_module\",\"test_suite\":\"$test_suite\"}"
     if [ -n "$test_case" ]; then
         data=$(echo "$data" | jq ". + {\"test_case\":\"$test_case\"}")
-        echo "  Case: $test_case"
     fi
 
     local response=$(api_call "/test/start" "POST" "$data")
