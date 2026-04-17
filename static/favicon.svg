@@ -1,1 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y="70" font-size="70" text-anchor="middle">🔧</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <!-- Clean red gradient -->
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff4444"/>
+      <stop offset="100%" style="stop-color:#cc0000"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Letter G - font size 70 -->
+  <text x="32" y="58"
+        font-family="Arial, Helvetica, sans-serif"
+        font-size="70"
+        font-weight="bold"
+        text-anchor="middle"
+        fill="url(#redGrad)">G</text>
+</svg>
