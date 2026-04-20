@@ -2154,6 +2154,172 @@ async def opengrok_search(request: Request):
 
 # ==================== 测试管理 ====================
 
+# ==================== 测试管理 ====================
+
+class TestParseArgsRequest(BaseModel):
+    """测试参数解析请求 - 用于智能识别命令行参数"""
+    params: List[str] = Field(default_factory=list, description="命令行参数列表")
+
+class TestParseArgsResponse(BaseModel):
+    """测试参数解析响应"""
+    success: bool = True
+    device: str = ""
+    test_type: str = ""
+    test_module: str = ""
+    test_case: str = ""
+    test_suite: str = ""
+    retry_dir: str = ""
+    warnings: List[str] = []
+    help_text: str = ""
+
+@app.post("/api/test/parse-args")
+async def parse_test_args(
+    request: Request,
+    h: Optional[str] = Query(None),
+    help: bool = Query(False),
+    req: TestParseArgsRequest = Body(None)
+):
+    """解析测试启动参数 - 智能识别命令行参数
+
+    支持两种模式：
+    1. 直接测试模式：gms-rt-test-start <DEVICE> [TYPE] [MODULE/SUITE] [CASE/SUITE] [SUITE]
+    2. 重试模式：gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE] [SUITE]
+
+    智能识别规则：
+    - 包含 '/' 的参数自动识别为路径（test_suite）
+    - 其他参数按位置识别为 device, test_type, test_module, test_case
+    """
+    # 检查是否需要显示帮助
+    if help or (req is None):
+        help_text = """📖 API: /api/test/parse-args
+
+🔹 功能：智能解析测试启动命令行参数
+
+🔹 直接测试模式参数格式:
+  params: ["DEVICE", "TYPE", "MODULE/SUITE", "CASE/SUITE", "SUITE"]
+
+  示例:
+  - ["RK3572GMS4", "CTS", "/path/to/android-cts/tools"]
+  - ["RK3572GMS4", "CTS", "TestModuleName"]
+  - ["RK3572GMS4", "CTS", "TestModuleName", "TestCaseName"]
+  - ["RK3572GMS4", "CTS", "TestModuleName", "TestCaseName", "/path/to/suite"]
+
+🔹 重试模式参数格式:
+  params: ["--retry", "REPORT_TIMESTAMP", "DEVICE", "TYPE", "SUITE"]
+
+  示例:
+  - ["--retry", "2026.04.11_17.27.04.421_2920", "RF8TC2W4JNH", "GTS"]
+  - ["--retry", "2026.04.11_17.27.04.421_2920", "RF8TC2W4JNH", "/path/to/suite"]
+
+🔹 Supported Test Types:
+  CTS, GTS, GTS-ROOT, STS, VTS, APTS, GSI
+"""
+        return PlainTextResponse(
+            content=help_text,
+            headers={
+                "Content-Type": "text/plain; charset=utf-8",
+                "Cache-Control": "public, max-age=300"
+            }
+        )
+
+    if req is None or not req.params:
+        return JSONResponse(
+            content={'success': False, 'error': 'Missing params'},
+            status_code=400
+        )
+
+    params = req.params
+    first_param = params[0] if params else ""
+
+    result = {
+        "success": True,
+        "device": "",
+        "test_type": "",
+        "test_module": "",
+        "test_case": "",
+        "test_suite": "",
+        "retry_dir": "",
+        "warnings": []
+    }
+
+    # 重试模式
+    if first_param == "--retry":
+        if len(params) < 2:
+            return JSONResponse(
+                content={
+                    'success': False,
+                    'error': 'Report timestamp required for retry mode'
+                },
+                status_code=400
+            )
+
+        result["retry_dir"] = params[1]
+        if len(params) > 2:
+            result["device"] = params[2]
+
+        # 处理第三个和第四个参数
+        if len(params) > 3:
+            third_param = params[3]
+            if "/" in third_param:
+                result["test_suite"] = third_param
+                result["warnings"].append("Test type will be auto-detected from suite path")
+            else:
+                result["test_type"] = third_param
+
+                # 检查第四个参数
+                if len(params) > 4:
+                    fourth_param = params[4]
+                    if "/" in fourth_param:
+                        result["test_suite"] = fourth_param
+                    else:
+                        result["warnings"].append(f"Fourth parameter ignored (expected suite path, got: {fourth_param})")
+        else:
+            result["warnings"].append("Neither test type nor suite specified")
+
+        return TestParseArgsResponse(**result)
+
+    # 直接测试模式
+    result["device"] = params[0] if len(params) > 0 else ""
+    result["test_type"] = params[1] if len(params) > 1 else ""
+
+    # 智能识别参数 3, 4, 5
+    param3 = params[2] if len(params) > 2 else ""
+    param4 = params[3] if len(params) > 3 else ""
+    param5 = params[4] if len(params) > 4 else ""
+
+    # 参数 3: 可能是 test_module 或 test_suite 路径
+    if param3:
+        if "/" in param3:
+            result["test_suite"] = param3
+        else:
+            result["test_module"] = param3
+
+    # 参数 4: 根据已有参数判断
+    if param4:
+        if result["test_suite"]:
+            # 已有 test_suite，param4 是 test_case
+            result["test_case"] = param4
+        else:
+            # 还没有 test_suite，检查是否是路径
+            if "/" in param4:
+                result["test_suite"] = param4
+            else:
+                result["test_case"] = param4
+
+    # 参数 5: 只在没有 test_suite 时检查
+    if param5 and not result["test_suite"]:
+        if "/" in param5:
+            result["test_suite"] = param5
+        else:
+            if result["test_case"]:
+                result["warnings"].append(f"Fifth parameter ignored (unexpected: {param5})")
+            else:
+                result["test_case"] = param5
+
+    return TestParseArgsResponse(**result)
+
+
+
 @app.post("/api/test/start")
 async def start_test(
     request: Request,
@@ -3302,61 +3468,172 @@ async def list_reports(request: Request, user_only: bool = False):
         logger.error(f"获取报告列表失败: {e}")
         return JSONResponse(content={'reports': []})
 
-@app.get("/api/reports/files/{report_timestamp}")
-async def list_report_files(report_timestamp: str):
-    """从数据库获取报告目录并列出文件（与Flask版本一致）"""
+@app.get("/api/reports/download")
+async def download_report(
+    request: Request,
+    report_timestamp: str = Query(None, description="报告时间戳"),
+    download: bool = Query(False, description="是否下载ZIP文件（默认返回JSON列表）"),
+    path: str = Query(None, description="文件路径（查看单个文件内容）")
+):
+    """
+    统一的报告接口
+
+    支持三种模式：
+    1. 获取报告文件列表（JSON）：?report_timestamp=xxx
+    2. 下载报告ZIP文件：?report_timestamp=xxx&download=true
+    3. 查看单个文件内容（JSON）：?path=/xxx/xxx/invocation_summary.txt
+    """
+    import io
+    import zipfile
+
     try:
-        # 从数据库获取报告信息
-        report = test_report_db.get_report_by_timestamp(report_timestamp)
+        # 模式1&2：处理报告相关请求
+        if report_timestamp:
+            # 从数据库获取报告信息
+            report = test_report_db.get_report_by_timestamp(report_timestamp)
 
-        if not report:
-            return JSONResponse(
-                content={'success': False, 'error': '报告不存在'},
-                status_code=404
-            )
+            if not report:
+                logger.error(f"[DOWNLOAD] 报告不存在: {report_timestamp}")
+                return JSONResponse(
+                    content={'success': False, 'error': f'报告不存在: {report_timestamp}'},
+                    status_code=404
+                )
 
-        report_dir = report.get('result_dir')
-        if not report_dir or not os.path.exists(report_dir):
-            return JSONResponse(
-                content={'success': False, 'error': '报告目录不存在'},
-                status_code=404
-            )
+            report_dir = report.get('result_dir')
 
-        # 列出文件
-        files = []
-        for root, dirs, filenames in os.walk(report_dir):
-            for filename in filenames:
-                file_path = os.path.join(root, filename)
-                # 相对于报告目录的路径，不包括时间戳目录名
-                rel_path = os.path.relpath(file_path, report_dir)
+            if not report_dir or not os.path.exists(report_dir):
+                logger.error(f"[DOWNLOAD] 报告目录不存在: {report_dir}")
+                return JSONResponse(
+                    content={'success': False, 'error': f'报告目录不存在: {report_dir}'},
+                    status_code=404
+                )
 
-                # 获取文件大小
-                try:
-                    file_size = os.path.getsize(file_path)
-                except (FileNotFoundError, OSError):
-                    file_size = 0
+            # 模式2：下载ZIP文件
+            if download:
+                logger.info(f"[DOWNLOAD] 请求下载报告ZIP: timestamp='{report_timestamp}'")
 
-                files.append({
-                    'name': filename,
-                    'path': file_path,
-                    'relative_path': rel_path,
-                    'size': file_size
+                # 创建ZIP文件到内存
+                zip_buffer = io.BytesIO()
+                zip_filename = f"report_{report_timestamp}.zip"
+                file_count = 0
+
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    for root, dirs, filenames in os.walk(report_dir):
+                        for filename in filenames:
+                            file_path = os.path.join(root, filename)
+                            arcname = os.path.relpath(file_path, os.path.dirname(report_dir))
+
+                            try:
+                                zip_file.write(file_path, arcname)
+                                file_count += 1
+                            except Exception as e:
+                                logger.warning(f"[DOWNLOAD] 无法添加文件到ZIP: {file_path}, 错误: {e}")
+
+                logger.info(f"[DOWNLOAD] 创建ZIP文件: {zip_filename}, 包含 {file_count} 个文件")
+
+                # 获取ZIP数据
+                zip_data = zip_buffer.getvalue()
+
+                if file_count == 0:
+                    return JSONResponse(
+                        content={'success': False, 'error': 'ZIP文件创建失败'},
+                        status_code=500
+                    )
+
+                # 返回ZIP文件
+                return Response(
+                    content=zip_data,
+                    media_type="application/zip",
+                    headers={
+                        "Content-Disposition": f"attachment; filename=\"{zip_filename}\""
+                    }
+                )
+
+            # 模式1：返回文件列表
+            else:
+                logger.info(f"[DOWNLOAD] 请求获取报告文件列表: timestamp='{report_timestamp}'")
+
+                # 列出文件
+                files = []
+                for root, dirs, filenames in os.walk(report_dir):
+                    for filename in filenames:
+                        file_path = os.path.join(root, filename)
+                        # 相对于报告目录的路径
+                        rel_path = os.path.relpath(file_path, report_dir)
+
+                        # 获取文件大小
+                        try:
+                            file_size = os.path.getsize(file_path)
+                        except (FileNotFoundError, OSError):
+                            file_size = 0
+
+                        files.append({
+                            'name': filename,
+                            'path': file_path,
+                            'relative_path': rel_path,
+                            'size': file_size
+                        })
+
+                        # 限制返回数量
+                        if len(files) >= 100:
+                            break
+
+                    if len(files) >= 100:
+                        break
+
+                return JSONResponse(content={'success': True, 'files': files})
+
+        # 模式3：查看单个文件内容
+        elif path:
+            logger.info(f"[DOWNLOAD] 请求查看文件内容: path='{path}'")
+
+            config = config_manager.load_config()
+            ssh = ssh_manager.get_connection(config)
+            if not ssh:
+                return JSONResponse(
+                    content={'success': False, 'error': 'SSH connection failed'},
+                    status_code=500
+                )
+
+            try:
+                # 读取文件内容
+                cat_cmd = f"cat '{path}' 2>/dev/null"
+                output, error, code = ssh_manager.execute_command(ssh, cat_cmd, timeout=30)
+
+                ssh_manager.return_connection(ssh)
+
+                # 确定内容类型
+                file_ext = os.path.splitext(path)[1].lower()
+                if file_ext in ['.xml', '.html']:
+                    content_type = 'text/html'
+                elif file_ext == '.json':
+                    content_type = 'application/json'
+                elif file_ext in ['.log', '.txt']:
+                    content_type = 'text/plain'
+                else:
+                    content_type = 'text/plain'
+
+                return JSONResponse(content={
+                    'success': True,
+                    'content': output,
+                    'content_type': content_type
                 })
 
-                # 限制返回数量
-                if len(files) >= 100:
-                    break
+            except Exception as e:
+                ssh_manager.return_connection(ssh)
+                raise
 
-            if len(files) >= 100:
-                break
-
-        return JSONResponse(content={'success': True, 'files': files})
+        else:
+            return JSONResponse(
+                content={'success': False, 'error': '请提供 report_timestamp 或 path 参数'},
+                status_code=400
+            )
 
     except Exception as e:
-        logger.error(f"Error listing report files: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
+        logger.error(f"[DOWNLOAD] 处理请求失败: {e}", exc_info=True)
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
         )
 
 @app.get("/api/reports/analyze/{report_timestamp}")
@@ -3418,138 +3695,6 @@ async def analyze_report(report_timestamp: str):
         raise HTTPException(
             status_code=500,
             detail=str(e)
-        )
-
-@app.get("/api/reports/get")
-async def get_report(request: Request):
-    """获取报告（查看或下载）"""
-    try:
-        file_path = request.query_params.get('path')
-        if not file_path:
-            return JSONResponse(
-                content={'success': False, 'error': 'File path is required'},
-                status_code=400
-            )
-
-        config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return JSONResponse(
-                content={'success': False, 'error': 'SSH connection failed'},
-                status_code=500
-            )
-
-        try:
-            # 读取文件内容
-            cat_cmd = f"cat '{file_path}' 2>/dev/null"
-            output, error, code = ssh_manager.execute_command(ssh, cat_cmd, timeout=30)
-
-            ssh_manager.return_connection(ssh)
-
-            # 确定内容类型
-            file_ext = os.path.splitext(file_path)[1].lower()
-            if file_ext in ['.xml', '.html']:
-                content_type = 'text/html'
-            elif file_ext == '.json':
-                content_type = 'application/json'
-            elif file_ext in ['.log', '.txt']:
-                content_type = 'text/plain'
-            else:
-                content_type = 'text/plain'
-
-            return JSONResponse(content={
-                'success': True,
-                'content': output,
-                'content_type': content_type
-            })
-
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            raise
-
-    except Exception as e:
-        logger.error(f"Error getting report file: {e}")
-        return JSONResponse(
-            content={'success': False, 'error': str(e)},
-            status_code=500
-        )
-
-@app.get("/api/reports/get/{report_timestamp}")
-async def get_report_by_timestamp(request: Request, report_timestamp: str):
-    """获取报告（查看或下载）"""
-    import io
-    import zipfile
-    from fastapi.responses import Response
-
-    try:
-        logger.info(f"[GET] 请求获取报告: timestamp='{report_timestamp}'")
-
-        # 从数据库获取报告信息
-        report = test_report_db.get_report_by_timestamp(report_timestamp)
-        logger.info(f"[GET] 查询报告结果: {report is not None}")
-
-        if not report:
-            logger.error(f"[GET] 报告不存在: {report_timestamp}")
-            # 尝试列出所有报告以供调试
-            all_reports = test_report_db.get_reports(limit=10)
-            logger.info(f"[GET] 数据库中的报告列表: {[r['timestamp'] for r in all_reports]}")
-            return JSONResponse(
-                content={'success': False, 'error': f'报告不存在: {report_timestamp}'},
-                status_code=404
-            )
-
-        report_dir = report.get('result_dir')
-        logger.info(f"[GET] 报告目录: {report_dir}, 存在: {os.path.exists(report_dir) if report_dir else False}")
-
-        if not report_dir or not os.path.exists(report_dir):
-            logger.error(f"[GET] 报告目录不存在: {report_dir}")
-            return JSONResponse(
-                content={'success': False, 'error': f'报告目录不存在: {report_dir}'},
-                status_code=404
-            )
-
-        # 创建ZIP文件到内存
-        zip_buffer = io.BytesIO()
-        zip_filename = f"report_{report_timestamp}.zip"
-        file_count = 0
-
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for root, dirs, filenames in os.walk(report_dir):
-                for filename in filenames:
-                    file_path = os.path.join(root, filename)
-                    arcname = os.path.relpath(file_path, os.path.dirname(report_dir))
-
-                    try:
-                        zip_file.write(file_path, arcname)
-                        file_count += 1
-                    except Exception as e:
-                        logger.warning(f"无法添加文件到ZIP: {file_path}, 错误: {e}")
-
-        logger.info(f"创建ZIP文件: {zip_filename}, 包含 {file_count} 个文件")
-
-        # 获取ZIP数据
-        zip_data = zip_buffer.getvalue()
-
-        if file_count == 0:
-            return JSONResponse(
-                content={'success': False, 'error': 'ZIP文件创建失败'},
-                status_code=500
-            )
-
-        # 返回ZIP文件
-        return Response(
-            content=zip_data,
-            media_type="application/zip",
-            headers={
-                "Content-Disposition": f"attachment; filename=\"{zip_filename}\""
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Error getting report: {e}", exc_info=True)
-        return JSONResponse(
-            content={'success': False, 'error': str(e)},
-            status_code=500
         )
 
 @app.get("/api/system/skills")
