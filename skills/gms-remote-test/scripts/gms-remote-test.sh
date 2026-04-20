@@ -782,8 +782,86 @@ gms-rt-reports-analyze() {
     [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-analyze <report_timestamp>"; return 1; }
     check_jq
     echo "🔍 Analyzing report: $report_timestamp..."
-    local response=$(api_call "/reports/analyze/$report_timestamp" "GET")
-    echo "$response" | jq '.'
+
+    # Use unified API with POST and mode parameter
+    local response=$(curl -s -X POST "${API_BASE}/reports/analyze" \
+        -F "mode=saved" \
+        -F "report_timestamp=${report_timestamp}")
+
+    # Check if request was successful
+    local success=$(echo "$response" | jq -r '.success // false')
+    if [ "$success" != "true" ]; then
+        error "Failed to analyze report: $(echo "$response" | jq -r '.error // "Unknown error"')"
+        return 1
+    fi
+
+    # Display formatted output similar to web UI
+    echo ""
+    echo "┌─────────────────────────────────────────────────────────────────┐"
+    echo "│                    📊 REPORT ANALYSIS                            │"
+    echo "└─────────────────────────────────────────────────────────────────┘"
+    echo ""
+
+    # Summary section
+    local total=$(echo "$response" | jq -r '.data.summary.total // 0')
+    local pass=$(echo "$response" | jq -r '.data.summary.pass // 0')
+    local fail=$(echo "$response" | jq -r '.data.summary.fail // 0')
+    local pass_rate=$(echo "$response" | jq -r '.data.summary.pass_rate // "0.00%"')
+
+    echo "📈 Summary:"
+    echo "   Total Tests:  $total"
+    echo "   ✓ Passed:     $pass"
+    echo "   ✗ Failed:     $fail"
+    echo "   Pass Rate:    $pass_rate"
+    echo ""
+
+    # Details section
+    local test_type=$(echo "$response" | jq -r '.data.details.test_type // "N/A"')
+    local device=$(echo "$response" | jq -r '.data.details.device // "N/A"')
+    local android_version=$(echo "$response" | jq -r '.data.details.android_version // "N/A"')
+    local start_time=$(echo "$response" | jq -r '.data.details.start_time // "N/A"')
+
+    echo "📋 Details:"
+    echo "   Test Type:      $test_type"
+    echo "   Device:         $device"
+    echo "   Android Version: $android_version"
+    echo "   Start Time:     $start_time"
+    echo ""
+
+    # Failures section - Web UI format
+    local failure_count=$(echo "$response" | jq -r '.data.failures | length')
+    if [ "$failure_count" -gt 0 ]; then
+        echo "❌ Failures ($failure_count):"
+        echo ""
+
+        # Iterate through each failure with Web UI format
+        for i in $(seq 0 $((failure_count - 1))); do
+            local failure=$(echo "$response" | jq ".data.failures[$i]")
+            local name=$(echo "$failure" | jq -r '.name // "Unknown"')
+            local module=$(echo "$failure" | jq -r '.module // "Unknown"')
+            local reason=$(echo "$failure" | jq -r '.reason // "No reason provided"')
+
+            # Web UI format: 测试模块
+            echo "   ┌──────────────────────────────────────────────────────────────┐"
+            echo "   │ 测试模块: $module"
+            echo "   └──────────────────────────────────────────────────────────────┘"
+
+            # Web UI format: 测试用例
+            echo "   测试用例: $name"
+            echo ""
+
+            # Web UI format: 失败详情
+            echo "   失败详情:"
+            # Preserve original formatting with proper indentation
+            echo "$reason" | sed 's/^/   /'
+            echo ""
+        done
+    else
+        echo "✅ No failures! All tests passed."
+        echo ""
+    fi
+
+    echo "└─────────────────────────────────────────────────────────────────┘"
 }
 
 # Delete report

@@ -635,6 +635,9 @@ function initEventListeners() {
     $('local-server').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') onLocalServerConfirm();
     });
+
+    // Initialize report analysis drag and drop
+    initReportAnalysis();
 }
 
 // ==================== Input Change Handlers ====================
@@ -851,6 +854,36 @@ function initDragDrop() {
 }
 
 // ==================== API Calls ====================
+// Helper function to create FormData for API calls
+// Analysis mode constants (matching backend Enum)
+const AnalysisMode = {
+    UPLOAD: 'upload',
+    SAVED: 'saved',
+    AI: 'ai'
+};
+
+// Helper function to create FormData for API calls
+function createFormData(mode, params = {}, files = {}) {
+    const formData = new FormData();
+    formData.append('mode', mode);
+
+    // Add regular parameters
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null) {
+            formData.append(key, value);
+        }
+    }
+
+    // Add files
+    for (const [key, file] of Object.entries(files)) {
+        if (file instanceof File) {
+            formData.append(key, file);
+        }
+    }
+
+    return formData;
+}
+
 async function apiCall(url, method = 'GET', data = null) {
     try {
         const headers = {
@@ -3652,7 +3685,6 @@ function displayTestReports(reports) {
                     ${passRate}
                 </td>
                 <td style="padding: 12px; text-align: center;">
-                    <button class="btn-xxs" onclick="event.stopPropagation(); claudeAnalyzeReport('${report.timestamp}')" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: 600;">🤖 Claude分析</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); analyzeReport('${report.timestamp}')">📈 分析报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); retryReportWithSuite('${report.timestamp}', '${report.test_type || ''}', '${(report.suite_path || '').replace(/'/g, "\\'")}')" style="background: var(--primary-color);">🔄 retry报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); downloadReport('${report.timestamp}')" style="background: var(--success-color);">⬇️ 下载报告</button>
@@ -3691,191 +3723,6 @@ async function deleteReport(timestamp) {
     }
 }
 
-/**
- * 使用Claude分析测试报告
- */
-async function claudeAnalyzeReport(timestamp) {
-    console.log(`[Claude Analyze] 分析报告: ${timestamp}`);
-
-    // 显示分析中提示
-    showToast('🤖 正在使用Claude分析报告...', 'info');
-
-    try {
-        // 询问是否使用Claude API
-        const useClaudeApi = await showConfirmDialog(
-            'Claude API 分析',
-            '是否使用Claude API进行深度分析？\n\n确定 = 使用Claude API (需要API密钥)\n取消 = 仅基础分析 (免费)'
-        );
-
-        let apiUrl = `/api/reports/claude-analyze/${encodeURIComponent(timestamp)}`;
-
-        if (useClaudeApi) {
-            // 获取Claude API密钥
-            const apiKey = prompt('请输入Claude API密钥 (sk-ant-xxxxx):');
-            if (!apiKey) {
-                showToast('已取消分析', 'info');
-                return;
-            }
-            apiUrl += `?use_claude_api=true&claude_api_key=${encodeURIComponent(apiKey)}`;
-        }
-
-        const response = await fetch(apiUrl);
-        const result = await response.json();
-
-        if (!result.success) {
-            showToast('分析失败: ' + (result.error || '未知错误'), 'error');
-            return;
-        }
-
-        // 显示分析结果弹窗
-        showClaudeAnalysisResult(result, timestamp);
-
-    } catch (error) {
-        console.error('[Claude Analyze] Error:', error);
-        showToast('分析失败: ' + error.message, 'error');
-    }
-}
-
-/**
- * 显示Claude分析结果弹窗
- */
-function showClaudeAnalysisResult(result, timestamp) {
-    const basic = result.basic_analysis;
-    const claude = result.claude_analysis;
-
-    // 创建弹窗HTML
-    const modalHtml = `
-        <div id="claude-analysis-modal" class="modal" style="display: flex;">
-            <div class="modal-content" style="max-width: 900px; max-height: 90vh;">
-                <div class="modal-header">
-                    <span class="modal-title">🤖 Claude分析报告 - ${timestamp}</span>
-                    <span class="modal-close" onclick="closeClaudeAnalysisModal()">&times;</span>
-                </div>
-                <div class="modal-body" style="padding: 20px; overflow-y: auto;">
-                    <!-- 基础分析 -->
-                    <div style="margin-bottom: 24px;">
-                        <h3 style="color: var(--primary-color); margin-bottom: 12px;">📊 测试概要</h3>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px;">
-                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 24px; font-weight: bold; color: ${basic.summary.failed === 0 ? 'var(--success-color)' : 'var(--danger-color)'};">
-                                    ${basic.summary.status}
-                                </div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">状态</div>
-                            </div>
-                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);">
-                                    ${basic.summary.total_tests}
-                                </div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">总测试数</div>
-                            </div>
-                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 24px; font-weight: bold; color: var(--success-color);">
-                                    ${basic.summary.passed}
-                                </div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">通过</div>
-                            </div>
-                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 24px; font-weight: bold; color: var(--danger-color);">
-                                    ${basic.summary.failed}
-                                </div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">失败</div>
-                            </div>
-                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 20px; font-weight: bold; color: var(--text-primary);">
-                                    ${basic.summary.duration || '-'}
-                                </div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">耗时</div>
-                            </div>
-                            <div style="background: var(--light-bg); padding: 16px; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 20px; font-weight: bold; color: var(--warning-color);">
-                                    ${basic.summary.retry_success}/${basic.summary.retry_failure}
-                                </div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">重试</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 测试信息 -->
-                    <div style="margin-bottom: 24px;">
-                        <h3 style="color: var(--primary-color); margin-bottom: 12px;">📋 测试信息</h3>
-                        <div style="background: var(--light-bg); padding: 16px; border-radius: 8px;">
-                            <div style="margin-bottom: 8px;">
-                                <strong>设备:</strong> <code style="background: var(--darker-bg); padding: 4px 8px; border-radius: 4px;">${basic.test_info.device}</code>
-                            </div>
-                            <div style="margin-bottom: 8px;">
-                                <strong>模块:</strong> <code style="background: var(--darker-bg); padding: 4px 8px; border-radius: 4px;">${basic.test_info.module}</code>
-                            </div>
-                            <div>
-                                <strong>测试用例:</strong> <code style="background: var(--darker-bg); padding: 4px 8px; border-radius: 4px; word-break: break-all;">${basic.test_info.test_case}</code>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 智能洞察 -->
-                    ${basic.insights.length > 0 ? `
-                    <div style="margin-bottom: 24px;">
-                        <h3 style="color: var(--primary-color); margin-bottom: 12px;">💡 智能洞察</h3>
-                        ${basic.insights.map(insight => `
-                            <div style="background: ${insight.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : insight.type === 'warning' ? 'rgba(245, 158, 11, 0.1)' : insight.type === 'success' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)'}; padding: 12px; border-radius: 8px; border-left: 4px solid ${insight.type === 'error' ? 'var(--danger-color)' : insight.type === 'warning' ? 'var(--warning-color)' : insight.type === 'success' ? 'var(--success-color)' : 'var(--primary-color)'}; margin-bottom: 12px;">
-                                <div style="display: flex; gap: 12px; align-items: start;">
-                                    <span style="font-size: 20px;">${insight.icon}</span>
-                                    <div style="flex: 1;">
-                                        <div style="font-weight: 600; margin-bottom: 4px; color: var(--text-primary);">${insight.title}</div>
-                                        <div style="font-size: 13px; color: var(--text-secondary);">${insight.message}</div>
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                    ` : ''}
-
-                    <!-- Claude深度分析 -->
-                    ${claude && claude.success ? `
-                    <div style="margin-bottom: 24px;">
-                        <h3 style="color: var(--primary-color); margin-bottom: 12px;">🤖 Claude深度分析</h3>
-                        <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); padding: 16px; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.2);">
-                            <div style="font-size: 13px; line-height: 1.6; color: var(--text-primary); white-space: pre-wrap;">${claude.analysis}</div>
-                        </div>
-                    </div>
-                    ` : ''}
-
-                    <!-- 路径信息 -->
-                    <div>
-                        <h3 style="color: var(--primary-color); margin-bottom: 12px;">📁 文件路径</h3>
-                        <div style="background: var(--light-bg); padding: 16px; border-radius: 8px;">
-                            ${basic.paths.log_dir ? `<div style="margin-bottom: 8px;"><strong>日志目录:</strong> <code style="background: var(--darker-bg); padding: 4px 8px; border-radius: 4px; font-size: 11px; word-break: break-all;">${basic.paths.log_dir}</code></div>` : ''}
-                            ${basic.paths.result_dir ? `<div><strong>结果目录:</strong> <code style="background: var(--darker-bg); padding: 4px 8px; border-radius: 4px; font-size: 11px; word-break: break-all;">${basic.paths.result_dir}</code></div>` : ''}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-
-    // 添加到页面
-    const modalContainer = document.createElement('div');
-    modalContainer.innerHTML = modalHtml;
-    document.body.appendChild(modalContainer);
-
-    // 显示弹窗
-    const modal = document.getElementById('claude-analysis-modal');
-    if (modal) {
-        modal.style.display = 'flex';
-    }
-}
-
-/**
- * 关闭Claude分析弹窗
- */
-function closeClaudeAnalysisModal() {
-    const modal = document.getElementById('claude-analysis-modal');
-    if (modal) {
-        modal.style.display = 'none';
-        setTimeout(() => {
-            modal.remove();
-        }, 300);
-    }
-}
 
 async function retryReport(timestamp, testType) {
     try {
@@ -4248,7 +4095,11 @@ async function analyzeReport(timestamp) {
         setTimeout(async () => {
             showToast('正在分析报告...', 'info');
 
-            const resp = await fetch(`/api/reports/analyze/${timestamp}`);
+            const formData = createFormData(AnalysisMode.SAVED, { report_timestamp: timestamp });
+            const resp = await fetch('/api/reports/analyze', {
+                method: 'POST',
+                body: formData
+            });
             const data = await resp.json();
 
             if (!data.success) {
@@ -4597,8 +4448,7 @@ async function handleReportFile(file) {
     progressFill.style.width = '0%';
 
     try {
-        const formData = new FormData();
-        formData.append('file', file);
+        const formData = createFormData(AnalysisMode.UPLOAD, { file: file });
 
         progressFill.style.width = '50%';
 
@@ -4647,6 +4497,7 @@ async function handleReportFolder(files) {
 
     try {
         const formData = new FormData();
+        formData.append('mode', 'upload');
 
         // 添加所有文件到 FormData，保持文件夹结构
         let fileCount = 0;
@@ -4860,14 +4711,15 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
     document.body.appendChild(modal);
 
     try {
-        const response = await fetch('/api/reports/analyze-ai', {
+        const formData = createFormData(AnalysisMode.AI, {
+            test_name: testName,
+            error_message: errorMessage,
+            stack_trace: errorMessage
+        });
+
+        const response = await fetch('/api/reports/analyze', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                test_name: testName,
-                error_message: errorMessage,
-                stack_trace: errorMessage
-            })
+            body: formData
         });
 
         const result = await response.json();
@@ -4978,478 +4830,27 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
     }
 }
 
-// 源码分析失败用例
-async function analyzeFailureSource(testName, errorMessage) {
-    const modalId = 'source-analysis-modal-' + Date.now();
-    const modal = document.createElement('div');
-    modal.id = modalId;
-    modal.className = 'modal show';
-    modal.style.cssText = 'display: flex; z-index: 10000;';
-
-    modal.innerHTML = `
-        <div class="modal-content" style="max-width: 800px; max-height: 80vh;">
-            <div class="modal-header">
-                <span class="modal-title">🔍 源码分析中...</span>
-                <span class="modal-close" onclick="closeModal('${modalId}')">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div style="text-align: center; padding: 40px;">
-                    <div style="font-size: 48px; margin-bottom: 20px;">🔍</div>
-                    <div style="color: var(--text-secondary);">正在查找源码，请稍候...</div>
-                </div>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    try {
-        const response = await fetch('/api/reports/analyze-source', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ test_name: testName, error_message: errorMessage })
-        });
-
-        const result = await response.json();
-
-        // 检查HTTP状态码
-        if (!response.ok) {
-            // 处理HTTP错误（FastAPI的HTTPException返回 {detail: "error message"}）
-            const errorDetail = result.detail || result.error || '未知错误';
-            modal.querySelector('.modal-title').textContent = '❌ 分析失败';
-            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${errorDetail}</div>`;
-            return;
-        }
-
-        // 更新模态框内容
-        modal.querySelector('.modal-title').textContent = '🔍 源码分析结果';
-
-        // 确保modal-content使用正确的flex布局（使header固定）
-        const modalContent = modal.querySelector('.modal-content');
-        if (modalContent) {
-            modalContent.style.display = 'flex';
-            modalContent.style.flexDirection = 'column';
-            modalContent.style.overflow = 'hidden';
-        }
-
-        // 确保modal-header固定
-        const modalHeader = modal.querySelector('.modal-header');
-        if (modalHeader) {
-            modalHeader.style.flexShrink = '0';
-            modalHeader.style.position = 'relative';
-            modalHeader.style.zIndex = '10';
-        }
-
-        // 确保modal-body可滚动
-        const modalBody = modal.querySelector('.modal-body');
-        if (modalBody) {
-            modalBody.style.overflowY = 'auto';
-            modalBody.style.overflowX = 'hidden';
-            modalBody.style.flex = '1';
-            modalBody.style.minHeight = '0';
-        }
-
-        if (result.success) {
-            const data = result.data;
-            let content = '';
-
-            // 测试信息
-            if (data.test_info) {
-                content += '<div style="margin-bottom: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
-                content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--primary-color);">📋 测试信息</div>';
-                if (data.test_info.class) {
-                    content += `<div style="font-size: 12px; margin-bottom: 4px;"><strong>类名:</strong> ${data.test_info.class}</div>`;
-                }
-                if (data.test_info.method) {
-                    content += `<div style="font-size: 12px; margin-bottom: 4px;"><strong>方法:</strong> ${data.test_info.method}</div>`;
-                }
-                if (data.test_info.package) {
-                    content += `<div style="font-size: 12px;"><strong>包名:</strong> ${data.test_info.package}</div>`;
-                }
-                content += '</div>';
-            }
-
-            // 分析结果
-            if (data.analysis) {
-                content += '<div style="margin-bottom: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
-                content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--primary-color);">🔬 分析结果</div>';
-                if (data.analysis.test_type && data.analysis.test_type !== 'unknown') {
-                    content += `<div style="font-size: 12px; margin-bottom: 8px;"><strong>测试类型:</strong> ${data.analysis.test_type}</div>`;
-                }
-                if (data.analysis.possible_causes && data.analysis.possible_causes.length > 0) {
-                    content += '<div style="font-size: 12px; margin-bottom: 8px;"><strong>可能原因:</strong></div>';
-                    content += '<ul style="margin: 4px 0; padding-left: 20px; font-size: 12px;">';
-                    data.analysis.possible_causes.forEach(cause => {
-                        content += `<li>${cause}</li>`;
-                    });
-                    content += '</ul>';
-                }
-                if (data.analysis.suggestions && data.analysis.suggestions.length > 0) {
-                    content += '<div style="font-size: 12px; margin-bottom: 8px;"><strong>建议:</strong></div>';
-                    content += '<ul style="margin: 4px 0; padding-left: 20px; font-size: 12px;">';
-                    data.analysis.suggestions.forEach(suggestion => {
-                        content += `<li>${suggestion}</li>`;
-                    });
-                    content += '</ul>';
-                }
-                content += '</div>';
-            }
-
-            // 源码分析结果
-            if (data.source_analysis) {
-                const sourceAnalysis = data.source_analysis;
-                content += '<div style="margin-bottom: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
-                content += '<div style="font-weight: 600; margin-bottom: 12px; color: var(--primary-color);">💻 智能源码分析</div>';
-
-                if (sourceAnalysis.source_found) {
-                    content += `<div style="font-size: 12px; margin-bottom: 8px; color: var(--success-color);">✓ 已成功获取并分析源码</div>`;
-
-                    // 显示源码路径
-                    if (sourceAnalysis.file_path) {
-                        content += `<div style="font-size: 12px; margin-bottom: 8px;"><strong>📁 文件路径:</strong> <span style="color: var(--primary-color);">${sourceAnalysis.file_path}</span></div>`;
-                    }
-
-                    // 解决方案部分（最重要）
-                    if (sourceAnalysis.solution) {
-                        const solution = sourceAnalysis.solution;
-                        content += '<div style="margin: 12px 0; padding: 10px; background: rgba(76, 175, 80, 0.1); border-left: 3px solid var(--success-color); border-radius: 4px;">';
-                        content += '<div style="font-size: 13px; margin-bottom: 8px; font-weight: 600; color: var(--success-color);">🎯 问题诊断</div>';
-                        if (solution.problem_description) {
-                            content += `<div style="font-size: 12px; margin-bottom: 8px; line-height: 1.5;">${solution.problem_description.replace(/\n/g, '<br>')}</div>`;
-                        }
-                        if (solution.error_type) {
-                            content += `<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">错误类型: <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px;">${solution.error_type}</code></div>`;
-                        }
-                        if (solution.fix_strategy) {
-                            const strategyNames = {
-                                'verify_expectations': '验证预期值',
-                                'add_null_checks': '添加空值检查',
-                                'verify_state': '验证状态',
-                                'adjust_timeout': '调整超时',
-                                'generic': '通用修复'
-                            };
-                            const strategyName = strategyNames[solution.fix_strategy] || solution.fix_strategy;
-                            content += `<div style="font-size: 11px; color: var(--text-secondary);">修复策略: <span style="color: var(--primary-color);">${strategyName}</span></div>`;
-                        }
-                        content += '</div>';
-                    }
-
-                    // 显示相关代码片段
-                    if (sourceAnalysis.relevant_code && sourceAnalysis.relevant_code.length > 0) {
-                        content += '<div style="margin: 12px 0;">';
-                        content += '<div style="font-size: 12px; margin-bottom: 8px; font-weight: 600;">📝 相关代码片段:</div>';
-                        sourceAnalysis.relevant_code.slice(0, 2).forEach(code => {
-                            const displayName = code.name || code.keyword || '代码片段';
-                            content += '<div style="margin: 8px 0; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 4px; font-family: monospace; font-size: 11px; overflow-x: auto; white-space: pre-wrap; border-left: 2px solid var(--primary-color);">';
-                            content += `<div style="color: var(--primary-color); margin-bottom: 6px; font-size: 10px; text-transform: uppercase;">// ${code.type}: ${displayName}</div>`;
-                            const codeText = code.code.substring(0, 800);
-                            content += codeText + (code.code.length > 800 ? '\n... (代码已截断)' : '');
-                            content += '</div>';
-                        });
-                        content += '</div>';
-                    }
-
-                    // 具体的修改建议
-                    if (sourceAnalysis.suggestions && sourceAnalysis.suggestions.length > 0) {
-                        content += '<div style="margin: 12px 0; padding: 10px; background: rgba(33, 150, 243, 0.1); border-radius: 4px;">';
-                        content += '<div style="font-size: 12px; margin-bottom: 8px; font-weight: 600; color: var(--primary-color);">💡 修复建议</div>';
-                        sourceAnalysis.suggestions.forEach((suggestion, index) => {
-                            content += `<div style="font-size: 12px; margin: 6px 0; padding-left: 16px; position: relative;">`;
-                            content += `<span style="position: absolute; left: 0; color: var(--primary-color); font-weight: bold;">${index + 1}.</span> ${suggestion}`;
-                            content += `</div>`;
-                        });
-                        content += '</div>';
-                    }
-
-                    // 显示额外的分析结果
-                    if (sourceAnalysis.analysis && sourceAnalysis.analysis.length > 0) {
-                        content += '<div style="margin: 8px 0;">';
-                        content += '<div style="font-size: 12px; margin-bottom: 4px; font-weight: 600;">🔍 详细分析:</div>';
-                        sourceAnalysis.analysis.forEach(analysis => {
-                            content += `<div style="font-size: 12px; margin: 4px 0; color: var(--text-secondary);">• ${analysis}</div>`;
-                        });
-                        content += '</div>';
-                    }
-
-                } else {
-                    // 未找到源码时的错误模式分析
-                    content += `<div style="font-size: 12px; color: var(--warning-color); margin-bottom: 8px;">⚠ 无法自动获取源码，基于错误模式进行分析</div>`;
-
-                    // 显示基于错误模式的分析结果
-                    if (sourceAnalysis.solution) {
-                        const solution = sourceAnalysis.solution;
-                        content += '<div style="margin: 12px 0; padding: 10px; background: rgba(255, 152, 0, 0.1); border-left: 3px solid var(--warning-color); border-radius: 4px;">';
-                        content += '<div style="font-size: 13px; margin-bottom: 8px; font-weight: 600; color: var(--warning-color);">🎯 问题诊断</div>';
-                        if (solution.problem_description) {
-                            content += `<div style="font-size: 12px; margin-bottom: 8px;">${solution.problem_description}</div>`;
-                        }
-                        content += '</div>';
-                    }
-
-                    if (sourceAnalysis.suggestions && sourceAnalysis.suggestions.length > 0) {
-                        content += '<div style="margin: 12px 0; padding: 10px; background: rgba(33, 150, 243, 0.1); border-radius: 4px;">';
-                        content += '<div style="font-size: 12px; margin-bottom: 8px; font-weight: 600; color: var(--primary-color);">💡 修复建议</div>';
-                        sourceAnalysis.suggestions.forEach((suggestion, index) => {
-                            content += `<div style="font-size: 12px; margin: 6px 0; padding-left: 16px; position: relative;">`;
-                            content += `<span style="position: absolute; left: 0; color: var(--primary-color); font-weight: bold;">${index + 1}.</span> ${suggestion}`;
-                            content += `</div>`;
-                        });
-                        content += '</div>';
-                    }
-
-                    if (sourceAnalysis.error) {
-                        content += `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 8px;">技术详情: ${sourceAnalysis.error}</div>`;
-                    }
-                }
-
-                content += '</div>';
-            }
-
-            // 搜索链接
-            if (data.search_links && data.search_links.length > 0) {
-                content += '<div style="padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
-                content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--primary-color);">🔗 源码搜索链接</div>';
-                content += '<div style="display: flex; flex-direction: column; gap: 8px;">';
-                data.search_links.forEach(link => {
-                    content += `<a href="${link.url}" target="_blank" style="display: block; padding: 8px 12px; background: var(--primary-color); color: white; text-decoration: none; border-radius: 4px; font-size: 12px; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">${link.title} ↗</a>`;
-                });
-                content += '</div></div>';
-            }
-
-            modal.querySelector('.modal-body').innerHTML = content;
-        } else {
-            // 处理业务逻辑错误（success: false）
-            const errorDetail = result.error || result.detail || '未知错误';
-            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${errorDetail}</div>`;
-        }
-
-    } catch (error) {
-        modal.querySelector('.modal-title').textContent = '❌ 分析失败';
-        modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">请求失败: ${error.message}</div>`;
-    }
-}
-
-function resetReportAnalysis() {
-    const resultDiv = $('report-analysis-result');
-    const uploadZone = $('report-upload-zone');
-    const fileInput = $('report-file-input');
-    const folderInput = $('report-folder-input');
-
-    if (resultDiv) resultDiv.style.display = 'none';
-    if (fileInput) fileInput.value = '';
-    if (folderInput) folderInput.value = '';
-
-    // 重新添加上传空状态类（恢复占满屏幕）
-    if (uploadZone) uploadZone.classList.add('upload-empty');
-
-    showToast('已清除分析结果', 'success');
-}
-
-// 页面加载时初始化
-document.addEventListener('DOMContentLoaded', () => {
-    initReportAnalysis();
-});
-
-// ==================== Android Source Code Analysis ====================
-
 /**
- * 分析测试失败的源码
- * @param {string} testName - 测试用例名称
- * @param {string} errorMessage - 错误消息
- */
-async function analyzeSourceCode(testName, errorMessage) {
-    try {
-        // 显示加载提示
-        showToast('正在分析源码...', 'info');
-
-        const response = await fetch('/api/reports/analyze-source', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                test_name: testName,
-                error_message: errorMessage
-            })
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-            displaySourceAnalysis(result.data);
-        } else {
-            showToast('源码分析失败: ' + (result.error || result.detail || '未知错误'), 'error');
-        }
-    } catch (error) {
-        console.error('源码分析错误:', error);
-        showToast('源码分析请求失败', 'error');
-    }
-}
-
-/**
- * 显示源码分析结果
- * @param {object} data - 分析数据
- */
-function displaySourceAnalysis(data) {
-    const modalId = 'source-analysis-modal-' + Date.now();
-    const modal = document.createElement('div');
-    modal.id = modalId;
-    modal.className = 'modal';
-    modal.style.cssText = `
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
-        background: rgba(0, 0, 0, 0.7) !important;
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        z-index: 10000 !important;
-    `;
-
-    let html = `
-        <div style="background: var(--bg-color); border-radius: 12px; padding: 24px; max-width: 800px; max-height: 85vh; overflow-y: auto; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); margin: auto;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; font-size: 18px; font-weight: 600;">🔍 Android源码分析</h2>
-                <button onclick="closeSourceAnalysisModal('${modalId}')" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
-            </div>
-    `;
-
-    // 测试信息
-    if (data.test_info) {
-        html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📋 测试信息</div>
-                <div style="font-size: 12px;">
-                    ${data.test_info.class ? `<div style="margin-bottom: 4px;"><strong>类名:</strong> <span style="color: var(--primary-color);">${data.test_info.class}</span></div>` : ''}
-                    ${data.test_info.method ? `<div style="margin-bottom: 4px;"><strong>方法:</strong> ${data.test_info.method}</div>` : ''}
-                    ${data.test_info.package ? `<div style="margin-bottom: 4px;"><strong>包名:</strong> ${data.test_info.package}</div>` : ''}
-                </div>
-            </div>
-        `;
-    }
-
-    // 错误信息
-    if (data.error_info) {
-        html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">❌ 错误信息</div>
-                <div style="font-size: 12px;">
-                    ${data.error_info.type ? `<div style="margin-bottom: 4px;"><strong>错误类型:</strong> <span style="color: var(--danger-color);">${data.error_info.type}</span></div>` : ''}
-                    ${data.error_info.message ? `<div style="margin-bottom: 4px;"><strong>错误消息:</strong> ${data.error_info.message.substring(0, 200)}${data.error_info.message.length > 200 ? '...' : ''}</div>` : ''}
-                    ${data.error_info.keywords && data.error_info.keywords.length > 0 ? `
-                        <div style="margin-top: 8px;">
-                            <strong>关键词:</strong>
-                            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
-                                ${data.error_info.keywords.map(kw => `<span style="background: var(--warning-color); color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px;">${kw}</span>`).join('')}
-                            </div>
-                        </div>
-                    ` : ''}
-                </div>
-            </div>
-        `;
-    }
-
-    // 分析结果
-    if (data.analysis) {
-        html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">🔬 分析结果</div>
-                <div style="font-size: 12px;">
-                    ${data.analysis.test_type && data.analysis.test_type !== 'unknown' ? `
-                        <div style="margin-bottom: 8px;">
-                            <strong>测试类型:</strong> <span style="color: var(--info-color); font-weight: 600;">${data.analysis.test_type}</span>
-                        </div>
-                    ` : ''}
-                    ${data.analysis.possible_causes && data.analysis.possible_causes.length > 0 ? `
-                        <div style="margin-bottom: 8px;">
-                            <strong>可能原因:</strong>
-                            <ul style="margin: 4px 0; padding-left: 20px;">
-                                ${data.analysis.possible_causes.map(cause => `<li style="color: var(--text-secondary);">${cause}</li>`).join('')}
-                            </ul>
-                        </div>
-                    ` : ''}
-                    ${data.analysis.suggestions && data.analysis.suggestions.length > 0 ? `
-                        <div style="margin-bottom: 8px;">
-                            <strong>修复建议:</strong>
-                            <ul style="margin: 4px 0; padding-left: 20px;">
-                                ${data.analysis.suggestions.map(suggestion => `<li style="color: var(--success-color);">${suggestion}</li>`).join('')}
-                            </ul>
-                        </div>
-                    ` : ''}
-                </div>
-            </div>
-        `;
-    }
-
-    // 源码搜索链接
-    if (data.search_links && data.search_links.length > 0) {
-        html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">🔗 源码搜索链接</div>
-                <div style="display: flex; flex-direction: column; gap: 8px;">
-                    ${data.search_links.map(link => `
-                        <a href="${link.url}" target="_blank" style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: var(--darker-bg); border-radius: 6px; text-decoration: none; color: var(--text-color); transition: all 0.2s;">
-                            <span style="font-size: 12px;">${link.title}</span>
-                            <span style="font-size: 10px; color: var(--primary-color);">🔗 打开</span>
-                        </a>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-    }
-
-    html += `
-            <div style="display: flex; gap: 10px; margin-top: 20px;">
-                <button onclick="closeSourceAnalysisModal('${modalId}')" class="btn-xs">关闭</button>
-            </div>
-        </div>
-    `;
-
-    modal.innerHTML = html;
-    document.body.appendChild(modal);
-
-    // 点击外部关闭
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            closeSourceAnalysisModal(modalId);
-        }
-    });
-}
-
-/**
- * 关闭源码分析模态框
- * @param {string} modalId - 模态框ID
- */
-function closeSourceAnalysisModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) {
-        modal.remove();
-    }
-}
-
-/**
- * 使用AI分析测试失败
+ * 使用 AI 分析测试失败
  * @param {string} testName - 测试用例名称
  * @param {string} errorMessage - 错误消息
  * @param {string} module - 测试模块
  */
+
 async function aiAnalyzeFailure(testName, errorMessage, module = '') {
     try {
         // 显示加载提示
         showToast('🤖 AI正在分析...', 'info');
 
-        const response = await fetch('/api/reports/analyze-ai', {
+        const formData = createFormData(AnalysisMode.AI, {
+            test_name: testName,
+            error_message: errorMessage,
+            module: module
+        });
+
+        const response = await fetch('/api/reports/analyze', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                test_name: testName,
-                error_message: errorMessage,
-                module: module
-            })
+            body: formData
         });
 
         const result = await response.json();
@@ -5574,20 +4975,6 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
         `;
     }
 
-    // 深度源码分析按钮区域
-    html += `
-            <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%); border: 1px dashed #667eea; border-radius: 8px; padding: 16px; margin-top: 20px; margin-bottom: 16px;">
-                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-                    <div style="flex: 1;">
-                        <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #667eea;">💻 深度源码分析</div>
-                        <div style="font-size: 11px; color: var(--text-secondary);">从 Android 源码仓库获取完整测试用例代码，进行深入的规则分析</div>
-                    </div>
-                    <button onclick="closeAIAnalysisModal('${modalId}'); analyzeFailureSource('${testName.replace(/'/g, "\\'")}', '${(data.error_message || '').replace(/'/g, "\\'")}')" class="btn-xs" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); white-space: nowrap; padding: 8px 16px;">
-                        🔍 开始深度分析
-                    </button>
-                </div>
-            </div>
-    `;
 
     html += `
             <div style="display: flex; gap: 10px; margin-top: 20px;">
@@ -5823,6 +5210,31 @@ window.showSshdInstallGuide = showSshdInstallGuide;
 window.closeSshdInstallGuide = closeSshdInstallGuide;
 window.autoInstallUsbipd = autoInstallUsbipd;
 window.resetReportAnalysis = resetReportAnalysis;
+
+function resetReportAnalysis() {
+    const resultDiv = $('report-analysis-result');
+    const uploadZone = $('report-upload-zone');
+    const summaryDiv = $('report-summary');
+    const detailsDiv = $('report-details');
+    const failuresDiv = $('report-failures');
+    const failureList = $('report-failure-list');
+
+    // Clear all analysis results
+    if (resultDiv) resultDiv.innerHTML = '';
+    if (summaryDiv) summaryDiv.innerHTML = '';
+    if (detailsDiv) detailsDiv.innerHTML = '';
+    if (failuresDiv) failuresDiv.innerHTML = '';
+    if (failureList) failureList.innerHTML = '';
+
+    // Reset upload zone to empty state
+    if (uploadZone) {
+        uploadZone.classList.add('upload-empty');
+        const content = uploadZone.querySelector('.report-upload-content');
+        if (content) content.style.opacity = '1';
+    }
+
+    console.log('[resetReportAnalysis] Report analysis reset complete');
+}
 
 // 当前筛选状态
 let currentCategoryFilter = 'all';
@@ -6063,7 +5475,7 @@ const CURL_PLACEHOLDERS = Object.freeze({
  * Path parameter normalization patterns
  */
 const PATH_PATTERNS = [
-    { pattern: /^\/api\/reports\/analyze\//, template: '/api/reports/analyze/{report_timestamp}' }
+    // No more path patterns needed with unified API
 ];
 
 /**

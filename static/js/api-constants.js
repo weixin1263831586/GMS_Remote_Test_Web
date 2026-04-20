@@ -245,11 +245,13 @@ const API_DETAILS_MAP = {
     },
     '/api/system/help': {
         title: '获取API帮助',
-        description: '获取API帮助信息（纯文本格式）',
+        description: '获取API帮助信息（统一接口）- 不带参数返回所有API列表，带api_path参数返回单个API详细帮助',
         method: 'GET',
-        params: [],
-        response: 'GMS Auto Test API List\n\nTotal: 72 APIs...',
-        usage: '查看API列表和使用示例'
+        params: [
+            { name: 'api_path', type: 'Optional[str]', description: 'API路径（如 "api/test/start"），不提供则返回所有API列表', required: false }
+        ],
+        response: 'GMS Auto Test API List\n\nTotal: 68 APIs...',
+        usage: '查看API列表和单个API详细帮助'
     },
     '/api/config/values': {
         title: '获取前端配置',
@@ -427,14 +429,18 @@ const API_DETAILS_MAP = {
         response: '{ "reports": [{ "timestamp": "20260326_100000", "test_type": "CTS" }] }',
         usage: '查看所有历史测试报告'
     },
-    '/api/reports/analyze/{report_timestamp}': {
+    '/api/reports/analyze': {
         title: '分析报告',
-        description: '分析测试报告',
+        description: '统一的报告分析API（支持上传、已保存报告、AI分析）',
         params: [
-            { name: 'report_timestamp', type: 'string', required: true, desc: '报告时间戳' }
+            { name: 'mode', type: 'string', required: true, desc: '分析模式：upload/saved/ai' },
+            { name: 'file', type: 'file', required: false, desc: '上传的文件（mode=upload时）' },
+            { name: 'report_timestamp', type: 'string', required: false, desc: '报告时间戳（mode=saved时）' },
+            { name: 'test_name', type: 'string', required: false, desc: '测试用例名（mode=ai时）' },
+            { name: 'error_message', type: 'string', required: false, desc: '错误消息（mode=ai时）' }
         ],
-        response: '{ "summary": { "passed": 150, "failed": 5 }, "failed_tests": [] }',
-        usage: '快速查看测试结果统计和失败用例'
+        response: '{ "success": true, "data": {...}, "mode": "upload|saved|ai" }',
+        usage: '统一接口分析测试报告'
     },
     '/api/reports/download': {
         title: '获取报告',
