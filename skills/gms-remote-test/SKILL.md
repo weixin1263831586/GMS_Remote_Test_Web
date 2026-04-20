@@ -580,8 +580,14 @@ curl -s "http://172.16.14.233:5001/api/reports/analyze/2026-04-05_10-39-00" | jq
 
 #### Get Report
 ```bash
-# Get report content
+# Get report file list (JSON)
 curl -s "http://172.16.14.233:5001/api/reports/download?report_timestamp=2026-04-05_10-39-00" | jq '.'
+
+# Download report as ZIP file
+curl -s "http://172.16.14.233:5001/api/reports/download?report_timestamp=2026-04-05_10-39-00&download=true" -o report.zip
+
+# View specific file content
+curl -s "http://172.16.14.233:5001/api/reports/download?path=/path/to/report/invocation_summary.txt" | jq '.'
 ```
 
 #### Delete Report
