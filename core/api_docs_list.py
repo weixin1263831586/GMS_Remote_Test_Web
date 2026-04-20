@@ -653,8 +653,15 @@ API_DOCS_LIST = [
     {
         "method": "GET",
         "path": "/api/system/help",
-        "description": "获取API帮助信息（纯文本格式）",
-        "params": [],
+        "description": "获取API帮助信息（统一接口）- 不带参数返回所有API列表，带api_path参数返回单个API详细帮助",
+        "params": [
+            {
+                "name": "api_path",
+                "type": "Optional[str]",
+                "description": "API路径（如 'api/test/start'），不提供则返回所有API列表",
+                "required": False
+            }
+        ],
         "category": "system",
         "skill": "gms-rt-system-help"
     }

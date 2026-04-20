@@ -575,7 +575,21 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.'
 
 #### Analyze Report
 ```bash
-curl -s "http://172.16.14.233:5001/api/reports/analyze/2026-04-05_10-39-00" | jq '.'
+# Analyze saved report
+curl -X POST "http://172.16.14.233:5001/api/reports/analyze" \
+  -F "mode=saved" \
+  -F "report_timestamp=2026-04-05_10-39-00" | jq '.'
+
+# Upload and analyze report file
+curl -X POST "http://172.16.14.233:5001/api/reports/analyze" \
+  -F "mode=upload" \
+  -F "file=@test_result.xml" | jq '.'
+
+# AI analyze failure
+curl -X POST "http://172.16.14.233:5001/api/reports/analyze" \
+  -F "mode=ai" \
+  -F "test_name=com.example.Test#testMethod" \
+  -F "error_message=AssertionError: failed" | jq '.'
 ```
 
 #### Get Report
@@ -982,7 +996,7 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/reports/list` | GET | List all reports |
-| `/api/reports/analyze/{ts}` | GET | Analyze saved report |
+| `/api/reports/analyze` | POST | Analyze reports (upload/saved/ai modes) |
 | `/api/reports/download` | GET | Get report (view/download) |
 | `/api/reports/delete` | DELETE | Delete report |
 

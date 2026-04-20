@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Union
 from contextlib import asynccontextmanager
 from collections import deque
+from enum import Enum
 import asyncio
 
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Body, Query
@@ -67,6 +68,12 @@ class LogLevel(str, Enum):
     WARNING = 'warning'
     ERROR = 'error'
     SUCCESS = 'success'
+
+class AnalysisMode(str, Enum):
+    """报告分析模式"""
+    UPLOAD = "upload"
+    SAVED = "saved"
+    AI = "ai"
 
 # ==================== 常量定义 ====================
 
@@ -268,7 +275,6 @@ from core.test_report import test_report_manager
 from core.vnc import vnc_manager, calculate_window_positions
 from core.adb_forward import adb_forward_manager
 from core.usbip import usbip_manager
-from core.claude_report_analyzer import ClaudeReportAnalyzer
 from core.common_utils import CommonUtils
 from core.device_utils import DeviceUtils
 from core.report_analyzer import ReportAnalyzer
@@ -3623,66 +3629,261 @@ async def download_report(
             status_code=500
         )
 
-@app.get("/api/reports/analyze/{report_timestamp}")
-async def analyze_report(report_timestamp: str):
-    """从数据库分析测试报告（与Flask版本一致）"""
-    try:
-        # 从数据库获取报告信息
-        report = test_report_db.get_report_by_timestamp(report_timestamp)
+@app.post("/api/reports/analyze")
+async def analyze_reports(
+    mode: AnalysisMode = Form(default=AnalysisMode.UPLOAD),
+    report_timestamp: Optional[str] = Form(default=None),
+    test_name: Optional[str] = Form(default=None),
+    error_message: Optional[str] = Form(default=None),
+    stack_trace: Optional[str] = Form(default=None),
+    module: Optional[str] = Form(default=None),
+    class_names: Optional[str] = Form(default=None),
+    file: Optional[UploadFile] = File(default=None),
+    files: Optional[List[UploadFile]] = File(default=None),
+    files_array: Optional[List[UploadFile]] = File(default=None, alias='files[]')
+):
+    """
+    统一的报告分析 API
 
-        if not report:
-            return JSONResponse(
-                content={'success': False, 'error': '报告不存在'},
-                status_code=404
-            )
+    参数：
+        mode: 分析模式
+            - 'upload': 上传并分析报告文件（默认）
+            - 'saved': 分析已保存的报告
+            - 'ai': AI分析失败用例
 
-        result_dir = report.get('result_dir')
-        if not result_dir or not await asyncio.to_thread(os.path.exists, result_dir):
-            return JSONResponse(
-                content={'success': False, 'error': '报告目录不存在'},
-                status_code=404
-            )
+    各模式参数：
+        mode='upload':
+            - file: 单个文件上传（XML、ZIP、TAR.GZ）
+            - files: 多文件上传（文件夹模式）
+            - files[]: 多文件上传（HTML标准格式）
 
-        # 查找 test_result.xml
-        result_xml = os.path.join(result_dir, 'test_result.xml')
-        if not await asyncio.to_thread(os.path.exists, result_xml):
-            return JSONResponse(
-                content={'success': False, 'error': 'test_result.xml 不存在'},
-                status_code=404
-            )
+        mode='saved':
+            - report_timestamp: 报告时间戳
 
-        # 使用 ReportAnalyzer 解析 XML
-        analyzer = ReportAnalyzer()
-        result = analyzer.analyze_file(result_xml)
+        mode='ai':
+            - test_name: 测试用例名称
+            - error_message: 错误消息
+            - stack_trace: 堆栈跟踪（可选）
+            - module: 模块名（可选）
+            - class_names: 类名列表JSON字符串（可选）
 
-        if not result:
-            return JSONResponse(
-                content={'success': False, 'error': '解析 XML 失败'},
-                status_code=500
-            )
-
-        # 转换为前端需要的格式（与Flask版本一致）
-        analysis = {
-            'summary': result['summary'],
-            'device_info': {
-                'device': result['details']['device'],
-                'android_version': result['details']['android_version']
-            },
-            'test_info': {
-                'start_time': result['details']['start_time'],
-                'test_type': result['details']['test_type']
-            },
-            'failures': result['failures']
+    Response:
+        {
+            "success": true,
+            "data": {...},
+            "mode": "upload|saved|ai"
         }
+    """
+    import tempfile
+    import json
 
-        return JSONResponse(content={'success': True, 'data': analysis})
+    try:
+        # 模式1: 分析已保存的报告
+        if mode == AnalysisMode.SAVED:
+            if not report_timestamp:
+                return JSONResponse(
+                    status_code=400,
+                    content={'success': False, 'error': '缺少 report_timestamp 参数'}
+                )
+
+            # 从数据库获取报告信息
+            report = test_report_db.get_report_by_timestamp(report_timestamp)
+
+            if not report:
+                return JSONResponse(
+                    content={'success': False, 'error': '报告不存在'},
+                    status_code=404
+                )
+
+            result_dir = report.get('result_dir')
+            if not result_dir:
+                return JSONResponse(
+                    content={'success': False, 'error': '报告目录不存在'},
+                    status_code=404
+                )
+
+            # 直接检查 XML 文件是否存在（TOCTOU 修复：合并检查）
+            result_xml = os.path.join(result_dir, 'test_result.xml')
+            if not await asyncio.to_thread(os.path.exists, result_xml):
+                return JSONResponse(
+                    content={'success': False, 'error': 'test_result.xml 不存在'},
+                    status_code=404
+                )
+
+            # 使用缓存的分析结果（性能优化）
+            stat = await asyncio.to_thread(os.stat, result_xml)
+            result = cached_xml_analysis(result_xml, stat.st_mtime)
+
+            if not result:
+                return JSONResponse(
+                    content={'success': False, 'error': '解析 XML 失败'},
+                    status_code=500
+                )
+
+            return JSONResponse(content={
+                'success': True,
+                'data': result,
+                'mode': 'saved'
+            })
+
+        # 模式2: AI分析失败用例
+        elif mode == AnalysisMode.AI:
+            if not test_name:
+                return JSONResponse(
+                    status_code=400,
+                    content={'success': False, 'error': '缺少 test_name 参数'}
+                )
+
+            # 解析 class_names JSON 字符串
+            parsed_class_names = []
+            if class_names:
+                try:
+                    parsed_class_names = json.loads(class_names)
+                except json.JSONDecodeError:
+                    parsed_class_names = []
+
+            # 调用AI分析（包含OpenGrok源码搜索）
+            result = analyze_with_ai(test_name, error_message or '', stack_trace or '', module or '', parsed_class_names)
+
+            return JSONResponse(content={
+                'success': True,
+                'data': result,
+                'mode': 'ai'
+            })
+
+        # 模式3: 上传并分析报告文件（默认）
+        else:  # mode == 'upload'
+            # 支持多种上传方式 - 优先使用 files[] 参数（Flask兼容）
+            all_files = []
+            if file:
+                all_files = [file]
+            elif files_array:
+                all_files = files_array
+            elif files:
+                all_files = files
+
+            if not all_files or len(all_files) == 0:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        'success': False,
+                        'error': '没有上传文件'
+                    }
+                )
+
+            if len(all_files) == 1 and all_files[0].filename == '':
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        'success': False,
+                        'error': '文件名为空'
+                    }
+                )
+
+            # 保存上传文件到临时位置
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # 如果是单文件（XML、ZIP、TAR.GZ）
+                if len(all_files) == 1:
+                    uploaded_file = all_files[0]
+                    temp_file_path = os.path.join(temp_dir, uploaded_file.filename)
+
+                    # 保存文件内容
+                    with open(temp_file_path, 'wb') as f:
+                        content = await uploaded_file.read()
+                        f.write(content)
+
+                    # 使用 ReportAnalyzer 分析报告
+                    analyzer = ReportAnalyzer(temp_dir=temp_dir)
+                    result = analyzer.analyze_file(temp_file_path)
+
+                    if result:
+                        return JSONResponse(content={
+                            'success': True,
+                            'data': result,
+                            'mode': 'upload'
+                        })
+                    else:
+                        return JSONResponse(
+                            status_code=400,
+                            content={
+                                'success': False,
+                                'error': '无法解析报告文件',
+                                'message': '请确保文件是有效的XML或压缩包格式'
+                            }
+                        )
+
+                # 如果是多文件（文件夹上传）
+                else:
+                    # 保存所有文件到临时目录
+                    for uploaded_file in all_files:
+                        if uploaded_file.filename:
+                            # 保持相对路径结构
+                            file_path = os.path.join(temp_dir, uploaded_file.filename)
+                            # 确保目录存在
+                            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                            # 保存文件内容
+                            with open(file_path, 'wb') as f:
+                                content = await uploaded_file.read()
+                                f.write(content)
+
+                    # 查找 test_result.xml 或 host_log（支持两种模式）
+                    analyzer = ReportAnalyzer(temp_dir=temp_dir)
+                    xml_path = analyzer.file_handler.find_xml_file()
+
+                    # 如果没有 test_result.xml，尝试使用日志分析器
+                    if not xml_path:
+                        logger.info(f"未找到 test_result.xml，尝试使用HostLog日志分析器")
+                        result = analyzer.analyze_log_dir(temp_dir)
+
+                        if not result:
+                            return JSONResponse(
+                                status_code=400,
+                                content={
+                                    'success': False,
+                                    'error': '未找到 test_result.xml 或 host_log 文件',
+                                    'message': f'已接收 {len(all_files)} 个文件，但文件夹中既不包含 test_result.xml 也不包含 host_log'
+                                }
+                            )
+
+                        # 标记为日志分析结果
+                        result['report_type'] = 'log'
+                        return JSONResponse(content={
+                            'success': True,
+                            'data': result,
+                            'mode': 'upload'
+                        })
+
+                    # 分析报告（使用 analyze_file 方法来获得正确的字典格式）
+                    result = analyzer.analyze_file(xml_path)
+
+                    if result:
+                        return JSONResponse(content={
+                            'success': True,
+                            'data': result,
+                            'mode': 'upload'
+                        })
+                    else:
+                        return JSONResponse(
+                            status_code=400,
+                            content={
+                                'success': False,
+                                'error': '无法解析报告文件',
+                                'message': 'test_result.xml 文件格式无效或损坏'
+                            }
+                        )
 
     except Exception as e:
-        logger.error(f"Error analyzing report: {e}")
-        raise HTTPException(
+        logger.error(f"报告分析失败: {e}")
+        return JSONResponse(
             status_code=500,
-            detail=str(e)
+            content={
+                'success': False,
+                'error': '报告分析失败',
+                'message': str(e)
+            }
         )
+
+
 
 @app.get("/api/system/skills")
 async def download_skills_zip(request: Request, skill_name: str = Query("gms-remote-test", description="技能名称")):
@@ -3791,171 +3992,6 @@ async def delete_report(request: Request, timestamp: str = Query(..., descriptio
             status_code=500
         )
 
-@app.post("/api/reports/analyze")
-async def analyze_test_report(
-    file: Optional[UploadFile] = File(default=None),
-    files: Optional[List[UploadFile]] = File(default=None),
-    files_array: Optional[List[UploadFile]] = File(default=None, alias='files[]')
-):
-    """
-    分析上传的测试报告文件或文件夹（使用新的简化分析器模块）
-
-    Request: multipart/form-data
-        - 'file': 单个文件上传（XML、ZIP、TAR.GZ）
-        - 'files': 多文件上传（文件夹模式）
-        - 'files[]': 多文件上传（HTML标准格式，兼容Flask版本）
-
-    Response:
-        {
-            "success": true,
-            "data": {
-                "test_type": "GTS",
-                "device": "device_serial",
-                "android_version": "15",
-                "start_time": "2025-12-02 09:35:01",
-                "total": 100,
-                "pass_count": 95,
-                "fail_count": 5,
-                "pass_rate": "95.00%",
-                "failures": [
-                    {
-                        "name": "com.example.Test#testMethod",
-                        "reason": "Failure reason...",
-                        "module": "ModuleName"
-                    }
-                ]
-            }
-        }
-    """
-    import tempfile
-
-    # 支持多种上传方式 - 优先使用 files[] 参数（Flask兼容）
-    all_files = []
-    if file:
-        all_files = [file]
-    elif files_array:
-        all_files = files_array
-    elif files:
-        all_files = files
-
-    if not all_files or len(all_files) == 0:
-        return JSONResponse(
-            status_code=400,
-            content={
-                'success': False,
-                'error': '没有上传文件'
-            }
-        )
-
-    if len(all_files) == 1 and all_files[0].filename == '':
-        return JSONResponse(
-            status_code=400,
-            content={
-                'success': False,
-                'error': '文件名为空'
-            }
-        )
-
-    try:
-        # 保存上传文件到临时位置
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # 如果是单文件（XML、ZIP、TAR.GZ）
-            if len(all_files) == 1:
-                uploaded_file = all_files[0]
-                temp_file_path = os.path.join(temp_dir, uploaded_file.filename)
-
-                # 保存文件内容
-                with open(temp_file_path, 'wb') as f:
-                    content = await uploaded_file.read()
-                    f.write(content)
-
-                # 使用 ReportAnalyzer 分析报告
-                analyzer = ReportAnalyzer(temp_dir=temp_dir)
-                result = analyzer.analyze_file(temp_file_path)
-
-                if result:
-                    return JSONResponse(content={
-                        'success': True,
-                        'data': result
-                    })
-                else:
-                    return JSONResponse(
-                        status_code=400,
-                        content={
-                            'success': False,
-                            'error': '无法解析报告文件',
-                            'message': '请确保文件是有效的XML或压缩包格式'
-                        }
-                    )
-
-            # 如果是多文件（文件夹上传）
-            else:
-                # 保存所有文件到临时目录
-                for uploaded_file in all_files:
-                    if uploaded_file.filename:
-                        # 保持相对路径结构
-                        file_path = os.path.join(temp_dir, uploaded_file.filename)
-                        # 确保目录存在
-                        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                        # 保存文件内容
-                        with open(file_path, 'wb') as f:
-                            content = await uploaded_file.read()
-                            f.write(content)
-
-                # 查找 test_result.xml 或 host_log（支持两种模式）
-                analyzer = ReportAnalyzer(temp_dir=temp_dir)
-                xml_path = analyzer.file_handler.find_xml_file()
-
-                # 如果没有 test_result.xml，尝试使用日志分析器
-                if not xml_path:
-                    logger.info(f"未找到 test_result.xml，尝试使用HostLog日志分析器")
-                    result = analyzer.analyze_log_dir(temp_dir)
-
-                    if not result:
-                        return JSONResponse(
-                            status_code=400,
-                            content={
-                                'success': False,
-                                'error': '未找到 test_result.xml 或 host_log 文件',
-                                'message': f'已接收 {len(all_files)} 个文件，但文件夹中既不包含 test_result.xml 也不包含 host_log'
-                            }
-                        )
-
-                    # 标记为日志分析结果
-                    result['report_type'] = 'log'
-                    return JSONResponse(content={
-                        'success': True,
-                        'data': result
-                    })
-
-                # 分析报告（使用 analyze_file 方法来获得正确的字典格式）
-                result = analyzer.analyze_file(xml_path)
-
-                if result:
-                    return JSONResponse(content={
-                        'success': True,
-                        'data': result
-                    })
-                else:
-                    return JSONResponse(
-                        status_code=400,
-                        content={
-                            'success': False,
-                            'error': '无法解析报告文件',
-                            'message': 'test_result.xml 文件格式无效或损坏'
-                        }
-                    )
-
-    except Exception as e:
-        logger.error(f"报告分析失败: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                'success': False,
-                'error': '报告分析失败',
-                'message': str(e)
-            }
-        )
 
 # ==================== 测试分析辅助函数 ====================
 
@@ -4774,111 +4810,7 @@ def get_source_code_suggestions(test_name, error_message, stack_trace=None):
     return result
 
 
-@app.post("/api/reports/analyze-source")
-async def analyze_test_source(req: dict):
-    """
-    分析测试失败并提供Android源码查询链接
 
-    Request body:
-        {
-            "test_name": "com.google.android.gts.multiuser.RestrictedProfileHostTest#testUserIsRestricted",
-            "error_message": "java.lang.AssertionError: ...",
-            "stack_trace": "..."  // 可选
-        }
-
-    Response:
-        {
-            "success": true,
-            "data": {
-                "test_info": {...},
-                "error_info": {...},
-                "analysis": {...},
-                "search_links": [...]
-            }
-        }
-    """
-    try:
-        test_name = req.get('test_name', '')
-        error_message = req.get('error_message', '')
-        stack_trace = req.get('stack_trace', '')
-
-        if not test_name:
-            raise HTTPException(status_code=400, detail="缺少test_name参数")
-
-        # 获取源码建议
-        result = get_source_code_suggestions(test_name, error_message, stack_trace)
-
-        return JSONResponse(content={'success': True, 'data': result})
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"源码分析失败: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"源码分析失败: {str(e)}"
-        )
-
-
-@app.post("/api/reports/analyze-ai")
-async def ai_analyze_failure(req: dict):
-    """
-    使用AI分析测试失败（自动获取源码并分析，使用OpenGrok源码搜索）
-
-    功能说明：
-    - 使用OpenGrok自动获取测试用例源码
-    - 使用OpenGrok搜索失败堆栈中的相关类源码
-    - 结合源码、错误信息和测试逻辑进行综合分析
-    - 提供诊断结果和修复建议
-
-    Request body:
-        {
-            "test_name": "com.google.android.gts.multiuser.RestrictedProfileHostTest#testUserIsRestricted",
-            "error_message": "java.lang.AssertionError: ...",
-            "stack_trace": "...",  // 可选
-            "module": "GtsGmscoreHostTestCases",  // 可选
-            "class_names": ["com.android.server.xxx", "MyClass"]  // 可选：提取的类名列表
-        }
-
-    Response:
-        {
-            "success": true,
-            "data": {
-                "analysis": "...",  // AI分析结果（包含源码分析）
-                "suggestions": [...],  // 解决建议
-                "root_cause": "...",  // 根本原因
-                "source_code_fetched": true,  // 是否成功获取源码
-                "source_url": "...",  // 源码链接（如果获取成功）
-                "source_file_path": "...",  // 源码文件路径
-                "opengrok_results": [...],  // OpenGrok搜索结果（如果有）
-                "ai_model": "GLM-4 (智谱AI)",  // 使用的AI模型
-                "related_docs": [...]
-            }
-        }
-    """
-    try:
-        test_name = req.get('test_name', '')
-        error_message = req.get('error_message', '')
-        stack_trace = req.get('stack_trace', '')
-        module = req.get('module', '')
-        class_names = req.get('class_names', [])  # 新增：提取的类名列表
-
-        if not test_name:
-            raise HTTPException(status_code=400, detail="缺少test_name参数")
-
-        # 调用AI分析（包含OpenGrok源码搜索）
-        result = analyze_with_ai(test_name, error_message, stack_trace, module, class_names)
-
-        return JSONResponse(content={'success': True, 'data': result})
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"AI分析失败: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"AI分析失败: {str(e)}"
-        )
 
 # ==================== VNC管理 ====================
 @app.get("/api/desktop/vnc/status")
@@ -8336,9 +8268,50 @@ async def get_api_docs():
 
 
 @app.get("/api/system/help")
-async def get_api_help():
-    """获取API列表（纯文本格式，只显示方法名和路径）"""
+async def get_api_help(api_path: Optional[str] = None):
+    """获取API帮助信息（统一接口）
+
+    Args:
+        api_path: 可选的API路径（如 'api/test/start'）
+                  - 不提供：返回所有API列表
+                  - 提供：返回指定API的详细帮助
+
+    Examples:
+        # 获取所有API列表
+        curl -s "http://172.16.14.233:5001/api/system/help"
+
+        # 获取单个API详细帮助
+        curl -s "http://172.16.14.233:5001/api/system/help?api_path=api/test/start"
+    """
     try:
+        # 如果指定了api_path，返回单个API的详细帮助
+        if api_path:
+            # 查找匹配的API
+            api_doc = None
+            for api in API_DOCS_LIST:
+                # 移除开头的斜杠进行匹配
+                if api['path'].lstrip('/') == api_path:
+                    api_doc = api
+                    break
+
+            if not api_doc:
+                raise HTTPException(status_code=404, detail=f"API not found: /{api_path}")
+
+            # 生成帮助文本
+            help_text = generate_per_api_help_text(api_doc['method'], api_doc['path'])
+
+            if not help_text:
+                raise HTTPException(status_code=404, detail=f"Help not available for: /{api_path}")
+
+            return PlainTextResponse(
+                content=help_text,
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=300"
+                }
+            )
+
+        # 否则返回所有API列表
         # 按方法类型和路径排序
         sorted_apis = sorted(API_DOCS_LIST, key=lambda x: (x['method'], x['path']))
 
@@ -8359,9 +8332,10 @@ async def get_api_help():
         # 添加使用示例
         text_content += "\n" + "=" * 60 + "\n"
         text_content += "Usage Examples:\n"
-        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/devices/list?help=1"     \n'
-        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/test/status?help=1"       \n'
-        text_content += f'  curl -sX POST "{DEFAULT_SERVER_URL}/api/test/start?help=1"  \n'
+        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/system/help"                          \n'
+        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/system/help?api_path=api/devices/list"\n'
+        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/devices/list?help=1"                 \n'
+        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/test/status?help=1"                   \n'
 
         return PlainTextResponse(
             content=text_content,
@@ -8370,43 +8344,10 @@ async def get_api_help():
                 "Content-Type": "text/plain; charset=utf-8"
             }
         )
-    except Exception as e:
-        logger.error(f"Error getting API help: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/system/help/{api_path:path}")
-async def get_api_help_detail(api_path: str, help: Optional[str] = None):
-    """获取单个API的详细帮助信息（通过GET请求）"""
-    try:
-        # 查找匹配的API
-        api_doc = None
-        for api in API_DOCS_LIST:
-            # 移除开头的斜杠进行匹配
-            if api['path'].lstrip('/') == api_path:
-                api_doc = api
-                break
-
-        if not api_doc:
-            raise HTTPException(status_code=404, detail=f"API not found: /{api_path}")
-
-        # 生成帮助文本
-        help_text = generate_per_api_help_text(api_doc['method'], api_doc['path'])
-
-        if not help_text:
-            raise HTTPException(status_code=404, detail=f"Help not available for: /{api_path}")
-
-        return PlainTextResponse(
-            content=help_text,
-            headers={
-                "Content-Type": "text/plain; charset=utf-8",
-                "Cache-Control": "public, max-age=300"
-            }
-        )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting API help detail: {e}")
+        logger.error(f"Error getting API help: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -8893,143 +8834,6 @@ def generate_api_example(api):
         return f'curl -X {method} "{base_url}{path}"'
 
 # ==================== Claude报告分析API ====================
-
-@app.get("/api/reports/claude-analyze/{report_timestamp}")
-async def claude_analyze_report(
-    report_timestamp: str,
-    use_claude_api: bool = Query(False, description="是否使用Claude API进行深度分析"),
-    claude_api_key: Optional[str] = Query(None, description="Claude API密钥（如果使用Claude API）")
-):
-    """
-    使用Claude分析测试报告
-
-    Args:
-        report_timestamp: 报告时间戳
-        use_claude_api: 是否使用Claude API（需要API密钥）
-        claude_api_key: Claude API密钥
-
-    Returns:
-        {
-            "success": true,
-            "basic_analysis": {...},  # 基础分析（总是返回）
-            "claude_analysis": {...}  # Claude深度分析（如果use_claude_api=true）
-        }
-    """
-    try:
-        # 从数据库获取报告信息
-        report = test_report_db.get_report_by_timestamp(report_timestamp)
-
-        if not report:
-            return JSONResponse(
-                content={'success': False, 'error': '报告不存在'},
-                status_code=404
-            )
-
-        # 获取路径信息
-        result_dir = report.get('result_dir')
-        log_file = report.get('log_file')
-
-        if not result_dir or not os.path.exists(result_dir):
-            return JSONResponse(
-                content={'success': False, 'error': '报告目录不存在'},
-                status_code=404
-            )
-
-        # 创建Claude分析器
-        analyzer = ClaudeReportAnalyzer()
-
-        # 1. 基础分析（解析日志摘要）
-        basic_analysis = analyzer.analyze_report_file(result_dir, log_file)
-
-        if not basic_analysis.get('success'):
-            return JSONResponse(
-                content={'success': False, 'error': '基础分析失败'},
-                status_code=500
-            )
-
-        result = {
-            'success': True,
-            'basic_analysis': basic_analysis
-        }
-
-        # 2. Claude API深度分析（可选）
-        if use_claude_api and claude_api_key:
-            logger.info(f"[Claude] 使用Claude API深度分析报告: {report_timestamp}")
-            claude_analysis = analyzer.analyze_with_claude_api(basic_analysis, claude_api_key)
-            result['claude_analysis'] = claude_analysis
-
-            if claude_analysis.get('success'):
-                logger.info("[Claude] Claude API分析成功")
-            else:
-                logger.warning(f"[Claude] Claude API分析失败: {claude_analysis.get('error')}")
-
-        return JSONResponse(content=result)
-
-    except Exception as e:
-        logger.error(f"Claude分析失败: {e}", exc_info=True)
-        return JSONResponse(
-            content={'success': False, 'error': str(e)},
-            status_code=500
-        )
-
-
-@app.post("/api/reports/claude-analyze-upload")
-async def claude_analyze_uploaded_report(
-    file: UploadFile = File(..., description="测试日志文件或XML报告"),
-    use_claude_api: bool = Form(False, description="是否使用Claude API"),
-    claude_api_key: Optional[str] = Form(None, description="Claude API密钥")
-):
-    """
-    分析上传的测试报告文件
-
-    Args:
-        file: 上传的文件（支持.log、.xml、.zip、.tar.gz）
-        use_claude_api: 是否使用Claude API
-        claude_api_key: Claude API密钥
-
-    Returns:
-        分析结果
-    """
-    import tempfile
-    import shutil
-
-    try:
-        # 保存上传的文件到临时目录
-        temp_dir = tempfile.mkdtemp(prefix='claude_analyze_')
-        file_path = os.path.join(temp_dir, file.filename)
-
-        with open(file_path, 'wb') as f:
-            content = await file.read()
-            f.write(content)
-
-        # 创建分析器
-        analyzer = ClaudeReportAnalyzer()
-
-        # 基础分析
-        basic_analysis = analyzer.analyze_report_file(temp_dir, file_path)
-
-        result = {
-            'success': True,
-            'basic_analysis': basic_analysis
-        }
-
-        # Claude API分析
-        if use_claude_api and claude_api_key:
-            claude_analysis = analyzer.analyze_with_claude_api(basic_analysis, claude_api_key)
-            result['claude_analysis'] = claude_analysis
-
-        # 清理临时文件
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-        return JSONResponse(content=result)
-
-    except Exception as e:
-        logger.error(f"分析上传文件失败: {e}", exc_info=True)
-        return JSONResponse(
-            content={'success': False, 'error': str(e)},
-            status_code=500
-        )
-
 
 # ==================== 主程序 ====================
 
