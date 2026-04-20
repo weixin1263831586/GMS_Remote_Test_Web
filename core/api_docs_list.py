@@ -306,21 +306,12 @@ API_DOCS_LIST = [
     },
     {
         "method": "GET",
-        "path": "/api/reports/analyze/{report_timestamp}",
-        "description": "分析测试报告",
-        "params": [
-            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"}
-        ],
-        "category": "report",
-        "skill": "gms-rt-reports-analyze"
-    },
-    {
-        "method": "GET",
         "path": "/api/reports/download",
-        "description": "获取报告（查看或下载）",
+        "description": "获取报告文件列表、下载ZIP或查看文件内容（统一接口）",
         "params": [
-            {"name": "report_timestamp", "type": "string", "required": True, "desc": "报告时间戳"},
-            {"name": "output_file", "type": "string", "required": False, "desc": "输出文件名（可选）"}
+            {"name": "report_timestamp", "type": "string", "required": False, "desc": "报告时间戳（获取文件列表）"},
+            {"name": "download", "type": "boolean", "required": False, "desc": "设为true时下载ZIP文件"},
+            {"name": "path", "type": "string", "required": False, "desc": "文件路径（查看单个文件内容）"}
         ],
         "category": "report",
         "skill": "gms-rt-reports-download"

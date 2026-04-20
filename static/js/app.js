@@ -4037,7 +4037,7 @@ async function downloadReport(timestamp) {
     try {
         showToast('正在下载报告...', 'info');
 
-        const response = await fetch(`/api/reports/download/${timestamp}`);
+        const response = await fetch(`/api/reports/download?report_timestamp=${timestamp}&download=true`);
 
         // 检查响应状态
         if (!response.ok) {
@@ -6053,8 +6053,7 @@ const CURL_PLACEHOLDERS = Object.freeze({
  * Path parameter normalization patterns
  */
 const PATH_PATTERNS = [
-    { pattern: /^\/api\/reports\/analyze\//, template: '/api/reports/analyze/{report_timestamp}' },
-    { pattern: /^\/api\/reports\/download\//, template: '/api/reports/download/{report_timestamp}' }
+    { pattern: /^\/api\/reports\/analyze\//, template: '/api/reports/analyze/{report_timestamp}' }
 ];
 
 /**
