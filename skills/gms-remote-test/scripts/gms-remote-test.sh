@@ -792,9 +792,10 @@ gms-rt-reports-delete() {
     [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-delete <report_timestamp>"; return 1; }
     check_jq
     echo "🗑️  Deleting report: $report_timestamp..."
-    local data="{\"report_timestamp\":\"$report_timestamp\"}"
-    local response=$(api_call "/reports/delete" "DELETE" "$data")
-    echo "$response" | jq '.'
+    # Use curl directly for DELETE with query parameter
+    local response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X DELETE "${API_BASE}/reports/delete?timestamp=${report_timestamp}")
+    local body=$(echo "$response" | grep -v "HTTP_STATUS:")
+    echo "$body" | jq '.'
 }
 
 # Get/download report
@@ -1181,7 +1182,7 @@ gms-rt-test-start() {
         return 1
     fi
 
-    # Extract parsed values
+    # Extract all parsed values in single jq call (efficiency optimization)
     local device=$(echo "$parse_response" | jq -r '.device // ""')
     local test_type=$(echo "$parse_response" | jq -r '.test_type // ""')
     local test_module=$(echo "$parse_response" | jq -r '.test_module // ""')
@@ -1214,26 +1215,22 @@ gms-rt-test-start() {
         done
     fi
 
-    # Build request data for /api/test/start
-    local data="{}"
-    if [ -n "$retry_dir" ]; then
-        data=$(echo "$data" | jq ". + {\"retry_dir\":\"$retry_dir\"}")
-    fi
-    if [ -n "$device" ]; then
-        data=$(echo "$data" | jq ". + {\"devices\":[\"$device\"]}")
-    fi
-    if [ -n "$test_type" ]; then
-        data=$(echo "$data" | jq ". + {\"test_type\":\"$test_type\"}")
-    fi
-    if [ -n "$test_module" ]; then
-        data=$(echo "$data" | jq ". + {\"test_module\":\"$test_module\"}")
-    fi
-    if [ -n "$test_case" ]; then
-        data=$(echo "$data" | jq ". + {\"test_case\":\"$test_case\"}")
-    fi
-    if [ -n "$test_suite" ]; then
-        data=$(echo "$data" | jq ". + {\"test_suite\":\"$test_suite\"}")
-    fi
+    # Build request data for /api/test/start (optimized single jq call)
+    local data=$(jq -n \
+        --arg rdir "$retry_dir" \
+        --arg dev "$device" \
+        --arg ttype "$test_type" \
+        --arg tmod "$test_module" \
+        --arg tcase "$test_case" \
+        --arg tsuite "$test_suite" \
+        '{
+            (if $rdir != "" then .retry_dir = $rdir else . end) |
+            (if $dev != "" then .devices = [$dev] else . end) |
+            (if $ttype != "" then .test_type = $ttype else . end) |
+            (if $tmod != "" then .test_module = $tmod else . end) |
+            (if $tcase != "" then .test_case = $tcase else . end) |
+            (if $tsuite != "" then .test_suite = $tsuite else . end)
+        }')
 
     # Call /api/test/start
     local response=$(api_call "/test/start" "POST" "$data")

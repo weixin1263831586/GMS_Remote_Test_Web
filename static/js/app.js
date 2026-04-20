@@ -3654,7 +3654,6 @@ function displayTestReports(reports) {
                 <td style="padding: 12px; text-align: center;">
                     <button class="btn-xxs" onclick="event.stopPropagation(); claudeAnalyzeReport('${report.timestamp}')" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: 600;">🤖 Claude分析</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); analyzeReport('${report.timestamp}')">📈 分析报告</button>
-                    <button class="btn-xxs" onclick="event.stopPropagation(); viewReportDetails('${report.timestamp}')">📄 查看报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); retryReportWithSuite('${report.timestamp}', '${report.test_type || ''}', '${(report.suite_path || '').replace(/'/g, "\\'")}')" style="background: var(--primary-color);">🔄 retry报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); downloadReport('${report.timestamp}')" style="background: var(--success-color);">⬇️ 下载报告</button>
                     <button class="btn-xxs" onclick="event.stopPropagation(); deleteReport('${report.timestamp}')" style="background: var(--danger-color);">🗑️ 删除报告</button>
@@ -4035,39 +4034,156 @@ async function retryReportWithSuite(timestamp, testType, suitePath) {
 
 async function downloadReport(timestamp) {
     try {
-        showToast('正在下载报告...', 'info');
+        console.log('[downloadReport] Starting download for timestamp:', timestamp);
+        showToast('正在下载测试报告文件夹...', 'info');
 
+        // 获取文件列表
+        const listUrl = `/api/reports/download?report_timestamp=${timestamp}`;
+        console.log('[downloadReport] Fetching file list from:', listUrl);
+        const listResponse = await fetch(listUrl);
+
+        if (!listResponse.ok) {
+            let errorMsg = `HTTP ${listResponse.status}`;
+            try {
+                const errorData = await listResponse.json();
+                errorMsg = errorData.error || errorMsg;
+            } catch (e) {
+                // 如果无法解析 JSON，使用默认错误消息
+            }
+            console.error('Download failed:', listResponse.status, errorMsg);
+            showToast('下载失败：' + errorMsg, 'error');
+            return;
+        }
+
+        const listData = await listResponse.json();
+        console.log('[downloadReport] File list data:', listData);
+
+        if (!listData.success || !listData.files || listData.files.length === 0) {
+            showToast('下载失败：' + (listData.error || '没有找到文件'), 'error');
+            return;
+        }
+
+        console.log('[downloadReport] Found', listData.files.length, 'files');
+
+        // 检查浏览器是否支持文件系统访问 API（需要 HTTPS 或 localhost 环境）
+        if ('showDirectoryPicker' in window) {
+            console.log('[downloadReport] Using File System Access API');
+            await downloadReportWithFileSystemAPI(timestamp, listData.files);
+        } else {
+            console.log('[downloadReport] File System Access API not supported, falling back to ZIP');
+            // 回退到 ZIP 下载
+            await downloadReportAsZip(timestamp);
+        }
+    } catch (error) {
+        console.error('Download report error:', error);
+        showToast('下载失败：' + error.message, 'error');
+    }
+}
+
+// 使用文件系统API下载文件夹
+async function downloadReportWithFileSystemAPI(timestamp, files) {
+    try {
+        // 让用户选择保存目录
+        const dirHandle = await window.showDirectoryPicker({
+            startIn: 'downloads',
+            suggestedName: timestamp
+        });
+
+        let successCount = 0;
+        let failCount = 0;
+
+        // 下载每个文件
+        for (const file of files) {
+            try {
+                // 创建目录结构
+                const pathParts = file.relative_path.split('/');
+                let currentHandle = dirHandle;
+
+                // 创建子目录（除了最后的部分，那是文件名）
+                for (let i = 0; i < pathParts.length - 1; i++) {
+                    const part = pathParts[i];
+                    currentHandle = await currentHandle.getDirectoryHandle(part, { create: true });
+                }
+
+                // 获取文件内容
+                const fileResponse = await fetch(`/api/reports/download?path=${encodeURIComponent(file.path)}`);
+                if (!fileResponse.ok) {
+                    console.error(`Failed to download ${file.relative_path}`);
+                    failCount++;
+                    continue;
+                }
+
+                const fileData = await fileResponse.json();
+                if (!fileData.success) {
+                    console.error(`Failed to download ${file.relative_path}: ${fileData.error}`);
+                    failCount++;
+                    continue;
+                }
+
+                // 解码base64内容
+                const binaryString = atob(fileData.content);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                // 创建文件
+                const fileName = pathParts[pathParts.length - 1];
+                const fileHandle = await currentHandle.getFileHandle(fileName, { create: true });
+                const writable = await fileHandle.createWritable();
+                await writable.write(bytes);
+                await writable.close();
+
+                successCount++;
+                console.log(`Downloaded: ${file.relative_path}`);
+            } catch (error) {
+                console.error(`Error downloading ${file.relative_path}:`, error);
+                failCount++;
+            }
+        }
+
+        showToast(`报告下载成功：${successCount}个文件成功，${failCount}个失败`, successCount > 0 ? 'success' : 'error');
+    } catch (error) {
+        console.error('File System Access API error:', error);
+        // 如果用户取消或 API 失败，回退到 ZIP 下载
+        showToast('文件夹下载失败，正在切换到 ZIP 下载...', 'info');
+        await downloadReportAsZip(timestamp);
+    }
+}
+
+// 回退方案：下载为 ZIP
+async function downloadReportAsZip(timestamp) {
+    try {
         const response = await fetch(`/api/reports/download?report_timestamp=${timestamp}&download=true`);
 
-        // 检查响应状态
         if (!response.ok) {
             let errorMsg = `HTTP ${response.status}`;
             try {
                 const errorData = await response.json();
                 errorMsg = errorData.error || errorMsg;
             } catch (e) {
-                // 如果无法解析JSON，使用默认错误消息
+                // 如果无法解析 JSON，使用默认错误消息
             }
             console.error('Download failed:', response.status, errorMsg);
-            showToast('下载失败: ' + errorMsg, 'error');
+            showToast('下载失败：' + errorMsg, 'error');
             return;
         }
 
-        // 检查Content-Type
+        // 检查 Content-Type
         const contentType = response.headers.get('Content-Type');
         console.log('Response Content-Type:', contentType);
 
         if (contentType && contentType.includes('application/json')) {
-            // 如果返回的是JSON而不是文件，说明有错误
+            // 如果返回的是 JSON 而不是文件，说明有错误
             const errorData = await response.json();
             console.error('Server returned error:', errorData);
-            showToast('下载失败: ' + (errorData.error || '服务器错误'), 'error');
+            showToast('下载失败：' + (errorData.error || '服务器错误'), 'error');
             return;
         }
 
         // 获取文件名
         const contentDisposition = response.headers.get('Content-Disposition');
-        let filename = `report_${timestamp}.zip`;
+        let filename = `${timestamp}.zip`;
 
         if (contentDisposition) {
             const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
@@ -4082,7 +4198,7 @@ async function downloadReport(timestamp) {
         console.log('Blob size:', blob.size, 'bytes');
 
         if (blob.size === 0) {
-            showToast('下载失败: 文件为空', 'error');
+            showToast('下载失败：文件为空', 'error');
             return;
         }
 
@@ -4100,10 +4216,10 @@ async function downloadReport(timestamp) {
             window.URL.revokeObjectURL(url);
         }, 100);
 
-        showToast('报告下载成功', 'success');
+        showToast('报告 ZIP 下载成功', 'success');
     } catch (error) {
-        console.error('Download report error:', error);
-        showToast('下载失败: ' + error.message, 'error');
+        console.error('Download report as ZIP error:', error);
+        showToast('ZIP 下载失败：' + error.message, 'error');
     }
 }
 
@@ -4149,111 +4265,6 @@ async function analyzeReport(timestamp) {
     }
 }
 
-
-async function viewReportDetails(timestamp) {
-    try {
-        const resp = await fetch(`/api/reports/download?report_timestamp=${timestamp}`);
-        const data = await resp.json();
-
-        if (!data.success) {
-            showToast('加载报告文件失败: ' + data.error, 'error');
-            return;
-        }
-
-        // Show report details modal
-        showReportDetailsModal(timestamp, data.files);
-    } catch (e) {
-        console.error('[Reports] Error loading report details:', e);
-        showToast('加载报告详情失败: ' + e.message, 'error');
-    }
-}
-
-function showReportDetailsModal(timestamp, files) {
-    // Create modal if not exists
-    let modal = document.getElementById('report-details-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'report-details-modal';
-        modal.className = 'modal';
-        modal.innerHTML = `
-            <div class="modal-content" style="max-width: 700px; width: 90%; max-height: 80vh; overflow: hidden;">
-                <div class="modal-header">
-                    <span class="modal-title">测试报告详情</span>
-                    <span class="modal-close" onclick="closeReportDetailsModal()">&times;</span>
-                </div>
-                <div class="modal-body" style="overflow-y: auto; max-height: calc(80vh - 120px);">
-                    <div style="margin-bottom: 15px;">
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">时间戳</div>
-                        <div id="report-timestamp" style="font-family: monospace; font-size: 13px; color: var(--text-primary);"></div>
-                    </div>
-                    <div style="margin-bottom: 15px;">
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">报告文件</div>
-                        <div id="report-files-list" style="max-height: 300px; overflow-y: auto;"></div>
-                    </div>
-                    <div id="report-file-preview" style="display: none;">
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">文件预览</div>
-                        <pre id="report-file-content" style="background: var(--darker-bg); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 11px; max-height: 300px; overflow-y: auto;"></pre>
-                    </div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-    }
-
-    document.getElementById('report-timestamp').textContent = timestamp;
-
-    const filesList = document.getElementById('report-files-list');
-    filesList.innerHTML = files.map(file => {
-        const sizeKB = (file.size / 1024).toFixed(1);
-        return `
-            <div style="display: flex; align-items: center; padding: 8px; border-bottom: 1px solid var(--border-color); cursor: pointer; hover:background: var(--light-bg);" onclick="viewReportFile('${file.path}', '${file.name}')">
-                <span style="flex: 1; font-family: monospace; font-size: 11px; color: var(--text-primary);">${file.relative_path}</span>
-                <span style="font-size: 10px; color: var(--text-secondary); margin-right: 10px;">${sizeKB} KB</span>
-                <button class="btn-xxs" onclick="event.stopPropagation(); viewReportFile('${file.path}', '${file.name}')">📄 查看</button>
-            </div>
-        `;
-    }).join('');
-
-    // 使用show类来显示modal，不要直接设置style.display
-    modal.classList.add('show');
-}
-
-function closeReportDetailsModal() {
-    const modal = document.getElementById('report-details-modal');
-    if (modal) {
-        modal.classList.remove('show');
-        document.getElementById('report-file-preview').style.display = 'none';
-    }
-}
-
-async function viewReportFile(filePath, fileName) {
-    try {
-        const resp = await fetch(`/api/reports/download?path=${encodeURIComponent(filePath)}`);
-        const data = await resp.json();
-
-        if (!data.success) {
-            showToast('读取文件失败: ' + data.error, 'error');
-            return;
-        }
-
-        // Show file preview
-        const preview = document.getElementById('report-file-preview');
-        const content = document.getElementById('report-file-content');
-
-        preview.style.display = 'block';
-        content.textContent = data.content.substring(0, 10000); // Limit to first 10KB
-
-        if (data.content.length > 10000) {
-            content.textContent += '\n\n... (文件过大，仅显示前 10KB)';
-        }
-
-        // Scroll to preview
-        preview.scrollIntoView({ behavior: 'smooth' });
-    } catch (e) {
-        console.error('[Reports] Error viewing file:', e);
-        showToast('查看文件失败: ' + e.message, 'error');
-    }
-}
 
 // ==================== 安装指南弹窗 ====================
 // 模块级状态管理，避免使用 this
@@ -5804,7 +5815,6 @@ window.startTest = startTest;
 window.stopTest = stopTest;
 window.selectReportSource = selectReportSource;
 window.deleteReport = deleteReport;
-window.viewReportDetails = viewReportDetails;  // 使用实际存在的函数名
 window.downloadReport = downloadReport;
 window.retryReportWithSuite = retryReportWithSuite;
 window.analyzeReport = analyzeReport;
