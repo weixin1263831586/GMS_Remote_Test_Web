@@ -261,6 +261,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # 导入核心模块
 from core.config import config_manager
 from core.ssh import ssh_manager, SSHD_INSTALL_GUIDE
+from core.file_utils import FileUtils
 from core.device import device_manager
 from core.test_runner import test_runner
 from core.test_report import test_report_manager
@@ -2154,8 +2155,6 @@ async def opengrok_search(request: Request):
 
 # ==================== 测试管理 ====================
 
-# ==================== 测试管理 ====================
-
 class TestParseArgsRequest(BaseModel):
     """测试参数解析请求 - 用于智能识别命令行参数"""
     params: List[str] = Field(default_factory=list, description="命令行参数列表")
@@ -3508,80 +3507,68 @@ async def download_report(
                     status_code=404
                 )
 
-            # 模式2：下载ZIP文件
+            # 推导 logs 目录路径 (result_dir 向上两级到 android_suite_dir，再构建 logs 路径)
+            android_suite_dir = os.path.dirname(os.path.dirname(report_dir))
+            logs_dir = os.path.join(android_suite_dir, 'logs', report_timestamp)
+
+            # 检查logs目录是否存在
+            has_logs = os.path.exists(logs_dir)
+            if has_logs:
+                logger.info(f"[DOWNLOAD] 找到logs目录: {logs_dir}")
+            else:
+                logger.info(f"[DOWNLOAD] 未找到logs目录: {logs_dir}")
+
+            # 模式 2：下载 ZIP 文件（回退方案）
             if download:
-                logger.info(f"[DOWNLOAD] 请求下载报告ZIP: timestamp='{report_timestamp}'")
+                logger.info(f"[DOWNLOAD] 请求下载报告 ZIP: timestamp='{report_timestamp}'")
 
-                # 创建ZIP文件到内存
-                zip_buffer = io.BytesIO()
-                zip_filename = f"report_{report_timestamp}.zip"
-                file_count = 0
+                # 构建目录映射：{目录路径：ZIP 中的前缀}
+                dir_mapping = {report_dir: ''}  # results 目录文件放在 ZIP 根目录
+                if has_logs:
+                    dir_mapping[logs_dir] = 'logs'  # logs 目录文件放在 ZIP 的 logs/子目录下
 
-                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                    for root, dirs, filenames in os.walk(report_dir):
-                        for filename in filenames:
-                            file_path = os.path.join(root, filename)
-                            arcname = os.path.relpath(file_path, os.path.dirname(report_dir))
+                result = FileUtils.create_zip_from_multiple_directories(dir_mapping, zip_filename=f"{report_timestamp}.zip")
 
-                            try:
-                                zip_file.write(file_path, arcname)
-                                file_count += 1
-                            except Exception as e:
-                                logger.warning(f"[DOWNLOAD] 无法添加文件到ZIP: {file_path}, 错误: {e}")
-
-                logger.info(f"[DOWNLOAD] 创建ZIP文件: {zip_filename}, 包含 {file_count} 个文件")
-
-                # 获取ZIP数据
-                zip_data = zip_buffer.getvalue()
-
-                if file_count == 0:
+                if result is None:
+                    logger.warning(f"[DOWNLOAD] 没有找到文件")
                     return JSONResponse(
-                        content={'success': False, 'error': 'ZIP文件创建失败'},
+                        content={'success': False, 'error': '没有找到文件'},
                         status_code=500
                     )
 
-                # 返回ZIP文件
+                zip_data, file_count = result
+                logger.info(f"[DOWNLOAD] 创建 ZIP 成功：{report_timestamp}.zip, {file_count} 个文件")
+
+                # 返回 ZIP 文件
                 return Response(
                     content=zip_data,
                     media_type="application/zip",
                     headers={
-                        "Content-Disposition": f"attachment; filename=\"{zip_filename}\""
+                        "Content-Disposition": f"attachment; filename=\"{report_timestamp}.zip\""
                     }
                 )
 
-            # 模式1：返回文件列表
-            else:
-                logger.info(f"[DOWNLOAD] 请求获取报告文件列表: timestamp='{report_timestamp}'")
 
-                # 列出文件
-                files = []
-                for root, dirs, filenames in os.walk(report_dir):
-                    for filename in filenames:
-                        file_path = os.path.join(root, filename)
-                        # 相对于报告目录的路径
-                        rel_path = os.path.relpath(file_path, report_dir)
+            logger.info(f"[DOWNLOAD] 请求获取报告文件列表: timestamp='{report_timestamp}'")
 
-                        # 获取文件大小
-                        try:
-                            file_size = os.path.getsize(file_path)
-                        except (FileNotFoundError, OSError):
-                            file_size = 0
+            # 收集所有文件（results和logs）
+            all_files = []
 
-                        files.append({
-                            'name': filename,
-                            'path': file_path,
-                            'relative_path': rel_path,
-                            'size': file_size
-                        })
+            # 添加results目录文件，results目录下的文件相对路径直接从result_dir开始
+            result_files = FileUtils.list_directory_files(report_dir, max_files=100, relative_to=report_dir)
+            all_files.extend(result_files)
 
-                        # 限制返回数量
-                        if len(files) >= 100:
-                            break
+            # 添加logs目录文件（如果存在），添加logs/前缀
+            if has_logs:
+                log_files = FileUtils.list_directory_files(logs_dir, max_files=100, relative_to=logs_dir)
+                # 为logs文件添加logs/前缀
+                for file_info in log_files:
+                    file_info['relative_path'] = os.path.join('logs', file_info['relative_path'])
+                all_files.extend(log_files)
 
-                    if len(files) >= 100:
-                        break
+            logger.info(f"[DOWNLOAD] 找到 {len(all_files)} 个文件 (results: {len(result_files)}, logs: {len(log_files) if has_logs else 0})")
 
-                return JSONResponse(content={'success': True, 'files': files})
+            return JSONResponse(content={'success': True, 'files': all_files})
 
         # 模式3：查看单个文件内容
         elif path:
@@ -3720,31 +3707,17 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
                 status_code=404
             )
 
-        zip_buffer = io.BytesIO()
+        # 使用共享工具创建ZIP
         zip_filename = f"{skill_name}-skills.zip"
-        file_count = 0
+        result = FileUtils.create_zip_from_directory(skills_dir, zip_filename)
 
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for root, dirs, filenames in os.walk(skills_dir):
-                for filename in filenames:
-                    file_path = os.path.join(root, filename)
-                    arcname = os.path.relpath(file_path, skills_dir)
-
-                    try:
-                        zip_file.write(file_path, arcname)
-                        file_count += 1
-                    except Exception as e:
-                        logger.warning(f"[SKILLS_DOWNLOAD] 无法添加文件到 ZIP: {file_path}, 错误：{e}")
-
-        logger.info(f"[SKILLS_DOWNLOAD] 成功创建 ZIP 文件 {zip_filename}，包含 {file_count} 个文件")
-
-        zip_data = zip_buffer.getvalue()
-
-        if file_count == 0:
+        if result is None:
             return JSONResponse(
                 content={'success': False, 'error': 'ZIP 文件创建失败：目录为空'},
                 status_code=500
             )
+
+        zip_data, file_count = result
 
         return Response(
             content=zip_data,
