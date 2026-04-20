@@ -38,12 +38,18 @@ info() {
 }
 
 # Make API call and return JSON
+# Usage: api_call <endpoint> [method] [data] [curl_extra_args]
 api_call() {
     local endpoint="$1"
     local method="${2:-GET}"
     local data="${3:-}"
+    local curl_extra="${4:-}"
 
-    if [ -n "$data" ] || [ "$method" = "POST" ]; then
+    if [ -n "$curl_extra" ]; then
+        # File upload or custom curl args mode
+        # Don't use -s here as it may conflict with progress bars (-#) in curl_extra
+        eval "curl -w \"\\nHTTP_STATUS:%{http_code}\" -X \"\${method}\" \"\${API_BASE}\${endpoint}\" $curl_extra"
+    elif [ -n "$data" ] || [ "$method" = "POST" ]; then
         curl -s -X "${method}" "${API_BASE}${endpoint}" \
             -H "Content-Type: application/json" \
             -d "${data}"
@@ -161,41 +167,29 @@ gms-rt-burn-firmware() {
     local term_width=${COLUMNS:-$(tput cols 2>/dev/null || echo 80)}
     local bar_width=$((term_width * 60 / 100))
 
-    # Upload with progress bar and capture response
-    local tmp_response=$(mktemp)
-
     # Set COLUMNS for curl progress bar width (60% of terminal)
     export COLUMNS=$bar_width
-    curl -# -X POST "${API_BASE}/burn/firmware" \
-        -F "firmware_file=@$firmware_path" \
-        -F "devices=$devices" \
-        -F "wipe_data=$wipe_data" \
-        -o "$tmp_response" \
-        -w "\nHTTP_STATUS:%{http_code}\n"
+
+    # Use api_call with custom curl args for file upload with progress bar
+    local curl_args="-# -o /dev/stdout -F \"firmware_file=@$firmware_path\" -F \"devices=$devices\" -F \"wipe_data=$wipe_data\""
+    local response=$(api_call "/burn/firmware" "POST" "" "$curl_args")
 
     unset COLUMNS
-    local http_status=$(grep "HTTP_STATUS:" "$tmp_response" | cut -d: -f2)
-    local response=$(cat "$tmp_response" | grep -v "HTTP_STATUS:")
 
-    rm -f "$tmp_response"
-
-    echo ""  # Add newline after progress bar
-
-    # Check response
-    # First check if HTTP status is successful (200-299)
-    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]]; then
-        error "Firmware burn failed - HTTP status: $http_status"
-        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+    local body
+    if ! body=$(check_http_response "$response"); then
+        error "Firmware burn failed - HTTP status: $HTTP_STATUS_CODE"
+        echo "$response" | grep -v "HTTP_STATUS:" | jq '.' 2>/dev/null || echo "$response" | grep -v "HTTP_STATUS:"
         return 1
     fi
 
-    # Then check if response contains success field
-    if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then
+    # Check if response contains success field
+    if echo "$body" | jq -e '.success' > /dev/null 2>/dev/null; then
         success "Firmware burn completed successfully"
-        echo "$response" | jq '.'
+        echo "$body" | jq '.'
     else
         error "Firmware burn failed - API returned error"
-        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        echo "$body" | jq '.' 2>/dev/null || echo "$body"
         return 1
     fi
 }
@@ -232,9 +226,8 @@ gms-rt-burn-gsi() {
         --argjson devices "$(convert_devices_to_json "$devices")" \
         '{system_img: $system_img, script_path: $script_path, devices: $devices}')
 
-    local response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${API_BASE}/burn/gsi" \
-        -H "Content-Type: application/json" \
-        -d "$json_payload")
+    # Use api_call with custom curl args for JSON POST with status code
+    local response=$(api_call "/burn/gsi" "POST" "" "-H \"Content-Type: application/json\" -d \"$json_payload\"")
 
     local body
     if ! body=$(check_http_response "$response"); then
@@ -705,9 +698,8 @@ gms-rt-files-install() {
     check_jq
     echo "📦 Installing APK: $file_path to $device_id..."
 
-    local response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${API_BASE}/files/install" \
-        -F "file=@$file_path" \
-        -F "device_id=$device_id")
+    local curl_args="-F \"file=@$file_path\" -F \"device_id=$device_id\""
+    local response=$(api_call "/files/install" "POST" "" "$curl_args")
 
     local body
     if ! body=$(check_http_response "$response"); then
@@ -749,15 +741,14 @@ gms-rt-files-upload() {
     check_jq
     echo "📤 Uploading file: $file_path..."
 
-    local response
+    local curl_args
     if [ -n "$target_path" ]; then
-        response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${API_BASE}/files/upload" \
-            -F "file=@$file_path" \
-            -F "path=$target_path")
+        curl_args="-F \"file=@$file_path\" -F \"path=$target_path\""
     else
-        response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${API_BASE}/files/upload" \
-            -F "file=@$file_path")
+        curl_args="-F \"file=@$file_path\""
     fi
+
+    local response=$(api_call "/files/upload" "POST" "" "$curl_args")
 
     local body
     if ! body=$(check_http_response "$response"); then
@@ -809,21 +800,54 @@ gms-rt-reports-delete() {
 # Get/download report
 gms-rt-reports-download() {
     local report_timestamp="$1"
-    local output_file="${2:-}"
-    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-download <report_timestamp> [output_file]"; return 1; }
+    local output_dir="${2:-${report_timestamp}}"
+    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-download <report_timestamp> [output_dir]"; return 1; }
     check_jq
-    if [ -n "$output_file" ]; then
-        echo "📥 Downloading report: $report_timestamp to $output_file..."
-        curl -s "${API_BASE}/reports/download?report_timestamp=$report_timestamp" -o "$output_file"
-        if [ $? -eq 0 ]; then
-            success "Report downloaded to $output_file"
-        else
-            error "Failed to download report"
-        fi
-    else
-        echo "📊 Viewing report: $report_timestamp..."
-        api_call "/reports/download?report_timestamp=$report_timestamp" | jq '.'
+
+    echo "📥 Downloading report folder: $report_timestamp to $output_dir..."
+
+    # 创建输出目录
+    mkdir -p "$output_dir"
+
+    # 获取文件列表
+    local response=$(api_call "/reports/download?report_timestamp=$report_timestamp")
+
+    if ! echo "$response" | jq -e '.success' > /dev/null; then
+        local error_msg=$(echo "$response" | jq -r '.error // "Unknown error"')
+        error "Failed to get report files: $error_msg"
+        return 1
     fi
+
+    # 下载每个文件
+    local file_count=$(echo "$response" | jq '.files | length')
+    echo "Found $file_count files, downloading..."
+
+    local success_count=0
+    local fail_count=0
+
+    echo "$response" | jq -r '.files[] | @json "{\"path\": \"" + .path + "\", \"relative_path\": \"" + .relative_path + "\"}"' | while IFS= read -r file_info; do
+        local file_path=$(echo "$file_info" | jq -r '.path')
+        local relative_path=$(echo "$file_info" | jq -r '.relative_path')
+        local output_path="${output_dir}/${relative_path}"
+
+        # 创建目标目录
+        local target_dir=$(dirname "$output_path")
+        mkdir -p "$target_dir"
+
+        # 下载文件内容
+        local file_response=$(api_call "/reports/download?path=${file_path}")
+        if echo "$file_response" | jq -e '.success' > /dev/null; then
+            echo "$file_response" | jq -r '.content' > "$output_path"
+            echo "✓ Downloaded: $relative_path"
+            ((success_count++))
+        else
+            echo "✗ Failed: $relative_path"
+            ((fail_count++))
+        fi
+    done
+
+    echo ""
+    success "Report folder downloaded to: $output_dir"
 }
 
 # List all reports
@@ -1090,18 +1114,13 @@ gms-rt-terminal-push() {
     echo "📤 Pushing file to terminal: $filename"
     echo "📁 Target path: $target_path"
 
-    # 使用curl上传文件
-    local response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${API_BASE}/terminal/push" \
-        -F "file=@$file_path" \
-        -F "path=$target_path" \
-        -F "auto_rename=true")
+    # 使用 api_call with custom curl args for file upload
+    local curl_args="-F \"file=@$file_path\" -F \"path=$target_path\" -F \"auto_rename=true\""
+    local response=$(api_call "/terminal/push" "POST" "" "$curl_args")
 
-    local http_status=$(echo "$response" | grep "HTTP_STATUS:" | cut -d: -f2)
-    local body=$(echo "$response" | grep -v "HTTP_STATUS:")
-
-    # Check HTTP status first
-    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]]; then
-        error "Failed to push file - HTTP status: $http_status"
+    local body
+    if ! body=$(check_http_response "$response"); then
+        error "Failed to push file - HTTP status: $HTTP_STATUS_CODE"
         echo "$body" | jq '.' 2>/dev/null || echo "$body"
         return 1
     fi
@@ -1135,182 +1154,88 @@ gms-rt-test-logs-stream() {
     curl -N "${API_BASE}/test/logs/stream"
 }
 
-# Start a test
+# Start a test - delegates to /api/test/parse-args for intelligent parameter parsing
 gms-rt-test-start() {
     check_jq
 
-    # 检测模式：通过第一个参数判断
-    local first_param="$1"
+    # Collect all arguments into an array
+    local args=("$@")
+    local first_param="${args[0]:-}"
 
+    # Show help if no arguments
     if [ -z "$first_param" ]; then
-        error "Usage:"
-        error "  Mode 1 (Direct test): gms-rt-test-start <DEVICE> [TYPE] [MODULE/SUITE] [CASE/SUITE] [SUITE]"
-        error "  Mode 2 (Retry report): gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE] [SUITE]"
-        error ""
-        error "智能参数识别："
-        error "  - 包含 '/' 的参数自动识别为路径（test_suite）"
-        error "  - 其他参数按位置识别为 test_module, test_case"
-        error ""
-        error "示例:"
-        error "  gms-rt-test-start RK3572GMS4 CTS /path/to/android-cts/tools"
-        error "  gms-rt-test-start RK3572GMS4 CTS TestModuleName"
-        error "  gms-rt-test-start RK3572GMS4 CTS TestModuleName TestCaseName"
-        error "  gms-rt-test-start RK3572GMS4 CTS TestModuleName TestCaseName /path/to/suite"
-        error ""
-        error "Supported Test Types:"
-        error "  CTS      - Compatibility Test Suite"
-        error "  GTS      - Google Mobile Services Test Suite"
-        error "  GTS-ROOT - GTS with root permissions"
-        error "  STS      - Security Test Suite"
-        error "  VTS      - Vendor Test Suite"
-        error "  APTS     - Android Peripheral Test Suite"
-        error "  GSI      - Generic System Image tests (uses CTS suite)"
-        error ""
-        error "Examples:"
-        error "  gms-rt-test-start RF8TC2W4JNH CTS CtsPermissionTestCases"
-        error "  gms-rt-test-start RF8TC2W4JNH GTS-ROOT"
-        error "  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 RF8TC2W4JNH GTS"
-        error "  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 RF8TC2W4JNH /path/to/suite"
+        _gms_rt_test_start_help
         return 1
     fi
 
-    # 模式2: 重试模式
-    if [ "$first_param" = "--retry" ]; then
-        local report_timestamp="$2"
-        local device_serial="${3:-}"
-        local third_param="${4:-}"
-        local fourth_param="${5:-}"  # 添加第四个参数支持
+    # Call API to parse arguments
+    local params_json=$(printf '%s\n' "${args[@]}" | jq -R . | jq -s .)
+    local parse_response=$(api_call "/test/parse-args" "POST" "{\"params\":$params_json}")
 
-        if [ -z "$report_timestamp" ]; then
-            error "Report timestamp required for retry mode"
-            error "Usage: gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE] [SUITE]"
-            error "Supported types: CTS, GSI, GTS, GTS-ROOT, STS, VTS, APTS"
-            error "Example: gms-rt-test-start --retry 2026.03.25_09.49.10 RK3572GMS4 CTS /path/to/android-cts/tools"
-            return 1
-        fi
+    # Check if parsing succeeded
+    if ! echo "$parse_response" | jq -e '.success' > /dev/null 2>/dev/null; then
+        local error_msg=$(extract_api_error "$parse_response")
+        error "Failed to parse arguments: $error_msg"
+        echo ""
+        _gms_rt_test_start_help
+        return 1
+    fi
 
+    # Extract parsed values
+    local device=$(echo "$parse_response" | jq -r '.device // ""')
+    local test_type=$(echo "$parse_response" | jq -r '.test_type // ""')
+    local test_module=$(echo "$parse_response" | jq -r '.test_module // ""')
+    local test_case=$(echo "$parse_response" | jq -r '.test_case // ""')
+    local test_suite=$(echo "$parse_response" | jq -r '.test_suite // ""')
+    local retry_dir=$(echo "$parse_response" | jq -r '.retry_dir // ""')
+    local warnings=$(echo "$parse_response" | jq -r '.warnings[]?' 2>/dev/null)
+
+    # Display parsed parameters
+    if [ -n "$retry_dir" ]; then
         echo "🔄 Starting test retry..."
-        echo "  Report: $report_timestamp"
-
-        local data="{\"retry_dir\":\"$report_timestamp\"}"
-        if [ -n "$device_serial" ]; then
-            data=$(echo "$data" | jq ". + {\"devices\":[\"$device_serial\"]}")
-            echo "  Device: $device_serial"
-        fi
-
-        # 处理第三个参数（test_type）和第四个参数（test_suite，可选）
-        if [ -n "$third_param" ]; then
-            if [[ "$third_param" == */* ]]; then
-                # 第三个参数是路径，作为 test_suite
-                data=$(echo "$data" | jq ". + {\"test_suite\":\"$third_param\"}")
-                echo "  Suite: $third_param"
-                echo "  ℹ️  Test type will be auto-detected from suite path"
-            else
-                # 第三个参数不是路径，作为 test_type
-                data=$(echo "$data" | jq ". + {\"test_type\":\"$third_param\"}")
-                echo "  Type: $third_param"
-
-                # 检查第四个参数是否为test_suite路径
-                if [ -n "$fourth_param" ]; then
-                    if [[ "$fourth_param" == */* ]]; then
-                        data=$(echo "$data" | jq ". + {\"test_suite\":\"$fourth_param\"}")
-                        echo "  Suite: $fourth_param"
-                    else
-                        echo "  ⚠️  Warning: Fourth parameter ignored (expected suite path, got: $fourth_param)"
-                    fi
-                fi
-            fi
-        else
-            echo "  ⚠️  Warning: Neither test type nor suite specified"
-            echo "  Will try to auto-detect from report or config"
-        fi
-
-        local response=$(api_call "/test/start" "POST" "$data")
-
-        if echo "$response" | jq -e '.success' > /dev/null; then
-            success "Test retry started successfully"
-            echo "$response" | jq '.'
-        else
-            local msg=$(extract_api_error "$response")
-            error "Failed to start test retry: $msg"
-            return 1
-        fi
-        return
+        echo "  Report: $retry_dir"
+        [ -n "$device" ] && echo "  Device: $device"
+        [ -n "$test_type" ] && echo "  Type: $test_type"
+        [ -n "$test_suite" ] && echo "  Suite: $test_suite"
+    else
+        echo "🚀 Starting test..."
+        echo "  Device: $device"
+        [ -n "$test_type" ] && echo "  Type: $test_type"
+        [ -n "$test_module" ] && echo "  Module: $test_module"
+        [ -n "$test_case" ] && echo "  Case: $test_case"
+        [ -n "$test_suite" ] && echo "  Suite: $test_suite"
     fi
 
-    # 模式1: 直接测试模式（支持智能参数识别）
-    local device_serial="$1"
-    local test_type="${2:-}"
-    local param3="${3:-}"
-    local param4="${4:-}"
-    local param5="${5:-}"
-
-    # 初始化变量
-    local test_module=""
-    local test_case=""
-    local test_suite=""
-
-    echo "🚀 Starting test..."
-    echo "  Device: $device_serial"
-    echo "  Type: $test_type"
-
-    # 智能识别参数3：可能是test_module或test_suite路径
-    if [ -n "$param3" ]; then
-        if [[ "$param3" == */* ]]; then
-            # 是路径，作为 test_suite
-            test_suite="$param3"
-            echo "  Suite: $test_suite"
-        else
-            # 不是路径，作为 test_module
-            test_module="$param3"
-            echo "  Module: $test_module"
-        fi
+    # Display warnings
+    if [ -n "$warnings" ]; then
+        echo ""
+        echo "$warnings" | while read -r warning; do
+            warning "⚠️  $warning"
+        done
     fi
 
-    # 智能识别参数4：在已有test_suite时忽略，否则可能是test_case或test_suite路径
-    if [ -n "$param4" ]; then
-        if [ -n "$test_suite" ]; then
-            # 已经有test_suite，param4是test_case
-            test_case="$param4"
-            echo "  Case: $test_case"
-        else
-            # 还没有test_suite，检查param4是否是路径
-            if [[ "$param4" == */* ]]; then
-                # 是路径，作为 test_suite
-                test_suite="$param4"
-                echo "  Suite: $test_suite"
-            else
-                # 不是路径，作为 test_case
-                test_case="$param4"
-                echo "  Case: $test_case"
-            fi
-        fi
+    # Build request data for /api/test/start
+    local data="{}"
+    if [ -n "$retry_dir" ]; then
+        data=$(echo "$data" | jq ". + {\"retry_dir\":\"$retry_dir\"}")
     fi
-
-    # 智能识别参数5：只在没有test_suite时检查是否为路径
-    if [ -n "$param5" ] && [ -z "$test_suite" ]; then
-        if [[ "$param5" == */* ]]; then
-            # 是路径，作为 test_suite
-            test_suite="$param5"
-            echo "  Suite: $test_suite"
-        else
-            # 不是路径但有test_module和test_case时的额外参数，忽略
-            if [ -n "$test_case" ]; then
-                echo "  ⚠️  Warning: Fifth parameter ignored (unexpected: $param5)"
-            else
-                # 没有test_case，将param5作为test_case
-                test_case="$param5"
-                echo "  Case: $test_case"
-            fi
-        fi
+    if [ -n "$device" ]; then
+        data=$(echo "$data" | jq ". + {\"devices\":[\"$device\"]}")
     fi
-
-    # 构建JSON数据
-    local data="{\"devices\":[\"$device_serial\"],\"test_type\":\"$test_type\",\"test_module\":\"$test_module\",\"test_suite\":\"$test_suite\"}"
+    if [ -n "$test_type" ]; then
+        data=$(echo "$data" | jq ". + {\"test_type\":\"$test_type\"}")
+    fi
+    if [ -n "$test_module" ]; then
+        data=$(echo "$data" | jq ". + {\"test_module\":\"$test_module\"}")
+    fi
     if [ -n "$test_case" ]; then
         data=$(echo "$data" | jq ". + {\"test_case\":\"$test_case\"}")
     fi
+    if [ -n "$test_suite" ]; then
+        data=$(echo "$data" | jq ". + {\"test_suite\":\"$test_suite\"}")
+    fi
 
+    # Call /api/test/start
     local response=$(api_call "/test/start" "POST" "$data")
 
     if echo "$response" | jq -e '.success' > /dev/null; then
@@ -1329,7 +1254,41 @@ gms-rt-test-start() {
     fi
 }
 
-# Check test status
+# Help function for gms-rt-test-start
+_gms_rt_test_start_help() {
+    cat << EOF
+Usage:
+  Mode 1 (Direct test): gms-rt-test-start <DEVICE> [TYPE] [MODULE/SUITE] [CASE/SUITE] [SUITE]
+  Mode 2 (Retry report): gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE] [SUITE]
+
+智能参数识别：
+  - 包含 '/' 的参数自动识别为路径（test_suite）
+  - 其他参数按位置识别为 test_module, test_case
+
+示例:
+  gms-rt-test-start RK3572GMS4 CTS /path/to/android-cts/tools
+  gms-rt-test-start RK3572GMS4 CTS TestModuleName
+  gms-rt-test-start RK3572GMS4 CTS TestModuleName TestCaseName
+  gms-rt-test-start RK3572GMS4 CTS TestModuleName TestCaseName /path/to/suite
+
+Supported Test Types:
+  CTS      - Compatibility Test Suite
+  GTS      - Google Mobile Services Test Suite
+  GTS-ROOT - GTS with root permissions
+  STS      - Security Test Suite
+  VTS      - Vendor Test Suite
+  APTS     - Android Peripheral Test Suite
+  GSI      - Generic System Image tests (uses CTS suite)
+
+Examples:
+  gms-rt-test-start RF8TC2W4JNH CTS CtsPermissionTestCases
+  gms-rt-test-start RF8TC2W4JNH GTS-ROOT
+  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 RF8TC2W4JNH GTS
+  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 RF8TC2W4JNH /path/to/suite
+EOF
+}
+
+
 gms-rt-test-status() {
     check_jq
     echo "📊 Checking test status..."
@@ -1634,7 +1593,7 @@ ${YELLOW}File Management:${NC}
 
 ${YELLOW}Reports:${NC}
   gms-rt-reports-list            - List all test reports
-  gms-rt-reports-download        - Get report (view/download)
+  gms-rt-reports-download        - Download report folder
   gms-rt-reports-analyze         - Analyze report
   gms-rt-reports-delete          - Delete report
 
