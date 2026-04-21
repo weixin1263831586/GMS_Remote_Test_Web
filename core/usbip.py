@@ -18,8 +18,8 @@ from .device_utils import DeviceUtils
 logger = logging.getLogger(__name__)
 
 # usbipd 安装命令常量
-USBIPD_INSTALL_CMD = 'winget install dorssel.usbipd-win --source winget'
 USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行PowerShell执行：
+USBIPD_INSTALL_CMD = 'winget install dorssel.usbipd-win --source winget'
 {install_cmd}
 验证安装：usbipd --version'''
 
@@ -366,6 +366,17 @@ class USBIPManager:
             # 计算新增设备
             new_devices = list(devices_after - devices_before)
             logger.info(f"New devices via USB/IP: {new_devices}")
+
+            # 🔧 修复：如果没有新增设备，检查是否有设备来源已知的USB/IP设备
+            # 如果设备已存在，我们仍然需要返回它，因为这是通过USB/IP连接的
+            if not new_devices:
+                # 检查是否有之前记录的USB/IP设备现在仍然在线
+                for device_id in devices_after:
+                    if device_id in self.device_sources:
+                        # 这个设备之前是通过USB/IP连接的，现在还在
+                        new_devices = [device_id]
+                        logger.info(f"Found existing USB/IP device still online: {device_id}")
+                        break
 
             return attached, new_devices
 

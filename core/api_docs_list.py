@@ -456,17 +456,17 @@ API_DOCS_LIST = [
     {
         "method": "GET",
         "path": "/api/usbip/status",
-        "description": "检查USB/IP服务状态",
-        "params": [],
+        "description": "检查USB/IP服务状态（支持指定主机）",
+        "params": [{"name": "device_host", "type": "string", "required": False, "desc": "目标主机 (user@ip 或 ip)，不传则使用当前客户端"}],
         "category": "usbip",
         "skill": "gms-rt-usbip-status"
     },
     {
         "method": "POST",
         "path": "/api/usbip/connect",
-        "description": "启动USB/IP设备共享",
+        "description": "启动USB/IP设备共享（支持指定主机）",
         "params": [
-            {"name": "device_host", "type": "string", "required": False, "desc": "设备主机地址，如172.16.14.233"},
+            {"name": "device_host", "type": "string", "required": True, "desc": "设备主机地址 (user@ip或 ip)"},
             {"name": "device_password", "type": "string", "required": False, "desc": "设备主机SSH密码（可选）"}
         ],
         "category": "usbip",
@@ -475,18 +475,20 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/usbip/disconnect",
-        "description": "停止USB/IP服务",
-        "params": [],
+        "description": "停止USB/IP服务（支持指定主机）",
+        "params": [{"name": "device_host", "type": "string", "required": False, "desc": "目标主机 (user@ip 或 ip)，不传则使用当前客户端"}],
         "category": "usbip",
         "skill": "gms-rt-usbip-disconnect"
     },
     {
         "method": "POST",
-        "path": "/api/usbip/auto-install",
-        "description": "自动安装USB/IP服务",
-        "params": [],
+        "path": "/api/usbip/install",
+        "description": "安装 USB/IP 服务（支持指定主机）",
+        "params": [
+            {"name": "device_host", "type": "string", "required": False, "desc": "目标主机 (user@ip 或 ip)，不传则使用当前客户端"}
+        ],
         "category": "usbip",
-        "skill": "gms-rt-usbip-auto-install"
+        "skill": "gms-rt-usbip-install"
     },
 
     # ==================== 文件管理 ====================

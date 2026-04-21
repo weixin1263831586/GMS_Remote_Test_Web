@@ -979,7 +979,7 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 | `/api/usbip/connect` | POST | Start USB/IP connection |
 | `/api/usbip/disconnect` | POST | Stop USB/IP connection |
 | `/api/usbip/status` | GET | Check USB/IP status |
-| `/api/usbip/auto-install` | POST | Auto-install usbipd |
+| `/api/usbip/install` | POST | Install usbipd (supports specifying target host) |
 
 ### Test Execution
 | Endpoint | Method | Description |

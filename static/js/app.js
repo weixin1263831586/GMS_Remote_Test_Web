@@ -4171,8 +4171,8 @@ async function autoInstallUsbipd() {
         progressBar.style.width = '10%';
         statusText.textContent = '📡 正在连接 Windows 主机...';
 
-        // 调用后端自动安装 API
-        const result = await apiCall('/api/usbip/auto-install', 'POST', {});
+        // 调用后端安装 API
+        const result = await apiCall('/api/usbip/install', 'POST', {});
 
         // 更新状态：安装中
         progressBar.style.width = '50%';
