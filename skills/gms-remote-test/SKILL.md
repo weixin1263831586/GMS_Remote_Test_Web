@@ -1016,7 +1016,6 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 |----------|--------|-------------|
 | `/api/config/read` | GET | Get current config |
 | `/api/config/update` | POST | Update dynamic config |
-| `/api/config/values` | GET | Get config values |
 
 ### VPN Management
 | Endpoint | Method | Description |
@@ -1287,7 +1286,6 @@ For complete API documentation with try-it-out functionality:
 - `gms-rt-system-health` - Check server health status
 - `gms-rt-system-docs` - Get API documentation
 - `gms-rt-system-help` - Show command help
-- `gms-rt-system-websocket` - WebSocket connection info
 
 ### Device Management
 - `gms-rt-devices-list` - List all connected devices
@@ -1363,7 +1361,6 @@ For complete API documentation with try-it-out functionality:
 ### Configuration
 - `gms-rt-config-read` - Read configuration
 - `gms-rt-config-update` - Update configuration
-- `gms-rt-config-values` - Get config values
 
 ### Tools & Utilities
 - `gms-rt-terminal-push` - Push command to terminal

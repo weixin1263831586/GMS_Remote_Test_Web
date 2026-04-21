@@ -1142,24 +1142,6 @@ async def get_architecture():
 
 # ==================== 客户端管理 ====================
 
-@app.get("/api/config/values")
-@handle_api_errors
-async def get_config_values():
-    """获取配置值供前端使用（不包含敏感信息）"""
-    config = config_manager.load_config()
-
-    # 只返回前端需要的配置项
-    safe_config = {
-        'script_path': config.get('script_path', ''),
-        'suites_path': config.get('suites_path', ''),
-        'ubuntu_user': config.get('ubuntu_user', ''),
-        'ubuntu_host': config.get('ubuntu_host', 'localhost'),
-        'local_server': config.get('local_server', '')
-        # 不返回密码
-    }
-
-    return JSONResponse(content={"success": True, "data": safe_config})
-
 @app.get("/api/users/current")
 async def get_client_info(request: Request):
     """获取客户端信息（返回client_id用于WebSocket连接）"""

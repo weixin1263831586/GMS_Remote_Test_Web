@@ -299,12 +299,6 @@ gms-rt-config-update() {
     fi
 }
 
-# Get configuration values
-gms-rt-config-values() {
-    check_jq
-    echo "📋 Getting config values..."
-    api_call "/config/values" | jq '.'
-}
 
 # ==============================================================================
 # Desktop VNC Commands
@@ -1048,12 +1042,6 @@ gms-rt-system-skills() {
     fi
 }
 
-# WebSocket connection
-gms-rt-system-websocket() {
-    local client_id="${1:-test_client_$(date +%s)}"
-    echo "🔗 Connecting to WebSocket with client_id: $client_id..."
-    echo "Use this in your WebSocket client: ws://${SERVER_URL}/system/websocket/${client_id}"
-}
 
 # Open terminal on test host (SSH connection)
 gms-rt-terminal-open() {
@@ -1646,7 +1634,6 @@ ${YELLOW}Firmware Burning:${NC}
 ${YELLOW}Configuration:${NC}
   gms-rt-config-read             - Read full configuration
   gms-rt-config-update           - Update configuration
-  gms-rt-config-values           - Get frontend config values
 
 ${YELLOW}Desktop VNC:${NC}
   gms-rt-desktop-validate        - Validate desktop host
