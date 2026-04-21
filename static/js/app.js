@@ -708,7 +708,7 @@ function autoSelectTestSuite(testType) {
             // android-gts-13.1-R1 -> 主版本: 13.1, 修订版: 1
             const extractVersion = (version) => {
                 // 移除前缀，保留版本部分
-                let versionStr = version.replace(/^[^-]+-[^-]+-/, '');
+                let versionStr = (version || '').replace(/^[^-]+-[^-]+-/, '');
 
                 let mainVersion = versionStr;
                 let revision = 0;
@@ -2720,14 +2720,15 @@ async function browseRemoteFile(mode) {
 
     // Get current test suite selection
     const testSuiteSelect = document.getElementById('test-suite');
-    if (!testSuiteSelect || !testSuiteSelect.value) {
+    const toolsPath = testSuiteSelect?.value || '';
+
+    if (!toolsPath) {
         addLogEntry(`未选择测试套件，使用默认路径: ${defaultPath}`, 'info');
         await loadFileDirectory(defaultPath);
         return;
     }
 
     // Convert tools path to results path
-    const toolsPath = testSuiteSelect.value;
     if (toolsPath.includes('/tools')) {
         defaultPath = toolsPath.replace('/tools', '/results');
         addLogEntry(`自动导航到测试套件results目录: ${defaultPath}`, 'info');
@@ -4034,7 +4035,7 @@ async function downloadReportAsZip(timestamp) {
 
         if (contentDisposition) {
             const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-            if (filenameMatch && filenameMatch[1]) {
+            if (filenameMatch && filenameMatch[1] && typeof filenameMatch[1] === 'string') {
                 filename = filenameMatch[1].replace(/['"]/g, '');
             }
         }
@@ -4351,7 +4352,7 @@ function initReportAnalysis() {
                             entry.file((file) => {
                                 // 保留相对路径
                                 Object.defineProperty(file, 'webkitRelativePath', {
-                                    value: entry.fullPath.replace(/^\//, ''),
+                                    value: (entry.fullPath || '').replace(/^\//, ''),
                                     writable: false
                                 });
                                 files.push(file);
@@ -4651,7 +4652,7 @@ function displayReportAnalysis(data) {
             const testCaseName = failure.name || '未知用例';
 
             // 格式化完整堆栈信息，保留换行和缩进
-            const formattedStackTrace = reasonText
+            const formattedStackTrace = (reasonText || '无失败原因')
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
@@ -5183,6 +5184,7 @@ const HTML_ENTITIES = Object.freeze({
 
 // Escape HTML to prevent XSS (efficient regex-based implementation)
 function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
     return text.replace(/[&<>"']/g, char => HTML_ENTITIES[char]);
 }
 
@@ -5296,8 +5298,8 @@ function applyFilters() {
     const filteredApis = allApiDocs.filter(api => {
         // 搜索关键词匹配
         const matchesSearch = !searchTerm ||
-            api.path.toLowerCase().includes(searchTerm) ||
-            api.description.toLowerCase().includes(searchTerm);
+            (api.path && api.path.toLowerCase().includes(searchTerm)) ||
+            (api.description && api.description.toLowerCase().includes(searchTerm));
 
         // 分类匹配
         const matchesCategory = currentCategoryFilter === 'all' || api.category === currentCategoryFilter;
@@ -5360,7 +5362,7 @@ async function loadApiDocs(forceRefresh = false) {
             // 为每个API添加分类信息
             const apisWithCategory = filteredApis.map(api => ({
                 ...api,
-                category: getApiCategory(api.path)
+                category: getApiCategory(api.path || '')
             }));
 
             // 按分类排序
@@ -5576,11 +5578,12 @@ const BASE_URL = `http://${SERVER_HOST}:${SERVER_PORT}`;
  * Moved to module level to avoid recreating on every render
  */
 function generateCurlCommand(api, details) {
+    const apiPath = api.path || '';
     if (api.method === 'GET') {
         // 特殊处理stream端点：使用 -N 而不是 -s
-        const isStreamEndpoint = api.path.includes('/api/test/logs/stream');
+        const isStreamEndpoint = apiPath.includes('/api/test/logs/stream');
         // 特殊处理文件下载端点：使用 -OJ
-        const isDownloadEndpoint = api.path.includes('/api/system/skills');
+        const isDownloadEndpoint = apiPath.includes('/api/system/skills');
 
         let curlOptions = 'curl -s';
         if (isStreamEndpoint) {
@@ -5589,7 +5592,7 @@ function generateCurlCommand(api, details) {
             curlOptions = 'curl -s -OJ';
         }
 
-        let cmd = `${curlOptions} "${BASE_URL}${api.path}"`;
+        let cmd = `${curlOptions} "${BASE_URL}${apiPath}"`;
         // Add query parameter example
         if (details.params && details.params.length > 0) {
             const queryParams = details.params.filter(p =>
@@ -5608,7 +5611,7 @@ function generateCurlCommand(api, details) {
 
         if (hasFileParam) {
             // Generate FormData format for file uploads
-            let multiLineCmd = `curl -sX POST "${BASE_URL}${api.path}"`;
+            let multiLineCmd = `curl -sX POST "${BASE_URL}${api.path || ''}"`;
 
             if (details.params && details.params.length > 0) {
                 details.params.forEach(p => {
@@ -5631,7 +5634,7 @@ function generateCurlCommand(api, details) {
             return { display: displayCmd, full: multiLineCmd };
         } else {
             // Generate JSON format for non-file uploads
-            let multiLineCmd = `curl -sX POST "${BASE_URL}${api.path}"`;
+            let multiLineCmd = `curl -sX POST "${BASE_URL}${api.path || ''}"`;
 
             // Generate request body example
             if (details.params && details.params.length > 0) {
@@ -5683,7 +5686,7 @@ function generateCurlCommand(api, details) {
         }
     } else if (api.method === 'DELETE') {
         // Generate DELETE request
-        let cmd = `curl -X DELETE "${BASE_URL}${api.path}"`;
+        let cmd = `curl -X DELETE "${BASE_URL}${api.path || ''}"`;
 
         // Add query parameters or request body
         if (details.params && details.params.length > 0) {
@@ -5698,9 +5701,10 @@ function generateCurlCommand(api, details) {
         return { display: displayCmd, full: cmd };
     } else if (api.method === 'WebSocket') {
         const wsBaseUrl = `${SERVER_HOST}:${SERVER_PORT}`;
-        return { display: `wscat -c ws://${wsBaseUrl}${api.path.replace('{client_id}', 'YOUR_CLIENT_ID')}`, full: `wscat -c ws://${wsBaseUrl}${api.path.replace('{client_id}', 'YOUR_CLIENT_ID')}` };
+        const wsPath = apiPath.replace('{client_id}', 'YOUR_CLIENT_ID');
+        return { display: `wscat -c ws://${wsBaseUrl}${wsPath}`, full: `wscat -c ws://${wsBaseUrl}${wsPath}` };
     }
-    return { display: `curl -s ${BASE_URL}${api.path}`, full: `curl -s ${BASE_URL}${api.path}` };
+    return { display: `curl -s ${BASE_URL}${apiPath}`, full: `curl -s ${BASE_URL}${apiPath}` };
 }
 
 /**
@@ -5751,12 +5755,12 @@ function displayApiDocs(apis) {
         const categoryBadge = getCategoryName(api.category);
 
         // 获取API详细信息
-        const details = getApiDetails(api.path);
+        const details = getApiDetails(api.path || '');
         const curlCmdObj = generateCurlCommand(api, details);
         const paramsHtml = generateParamsHtml(details);
 
         // 将curl命令存储到data属性中,避免在onclick中直接传递复杂字符串
-        const escapedCurlCmd = curlCmdObj.full.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        const escapedCurlCmd = (curlCmdObj.full || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         const displayCurlCmd = curlCmdObj.display;
 
         htmlParts.push(`
@@ -5765,7 +5769,7 @@ function displayApiDocs(apis) {
                 <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 25%;">
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <span style="${methodClass} font-weight: 700; font-size: 13px; min-width: 90px; display: inline-block;">${api.method}</span>
-                        <span style="font-family: monospace; font-size: 12px; color: var(--text-primary); word-break: break-all;">${escapeHtml(api.path)}</span>
+                        <span style="font-family: monospace; font-size: 12px; color: var(--text-primary); word-break: break-all;">${escapeHtml(api.path || '')}</span>
                     </div>
                 </td>
 
@@ -5826,7 +5830,7 @@ function displayApiDocs(apis) {
 
                                 <!-- HTTP Method and Path -->
                                 <div style="font-family: monospace; font-size: 11px; color: var(--text-primary); background: var(--darker-bg); padding: 6px; border-radius: 4px; margin-bottom: 8px; font-weight: 600;">
-${api.method} ${api.path}
+${api.method} ${api.path || ''}
 ${api.method === 'POST' ? 'Content-Type: application/json' : ''}
                                 </div>
 
