@@ -705,16 +705,6 @@ gms-rt-files-install() {
     echo "$body" | jq '.'
 }
 
-# List files
-gms-rt-files-list() {
-    local path="${1:-/tmp}"
-    check_jq
-    echo "📁 Listing files in: $path..."
-    local data="{\"path\":\"$path\"}"
-    local response=$(api_call "/files/list" "POST" "$data")
-    echo "$response" | jq '.'
-}
-
 # Get upload progress
 gms-rt-files-progress() {
     local upload_id="${1:-}"
@@ -1657,7 +1647,6 @@ ${YELLOW}File Management:${NC}
   gms-rt-files-upload            - Upload file
   gms-rt-files-install           - Upload and install APK
   gms-rt-files-progress          - Get upload progress
-  gms-rt-files-list              - List files
 
 ${YELLOW}Reports:${NC}
   gms-rt-reports-list            - List all test reports
