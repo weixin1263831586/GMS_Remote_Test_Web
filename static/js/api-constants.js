@@ -156,7 +156,7 @@ const API_DETAILS_MAP = {
     '/api/test/stop': {
         title: '停止测试',
         description: '停止测试',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "message": "测试已停止" }',
         usage: '停止测试'
     },
@@ -164,7 +164,7 @@ const API_DETAILS_MAP = {
         title: '列出测试套件',
         description: '列出可用的测试套件',
         method: 'GET',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "suites": [{"test_type": "cts", "version": "android-cts-16_r4", "tools_path": "...", "full_path": "...", "binary": "cts-tradefed"}], "count": 9, "base_path": "/home/hcq/GMS-Suite" }',
         usage: 'gms-rt-test-suites'
     },
@@ -183,14 +183,14 @@ const API_DETAILS_MAP = {
     '/api/test/clean': {
         title: '清理测试环境',
         description: '清理测试环境',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "message": "测试环境已清理" }',
         usage: '清理测试临时文件'
     },
     '/api/test/logs/save': {
         title: '保存当前日志',
         description: '保存当前正在运行的日志',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "log_path": "/logs/saved_20260326_110000.log" }',
         usage: '测试运行中保存当前日志快照'
     },
@@ -198,21 +198,21 @@ const API_DETAILS_MAP = {
         title: '实时流式日志',
         description: '实时流式输出测试日志',
         method: 'GET',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '实时文本流',
         usage: '实时查看测试日志输出'
     },
     '/api/test/status': {
         title: '获取测试状态',
         description: '获取当前测试运行状态',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "running": false, "test_type": "CTS", "devices": ["RF8TC2W4JNH"] }',
         usage: '查看测试运行状态'
     },
     '/api/system/health': {
         title: '系统管理',
         description: '检查服务器运行状态',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "status": "healthy", "timestamp": "2026-03-26T10:30:00" }',
         usage: '监控服务器健康状态'
     },
@@ -230,7 +230,7 @@ const API_DETAILS_MAP = {
         title: '下载技能包',
         description: '下载技能ZIP压缩包（默认下载gms-remote-test技能包）',
         method: 'GET',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: 'ZIP文件下载',
         usage: '下载技能包用于离线部署或备份',
         curl_example: 'curl -s -OJ "http://172.16.14.233:5001/api/system/skills"'
@@ -239,7 +239,7 @@ const API_DETAILS_MAP = {
         title: '获取API文档',
         description: '获取系统API文档列表',
         method: 'GET',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "apis": [...] }',
         usage: '查看所有可用API'
     },
@@ -257,7 +257,7 @@ const API_DETAILS_MAP = {
         title: '获取前端配置',
         description: '获取前端页面需要的配置（不含敏感信息）',
         method: 'GET',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "data": {"script_path": "...", "ubuntu_user": "..."}}',
         usage: '获取前端配置信息'
     },
@@ -265,7 +265,7 @@ const API_DETAILS_MAP = {
         title: '获取完整配置',
         description: '获取完整系统配置（包含所有字段和敏感信息）',
         method: 'GET',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "ubuntu_user": "hcq", "ubuntu_host": "172.16.14.233", "ubuntu_pswd": "..."}',
         usage: '查看完整配置信息'
     },
@@ -284,7 +284,7 @@ const API_DETAILS_MAP = {
     '/api/users/current': {
         title: '获取客户端信息',
         description: '获取客户端信息',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "ip": "172.16.14.248", "client_id": "hcq@172.16.14.248", "username": "hcq" }',
         usage: '获取客户端身份信息'
     },
@@ -312,7 +312,7 @@ const API_DETAILS_MAP = {
     '/api/users/list': {
         title: '获取在线用户',
         description: '获取所有在线用户列表',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "users": [{ "client_id": "xxx", "username": "admin", "running": false }] }',
         usage: '查看当前在线用户及其设备使用情况'
     },
@@ -364,14 +364,14 @@ const API_DETAILS_MAP = {
     '/api/devices/management': {
         title: '设备管理信息',
         description: '获取所有设备的详细管理信息(设备列表、电池、来源等)',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '[{ "device_id": "xxx", "serial_no": "xxx", "model": "xxx", "android_version": "14", "battery_level": "85", "source_type": "usbip", "source_host": "172.16.14.68", "status": "online", "locked_by": "", "locked_by_self": false }]',
         usage: '查看设备管理信息'
     },
     '/api/devices/user-locked': {
         title: '列出用户锁定设备',
         description: '列出用户锁定设备',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "data": { "RF8TC2W4JNH": { "client_id": "hcq@172.16.14.68", "username": "hcq", "timestamp": "2026-04-04T15:30:00" } } }',
         usage: '查看设备占用状态'
     },
@@ -425,7 +425,7 @@ const API_DETAILS_MAP = {
     '/api/reports/list': {
         title: '获取报告列表',
         description: '获取所有历史测试报告',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "reports": [{ "timestamp": "20260326_100000", "test_type": "CTS" }] }',
         usage: '查看所有历史测试报告'
     },
@@ -465,7 +465,7 @@ const API_DETAILS_MAP = {
     '/api/desktop/vnc/status': {
         title: '获取桌面VNC状态',
         description: '检查桌面VNC服务运行状态',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "running": false, "port": 5900 }',
         usage: '检查VNC服务是否正在运行'
     },
@@ -483,7 +483,7 @@ const API_DETAILS_MAP = {
     '/api/desktop/vnc/stop': {
         title: '停止桌面VNC',
         description: '停止桌面VNC服务',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "message": "VNC已停止" }',
         usage: '停止VNC服务'
     },
@@ -500,7 +500,7 @@ const API_DETAILS_MAP = {
     '/api/desktop/vnc/status': {
         title: '查询Ubuntu主机桌面VNC状态',
         description: '查询Ubuntu主机桌面VNC服务状态',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "running": true, "url": "http://172.16.14.233:6080/vnc.html" }',
         usage: '检查VNC服务运行状态'
     },
@@ -518,7 +518,7 @@ const API_DETAILS_MAP = {
     '/api/desktop/vnc/stop': {
         title: '停止Ubuntu主机桌面VNC',
         description: '停止Ubuntu主机桌面VNC服务',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "message": "Ubuntu主机桌面VNC已停止" }',
         usage: '停止Ubuntu主机桌面VNC服务'
     },
@@ -542,47 +542,47 @@ const API_DETAILS_MAP = {
         usage: '停止ADB端口转发'
     },
     '/api/usbip/status': {
-        title: '获取USB/IP状态',
-        description: '检查USB/IP服务状态',
-        params: [],
-        response: '{ "installed": true, "running": false }',
-        usage: '检查USB/IP服务状态'
+        title: '检查 USB/IP 状态',
+        description: '检查 USB/IP 服务状态（支持指定主机）',
+        params: [{ name: 'device_host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
+        response: '{ "connected": true }',
+        usage: '检查 USB/IP 连接状态'
     },
     '/api/usbip/connect': {
-        title: '启动USB/IP',
-        description: '启动USB/IP设备共享',
+        title: '启动 USB/IP',
+        description: '启动 USB/IP 设备共享（支持指定主机）',
         params: [
-            { name: 'device_host', type: 'string', required: false, desc: '设备主机地址，如172.16.14.233' },
-            { name: 'device_password', type: 'string', required: false, desc: '设备主机SSH密码（可选）' }
+            { name: 'device_host', type: 'string', required: true, desc: '设备主机地址 (user@ip 或 ip)' },
+            { name: 'device_password', type: 'string', required: false, desc: '设备主机 SSH 密码（可选）' }
         ],
-        response: '{ "success": true, "message": "USB/IP已启动" }',
-        usage: '启动USB/IP服务'
+        response: '{ "success": true, "message": "USB/IP 已启动" }',
+        usage: '启动 USB/IP 连接'
     },
     '/api/usbip/disconnect': {
-        title: '停止USB/IP',
-        description: '停止USB/IP服务',
-        params: [],
-        response: '{ "success": true, "message": "USB/IP已停止" }',
-        usage: '停止USB/IP服务'
+        title: '停止 USB/IP',
+        description: '停止 USB/IP 服务（支持指定主机）',
+        params: [{ name: 'device_host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
+        response: '{ "success": true, "message": "USB/IP 已停止" }',
+        usage: '停止 USB/IP 连接'
     },
-    '/api/usbip/auto-install': {
-        title: '自动安装USB/IP',
-        description: '自动安装USB/IP服务',
-        params: [],
-        response: '{ "success": true, "message": "USB/IP已自动安装" }',
-        usage: '一键安装USB/IP服务'
+    '/api/usbip/install': {
+        title: '安装 USB/IP',
+        description: '安装 USB/IP 服务（支持指定主机）',
+        params: [{ name: 'device_host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
+        response: '{ "success": true, "message": "USB/IP 已安装" }',
+        usage: '安装 USB/IP 服务'
     },
     '/api/ssh/sshd-check': {
         title: '检查SSHD状态',
         description: '检查SSH服务状态',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "installed": true, "running": true }',
         usage: '检查SSH服务是否正常运行'
     },
     '/api/ssh/sshd-install': {
         title: '安装SSHD',
         description: '获取SSHD安装指南',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": false, "error": "SSHD需要在Windows客户端手动安装", "install_guide": "安装步骤...", "manual_install": true }',
         usage: '安装Windows SSHD服务'
     },
@@ -599,28 +599,28 @@ const API_DETAILS_MAP = {
     '/api/ssh/route': {
         title: '检查路由',
         description: '检查系统路由表',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "routing_table": [] }',
         usage: '查看系统路由配置'
     },
     '/api/vpn/status': {
         title: '获取VPN状态',
         description: '检查VPN连接状态',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "connected": true }',
         usage: '检查VPN是否已连接'
     },
     '/api/vpn/connect': {
         title: '连接VPN',
         description: '连接到默认VPN服务器（无需参数）',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "message": "VPN已连接" }',
         usage: '连接到默认VPN服务器'
     },
     '/api/vpn/disconnect': {
         title: '断开VPN',
         description: '断开VPN连接',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "message": "VPN已断开" }',
         usage: '断开当前VPN连接'
     },
@@ -682,7 +682,7 @@ const API_DETAILS_MAP = {
         title: '固件上传进度',
         description: '查询固件上传进度',
         method: 'GET',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "in_progress": true, "progress": 45.5, "filename": "update.img" }',
         usage: '查看固件上传进度'
     },
@@ -714,7 +714,7 @@ const API_DETAILS_MAP = {
         title: '打开主机终端',
         description: '获取SSH终端连接信息，用于建立SSH连接到测试主机',
         method: 'GET',
-        params: [],
+        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "host": "172.16.14.233", "user": "hcq", "port": 22, "connection_command": "ssh hcq@172.16.14.233", "instructions": ["1. 复制连接命令: ssh hcq@172.16.14.233", "2. 在终端中粘贴并执行连接命令", "3. 输入密码或使用SSH密钥认证", "4. 连接成功后，您将获得测试主机的终端访问权限"] }',
         usage: 'gms-rt-terminal-open',
         curl_example: 'curl -s "http://172.16.14.233:5001/api/terminal/open" | jq \'.connection_command\''

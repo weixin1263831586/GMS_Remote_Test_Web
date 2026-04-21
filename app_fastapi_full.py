@@ -1050,6 +1050,10 @@ class USBIPStartRequest(BaseModel):
     device_host: Optional[str] = None
     device_password: Optional[str] = Field(default="", description="设备主机SSH密码")
 
+class USBIPDisconnectRequest(BaseModel):
+    """USB/IP断开请求"""
+    device_host: Optional[str] = None
+
 class VPNConnectRequest(BaseModel):
     """VPN 连接请求（所有字段可选，兼容前端无参数调用）"""
     host: Optional[str] = None
@@ -5155,28 +5159,34 @@ async def stop_adb_forward():
 # ==================== USB/IP ====================
 @app.get("/api/usbip/status")
 @handle_api_errors
-async def get_usbip_status(request: Request):
+async def get_usbip_status(request: Request, device_host: Optional[str] = None):
     """
-    获取 USB/IP 状态
+    获取 USB/IP 状态（支持指定主机）
 
-    通过检查多个维度来判断 USB/IP 连接状态：
-    1. 检查当前客户端的连接状态记录
-    2. 检查全局 USB/IP 设备来源记录（支持刷新页面后恢复状态）
+    Args:
+        device_host: 可选，目标主机 (user@ip 或 ip)，不传则使用当前客户端
     """
-    client_id = get_client_id_from_request(request)
+    # 确定目标主机
+    if device_host:
+        client_id = device_host
+    else:
+        client_id = get_client_id_from_request(request)
 
     # 方法1：检查当前客户端的连接状态
     with global_state.usbip_states_lock:
         state_info = global_state.usbip_states.get(client_id, {'connected': False, 'timestamp': 0})
         connected = state_info['connected']
 
-    # 方法2：如果当前客户端没有记录，检查是否有全局 USB/IP 设备记录
-    # 这样可以支持刷新页面后恢复按钮状态
+    # 方法2：如果当前客户端没有记录，检查是否有来自该主机的 USB/IP 设备记录
+    # 这样可以支持刷新页面后恢复按钮状态，但需要匹配设备来源
     if not connected:
         with global_state.usbip_devices_source_lock:
-            # 如果有任何 USB/IP 设备记录，说明有 USB/IP 连接
-            has_usbip_devices = len(global_state.usbip_devices_source) > 0
-            if has_usbip_devices:
+            # 检查是否有来自该主机的 USB/IP 设备
+            has_devices_from_host = any(
+                device_info.get('source') == client_id
+                for device_info in global_state.usbip_devices_source.values()
+            )
+            if has_devices_from_host:
                 connected = True
 
     logger.info(f"[USB/IP Status] client_id={client_id}, connected={connected}, device_count={len(global_state.usbip_devices_source)}")
@@ -5232,8 +5242,8 @@ async def start_usbip(
         # 更新连接状态（使用线程锁 - 与Flask版本一致）
         if result.get('success'):
             with global_state.usbip_states_lock:
-                global_state.usbip_states[client_id] = {'connected': True, 'timestamp': time.time()}
-            logger.info(f"[USB/IP Start] Set connected=True for client_id={client_id}")
+                global_state.usbip_states[device_host] = {'connected': True, 'timestamp': time.time()}
+            logger.info(f"[USB/IP Start] Set connected=True for device_host={device_host}")
 
             # 记录设备来源（使用线程锁 - 与Flask版本一致）
             device_list = result.get('device_list', [])
@@ -5275,15 +5285,22 @@ async def start_usbip(
         return ApiResponse.error(str(e), status_code=500)
 
 @app.post("/api/usbip/disconnect")
-async def stop_usbip(request: Request):
-    """停止 USB/IP 转发"""
-    config = config_manager.load_config()
-    client_id = get_client_id_from_request(request)
-    device_host = client_id
-    config['device_host'] = device_host
+async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = Body(default=None)):
+    """停止 USB/IP 转发（支持指定主机）
 
-    # 自动从 client_ssh_credentials 中查找密码
-    device_password = find_device_host_password(config, device_host)
+    Args:
+        req: 请求体，包含 device_host 参数（可选）
+    """
+    config = config_manager.load_config()
+
+    # 使用提供的主机或当前客户端
+    if req and req.device_host:
+        config['device_host'] = req.device_host
+    else:
+        client_id = get_client_id_from_request(request)
+        config['device_host'] = client_id
+
+    device_password = find_device_host_password(config, config['device_host'])
     if not device_password:
         device_password = config.get('device_pswd', '')
 
@@ -5295,49 +5312,126 @@ async def stop_usbip(request: Request):
             ssh_manager.execute_command(win_ssh, 'usbipd unbind --all', timeout=10)
             await asyncio.sleep(2)
 
-            # 只更新 USB/IP 连接状态，不清除设备来源记录
-            # 设备仍然在测试主机上，来源信息应该保留
+            # 清除来自该主机的USB/IP设备来源记录（从多个位置）
+            with global_state.usbip_devices_source_lock:
+                logger.info(f"[USB/IP Stop] Looking for devices from {config['device_host']} in usbip_devices_source")
+                logger.info(f"[USB/IP Stop] Current sources: {list(global_state.usbip_devices_source.items())}")
+
+                devices_to_remove = [
+                    device_id for device_id, device_info in global_state.usbip_devices_source.items()
+                    if device_info.get('source') == config['device_host']
+                ]
+
+                logger.info(f"[USB/IP Stop] Found {len(devices_to_remove)} devices to remove: {devices_to_remove}")
+
+                for device_id in devices_to_remove:
+                    del global_state.usbip_devices_source[device_id]
+                    logger.info(f"[USB/IP Stop] Removed device source: {device_id} from {config['device_host']}")
+
+            # 同时从 usbip_manager.device_sources 中清除
+            for device_id in devices_to_remove:
+                if device_id in usbip_manager.device_sources:
+                    del usbip_manager.device_sources[device_id]
+                    logger.info(f"[USB/IP Stop] Removed device source from usbip_manager: {device_id}")
+
+            # 持久化更新的设备来源到配置文件
+            if devices_to_remove:
+                try:
+                    existing_dynamic = config_manager._load_dynamic_config() or {}
+                    usbip_sources = existing_dynamic.get('usbip_devices_source', {})
+
+                    # 从配置文件中删除已断开的设备
+                    for device_id in devices_to_remove:
+                        if device_id in usbip_sources:
+                            del usbip_sources[device_id]
+
+                    # 保存更新后的配置
+                    existing_dynamic['usbip_devices_source'] = usbip_sources
+                    if config_manager.save_dynamic_config(existing_dynamic):
+                        logger.info(f"[USB/IP Stop] Persisted device source removal for {len(devices_to_remove)} devices")
+                except Exception as e:
+                    logger.warning(f"[USB/IP Stop] Failed to persist device source removal: {e}")
+
+            # 更新 USB/IP 连接状态
             with global_state.usbip_states_lock:
-                global_state.usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
-            logger.info(f"[USB/IP Stop] Connection cleared (device source preserved)")
+                global_state.usbip_states[config['device_host']] = {'connected': False, 'timestamp': time.time()}
+            logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices")
 
             return JSONResponse(content={
                 'success': True,
                 'message': '本地设备已断开'
             })
     except HTTPException:
-        # 无法连接到 Windows，只清除连接状态
-        # 注意：不清除设备来源记录，因为设备仍然在测试主机上
+        # 无法连接到 Windows，只清除连接状态和设备来源记录
+        with global_state.usbip_devices_source_lock:
+            devices_to_remove = [
+                device_id for device_id, device_info in global_state.usbip_devices_source.items()
+                if device_info.get('source') == config['device_host']
+            ]
+            for device_id in devices_to_remove:
+                del global_state.usbip_devices_source[device_id]
+                logger.info(f"[USB/IP Stop] Removed device source: {device_id} from {config['device_host']}")
+
+        # 同时从 usbip_manager.device_sources 中清除
+        for device_id in devices_to_remove:
+            if device_id in usbip_manager.device_sources:
+                del usbip_manager.device_sources[device_id]
+                logger.info(f"[USB/IP Stop] Removed device source from usbip_manager: {device_id}")
+
+        # 持久化更新的设备来源到配置文件
+        if devices_to_remove:
+            try:
+                existing_dynamic = config_manager._load_dynamic_config() or {}
+                usbip_sources = existing_dynamic.get('usbip_devices_source', {})
+
+                # 从配置文件中删除已断开的设备
+                for device_id in devices_to_remove:
+                    if device_id in usbip_sources:
+                        del usbip_sources[device_id]
+
+                # 保存更新后的配置
+                existing_dynamic['usbip_devices_source'] = usbip_sources
+                if config_manager.save_dynamic_config(existing_dynamic):
+                    logger.info(f"[USB/IP Stop] Persisted device source removal for {len(devices_to_remove)} devices")
+            except Exception as e:
+                logger.warning(f"[USB/IP Stop] Failed to persist device source removal: {e}")
+
         with global_state.usbip_states_lock:
-            global_state.usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
-        logger.info(f"[USB/IP Stop] Connection cleared (device source preserved)")
+            global_state.usbip_states[config['device_host']] = {'connected': False, 'timestamp': time.time()}
+        logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices")
         return JSONResponse(content={'success': True, 'message': '本地设备已断开'})
 
-@app.post("/api/usbip/auto-install")
-async def auto_install_usbipd(request: Request):
-    """自动安装 usbipd 到 Windows 主机"""
+@app.post("/api/usbip/install")
+async def install_usbipd(request: Request, device_host: Optional[str] = None):
+    """Install usbipd to Windows host (supports specifying target host)
+
+    Args:
+        device_host: Optional target host (format: user@ip or ip). If not provided, uses current client
+    """
     try:
         config = config_manager.load_config()
-        client_id = get_client_id_from_request(request)
-        device_host = client_id
-        config['device_host'] = device_host
 
-        # 自动从 client_ssh_credentials 中查找密码
-        device_password = find_device_host_password(config, device_host)
+        # Use provided host or fallback to current client
+        if device_host:
+            config['device_host'] = device_host
+        else:
+            config['device_host'] = get_client_id_from_request(request)
+
+        # Auto-find password from client_ssh_credentials
+        device_password = find_device_host_password(config, config['device_host'])
         if not device_password:
             device_password = config.get('device_pswd', '')
 
         if device_password:
             config['device_pswd'] = device_password
 
-        # 连接到 Windows 主机
+        # Connect to Windows host and install
         with DeviceSSHConnection(config) as win_ssh:
-            # 使用 USBIPManager 的安装方法
             result = usbip_manager.install_usbipd(win_ssh, config)
             return JSONResponse(content=result)
 
     except Exception as e:
-        logger.error(f"Error auto-installing usbipd: {e}")
+        logger.error(f"Error installing usbipd: {e}")
         return JSONResponse(
             content={"success": False, "error": str(e)},
             status_code=500

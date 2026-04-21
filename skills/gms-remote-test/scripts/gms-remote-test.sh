@@ -1471,11 +1471,14 @@ gms-rt-test-suites-result() {
 # USB/IP Commands
 # ==============================================================================
 
-# Auto install USB/IP
-gms-rt-usbip-auto-install() {
+# Install USB/IP on specified host
+gms-rt-usbip-install() {
+    local device_host="$1"
+    [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-usbip-install <user@ip>"; return 1; }
     check_jq
-    echo "🔧 Auto-installing USB/IP..."
-    local response=$(api_call "/usbip/auto-install" "POST" "{}")
+    echo "🔧 Installing USB/IP on host: $device_host..."
+    local data="{\"device_host\":\"$device_host\"}"
+    local response=$(api_call "/usbip/install" "POST" "$data")
     echo "$response" | jq '.'
 }
 
@@ -1483,17 +1486,12 @@ gms-rt-usbip-auto-install() {
 gms-rt-usbip-connect() {
     local device_host="$1"
     local device_password="$2"
-
     [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-usbip-connect <user@ip> [password]"; return 1; }
-
     check_jq
     echo "🔌 Starting USB/IP connection to $device_host..."
-
     local data="{\"device_host\":\"$device_host\"}"
     [ -n "$device_password" ] && data=$(echo "$data" | jq ". + {\"device_password\":\"$device_password\"}")
-
     local response=$(api_call "/usbip/connect" "POST" "$data")
-
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "USB/IP connection started"
         echo "$response" | jq '.'
@@ -1505,21 +1503,29 @@ gms-rt-usbip-connect() {
 
 # Stop USB/IP connection
 gms-rt-usbip-disconnect() {
+    local device_host="$1"
+    [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-usbip-disconnect <user@ip>"; return 1; }
     check_jq
-    echo "🔌 Stopping USB/IP connection..."
-    local response=$(api_call "/usbip/disconnect" "POST")
+    echo "🔌 Stopping USB/IP connection for $device_host..."
+    local data="{\"device_host\":\"$device_host\"}"
+    local response=$(api_call "/usbip/disconnect" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "USB/IP stopped"
+        echo "$response" | jq '.'
     else
         warning "Failed to stop USB/IP or not connected"
+        echo "$response" | jq '.'
     fi
 }
 
 # Check USB/IP status
 gms-rt-usbip-status() {
+    local device_host="$1"
+    [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-usbip-status <user@ip>"; return 1; }
     check_jq
-    echo "🔌 Checking USB/IP status..."
-    api_call "/usbip/status" | jq '.'
+    echo "🔌 Checking USB/IP status for $device_host..."
+    # Use GET with query parameter
+    api_call "/usbip/status?device_host=$device_host" | jq '.'
 }
 
 # ==============================================================================
@@ -1697,12 +1703,10 @@ ${YELLOW}Test Management:${NC}
   gms-rt-test-suites-result      - List test results (tradefed list results)
 
 ${YELLOW}USB/IP Connection:${NC}
-  gms-rt-adb-forward-start       - Start ADB port forwarding (USB/IP)
-  gms-rt-adb-forward-stop        - Stop ADB port forwarding (USB/IP)
-  gms-rt-usbip-auto-install      - Auto-install USB/IP
-  gms-rt-usbip-connect           - Start USB/IP connection
-  gms-rt-usbip-disconnect        - Stop USB/IP connection
-  gms-rt-usbip-status            - Check USB/IP status
+  gms-rt-usbip-install           - Install USB/IP (requires host parameter)
+  gms-rt-usbip-connect           - Start USB/IP connection (requires host parameter)
+  gms-rt-usbip-disconnect        - Stop USB/IP connection (requires host parameter)
+  gms-rt-usbip-status            - Check USB/IP status (requires host parameter)
 
 ${YELLOW}User Management:${NC}
   gms-rt-users-current           - Get current user info
