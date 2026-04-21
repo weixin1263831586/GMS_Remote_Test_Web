@@ -36,14 +36,6 @@ API_DOCS_LIST = [
     # ==================== 配置管理 ====================
     {
         "method": "GET",
-        "path": "/api/config/values",
-        "description": "获取前端配置（仅返回前端需要的字段，不含敏感信息）",
-        "params": [],
-        "category": "config",
-        "skill": "gms-rt-config-values"
-    },
-    {
-        "method": "GET",
         "path": "/api/config/read",
         "description": "获取完整系统配置（包含所有字段和敏感信息）",
         "params": [],
@@ -630,7 +622,6 @@ API_DOCS_LIST = [
         "description": "建立WebSocket连接用于实时通信",
         "params": [{"name": "client_id", "type": "string", "required": True}],
         "category": "system",
-        "skill": "gms-rt-system-websocket"
     },
 
     # ==================== 技能管理 ====================

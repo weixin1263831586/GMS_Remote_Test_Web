@@ -21,7 +21,6 @@ const API_CATEGORIES = {
     '/api/system/docs': 'system',
     '/api/config/read': 'config',
     '/api/config/update': 'config',
-    '/api/config/values': 'config',
     '/api/users': 'users',
     '/api/devices/list': 'device',
     '/api/devices/bootloader-lock': 'device',
@@ -252,14 +251,6 @@ const API_DETAILS_MAP = {
         ],
         response: 'GMS Auto Test API List\n\nTotal: 68 APIs...',
         usage: '查看API列表和单个API详细帮助'
-    },
-    '/api/config/values': {
-        title: '获取前端配置',
-        description: '获取前端页面需要的配置（不含敏感信息）',
-        method: 'GET',
-        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "success": true, "data": {"script_path": "...", "ubuntu_user": "..."}}',
-        usage: '获取前端配置信息'
     },
     '/api/config/read': {
         title: '获取完整配置',
