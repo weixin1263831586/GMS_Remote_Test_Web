@@ -820,12 +820,6 @@ curl -sX POST http://172.16.14.233:5001/api/files/list \
   -d '{"path": "/tmp"}' | jq '.'
 ```
 
-#### Upload Files for Installation
-```bash
-curl -sX POST http://172.16.14.233:5001/api/files/install \
-  -F "files=@/path/to/app.apk" | jq '.'
-```
-
 #### Download Skills ZIP
 ```bash
 # Download complete skills directory as ZIP file
@@ -1028,7 +1022,6 @@ curl -s http://172.16.14.233:5001/api/reports/list | jq '.reports[0]'
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/terminal/push` | POST | Upload file |
-| `/api/files/install` | POST | Upload files for install |
 | `/api/files/progress` | GET | Get upload progress |
 | `/api/files/list` | POST | List files |
 
@@ -1323,7 +1316,6 @@ For complete API documentation with try-it-out functionality:
 
 ### File Management
 - `gms-rt-files-upload` - Upload file to server
-- `gms-rt-files-install` - Upload and install APK
 - `gms-rt-files-progress` - Check upload progress
 
 ### Desktop VNC
@@ -1406,9 +1398,6 @@ gms-rt-burn-gsi /path/to/system.img RK3572GMS1
 ```bash
 # Upload file
 gms-rt-files-upload ./test.apk /data/local/tmp
-
-# Install APK
-gms-rt-files-install ./app.apk RK3572GMS1
 ```
 
 ---

@@ -681,30 +681,6 @@ gms-rt-devices-wifi-connect() {
 # File Commands
 # ==============================================================================
 
-# Install APK
-gms-rt-files-install() {
-    local file_path="$1"
-    local device_id="$2"
-    [ -z "$file_path" ] && { error "File path required. Usage: gms-rt-files-install <file_path> <device_id>"; return 1; }
-    [ -z "$device_id" ] && { error "Device ID required. Usage: gms-rt-files-install <file_path> <device_id>"; return 1; }
-    [ ! -f "$file_path" ] && { error "File not found: $file_path"; return 1; }
-
-    check_jq
-    echo "📦 Installing APK: $file_path to $device_id..."
-
-    local curl_args="-F \"file=@$file_path\" -F \"device_id=$device_id\""
-    local response=$(api_call "/files/install" "POST" "" "$curl_args")
-
-    local body
-    if ! body=$(check_http_response "$response"); then
-        error "Failed to install APK - HTTP status: $HTTP_STATUS_CODE"
-        echo "$response" | grep -v "HTTP_STATUS:" | jq '.' 2>/dev/null || echo "$response" | grep -v "HTTP_STATUS:"
-        return 1
-    fi
-
-    echo "$body" | jq '.'
-}
-
 # Get upload progress
 gms-rt-files-progress() {
     local upload_id="${1:-}"
@@ -1645,7 +1621,6 @@ ${YELLOW}Device Management:${NC}
 
 ${YELLOW}File Management:${NC}
   gms-rt-files-upload            - Upload file
-  gms-rt-files-install           - Upload and install APK
   gms-rt-files-progress          - Get upload progress
 
 ${YELLOW}Reports:${NC}

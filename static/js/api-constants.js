@@ -615,17 +615,6 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "VPN已断开" }',
         usage: '断开当前VPN连接'
     },
-    '/api/files/install': {
-        title: '上传并安装',
-        description: '上传APK并安装到设备',
-        method: 'POST',
-        params: [
-            { name: 'file', type: 'file', required: true, desc: 'APK文件' },
-            { name: 'device_id', type: 'string', required: true, desc: '目标设备序列号' }
-        ],
-        response: '{ "success": true, "message": "应用已安装" }',
-        usage: '上传并安装APK到指定设备'
-    },
     '/api/files/progress': {
         title: '获取上传进度',
         description: '获取当前文件上传进度',
