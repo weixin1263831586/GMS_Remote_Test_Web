@@ -1130,6 +1130,16 @@ async def health_check():
         }
     })
 
+@app.get("/templates/architecture.html")
+async def get_architecture():
+    """获取系统架构图"""
+    architecture_file = os.path.join(os.path.dirname(__file__), 'templates', 'architecture.html')
+    if os.path.exists(architecture_file):
+        with open(architecture_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return HTMLResponse(content=content)
+    return JSONResponse(status_code=404, content={"error": "Architecture diagram not found"})
+
 # ==================== 客户端管理 ====================
 
 @app.get("/api/config/values")
