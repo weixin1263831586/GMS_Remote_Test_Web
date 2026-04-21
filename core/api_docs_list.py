@@ -512,8 +512,7 @@ API_DOCS_LIST = [
         "params": [
             {"name": "path", "type": "string", "required": True, "desc": "目录路径，如/sdcard"}
         ],
-        "category": "file",
-        "skill": "gms-rt-files-list"
+        "category": "file"
     },
 
     # ==================== 固件烧写 ====================

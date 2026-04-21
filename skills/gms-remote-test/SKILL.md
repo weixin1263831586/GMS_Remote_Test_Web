@@ -1323,7 +1323,6 @@ For complete API documentation with try-it-out functionality:
 
 ### File Management
 - `gms-rt-files-upload` - Upload file to server
-- `gms-rt-files-list` - List files on server
 - `gms-rt-files-install` - Upload and install APK
 - `gms-rt-files-progress` - Check upload progress
 
@@ -1407,9 +1406,6 @@ gms-rt-burn-gsi /path/to/system.img RK3572GMS1
 ```bash
 # Upload file
 gms-rt-files-upload ./test.apk /data/local/tmp
-
-# List files
-gms-rt-files-list /data/local/tmp
 
 # Install APK
 gms-rt-files-install ./app.apk RK3572GMS1
