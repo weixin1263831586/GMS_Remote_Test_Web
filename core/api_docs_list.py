@@ -485,17 +485,6 @@ API_DOCS_LIST = [
 
     # ==================== 文件管理 ====================
     {
-        "method": "POST",
-        "path": "/api/files/install",
-        "description": "上传APK并安装到设备",
-        "params": [
-            {"name": "file", "type": "file", "required": True, "desc": "APK文件"},
-            {"name": "device_id", "type": "string", "required": True, "desc": "目标设备序列号"}
-        ],
-        "category": "file",
-        "skill": "gms-rt-files-install"
-    },
-    {
         "method": "GET",
         "path": "/api/files/progress",
         "description": "获取当前文件上传进度",
