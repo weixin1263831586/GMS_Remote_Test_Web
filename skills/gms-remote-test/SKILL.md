@@ -1315,7 +1315,6 @@ For complete API documentation with try-it-out functionality:
 - `gms-rt-burn-serial` - Burn serial number
 
 ### File Management
-- `gms-rt-files-upload` - Upload file to server
 - `gms-rt-files-progress` - Check upload progress
 
 ### Desktop VNC
@@ -1395,11 +1394,6 @@ gms-rt-burn-gsi /path/to/system.img RK3572GMS1
 ```
 
 ### File Operations
-```bash
-# Upload file
-gms-rt-files-upload ./test.apk /data/local/tmp
-```
-
 ---
 
 **Server**: http://172.16.14.233:5001

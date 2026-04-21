@@ -691,35 +691,6 @@ gms-rt-files-progress() {
     api_call "/files/progress" | jq '.'
 }
 
-# Upload file
-gms-rt-files-upload() {
-    local file_path="$1"
-    local target_path="${2:-}"
-    [ -z "$file_path" ] && { error "File path required. Usage: gms-rt-files-upload <file_path> [target_path]"; return 1; }
-    [ ! -f "$file_path" ] && { error "File not found: $file_path"; return 1; }
-
-    check_jq
-    echo "📤 Uploading file: $file_path..."
-
-    local curl_args
-    if [ -n "$target_path" ]; then
-        curl_args="-F \"file=@$file_path\" -F \"path=$target_path\""
-    else
-        curl_args="-F \"file=@$file_path\""
-    fi
-
-    local response=$(api_call "/files/upload" "POST" "" "$curl_args")
-
-    local body
-    if ! body=$(check_http_response "$response"); then
-        error "Failed to upload file - HTTP status: $HTTP_STATUS_CODE"
-        echo "$response" | grep -v "HTTP_STATUS:" | jq '.' 2>/dev/null || echo "$response" | grep -v "HTTP_STATUS:"
-        return 1
-    fi
-
-    echo "$body" | jq '.'
-}
-
 # OpenGrok search
 gms-rt-opengrok-search() {
     local query="$1"
@@ -1620,7 +1591,6 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-screen             - Show device screen
 
 ${YELLOW}File Management:${NC}
-  gms-rt-files-upload            - Upload file
   gms-rt-files-progress          - Get upload progress
 
 ${YELLOW}Reports:${NC}
