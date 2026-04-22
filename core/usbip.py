@@ -18,8 +18,9 @@ from .device_utils import DeviceUtils
 logger = logging.getLogger(__name__)
 
 # usbipd 安装命令常量
-USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行PowerShell执行：
 USBIPD_INSTALL_CMD = 'winget install dorssel.usbipd-win --source winget'
+
+USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行PowerShell执行：
 {install_cmd}
 验证安装：usbipd --version'''
 

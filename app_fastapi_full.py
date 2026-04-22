@@ -1,8 +1,21 @@
 #!/usr/bin/env python3
 """
-GMS Auto Test - 完整版FastAPI应用（端口5001）
+GMS Auto Test - FastAPI Full Application (Port 5001)
 
-完全替代Flask版本，实现所有60个端点
+完整的 GMS 自动测试平台 FastAPI 应用，提供以下功能:
+- 设备管理 (Devices): 设备列表、信息查询、重启、remount 等
+- 测试管理 (Tests): 测试启动、停止、状态查询、日志流等
+- 报告管理 (Reports): 报告列表、下载、分析、删除等
+- 固件烧写 (Burning): 固件上传、GSI 烧写、序列号烧写等
+- USB/IP 连接: USB/IP 设备连接、断开、状态查询
+- 桌面 VNC: VNC 会话管理、桌面验证
+- SSH 管理: SSH 连接测试、路由检查、SSHD 管理
+- 文件管理: 文件上传、进度查询、列表
+- VPN 管理: VPN 连接、断开、状态查询
+
+Author: GMS Team
+Version: 1.0.0
+Port: 5001
 """
 
 import os
@@ -34,8 +47,6 @@ import asyncio
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Body, Query
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.websockets import WebSocketState
-from enum import Enum
-import socket  # 用于TCP连接优化
 
 # 导入API文档列表
 from core.api_docs_list import API_DOCS_LIST
@@ -84,6 +95,30 @@ UPLOAD_PROGRESS_CLEANUP_INTERVAL = 60  # 清理间隔（秒）
 
 # GSI 固件烧写进度轮询配置
 GSI_PROGRESS_POLL_INTERVAL = 0.5  # 服务器端进度更新间隔（秒）
+
+# ==================== 统一响应格式 ====================
+
+def success_response(data: Any = None, message: str = "Success") -> JSONResponse:
+    """成功响应"""
+    content = {'success': True, 'message': message}
+    if data is not None:
+        content['data'] = data
+    return JSONResponse(content=content)
+
+def error_response(error: str, status_code: int = 500, detail: Any = None) -> JSONResponse:
+    """错误响应"""
+    content = {'success': False, 'error': error}
+    if detail is not None:
+        content['detail'] = detail
+    return JSONResponse(content=content, status_code=status_code)
+
+def validation_error_response(errors: List[str]) -> JSONResponse:
+    """验证错误响应"""
+    return error_response(
+        error="Validation failed",
+        status_code=422,
+        detail={"errors": errors}
+    )
 GSI_PROGRESS_INCREMENT = 5  # 每次增加的百分比
 GSI_PROGRESS_MAX = 95  # 最大进度百分比（等待完成前）
 
@@ -5804,7 +5839,7 @@ async def get_ssh_terminal_info():
         config = config_manager.load_config()
 
         # Cache config values to avoid redundant get() calls
-        ssh_host = config.get('ubuntu_host', '172.16.14.233')
+        ssh_host = config.get('ubuntu_host', 'localhost')
         ssh_user = config.get('ubuntu_user', 'hcq')
         connection_string = f"ssh {ssh_user}@{ssh_host}"
 
@@ -8291,10 +8326,10 @@ async def get_api_help(api_path: Optional[str] = None):
 
     Examples:
         # 获取所有API列表
-        curl -s "http://172.16.14.233:5001/api/system/help"
+        curl -s "http://localhost:5001/api/system/help"
 
         # 获取单个API详细帮助
-        curl -s "http://172.16.14.233:5001/api/system/help?api_path=api/test/start"
+        curl -s "http://localhost:5001/api/system/help?api_path=api/test/start"
     """
     try:
         # 如果指定了api_path，返回单个API的详细帮助
@@ -8501,7 +8536,7 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             'title': '验证Ubuntu主机',
             'description': '验证Ubuntu主机SSH连接并检查VNC服务可用性（host格式：user@ip）',
             'params': [
-                {'name': 'host', 'type': 'string', 'required': True, 'desc': '主机地址（格式：user@ip，如hcq@172.16.14.233）'},
+                {'name': 'host', 'type': 'string', 'required': True, 'desc': '主机地址（格式：user@ip，如hcq@192.168.1.100）'},
                 {'name': 'password', 'type': 'string', 'required': False, 'desc': 'SSH登录密码（可选）'}
             ],
             'response': '{"success": true, "message": "SSH连接成功，VNC服务可用"}',
