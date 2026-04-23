@@ -1319,8 +1319,8 @@ async function rebootDevices() {
 }
 
 async function remountDevices() {
-    await callDeviceApi('/api/devices/remount');
     addLogEntry('正在执行 remount...', 'info');
+    await callDeviceApi('/api/devices/remount');
 }
 
 async function connectWifi() {
