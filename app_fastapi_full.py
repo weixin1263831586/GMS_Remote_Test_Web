@@ -8475,17 +8475,6 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             'response': '{"success": true, "devices": [...]}',
             'usage': ''
         },
-        '/api/devices/lock': {
-            'title': '锁定设备',
-            'description': '锁定/解锁设备',
-            'params': [
-                {'name': 'device_id', 'type': 'string', 'required': True, 'desc': '设备序列号'},
-                {'name': 'client_id', 'type': 'string', 'required': True, 'desc': '客户端ID'},
-                {'name': 'username', 'type': 'string', 'required': True, 'desc': '用户名'}
-            ],
-            'response': '{"success": true, "message": "设备已锁定"}',
-            'usage': ''
-        },
         '/api/burn/firmware': {
             'title': '烧写固件',
             'description': '上传固件文件并烧写设备',

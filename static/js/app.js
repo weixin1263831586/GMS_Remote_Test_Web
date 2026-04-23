@@ -267,8 +267,7 @@ function checkPendingFirmwareUpload() {
                        `上次进度: ${progress.toFixed(1)}% (${formatBytes(uploadedSize)}/${formatBytes(totalSize)})\n` +
                        `中断时间: ${Math.floor(elapsed / 1000)}秒前\n\n` +
                        `请重新开始上传。\n\n` +
-                       `💡 提示：上传过程中请勿刷新页面，可以使用以下文件分块上传功能：\n` +
-                       `   http://172.16.14.233:5001/static/chunk-upload-simple.html`;
+                       `💡 提示：上传过程中请勿刷新页面。`;
 
         addLogEntry(message, 'warning');
         showToast('固件上传已中断，请重新上传', 'warning');
@@ -492,8 +491,6 @@ function initWebSocket() {
 
                     case 'file_upload_progress':
                         // 文件上传进度更新（通用，用于固件上传等）
-                        // 移除频繁的调试日志，减少控制台噪音
-                        // console.log('[WebSocket] file_upload_progress:', data);
                         updateUploadProgress(data.percentage, data.filename, data.uploaded_size, data.total_size);
                         break;
 
@@ -1319,8 +1316,28 @@ async function rebootDevices() {
 }
 
 async function remountDevices() {
-    addLogEntry('正在执行 remount...', 'info');
-    await callDeviceApi('/api/devices/remount');
+    const button = document.getElementById('btn-remount-devices');
+
+    // 禁用按钮，防止重复点击
+    if (button) {
+        button.disabled = true;
+        button.style.opacity = '0.5';
+        button.style.cursor = 'not-allowed';
+    }
+
+    try {
+        addLogEntry('正在执行 remount...', 'info');
+        await callDeviceApi('/api/devices/remount');
+    } catch (error) {
+        addLogEntry('Remount失败: ' + error.message, 'error');
+    } finally {
+        // 恢复按钮状态
+        if (button) {
+            button.disabled = false;
+            button.style.opacity = '1';
+            button.style.cursor = 'pointer';
+        }
+    }
 }
 
 async function connectWifi() {
@@ -1363,24 +1380,76 @@ async function submitWifiConfig() {
 }
 
 async function lockSelectedDevices(action) {
-    await callDeviceApi('/api/devices/lock', { action });
-    addLogEntry(`正在${action === 'lock' ? '锁定' : '解锁'}设备...`, 'info');
+    if (!validateDeviceSelection()) return;
+
+    const buttonId = action === 'lock' ? 'btn-lock-device' : 'btn-unlock-device';
+    const button = document.getElementById(buttonId);
+    const actionText = action === 'lock' ? '锁定' : '解锁';
+
+    // 禁用按钮，防止重复点击
+    if (button) {
+        button.disabled = true;
+        button.style.opacity = '0.5';
+        button.style.cursor = 'not-allowed';
+    }
+
+    try {
+        addLogEntry(`正在${actionText}设备...`, 'info');
+        await callDeviceApi(`/api/devices/bootloader-${action}`, {});
+        addLogEntry(`设备${actionText}完成`, 'info');
+    } catch (error) {
+        addLogEntry(`设备${actionText}失败: ${error.message}`, 'error');
+    } finally {
+        // 恢复按钮状态
+        if (button) {
+            button.disabled = false;
+            button.style.opacity = '1';
+            button.style.cursor = 'pointer';
+        }
+    }
 }
 
 async function checkDeviceLockStatus() {
     if (!validateDeviceSelection()) return;
+
+    const button = document.getElementById('btn-check-lock-status');
+
+    // 禁用按钮，防止重复点击
+    if (button) {
+        button.disabled = true;
+        button.style.opacity = '0.5';
+        button.style.cursor = 'not-allowed';
+    }
+
     try {
-        const result = await apiCall('/api/devices/lock-status', 'POST', {
+        const result = await apiCall('/api/devices/bootloader-status', 'POST', {
             devices: Array.from(state.selectedDevices)
         });
         addLogEntry('设备锁定状态: ' + JSON.stringify(result, null, 2), 'info');
     } catch (error) {
         addLogEntry('获取锁定状态失败: ' + error.message, 'error');
+    } finally {
+        // 恢复按钮状态
+        if (button) {
+            button.disabled = false;
+            button.style.opacity = '1';
+            button.style.cursor = 'pointer';
+        }
     }
 }
 
 async function collectDeviceInfo() {
     if (!validateDeviceSelection()) return;
+
+    const button = document.getElementById('btn-device-info');
+
+    // 禁用按钮，防止重复点击
+    if (button) {
+        button.disabled = true;
+        button.style.opacity = '0.5';
+        button.style.cursor = 'not-allowed';
+    }
+
     try {
         const result = await apiCall('/api/devices/info', 'POST', {
             devices: Array.from(state.selectedDevices)
@@ -1388,6 +1457,13 @@ async function collectDeviceInfo() {
         addLogEntry('设备信息: ' + JSON.stringify(result, null, 2), 'info');
     } catch (error) {
         addLogEntry('获取设备信息失败: ' + error.message, 'error');
+    } finally {
+        // 恢复按钮状态
+        if (button) {
+            button.disabled = false;
+            button.style.opacity = '1';
+            button.style.cursor = 'pointer';
+        }
     }
 }
 
@@ -2660,22 +2736,15 @@ window.clearFirmwareUploadState = clearFirmwareUploadState;
 
 // 通用上传进度更新函数（用于固件上传等）
 function updateUploadProgress(percentage, filename, uploadedSize, totalSize) {
-    // 移除频繁的调试日志，减少控制台噪音
-    // console.log('[updateUploadProgress] Called with:', { percentage, filename, uploadedSize, totalSize });
 
     const progressFill = document.getElementById('upload-progress-fill');
     const progressInfo = document.getElementById('progress-info');
-
-    // console.log('[updateUploadProgress] Elements:', { progressFill, progressInfo });
 
     if (progressFill && progressInfo) {
         progressFill.style.width = percentage + '%';
 
         const transferred = formatBytes(uploadedSize);
         const total = formatBytes(totalSize);
-
-        // 移除频繁的UI更新日志，减少控制台噪音
-        // console.log('[updateUploadProgress] Updating UI:', { percentage, transferred, total });
 
         if (percentage >= 100) {
             progressInfo.textContent = `✅ ${filename} 上传完成 (${total})`;
@@ -3329,11 +3398,6 @@ function startStatusPolling() {
             const hasRealtimeConnection = (state.socket && typeof io !== 'undefined') ||
                                         (state.websocket && state.websocket.readyState === WebSocket.OPEN);
 
-            // 移除频繁的调试日志，减少控制台噪音
-            // console.log('[Poll] hasRealtimeConnection:', hasRealtimeConnection,
-            //            'Socket.IO:', !!state.socket,
-            //            'WebSocket:', state.websocket ? state.websocket.readyState : 'none');
-
             // 如果没有实时连接，获取日志；否则只获取状态
             const status = await apiCall(hasRealtimeConnection ? '/api/test/status?logs=false' : '/api/test/status');
 
@@ -3356,13 +3420,10 @@ function startStatusPolling() {
             }
 
             // 更新测试状态按钮
-            // console.log('[Poll] Status:', status.running, 'State.testing:', state.testing);
             if (status.running && !state.testing) {
-                // console.log('[Poll] Setting testing = TRUE');
                 state.testing = true;
                 updateTestToggleButton(true);
             } else if (!status.running && state.testing) {
-                // console.log('[Poll] Setting testing = FALSE');
                 state.testing = false;
                 updateTestToggleButton(false);
             }
