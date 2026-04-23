@@ -514,12 +514,12 @@
                         <button class="btn-xxs" onclick="refreshDevices()">🔄 刷新设备</button>
                         <button class="btn-xxs" onclick="selectAllDevices()">✅ 全选设备</button>
                         <button class="btn-xxs" onclick="rebootDevices()">⏻ 重启设备</button>
-                        <button class="btn-xxs" onclick="remountDevices()">⏻ Remount</button>
+                        <button id="btn-remount-devices" class="btn-xxs" onclick="remountDevices()">⏻ Remount</button>
                         <button class="btn-xxs" onclick="connectWifi()">🛜 连接Wifi</button>
-                        <button class="btn-xxs" onclick="lockSelectedDevices('lock')">🔒 锁定设备</button>
-                        <button class="btn-xxs" onclick="lockSelectedDevices('unlock')">🔓 解锁设备</button>
-                        <button class="btn-xxs" onclick="checkDeviceLockStatus()">🔐 锁定状态</button>
-                        <button class="btn-xxs" onclick="collectDeviceInfo()">📋 设备信息</button>
+                        <button id="btn-lock-device" class="btn-xxs" onclick="lockSelectedDevices('lock')">🔒 锁定设备</button>
+                        <button id="btn-unlock-device" class="btn-xxs" onclick="lockSelectedDevices('unlock')">🔓 解锁设备</button>
+                        <button id="btn-check-lock-status" class="btn-xxs" onclick="checkDeviceLockStatus()">🔐 锁定状态</button>
+                        <button id="btn-device-info" class="btn-xxs" onclick="collectDeviceInfo()">📋 设备信息</button>
                     </div>
                     <!-- VNC 控制按钮 -->
                     <div class="vnc-button-frame">
@@ -3002,7 +3002,7 @@
 
                     <h3 style="color: var(--primary-color); margin-bottom: 16px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">💡 常用命令快速参考</h3>
                     <div style="margin-top: 24px; padding: 12px; background: rgba(78, 205, 176, 0.1); border-left: 4px solid var(--primary-color); border-radius: 4px;">
-                        <div style="font-size: 11px; color: var(--text-secondary);">
+                        <div style="font-size: 12px; color: var(--text-secondary);">
                             <div style="margin-bottom: 4px;">• <code style="color: #4ec9b0;">gms-rt-devices-info</code> - 获取详细设备信息</div>
                             <div style="margin-bottom: 4px;">• <code style="color: #4ec9b0;">gms-rt-devices-user-locked</code> - 检查设备锁状态</div>
                             <div style="margin-bottom: 4px;">• <code style="color: #4ec9b0;">gms-rt-reports-list</code> - 列出所有测试报告</div>
