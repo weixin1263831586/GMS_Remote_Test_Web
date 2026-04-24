@@ -297,6 +297,20 @@ API_DOCS_LIST = [
         "skill": "gms-rt-reports-list"
     },
     {
+        "method": "POST",
+        "path": "/api/reports/analyze",
+        "description": "统一的报告分析 API（支持上传、已保存报告、AI 分析）",
+        "params": [
+            {"name": "mode", "type": "string", "required": True, "desc": "分析模式：upload/saved/ai"},
+            {"name": "file", "type": "file", "required": False, "desc": "上传的文件（mode=upload 时）"},
+            {"name": "report_timestamp", "type": "string", "required": False, "desc": "报告时间戳（mode=saved 时）"},
+            {"name": "test_name", "type": "string", "required": False, "desc": "测试用例名（mode=ai 时）"},
+            {"name": "error_message", "type": "string", "required": False, "desc": "错误消息（mode=ai 时）"}
+        ],
+        "category": "report",
+        "skill": "gms-rt-reports-analyze"
+    },
+    {
         "method": "GET",
         "path": "/api/reports/download",
         "description": "获取报告文件列表、下载ZIP或查看文件内容（统一接口）",

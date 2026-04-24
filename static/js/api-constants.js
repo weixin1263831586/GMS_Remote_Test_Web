@@ -414,7 +414,7 @@ const API_DETAILS_MAP = {
         usage: '批量查看设备屏幕'
     },
     '/api/reports/list': {
-        title: '获取报告列表',
+        title: '查询报告',
         description: '获取所有历史测试报告',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "reports": [{ "timestamp": "20260326_100000", "test_type": "CTS" }] }',
@@ -434,7 +434,7 @@ const API_DETAILS_MAP = {
         usage: '统一接口分析测试报告'
     },
     '/api/reports/download': {
-        title: '获取报告',
+        title: '下载报告',
         description: '获取测试报告（查看或下载）',
         params: [
             { name: 'path', type: 'string', required: false, desc: '报告文件路径' },
