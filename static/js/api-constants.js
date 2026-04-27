@@ -236,7 +236,7 @@ const API_DETAILS_MAP = {
     },
     '/api/system/docs': {
         title: '获取API文档',
-        description: '获取系统API文档列表',
+        description: '获取系统接口文档列表',
         method: 'GET',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "apis": [...] }',

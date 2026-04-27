@@ -640,7 +640,7 @@ API_DOCS_LIST = [
     {
         "method": "GET",
         "path": "/api/system/docs",
-        "description": "获取系统API文档列表",
+        "description": "获取系统接口文档列表",
         "params": [],
         "category": "system",
         "skill": "gms-rt-system-docs"
