@@ -12,395 +12,415 @@
       box-sizing: border-box;
     }
 
+    /* 自定义滚动条样式 */
+    html {
+      overflow-y: auto;
+    }
+
     body {
       font-family: 'JetBrains Mono', monospace;
       background: #020617;
-      min-height: 100vh;
-      padding: 2rem;
       color: white;
+      padding: 2rem;
+      overflow-x: hidden;
+    }
+
+    /* Webkit浏览器滚动条样式 */
+    ::-webkit-scrollbar {
+      width: 12px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #1e293b;
+      border-radius: 6px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 6px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+
+    /* Firefox滚动条样式 */
+    html {
+      scrollbar-width: thin;
+      scrollbar-color: #475569 #1e293b;
     }
 
     .container {
-      max-width: 1600px;
+      width: 100%;
       margin: 0 auto;
-    }
-
-    .header {
-      margin-bottom: 2rem;
-    }
-
-    .header-row {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .pulse-dot {
-      width: 12px;
-      height: 12px;
-      background: #22d3ee;
-      border-radius: 50%;
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    h1 {
-      font-size: 1.5rem;
-      font-weight: 700;
-      letter-spacing: -0.025em;
-    }
-
-    .subtitle {
-      color: #94a3b8;
-      font-size: 0.875rem;
-      margin-left: 1.75rem;
-    }
-
-    .diagram-container {
-      background: rgba(15, 23, 42, 0.5);
-      border-radius: 1rem;
-      border: 1px solid #1e293b;
-      padding: 2rem;
-      overflow-x: auto;
+      padding: 0;
     }
 
     svg {
       width: 100%;
-      min-width: 1200px;
+      height: auto;
       display: block;
+      margin: 0 auto;
     }
 
     .footer {
       text-align: center;
-      margin-top: 2rem;
+      margin-top: 0.5rem;
       color: #475569;
       font-size: 0.75rem;
+      padding: 0.5rem;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="diagram-container">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1200">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2600 1400">
         <!-- Definitions -->
         <defs>
+          <!-- 字体大小变量系统 -->
+          <style>
+            .font-primary { font-size: 30px; font-weight: 700; }
+            .font-secondary { font-size: 22px; font-weight: 600; }
+            .font-tertiary { font-size: 17px; font-weight: 600; }
+            .font-quaternary { font-size: 15px; font-weight: 600; }
+            .font-body { font-size: 13px; font-weight: 400; }
+            .font-small { font-size: 11px; font-weight: 400; }
+            .font-tiny { font-size: 9px; font-weight: 400; }
+          </style>
+
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
             <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="arrowhead-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" />
+          </marker>
+          <marker id="arrowhead-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#10b981" />
           </marker>
           <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
             <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
           </pattern>
+          <linearGradient id="windowsGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:0.12" />
+            <stop offset="100%" style="stop-color:#2563eb;stop-opacity:0.20" />
+          </linearGradient>
+          <linearGradient id="ubuntuGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:0.12" />
+            <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:0.20" />
+          </linearGradient>
+          <linearGradient id="buildGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#10b981;stop-opacity:0.12" />
+            <stop offset="100%" style="stop-color:#059669;stop-opacity:0.20" />
+          </linearGradient>
         </defs>
 
         <!-- Background Grid -->
-        <rect width="1600" height="1200" fill="url(#grid)" />
+        <rect width="2600" height="1400" fill="url(#grid)" />
 
-        <!-- Connection labels -->
+        <!-- ==================== MAIN ZONES ==================== -->
+        <!-- 字体使用说明:
+             - font-primary: 32px, 主要区域标题 (WINDOWS CLIENT, TEST HOST, BUILD SERVER)
+             - font-secondary: 24px, 大组件标题 (FastAPI Backend, Build Server System)
+             - font-tertiary: 18px, 中等组件标题 (Test Runner, 管理模块)
+             - font-quaternary: 16px, 小组件标题
+             - font-body: 14px, 正文内容
+             - font-small: 12px, 辅助文字
+             - font-tiny: 10px, 最小文字
+        -->
 
-        <!-- Connection Arrows (drawn first to be behind components) -->
-        <!-- Frontend to Backend -->
-        <path d="M 800 80 L 800 140" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <text x="810" y="115" fill="#94a3b8" font-size="9">HTTP/HTTPS</text>
+        <!-- Zone 1: WINDOWS CLIENT -->
+        <rect x="50" y="80" width="700" height="1150" rx="16" fill="url(#windowsGradient)" stroke="#3b82f6" stroke-width="3"/>
+        <text x="400" y="120" fill="#3b82f6" class="font-primary" text-anchor="middle">WINDOWS CLIENT</text>
+        <text x="400" y="155" fill="#3b82f6" class="font-tertiary" text-anchor="middle">Web UI 操作端 • 本地设备桥接</text>
 
-        <!-- Backend to Core Services -->
-        <path d="M 720 240 L 420 240" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <text x="570" y="235" fill="#94a3b8" font-size="9" text-anchor="middle">内部调用</text>
+        <!-- Zone 2: TEST HOST (UBUNTU) -->
+        <rect x="950" y="80" width="900" height="1150" rx="16" fill="url(#ubuntuGradient)" stroke="#fbbf24" stroke-width="3"/>
+        <text x="1400" y="120" fill="#fbbf24" class="font-primary" text-anchor="middle">TEST HOST (Ubuntu)</text>
+        <text x="1400" y="155" fill="#fbbf24" class="font-tertiary" text-anchor="middle">测试控制中心 • FastAPI Server</text>
 
-        <!-- Backend to Modules -->
-        <path d="M 980 240 L 1080 240" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <text x="1030" y="235" fill="#94a3b8" font-size="9" text-anchor="middle">模块调用</text>
+        <!-- Zone 3: BUILD SERVER -->
+        <rect x="1950" y="80" width="600" height="1150" rx="16" fill="url(#buildGradient)" stroke="#10b981" stroke-width="3"/>
+        <text x="2250" y="120" fill="#10b981" class="font-primary" text-anchor="middle">BUILD SERVER</text>
+        <text x="2250" y="155" fill="#10b981" class="font-tertiary" text-anchor="middle">10.10.10.206 • 编译构建服务器</text>
 
-        <!-- Backend to Test Host -->
-        <path d="M 800 260 L 800 380" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <text x="810" y="325" fill="#94a3b8" font-size="9">SSH/ADB</text>
+        <!-- ==================== CONNECTION ARROWS ==================== -->
 
-        <!-- Test Host to Windows Client -->
-        <path d="M 800 440 L 800 520" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <text x="810" y="485" fill="#94a3b8" font-size="9">USBIPD</text>
+        <!-- Arrow 1: Windows Client -> TEST HOST -->
+        <path d="M 750 260 L 950 260" stroke="#3b82f6" stroke-width="6" marker-end="url(#arrowhead-blue)"/>
+        <rect x="775" y="238" width="150" height="32" rx="4" fill="rgba(59, 130, 246, 0.9)" stroke="#3b82f6" stroke-width="2"/>
+        <text x="850" y="260" fill="#ffffff" class="font-tertiary" text-anchor="middle">HTTP/WebSocket</text>
 
-        <!-- Windows Client to Devices -->
-        <!-- Left arrow to Device 1 -->
-        <path d="M 700 580 L 700 610 L 500 610 L 500 640" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <!-- Center arrow to Device 2 -->
-        <path d="M 800 580 L 800 610 L 800 640" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <!-- Right arrow to Device 3 -->
-        <path d="M 900 580 L 900 610 L 1100 610 L 1100 640" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <!-- Arrow 2: TEST HOST -> BUILD SERVER -->
+        <path d="M 1850 260 L 1950 260" stroke="#10b981" stroke-width="6" marker-end="url(#arrowhead-green)"/>
+        <rect x="1868" y="238" width="64" height="32" rx="4" fill="rgba(16, 185, 129, 0.9)" stroke="#10b981" stroke-width="2"/>
+        <text x="1900" y="260" fill="#ffffff" class="font-tertiary" text-anchor="middle">SSH</text>
 
-        <!-- Test Host to Database -->
-        <path d="M 640 410 L 200 410" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <text x="420" y="405" fill="#94a3b8" font-size="9" text-anchor="middle">存储报告</text>
+        <!-- Return Arrow: BUILD SERVER -> TEST HOST -->
+        <path d="M 1950 305 L 1850 305" stroke="#10b981" stroke-width="4" stroke-dasharray="8,4" marker-end="url(#arrowhead-green)"/>
+        <text x="1900" y="298" fill="#10b981" class="font-quaternary" text-anchor="middle">Build Artifacts</text>
 
-        <!-- WebSocket connection (dashed) -->
-        <path d="M 920 60 L 920 100" stroke="#fb923c" stroke-width="1" stroke-dasharray="4,4" marker-end="url(#arrowhead)"/>
-        <text x="930" y="85" fill="#fb923c" font-size="8">实时推送</text>
+        <!-- ==================== WINDOWS CLIENT CONTENT ==================== -->
 
-        <!-- ==================== FRONTEND LAYER ==================== -->
-        <g transform="translate(620, 40)">
-          <rect x="0" y="0" width="360" height="40" rx="6" fill="#0f172a"/>
-          <rect x="0" y="0" width="360" height="40" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
-          <text x="180" y="25" fill="#22d3ee" font-size="12" text-anchor="middle" font-weight="600">Frontend (Web UI)</text>
+        <!-- Web Browser -->
+        <g transform="translate(150, 210)">
+          <rect x="0" y="0" width="500" height="55" rx="8" fill="#0f172a" stroke="#22d3ee" stroke-width="2"/>
+          <text x="250" y="35" fill="#22d3ee" class="font-secondary" text-anchor="middle">Web Browser</text>
         </g>
 
-        <!-- ==================== BACKEND LAYER ==================== -->
-        <g transform="translate(620, 140)">
-          <rect x="0" y="0" width="360" height="120" rx="6" fill="#0f172a"/>
-          <rect x="0" y="0" width="360" height="120" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-          <text x="180" y="35" fill="#34d399" font-size="14" text-anchor="middle" font-weight="600">FastAPI Backend</text>
-          <text x="180" y="58" fill="#34d399" font-size="10" text-anchor="middle">Port 5001</text>
-          <text x="180" y="78" fill="#34d399" font-size="9" text-anchor="middle">68 API Endpoints</text>
-          <text x="180" y="98" fill="#34d399" font-size="8" text-anchor="middle">异步处理 • WebSocket支持</text>
+        <!-- Windows System -->
+        <g transform="translate(150, 290)">
+          <rect x="0" y="0" width="500" height="85" rx="8" fill="#0f172a" stroke="#94a3b8" stroke-width="2"/>
+          <text x="250" y="32" fill="#94a3b8" class="font-secondary" text-anchor="middle">Windows Client System</text>
+          <text x="250" y="54" fill="#94a3b8" class="font-body" text-anchor="middle">usbipd • WSL2 Ubuntu • USB/IP Server</text>
+          <text x="250" y="73" fill="#94a3b8" class="font-body" text-anchor="middle">本地设备桥接 • USB共享 • ADB转发</text>
         </g>
 
-        <!-- WebSocket Indicator -->
-        <g transform="translate(1000, 150)">
-          <rect x="0" y="0" width="100" height="20" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
-          <text x="50" y="14" fill="#fb923c" font-size="7" text-anchor="middle">WebSocket实时通信</text>
-        </g>
-
-        <!-- ==================== CORE SERVICES LAYER ==================== -->
-        <g transform="translate(60, 140)">
-          <!-- Config Management -->
+        <!-- Management Modules -->
+        <g transform="translate(150, 400)">
           <g transform="translate(0, 0)">
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-            <text x="60" y="25" fill="#34d399" font-size="11" text-anchor="middle" font-weight="600">Config</text>
-            <text x="60" y="42" fill="#34d399" font-size="9" text-anchor="middle">配置管理</text>
-            <text x="60" y="58" fill="#34d399" font-size="7" text-anchor="middle">动态配置</text>
-            <text x="60" y="72" fill="#34d399" font-size="7" text-anchor="middle">热重载</text>
+            <rect x="0" y="0" width="150" height="65" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+            <text x="75" y="30" fill="#a78bfa" class="font-quaternary" text-anchor="middle">ADB Forward</text>
+            <text x="75" y="48" fill="#a78bfa" class="font-body" text-anchor="middle">端口转发</text>
           </g>
-
-          <!-- SSH Connection -->
-          <g transform="translate(140, 0)">
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-            <text x="60" y="25" fill="#34d399" font-size="11" text-anchor="middle" font-weight="600">SSH</text>
-            <text x="60" y="42" fill="#34d399" font-size="9" text-anchor="middle">SSH连接</text>
-            <text x="60" y="58" fill="#34d399" font-size="7" text-anchor="middle">密钥认证</text>
-            <text x="60" y="72" fill="#34d399" font-size="7" text-anchor="middle">终端访问</text>
+          <g transform="translate(175, 0)">
+            <rect x="0" y="0" width="150" height="65" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+            <text x="75" y="30" fill="#a78bfa" class="font-quaternary" text-anchor="middle">VNC</text>
+            <text x="75" y="48" fill="#a78bfa" class="font-body" text-anchor="middle">桌面控制</text>
           </g>
-
-          <!-- Device Management -->
-          <g transform="translate(280, 0)">
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-            <text x="60" y="25" fill="#34d399" font-size="11" text-anchor="middle" font-weight="600">Device</text>
-            <text x="60" y="42" fill="#34d399" font-size="9" text-anchor="middle">设备管理</text>
-            <text x="60" y="58" fill="#34d399" font-size="7" text-anchor="middle">ADB控制</text>
-            <text x="60" y="72" fill="#34d399" font-size="7" text-anchor="middle">状态监控</text>
+          <g transform="translate(350, 0)">
+            <rect x="0" y="0" width="150" height="65" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+            <text x="75" y="30" fill="#a78bfa" class="font-quaternary" text-anchor="middle">USBIP Mgr</text>
+            <text x="75" y="48" fill="#a78bfa" class="font-body" text-anchor="middle">USB/IP管理</text>
           </g>
         </g>
 
-        <!-- Second Row of Core Services -->
-        <g transform="translate(60, 240)">
-          <!-- Test Runner -->
-          <g transform="translate(0, 0)">
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-            <text x="60" y="25" fill="#34d399" font-size="11" text-anchor="middle" font-weight="600">Test Runner</text>
-            <text x="60" y="42" fill="#34d399" font-size="9" text-anchor="middle">测试执行</text>
-            <text x="60" y="58" fill="#34d399" font-size="7" text-anchor="middle">CTS/VTS/GTS</text>
-            <text x="60" y="72" fill="#34d399" font-size="7" text-anchor="middle">自动化运行</text>
-          </g>
+        <!-- Devices -->
+        <g transform="translate(150, 490)">
+          <rect x="0" y="0" width="500" height="170" rx="8" fill="#0f172a" stroke="#34d399" stroke-width="2"/>
+          <text x="250" y="28" fill="#34d399" class="font-secondary" text-anchor="middle">Local Devices</text>
 
-          <!-- Report Analyzer -->
-          <g transform="translate(140, 0)">
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-            <text x="60" y="25" fill="#34d399" font-size="11" text-anchor="middle" font-weight="600">Report</text>
-            <text x="60" y="42" fill="#34d399" font-size="9" text-anchor="middle">报告分析</text>
-            <text x="60" y="58" fill="#34d399" font-size="7" text-anchor="middle">结果解析</text>
-            <text x="60" y="72" fill="#34d399" font-size="7" text-anchor="middle">失败分析</text>
+          <g transform="translate(20, 45)">
+            <rect x="0" y="0" width="140" height="65" rx="4" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+            <text x="70" y="23" fill="#34d399" class="font-body" text-anchor="middle" font-weight="600">Device 1</text>
+            <text x="70" y="39" fill="#34d399" class="font-small" text-anchor="middle">RK3572GMS1</text>
+            <text x="70" y="54" fill="#34d399" class="font-tiny" text-anchor="middle">USB/IP • Local:5555</text>
           </g>
-
-          <!-- USB/IP Manager -->
-          <g transform="translate(280, 0)">
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="120" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-            <text x="60" y="25" fill="#34d399" font-size="11" text-anchor="middle" font-weight="600">USBIP</text>
-            <text x="60" y="42" fill="#34d399" font-size="9" text-anchor="middle">USB/IP管理</text>
-            <text x="60" y="58" fill="#34d399" font-size="7" text-anchor="middle">设备共享</text>
-            <text x="60" y="72" fill="#34d399" font-size="7" text-anchor="middle">远程连接</text>
+          <g transform="translate(180, 45)">
+            <rect x="0" y="0" width="140" height="65" rx="4" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+            <text x="70" y="23" fill="#a78bfa" class="font-body" text-anchor="middle" font-weight="600">Device 2</text>
+            <text x="70" y="39" fill="#a78bfa" class="font-small" text-anchor="middle">RK3572GMS2</text>
+            <text x="70" y="54" fill="#a78bfa" class="font-tiny" text-anchor="middle">USB/IP • Local:5556</text>
+          </g>
+          <g transform="translate(340, 45)">
+            <rect x="0" y="0" width="140" height="65" rx="4" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+            <text x="70" y="23" fill="#a78bfa" class="font-body" text-anchor="middle" font-weight="600">Device 3</text>
+            <text x="70" y="39" fill="#a78bfa" class="font-small" text-anchor="middle">c3d9b86...</text>
+            <text x="70" y="54" fill="#a78bfa" class="font-tiny" text-anchor="middle">USB/IP • Local:5557</text>
           </g>
         </g>
 
-        <!-- ==================== MODULES LAYER ==================== -->
-        <g transform="translate(1080, 140)">
-          <!-- Device Lock Manager -->
-          <g transform="translate(0, 0)">
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-            <text x="70" y="25" fill="#a78bfa" font-size="10" text-anchor="middle" font-weight="600">Device Lock</text>
-            <text x="70" y="45" fill="#a78bfa" font-size="8" text-anchor="middle">设备锁定管理</text>
-          </g>
+        <!-- ==================== TEST HOST CONTENT ==================== -->
 
-          <!-- Client Manager -->
-          <g transform="translate(160, 0)">
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-            <text x="70" y="25" fill="#a78bfa" font-size="10" text-anchor="middle" font-weight="600">Client Mgr</text>
-            <text x="70" y="45" fill="#a78bfa" font-size="8" text-anchor="middle">客户端管理</text>
-          </g>
+        <!-- Frontend + Backend -->
+        <g transform="translate(1050, 210)">
+          <rect x="0" y="0" width="700" height="130" rx="8" fill="#0f172a" stroke="#34d399" stroke-width="2"/>
+          <text x="350" y="32" fill="#34d399" class="font-secondary" text-anchor="middle">FastAPI Backend</text>
+          <text x="350" y="60" fill="#34d399" class="font-tertiary" text-anchor="middle">Port 5001 • 68 API Endpoints</text>
+          <text x="350" y="86" fill="#34d399" class="font-body" text-anchor="middle">异步处理 • WebSocket支持 • RESTful API</text>
+          <text x="350" y="108" fill="#34d399" class="font-body" text-anchor="middle">http://<test_host>:5001</text>
+        </g>
 
-          <!-- Test Logs Manager -->
-          <g transform="translate(320, 0)">
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-            <text x="70" y="25" fill="#a78bfa" font-size="10" text-anchor="middle" font-weight="600">Test Logs</text>
-            <text x="70" y="45" fill="#a78bfa" font-size="8" text-anchor="middle">日志管理</text>
-          </g>
+        <!-- Core Services -->
+        <g transform="translate(1050, 365)">
+          <rect x="0" y="0" width="200" height="85" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="100" y="32" fill="#34d399" class="font-quaternary" text-anchor="middle">Config</text>
+          <text x="100" y="52" fill="#34d399" class="font-body" text-anchor="middle">配置管理</text>
+          <text x="100" y="70" fill="#34d399" class="font-small" text-anchor="middle">动态配置 • 热重载</text>
+        </g>
+        <g transform="translate(1270, 365)">
+          <rect x="0" y="0" width="200" height="85" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="100" y="32" fill="#34d399" class="font-quaternary" text-anchor="middle">SSH</text>
+          <text x="100" y="52" fill="#34d399" class="font-body" text-anchor="middle">SSH连接</text>
+          <text x="100" y="70" fill="#34d399" class="font-small" text-anchor="middle">密钥认证 • 终端访问</text>
+        </g>
+        <g transform="translate(1490, 365)">
+          <rect x="0" y="0" width="200" height="85" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="100" y="32" fill="#34d399" class="font-quaternary" text-anchor="middle">Device</text>
+          <text x="100" y="52" fill="#34d399" class="font-body" text-anchor="middle">设备管理</text>
+          <text x="100" y="70" fill="#34d399" class="font-small" text-anchor="middle">ADB控制 • 状态监控</text>
+        </g>
 
-          <!-- ADB Forward Manager -->
-          <g transform="translate(0, 80)">
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-            <text x="70" y="25" fill="#a78bfa" font-size="10" text-anchor="middle" font-weight="600">ADB Forward</text>
-            <text x="70" y="45" fill="#a78bfa" font-size="8" text-anchor="middle">端口转发</text>
-          </g>
+        <!-- Test Runner -->
+        <g transform="translate(1050, 475)">
+          <rect x="0" y="0" width="700" height="85" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="350" y="32" fill="#34d399" class="font-tertiary" text-anchor="middle">Test Runner</text>
+          <text x="350" y="58" fill="#34d399" class="font-body" text-anchor="middle">测试执行 • CTS/VTS/GTS • 自动化运行</text>
+          <text x="350" y="77" fill="#34d399" class="font-body" text-anchor="middle">远程测试命令执行 • 日志收集</text>
+        </g>
 
-          <!-- VNC Manager -->
-          <g transform="translate(160, 80)">
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-            <text x="70" y="25" fill="#a78bfa" font-size="10" text-anchor="middle" font-weight="600">VNC</text>
-            <text x="70" y="45" fill="#a78bfa" font-size="8" text-anchor="middle">桌面控制</text>
-          </g>
+        <!-- Report & USBIP -->
+        <g transform="translate(1050, 585)">
+          <rect x="0" y="0" width="340" height="75" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="170" y="28" fill="#34d399" class="font-quaternary" text-anchor="middle">Report Analyzer</text>
+          <text x="170" y="45" fill="#34d399" class="font-body" text-anchor="middle">报告分析 • 结果解析 • 失败分析</text>
+          <text x="170" y="62" fill="#34d399" class="font-small" text-anchor="middle">Test Reports Database</text>
+        </g>
+        <g transform="translate(1410, 585)">
+          <rect x="0" y="0" width="340" height="75" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="170" y="28" fill="#34d399" class="font-quaternary" text-anchor="middle">USBIP Manager</text>
+          <text x="170" y="45" fill="#34d399" class="font-body" text-anchor="middle">USB/IP管理 • 设备共享 • 远程连接</text>
+          <text x="170" y="62" fill="#34d399" class="font-small" text-anchor="middle">Network Device Bridge</text>
+        </g>
 
-          <!-- USBIP Manager -->
-          <g transform="translate(320, 80)">
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="140" height="60" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-            <text x="70" y="25" fill="#a78bfa" font-size="10" text-anchor="middle" font-weight="600">USBIP Mgr</text>
-            <text x="70" y="45" fill="#a78bfa" font-size="8" text-anchor="middle">USB/IP管理</text>
+        <!-- Management Modules -->
+        <g transform="translate(1050, 685)">
+          <rect x="0" y="0" width="220" height="65" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="110" y="28" fill="#a78bfa" class="font-quaternary" text-anchor="middle">Device Lock</text>
+          <text x="110" y="46" fill="#a78bfa" class="font-small" text-anchor="middle">设备锁定管理</text>
+        </g>
+        <g transform="translate(1290, 685)">
+          <rect x="0" y="0" width="220" height="65" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="110" y="28" fill="#a78bfa" class="font-quaternary" text-anchor="middle">Client Mgr</text>
+          <text x="110" y="46" fill="#a78bfa" class="font-small" text-anchor="middle">客户端管理</text>
+        </g>
+        <g transform="translate(1530, 685)">
+          <rect x="0" y="0" width="220" height="65" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="110" y="28" fill="#a78bfa" class="font-quaternary" text-anchor="middle">Test Logs</text>
+          <text x="110" y="46" fill="#a78bfa" class="font-small" text-anchor="middle">日志管理</text>
+        </g>
+
+        <!-- Security Zone -->
+        <rect x="1050" y="775" width="700" height="65" rx="8" fill="rgba(251, 113, 133, 0.1)" stroke="#fb7185" stroke-width="2" stroke-dasharray="8,4"/>
+        <text x="1400" y="815" fill="#fb7185" class="font-quaternary" text-anchor="middle">Security Zone: Test Host • 隔离测试环境 • 密钥认证访问 • 设备锁定机制</text>
+
+        <!-- ==================== BUILD SERVER CONTENT ==================== -->
+
+        <!-- Build System -->
+        <g transform="translate(2020, 210)">
+          <rect x="0" y="0" width="460" height="85" rx="8" fill="#0f172a" stroke="#34d399" stroke-width="2"/>
+          <text x="230" y="32" fill="#34d399" class="font-secondary" text-anchor="middle">Build Server System</text>
+          <text x="230" y="56" fill="#34d399" class="font-body" text-anchor="middle">SSH Access • gms-rt-* skill • CLI Execution</text>
+          <text x="230" y="75" fill="#34d399" class="font-body" text-anchor="middle">编译构建 • 固件生成 • 远程执行</text>
+        </g>
+
+        <!-- Skill Download -->
+        <g transform="translate(2020, 320)">
+          <rect x="0" y="0" width="460" height="55" rx="6" fill="#0f172a" stroke="#10b981" stroke-width="2"/>
+          <text x="230" y="23" fill="#10b981" class="font-quaternary" text-anchor="middle">Skill Download & Execution</text>
+          <text x="230" y="42" fill="#10b981" class="font-body" text-anchor="middle">下载 skill 脚本 → 执行 gms-rt-***-*** 命令</text>
+        </g>
+
+        <!-- CLI -->
+        <g transform="translate(2020, 400)">
+          <rect x="0" y="0" width="460" height="65" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="2"/>
+          <text x="230" y="28" fill="#a78bfa" class="font-tertiary" text-anchor="middle">gms-rt-***-*** CLI</text>
+          <text x="230" y="46" fill="#a78bfa" class="font-small" text-anchor="middle">远程测试命令执行 • CLI Interface</text>
+        </g>
+
+        <!-- Storage -->
+        <g transform="translate(2020, 490)">
+          <rect x="0" y="0" width="460" height="85" rx="6" fill="#0f172a" stroke="#94a3b8" stroke-width="2"/>
+          <text x="230" y="28" fill="#94a3b8" class="font-quaternary" text-anchor="middle">Build Artifacts Storage</text>
+          <g transform="translate(30, 42)">
+            <text x="0" y="0" fill="#94a3b8" class="font-small">• 固件镜像 (Firmware Images)</text>
+            <text x="0" y="16" fill="#94a3b8" class="font-small">• 编译日志 (Build Logs)</text>
+            <text x="0" y="32" fill="#94a3b8" class="font-small">• SDK 包 (SDK Packages)</text>
+          </g>
+          <g transform="translate(250, 42)">
+            <text x="0" y="0" fill="#94a3b8" class="font-small">构建产物存储</text>
+            <text x="0" y="16" fill="#94a3b8" class="font-small">版本管理</text>
+            <text x="0" y="32" fill="#94a3b8" class="font-small">文件归档</text>
           </g>
         </g>
 
-        <!-- ==================== TEST HOST LAYER ==================== -->
-        <g transform="translate(620, 340)">
-          <rect x="0" y="0" width="360" height="60" rx="6" fill="#0f172a"/>
-          <rect x="0" y="0" width="360" height="60" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
-          <text x="180" y="25" fill="#fbbf24" font-size="12" text-anchor="middle" font-weight="600">Test Host (Ubuntu)</text>
-          <text x="180" y="43" fill="#fbbf24" font-size="9" text-anchor="middle">172.16.14.233 • SSH • VNC • ADB • 测试执行环境</text>
-        </g>
-
-        <!-- Database -->
-        <g transform="translate(180, 345)">
-          <ellipse cx="70" cy="25" rx="65" ry="25" fill="#0f172a"/>
-          <ellipse cx="70" cy="25" rx="65" ry="25" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-          <text x="70" y="20" fill="#a78bfa" font-size="10" text-anchor="middle" font-weight="600">Test Reports</text>
-          <text x="70" y="35" fill="#a78bfa" font-size="8" text-anchor="middle">Database</text>
-        </g>
-
-        <!-- ==================== CLIENT LAYER ==================== -->
-        <g transform="translate(620, 480)">
-          <rect x="0" y="0" width="360" height="60" rx="6" fill="#0f172a"/>
-          <rect x="0" y="0" width="360" height="60" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
-          <text x="180" y="25" fill="#94a3b8" font-size="12" text-anchor="middle" font-weight="600">Windows Client</text>
-          <text x="180" y="43" fill="#94a3b8" font-size="9" text-anchor="middle">172.16.14.68 • USB/IP (usbipd) • 设备桥接</text>
-        </g>
-
-        <!-- ==================== DEVICES LAYER ==================== -->
-        <g transform="translate(400, 600)">
-          <!-- Device 1 - Direct Connection -->
-          <g transform="translate(0, 0)">
-            <rect x="0" y="0" width="200" height="120" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="200" height="120" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-            <text x="100" y="35" fill="#34d399" font-size="12" text-anchor="middle" font-weight="600">Device 1</text>
-            <text x="100" y="60" fill="#34d399" font-size="10" text-anchor="middle">RK3572GMS1</text>
-            <text x="100" y="82" fill="#34d399" font-size="9" text-anchor="middle">直接连接 • ADB</text>
-            <text x="100" y="102" fill="#34d399" font-size="8" text-anchor="middle">本地调试</text>
+        <!-- Network -->
+        <g transform="translate(2020, 600)">
+          <rect x="0" y="0" width="460" height="65" rx="6" fill="#0f172a" stroke="#64748b" stroke-width="2"/>
+          <text x="230" y="28" fill="#64748b" class="font-quaternary" text-anchor="middle">Network & Protocols</text>
+          <g transform="translate(30, 38)">
+            <text x="0" y="0" fill="#94a3b8" class="font-small">• SSH: Port 22 (密钥认证)</text>
+            <text x="0" y="14" fill="#94a3b8" class="font-small">• gms-rt-* skill CLI 接口</text>
           </g>
-
-          <!-- Device 2 - USB/IP -->
-          <g transform="translate(300, 0)">
-            <rect x="0" y="0" width="200" height="120" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="200" height="120" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-            <text x="100" y="35" fill="#a78bfa" font-size="12" text-anchor="middle" font-weight="600">Device 2</text>
-            <text x="100" y="60" fill="#a78bfa" font-size="10" text-anchor="middle">RK3572GMS2</text>
-            <text x="100" y="82" fill="#a78bfa" font-size="9" text-anchor="middle">USB/IP • 远程ADB</text>
-            <text x="100" y="102" fill="#a78bfa" font-size="8" text-anchor="middle">网络设备</text>
-          </g>
-
-          <!-- Device 3 - USB/IP -->
-          <g transform="translate(600, 0)">
-            <rect x="0" y="0" width="200" height="120" rx="6" fill="#0f172a"/>
-            <rect x="0" y="0" width="200" height="120" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-            <text x="100" y="35" fill="#a78bfa" font-size="12" text-anchor="middle" font-weight="600">Device 3</text>
-            <text x="100" y="60" fill="#a78bfa" font-size="10" text-anchor="middle">c3d9b86...</text>
-            <text x="100" y="82" fill="#a78bfa" font-size="9" text-anchor="middle">USB/IP • 远程ADB</text>
-            <text x="100" y="102" fill="#a78bfa" font-size="8" text-anchor="middle">虚拟设备</text>
+          <g transform="translate(250, 38)">
+            <text x="0" y="0" fill="#94a3b8" class="font-small">• 构建任务调度</text>
+            <text x="0" y="14" fill="#94a3b8" class="font-small">• 日志实时回传</text>
           </g>
         </g>
 
-        <!-- ==================== SECURITY ZONES ==================== -->
-        <!-- Backend Security Zone -->
-        <rect x="40" y="100" width="460" height="350" rx="12" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="8,4"/>
-        <text x="200" y="80" fill="#fb7185" font-size="12" font-anchor="middle">Backend Security Zone</text>
+        <!-- Features -->
+        <g transform="translate(2020, 690)">
+          <rect x="0" y="0" width="460" height="130" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="2"/>
+          <text x="230" y="28" fill="#34d399" class="font-quaternary" text-anchor="middle">Build Server Features</text>
+
+          <g transform="translate(20, 46)">
+            <text x="0" y="0" fill="#94a3b8" class="font-body" font-weight="600">核心功能:</text>
+            <text x="0" y="16" fill="#94a3b8" class="font-small">• Skill 脚本自动下载</text>
+            <text x="0" y="30" fill="#94a3b8" class="font-small">• gms-rt-***-*** 命令执行</text>
+            <text x="0" y="44" fill="#94a3b8" class="font-small">• 构建任务队列管理</text>
+            <text x="0" y="58" fill="#94a3b8" class="font-small">• 实时日志流式传输</text>
+          </g>
+
+          <g transform="translate(240, 46)">
+            <text x="0" y="0" fill="#94a3b8" class="font-body" font-weight="600">系统特性:</text>
+            <text x="0" y="16" fill="#94a3b8" class="font-small">• SSH 密钥认证</text>
+            <text x="0" y="30" fill="#94a3b8" class="font-small">• 异步任务处理</text>
+            <text x="0" y="44" fill="#94a3b8" class="font-small">• 构建产物自动归档</text>
+            <text x="0" y="58" fill="#94a3b8" class="font-small">• 错误日志记录</text>
+          </g>
+        </g>
+
+        <!-- Security Zone -->
+        <rect x="2020" y="845" width="460" height="55" rx="8" fill="rgba(251, 113, 133, 0.1)" stroke="#fb7185" stroke-width="2" stroke-dasharray="8,4"/>
+        <text x="2250" y="878" fill="#fb7185" class="font-small" text-anchor="middle" font-weight="600">Security Zone: Build Server • SSH密钥 • 命令执行权限 • 审计日志</text>
 
         <!-- ==================== LEGEND ==================== -->
-        <g transform="translate(1350, 400)">
-          <text x="0" y="0" fill="white" font-size="11" font-weight="600">图例说明</text>
+        <g transform="translate(50, 1280)">
+          <rect x="0" y="0" width="2500" height="65" rx="8" fill="#0f172a" stroke="#334155" stroke-width="2"/>
+          <text x="1250" y="20" fill="white" class="font-tertiary" text-anchor="middle">图例说明 Legend</text>
 
-          <!-- Frontend -->
-          <g transform="translate(0, 25)">
-            <rect width="16" height="16" rx="3" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
-            <text x="24" y="13" fill="#e2e8f0" font-size="10">前端界面</text>
-          </g>
+          <!-- 优化后的单行图例 -->
+          <g transform="translate(80, 45)">
+            <!-- 组件类型 -->
+            <rect x="0" y="-9" width="18" height="14" rx="2" fill="rgba(8, 51, 68, 0.5)" stroke="#22d3ee" stroke-width="2"/>
+            <text x="25" y="0" fill="#e2e8f0" class="font-body">Web Browser</text>
 
-          <!-- Backend Services -->
-          <g transform="translate(0, 50)">
-            <rect width="16" height="16" rx="3" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-            <text x="24" y="13" fill="#e2e8f0" font-size="10">后端服务</text>
-          </g>
+            <rect x="130" y="-9" width="18" height="14" rx="2" fill="rgba(30, 41, 59, 0.6)" stroke="#94a3b8" stroke-width="2"/>
+            <text x="155" y="0" fill="#e2e8f0" class="font-body">System</text>
 
-          <!-- Database/Modules -->
-          <g transform="translate(0, 75)">
-            <rect width="16" height="16" rx="3" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-            <text x="24" y="13" fill="#e2e8f0" font-size="10">数据库/模块</text>
-          </g>
+            <rect x="230" y="-9" width="18" height="14" rx="2" fill="rgba(6, 78, 59, 0.5)" stroke="#34d399" stroke-width="2"/>
+            <text x="255" y="0" fill="#e2e8f0" class="font-body">Service</text>
 
-          <!-- Test Host -->
-          <g transform="translate(0, 100)">
-            <rect width="16" height="16" rx="3" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
-            <text x="24" y="13" fill="#e2e8f0" font-size="10">测试主机</text>
-          </g>
+            <rect x="340" y="-9" width="18" height="14" rx="2" fill="rgba(76, 29, 149, 0.5)" stroke="#a78bfa" stroke-width="2"/>
+            <text x="365" y="0" fill="#e2e8f0" class="font-body">Management</text>
 
-          <!-- Client -->
-          <g transform="translate(0, 125)">
-            <rect width="16" height="16" rx="3" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
-            <text x="24" y="13" fill="#e2e8f0" font-size="10">Windows客户端</text>
-          </g>
+            <!-- 连接线 -->
+            <line x1="480" y1="0" x2="505" y2="0" stroke="#3b82f6" stroke-width="3"/>
+            <text x="515" y="0" fill="#3b82f6" class="font-body">HTTP/WebSocket</text>
 
-          <!-- USB/IP Device -->
-          <g transform="translate(0, 150)">
-            <rect width="16" height="16" rx="3" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="4,4"/>
-            <text x="24" y="13" fill="#e2e8f0" font-size="10">USB/IP设备</text>
-          </g>
+            <line x1="640" y1="0" x2="665" y2="0" stroke="#10b981" stroke-width="3"/>
+            <text x="675" y="0" fill="#10b981" class="font-body">SSH/gms-rt-*</text>
 
-          <!-- Direct Device -->
-          <g transform="translate(0, 175)">
-            <rect width="16" height="16" rx="3" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-            <text x="24" y="13" fill="#e2e8f0" font-size="10">直连设备</text>
-          </g>
+            <!-- 系统颜色 -->
+            <text x="780" y="0" fill="#94a3b8" class="font-body" font-weight="600">系统:</text>
+            <text x="825" y="0" fill="#3b82f6" class="font-small">Windows</text>
+            <text x="890" y="0" fill="#fbbf24" class="font-small">测试主机</text>
+            <text x="955" y="0" fill="#10b981" class="font-small">编译服务器</text>
+            <text x="1040" y="0" fill="#fb7185" class="font-small">安全区域</text>
 
-          <!-- Security Zone -->
-          <g transform="translate(0, 200)">
-            <rect width="16" height="16" rx="3" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4"/>
-            <text x="24" y="13" fill="#e2e8f0" font-size="10">安全区域</text>
+            <!-- 边框类型 -->
+            <text x="1120" y="0" fill="#94a3b8" class="font-body" font-weight="600">边框:</text>
+            <text x="1165" y="0" fill="#e2e8f0" class="font-small">实线=组件</text>
+            <text x="1235" y="0" fill="#e2e8f0" class="font-small">虚线=边界</text>
+
+            <!-- 版本信息 -->
+            <text x="1750" y="0" fill="#64748b" class="font-small" text-anchor="middle">Architecture Diagram v7.0 • GMS Auto Test Platform</text>
           </g>
         </g>
 
+        <!-- Version Info -->
+        <text x="1300" y="1370" fill="#475569" class="font-small" text-anchor="middle">Architecture Diagram v7.0 • GMS Auto Test Platform • Windows Client ↔ TEST HOST ↔ BUILD SERVER</text>
       </g>
     </svg>
-    </div>
-
-    <div class="footer">
-      Generated by Architecture Diagram Generator • GMS Auto Test Platform • Version 2.0
-    </div>
   </div>
 </body>
 </html>

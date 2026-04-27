@@ -339,19 +339,21 @@
         }
 
         /* 架构图页面样式 */
-        #page-architecture .diagram-container {
+        #page-architecture .architecture-container {
             background: rgba(15, 23, 42, 0.5);
             border-radius: 1rem;
             border: 1px solid #1e293b;
-            padding: 2rem;
-            overflow-x: auto;
-            min-height: 100vh;
+            padding: 1rem;
+            height: 92vh;
+            overflow: hidden;
         }
 
-        #page-architecture .diagram-container iframe {
+        #page-architecture .architecture-container iframe {
             width: 100%;
-            min-width: 1000px;
+            height: 100%;
             display: block;
+            border: none;
+            border-radius: 0.5rem;
         }
     </style>
 </head>
@@ -393,7 +395,7 @@
                 </a>
                 <a href="#" class="sidebar-item" data-page="api-docs" onclick="switchPage('api-docs', event)">
                     <span class="sidebar-icon">📡</span>
-                    <span class="sidebar-text">系统API</span>
+                    <span class="sidebar-text">系统接口</span>
                 </a>
                 <a href="#" class="sidebar-item" data-page="architecture" onclick="switchPage('architecture', event)">
                     <span class="sidebar-icon">🏗️</span>
@@ -834,9 +836,9 @@
             </div>
         </div>
 
-        <!-- 系统API页面 -->
+        <!-- 系统接口页面 -->
         <div class="container page-content" id="page-api-docs">
-            <div class="section-title">📡 系统API</div>
+            <div class="section-title">📡 系统接口</div>
 
             <!-- API统计卡片 -->
             <div style="display: flex; gap: 15px; margin-bottom: 10px;">
@@ -951,8 +953,7 @@
             <div class="section-title">🏗️ 系统架构</div>
             <div class="architecture-container">
                 <iframe src="/templates/architecture.html"
-                        style="width: 100%; height: 1400px; border: none; border-radius: 1rem;"
-                        frameborder="0"></iframe>
+                        frameborder="0" scrolling="yes" id="architecture-iframe"></iframe>
             </div>
         </div>
     </div>
@@ -2226,7 +2227,7 @@
                 'users': '用户管理 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
-                'api-docs': '系统API - GMS远程测试',
+                'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS远程测试'
             };
             document.title = titles[pageName] || 'GMS远程测试';
@@ -2289,7 +2290,7 @@
                 loadTestReports();
             }
 
-            // 如果切换到系统API页面，加载API文档
+            // 如果切换到系统接口页面，加载API文档
             if (pageName === 'api-docs') {
                 loadApiDocs();
             }
@@ -2826,7 +2827,7 @@
                 'users': '用户管理 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
-                'api-docs': '系统API - GMS远程测试',
+                'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS远程测试'
             };
             document.title = titles[targetPage] || 'GMS远程测试';

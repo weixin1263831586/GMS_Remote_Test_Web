@@ -3989,7 +3989,6 @@ async function downloadReport(timestamp) {
     }
 }
 
-// 使用文件系统API下载文件夹
 async function downloadReportWithFileSystemAPI(timestamp, files) {
     try {
         // 让用户选择保存目录
