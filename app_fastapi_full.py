@@ -685,6 +685,71 @@ async def safe_websocket_send(client_id: str, message: dict):
         except Exception as e:
             logger.debug(f"Failed to send WebSocket message to {client_id}: {e}")
 
+async def broadcast_device_change(devices: List[str], disconnected: List[str] = None, connected: List[str] = None, source: str = 'usb_monitor'):
+    """广播设备变化事件到所有 WebSocket 客户端
+
+    Args:
+        devices: 当前设备列表
+        disconnected: 断开的设备列表（可选）
+        connected: 连接的设备列表（可选）
+        source: 事件来源 ('usb_monitor' 或 'usbip_disconnect')
+    """
+    message = {
+        'type': 'devices_changed',
+        'devices': devices,
+        'source': source,
+        'timestamp': datetime.now().isoformat()
+    }
+    if disconnected:
+        message['disconnected'] = disconnected
+    if connected:
+        message['connected'] = connected
+
+    logger.info(f"[Broadcast] Notifying {len(global_state.websocket_connections)} clients about device change (source: {source})")
+
+    with global_state.websocket_connections_lock:
+        clients = list(global_state.websocket_connections.items())
+
+    for client_id, ws in clients:
+        try:
+            if ws.client_state == WebSocketState.CONNECTED:
+                await ws.send_json(message)
+        except Exception as e:
+            logger.debug(f"Failed to broadcast to {client_id}: {e}")
+
+async def notify_device_change(devices_to_remove: List[str], context: str = "USB/IP Stop"):
+    """通知设备变化到 WebSocket 客户端
+
+    Args:
+        devices_to_remove: 已断开的设备列表
+        context: 日志上下文标识
+    """
+    if not devices_to_remove:
+        return
+
+    try:
+        import asyncio
+        from core.device_manager import get_device_manager
+
+        dm = get_device_manager()
+        # 使用 asyncio.to_thread 避免阻塞事件循环
+        current_devices = await asyncio.to_thread(dm.get_connected_devices)
+        logger.info(f"[{context}] Notifying device change: {current_devices}")
+        await broadcast_device_change(current_devices, disconnected=devices_to_remove)
+    except Exception as e:
+        logger.warning(f"[{context}] Failed to notify device change: {e}")
+
+def format_device_list_info(devices: List[str]) -> str:
+    """格式化设备列表用于显示
+
+    Args:
+        devices: 设备列表
+
+    Returns:
+        格式化后的字符串，如 " (device1, device2)" 或空字符串
+    """
+    return f" ({', '.join(devices)})" if devices else ""
+
 # ==================== 统一响应格式工具类 ====================
 
 class ApiResponse:
@@ -5382,11 +5447,17 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
             # 更新 USB/IP 连接状态
             with global_state.usbip_states_lock:
                 global_state.usbip_states[config['device_host']] = {'connected': False, 'timestamp': time.time()}
-            logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices")
+
+            # 构建断开设备的详细信息
+            disconnected_devices_info = format_device_list_info(devices_to_remove)
+            logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices{disconnected_devices_info}")
+
+            # 主动触发设备列表刷新（避免等待 USB 监控器检测到变化，减少延迟）
+            await notify_device_change(devices_to_remove, "USB/IP Stop")
 
             return JSONResponse(content={
                 'success': True,
-                'message': '本地设备已断开'
+                'message': f'本地设备已断开{disconnected_devices_info}'
             })
     except HTTPException:
         # 无法连接到 Windows，只清除连接状态和设备来源记录
@@ -5425,8 +5496,15 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
 
         with global_state.usbip_states_lock:
             global_state.usbip_states[config['device_host']] = {'connected': False, 'timestamp': time.time()}
-        logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices")
-        return JSONResponse(content={'success': True, 'message': '本地设备已断开'})
+
+        # 构建断开设备的详细信息
+        disconnected_devices_info = format_device_list_info(devices_to_remove)
+        logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices{disconnected_devices_info}")
+
+        # 主动触发设备列表刷新（避免等待 USB 监控器检测到变化，减少延迟）
+        await notify_device_change(devices_to_remove, "USB/IP Stop")
+
+        return JSONResponse(content={'success': True, 'message': f'本地设备已断开{disconnected_devices_info}'})
 
 @app.post("/api/usbip/install")
 async def install_usbipd(request: Request, device_host: Optional[str] = None):
