@@ -13,12 +13,6 @@ API_BASE="${SERVER_URL}/api"
 # Can be overridden by environment variable
 GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-/home/hcq/GMS_Auto_Test/web_app}"
 
-# Constants (use conditional assignment to avoid errors when sourcing)
-: "${PING_TIMEOUT:=2}"
-: "${CURL_TIMEOUT:=10}"
-: "${CURL_EXIT_CANNOT_CONNECT:=7}"
-: "${CURL_EXIT_OPERATION_TIMEOUT:=28}"
-
 # Colors for output
 RED=$(printf '\033[0;31m')
 GREEN=$(printf '\033[0;32m')
@@ -26,23 +20,11 @@ YELLOW=$(printf '\033[1;33m')
 BLUE=$(printf '\033[0;34m')
 NC=$(printf '\033[0m')
 
-# Cache command availability checks (only if not already cached)
-if [ -z "$_JQ_CHECKED" ]; then
-    command -v jq &> /dev/null || { echo "Error: jq is required but not installed. Please install: sudo apt-get install jq" >&2; exit 1; }
-    _JQ_CHECKED=true
-fi
-
-if [ -z "$_NC_CHECKED" ]; then
-    _HAS_NC=false
-    command -v nc &> /dev/null && _HAS_NC=true
-    _NC_CHECKED=true
-fi
-
-# Cache URL parsing (only if not already cached)
-if [ -z "$_PARSED_HOST" ]; then
-    _PARSED_HOST=$(echo "$SERVER_URL" | sed -e 's|^[^/]*//||' -e 's|/.*$||' -e 's|:.*$||')
-    _PARSED_PORT=$(echo "$SERVER_URL" | sed -e 's|^[^/]*//||' -e 's|^[^:]*:||' -e 's|/.*$||')
-fi
+# Network timeout constants
+PING_TIMEOUT=2
+CURL_TIMEOUT=5
+CURL_EXIT_CANNOT_CONNECT=7
+CURL_EXIT_OPERATION_TIMEOUT=28
 
 # Print functions
 error() {
@@ -61,92 +43,73 @@ info() {
     echo -e "${BLUE}ℹ $1${NC}"
 }
 
-# Print to stderr (for error messages that shouldn't be captured)
-echo_stderr() {
-    echo "$1" >&2
-}
-
-# Check if server is reachable
-check_server_connection() {
-    # Fast path ping test (may be blocked by firewalls)
-    if timeout $PING_TIMEOUT ping -c 1 "$_PARSED_HOST" >/dev/null 2>&1; then
-        return 0
-    fi
-
-    # Fallback to TCP connection test (more reliable)
-    if $_HAS_NC; then
-        if timeout $PING_TIMEOUT nc -z "$_PARSED_HOST" "$_PARSED_PORT" 2>/dev/null; then
-            return 0
-        fi
-    fi
-
-    return 1
-}
-
-# Show connection error message with troubleshooting tips
+# Show connection error message to stderr
 show_connection_error() {
-    error "Cannot connect to server at ${SERVER_URL}"
-    echo_stderr ""
-    echo_stderr "🔧 Troubleshooting tips:"
-    echo_stderr "  1. Test network: ping $_PARSED_HOST"
-    echo_stderr "  2. Check if server is running: ps aux | grep uvicorn"
-    echo_stderr "  3. Try restarting: cd ${GMS_WEB_APP_DIR} && ./restart_services.sh"
-    echo_stderr ""
+    error "无法连接到服务器 $SERVER_URL"
+    error "请检查:"
+    error "  1. 服务器是否运行 (systemctl status gms-web-app)"
+    error "  2. 网络连通性 (ping $(echo "$SERVER_URL" | sed 's|http://||' | sed 's|/.*||'))"
+    error "  3. 防火墙设置 (sudo ufw status)"
+    error "  4. 服务器日志 (tail -f $GMS_WEB_APP_DIR/fastapi.log)"
 }
 
-# Make API call and return JSON
+# Make API call and return JSON with optimized error handling
 # Usage: api_call <endpoint> [method] [data] [curl_extra_args]
-# Returns: response via stdout, exit code 0 for success, 1 for failure
 api_call() {
     local endpoint="$1"
     local method="${2:-GET}"
     local data="${3:-}"
     local curl_extra="${4:-}"
-
     local response
+
     if [ -n "$curl_extra" ]; then
         # File upload or custom curl args mode
         # Don't use -s here as it may conflict with progress bars (-#) in curl_extra
         response=$(eval "curl -w \"\\nHTTP_STATUS:%{http_code}\" --max-time $CURL_TIMEOUT -X \"\${method}\" \"\${API_BASE}\${endpoint}\" $curl_extra" 2>/dev/null)
-    elif [ -n "$data" ] || [ "$method" = "POST" ]; then
-        response=$(curl -s --max-time $CURL_TIMEOUT -X "${method}" "${API_BASE}${endpoint}" \
-            -H "Content-Type: application/json" \
-            -d "${data}" 2>/dev/null)
-    else
-        response=$(curl -s --max-time $CURL_TIMEOUT "${API_BASE}${endpoint}" 2>/dev/null)
-    fi
-
-    local curl_exit_code=$?
-
-    # Check if curl succeeded and returned valid response
-    if [ $curl_exit_code -eq 0 ] && [ -n "$response" ]; then
-        echo "$response"
-        return 0
-    else
-        # Determine error type based on curl exit code
-        if [ $curl_exit_code -eq $CURL_EXIT_CANNOT_CONNECT ] || [ $curl_exit_code -eq $CURL_EXIT_OPERATION_TIMEOUT ]; then
-            show_connection_error
+        local curl_exit_code=$?
+        if [ $curl_exit_code -eq 0 ] && [ -n "$response" ]; then
+            echo "$response"
+            return 0
         else
-            error "Failed to get response from server (curl exit code: $curl_exit_code)"
+            if [ $curl_exit_code -eq $CURL_EXIT_CANNOT_CONNECT ] || [ $curl_exit_code -eq $CURL_EXIT_OPERATION_TIMEOUT ]; then
+                show_connection_error
+            else
+                error "Failed to get response from server (curl exit code: $curl_exit_code)" >&2
+            fi
+            return 1
         fi
-        return 1
+    elif [ -n "$data" ] || [ "$method" = "POST" ]; then
+        response=$(curl -s -X "${method}" "${API_BASE}${endpoint}" \
+            -H "Content-Type: application/json" \
+            -d "${data}" \
+            --max-time $CURL_TIMEOUT 2>/dev/null)
+        local curl_exit_code=$?
+        if [ $curl_exit_code -eq 0 ] && [ -n "$response" ]; then
+            echo "$response"
+            return 0
+        else
+            if [ $curl_exit_code -eq $CURL_EXIT_CANNOT_CONNECT ] || [ $curl_exit_code -eq $CURL_EXIT_OPERATION_TIMEOUT ]; then
+                show_connection_error
+            else
+                error "Failed to get response from server (curl exit code: $curl_exit_code)" >&2
+            fi
+            return 1
+        fi
+    else
+        response=$(curl -s "${API_BASE}${endpoint}" --max-time $CURL_TIMEOUT 2>/dev/null)
+        local curl_exit_code=$?
+        if [ $curl_exit_code -eq 0 ] && [ -n "$response" ]; then
+            echo "$response"
+            return 0
+        else
+            if [ $curl_exit_code -eq $CURL_EXIT_CANNOT_CONNECT ] || [ $curl_exit_code -eq $CURL_EXIT_OPERATION_TIMEOUT ]; then
+                show_connection_error
+            else
+                error "Failed to get response from server (curl exit code: $curl_exit_code)" >&2
+            fi
+            return 1
+        fi
     fi
-}
-
-# Wrapper for api_call that exits on failure
-# Usage: api_call_or_exit <endpoint> [method] [data] [curl_extra_args]
-# Returns: response via stdout (exits script on failure)
-api_call_or_exit() {
-    local response
-    response=$(api_call "$@")
-    local exit_code=$?
-
-    if [ $exit_code -ne 0 ]; then
-        return $exit_code
-    fi
-
-    echo "$response"
-    return 0
 }
 
 # Extract error message from API response
@@ -169,9 +132,11 @@ check_http_response() {
     return 0
 }
 
-# Check if jq is installed (no-op - checked at script initialization)
+# Check if jq is installed
 check_jq() {
-    :  # No-op - jq availability is checked at script startup
+    if ! command -v jq &> /dev/null; then
+        error "jq is required but not installed. Please install: sudo apt-get install jq"
+    fi
 }
 
 # ==============================================================================
@@ -367,7 +332,7 @@ gms-rt-burn-serial() {
 gms-rt-config-read() {
     check_jq
     echo "📖 Reading configuration..."
-    api_call_or_exit "/config/read" | jq '.'
+    api_call "/config/read" | jq '.'
 }
 
 # Update configuration
@@ -431,7 +396,7 @@ gms-rt-desktop-vnc-start() {
 gms-rt-desktop-vnc-status() {
     check_jq
     echo "🖥️ Getting VNC status..."
-    api_call_or_exit "/desktop/vnc/status" | jq '.'
+    api_call "/desktop/vnc/status" | jq '.'
 }
 
 # Stop VNC server
@@ -559,7 +524,7 @@ gms-rt-devices-info() {
 gms-rt-devices-list() {
     check_jq
     echo "📱 Listing devices..."
-    api_call_or_exit "/devices/list" | jq '.'
+    api_call "/devices/list" | jq '.'
 }
 
 # Reboot multiple devices (parallel)
@@ -709,9 +674,12 @@ gms-rt-devices-screen() {
 # Execute shell command (direct local adb shell)
 gms-rt-devices-shell() {
     local device_id="$1"
-    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID"; return 1; }
+    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID [COMMAND]"; return 1; }
 
-    # Check if adb is available
+    # Shift the first argument (device_id) and get the rest as command
+    shift
+    local shell_command="$*"
+
     if ! command -v adb &> /dev/null; then
         error "adb 命令未找到. 请确保 Android SDK 已安装并配置 PATH"
         return 1
@@ -725,19 +693,25 @@ gms-rt-devices-shell() {
         return 1
     fi
 
-    echo "💻 打开设备Shell: $device_id..."
-    echo "🔌 使用 Ctrl+D 退出 shell"
-    echo ""
-
-    # Execute adb shell directly (interactive)
-    adb -s "$device_id" shell
+    # Check if command argument is provided
+    if [ -n "$shell_command" ]; then
+        # Direct command execution mode
+        adb -s "$device_id" shell "$shell_command"
+    else
+        # Interactive shell mode
+        echo ""
+        echo "💻 打开设备Shell: $device_id..."
+        echo "🔌 使用 Ctrl+D 退出 shell"
+        echo ""
+        adb -s "$device_id" shell
+    fi
 }
 
 # User locked devices
 gms-rt-devices-user-locked() {
     check_jq
     echo "🔒 Getting user-locked devices..."
-    api_call_or_exit "/devices/user-locked" | jq '.'
+    api_call "/devices/user-locked" | jq '.'
 }
 
 # Connect WiFi
@@ -775,9 +749,9 @@ gms-rt-files-progress() {
     local upload_id="${1:-}"
     check_jq
     echo "📊 Getting upload progress..."
-    local url="/files/progress"
+    local url="${SERVER_URL}/files/progress"
     [ -n "$upload_id" ] && url="$url?upload_id=$upload_id"
-    api_call_or_exit "$url" | jq '.'
+    api_call "/files/progress" | jq '.'
 }
 
 # OpenGrok search
@@ -1016,7 +990,7 @@ gms-rt-ssh-ping() {
 gms-rt-ssh-route() {
     check_jq
     echo "🛣️  Checking SSH route..."
-    api_call_or_exit "/ssh/route" | jq '.'
+    api_call "/ssh/route" | jq '.'
 }
 
 
@@ -1024,7 +998,7 @@ gms-rt-ssh-route() {
 gms-rt-ssh-sshd-check() {
     check_jq
     echo "🔍 Checking SSHD status..."
-    api_call_or_exit "/ssh/sshd-check" | jq '.'
+    api_call "/ssh/sshd-check" | jq '.'
 }
 
 # Install SSHD
@@ -1043,14 +1017,14 @@ gms-rt-ssh-sshd-install() {
 gms-rt-system-docs() {
     check_jq
     echo "📚 Getting API documentation..."
-    api_call_or_exit "/system/docs" | jq '.'
+    api_call "/system/docs" | jq '.'
 }
 
 # Health check
 gms-rt-system-health() {
     check_jq
     echo "🏥 Checking server health..."
-    api_call_or_exit "/system/health" | jq '.'
+    api_call "/system/health" | jq '.'
 }
 
 # Download skills ZIP
@@ -1288,15 +1262,15 @@ gms-rt-test-start() {
         echo "🔄 Starting test retry..."
         echo "  Report: $retry_dir"
         [ -n "$device" ] && echo "  Device: $device"
-        [ -n "$test_type" ] && echo "  Type: $test_type"
-        [ -n "$test_suite" ] && echo "  Suite: $test_suite"
+        [ -n "$test_type" ] && echo "  Test_Type: $test_type"
+        [ -n "$test_suite" ] && echo "  Test_Suite: $test_suite"
     else
         echo "🚀 Starting test..."
         echo "  Device: $device"
-        [ -n "$test_type" ] && echo "  Type: $test_type"
-        [ -n "$test_module" ] && echo "  Module: $test_module"
-        [ -n "$test_case" ] && echo "  Case: $test_case"
-        [ -n "$test_suite" ] && echo "  Suite: $test_suite"
+        [ -n "$test_type" ] && echo "  Test_Type: $test_type"
+        [ -n "$test_module" ] && echo "  Test_Module: $test_module"
+        [ -n "$test_case" ] && echo "  Test_Case: $test_case"
+        [ -n "$test_suite" ] && echo "  Test_Suite: $test_suite"
     fi
 
     # Display warnings
@@ -1307,7 +1281,8 @@ gms-rt-test-start() {
         done
     fi
 
-    # Build request data for /api/test/start (optimized single jq call)
+    # Build request data for /api/test/start
+    # Use simple jq syntax to avoid parsing issues
     local data=$(jq -n \
         --arg rdir "$retry_dir" \
         --arg dev "$device" \
@@ -1316,12 +1291,12 @@ gms-rt-test-start() {
         --arg tcase "$test_case" \
         --arg tsuite "$test_suite" \
         '{
-            (if $rdir != "" then .retry_dir = $rdir else . end) |
-            (if $dev != "" then .devices = [$dev] else . end) |
-            (if $ttype != "" then .test_type = $ttype else . end) |
-            (if $tmod != "" then .test_module = $tmod else . end) |
-            (if $tcase != "" then .test_case = $tcase else . end) |
-            (if $tsuite != "" then .test_suite = $tsuite else . end)
+            retry_dir: $rdir,
+            devices: [$dev],
+            test_type: $ttype,
+            test_module: $tmod,
+            test_case: $tcase,
+            test_suite: $tsuite
         }')
 
     # Call /api/test/start
@@ -1333,12 +1308,6 @@ gms-rt-test-start() {
     else
         local msg=$(extract_api_error "$response")
         error "Failed to start test: $msg"
-        echo ""
-        echo "💡 Troubleshooting tips:"
-        echo "  • Make sure you have selected a test suite in the web interface first"
-        echo "  • Or specify test suite path using: gms-rt-test-start <DEVICE> <TYPE> --suite <PATH>"
-        echo "  • Check if the test suite path exists and is accessible"
-        echo "  • Verify device connection: adb devices"
         return 1
     fi
 }
@@ -1381,7 +1350,7 @@ EOF
 gms-rt-test-status() {
     check_jq
     echo "📊 Checking test status..."
-    api_call_or_exit "/test/status" | jq '.'
+    api_call "/test/status" | jq '.'
 }
 
 # Stop running test
@@ -1407,7 +1376,7 @@ gms-rt-test-suites() {
     fi
     local url="/test/suites"
     [ -n "$base_path" ] && url="/test/suites?base_path=$base_path"
-    local response=$(api_call_or_exit "$url" "GET")
+    local response=$(api_call "$url" "GET")
     if echo "$response" | jq -e '.success' > /dev/null; then
         local count=$(echo "$response" | jq '.count')
         success "Found $count test suite(s)"
@@ -1550,7 +1519,7 @@ gms-rt-usbip-status() {
 gms-rt-users-current() {
     check_jq
     echo "👤 Getting current user info..."
-    api_call_or_exit "/users/current" | jq '.'
+    api_call "/users/current" | jq '.'
 }
 
 # Detect user
@@ -1572,7 +1541,7 @@ gms-rt-users-detect() {
 gms-rt-users-list() {
     check_jq
     echo "👥 Listing all users..."
-    api_call_or_exit "/users/list" | jq '.'
+    api_call "/users/list" | jq '.'
 }
 
 # Set username
