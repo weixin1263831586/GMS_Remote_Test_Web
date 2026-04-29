@@ -22,7 +22,7 @@ NC=$(printf '\033[0m')
 
 # Network timeout constants
 PING_TIMEOUT=2
-CURL_TIMEOUT=5
+CURL_TIMEOUT=30  # 30 seconds for slow API endpoints (e.g., test results)
 CURL_EXIT_CANNOT_CONNECT=7
 CURL_EXIT_OPERATION_TIMEOUT=28
 
@@ -1424,8 +1424,20 @@ gms-rt-test-suites-result() {
 
     local start_time=$(date +%s.%3N)
     local response=$(api_call "$url" "POST" "$data")
+    local api_call_status=$?
     local end_time=$(date +%s.%3N)
     local elapsed=$(echo "$end_time - $start_time" | bc)
+
+    # Check if api_call succeeded
+    if [ $api_call_status -ne 0 ]; then
+        return 1
+    fi
+
+    # Also check if response is empty (api_call may have failed but returned 0)
+    if [ -z "$response" ]; then
+        error "No response from server"
+        return 1
+    fi
 
     if echo "$response" | jq -e '.success' > /dev/null; then
         local count=$(echo "$response" | jq '.count')
