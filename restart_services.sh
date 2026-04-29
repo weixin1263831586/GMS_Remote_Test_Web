@@ -21,9 +21,16 @@ echo ""
 
 # 1. 清理缓存
 echo -e "${YELLOW}[1/4] 清理 Python 缓存...${NC}"
+# 清理 Python 字节码缓存
+cache_count=$(find . -type d -name "__pycache__" 2>/dev/null | wc -l)
+pyc_count=$(find . -type f -name "*.pyc" 2>/dev/null | wc -l)
+
 find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 find . -type f -name "*.pyc" -delete 2>/dev/null || true
-echo -e "${GREEN}✓ 缓存已清理${NC}"
+find . -type f -name "*.pyo" -delete 2>/dev/null || true
+find . -type f -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+
+echo -e "${GREEN}✓ 缓存已清理 (删除了 ${cache_count} 个 __pycache__ 目录和 ${pyc_count} 个 .pyc 文件)${NC}"
 echo ""
 
 # 2. 备份旧日志
@@ -60,12 +67,15 @@ echo -e "  启动 Flask (5000)..."
 nohup python3 app.py >> flask.log 2>&1 &
 sleep 2
 
-# 健康检查
+# 健康检查（增加超时和重试）
+echo -e "${BLUE}  进行健康检查...${NC}"
+sleep 3  # 等待服务完全启动
+
 for port in 5001 5000; do
-    if curl -s -f "http://localhost:${port}/" >/dev/null 2>&1; then
+    if timeout 5 curl -s -f "http://localhost:${port}/" >/dev/null 2>&1; then
         echo -e "${GREEN}  ✓ ${port} 启动成功${NC}"
     else
-        echo -e "${YELLOW}  ⚠ ${port} 健康检查失败${NC}"
+        echo -e "${YELLOW}  ⚠ ${port} 健康检查失败（可能仍在启动中）${NC}"
     fi
 done
 echo ""
@@ -74,7 +84,14 @@ echo -e "${BLUE}========================================${NC}"
 echo -e "${GREEN}  ✓ 服务管理完成！${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
-echo -e "服务地址："
-echo -e "  FastAPI: ${GREEN}http://localhost:5001${NC}"
-echo -e "  Flask:   ${GREEN}http://localhost:5000${NC}"
+echo -e "📋 服务状态："
+echo -e "  FastAPI: ${GREEN}http://localhost:5001${NC} (主服务)"
+echo -e "  Flask:   ${GREEN}http://localhost:5000${NC} (VNC 服务)"
+echo ""
+echo -e "📊 查看日志："
+echo -e "  FastAPI: tail -f fastapi.log"
+echo -e "  Flask:   tail -f flask.log"
+echo ""
+echo -e "🔍 检查端口："
+echo -e "  lsof -i :5001 -i :5000"
 echo ""
