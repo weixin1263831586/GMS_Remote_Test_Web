@@ -422,53 +422,50 @@ function initWebSocket() {
                         break;
 
                     case 'devices_changed':
-                        // USB设备插拔事件，自动刷新设备列表
+                        // USB 设备插拔事件，自动刷新设备列表
                         console.log('[WebSocket] devices_changed:', data.devices);
-                        // 保存旧设备列表用于比较
-                        const oldDevices = new Set(state.devices.map(d => typeof d === 'string' ? d : d.device_id));
-                        // 自动刷新设备列表
-                        loadDevices(true).then(() => {
-                            const newDevices = new Set(state.devices.map(d => typeof d === 'string' ? d : d.device_id));
-                            // 找出连接的设备（在新列表中但不在旧列表中）
-                            const connected = [...newDevices].filter(d => !oldDevices.has(d));
-                            // 找出断开的设备（在旧列表中但不在新列表中）
-                            const disconnected = [...oldDevices].filter(d => !newDevices.has(d));
 
+                        // 优先使用后端提供的 connected/disconnected 信息（更准确、更快）
+                        let connected = data.connected || [];
+                        let disconnected = data.disconnected || [];
+
+                        // 如果没有提供 connected/disconnected，则通过比较计算（向后兼容）
+                        if (connected.length === 0 && disconnected.length === 0) {
+                            const oldDevices = new Set(state.devices.map(d => typeof d === 'string' ? d : d.device_id));
+                            const newDevicesSet = new Set(data.devices || []);
+                            connected = [...newDevicesSet].filter(d => !oldDevices.has(d));
+                            disconnected = [...oldDevices].filter(d => !newDevicesSet.has(d));
+                        }
+
+                        // 刷新设备列表
+                        loadDevices(true).then(() => {
                             // 构建设备变化消息
-                            let changeMessage = '检测到USB设备变化';
+                            let changeMessage = '检测到 USB 设备变化';
                             if (connected.length > 0) {
-                                changeMessage += `，连接: ${connected.join(' ')}`;
+                                changeMessage += `，连接：${connected.join(' ')}`;
                             }
                             if (disconnected.length > 0) {
-                                changeMessage += `，断开: ${disconnected.join(' ')}`;
+                                changeMessage += `，断开：${disconnected.join(' ')}`;
                             }
                             addLogEntry(changeMessage, 'info');
 
                             let message = '设备列表已更新';
                             if (connected.length > 0) {
-                                message += `，连接: ${connected.join(' ')}`;
+                                message += `，连接：${connected.join(' ')}`;
                             }
                             if (disconnected.length > 0) {
-                                message += `，断开: ${disconnected.join(' ')}`;
+                                message += `，断开：${disconnected.join(' ')}`;
                             }
                             showToast(message, 'success');
 
                             // 检查 USB/IP 设备是否断开，如果是则重置按钮状态
-                            // 注意：使用 oldDevices 检查，因为 state.devices 已被更新
                             if (state.usbipConnected && disconnected.length > 0) {
-                                // 使用 oldDevices 来检查哪些设备之前是 USB/IP 设备
-                                const usbipDevicesWereConnected = [...oldDevices].some(deviceId => {
-                                    return disconnected.includes(deviceId);
-                                });
-                                if (usbipDevicesWereConnected) {
-                                    // USB/IP 设备已断开，重置按钮状态
-                                    const btn = $('usbip-btn');
-                                    if (btn) {
-                                        btn.textContent = '📱 本地设备';
-                                        btn.disabled = false;
-                                        state.usbipConnected = false;
-                                        console.log('[USB/IP] Button reset due to device disconnect');
-                                    }
+                                const btn = $('usbip-btn');
+                                if (btn) {
+                                    btn.textContent = '📱 本地设备';
+                                    btn.disabled = false;
+                                    state.usbipConnected = false;
+                                    console.log('[USB/IP] Button reset due to device disconnect');
                                 }
                             }
                         }).catch(err => {

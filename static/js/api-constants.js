@@ -253,7 +253,7 @@ const API_DETAILS_MAP = {
         usage: '查看API列表和单个API详细帮助'
     },
     '/api/config/read': {
-        title: '获取完整配置',
+        title: '获取配置',
         description: '获取完整系统配置（包含所有字段和敏感信息）',
         method: 'GET',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
