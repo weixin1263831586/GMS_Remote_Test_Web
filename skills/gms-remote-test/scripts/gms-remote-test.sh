@@ -6,7 +6,17 @@
 
 # Default configuration
 # Use environment variable GMS_REMOTE_TEST_SERVER or default to localhost:5001
-SERVER_URL="${GMS_REMOTE_TEST_SERVER:-http://172.16.14.233:5001}"
+# If running on the server machine itself, use localhost to avoid firewall issues
+if [ -n "${GMS_REMOTE_TEST_SERVER:-}" ]; then
+    SERVER_URL="$GMS_REMOTE_TEST_SERVER"
+else
+    # Check if we're running on the server machine (172.16.14.233)
+    if hostname -I 2>/dev/null | grep -q "172.16.14.233"; then
+        SERVER_URL="http://localhost:5001"
+    else
+        SERVER_URL="http://172.16.14.233:5001"
+    fi
+fi
 API_BASE="${SERVER_URL}/api"
 
 # GMS Web App Configuration Directory
