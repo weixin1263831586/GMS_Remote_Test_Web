@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20260409-01-02">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260501-01">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- Socket.IO not used in FastAPI version, using native WebSocket -->
     <script src="/static/vendor/xterm/xterm.min.js"></script>
@@ -15,7 +15,7 @@
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260420-01"></script>
+    <script src="/static/js/app.js?v=20260501-01"></script>
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
@@ -2503,6 +2503,17 @@
                         }
                         // ADB模式和路由命令模式:保持静默模式,等待检测到提示符
                         updateTerminalStatus(true);
+
+                        // 连接建立后立即发送当前终端大小，确保PTY大小匹配
+                        if (terminal && terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+                            const dims = { cols: terminal.cols, rows: terminal.rows };
+                            console.log('Sending initial terminal size:', dims);
+                            terminalSocket.send(JSON.stringify({
+                                type: 'terminal_resize',
+                                cols: dims.cols,
+                                rows: dims.rows
+                            }));
+                        }
                     }
                 } catch (e) {
                     console.error('Error parsing WebSocket message:', e);
@@ -2547,7 +2558,8 @@
                     selection: 'rgba(255, 255, 255, 0.3)'
                 },
                 scrollback: 1000,
-                convertEol: true
+                convertEol: false,  // 不转换行尾，保持原始格式
+                termName: 'xterm-256color'  // 设置终端类型，确保正确的转义序列处理
             });
 
             // 加载FitAddon
@@ -2579,6 +2591,9 @@
             // 设置数据处理器
             terminal.onData((data) => {
                 if (isTerminalConnected && terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+                    // 确保正确处理方向键等特殊按键的ANSI转义序列
+                    // onData已经正确地将方向键转换为转义序列（如\x1b[A）
+                    // 直接发送原始数据，不做任何额外处理
                     terminalSocket.send(JSON.stringify({
                         type: 'terminal_input',
                         input: data
@@ -2586,7 +2601,7 @@
                 }
             });
 
-            // 添加 Ctrl+C 复制支持
+            // 添加 Ctrl+C 复制支持和方向键处理
             terminal.attachCustomKeyEventHandler((event) => {
                 // Ctrl+C 复制（有选中文本时）
                 if (event.ctrlKey && event.key === 'c' && terminal.hasSelection()) {
@@ -2608,6 +2623,14 @@
                     console.log('复制成功:', selection);
                     return false;  // 阻止默认行为
                 }
+
+                // 确保方向键和其他特殊按键不被浏览器拦截
+                // 方向键: ArrowUp, ArrowDown, ArrowLeft, ArrowRight
+                if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+                    // 让终端正常处理这些按键，不做任何拦截
+                    return true;
+                }
+
                 return true;
             });
 
