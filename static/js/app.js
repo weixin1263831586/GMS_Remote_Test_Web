@@ -888,10 +888,6 @@ async function apiCall(url, method = 'GET', data = null) {
         if (state.clientId && state.clientId !== 'unknown') {
             const username = state.clientId.split('@')[0];
             headers['X-Client-Username'] = username;
-            console.log(`[apiCall] Adding X-Client-Username: ${username} for URL: ${url}`);
-        } else {
-            // 降低日志级别，避免过多的控制台输出
-            console.debug(`[apiCall] No valid clientId available. state.clientId: ${state.clientId}, URL: ${url}`);
         }
 
         const options = {
@@ -3152,6 +3148,33 @@ async function cleanTest() {
     }
 }
 
+// ==================== 工具函数 ====================
+
+/**
+ * 触发文件下载
+ * @param {string} url - 下载URL
+ * @param {string} filename - 下载的文件名
+ * @param {boolean} isBlobUrl - 是否为Blob URL（需要清理）
+ */
+function triggerDownload(url, filename, isBlobUrl = false) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+
+    if (isBlobUrl) {
+        // Blob URL 需要延迟清理和释放
+        setTimeout(() => {
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        }, 100);
+    } else {
+        document.body.removeChild(link);
+    }
+}
+
 async function downloadTestLog() {
     try {
         addLogEntry('正在保存日志...', 'info');
@@ -3173,16 +3196,8 @@ async function downloadTestLog() {
 
         if (saveResult.success) {
             addLogEntry(`✅ 日志已保存: ${saveResult.filename}`, 'success');
-
-            // 直接下载保存的日志文件
-            const link = document.createElement('a');
-            link.href = `/api/test/logs/download?filename=${encodeURIComponent(saveResult.filename)}`;
-            link.download = saveResult.filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            showToast(`日志已保存: ${saveResult.filename}`, 'success');
+            triggerDownload('/api/test/logs/get', saveResult.filename);
+            showToast(`日志已保存并下载: ${saveResult.filename}`, 'success');
         } else {
             throw new Error(saveResult.error || '保存失败');
         }
@@ -3199,7 +3214,7 @@ async function showConfig() {
     // Fetch current config from API
     let config = {};
     try {
-        config = await apiCall('/api/config', 'GET');
+        config = await apiCall('/api/config/read', 'GET');
     } catch (error) {
         addLogEntry('获取配置失败: ' + error.message, 'error');
         return;
@@ -3299,7 +3314,7 @@ async function saveConfig() {
         // 立即关闭模态框
         closeModal();
 
-        await apiCall('/api/config', 'POST', config);
+        await apiCall('/api/config/update', 'POST', config);
         addLogEntry('配置已保存', 'success');
         showToast('配置保存成功', 'success');
 
@@ -4108,18 +4123,7 @@ async function downloadReportAsZip(timestamp) {
         }
 
         const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-
-        // 延迟清理
-        setTimeout(() => {
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-        }, 100);
+        triggerDownload(url, filename, true);
 
         showToast('报告 ZIP 下载成功', 'success');
     } catch (error) {
@@ -6014,13 +6018,7 @@ async function downloadSkillsZip() {
         }
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'gms-remote-test-skills.zip';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
+        triggerDownload(url, 'gms-remote-test-skills.zip', true);
     } catch (e) {
         console.error('[downloadSkillsZip] Error:', e);
         alert('下载失败：' + e.message);
