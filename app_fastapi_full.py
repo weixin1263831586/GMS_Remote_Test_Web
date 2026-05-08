@@ -728,7 +728,6 @@ async def notify_device_change(devices_to_remove: List[str], context: str = "USB
         return
 
     try:
-        import asyncio
         from core.device_manager import get_device_manager
 
         dm = get_device_manager()
@@ -8029,14 +8028,12 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
         channel = ssh.invoke_shell(term='xterm-256color')
         channel.setblocking(0)
 
-        # 设置初始终端大小（使用标准终端大小，后续会根据前端resize事件调整）
         channel.resize_pty(width=80, height=24)
 
         # 发送清屏和adb shell命令
-        # 使用多个换行和clear命令来清除banner
-        channel.send('\n\n\n')  # 发送换行跳过banner
-        channel.send('clear\n')  # 清屏
-        channel.send(f'adb -s {serial_no} shell\n')  # 执行 adb shell
+        channel.send('\n\n\n')
+        channel.send('clear\n')
+        channel.send(f'adb -s {serial_no} shell\n')
 
         # 保存会话
         loop = asyncio.get_event_loop()
@@ -8092,21 +8089,17 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
                     try:
                         channel = global_state.terminal_ssh_sessions[session_id]['channel']
 
-                        # 等待数据可读，避免CPU占用过高
                         if channel.recv_ready():
-                            # 增大缓冲区以避免ANSI转义序列被截断
                             data_chunk = channel.recv(4096)
                             if not data_chunk:
                                 logger.info(f"[TERMINAL] No data received, ADB connection closed")
                                 break
 
-                            # 解码并发送
                             try:
                                 text = data_chunk.decode('utf-8')
                             except UnicodeDecodeError:
                                 text = data_chunk.decode('utf-8', errors='ignore')
 
-                            # 使用保存的事件循环通过WebSocket发送
                             try:
                                 future = asyncio.run_coroutine_threadsafe(
                                     websocket.send_json({
@@ -8115,13 +8108,11 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
                                     }),
                                     loop
                                 )
-                                # 等待发送完成
                                 future.result(timeout=5)
                             except Exception as e:
                                 logger.error(f"[TERMINAL] Error sending ADB data: {e}")
                                 break
                         else:
-                            # 没有数据可读时短暂休眠
                             time.sleep(0.01)
 
                     except socket.timeout:
@@ -8193,7 +8184,6 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
         channel = ssh.invoke_shell(term='xterm-256color')
         channel.setblocking(0)
 
-        # 设置初始终端大小（使用标准终端大小，后续会根据前端resize事件调整）
         channel.resize_pty(width=80, height=24)
 
         # 保存SSH会话和当前事件循环
@@ -8234,22 +8224,17 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                     try:
                         channel = global_state.terminal_ssh_sessions[session_id]['channel']
 
-                        # 等待数据可读，避免CPU占用过高
                         if channel.recv_ready():
-                            # 增大缓冲区以避免ANSI转义序列被截断
-                            # 使用更大的缓冲区（4096字节）确保完整的转义序列
                             data_chunk = channel.recv(4096)
                             if not data_chunk:
                                 logger.info(f"[TERMINAL] No data received, connection closed")
                                 break
 
-                            # 解码并发送
                             try:
                                 text = data_chunk.decode('utf-8')
                             except UnicodeDecodeError:
                                 text = data_chunk.decode('utf-8', errors='ignore')
 
-                            # 使用保存的事件循环通过WebSocket发送
                             try:
                                 future = asyncio.run_coroutine_threadsafe(
                                     websocket.send_json({
@@ -8258,14 +8243,11 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                                     }),
                                     loop
                                 )
-                                # 等待发送完成
                                 future.result(timeout=5)
                             except Exception as e:
                                 logger.error(f"[TERMINAL] Error sending data: {e}")
                                 break
                         else:
-                            # 没有数据可读时短暂休眠
-                            import time
                             time.sleep(0.01)
 
                     except socket.timeout:
@@ -8328,7 +8310,6 @@ async def handle_terminal_input(client_id: str, websocket: WebSocket, data: dict
         if session_id in global_state.terminal_ssh_sessions:
             try:
                 input_data = data.get('input', data.get('data', ''))
-                # 调试：记录包含ANSI转义序列的输入
                 if '\x1b' in input_data:
                     logger.debug(f"[TERMINAL] ANSI input: {repr(input_data)}")
                 global_state.terminal_ssh_sessions[session_id]['channel'].send(input_data)
