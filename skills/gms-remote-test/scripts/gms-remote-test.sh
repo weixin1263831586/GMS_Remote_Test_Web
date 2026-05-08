@@ -74,51 +74,27 @@ api_call() {
 
     if [ -n "$curl_extra" ]; then
         # File upload or custom curl args mode
-        # Don't use -s here as it may conflict with progress bars (-#) in curl_extra
         response=$(eval "curl -w \"\\nHTTP_STATUS:%{http_code}\" --max-time $CURL_TIMEOUT -X \"\${method}\" \"\${API_BASE}\${endpoint}\" $curl_extra" 2>/dev/null)
-        local curl_exit_code=$?
-        if [ $curl_exit_code -eq 0 ] && [ -n "$response" ]; then
-            echo "$response"
-            return 0
-        else
-            if [ $curl_exit_code -eq $CURL_EXIT_CANNOT_CONNECT ] || [ $curl_exit_code -eq $CURL_EXIT_OPERATION_TIMEOUT ]; then
-                show_connection_error
-            else
-                error "Failed to get response from server (curl exit code: $curl_exit_code)" >&2
-            fi
-            return 1
-        fi
     elif [ -n "$data" ] || [ "$method" = "POST" ]; then
         response=$(curl -s -X "${method}" "${API_BASE}${endpoint}" \
             -H "Content-Type: application/json" \
             -d "${data}" \
             --max-time $CURL_TIMEOUT 2>/dev/null)
-        local curl_exit_code=$?
-        if [ $curl_exit_code -eq 0 ] && [ -n "$response" ]; then
-            echo "$response"
-            return 0
-        else
-            if [ $curl_exit_code -eq $CURL_EXIT_CANNOT_CONNECT ] || [ $curl_exit_code -eq $CURL_EXIT_OPERATION_TIMEOUT ]; then
-                show_connection_error
-            else
-                error "Failed to get response from server (curl exit code: $curl_exit_code)" >&2
-            fi
-            return 1
-        fi
     else
         response=$(curl -s "${API_BASE}${endpoint}" --max-time $CURL_TIMEOUT 2>/dev/null)
-        local curl_exit_code=$?
-        if [ $curl_exit_code -eq 0 ] && [ -n "$response" ]; then
-            echo "$response"
-            return 0
+    fi
+
+    local curl_exit_code=$?
+    if [ $curl_exit_code -eq 0 ] && [ -n "$response" ]; then
+        echo "$response"
+        return 0
+    else
+        if [ $curl_exit_code -eq $CURL_EXIT_CANNOT_CONNECT ] || [ $curl_exit_code -eq $CURL_EXIT_OPERATION_TIMEOUT ]; then
+            show_connection_error
         else
-            if [ $curl_exit_code -eq $CURL_EXIT_CANNOT_CONNECT ] || [ $curl_exit_code -eq $CURL_EXIT_OPERATION_TIMEOUT ]; then
-                show_connection_error
-            else
-                error "Failed to get response from server (curl exit code: $curl_exit_code)" >&2
-            fi
-            return 1
+            error "Failed to get response from server (curl exit code: $curl_exit_code)" >&2
         fi
+        return 1
     fi
 }
 
