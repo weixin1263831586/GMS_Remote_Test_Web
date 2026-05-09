@@ -645,15 +645,15 @@ gms-rt-devices-remount() {
 }
 
 # Show device screen
-gms-rt-devices-screen() {
+gms-rt-devices-scrcpy() {
     local devices="$1"
-    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-screen DEVICE1 [DEVICE2 ...]"; return 1; }
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-scrcpy DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     echo "📺 显示设备屏幕..."
 
     local data=$(build_devices_json_data "$devices")
 
-    local response=$(api_call "/devices/screen" "POST" "$data")
+    local response=$(api_call "/devices/scrcpy" "POST" "$data")
     echo "$response" | jq '.'
 }
 
@@ -1666,9 +1666,9 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-user-locked        - List user-locked devices
   gms-rt-devices-reboot             - Reboot devices
   gms-rt-devices-remount            - Remount RW (with auto-reboot prompt)
-  gms-rt-devices-wifi       - Connect to WiFi
+  gms-rt-devices-wifi               - Connect to WiFi
   gms-rt-devices-shell              - Open interactive ADB shell
-  gms-rt-devices-screen             - Show device screen
+  gms-rt-devices-scrcpy             - Show device screen
 
 ${YELLOW}File Management:${NC}
   gms-rt-files-progress          - Get upload progress

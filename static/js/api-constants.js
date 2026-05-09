@@ -33,7 +33,7 @@ const API_CATEGORIES = {
     '/api/devices/remount': 'device',
     '/api/devices/wifi': 'device',
     '/api/devices/shell': 'device',
-    '/api/devices/screen': 'device',
+    '/api/devices/scrcpy': 'device',
     '/api/desktop': 'desktop',
     '/api/test': 'test',
     '/api/reports': 'report',
@@ -404,9 +404,9 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "output": "命令输出..." }',
         usage: '建立ADB Shell会话'
     },
-    '/api/devices/screen': {
+    '/api/devices/scrcpy': {
         title: '显示设备屏幕',
-        description: '启动设备屏幕显示(VNC)',
+        description: '启动设备屏幕显示',
         params: [
             { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],

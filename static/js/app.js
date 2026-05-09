@@ -1875,7 +1875,7 @@ async function showDeviceScreen() {
         await initAndStartVnc();
 
         addLogEntry('正在启动屏幕投屏...', 'info');
-        const result = await apiCall('/api/devices/screen', 'POST', {
+        const result = await apiCall('/api/devices/scrcpy', 'POST', {
             devices: Array.from(state.selectedDevices)
         });
 

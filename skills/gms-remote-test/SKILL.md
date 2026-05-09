@@ -58,7 +58,7 @@ description: |
 | `POST /api/devices/bootloader-unlock` | `gms-rt-devices-bootloader-unlock` | Unlock bootloader |
 | `POST /api/devices/bootloader-status` | `gms-rt-devices-bootloader-status` | Check bootloader status |
 | `POST /api/devices/wifi` | `gms-rt-devices-wifi` | Connect to WiFi |
-| `POST /api/devices/screen` | `gms-rt-devices-screen` | Show device screen |
+| `POST /api/devices/scrcpy` | `gms-rt-devices-scrcpy` | Show device screen |
 | `POST /api/devices/shell` | `gms-rt-devices-shell` | Execute ADB shell command |
 | `GET /api/devices/user-locked` | `gms-rt-devices-user-locked` | List user locks |
 

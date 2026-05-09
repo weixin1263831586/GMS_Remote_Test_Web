@@ -206,13 +206,13 @@ API_DOCS_LIST = [
     },
     {
         "method": "POST",
-        "path": "/api/devices/screen",
-        "description": "启动设备屏幕显示(VNC)",
+        "path": "/api/devices/scrcpy",
+        "description": "启动设备屏幕显示",
         "params": [
             {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"}
         ],
         "category": "device",
-        "skill": "gms-rt-devices-screen"
+        "skill": "gms-rt-devices-scrcpy"
     },
 
     # ==================== 测试管理 ====================
