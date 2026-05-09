@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-PROJECT_DIR="/home/hcq/GMS_Auto_Test/web_app"
+PROJECT_DIR="/home/hcq/GMS_Remote_Test/web_app"
 cd "$PROJECT_DIR"
 
 echo -e "${BLUE}========================================${NC}"

@@ -3993,7 +3993,7 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
     try:
         logger.info(f"[SKILLS_DOWNLOAD] 请求下载技能包: {skill_name}")
 
-        skills_base_dir = "/home/hcq/GMS_Auto_Test/web_app/skills"
+        skills_base_dir = "/home/hcq/GMS_Remote_Test/web_app/skills"
         skills_dir = os.path.join(skills_base_dir, skill_name)
 
         if not os.path.exists(skills_dir):

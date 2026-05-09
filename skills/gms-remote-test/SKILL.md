@@ -234,7 +234,7 @@ gms-rt-devices-bootloader-unlock "R58M1234567"
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `GMS_REMOTE_TEST_SERVER` | 服务器地址 | `http://172.16.14.233:5001` |
-| `GMS_WEB_APP_DIR` | Web 应用目录 | `/home/hcq/GMS_Auto_Test/web_app` |
+| `GMS_WEB_APP_DIR` | Web 应用目录 | `/home/hcq/GMS_Remote_Test/web_app` |
 
 ---
 
