@@ -21,7 +21,7 @@ API_BASE="${SERVER_URL}/api"
 
 # GMS Web App Configuration Directory
 # Can be overridden by environment variable
-GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-/home/hcq/GMS_Auto_Test/web_app}"
+GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-/home/hcq/GMS_Remote_Test/web_app}"
 
 # Colors for output
 RED=$(printf '\033[0;31m')
@@ -1062,7 +1062,7 @@ gms-rt-terminal-open() {
         local config_host=""
         local config_files=(
             "${GMS_WEB_APP_DIR}/configs/config.json"
-            "${HOME}/GMS_Auto_Test/web_app/configs/config.json"
+            "${HOME}/GMS_Remote_Test/web_app/configs/config.json"
         )
 
         for config_file in "${config_files[@]}"; do
