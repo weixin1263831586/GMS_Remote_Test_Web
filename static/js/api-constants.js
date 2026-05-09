@@ -31,7 +31,7 @@ const API_CATEGORIES = {
     '/api/devices/user-locked': 'device',
     '/api/devices/reboot': 'device',
     '/api/devices/remount': 'device',
-    '/api/devices/wifi-connect': 'device',
+    '/api/devices/wifi': 'device',
     '/api/devices/shell': 'device',
     '/api/devices/screen': 'device',
     '/api/desktop': 'desktop',
@@ -384,7 +384,7 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "设备已重新挂载为读写模式" }',
         usage: '需要修改系统文件时使用'
     },
-    '/api/devices/wifi-connect': {
+    '/api/devices/wifi': {
         title: '连接WiFi',
         description: '让设备连接到指定的WiFi网络',
         params: [

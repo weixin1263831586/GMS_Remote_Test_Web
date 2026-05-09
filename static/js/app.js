@@ -1360,7 +1360,7 @@ async function submitWifiConfig() {
         addLogEntry(`正在连接 Wi-Fi (${ssid})...`, 'info');
         showToast('正在连接 Wi-Fi...', 'info');
 
-        await apiCall('/api/devices/wifi-connect', 'POST', {
+        await apiCall('/api/devices/wifi', 'POST', {
             devices: Array.from(state.selectedDevices),
             ssid: ssid,
             password: password
