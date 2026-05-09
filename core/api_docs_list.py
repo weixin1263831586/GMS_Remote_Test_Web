@@ -184,7 +184,7 @@ API_DOCS_LIST = [
     },
     {
         "method": "POST",
-        "path": "/api/devices/wifi-connect",
+        "path": "/api/devices/wifi",
         "description": "让设备连接到指定的WiFi网络",
         "params": [
             {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"},
@@ -192,7 +192,7 @@ API_DOCS_LIST = [
             {"name": "password", "type": "string", "required": False, "desc": "WiFi密码，默认1234567890"}
         ],
         "category": "device",
-        "skill": "gms-rt-devices-wifi-connect"
+        "skill": "gms-rt-devices-wifi"
     },
     {
         "method": "POST",

@@ -2043,7 +2043,7 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
         results = await asyncio.gather(*[remount_single_device(d) for d in req.devices])
         return ApiResponse.device_results(results, "设备Remount")
 
-@app.post("/api/devices/wifi-connect")
+@app.post("/api/devices/wifi")
 async def connect_wifi(req: WifiConnectRequest):
     """连接WiFi"""
     try:

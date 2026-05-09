@@ -701,21 +701,21 @@ gms-rt-devices-user-locked() {
 }
 
 # Connect WiFi
-gms-rt-devices-wifi-connect() {
+gms-rt-devices-wifi() {
     local devices="$1"
     local ssid="$2"
     local password="$3"
 
-    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-wifi-connect DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
-    [ -z "$ssid" ] && { error "SSID必填. 用法: gms-rt-devices-wifi-connect DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
-    [ -z "$password" ] && { error "密码必填. 用法: gms-rt-devices-wifi-connect DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
+    [ -z "$ssid" ] && { error "SSID必填. 用法: gms-rt-devices-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
+    [ -z "$password" ] && { error "密码必填. 用法: gms-rt-devices-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
 
     check_jq
     echo "📶 连接WiFi: $ssid..."
 
     local devices_json=$(build_devices_json_data "$devices")
     local data=$(echo "$devices_json" | jq -c ". + {ssid: \"$ssid\", password: \"$password\"}")
-    local response=$(api_call "/devices/wifi-connect" "POST" "$data")
+    local response=$(api_call "/devices/wifi" "POST" "$data")
 
     if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then
         success "WiFi连接已启动"
@@ -1666,7 +1666,7 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-user-locked        - List user-locked devices
   gms-rt-devices-reboot             - Reboot devices
   gms-rt-devices-remount            - Remount RW (with auto-reboot prompt)
-  gms-rt-devices-wifi-connect       - Connect to WiFi
+  gms-rt-devices-wifi       - Connect to WiFi
   gms-rt-devices-shell              - Open interactive ADB shell
   gms-rt-devices-screen             - Show device screen
 
