@@ -980,19 +980,43 @@ gms-rt-ssh-route() {
 }
 
 
-# Check SSHD status
-gms-rt-ssh-sshd-check() {
+# Check SSHD status (returns install guide if not installed)
+gms-rt-ssh-sshd() {
+    local device_host="$1"
     check_jq
-    echo "🔍 Checking SSHD status..."
-    api_call "/ssh/sshd-check" | jq '.'
-}
 
-# Install SSHD
-gms-rt-ssh-sshd-install() {
-    check_jq
-    echo "🔧 Installing SSHD..."
-    local response=$(api_call "/ssh/sshd-install" "POST" "{}")
-    echo "$response" | jq '.'
+    if [ -n "$device_host" ]; then
+        # 验证格式：必须包含 @ 符号
+        if [[ "$device_host" != *@* ]]; then
+            error "❌ 设备主机格式错误：'$device_host'"
+            echo "   正确格式应为：user@ip（例如：hcq@172.16.14.68）" >&2
+            return 1
+        fi
+        echo "🔍 Checking SSHD status for $device_host..."
+        # Use GET with query parameter (like USB/IP status)
+        local response=$(api_call "/ssh/sshd?device_host=$device_host")
+    else
+        echo "🔍 Checking SSHD status for current client..."
+        local response=$(api_call "/ssh/sshd")
+    fi
+
+    # 解析响应
+    local installed=$(echo "$response" | jq -r '.installed')
+    local running=$(echo "$response" | jq -r '.running')
+
+    # 显示简洁的状态摘要
+    if [ "$installed" = "true" ]; then
+        if [ "$running" = "true" ]; then
+            echo "✅ SSHD 已安装并运行中"
+        else
+            echo "⚠️  SSHD 已安装但未运行"
+        fi
+    else
+        echo "❌ SSHD 未安装"
+        echo ""
+        echo "📋 Windows 电脑安装指南:"
+        echo "$response" | jq -r '.install_guide'
+    fi
 }
 
 # ==============================================================================
@@ -1658,8 +1682,7 @@ ${YELLOW}Reports:${NC}
 ${YELLOW}SSH Management:${NC}
   gms-rt-ssh-ping                - Test SSH connectivity
   gms-rt-ssh-route               - Check SSH route
-  gms-rt-ssh-sshd-check          - Check SSHD status
-  gms-rt-ssh-sshd-install        - Install SSHD
+  gms-rt-ssh-sshd          - Check SSHD status & install guide (optional: user@ip, e.g. hcq@172.16.14.68)
 
 ${YELLOW}System:${NC}
   gms-rt-system-docs             - Get API documentation

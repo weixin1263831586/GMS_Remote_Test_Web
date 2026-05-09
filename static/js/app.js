@@ -2229,16 +2229,11 @@ async function submitDevicePassword() {
 // ==================== VPN Control ====================
 async function checkSshd() {
     try {
-        const result = await apiCall('/api/ssh/sshd-check', 'GET');
+        const result = await apiCall('/api/ssh/sshd', 'GET');
 
         if (!result.installed) {
-            // SSHD 未安装，显示安装指南
-            // 优先使用 API 返回的指南，否则从服务器获取
-            let guide = result.install_guide;
-            if (!guide) {
-                guide = await getSshdInstallGuide();
-            }
-            showSshdInstallGuide(guide);
+            // SSHD 未安装，显示安装指南（已包含在 API 响应中）
+            showSshdInstallGuide(result.install_guide);
         } else if (result.running) {
             addLogEntry(`SSHD 状态: 运行中`, 'success');
         } else {
@@ -2253,22 +2248,11 @@ async function checkSshd() {
         addLogEntry('检查 SSHD 失败: ' + error.message, 'error');
         // 即使检查失败，也尝试从服务器获取安装指南
         try {
-            const guide = await getSshdInstallGuide();
-            showSshdInstallGuide(guide);
+            const result = await apiCall('/api/ssh/sshd', 'GET');
+            showSshdInstallGuide(result.install_guide);
         } catch (guideError) {
             addLogEntry('无法加载安装指南', 'error');
         }
-    }
-}
-
-// 获取 SSHD 安装指南（从服务器加载）
-async function getSshdInstallGuide() {
-    try {
-        const result = await apiCall('/api/ssh/sshd-guide', 'GET');
-        return result.install_guide || '无法加载安装指南，请刷新页面重试';
-    } catch (error) {
-        console.error('Failed to load SSHD install guide:', error);
-        return '无法加载安装指南，请检查网络连接后重试';
     }
 }
 
@@ -5961,9 +5945,6 @@ window.copyCurlCommandFromData = function(element) {
                                 // 匹配根路径（如 "http://localhost:5001/" 或 "http://172.16.14.233:5001/"）
                                 (text.match(/http:\/\/[^\/]+:\d+\/"$/) !== null);
 
-    // 检查是否为需要特殊jq处理的端点
-    const isSshdInstall = text.includes('/api/ssh/sshd-install');
-
     if (isWebSocketEndpoint) {
         // WebSocket端点，不添加jq
         commandToCopy = text;
@@ -5972,10 +5953,6 @@ window.copyCurlCommandFromData = function(element) {
         // 纯文本端点，不添加jq
         commandToCopy = text;
         successMessage = '✓ curl命令已复制';
-    } else if (isSshdInstall) {
-        // sshd-install API，使用 jq -r '.install_guide'
-        commandToCopy = text + ' | jq -r \'.install_guide\'';
-        successMessage = '✓ curl命令已复制 (含jq -r查看指南)';
     } else {
         // 其他JSON端点，使用 jq "."
         commandToCopy = text + ' | jq "."';

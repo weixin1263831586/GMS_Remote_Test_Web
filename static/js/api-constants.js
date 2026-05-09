@@ -563,19 +563,12 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "USB/IP 已安装" }',
         usage: '安装 USB/IP 服务'
     },
-    '/api/ssh/sshd-check': {
+    '/api/ssh/sshd': {
         title: '检查SSHD状态',
-        description: '检查SSH服务状态',
-        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "installed": true, "running": true }',
-        usage: '检查SSH服务是否正常运行'
-    },
-    '/api/ssh/sshd-install': {
-        title: '安装SSHD',
-        description: '获取SSHD安装指南',
-        params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "success": false, "error": "SSHD需要在Windows客户端手动安装", "install_guide": "安装步骤...", "manual_install": true }',
-        usage: '安装Windows SSHD服务'
+        description: '检查SSH服务状态（如未安装则返回安装指南）',
+        params: [{ name: 'device_host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
+        response: '{ "success": true, "installed": true, "running": true, "install_guide": null }',
+        usage: '检查SSH服务状态，如未安装则自动返回安装指南'
     },
     '/api/ssh/ping': {
         title: 'SSH连通性测试',

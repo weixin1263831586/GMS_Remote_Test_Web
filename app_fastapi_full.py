@@ -3993,7 +3993,8 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
     try:
         logger.info(f"[SKILLS_DOWNLOAD] 请求下载技能包: {skill_name}")
 
-        skills_base_dir = "/home/hcq/GMS_Remote_Test/web_app/skills"
+        # 使用相对路径避免硬编码
+        skills_base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'skills')
         skills_dir = os.path.join(skills_base_dir, skill_name)
 
         if not os.path.exists(skills_dir):
@@ -5542,12 +5543,14 @@ async def install_usbipd(request: Request, device_host: Optional[str] = None):
         )
 
 # ==================== VPN管理 ====================
-@app.get("/api/ssh/sshd-check")
+@app.get("/api/ssh/sshd")
 @handle_api_errors
-async def check_ssh_sshd(request: Request):
-    """检查VPN SSH服务状态
+async def check_ssh_sshd(request: Request, device_host: Optional[str] = Query(None, description="设备主机地址 (user@ip 格式，如 hcq@172.16.14.68)")):
+    """检查SSH服务状态（如未安装则返回安装指南）
 
     通过SSH连接到Windows客户端检查SSHD服务状态。
+    支持查询参数 device_host 来检查指定主机的状态。
+    注意：device_host 必须是 user@ip 格式，例如 hcq@172.16.14.68
     """
     def exec_ssh_cmd(ssh, cmd):
         """执行SSH命令并返回输出"""
@@ -5555,7 +5558,19 @@ async def check_ssh_sshd(request: Request):
         return stdout.read().decode('utf-8', errors='ignore').strip()
 
     config = config_manager.load_config()
-    device_host = get_client_id_from_request(request)
+    # 优先使用查询参数中的 device_host，否则使用请求中的客户端ID
+    if not device_host:
+        device_host = get_client_id_from_request(request)
+
+    # 验证 device_host 格式
+    if device_host and '@' not in device_host:
+        return JSONResponse(content={
+            'success': False,
+            'error': f'设备主机格式错误："{device_host}"。正确格式应为 user@ip，例如 hcq@172.16.14.68',
+            'installed': False,
+            'running': False
+        }, status_code=400)
+
     config['device_host'] = device_host
     config['device_pswd'] = find_device_host_password(config, device_host) or config.get('device_pswd', '')
 
@@ -5595,22 +5610,6 @@ async def check_ssh_sshd(request: Request):
             "install_guide": SSHD_INSTALL_GUIDE,
             "error": f"检查SSHD状态时发生错误: {str(e)}"
         })
-
-@app.post("/api/ssh/sshd-install")
-async def install_ssh_sshd():
-    """获取SSHD安装说明（已废弃，使用 /api/ssh/sshd-guide）"""
-    return await get_sshd_install_guide()
-
-@app.get("/api/ssh/sshd-guide")
-@handle_api_errors
-async def get_sshd_install_guide():
-    """获取 SSHD 安装指南"""
-    from core.ssh import SSHD_INSTALL_GUIDE
-    return JSONResponse(content={
-        'success': True,
-        'install_guide': SSHD_INSTALL_GUIDE
-    })
-
 
 @app.get("/api/ssh/route")
 @handle_api_errors
@@ -7601,33 +7600,6 @@ class DeviceSSHConnection:
             except Exception as e:
                 logger.error(f"Failed to return device SSH connection: {e}")
 
-
-def create_device_ssh_connection(config):
-    """创建设备主机的SSH连接（Windows）- 已废弃，请使用 DeviceSSHConnection 上下文管理器"""
-    logger.warning("[DEPRECATED] create_device_ssh_connection 已废弃，请使用 DeviceSSHConnection 上下文管理器")
-    device_host = config.get('device_host', '')
-    if not device_host:
-        return None
-
-    if '@' not in device_host:
-        logger.error("[USB/IP] Device host format should be user@host")
-        return None
-
-    username, hostname = device_host.split('@', 1)
-    password = config.get('device_pswd', '')
-
-    if not password:
-        logger.error("[USB/IP] No SSH password configured for device host")
-        return None
-
-    try:
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(hostname=hostname, username=username, password=password, timeout=10)
-        return ssh
-    except Exception as e:
-        logger.error(f"[USB/IP] Failed to connect to device host: {e}")
-        return None
 
 # ==================== 辅助函数 ====================
 

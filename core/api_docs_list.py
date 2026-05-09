@@ -377,19 +377,13 @@ API_DOCS_LIST = [
     # ==================== SSH管理 ====================
     {
         "method": "GET",
-        "path": "/api/ssh/sshd-check",
-        "description": "检查SSH服务状态",
-        "params": [],
+        "path": "/api/ssh/sshd",
+        "description": "检查SSH服务状态（如未安装则返回安装指南）",
+        "params": [
+            {"name": "device_host", "type": "string", "required": False, "desc": "目标主机 (user@ip 或 ip)，不传则使用当前客户端"}
+        ],
         "category": "ssh",
-        "skill": "gms-rt-ssh-sshd-check"
-    },
-    {
-        "method": "POST",
-        "path": "/api/ssh/sshd-install",
-        "description": "获取SSHD安装指南",
-        "params": [],
-        "category": "ssh",
-        "skill": "gms-rt-ssh-sshd-install"
+        "skill": "gms-rt-ssh-sshd"
     },
     {
         "method": "POST",

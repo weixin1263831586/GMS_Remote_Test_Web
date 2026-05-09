@@ -7,11 +7,11 @@ description: |
 
   当用户询问"有哪些技能"时，请阅读本文件完整内容，按以下格式展示所有技能：
 
-  ## 技能列表 (共 14 类，56 个 API + 2 个 Web API)
+  ## 技能列表 (共 14 类，54 个 API + 2 个 Web API)
 
   请按顺序展示以下所有分类的完整表格：
 
-  **测试执行 (7 个)**、**主机桌面 (4 个)**、**主机终端 (2 个)**、**设备管理 (11 个)**、**用户管理 (4 个)**、**报告管理 (4 个)**、**固件烧写 (3 个)**、**文件管理 (2 个)**、**配置管理 (2 个)**、**系统管理 (4 个)**、**SSH 管理 (5 个)**、**VPN 管理 (3 个)**、**USB/IP 管理 (6 个)**、**其他 (1 个)**
+  **测试执行 (7 个)**、**主机桌面 (4 个)**、**主机终端 (2 个)**、**设备管理 (11 个)**、**用户管理 (4 个)**、**报告管理 (4 个)**、**固件烧写 (3 个)**、**文件管理 (2 个)**、**配置管理 (2 个)**、**系统管理 (4 个)**、**SSH 管理 (4 个)**、**VPN 管理 (3 个)**、**USB/IP 管理 (6 个)**、**其他 (1 个)**
 
   每个表格包含三列：API 端点、CLI 命令、功能说明。所有分类都必须完整显示，不要省略。
 
@@ -110,9 +110,7 @@ description: |
 |-----|----------|------|
 | `POST /api/ssh/ping` | `gms-rt-ssh-ping` | Test connectivity |
 | `GET /api/ssh/route` | `gms-rt-ssh-route` | Check SSH routing |
-| `GET /api/ssh/sshd-check` | `gms-rt-ssh-sshd-check` | Check SSHD status |
-| `GET /api/ssh/sshd-guide` | *(Web API)* | SSHD setup guide |
-| `POST /api/ssh/sshd-install` | `gms-rt-ssh-sshd-install` | Install SSHD |
+| `GET /api/ssh/sshd` | `gms-rt-ssh-sshd` | Check SSHD status & install guide |
 
 ### VPN管理 (3 个)
 | API | CLI 命令 | 功能 |
