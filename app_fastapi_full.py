@@ -5025,7 +5025,7 @@ async def validate_desktop_host(req: dict = Body(...)):
             status_code=500
         )
 
-@app.post("/api/devices/screen")
+@app.post("/api/devices/scrcpy")
 async def show_device_screens(req: DeviceActionRequest):
     """显示设备屏幕（启动scrcpy投屏）"""
     try:

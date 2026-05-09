@@ -2344,7 +2344,7 @@ def desktop_validate_host():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/devices/screen', methods=['POST'])
+@app.route('/api/devices/scrcpy', methods=['POST'])
 def show_device_screen():
     """Show device screen via scrcpy with tiled layout support - matches GUI implementation"""
     data = request.json
