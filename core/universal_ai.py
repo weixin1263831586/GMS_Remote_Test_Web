@@ -22,19 +22,49 @@ class UniversalAIAnalyzer:
         """
         self.config = config or {}
         self.timeout = 60
+        # API 格式常量
+        self.API_FORMAT_ANTHROPIC = 'anthropic'  # /v1/messages 端点
+        self.API_FORMAT_OPENAI = 'openai'  # /v1/chat/completions 端点
+
+
+    def _get_api_format(self, provider_name: str, config: Dict) -> str:
+        """
+        获取提供商的 API 格式
+
+        Args:
+            provider_name: 提供商名称
+            config: 提供商配置
+
+        Returns:
+            API 格式：'anthropic' 或 'openai'
+        """
+        # 优先使用配置中的 api_format 字段
+        api_format = config.get('api_format')
+        if api_format:
+            return api_format
+
+        # 根据 base_url 推断
+        base_url = config.get('base_url', '')
+        if 'anthropic' in base_url.lower() or base_url.endswith('/messages'):
+            return self.API_FORMAT_ANTHROPIC
+
+        # 默认使用 OpenAI 格式
+        return self.API_FORMAT_OPENAI
 
     def get_primary_provider(self) -> Optional[str]:
         """获取主要提供商"""
         if not self.config.get('enabled', False):
             return None
 
-        primary = self.config.get('primary_provider', 'zhipu')
+        # 使用配置中的 primary_provider，默认为第一个启用的提供商
+        primary = self.config.get('primary_provider')
         providers = self.config.get('providers', {})
 
-        # 如果主要提供商未启用，返回第一个启用的
-        if providers.get(primary, {}).get('enabled', False):
+        # 如果指定了主要提供商且已启用，返回它
+        if primary and providers.get(primary, {}).get('enabled', False):
             return primary
 
+        # 否则返回第一个启用的提供商
         for provider_name, provider_config in providers.items():
             if provider_config.get('enabled', False):
                 return provider_name
@@ -142,11 +172,21 @@ class UniversalAIAnalyzer:
 
             prompt = self._build_prompt(class_name, method_name, error_message, stack_trace, source_code)
 
-            # 检测是否使用 Anthropic 格式
-            is_anthropic = 'anthropic' in base_url.lower()
+            # 获取 API 格式（优先使用配置中的 api_format 字段）
+            api_format = self._get_api_format(provider_name, config)
 
-            if is_anthropic:
-                # Anthropic API 格式
+            import os
+            env_api_key = os.environ.get('ANTHROPIC_AUTH_TOKEN')
+            env_base_url = os.environ.get('ANTHROPIC_BASE_URL')
+
+            if env_api_key and provider_name == 'qwen':
+                api_key = env_api_key
+            if env_base_url and provider_name == 'qwen':
+                base_url = env_base_url.rstrip('/')
+
+            # 根据 API 格式构建请求
+            if api_format == self.API_FORMAT_ANTHROPIC:
+                # Anthropic 格式：/v1/messages
                 url = f"{base_url}/v1/messages" if not base_url.endswith('/messages') else base_url
                 headers = {
                     "x-api-key": api_key,
@@ -159,7 +199,7 @@ class UniversalAIAnalyzer:
                     "messages": [{"role": "user", "content": prompt}]
                 }
             else:
-                # OpenAI 格式
+                # OpenAI 格式：/v1/chat/completions
                 headers = {
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
@@ -170,7 +210,9 @@ class UniversalAIAnalyzer:
                     "temperature": config.get('temperature', 0.3),
                     "max_tokens": config.get('max_tokens', 2000)
                 }
-                url = base_url
+                url = f"{base_url}/v1/chat/completions" if not (base_url.endswith('/chat/completions') or base_url.endswith('/completions')) else base_url
+
+            logger.info(f"[{provider_name}] Request URL: {url}, Model: {model}, Format: {api_format}")
 
             response = requests.post(url, headers=headers, json=data, timeout=self.timeout)
 
@@ -178,11 +220,11 @@ class UniversalAIAnalyzer:
                 result = response.json()
 
                 # 支持两种响应格式：Anthropic 和 OpenAI
-                if is_anthropic and 'content' in result:
+                if api_format == self.API_FORMAT_ANTHROPIC and 'content' in result:
                     # Anthropic 格式
                     content = result['content'][0].get('text', '')
-                elif not is_anthropic and 'choices' in result:
-                    # OpenAI 格式
+                elif 'choices' in result:
+                    # OpenAI 格式（智谱AI等）
                     content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
                 else:
                     content = str(result)

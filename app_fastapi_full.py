@@ -4579,7 +4579,7 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
         if result['success']:
             provider_name = result.get('provider', 'unknown')
             # 从配置获取模型显示名称
-            from core.config_manager import config_manager as cm
+            from core.config import config_manager as cm
             config = cm.load_config()
             ai_config = config.get('ai_models', {}).get('providers', {}).get(provider_name, {})
             provider_display = ai_config.get('name', f'{provider_name.upper()} AI')

@@ -19,10 +19,10 @@
         "primary_provider": "qwen",
         "providers": {
             "qwen": {
-                "name": "Qwen3.5-397B",
+                "name": "Qwen3.5-397B-A17B",
                 "enabled": true,
                 "api_key": "sk-n59SFal6iyndmvp3EjnFjiyTXs6jYPlQ5U88QY8tBYYNIi9v",
-                "model": "qwen-plus",
+                "model": "qwen3.5-397b-a17b",
                 "base_url": "http://172.16.14.248:3000",
                 "temperature": 0.3,
                 "max_tokens": 4000
