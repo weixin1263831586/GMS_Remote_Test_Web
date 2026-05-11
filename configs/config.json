@@ -18,12 +18,21 @@
         "enabled": true,
         "primary_provider": "zhipu",
         "providers": {
+            "qwen": {
+                "name": "Qwen3.5-397B",
+                "enabled": false,
+                "api_key": "sk-n59SFal6iyndmvp3EjnFjiyTXs6jYPlQ5U88QY8tBYYNIi9v",
+                "model": "qwen-plus",
+                "base_url": "http://172.16.14.248:3000/v1/chat/completions",
+                "temperature": 0.3,
+                "max_tokens": 4000
+            },
             "zhipu": {
-                "name": "智谱GLM-4.7",
+                "name": "GLM-4 (Z.ai)",
                 "enabled": true,
                 "api_key": "d386361b9cf14b0b8c33aa5c272fe525.zELxeFIpUHhxkxsL",
-                "model": "glm-4",
-                "base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                "model": "glm-4.7",
+                "base_url": "https://api.z.ai/api/anthropic",
                 "temperature": 0.3,
                 "max_tokens": 2000
             }

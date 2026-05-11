@@ -4,11 +4,15 @@
 import json
 import os
 import logging
+import re
 import time
 import threading
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# Precompile regex pattern for placeholder replacement (efficiency)
+PLACEHOLDER_PATTERN = re.compile(r'\$\{([^}]+)\}')
 
 
 class ConfigManager:
@@ -155,14 +159,11 @@ class ConfigManager:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
 
-                # 替换 ${ubuntu_user} 占位符（不修改原始配置，返回副本）
-                ubuntu_user = config.get('ubuntu_user', 'hcq')
-                config_copy = {}
-                for key, value in config.items():
-                    if isinstance(value, str) and '${ubuntu_user}' in value:
-                        config_copy[key] = value.replace('${ubuntu_user}', ubuntu_user)
-                    else:
-                        config_copy[key] = value
+                # 验证 AI 配置
+                self._validate_ai_config(config)
+
+                # 递归替换所有占位符（支持 ${ubuntu_user} 和环境变量 ${VAR_NAME}）
+                config_copy = self._replace_placeholders(config)
 
                 logger.debug(f"Loaded static config from {self.config_path}")
                 return config_copy
@@ -173,6 +174,85 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"Error loading static config: {e}")
             return {}
+
+    def _validate_ai_config(self, config: Dict[str, Any]) -> None:
+        """
+        验证 AI 配置的有效性
+
+        Args:
+            config: 配置字典
+
+        Raises:
+            ValueError: 如果配置无效
+        """
+        ai_models = config.get('ai_models', {})
+        if not ai_models.get('enabled', False):
+            return
+
+        primary_provider = ai_models.get('primary_provider')
+        providers = ai_models.get('providers', {})
+
+        if primary_provider and primary_provider not in providers:
+            available = list(providers.keys())
+            raise ValueError(
+                f"AI 配置错误: primary_provider '{primary_provider}' 不存在。"
+                f"可用的 providers: {available if available else '(无)'}"
+            )
+
+    def _replace_placeholders(self, value: Any, config: Dict = None) -> Any:
+        """
+        递归替换配置中的占位符
+
+        支持的占位符格式：
+        - ${ubuntu_user} -> 配置中的 ubuntu_user 值
+        - ${ENV_VAR} -> 环境变量值
+        - ${VAR:default} -> 环境变量值，如果不存在则使用默认值
+
+        Args:
+            value: 配置值（可以是 dict, list, str 等）
+            config: 原始配置对象（用于获取配置值）
+
+        Returns:
+            替换后的值
+        """
+        if isinstance(value, dict):
+            # 第一次遍历时保存配置引用
+            if config is None:
+                config = value
+            return {k: self._replace_placeholders(v, config) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [self._replace_placeholders(item, config) for item in value]
+        elif isinstance(value, str):
+            def replace_var(match):
+                var_expr = match.group(1)
+                # 检查是否有默认值
+                if ':' in var_expr:
+                    var_name, default_val = var_expr.split(':', 1)
+                    # 优先使用环境变量
+                    if var_name in os.environ:
+                        return os.environ[var_name]
+                    # 其次使用配置中的值
+                    elif config and var_name in config:
+                        return str(config[var_name])
+                    else:
+                        return default_val
+                else:
+                    var_name = var_expr
+                    # 优先使用环境变量
+                    if var_name in os.environ:
+                        return os.environ[var_name]
+                    # 其次使用配置中的值
+                    elif config and var_name in config:
+                        return str(config[var_name])
+                    else:
+                        # 保留原样（未找到替换值）
+                        logger.warning(f"Placeholder ${{{var_name}}} not found in config or environment")
+                        return match.group(0)
+
+            # 使用预编译的 regex pattern 替换所有 ${...} 格式的占位符
+            return PLACEHOLDER_PATTERN.sub(replace_var, value)
+        else:
+            return value
 
     def _load_dynamic_config(self) -> Optional[Dict[str, Any]]:
         """加载动态配置"""

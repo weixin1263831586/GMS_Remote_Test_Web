@@ -892,7 +892,7 @@ async def get_device_properties_optimized(device_id: str, ssh) -> Dict[str, str]
 @lru_cache(maxsize=128)
 def cached_xml_analysis(xml_path: str, mtime: float) -> Dict:
     """带缓存的XML分析结果"""
-    from core.test_report import ReportAnalyzer
+    from core.report_analyzer import ReportAnalyzer
     return ReportAnalyzer().analyze_file(xml_path)
 
 def get_config_cached() -> Dict:
@@ -3809,9 +3809,12 @@ async def analyze_reports(
             stat = await asyncio.to_thread(os.stat, result_xml)
             result = cached_xml_analysis(result_xml, stat.st_mtime)
 
+            if result and result.get('summary', {}).get('total', 0) == 0:
+                result = await asyncio.to_thread(test_report_manager.analyze_report, report_timestamp)
+
             if not result:
                 return JSONResponse(
-                    content={'success': False, 'error': '解析 XML 失败'},
+                    content={'success': False, 'error': '报告分析失败'},
                     status_code=500
                 )
 
@@ -4358,108 +4361,6 @@ def parse_ai_response(ai_response):
     return result
 
 
-def call_ai_api(api_url, api_key, model, prompt):
-    """调用AI API进行分析"""
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {api_key}'
-    }
-
-    # 根据不同的API提供商构建请求体
-    if 'openai' in api_url.lower():
-        data = {
-            'model': model or 'gpt-3.5-turbo',
-            'messages': [
-                {'role': 'system', 'content': '你是一个专业的Android测试分析专家，精通CTS/GTS测试和Android系统开发。'},
-                {'role': 'user', 'content': prompt}
-            ],
-            'temperature': 0.7
-        }
-    elif 'anthropic' in api_url.lower():
-        data = {
-            'model': model or 'claude-3-sonnet-20240229',
-            'max_tokens': 2000,
-            'messages': [
-                {'role': 'user', 'content': prompt}
-            ]
-        }
-    else:
-        # 通用格式
-        data = {
-            'model': model,
-            'prompt': prompt,
-            'max_tokens': 2000
-        }
-
-    req = urllib.request.Request(
-        api_url,
-        data=json.dumps(data).encode('utf-8'),
-        headers=headers,
-        method='POST'
-    )
-
-    with urllib.request.urlopen(req, timeout=30) as response:
-        result = json.loads(response.read().decode('utf-8'))
-
-    # 解析返回结果
-    if 'choices' in result:  # OpenAI格式
-        ai_response = result['choices'][0]['message']['content']
-    elif 'completion' in result:  # 其他格式
-        ai_response = result['completion']
-    else:
-        ai_response = str(result)
-
-    return parse_ai_response(ai_response)
-
-
-def call_ollama(prompt):
-    """
-    调用本地ollama模型进行分析
-    """
-    logger = logging.getLogger(__name__)
-
-    try:
-        # 检查ollama是否安装
-        check_cmd = ['which', 'ollama']
-        result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=5)
-
-        if result.returncode != 0:
-            logger.info("Ollama未安装")
-            raise Exception('Ollama未安装')
-
-        # 使用ollama API（默认运行在localhost:11434）
-        data = {
-            'model': 'llama2',  # 默认模型
-            'prompt': prompt,
-            'stream': False
-        }
-
-        req = urllib.request.Request(
-            'http://localhost:11434/api/generate',
-            data=json.dumps(data).encode('utf-8'),
-            headers={'Content-Type': 'application/json'},
-            method='POST'
-        )
-
-        with urllib.request.urlopen(req, timeout=10) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            ai_response = result.get('response', '')
-
-        return parse_ai_response(ai_response)
-
-    except subprocess.TimeoutExpired:
-        logger.warning("Ollama检查超时")
-        raise Exception('Ollama检查超时')
-    except FileNotFoundError:
-        logger.info("Ollama命令未找到")
-        raise Exception('Ollama未安装')
-    except urllib.error.URLError as e:
-        logger.warning(f"Ollama服务连接失败: {str(e)}")
-        raise Exception(f'Ollama服务不可用: {str(e)}')
-    except Exception as e:
-        logger.warning(f"Ollama调用失败: {str(e)}")
-        raise Exception(f'Ollama调用失败: {str(e)}')
-
 
 # ==================== OpenGrok源码搜索辅助函数 ====================
 
@@ -4692,9 +4593,7 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
             provider_name = result.get('provider', 'unknown')
             provider_display = {
                 'zhipu': 'GLM-4 (智谱AI)',
-                'ollama': 'Ollama本地模型',
-                'openai': 'GPT-4 (OpenAI)',
-                'anthropic': 'Claude (Anthropic)'
+                'qwen': 'Qwen3.5-397B'
             }.get(provider_name, provider_name)
 
             response = {
@@ -4726,63 +4625,12 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
             raise Exception(result.get('error', 'AI分析失败'))
 
     except ImportError:
-        logger.info("通用AI分析器未安装")
+        logger.warning("通用AI分析器未安装，使用基于规则的分析")
     except Exception as e:
-        logger.warning(f"通用AI分析失败: {str(e)}")
+        logger.warning(f"通用AI分析失败: {str(e)}，使用基于规则的分析")
 
-    # 回退到旧的AI分析方法
-    try:
-        # 构建分析提示词
-        prompt = f"""请分析以下CTS测试失败信息，给出详细的原因分析和解决方案：
-
-测试用例: {test_name}
-测试模块: {module if module else '未知'}
-错误信息: {error_message}
-
-{f'''堆栈跟踪:
-{stack_trace}
-''' if stack_trace else ''}
-
-请提供：
-1. 问题根本原因分析
-2. 具体的解决方案和修复步骤
-3. 需要检查的系统配置或代码位置
-4. 相关的Android源码模块或类
-
-请用中文回答，格式清晰，包含具体的操作步骤。"""
-
-        # 尝试调用本地安装的AI模型（如通过ollama）
-        # 首先检查配置中是否有AI API设置
-        config = config_manager.load_config()
-        ai_api_key = config.get('ai_api_key', '')
-        ai_api_url = config.get('ai_api_url', '')
-        ai_model = config.get('ai_model', '')
-
-        logger.info(f"AI配置检查: api_url={ai_api_url}, api_key_set={bool(ai_api_key)}, model={ai_model}")
-
-        # 如果配置了API，使用API调用
-        if ai_api_url and ai_api_key:
-            logger.info("使用AI API进行分析")
-            return call_ai_api(ai_api_url, ai_api_key, ai_model, prompt)
-        else:
-            # 尝试使用本地ollama
-            logger.info("尝试使用本地ollama进行分析")
-            return call_ollama(prompt)
-    except Exception as e:
-        # 如果AI调用失败，返回基于规则的分析
-        logger.warning(f"AI调用失败，使用基于规则的分析: {str(e)}")
-        try:
-            return rule_based_analysis(test_name, error_message, stack_trace, module)
-        except Exception as rule_error:
-            logger.error(f"规则分析也失败: {str(rule_error)}")
-            # 最后的兜底响应
-            return {
-                'analysis': f'测试分析遇到错误: {str(e)}',
-                'suggestions': ['检查服务器日志了解详细错误信息'],
-                'root_cause': '分析服务异常',
-                'related_docs': [],
-                'ai_enabled': False
-            }
+    # AI调用失败，返回基于规则的分析
+    return rule_based_analysis(test_name, error_message, stack_trace, module)
 
 
 def get_source_code_suggestions(test_name, error_message, stack_trace=None):
@@ -4822,47 +4670,6 @@ def get_source_code_suggestions(test_name, error_message, stack_trace=None):
         'search_links': [],
         'source_analysis': None  # 新增：源码分析结果
     }
-
-    # 尝试进行源码分析（异步，不阻塞主流程）
-    try:
-        from core.source_analyzer import source_analyzer
-
-        class_name = failure_info.get('class_name', '')
-        if class_name:
-            # 提取简单类名
-            simple_class_name = class_name.split('.')[-1]
-
-            # 执行源码分析
-            source_analysis_result = source_analyzer.analyze_failure_with_source(
-                class_name=simple_class_name,
-                method_name=failure_info.get('method_name'),
-                error_message=error_message,
-                stack_trace=stack_trace
-            )
-
-            result['source_analysis'] = source_analysis_result
-
-            # 如果找到了源码，添加分析结果和建议
-            if source_analysis_result.get('source_found'):
-                # 合并源码分析的结果到主分析中
-                if source_analysis_result.get('analysis'):
-                    analysis['possible_causes'].extend(source_analysis_result['analysis'])
-                if source_analysis_result.get('suggestions'):
-                    analysis['suggestions'].extend(source_analysis_result['suggestions'])
-
-                # 添加源码链接
-                if source_analysis_result.get('source_url'):
-                    result['search_links'].insert(0, {
-                        'title': f'查看源码: {simple_class_name}.java',
-                        'url': source_analysis_result['source_url']
-                    })
-
-    except Exception as e:
-        logger.warning(f"源码分析失败: {e}")
-        result['source_analysis'] = {
-            'source_found': False,
-            'error': str(e)
-        }
 
     # 生成搜索链接
     if failure_info.get('class_name'):
@@ -8914,8 +8721,6 @@ def generate_api_example(api):
 
     else:
         return f'curl -X {method} "{base_url}{path}"'
-
-# ==================== Claude报告分析API ====================
 
 # ==================== 主程序 ====================
 
