@@ -64,7 +64,6 @@ class ConfigManager:
 
             # 检查是否需要重新加载
             if not force_reload and self._is_cache_valid(current_time):
-                logger.debug("Using cached config")
                 return self._cache.copy() if self._cache else {}
 
             # 加载配置
@@ -105,7 +104,6 @@ class ConfigManager:
 
             # 如果文件修改时间变化，缓存失效
             if static_mtime != self._static_mtime or dynamic_mtime != self._dynamic_mtime:
-                logger.debug("Config files modified, cache invalidated")
                 return False
 
         except Exception as e:
@@ -151,7 +149,6 @@ class ConfigManager:
         with self._cache_lock:
             self._cache = None
             self._cache_timestamp = 0
-            logger.debug("Config cache invalidated")
 
     def _load_static_config(self) -> Dict[str, Any]:
         """加载静态配置"""
@@ -165,7 +162,6 @@ class ConfigManager:
                 # 递归替换所有占位符（支持 ${ubuntu_user} 和环境变量 ${VAR_NAME}）
                 config_copy = self._replace_placeholders(config)
 
-                logger.debug(f"Loaded static config from {self.config_path}")
                 return config_copy
 
         except FileNotFoundError:
@@ -259,11 +255,9 @@ class ConfigManager:
         try:
             with open(self.dynamic_config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-                logger.debug(f"Loaded dynamic config from {self.dynamic_config_path}")
                 return config
 
         except FileNotFoundError:
-            logger.debug(f"Dynamic config file not found: {self.dynamic_config_path}")
             return None
         except Exception as e:
             logger.error(f"Error loading dynamic config: {e}")

@@ -16,20 +16,20 @@
     "scrcpy_path": "/home/${ubuntu_user}/Software/scrcpy-linux-x86_64-v3.3.4/scrcpy",
     "ai_models": {
         "enabled": true,
-        "primary_provider": "zhipu",
+        "primary_provider": "qwen",
         "providers": {
             "qwen": {
                 "name": "Qwen3.5-397B",
-                "enabled": false,
+                "enabled": true,
                 "api_key": "sk-n59SFal6iyndmvp3EjnFjiyTXs6jYPlQ5U88QY8tBYYNIi9v",
                 "model": "qwen-plus",
-                "base_url": "http://172.16.14.248:3000/v1/chat/completions",
+                "base_url": "http://172.16.14.248:3000",
                 "temperature": 0.3,
                 "max_tokens": 4000
             },
             "zhipu": {
-                "name": "GLM-4 (Z.ai)",
-                "enabled": true,
+                "name": "GLM-4.7 (Z.ai)",
+                "enabled": false,
                 "api_key": "d386361b9cf14b0b8c33aa5c272fe525.zELxeFIpUHhxkxsL",
                 "model": "glm-4.7",
                 "base_url": "https://api.z.ai/api/anthropic",

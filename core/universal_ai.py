@@ -1,6 +1,5 @@
 """
 通用AI模型管理器
-支持多个AI提供商：智谱AI、OpenAI
 """
 
 import requests
@@ -10,13 +9,6 @@ from typing import Dict, Optional, List
 from enum import Enum
 
 logger = logging.getLogger(__name__)
-
-
-class AIProvider(Enum):
-    """AI提供商枚举"""
-    ZHIPU = "zhipu"
-    QWEN = "qwen"
-
 
 class UniversalAIAnalyzer:
     """通用AI模型分析器"""
@@ -103,11 +95,7 @@ class UniversalAIAnalyzer:
 
             logger.info(f"使用AI提供商: {provider_name}")
 
-            # 根据提供商调用不同的方法
-            if provider_name in [AIProvider.ZHIPU.value, AIProvider.QWEN.value]:
-                provider_result = self._call_aimodel(provider_name, provider_config, class_name, method_name, error_message, stack_trace, source_code)
-            else:
-                provider_result = {'success': False, 'error': f'不支持的提供商: {provider_name}'}
+            provider_result = self._call_aimodel(provider_name, provider_config, class_name, method_name, error_message, stack_trace, source_code)
 
             if provider_result.get('success'):
                 result['success'] = True
@@ -127,8 +115,6 @@ class UniversalAIAnalyzer:
     def _call_aimodel(self, provider_name: str, config: Dict, class_name: str, method_name: Optional[str],
                                 error_message: str, stack_trace: Optional[str], source_code: Optional[str]) -> Dict:
         """
-        调用兼容 OpenAI API 格式的提供商（智谱AI、OpenAI等）
-
         Args:
             provider_name: 提供商名称
             config: 提供商配置
@@ -149,12 +135,10 @@ class UniversalAIAnalyzer:
             base_url = config.get('base_url')
             model = config.get('model')
 
-            # 使用默认值
             if not base_url:
-                base_url = 'https://api.z.ai/api/anthropic'
-
+                return {'success': False, 'error': f'{provider_name} base_url 未配置'}
             if not model:
-                model = 'glm-4.7'
+                return {'success': False, 'error': f'{provider_name} 模型未配置'}
 
             prompt = self._build_prompt(class_name, method_name, error_message, stack_trace, source_code)
 
