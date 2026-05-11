@@ -824,6 +824,119 @@ class ReportAnalyzer:
             return self._report_to_dict(report)
         return None
 
+    def search_source_code(self, class_name: str, method_name: str = None, max_results: int = 5) -> List[Dict[str, str]]:
+        """
+        使用 rk_codesearch 搜索源码
+
+        Args:
+            class_name: 类名 (如 com.android.cts.permission.PermissionTest)
+            method_name: 方法名 (可选)
+            max_results: 最大返回结果数
+
+        Returns:
+            List[Dict]: 搜索结果列表，每个包含 {project, path, line, type}
+        """
+        import subprocess
+        import os
+
+        codesearch_script = '/home/hcq/GMS_Remote_Test/web_app/skills/rk_codesearch/run.py'
+
+        try:
+            # 构建搜索关键词
+            keywords = []
+
+            # 提取简单类名
+            simple_class_name = class_name.split('.')[-1]
+            keywords.append(simple_class_name)
+
+            # 如果有方法名，添加到搜索
+            if method_name:
+                keywords.append(method_name)
+
+            # 单关键词搜索更准确（多关键词是 AND 模式，要求同时出现）
+            search_keywords = keywords if len(keywords) == 1 else [simple_class_name]
+
+            # 构建命令
+            cmd = [
+                'python3',
+                codesearch_script,
+                'search',
+                '--keywords', ','.join(search_keywords),
+                '--search-field', 'def',
+                '--type', 'java',
+                '--limit', str(max_results)
+            ]
+
+            # 执行搜索
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd='/home/hcq/GMS_Remote_Test/web_app/skills/rk_codesearch'
+            )
+
+            if result.returncode != 0:
+                return []
+
+            # 解析输出
+            search_results = []
+            lines = result.stdout.strip().split('\n')
+
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
+                if not line:
+                    i += 1
+                    continue
+
+                # 解析结果类型和路径 (格式："[definition] path/to/file.java")
+                if line.startswith('[') and ']' in line:
+                    bracket_content = line[1:line.index(']')]
+                    rest_of_line = line[line.index(']')+1:].strip()
+
+                    result_item = {
+                        'type': bracket_content,
+                        'path': rest_of_line
+                    }
+
+                    # 向下查找 project 信息（格式："  project: Android16"，在结果行之后）
+                    for j in range(i + 1, min(len(lines), i + 3)):
+                        next_line = lines[j].strip()
+                        if next_line.startswith('project:'):
+                            result_item['project'] = next_line.split(':', 1)[1].strip()
+                            break
+                        elif next_line.startswith('['):
+                            # 遇到另一个结果，停止查找
+                            break
+
+                    # 继续向下查找行号信息 (格式："  57: public class...")
+                    for j in range(i + 1, min(len(lines), i + 4)):
+                        next_line = lines[j].strip()
+                        if next_line and not next_line.startswith('project:') and not next_line.startswith('['):
+                            # 尝试提取行号
+                            if ':' in next_line:
+                                line_num_part = next_line.split(':')[0].strip()
+                                if line_num_part.isdigit():
+                                    result_item['line'] = line_num_part
+                                    break
+
+                    search_results.append(result_item)
+
+                i += 1
+
+            return search_results[:max_results]
+
+        except subprocess.TimeoutExpired:
+            logger.warning("代码搜索超时")
+            return []
+        except FileNotFoundError:
+            logger.warning(f"代码搜索脚本不存在: {codesearch_script}")
+            return []
+        except Exception as e:
+            logger.error(f"代码搜索异常: {e}")
+            return []
+
     def _report_to_dict(self, report: TestReport) -> Dict:
         """将报告对象转换为字典（兼容旧格式）"""
         return {

@@ -13,6 +13,11 @@ from core.config import config_manager
 class ClientManager:
     """客户端管理器"""
 
+    # SSH connection timeout settings (reduced from 30s for faster failover)
+    SSH_TIMEOUT = 3
+    SSH_BANNER_TIMEOUT = 3
+    SSH_AUTH_TIMEOUT = 3
+
     def __init__(self):
         self.client_hosts: Dict[str, str] = {}  # {client_ip: username}
         self.ssh_credentials: list = []  # 保存的SSH凭据
@@ -59,9 +64,9 @@ class ClientManager:
                     client_ip,
                     username=username,
                     password=password,
-                    timeout=30,
-                    banner_timeout=30,
-                    auth_timeout=30
+                    timeout=self.SSH_TIMEOUT,
+                    banner_timeout=self.SSH_TIMEOUT,
+                    auth_timeout=self.SSH_AUTH_TIMEOUT
                 )
                 stdout = ssh.exec_command('whoami')[1]
                 detected_username = stdout.read().decode().strip().split('\\')[-1]
@@ -106,9 +111,9 @@ class ClientManager:
                     client_ip,
                     username=cred['username'],
                     password=cred['password'],
-                    timeout=30,
-                    banner_timeout=30,
-                    auth_timeout=30
+                    timeout=self.SSH_TIMEOUT,
+                    banner_timeout=self.SSH_TIMEOUT,
+                    auth_timeout=self.SSH_AUTH_TIMEOUT
                 )
                 stdout = ssh.exec_command('whoami')[1]
                 detected_username = stdout.read().decode().strip().split('\\')[-1]
@@ -141,9 +146,9 @@ class ClientManager:
                             client_ip,
                             username=cred['username'],
                             password=cred['password'],
-                            timeout=30,
-                            banner_timeout=30,
-                            auth_timeout=30
+                            timeout=self.SSH_TIMEOUT,
+                            banner_timeout=self.SSH_TIMEOUT,
+                            auth_timeout=self.SSH_AUTH_TIMEOUT
                         )
                         stdout = ssh.exec_command('whoami')[1]
                         real_username = stdout.read().decode().strip()

@@ -196,7 +196,8 @@ class TestReportDB:
         limit: int = 50,
         test_type: str = None,
         client_id: str = None,
-        status: str = None
+        status: str = None,
+        user_only: str = None
     ) -> List[Dict]:
         """
         获取测试报告列表
@@ -206,13 +207,14 @@ class TestReportDB:
             test_type: 过滤测试类型 (可选)
             client_id: 过滤客户端ID (可选)
             status: 过滤状态 (可选)
+            user_only: 仅显示指定用户的报告 (可选)
 
         Returns:
             List[Dict]: 报告列表
         """
         try:
             # 如果没有过滤条件,直接返回(避免构建索引)
-            if not test_type and not client_id and not status:
+            if not test_type and not client_id and not status and not user_only:
                 data = self._load_data()
                 return data.get('reports', [])[:limit]
 
@@ -233,6 +235,11 @@ class TestReportDB:
             if status:
                 status_timestamps = set(self._indexes['status'].get(status, []))
                 timestamps = status_timestamps if timestamps is None else timestamps & status_timestamps
+
+            if user_only:
+                # 过滤当前用户的报告
+                user_timestamps = set(self._indexes['client_id'].get(user_only, []))
+                timestamps = user_timestamps if timestamps is None else timestamps & user_timestamps
 
             if timestamps is None:
                 return []

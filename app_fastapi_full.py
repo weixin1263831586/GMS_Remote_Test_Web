@@ -370,28 +370,24 @@ app.add_middleware(
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
-class PerformanceMiddleware(BaseHTTPMiddleware):
-    """性能优化中间件"""
-    async def dispatch(self, request, call_next):
-        # 添加连接保持和缓存控制头
-        response = await call_next(request)
-
-        # 优化响应头
-        response.headers["Connection"] = "keep-alive"
-        response.headers["Keep-Alive"] = "timeout=300, max=1000"  # 5分钟超时，最多1000个请求
-        response.headers["X-Content-Type-Options"] = "nosniff"
-
-        # 添加缓存控制（静态资源）
-        if request.url.path.startswith("/static/"):
-            response.headers["Cache-Control"] = "public, max-age=86400"  # 1天缓存
-
-        return response
-
-# 添加GZip压缩中间件
+# 添加GZip压缩中间件（移除BaseHTTPMiddleware以避免性能问题）
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# 添加性能优化中间件
-app.add_middleware(PerformanceMiddleware)
+@app.middleware("http")
+async def add_headers_middleware(request, call_next):
+    """轻量级HTTP中间件 - 添加响应头"""
+    response = await call_next(request)
+
+    # 添加响应头
+    response.headers["Connection"] = "keep-alive"
+    response.headers["Keep-Alive"] = "timeout=300, max=1000"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+
+    # 添加缓存控制（静态资源）
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "public, max-age=86400"
+
+    return response
 
 # 挂载静态文件
 static_dir = os.path.join(os.path.dirname(__file__), 'static')
@@ -1005,12 +1001,9 @@ def get_client_id_from_request(request: Request) -> str:
         username = request.headers.get('X-Client-Username')
         if not username or username == 'unknown':
             # 尝试动态检测用户名（通过已保存的 SSH 凭据）
-            success, detected_username, _ = client_manager.detect_username(client_ip)
-            if success and detected_username:
-                username = detected_username
-            else:
-                # 无法识别用户，使用 unknown
-                username = 'unknown'
+            # ⚠️ 跳过SSH检测，直接返回unknown，避免阻塞API请求
+            # SSH检测会在用户首次访问时通过modal触发，而不是在API请求中
+            username = 'unknown'
 
     return client_manager.get_client_id(client_ip, username)
 
@@ -1024,7 +1017,6 @@ async def broadcast_device_lock_update(device_ids: list = None):
         device_updates = []
         if device_ids:
             # 只更新指定的设备
-            logger.debug(f"[Broadcast Device Lock] 更新指定设备: {device_ids}")
             for device_id in device_ids:
                 if device_id in all_locks:
                     lock_info = all_locks[device_id]
@@ -1035,16 +1027,13 @@ async def broadcast_device_lock_update(device_ids: list = None):
                         'locked_by': locked_by,
                         'locked_at': lock_info['timestamp']
                     })
-                    logger.debug(f"[Broadcast Device Lock] 设备 {device_id} 已锁定 by {locked_by}")
                 else:
                     device_updates.append({
                         'device_id': device_id,
                         'locked': False
                     })
-                    logger.debug(f"[Broadcast Device Lock] 设备 {device_id} 已解锁")
         else:
             # 更新所有锁定的设备
-            logger.debug(f"[Broadcast Device Lock] 更新所有锁定设备")
             for device_id, lock_info in all_locks.items():
                 locked_by = lock_info['client_id']
                 device_updates.append({
@@ -1055,18 +1044,15 @@ async def broadcast_device_lock_update(device_ids: list = None):
                 })
 
         # 广播到所有连接的客户端
-        logger.debug(f"[Broadcast Device Lock] 广播到 {len(global_state.websocket_connections)} 个客户端")
         for client_id, ws in global_state.websocket_connections.items():
             try:
                 await ws.send_json({
                     'type': 'device_lock_update',
                     'devices': device_updates
                 })
-                logger.debug(f"[Broadcast Device Lock] 成功发送到客户端 {client_id}")
             except Exception as e:
                 logger.warning(f"[Broadcast Device Lock] 发送到客户端 {client_id} 失败: {e}")
 
-        logger.debug(f"[Broadcast Device Lock] 已发送设备锁定更新到 {len(global_state.websocket_connections)} 个客户端")
     except Exception as e:
         logger.error(f"[Broadcast Device Lock] 广播设备锁定更新失败: {e}")
 
@@ -3534,34 +3520,35 @@ async def list_reports(request: Request, user_only: bool = False):
     Args:
         user_only: 是否只显示当前用户的报告，默认 False 显示所有用户的报告
     """
-    try:
-        # 从数据库获取报告
-        all_reports = test_report_db.get_reports(limit=100)
+    import time
+    start_time = time.time()
 
-        # 如果要求只显示当前用户的报告，进行过滤
+    try:
+        # 如果要求只显示当前用户的报告，先获取 client_id 用于数据库过滤
+        client_id_filter = None
         if user_only:
-            # 获取当前用户ID
             client_id = get_client_id_from_request(request)
 
-            # 对于本地访问（127.0.0.1或::1），也显示配置文件中client_ip对应的报告
+            # 对于本地访问（127.0.0.1 或::1），也显示配置文件中 client_ip 对应的报告
             config = config_manager.load_config()
             configured_ip = config.get('client_ip', '')
             username = config.get('client_username', 'unknown')
 
-            # 构建可能的client_id列表
-            possible_client_ids = [client_id]
-            if configured_ip:
-                # 如果当前是本地访问，添加配置文件IP对应的client_id
-                if '@127.0.0.1' in client_id or '@::1' in client_id or '@localhost' in client_id:
-                    possible_client_ids.append(f"{username}@{configured_ip}")
+            # 构建可能的 client_id
+            if configured_ip and ('@127.0.0.1' in client_id or '@::1' in client_id or '@localhost' in client_id):
+                client_id_filter = f"{username}@{configured_ip}"
+            else:
+                client_id_filter = client_id
 
-            # 过滤当前用户的报告（支持多个可能的client_id）
-            all_reports = [
-                r for r in all_reports
-                if r.get('client_id') in possible_client_ids
-            ]
+        # 从数据库获取报告（使用索引过滤，限制返回数量）
+        db_start = time.time()
+        all_reports = test_report_db.get_reports(limit=30, user_only=client_id_filter)
+        db_time = (time.time() - db_start) * 1000
 
         # 返回报告列表
+        total_time = (time.time() - start_time) * 1000
+        logger.info(f"[API] /api/reports/list completed: {len(all_reports)} reports, DB: {db_time:.2f}ms, Total: {total_time:.2f}ms")
+
         return JSONResponse(content={'reports': all_reports})
 
     except Exception as e:
@@ -4591,10 +4578,11 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
 
         if result['success']:
             provider_name = result.get('provider', 'unknown')
-            provider_display = {
-                'zhipu': 'GLM-4 (智谱AI)',
-                'qwen': 'Qwen3.5-397B'
-            }.get(provider_name, provider_name)
+            # 从配置获取模型显示名称
+            from core.config_manager import config_manager as cm
+            config = cm.load_config()
+            ai_config = config.get('ai_models', {}).get('providers', {}).get(provider_name, {})
+            provider_display = ai_config.get('name', f'{provider_name.upper()} AI')
 
             response = {
                 'analysis': result.get('analysis', ''),
@@ -5676,8 +5664,6 @@ async def ping_route_test(request: Request):
                     reachable, latency = _parse_ping_output(ping_output, exit_status)
 
                     logger.info(f"Ping test from {test_host_ip} to {client_ip}: reachable={reachable}, latency={latency}")
-                    if ping_output:
-                        logger.debug(f"Ping output: {ping_output[:200]}")
 
             except Exception as e:
                 logger.warning(f"Ping test failed: {e}")
@@ -5764,13 +5750,12 @@ async def get_vpn_status():
     if isinstance(vpn_target, list):
         vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
 
-    # 多次ping测试，只要一次成功即认为已连接
-    max_attempts = 3
+    max_attempts = 2
     for attempt in range(max_attempts):
         output, error, code = ssh_manager.execute_command(
             ssh,
-            f"ping -c 1 -W 2 {vpn_target} 2>&1",
-            timeout=5
+            f"ping -c 1 -W 1 {vpn_target} 2>&1",  # 减少-W timeout从2到1
+            timeout=3  # 减少timeout从5到3
         )
 
         # 检查ping结果（成功则立即返回）
@@ -5784,7 +5769,7 @@ async def get_vpn_status():
         nmcli_output, _, _ = ssh_manager.execute_command(
             ssh,
             "nmcli -t -f NAME,TYPE,STATE connection show --active 2>&1",
-            timeout=5
+            timeout=3  # 减少timeout从5到3
         )
 
         # 检查是否有VPN类型的活跃连接
@@ -6218,7 +6203,6 @@ async def get_firmware_upload_progress(request: Request):
     返回当前客户端的固件上传状态
     """
     client_id = get_client_id_from_request(request)
-    logger.debug(f"[Upload Progress] Query progress for client_id: {client_id}")
 
     with global_state.firmware_upload_progress_lock:
         # 优化：查询时自动清理过期数据（替代后台线程）
@@ -6232,7 +6216,6 @@ async def get_firmware_upload_progress(request: Request):
 
         if client_id in global_state.firmware_upload_progress:
             progress_data = global_state.firmware_upload_progress[client_id]
-            logger.debug(f"[Upload Progress] Found progress data: {progress_data}")
 
             return JSONResponse(content={
                 'in_progress': True,
@@ -6242,7 +6225,6 @@ async def get_firmware_upload_progress(request: Request):
                 'total_size': progress_data['total_size']
             })
         else:
-            logger.debug(f"[Upload Progress] No progress found for client: {client_id}")
             return JSONResponse(content={'in_progress': False})
 
 @app.post("/api/burn/firmware")
@@ -6422,7 +6404,6 @@ async def burn_firmware(
                                     })
                             last_progress_update = received_size
 
-                        logger.debug(f"[Firmware Burn] Received chunk: {received_size} bytes")
 
                 # 文件接收完成
                 firmware_size = received_size
@@ -6471,7 +6452,6 @@ async def burn_firmware(
                                     'timestamp': time.time()
                                 }
                             upload_progress_data['last_lock_update'] = percentage
-                            logger.debug(f"[Firmware Burn] Updated global progress for {client_id}: {percentage:.2f}%")
                         except Exception as e:
                             logger.error(f"[Firmware Burn] Failed to update global progress: {e}")
 
@@ -7480,7 +7460,6 @@ def parse_tradefed_list_results(output: str) -> List[Dict[str, Any]]:
                     }
                 results.append(result_entry)
             except (ValueError, IndexError) as e:
-                logger.debug(f"[TRADEFED] 跳过格式不匹配的行：{line} - 错误：{e}")
                 continue
 
     return results
@@ -8089,8 +8068,6 @@ async def handle_terminal_input(client_id: str, websocket: WebSocket, data: dict
         if session_id in global_state.terminal_ssh_sessions:
             try:
                 input_data = data.get('input', data.get('data', ''))
-                if '\x1b' in input_data:
-                    logger.debug(f"[TERMINAL] ANSI input: {repr(input_data)}")
                 global_state.terminal_ssh_sessions[session_id]['channel'].send(input_data)
             except Exception as e:
                 logger.error(f"[TERMINAL] Input error for {session_id}: {e}")

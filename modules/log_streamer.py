@@ -77,7 +77,6 @@ class LogStreamer:
         self.stats['total_clients'] += 1
 
         logger.info(f"[LogStreamer] Client {client_id} connected")
-        logger.debug(f"[LogStreamer] Total clients: {len(self.connections)}")
 
         # 发送连接确认
         await self._send_direct(client_id, {
@@ -115,7 +114,6 @@ class LogStreamer:
         if client_id in self.client_queues:
             queue_size = len(self.client_queues[client_id])
             del self.client_queues[client_id]
-            logger.debug(f"[LogStreamer] Cleaned up queue for {client_id} ({queue_size} logs)")
 
         logger.info(f"[LogStreamer] Client {client_id} disconnected")
 
@@ -184,7 +182,6 @@ class LogStreamer:
                             'logs': batch,
                             'count': len(batch)
                         })
-                        logger.debug(f"[LogStreamer] Sent {len(batch)} logs to {client_id}")
 
                 except Exception as e:
                     logger.error(f"[LogStreamer] Error sending logs to {client_id}: {e}")

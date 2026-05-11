@@ -222,8 +222,6 @@ class USBMonitor:
 
             # 如果设备列表没有变化，重置防抖计数器
             if current_devices == self._current_devices:
-                if self._debounce_counter > 0:
-                    logger.debug(f"[USBMonitor] 设备列表恢复稳定，重置防抖计数器")
                 self._debounce_counter = 0
                 self._pending_changes = None
                 self._last_check_time = now
@@ -233,7 +231,6 @@ class USBMonitor:
             if self._last_check_time:
                 time_since_last_check = (now - self._last_check_time).total_seconds()
                 if time_since_last_check < 0.5:  # 两次检查间隔至少0.5秒
-                    logger.debug(f"[USBMonitor] 检查间隔太短 ({time_since_last_check:.2f}s)，跳过")
                     return
 
             self._last_check_time = now

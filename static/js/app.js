@@ -185,11 +185,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (userData.client_id.startsWith('unknown@')) {
                     console.warn('[Init] Detected unknown client, will show username modal via apiCall');
                 } else {
-                    // 已获取到正确的用户名，检查 USB/IP 和 VPN 状态
-                    await Promise.all([
-                        checkUsbipStatus(),
-                        checkVpnStatus()
-                    ]);
+                    // 已获取到正确的用户名，延迟检查 USB/IP 和 VPN 状态（避免阻塞关键请求）
+                    setTimeout(() => {
+                        Promise.all([
+                            checkUsbipStatus(),
+                            checkVpnStatus()
+                        ]).catch(error => {
+                            console.warn('[Init] Background status check failed:', error);
+                        });
+                    }, 3000);  // 3秒后再检查
                 }
             }
         } else {
@@ -202,11 +206,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🔌 现在初始化WebSocket（需要clientId）
     initSocket();
 
-    // ⚙️ 加载配置和设备
-    await loadConfig();
-    loadDevices();
-    await loadTestSuites();  // 加载测试套件列表
-    await checkInitialTestStatus();
+    // ⚙️ 延迟加载非关键配置（避免阻塞关键请求）
+    setTimeout(() => {
+        Promise.all([
+            loadConfig(),
+            checkInitialTestStatus()
+        ]).catch(error => {
+            console.warn('[Init] Async load failed:', error);
+        });
+    }, 2000);  // 2秒后再加载
+
+    // 延迟加载设备和测试套件（避免阻塞关键请求）
+    setTimeout(() => {
+        loadDevices();
+        loadTestSuites();
+    }, 1000);  // 1秒后再加载
+
     startStatusPolling();
 
     // 检查是否有未完成的固件上传
@@ -3696,61 +3711,92 @@ function displayTestReports(reports) {
         return;
     }
 
-    tbody.innerHTML = reports.map(report => {
+    // 使用 DocumentFragment 提高渲染性能
+    const fragment = document.createDocumentFragment();
+
+    // 测试类型颜色映射（定义在循环外，避免重复创建）
+    const typeColors = {
+        'CTS': '#3B82F6',
+        'GTS': '#10B981',
+        'STS': '#F59E0B',
+        'VTS': '#8B5CF6',
+        'XTS': '#EC4899',
+    };
+
+    reports.forEach(report => {
         const testType = report.test_type || '-';
-        // 显示完整的 client_id 格式（例如：hcq@172.16.14.233）
         const displayClient = report.client_id || report.user || '-';
         const passCount = report.pass !== undefined ? report.pass : '-';
         const failCount = report.fail !== undefined ? report.fail : '-';
         const totalCount = report.total !== undefined ? report.total : '-';
         const passRate = report.total > 0 ? ((report.pass / report.total) * 100).toFixed(1) + '%' : '-';
-        // 使用 result_dir 或 path 作为报告路径
-        const reportPath = report.result_dir || report.path || '';
 
         const passRateStyle = report.total > 0 ? (report.pass / report.total >= 0.9 ? 'color: var(--success-color);' : 'color: var(--warning-color);') : '';
 
-        // 测试类型颜色
-        const typeColors = {
-            'CTS': 'color: #3B82F6;',  // 蓝色
-            'GTS': 'color: #10B981;',  // 绿色
-            'STS': 'color: #F59E0B;',  // 黄色
-            'VTS': 'color: #8B5CF6;',  // 紫色
-            'XTS': 'color: #EC4899;',  // 粉色
-        };
-        const typeStyle = typeColors[testType] || 'color: var(--text-secondary);';
+        const typeColor = typeColors[testType] || 'var(--text-secondary)';
 
-        return `
-            <tr style="border-bottom: 1px solid var(--border-color);">
-                <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
-                    ${displayClient}
-                </td>
-                <td style="padding: 12px; text-align: center; font-weight: 700; font-size: 12px; ${typeStyle}">
-                    ${testType}
-                </td>
-                <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">
-                    ${report.timestamp}
-                </td>
-                <td style="padding: 12px; text-align: center; color: var(--success-color); font-weight: 600; font-size: 12px;">
-                    ${passCount}
-                </td>
-                <td style="padding: 12px; text-align: center; color: var(--danger-color); font-weight: 600; font-size: 12px;">
-                    ${failCount}
-                </td>
-                <td style="padding: 12px; text-align: center; font-weight: 600; font-size: 12px;">
-                    ${totalCount}
-                </td>
-                <td style="padding: 12px; text-align: center; font-weight: 600; font-size: 12px; ${passRateStyle}">
-                    ${passRate}
-                </td>
-                <td style="padding: 12px; text-align: center;">
-                    <button class="btn-xxs" onclick="event.stopPropagation(); analyzeReport('${report.timestamp}')">📈 分析报告</button>
-                    <button class="btn-xxs" onclick="event.stopPropagation(); retryReportWithSuite('${report.timestamp}', '${report.test_type || ''}', '${(report.suite_path || '').replace(/'/g, "\\'")}')" style="background: var(--primary-color);">🔄 retry报告</button>
-                    <button class="btn-xxs" onclick="event.stopPropagation(); downloadReport('${report.timestamp}')" style="background: var(--success-color);">⬇️ 下载报告</button>
-                    <button class="btn-xxs" onclick="event.stopPropagation(); deleteReport('${report.timestamp}')" style="background: var(--danger-color);">🗑️ 删除报告</button>
-                </td>
-            </tr>
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid var(--border-color)';
+        tr.dataset.timestamp = report.timestamp;
+        tr.dataset.testType = report.test_type || '';
+        tr.dataset.suitePath = report.suite_path || '';
+
+        tr.innerHTML = `
+            <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">${displayClient}</td>
+            <td style="padding: 12px; text-align: center; font-weight: 700; font-size: 12px; color: ${typeColor};">${testType}</td>
+            <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">${report.timestamp}</td>
+            <td style="padding: 12px; text-align: center; color: var(--success-color); font-weight: 600; font-size: 12px;">${passCount}</td>
+            <td style="padding: 12px; text-align: center; color: var(--danger-color); font-weight: 600; font-size: 12px;">${failCount}</td>
+            <td style="padding: 12px; text-align: center; font-weight: 600; font-size: 12px;">${totalCount}</td>
+            <td style="padding: 12px; text-align: center; font-weight: 600; font-size: 12px; ${passRateStyle}">${passRate}</td>
+            <td style="padding: 12px; text-align: center;">
+                <button class="btn-xxs" data-action="analyze" style="margin: 2px;">📈 分析报告</button>
+                <button class="btn-xxs" data-action="retry" style="background: var(--primary-color); margin: 2px;">🔄 retry报告</button>
+                <button class="btn-xxs" data-action="download" style="background: var(--success-color); margin: 2px;">⬇️ 下载报告</button>
+                <button class="btn-xxs" data-action="delete" style="background: var(--danger-color); margin: 2px;">🗑️ 删除报告</button>
+            </td>
         `;
-    }).join('');
+
+        fragment.appendChild(tr);
+    });
+
+    tbody.innerHTML = '';
+    tbody.appendChild(fragment);
+
+    // 使用事件委托处理按钮点击（提高性能）
+    tbody.removeEventListener('click', handleReportAction);
+    tbody.addEventListener('click', handleReportAction);
+}
+
+// 事件委托处理函数
+function handleReportAction(event) {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+
+    const action = button.dataset.action;
+    const tr = button.closest('tr');
+    if (!tr) return;
+
+    const timestamp = tr.dataset.timestamp;
+    const testType = tr.dataset.testType;
+    const suitePath = tr.dataset.suitePath;
+
+    event.stopPropagation();
+
+    switch (action) {
+        case 'analyze':
+            analyzeReport(timestamp);
+            break;
+        case 'retry':
+            retryReportWithSuite(timestamp, testType, suitePath);
+            break;
+        case 'download':
+            downloadReport(timestamp);
+            break;
+        case 'delete':
+            deleteReport(timestamp);
+            break;
+    }
 }
 
 async function deleteReport(timestamp) {
