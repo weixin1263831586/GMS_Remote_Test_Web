@@ -83,28 +83,102 @@ function throttle(func, limit) {
 
 // 模态框管理器
 const ModalManager = {
+    _escListener: null,
+    _activeModals: [],
+
     open(modalId) {
         const modal = document.getElementById(modalId);
-        if (modal) modal.classList.add('show');
+        if (modal) {
+            modal.classList.add('show');
+            this._addActiveModal(modalId);
+            this._ensureEscListener();
+        }
     },
 
     close(modalId) {
         const modal = document.getElementById(modalId);
-        if (modal) modal.classList.remove('show');
+        if (modal) {
+            modal.classList.remove('show');
+            this._removeActiveModal(modalId);
+            this._cleanupEscListener();
+        }
     },
 
     closeAll() {
-        document.querySelectorAll('.modal.show').forEach(m => m.classList.remove('show'));
+        document.querySelectorAll('.modal.show').forEach(m => {
+            m.classList.remove('show');
+            this._removeActiveModal(m.id);
+        });
+        this._cleanupEscListener();
     },
 
     toggle(modalId) {
         const modal = document.getElementById(modalId);
-        if (modal) modal.classList.toggle('show');
+        if (modal) {
+            modal.classList.toggle('show');
+            if (modal.classList.contains('show')) {
+                this._addActiveModal(modalId);
+                this._ensureEscListener();
+            } else {
+                this._removeActiveModal(modalId);
+                this._cleanupEscListener();
+            }
+        }
     },
 
     isOpen(modalId) {
         const modal = document.getElementById(modalId);
         return modal ? modal.classList.contains('show') : false;
+    },
+
+    // Register a dynamically created modal
+    registerDynamic(modalElement) {
+        document.body.appendChild(modalElement);
+        this._addActiveModal(modalElement.id);
+        this._ensureEscListener();
+        return modalElement;
+    },
+
+    // Unregister and remove a dynamically created modal
+    unregisterDynamic(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.remove();
+        }
+        this._removeActiveModal(modalId);
+    },
+
+    _addActiveModal(modalId) {
+        if (!this._activeModals.includes(modalId)) {
+            this._activeModals.push(modalId);
+        }
+    },
+
+    _removeActiveModal(modalId) {
+        this._activeModals = this._activeModals.filter(id => id !== modalId);
+        if (this._activeModals.length === 0) {
+            this._cleanupEscListener();
+        }
+    },
+
+    _ensureEscListener() {
+        if (!this._escListener) {
+            this._escListener = (event) => {
+                if (event.key === 'Escape' && this._activeModals.length > 0) {
+                    // 关闭最上层（最后打开）的弹框
+                    const topModalId = this._activeModals[this._activeModals.length - 1];
+                    this.close(topModalId);
+                }
+            };
+            document.addEventListener('keydown', this._escListener);
+        }
+    },
+
+    _cleanupEscListener() {
+        if (this._escListener && this._activeModals.length === 0) {
+            document.removeEventListener('keydown', this._escListener);
+            this._escListener = null;
+        }
     }
 };
 
@@ -1350,13 +1424,11 @@ async function remountDevices() {
 
 async function connectWifi() {
     if (!validateDeviceSelection()) return;
-    const modal = document.getElementById('wifi-modal');
-    modal.classList.add('show');
+    ModalManager.open('wifi-modal');
 }
 
 function closeWifiModal() {
-    const modal = document.getElementById('wifi-modal');
-    modal.classList.remove('show');
+    ModalManager.close('wifi-modal');
 }
 
 async function submitWifiConfig() {
@@ -1483,13 +1555,11 @@ async function burnFirmware() {
     }
 
     // Show firmware configuration modal
-    const modal = document.getElementById('firmware-modal');
-    modal.classList.add('show');
+    ModalManager.open('firmware-modal');
 }
 
 function closeFirmwareModal() {
-    const modal = document.getElementById('firmware-modal');
-    modal.classList.remove('show');
+    ModalManager.close('firmware-modal');
 }
 
 // 在UI上锁定设备（前端立即显示，不等待后端）
@@ -1677,13 +1747,11 @@ async function burnGsiImage() {
     }
 
     // Show GSI configuration modal
-    const modal = document.getElementById('gsi-modal');
-    modal.classList.add('show');
+    ModalManager.open('gsi-modal');
 }
 
 function closeGsiModal() {
-    const modal = document.getElementById('gsi-modal');
-    modal.classList.remove('show');
+    ModalManager.close('gsi-modal');
 }
 
 // Browse remote file for GSI script
@@ -1699,8 +1767,7 @@ async function browseLocalFileForGsiScript() {
     document.getElementById('file-browser-title').textContent = title;
 
     // Show modal
-    const modal = document.getElementById('file-browser-modal');
-    modal.classList.add('show');
+    ModalManager.open('file-browser-modal');
 
     // Load initial directory (GMS-Suite)
     const defaultUser = state.config?.ubuntu_user || 'hcq';
@@ -1720,8 +1787,7 @@ async function browseLocalFileForGsiSystem() {
     document.getElementById('file-browser-title').textContent = title;
 
     // Show modal
-    const modal = document.getElementById('file-browser-modal');
-    modal.classList.add('show');
+    ModalManager.open('file-browser-modal');
 
     // Load initial directory (GMS-Suite)
     const defaultUser = state.config?.ubuntu_user || 'hcq';
@@ -1774,13 +1840,11 @@ async function burnSerialNumber() {
     }
 
     // Show SN configuration modal
-    const modal = document.getElementById('sn-modal');
-    modal.classList.add('show');
+    ModalManager.open('sn-modal');
 }
 
 function closeSnModal() {
-    const modal = document.getElementById('sn-modal');
-    modal.classList.remove('show');
+    ModalManager.close('sn-modal');
 }
 
 async function submitSnBurn() {
@@ -2772,8 +2836,7 @@ async function browseRemoteFile(mode) {
     document.getElementById('file-browser-title').textContent = title;
 
     // Show modal
-    const modal = document.getElementById('file-browser-modal');
-    modal.classList.add('show');
+    ModalManager.open('file-browser-modal');
 
     // Load initial directory - use test suite results directory
     const defaultUser = state.config?.ubuntu_user || 'hcq';
@@ -2889,8 +2952,7 @@ function selectFile(name, type) {
 }
 
 function closeFileBrowserModal() {
-    const modal = document.getElementById('file-browser-modal');
-    modal.classList.remove('show');
+    ModalManager.close('file-browser-modal');
     state.fileBrowser.selectedFile = null;
 }
 
@@ -3263,7 +3325,7 @@ async function showConfig() {
         </div>
     `;
 
-    modal.classList.add('show');
+    ModalManager.open('config-modal');
 }
 
 function closeModal(modalId) {
@@ -3281,7 +3343,7 @@ function closeModal(modalId) {
             }, 300);
         } else {
             // 对于静态模态框（使用class控制）
-            modal.classList.remove('show');
+            ModalManager.close(id);
         }
     }
 }
@@ -3560,11 +3622,11 @@ function showConfirmDialog(title, message, onConfirm, onCancel) {
         messageEl.textContent = message;
 
         // 显示模态框
-        modal.classList.add('show');
+        ModalManager.open('confirm-modal');
 
         // 确定按钮事件
         const handleOk = () => {
-            modal.classList.remove('show');
+            ModalManager.close('confirm-modal');
             cleanup();
             resolve(true);
             if (onConfirm) onConfirm();
@@ -3572,7 +3634,7 @@ function showConfirmDialog(title, message, onConfirm, onCancel) {
 
         // 取消按钮事件
         const handleCancel = () => {
-            modal.classList.remove('show');
+            ModalManager.close('confirm-modal');
             cleanup();
             resolve(false);
             if (onCancel) onCancel();
@@ -4210,44 +4272,21 @@ async function analyzeReport(timestamp) {
 
 
 // ==================== 安装指南弹窗 ====================
-// 模块级状态管理，避免使用 this
-const _modalState = {
-    installGuide: { escListenerAdded: false },
-    sshdInstallGuide: { escListenerAdded: false }
-};
 
 function showInstallGuide(title, guide) {
-    const modal = document.getElementById('install-guide-modal');
-    if (modal) {
-        modal.classList.add('show');
-        // 添加 ESC 键监听
-        if (!_modalState.installGuide.escListenerAdded) {
-            document.addEventListener('keydown', handleInstallGuideEsc);
-            _modalState.installGuide.escListenerAdded = true;
-        }
-    }
+    ModalManager.open('install-guide-modal');
 }
 
 function closeInstallGuide() {
     const modal = document.getElementById('install-guide-modal');
     if (modal) {
-        modal.classList.remove('show');
         // 隐藏进度条
         const progressDiv = document.getElementById('install-progress');
         if (progressDiv) {
             progressDiv.style.display = 'none';
         }
     }
-    if (_modalState.installGuide.escListenerAdded) {
-        document.removeEventListener('keydown', handleInstallGuideEsc);
-        _modalState.installGuide.escListenerAdded = false;
-    }
-}
-
-function handleInstallGuideEsc(event) {
-    if (event.key === 'Escape') {
-        closeInstallGuide();
-    }
+    ModalManager.close('install-guide-modal');
 }
 
 async function autoInstallUsbipd() {
@@ -4314,12 +4353,7 @@ function showSshdInstallGuide(guide) {
         if (guideContent) {
             guideContent.textContent = guide;
         }
-        modal.classList.add('show');
-        // 添加 ESC 键监听（防止重复添加）
-        if (!_modalState.sshdInstallGuide.escListenerAdded) {
-            document.addEventListener('keydown', handleSshdInstallGuideEsc);
-            _modalState.sshdInstallGuide.escListenerAdded = true;
-        }
+        ModalManager.open('sshd-install-guide-modal');
     }
 }
 
@@ -4328,16 +4362,7 @@ function closeSshdInstallGuide() {
     if (modal) {
         modal.classList.remove('show');
     }
-    if (_modalState.sshdInstallGuide.escListenerAdded) {
-        document.removeEventListener('keydown', handleSshdInstallGuideEsc);
-        _modalState.sshdInstallGuide.escListenerAdded = false;
-    }
-}
-
-function handleSshdInstallGuideEsc(event) {
-    if (event.key === 'Escape') {
-        closeSshdInstallGuide();
-    }
+    ModalManager.close('sshd-install-guide-modal');
 }
 
 async function autoInstallSshd() {
@@ -4379,6 +4404,9 @@ function selectReportSource() {
     `;
     document.body.appendChild(modal);
 
+    // 注册到 ModalManager
+    ModalManager.registerDynamic(modal);
+
     // 点击背景关闭
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
@@ -4388,10 +4416,7 @@ function selectReportSource() {
 }
 
 function closeReportSourceModal() {
-    const modal = document.getElementById('report-source-modal');
-    if (modal) {
-        modal.remove();
-    }
+    ModalManager.unregisterDynamic('report-source-modal');
 }
 
 function selectReportFile() {
@@ -4800,7 +4825,8 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    // 注册到 ModalManager
+    ModalManager.registerDynamic(modal);
 
     try {
         const formData = createFormData(AnalysisMode.AI, {
@@ -5079,6 +5105,9 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     modal.innerHTML = html;
     document.body.appendChild(modal);
 
+    // 注册到 ModalManager
+    ModalManager.registerDynamic(modal);
+
     // 点击外部关闭
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
@@ -5092,10 +5121,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
  * @param {string} modalId - 模态框ID
  */
 function closeAIAnalysisModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) {
-        modal.remove();
-    }
+    ModalManager.unregisterDynamic(modalId);
 }
 
 /**
@@ -5138,6 +5164,7 @@ function openSourceAnalysisModal() {
         // 清空之前的搜索结果
         document.getElementById('opengrok-results').style.display = 'none';
         document.getElementById('opengrok-results-list').innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">请输入关键词进行搜索</div>';
+        ModalManager.open('source-analysis-modal');
     }
 }
 
@@ -5149,6 +5176,7 @@ function closeSourceAnalysisModal() {
     if (modal) {
         modal.classList.remove('show');
     }
+    ModalManager.close('source-analysis-modal');
 }
 
 /**
@@ -6012,10 +6040,7 @@ window.copyCurlCommandFromData = function(element) {
  * 显示使用实例弹窗
  */
 function showUsageExamples() {
-    const modal = document.getElementById('usage-examples-modal');
-    if (modal) {
-        modal.style.display = 'flex';
-    }
+    ModalManager.open('usage-examples-modal');
 }
 
 
@@ -6023,10 +6048,7 @@ function showUsageExamples() {
  * 关闭使用实例弹窗
  */
 function closeUsageExamplesModal() {
-    const modal = document.getElementById('usage-examples-modal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
+    ModalManager.close('usage-examples-modal');
 }
 
 /**

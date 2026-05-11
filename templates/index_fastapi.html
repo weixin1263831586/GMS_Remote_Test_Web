@@ -1440,13 +1440,18 @@
         function showSshModal() {
             const modal = document.getElementById('ssh-password-modal');
             modal.style.display = 'flex';
+            modal.classList.add('show');
             document.getElementById('ssh-client-ip').value = clientInfo.ip;
             document.getElementById('ssh-username').value = '';
             document.getElementById('ssh-password').value = '';
+            ModalManager.open('ssh-password-modal');
         }
 
         function closeSshModal() {
-            document.getElementById('ssh-password-modal').style.display = 'none';
+            const modal = document.getElementById('ssh-password-modal');
+            modal.style.display = 'none';
+            modal.classList.remove('show');
+            ModalManager.close('ssh-password-modal');
         }
 
         function handleSshKeyPress(e) {
@@ -1662,13 +1667,17 @@
         function showAddHostModal() {
             const modal = document.getElementById('add-host-modal');
             modal.style.display = 'flex';
+            modal.classList.add('show');
             document.getElementById('new-host-input').value = '';
             document.getElementById('new-host-input').focus();
+            ModalManager.open('add-host-modal');
         }
 
         function closeAddHostModal() {
             document.getElementById('add-host-modal').style.display = 'none';
+            document.getElementById('add-host-modal').classList.remove('show');
             document.getElementById('new-host-vnc-password').value = '';  // 清空VNC密码
+            ModalManager.close('add-host-modal');
         }
 
         function handleAddHostKeyPress(e) {
@@ -1761,14 +1770,18 @@
             if (!pendingHostConnection) return;
             const modal = document.getElementById('host-password-modal');
             modal.style.display = 'flex';
+            modal.classList.add('show');
             document.getElementById('host-password-host').textContent = pendingHostConnection.name;
             document.getElementById('host-password-input').value = '';
             document.getElementById('host-password-input').focus();
+            ModalManager.open('host-password-modal');
         }
 
         function closeHostPasswordModal() {
             document.getElementById('host-password-modal').style.display = 'none';
+            document.getElementById('host-password-modal').classList.remove('show');
             pendingHostConnection = null;
+            ModalManager.close('host-password-modal');
         }
 
         function handleHostPasswordKeyPress(e) {
