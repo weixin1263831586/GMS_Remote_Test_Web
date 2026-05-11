@@ -1,6 +1,6 @@
 """
 通用AI模型管理器
-支持多个AI提供商：智谱AI、OpenAI、Claude、Ollama等
+支持多个AI提供商：智谱AI、OpenAI
 """
 
 import requests
@@ -15,9 +15,7 @@ logger = logging.getLogger(__name__)
 class AIProvider(Enum):
     """AI提供商枚举"""
     ZHIPU = "zhipu"
-    OLLAMA = "ollama"
-    OPENAI = "openai"
-    ANTHROPIC = "anthropic"
+    QWEN = "qwen"
 
 
 class UniversalAIAnalyzer:
@@ -106,14 +104,8 @@ class UniversalAIAnalyzer:
             logger.info(f"使用AI提供商: {provider_name}")
 
             # 根据提供商调用不同的方法
-            if provider_name == AIProvider.ZHIPU.value:
-                provider_result = self._call_zhipu(provider_config, class_name, method_name, error_message, stack_trace, source_code)
-            elif provider_name == AIProvider.OLLAMA.value:
-                provider_result = self._call_ollama(provider_config, class_name, method_name, error_message, stack_trace, source_code)
-            elif provider_name == AIProvider.OPENAI.value:
-                provider_result = self._call_openai(provider_config, class_name, method_name, error_message, stack_trace, source_code)
-            elif provider_name == AIProvider.ANTHROPIC.value:
-                provider_result = self._call_anthropic(provider_config, class_name, method_name, error_message, stack_trace, source_code)
+            if provider_name in [AIProvider.ZHIPU.value, AIProvider.QWEN.value]:
+                provider_result = self._call_aimodel(provider_name, provider_config, class_name, method_name, error_message, stack_trace, source_code)
             else:
                 provider_result = {'success': False, 'error': f'不支持的提供商: {provider_name}'}
 
@@ -132,38 +124,85 @@ class UniversalAIAnalyzer:
 
         return result
 
-    def _call_zhipu(self, config: Dict, class_name: str, method_name: Optional[str],
-                    error_message: str, stack_trace: Optional[str], source_code: Optional[str]) -> Dict:
-        """调用智谱AI"""
+    def _call_aimodel(self, provider_name: str, config: Dict, class_name: str, method_name: Optional[str],
+                                error_message: str, stack_trace: Optional[str], source_code: Optional[str]) -> Dict:
+        """
+        调用兼容 OpenAI API 格式的提供商（智谱AI、OpenAI等）
+
+        Args:
+            provider_name: 提供商名称
+            config: 提供商配置
+            class_name: 测试类名
+            method_name: 测试方法名
+            error_message: 错误信息
+            stack_trace: 堆栈跟踪
+            source_code: 源码
+
+        Returns:
+            分析结果字典
+        """
         try:
             api_key = config.get('api_key', '')
             if not api_key:
-                return {'success': False, 'error': '智谱AI API密钥未配置'}
+                return {'success': False, 'error': f'{provider_name} API密钥未配置'}
 
-            base_url = config.get('base_url', 'https://open.bigmodel.cn/api/paas/v4/chat/completions')
-            model = config.get('model', 'glm-4')
+            base_url = config.get('base_url')
+            model = config.get('model')
 
-            # 构建提示词
+            # 使用默认值
+            if not base_url:
+                base_url = 'https://api.z.ai/api/anthropic'
+
+            if not model:
+                model = 'glm-4.7'
+
             prompt = self._build_prompt(class_name, method_name, error_message, stack_trace, source_code)
 
-            # 调用API
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
+            # 检测是否使用 Anthropic 格式
+            is_anthropic = 'anthropic' in base_url.lower()
 
-            data = {
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": config.get('temperature', 0.3),
-                "max_tokens": config.get('max_tokens', 2000)
-            }
+            if is_anthropic:
+                # Anthropic API 格式
+                url = f"{base_url}/v1/messages" if not base_url.endswith('/messages') else base_url
+                headers = {
+                    "x-api-key": api_key,
+                    "Content-Type": "application/json",
+                    "anthropic-version": "2023-06-01"
+                }
+                data = {
+                    "model": model,
+                    "max_tokens": config.get('max_tokens', 2000),
+                    "messages": [{"role": "user", "content": prompt}]
+                }
+            else:
+                # OpenAI 格式
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                data = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": config.get('temperature', 0.3),
+                    "max_tokens": config.get('max_tokens', 2000)
+                }
+                url = base_url
 
-            response = requests.post(base_url, headers=headers, json=data, timeout=self.timeout)
+            response = requests.post(url, headers=headers, json=data, timeout=self.timeout)
 
             if response.status_code == 200:
                 result = response.json()
-                content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+
+                # 支持两种响应格式：Anthropic 和 OpenAI
+                if is_anthropic and 'content' in result:
+                    # Anthropic 格式
+                    content = result['content'][0].get('text', '')
+                elif not is_anthropic and 'choices' in result:
+                    # OpenAI 格式
+                    content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                else:
+                    content = str(result)
+
                 parsed = self._parse_response(content)
 
                 return {
@@ -178,112 +217,28 @@ class UniversalAIAnalyzer:
                     error_msg = error_data.get('error', {}).get('message', f'HTTP {response.status_code}')
                 except:
                     error_msg = f'HTTP {response.status_code}: {response.text[:100]}'
-                return {'success': False, 'error': f'智谱AI API错误: {error_msg}'}
+                return {'success': False, 'error': f'{provider_name} API错误: {error_msg}'}
 
         except Exception as e:
-            return {'success': False, 'error': f'智谱AI调用失败: {str(e)}'}
+            return {'success': False, 'error': f'{provider_name}调用失败: {str(e)}'}
 
-    def _call_ollama(self, config: Dict, class_name: str, method_name: Optional[str],
-                     error_message: str, stack_trace: Optional[str], source_code: Optional[str]) -> Dict:
-        """调用Ollama本地模型"""
+    def _safe_import(self, module_path: str, error_result=None):
+        """
+        安全导入模块，失败时返回默认值
+
+        Args:
+            module_path: 模块路径
+            error_result: 导入失败时的返回值
+
+        Returns:
+            模块对象或 error_result
+        """
         try:
-            from core.llm_analyzer import llm_analyzer
-
-            # 更新配置
-            llm_analyzer.host = config.get('host', 'http://localhost:11434')
-            llm_analyzer.model_name = config.get('model', 'deepseek-coder:6.7b')
-
-            return llm_analyzer.analyze_test_failure(class_name, method_name, error_message, stack_trace, source_code)
-        except Exception as e:
-            return {'success': False, 'error': f'Ollama调用失败: {str(e)}'}
-
-    def _call_openai(self, config: Dict, class_name: str, method_name: Optional[str],
-                     error_message: str, stack_trace: Optional[str], source_code: Optional[str]) -> Dict:
-        """调用OpenAI"""
-        try:
-            api_key = config.get('api_key', '')
-            if not api_key:
-                return {'success': False, 'error': 'OpenAI API密钥未配置'}
-
-            base_url = config.get('base_url', 'https://api.openai.com/v1/chat/completions')
-            model = config.get('model', 'gpt-4')
-
-            prompt = self._build_prompt(class_name, method_name, error_message, stack_trace, source_code)
-
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-
-            data = {
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": config.get('temperature', 0.3),
-                "max_tokens": config.get('max_tokens', 2000)
-            }
-
-            response = requests.post(base_url, headers=headers, json=data, timeout=self.timeout)
-
-            if response.status_code == 200:
-                result = response.json()
-                content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
-                parsed = self._parse_response(content)
-
-                return {
-                    'success': True,
-                    'analysis': parsed.get('analysis'),
-                    'suggestions': parsed.get('suggestions', []),
-                    'solution': parsed.get('solution')
-                }
-            else:
-                return {'success': False, 'error': f'OpenAI API错误: {response.status_code}'}
-
-        except Exception as e:
-            return {'success': False, 'error': f'OpenAI调用失败: {str(e)}'}
-
-    def _call_anthropic(self, config: Dict, class_name: str, method_name: Optional[str],
-                        error_message: str, stack_trace: Optional[str], source_code: Optional[str]) -> Dict:
-        """调用Claude (Anthropic)"""
-        try:
-            api_key = config.get('api_key', '')
-            if not api_key:
-                return {'success': False, 'error': 'Claude API密钥未配置'}
-
-            base_url = config.get('base_url', 'https://api.anthropic.com/v1/messages')
-            model = config.get('model', 'claude-3-sonnet-20240229')
-
-            prompt = self._build_prompt(class_name, method_name, error_message, stack_trace, source_code)
-
-            headers = {
-                "x-api-key": api_key,
-                "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01"
-            }
-
-            data = {
-                "model": model,
-                "max_tokens": config.get('max_tokens', 2000),
-                "messages": [{"role": "user", "content": prompt}]
-            }
-
-            response = requests.post(base_url, headers=headers, json=data, timeout=self.timeout)
-
-            if response.status_code == 200:
-                result = response.json()
-                content = result.get('content', [{}])[0].get('text', '')
-                parsed = self._parse_response(content)
-
-                return {
-                    'success': True,
-                    'analysis': parsed.get('analysis'),
-                    'suggestions': parsed.get('suggestions', []),
-                    'solution': parsed.get('solution')
-                }
-            else:
-                return {'success': False, 'error': f'Claude API错误: {response.status_code}'}
-
-        except Exception as e:
-            return {'success': False, 'error': f'Claude调用失败: {str(e)}'}
+            from importlib import import_module
+            return import_module(module_path)
+        except ImportError:
+            logger.warning(f"{module_path} 不可用")
+            return error_result
 
     def _build_prompt(self, class_name: str, method_name: Optional[str],
                       error_message: str, stack_trace: Optional[str], source_code: Optional[str]) -> str:
@@ -410,22 +365,7 @@ class UniversalAIAnalyzer:
         Returns:
             dict: 包含源码信息，如果失败返回None
         """
-        try:
-            from core.source_analyzer import source_analyzer
-            # 提取简单类名
-            simple_class_name = class_name.split('.')[-1]
-            # 获取源码
-            source_info = source_analyzer.fetch_source_code(simple_class_name)
-
-            if source_info:
-                logger.info(f"成功获取源码: {source_info.get('file_path', 'unknown')}")
-                return source_info
-
-            return None
-
-        except Exception as e:
-            logger.warning(f"获取源码失败: {e}")
-            return None
+        return None
 
 
 # 全局实例

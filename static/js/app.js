@@ -4708,7 +4708,7 @@ function displayReportAnalysis(data) {
                 <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 12px; margin-bottom: 12px; position: relative;">
                     <!-- 右上角按钮 -->
                     <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
-                        <button onclick="aiAnalyzeFailureReport('${testCaseName}', \`${reasonText.substring(0, 500).replace(/`/g, '\\`')}\`)" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);">🤖 AI+源码分析</button>
+                        <button onclick="aiAnalyzeFailureReport('${testCaseName}', \`${reasonText.substring(0, 500).replace(/`/g, '\\`')}\`)" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);">🤖 报错分析</button>
                     </div>
 
                     <div style="margin-bottom: 8px; padding-right: 140px;">
@@ -4742,7 +4742,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
     modal.innerHTML = `
         <div class="modal-content" style="max-width: 700px; max-height: 80vh; overflow-y: auto;">
             <div class="modal-header">
-                <span class="modal-title">🤖 AI 分析中...</span>
+                <span class="modal-title">🤖 报错分析中...</span>
                 <span class="modal-close" onclick="closeModal('${modalId}')">&times;</span>
             </div>
             <div class="modal-body">
@@ -4780,7 +4780,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
         }
 
         // 更新模态框内容
-        modal.querySelector('.modal-title').textContent = '🤖 AI 分析结果';
+        modal.querySelector('.modal-title').textContent = '🤖 报错分析结果';
 
         if (result.success) {
             const data = result.data;
@@ -4886,7 +4886,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
 async function aiAnalyzeFailure(testName, errorMessage, module = '') {
     try {
         // 显示加载提示
-        showToast('🤖 AI正在分析...', 'info');
+        showToast('🤖 报错分析...', 'info');
 
         const formData = createFormData(AnalysisMode.AI, {
             test_name: testName,
@@ -4939,7 +4939,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     let html = `
         <div style="background: var(--bg-color); border-radius: 12px; padding: 24px; max-width: 900px; max-height: 85vh; overflow-y: auto; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); margin: auto;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; font-size: 18px; font-weight: 600;">🤖 AI+源码分析报告</h2>
+                <h2 style="margin: 0; font-size: 18px; font-weight: 600;">🤖 报错分析</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     ${data.source_code_fetched ? '<span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 3px 10px; border-radius: 4px;">✓ 源码已获取</span>' : ''}
                     ${data.ai_enabled === false ? '<span style="font-size: 10px; background: var(--warning-color); color: white; padding: 2px 8px; border-radius: 4px;">规则分析</span>' : '<span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2px 8px; border-radius: 4px;">AI增强</span>'}
