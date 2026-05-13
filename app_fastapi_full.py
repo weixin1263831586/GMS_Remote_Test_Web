@@ -142,7 +142,6 @@ SPECIAL_TEST_TYPES = {
 TRADEFED_BINARY_REVERSE_MAP = {v: k for k, v in TRADEFED_BINARY_MAP.items()}
 
 # 预编译正则表达式，避免重复编译
-import re
 SUITE_TYPE_PATTERN = re.compile(r'/android-([a-z]+)')
 
 # 预计算tradefed文件列表，避免在循环中重复计算
@@ -322,6 +321,27 @@ from modules.test_logs_manager import test_logs_manager
 
 # 导入USB监控模块
 from core.usb_monitor import init_usb_monitor, start_usb_monitor, stop_usb_monitor
+
+def extract_report_name_from_upload(files: List[UploadFile]) -> str:
+    """
+    从上传的文件中提取报告名称
+
+    Args:
+        files: 上传的文件列表
+
+    Returns:
+        报告名称字符串
+    """
+    if not files or not files[0].filename:
+        return 'Unknown Report'
+
+    if len(files) == 1:
+        return files[0].filename
+
+    # 多文件上传 - 使用文件夹名称
+    first_file = files[0].filename
+    folder_name = os.path.dirname(first_file) or os.path.basename(first_file)
+    return folder_name
 
 # 日志配置
 logging.basicConfig(
@@ -1469,6 +1489,27 @@ async def get_config(request: Request):
     safe_config = hide_sensitive_info(config.copy())
     return JSONResponse(content=safe_config)
 
+@app.get("/api/config/opengrok")
+async def get_opengrok_config(request: Request):
+    """获取OpenGrok配置 - 供前端源码链接使用"""
+    config = config_manager.load_config()
+    opengrok_config = config.get('opengrok', {})
+
+    if not opengrok_config or 'base_url' not in opengrok_config:
+        return error_response('OpenGrok未配置，请在configs/config.json中配置opengrok段', status_code=404)
+
+    return JSONResponse(content={'success': True, 'data': opengrok_config})
+
+@app.get("/api/config/ai")
+async def get_ai_config(request: Request):
+    """获取 AI 配置 - 供前端 AI 分析功能使用"""
+    ai_config = config_manager.get_ai_config()
+
+    if not ai_config:
+        return error_response('AI 未配置或未启用，请在 configs/config.json 中配置 ai_models 段并设置 enabled: true', status_code=404)
+
+    return JSONResponse(content={'success': True, 'data': ai_config})
+
 @app.post("/api/config/update")
 async def update_config(req: dict):
     """更新配置 - 只修改动态配置，禁止修改config.json"""
@@ -2120,125 +2161,6 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
 
 # ==================== OpenGrok源码搜索 ====================
 
-@app.post("/api/opengrok/search")
-async def opengrok_search(request: Request):
-    """OpenGrok源码搜索 - 调用OpenGrok插件进行源码搜索"""
-    try:
-        # 获取请求参数
-        data = await request.json()
-        query = data.get("query", "").strip()
-        search_field = data.get("search_field", "smart")
-        project = data.get("project", "")
-        file_type = data.get("type", "")
-        limit = data.get("limit", 15)
-
-        if not query:
-            return JSONResponse(
-                content={"success": False, "error": "请输入搜索关键词"},
-                status_code=400
-            )
-
-        # OpenGrok插件路径
-        plugin_dir = "/home/hcq/remote-run-server/plugins/commands/opengrok"
-        run_script = os.path.join(plugin_dir, "run.py")
-
-        if not os.path.exists(run_script):
-            logger.warning(f"[OpenGrok] Plugin not found: {run_script}")
-            return JSONResponse(
-                content={"success": False, "error": f"OpenGrok插件不存在: {run_script}"},
-                status_code=500
-            )
-
-        # 构建命令
-        cmd = [
-            "python3",
-            run_script,
-            "search",
-            "--query", query,
-            "--search-field", search_field,
-            "--limit", str(limit)
-        ]
-
-        # 添加可选参数
-        if project:
-            cmd.extend(["--project", project])
-        if file_type:
-            cmd.extend(["--type", file_type])
-
-        logger.info(f"[OpenGrok Search] Command: {' '.join(cmd)}")
-
-        # 执行搜索（使用异步版本避免阻塞）
-        try:
-            result = await async_subprocess_run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60,
-                cwd=plugin_dir
-            )
-
-            if result.returncode != 0:
-                logger.error(f"[OpenGrok Search] Plugin error: {result.stderr}")
-                return JSONResponse(
-                    content={
-                        "success": False,
-                        "error": f"搜索失败: {result.stderr}"
-                    },
-                    status_code=500
-                )
-
-            # 解析输出
-            output = result.stdout.strip()
-            results = []
-
-            if output:
-                # OpenGrok插件输出格式为纯文本，按行解析
-                for line in output.split('\n'):
-                    line = line.strip()
-                    if line and '|' in line:
-                        # 格式: file_path | line_number | context_text
-                        parts = line.split('|', 2)
-                        if len(parts) >= 3:
-                            file_path = parts[0].strip()
-                            line_num = parts[1].strip()
-                            context = parts[2].strip()
-                            results.append({
-                                "file": file_path,
-                                "line": line_num,
-                                "context": context
-                            })
-
-            logger.info(f"[OpenGrok Search] Found {len(results)} results for query: {query}")
-
-            return JSONResponse(content={
-                "success": True,
-                "query": query,
-                "search_field": search_field,
-                "project": project,
-                "type": file_type,
-                "count": len(results),
-                "results": results
-            })
-
-        except subprocess.TimeoutExpired:
-            logger.error(f"[OpenGrok Search] Timeout after 60s")
-            return JSONResponse(
-                content={"success": False, "error": "搜索超时(60秒)"},
-                status_code=500
-            )
-        except Exception as e:
-            logger.error(f"[OpenGrok Search] Execution error: {e}")
-            return JSONResponse(
-                content={"success": False, "error": f"搜索执行失败: {str(e)}"},
-                status_code=500
-            )
-
-    except Exception as e:
-        logger.error(f"[OpenGrok Search] Error: {e}")
-        return JSONResponse(
-            content={"success": False, "error": f"服务器错误: {str(e)}"},
-            status_code=500
-        )
 
 # ==================== 测试管理 ====================
 
@@ -3878,8 +3800,7 @@ async def analyze_reports(
                     result = analyzer.analyze_file(temp_file_path)
 
                     if result:
-                        # 添加报告名称（使用上传的文件名）
-                        result['report_name'] = uploaded_file.filename
+                        result['report_name'] = extract_report_name_from_upload([uploaded_file])
                         return JSONResponse(content={
                             'success': True,
                             'data': result,
@@ -3930,8 +3851,7 @@ async def analyze_reports(
 
                         # 标记为日志分析结果
                         result['report_type'] = 'log'
-                        # 添加报告名称（使用第一个上传的文件名）
-                        result['report_name'] = all_files[0].filename
+                        result['report_name'] = extract_report_name_from_upload(all_files)
                         return JSONResponse(content={
                             'success': True,
                             'data': result,
@@ -3942,10 +3862,7 @@ async def analyze_reports(
                     result = analyzer.analyze_file(xml_path)
 
                     if result:
-                        # 添加报告名称（多文件上传使用文件夹名称）
-                        first_file = all_files[0]
-                        folder_name = os.path.dirname(first_file.filename) or os.path.basename(first_file.filename)
-                        result['report_name'] = folder_name
+                        result['report_name'] = extract_report_name_from_upload(all_files)
 
                         return JSONResponse(content={
                             'success': True,
@@ -4355,71 +4272,6 @@ def parse_ai_response(ai_response):
 
 
 # ==================== OpenGrok源码搜索辅助函数 ====================
-
-def search_opengrok_sources(class_names):
-    """
-    使用OpenGrok搜索源码
-
-    Args:
-        class_names: 类名列表
-
-    Returns:
-        list: 搜索结果列表
-    """
-    logger = logging.getLogger(__name__)
-
-    # OpenGrok插件路径
-    plugin_dir = "/home/hcq/remote-run-server/plugins/commands/opengrok"
-    run_script = os.path.join(plugin_dir, "run.py")
-
-    if not os.path.exists(run_script):
-        logger.warning(f"OpenGrok插件不存在: {run_script}")
-        return []
-
-    results = []
-
-    for class_name in class_names:
-        try:
-            # 构建命令
-            cmd = [
-                "python3",
-                run_script,
-                "search",
-                "--query", class_name,
-                "--search-field", "def",  # 搜索定义
-                "--limit", "5"
-            ]
-
-            logger.info(f"[OpenGrok] Searching for: {class_name}")
-
-            # 执行搜索
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=plugin_dir
-            )
-
-            if result.returncode == 0 and result.stdout.strip():
-                # 解析输出
-                for line in result.stdout.strip().split('\n'):
-                    if '|' in line:
-                        parts = line.split('|', 2)
-                        if len(parts) >= 3:
-                            results.append({
-                                'class_name': class_name,
-                                'file': parts[0].strip(),
-                                'line': parts[1].strip(),
-                                'context': parts[2].strip()
-                            })
-        except subprocess.TimeoutExpired:
-            logger.warning(f"[OpenGrok] Timeout searching for: {class_name}")
-        except Exception as e:
-            logger.warning(f"[OpenGrok] Error searching for {class_name}: {e}")
-
-    return results
-
 
 def rule_based_analysis(test_name, error_message, stack_trace, module):
     """
@@ -7491,7 +7343,14 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
     """
     import time
     import re
-    platform_tools_path = "/home/hcq/Software/platform-tools"
+
+    # 常量定义
+    PLATFORM_TOOLS_PATH = "/home/hcq/Software/platform-tools"
+    RECV_BUFFER_SIZE = 8192
+    STABLE_OUTPUT_TIMEOUT = 2.0
+    POLL_INTERVAL = 0.05
+
+    platform_tools_path = PLATFORM_TOOLS_PATH
 
     def wait_for_prompt(shell, prompt_patterns, timeout=10, poll_interval=0.05):
         """
@@ -7509,7 +7368,7 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
 
         while time.time() - start_time < timeout:
             try:
-                chunk = shell.recv(8192).decode('utf-8', errors='ignore')  # 增加缓冲区
+                chunk = shell.recv(RECV_BUFFER_SIZE).decode('utf-8', errors='ignore')  # 增加缓冲区
                 if chunk:
                     output += chunk
                     last_output_time = time.time()
@@ -7529,11 +7388,11 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
                     else:
                         stable_count = 0
                         last_output_length = current_length
-            except:
-                # 如果超过 2 秒没有新输出，认为命令已完成
-                if time.time() - last_output_time > 2.0:
+            except Exception as e:
+                # 如果超过指定时间没有新输出，认为命令已完成
+                if time.time() - last_output_time > STABLE_OUTPUT_TIMEOUT:
                     return output
-            time.sleep(poll_interval)
+            time.sleep(POLL_INTERVAL)
 
         return output
 
@@ -7545,7 +7404,7 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
         # 清空欢迎消息
         try:
             shell.recv(1024)
-        except:
+        except Exception:
             pass
 
         # 发送命令序列，使用智能等待（优化超时）
@@ -7582,12 +7441,12 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
                     break
                 output += chunk
                 time.sleep(0.1)  # 短暂等待，确保所有数据都被接收
-            except:
+            except Exception:
                 break
 
         try:
             shell.close()
-        except:
+        except Exception:
             pass
 
         return output, "", 0
@@ -8600,7 +8459,7 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
     try:
         response_obj = json.loads(response_str)
         help_text += json.dumps(response_obj, ensure_ascii=False, indent=2)
-    except:
+    except json.JSONDecodeError:
         help_text += response_str
 
     # 添加结尾换行符（两个换行，视觉上更明显）
