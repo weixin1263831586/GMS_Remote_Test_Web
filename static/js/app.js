@@ -4738,6 +4738,10 @@ function displayReportAnalysis(data) {
                 <span class="summary-label">通过率：</span>
                 <span class="summary-value rate">${summary.pass_rate || '0%'}</span>
             </div>
+            <div>
+                <span class="summary-label">测试报告：</span>
+                <span class="summary-value">${data.report_name || data.test_result?.test_name || 'N/A'}</span>
+            </div>
         `;
 
         summaryDiv.innerHTML = summaryHTML;

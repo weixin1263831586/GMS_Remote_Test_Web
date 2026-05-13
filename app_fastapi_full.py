@@ -3792,12 +3792,8 @@ async def analyze_reports(
                     status_code=404
                 )
 
-            # 使用缓存的分析结果（性能优化）
-            stat = await asyncio.to_thread(os.stat, result_xml)
-            result = cached_xml_analysis(result_xml, stat.st_mtime)
-
-            if result and result.get('summary', {}).get('total', 0) == 0:
-                result = await asyncio.to_thread(test_report_manager.analyze_report, report_timestamp)
+            # 使用 test_report_manager.analyze_report 以获取完整的报告信息（包括 report_name）
+            result = await asyncio.to_thread(test_report_manager.analyze_report, report_timestamp)
 
             if not result:
                 return JSONResponse(
@@ -3882,6 +3878,8 @@ async def analyze_reports(
                     result = analyzer.analyze_file(temp_file_path)
 
                     if result:
+                        # 添加报告名称（使用上传的文件名）
+                        result['report_name'] = uploaded_file.filename
                         return JSONResponse(content={
                             'success': True,
                             'data': result,
@@ -3932,6 +3930,8 @@ async def analyze_reports(
 
                         # 标记为日志分析结果
                         result['report_type'] = 'log'
+                        # 添加报告名称（使用第一个上传的文件名）
+                        result['report_name'] = all_files[0].filename
                         return JSONResponse(content={
                             'success': True,
                             'data': result,
@@ -3942,6 +3942,11 @@ async def analyze_reports(
                     result = analyzer.analyze_file(xml_path)
 
                     if result:
+                        # 添加报告名称（多文件上传使用文件夹名称）
+                        first_file = all_files[0]
+                        folder_name = os.path.dirname(first_file.filename) or os.path.basename(first_file.filename)
+                        result['report_name'] = folder_name
+
                         return JSONResponse(content={
                             'success': True,
                             'data': result,
