@@ -150,6 +150,49 @@ class ConfigManager:
             self._cache = None
             self._cache_timestamp = 0
 
+    def get_ai_config(self) -> Dict[str, Any]:
+        """
+        获取 AI 配置（统一的配置访问接口）
+
+        Returns:
+            AI 配置字典，如果未配置或未启用则返回空字典
+        """
+        config = self.load_config()
+        ai_models = config.get('ai_models', {})
+
+        # 如果 AI 未启用，返回空配置
+        if not ai_models.get('enabled', False):
+            return {}
+
+        return ai_models
+
+    def get_ai_provider_config(self, provider_name: str) -> Optional[Dict[str, Any]]:
+        """
+        获取指定 AI provider 的配置
+
+        Args:
+            provider_name: provider 名称（如 'qwen', 'zhipu'）
+
+        Returns:
+            provider 配置字典，如果不存在则返回 None
+        """
+        ai_config = self.get_ai_config()
+        if not ai_config:
+            return None
+
+        providers = ai_config.get('providers', {})
+        return providers.get(provider_name)
+
+    def is_ai_enabled(self) -> bool:
+        """
+        检查 AI 功能是否已启用
+
+        Returns:
+            AI 是否已启用
+        """
+        ai_config = self.get_ai_config()
+        return ai_config.get('enabled', False)
+
     def _load_static_config(self) -> Dict[str, Any]:
         """加载静态配置"""
         try:

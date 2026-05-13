@@ -940,6 +940,14 @@ class ReportAnalyzer:
             if result.returncode != 0:
                 return []
 
+            # 预加载OpenGrok配置（避免在循环中重复加载）
+            opengrok_config = {}
+            try:
+                from core.config import config_manager
+                opengrok_config = config_manager.load_config().get('opengrok', {})
+            except Exception:
+                pass
+
             # 解析输出
             search_results = []
             lines = result.stdout.strip().split('\n')
@@ -961,6 +969,13 @@ class ReportAnalyzer:
                         'file_type': 'kt' if rest_of_line.endswith('.kt') else 'java'
                     }
 
+                    # 生成OpenGrok URL（使用预加载的配置）
+                    if opengrok_config.get('base_url') and opengrok_config.get('default_project'):
+                        base_url = opengrok_config['base_url']
+                        project = opengrok_config['default_project']
+                        result_item['_opengrok_base_url'] = base_url
+                        result_item['_opengrok_project'] = project
+
                     for j in range(i + 1, min(len(lines), i + 3)):
                         next_line = lines[j].strip()
                         if next_line.startswith('project:'):
@@ -976,7 +991,19 @@ class ReportAnalyzer:
                                 line_num_part = next_line.split(':')[0].strip()
                                 if line_num_part.isdigit():
                                     result_item['line'] = line_num_part
+                                    # 生成完整的OpenGrok URL
+                                    if '_opengrok_base_url' in result_item and '_opengrok_project' in result_item:
+                                        result_item['url'] = f"{result_item['_opengrok_base_url']}/xref/{result_item['_opengrok_project']}/{result_item['path']}#{result_item['line']}"
+                                        # 清理临时字段
+                                        del result_item['_opengrok_base_url']
+                                        del result_item['_opengrok_project']
                                     break
+
+                    # 如果没有找到line号，但有OpenGrok配置，也生成URL（没有#行号）
+                    if 'line' not in result_item and '_opengrok_base_url' in result_item:
+                        result_item['url'] = f"{result_item['_opengrok_base_url']}/xref/{result_item['_opengrok_project']}/{result_item['path']}"
+                        del result_item['_opengrok_base_url']
+                        del result_item['_opengrok_project']
 
                     search_results.append(result_item)
 

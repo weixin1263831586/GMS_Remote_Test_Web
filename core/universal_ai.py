@@ -217,7 +217,37 @@ class UniversalAIAnalyzer:
                     content = result['content'][0].get('text', '')
                 elif 'choices' in result:
                     # OpenAI 格式（智谱AI等）
-                    content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                    choice = result.get('choices', [{}])[0]
+                    message = choice.get('message', {})
+                    content = message.get('content', '')
+
+                    # 如果 content 为空，检查是否为推理模型且被截断
+                    finish_reason = choice.get('finish_reason', '')
+                    if not content and message.get('reasoning'):
+                        reasoning = message.get('reasoning', '')
+
+                        # 检查是否因长度限制被截断
+                        if finish_reason == 'length':
+                            logger.warning(f"[{provider_name}] 响应被截断（max_tokens太小），只有 reasoning 字段")
+                            # 尝试从 reasoning 中提取 JSON
+                            content = self._extract_json_from_reasoning(reasoning)
+                            if not content:
+                                content = reasoning
+                        else:
+                            content = reasoning
+                        logger.info(f"[{provider_name}] Content 为空，使用 reasoning 字段（长度: {len(content)}）")
+
+                    # 如果仍然为空，尝试其他可能的字段
+                    if not content:
+                        content = message.get('text', '')
+                        logger.info(f"[{provider_name}] Reasoning 也为空，尝试 text 字段")
+
+                    # 最后的回退：将整个 choice 转为字符串
+                    if not content:
+                        content = str(choice)
+                        logger.warning(f"[{provider_name}] 所有字段都为空，使用完整响应")
+
+                    logger.debug(f"[{provider_name}] Extracted content length: {len(content)}")
                 else:
                     content = str(result)
 
@@ -340,6 +370,19 @@ class UniversalAIAnalyzer:
     def _parse_response(self, response_text: str) -> Dict:
         """解析LLM响应"""
         try:
+            # 检查输入是否为空或None
+            if not response_text:
+                logger.warning("AI响应为空，返回默认分析结果")
+                return {
+                    'root_cause': '🎯 AI响应解析失败',
+                    'analysis': '📊 AI模型返回了空响应，可能是API配置问题或模型错误',
+                    'suggestions': [
+                        '✅ 检查AI模型配置是否正确',
+                        '✅ 查看后端日志了解详细错误信息',
+                        '✅ 尝试使用基于规则的分析'
+                    ]
+                }
+
             # 移除可能的markdown标记
             text = response_text.strip()
             if text.startswith('```json'):

@@ -21,6 +21,41 @@ const state = {
 // Debug flag - set to false in production to disable console logs
 const DEBUG = false;
 
+// OpenGrok配置 - 从后端API获取（异步加载，不阻塞启动）
+const OPENGROK_CONFIG = {
+    _loaded: false,
+    _baseUrl: '',
+    _defaultProject: '',
+
+    get isValid() {
+        return !!(this._loaded && this._baseUrl && this._defaultProject);
+    },
+
+    init() {
+        debugLog('[OpenGrok] 开始加载配置...');
+        fetch('/api/config/opengrok')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(result => {
+                if (result.success && result.data) {
+                    this._baseUrl = result.data.base_url;
+                    this._defaultProject = result.data.default_project;
+                    this._loaded = true;
+                    debugLog('[OpenGrok] ✅ 配置已加载:', { baseUrl: this._baseUrl, defaultProject: this._defaultProject });
+                } else {
+                    console.warn('[OpenGrok] ⚠️ 配置响应格式异常:', result);
+                }
+            })
+            .catch(error => {
+                console.error('[OpenGrok] ❌ 配置加载失败:', error.message);
+            });
+    }
+};
+
 // API文档缓存（全局变量，避免重复请求）
 let apiDocsCache = null;
 let apiDocsCacheTime = 0;
@@ -60,6 +95,78 @@ function debugLog(...args) {
     if (DEBUG) {
         console.log(...args);
     }
+}
+
+// Modal error display utility
+function showModalError(modal, message) {
+    modal.querySelector('.modal-title').textContent = '❌ 分析失败';
+    modal.querySelector('.modal-body').textContent = message;
+    modal.querySelector('.modal-body').style.cssText = 'color: var(--danger-color); padding: 20px; text-align: center;';
+}
+
+// Modal factory utility
+function createAnalysisModal(type, title, loadingMessage) {
+    const modalId = `${type}-modal-${Date.now()}`;
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';
+    modal.style.cssText = 'z-index: 10000;';
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <span class="modal-title">${title}</span>
+                <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; padding: 40px;">
+                    <div style="font-size: 48px; margin-bottom: 20px;">🔍</div>
+                    <div style="color: var(--text-secondary); margin-bottom: 12px;">${loadingMessage}</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    ModalManager.open(modalId);
+
+    return { modal, modalId };
+}
+
+// OpenGrok URL builder utility
+function buildOpenGrokUrl(path, line = null) {
+    if (!OPENGROK_CONFIG.isValid) return '';
+
+    const url = `${OPENGROK_CONFIG._baseUrl}/xref/${OPENGROK_CONFIG._defaultProject}/${path}`;
+    return line ? `${url}#${line}` : url;
+}
+
+function debounce(func, wait) {
+    const modalId = `${type}-modal-${Date.now()}`;
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';
+    modal.style.cssText = 'z-index: 10000;';
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <span class="modal-title">${title}</span>
+                <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; padding: 40px;">
+                    <div style="font-size: 48px; margin-bottom: 20px;">🔍</div>
+                    <div style="color: var(--text-secondary); margin-bottom: 12px;">${loadingMessage}</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    ModalManager.open(modalId);
+
+    return { modal, modalId };
 }
 
 function debounce(func, wait) {
@@ -245,6 +352,9 @@ async function callDeviceApi(endpoint, additionalData = {}) {
 document.addEventListener('DOMContentLoaded', async () => {
     initEventListeners();
     initDragDrop();
+
+    // 非阻塞加载OpenGrok配置（不等待，让它在后台加载）
+    OPENGROK_CONFIG.init();
 
     // 🚀 优先加载客户端信息，确保所有API调用都有正确的clientId
     try {
@@ -4331,7 +4441,7 @@ async function autoInstallUsbipd() {
             // 安装失败
             progressBar.style.width = '100%';
             progressBar.style.background = 'var(--danger-color, #dc3545)';
-            statusText.innerHTML = '❌ 安装失败: ' + (result.error || '未知错误');
+            statusText.textContent = '❌ 安装失败: ' + (result.error || '未知错误');
             statusText.style.color = 'var(--danger-color, #dc3545)';
 
             addLogEntry('usbipd 自动安装失败: ' + (result.error || '未知错误'), 'error');
@@ -4340,7 +4450,7 @@ async function autoInstallUsbipd() {
         // 异常处理
         progressBar.style.width = '100%';
         progressBar.style.background = 'var(--danger-color, #dc3545)';
-        statusText.innerHTML = '❌ 安装失败: ' + error.message;
+        statusText.textContent = '❌ 安装失败: ' + error.message;
         statusText.style.color = 'var(--danger-color, #dc3545)';
 
         addLogEntry('usbipd 自动安装失败: ' + error.message, 'error');
@@ -4675,7 +4785,7 @@ async function handleReportFolder(files) {
 }
 
 function displayReportAnalysis(data) {
-    console.log('[displayReportAnalysis] Called with data:', data);
+    if (DEBUG) console.log('[displayReportAnalysis] Called with data:', data);
 
     const resultDiv = $('report-analysis-result');
     const uploadZone = $('report-upload-zone');
@@ -4687,7 +4797,7 @@ function displayReportAnalysis(data) {
     // 移除上传空状态类（缩小到固定高度）
     if (uploadZone) uploadZone.classList.remove('upload-empty');
 
-    console.log('[displayReportAnalysis] Elements:', {
+    if (DEBUG) console.log('[displayReportAnalysis] Elements:', {
         resultDiv,
         summaryDiv,
         detailsDiv,
@@ -4702,12 +4812,10 @@ function displayReportAnalysis(data) {
 
     // 显示结果区域
     resultDiv.style.display = 'block';
-    console.log('[displayReportAnalysis] resultDiv display set to block');
 
     // 生成摘要
     if (summaryDiv && data.summary) {
         const summary = data.summary;
-        console.log('[displayReportAnalysis] Generating summary with:', summary);
 
         const summaryHTML = `
             ${data.details && data.details.test_type ? `
@@ -4745,8 +4853,6 @@ function displayReportAnalysis(data) {
         `;
 
         summaryDiv.innerHTML = summaryHTML;
-        console.log('[displayReportAnalysis] Summary HTML set, length:', summaryHTML.length);
-        console.log('[displayReportAnalysis] Summary div content after setting:', summaryDiv.innerHTML.substring(0, 200));
     } else {
         console.error('[displayReportAnalysis] Summary not generated. summaryDiv:', summaryDiv, 'data.summary:', data.summary);
     }
@@ -5034,8 +5140,7 @@ async function analyzeFailureWithSource(testName, errorMessage) {
 
         if (!response.ok) {
             const errorDetail = result.detail || result.error || '未知错误';
-            modal.querySelector('.modal-title').textContent = '❌ 分析失败';
-            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${errorDetail}</div>`;
+            showModalError(modal, `分析失败: ${errorDetail}`);
             return;
         }
 
@@ -5054,21 +5159,24 @@ async function analyzeFailureWithSource(testName, errorMessage) {
                 );
 
                 if (exactMatch) {
-                    const openGrokUrl = `http://10.10.10.203:8080/source/xref/Android16/${exactMatch.path}#${exactMatch.line}`;
-                    content += `
-                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                            <div style="color: white; font-size: 14px; font-weight: 600; margin-bottom: 12px;">🎯 快速访问 - 失败位置</div>
-                            <div style="background: rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 12px; margin-bottom: 10px;">
-                                <div style="color: rgba(255, 255, 255, 0.8); font-size: 11px; margin-bottom: 4px;">📁 失败位置</div>
-                                <div style="color: white; font-family: 'Courier New', monospace; font-size: 13px; margin-bottom: 8px;">
-                                    ${exactMatch.path.split('/').pop()} :${failureLocation.line_number}
+                    let openGrokUrl = exactMatch.url || buildOpenGrokUrl(exactMatch.path, exactMatch.line);
+
+                    if (openGrokUrl) {
+                        content += `
+                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                                <div style="color: white; font-size: 14px; font-weight: 600; margin-bottom: 12px;">🎯 快速访问 - 失败位置</div>
+                                <div style="background: rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 12px; margin-bottom: 10px;">
+                                    <div style="color: rgba(255, 255, 255, 0.8); font-size: 11px; margin-bottom: 4px;">📁 失败位置</div>
+                                    <div style="color: white; font-family: 'Courier New', monospace; font-size: 13px; margin-bottom: 8px;">
+                                        ${exactMatch.path.split('/').pop()} :${failureLocation.line_number}
+                                    </div>
+                                    <a href="${openGrokUrl}" target="_blank" style="display: inline-block; padding: 6px 12px; background: white; color: #667eea; text-decoration: none; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                                        🚀 直接跳转到源码 ↗
+                                    </a>
                                 </div>
-                                <a href="${openGrokUrl}" target="_blank" style="display: inline-block; padding: 6px 12px; background: white; color: #667eea; text-decoration: none; border-radius: 4px; font-size: 12px; font-weight: 600;">
-                                    🚀 直接跳转到源码 ↗
-                                </a>
                             </div>
-                        </div>
-                    `;
+                        `;
+                    }
                 }
             }
 
@@ -5080,7 +5188,18 @@ async function analyzeFailureWithSource(testName, errorMessage) {
 
                 data.source_search_results.forEach(item => {
                     const fileIcon = item.file_type === 'kt' ? '🔷' : (item.file_type === 'java' ? '☕' : '📄');
-                    const itemUrl = `http://10.10.10.203:8080/source/xref/Android16/${item.path}#${item.line}`;
+                    // 优先使用 item.url，如果没有则根据配置生成
+                    let itemUrl = item.url;
+                    if (!itemUrl) {
+                        itemUrl = buildOpenGrokUrl(item.path, item.line);
+                    }
+
+                    const linkHtml = itemUrl ?
+                        `<a href="${itemUrl}" target="_blank" style="font-size: 11px; color: #667eea; text-decoration: none; white-space: nowrap; font-weight: 600;">
+                            在 OpenGrok 中查看 →
+                        </a>` :
+                        '<span style="font-size: 10px; color: #999;">无链接</span>';
+
                     content += `
                         <div style="background: white; border-radius: 4px; padding: 10px; margin-bottom: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -5090,9 +5209,7 @@ async function analyzeFailureWithSource(testName, errorMessage) {
                                         ${item.type}
                                     </span>
                                 </div>
-                                <a href="${itemUrl}" target="_blank" style="font-size: 11px; color: #667eea; text-decoration: none; white-space: nowrap; font-weight: 600;">
-                                    在 OpenGrok 中查看 →
-                                </a>
+                                ${linkHtml}
                             </div>
                             <div style="font-family: monospace; font-size: 11px; color: #616161; margin-bottom: 4px;">
                                 📁 ${item.path}
@@ -5110,8 +5227,7 @@ async function analyzeFailureWithSource(testName, errorMessage) {
             modal.querySelector('.modal-body').innerHTML = content || '<div style="padding: 20px; text-align: center;">未找到源码搜索结果</div>';
         }
     } catch (error) {
-        modal.querySelector('.modal-title').textContent = '❌ 分析失败';
-        modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${error.message}</div>`;
+        showModalError(modal, `分析失败: ${error.message}`);
     }
 }
 
@@ -5155,7 +5271,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
         // 更新模态框显示正在搜索源码
         // 将类名列表格式化为多行显示
         const classNamesList = classNames.map((name, index) => {
-            const prefix = index === 0 ? '' : '├ ';
+            const prefix = index === 0 ? '' : '├── ';
             return `${prefix}${name}`;
         }).join('<br>');
 
@@ -5189,8 +5305,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
         if (!response.ok) {
             // 处理HTTP错误（FastAPI的HTTPException返回 {detail: "error message"}）
             const errorDetail = result.detail || result.error || '未知错误';
-            modal.querySelector('.modal-title').textContent = '❌ 分析失败';
-            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${errorDetail}</div>`;
+            showModalError(modal, `分析失败: ${errorDetail}`);
             return;
         }
 
@@ -5246,16 +5361,20 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                 content += '<div style="max-height: 300px; overflow-y: auto;">';
 
                 data.opengrok_results.forEach(item => {
-                    const opengrokUrl = `http://10.10.10.203:8080/source/xref/${item.file}#${item.line}`;
+                    let opengrokUrl = '';
+                    if (OPENGROK_CONFIG.isValid) {
+                        opengrokUrl = `${OPENGROK_CONFIG._baseUrl}/xref/${item.file}#${item.line}`;
+                    }
+
                     content += `
                         <div style="background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                                 <div style="font-family: monospace; font-size: 11px; color: #1976d2; font-weight: 600;">
                                     ${item.class_name}
                                 </div>
-                                <a href="${opengrokUrl}" target="_blank" style="font-size: 10px; color: #9c27b0; text-decoration: none; white-space: nowrap;">
+                                ${opengrokUrl ? `<a href="${opengrokUrl}" target="_blank" style="font-size: 10px; color: #9c27b0; text-decoration: none; white-space: nowrap;">
                                     查看源码 ↗
-                                </a>
+                                </a>` : '<span style="font-size: 10px; color: #999;">无链接</span>'}
                             </div>
                             <div style="font-family: monospace; font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
                                 ${item.file}:${item.line}
@@ -5270,15 +5389,28 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                 content += '</div></div>';
             }
 
-            // OpenGrok源码搜索结果 (rk_codesearch)
+            // OpenGrok源码搜索结果
             if (data.source_search_results && data.source_search_results.length > 0) {
                 content += '<div style="margin-top: 16px; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 6px; border-left: 3px solid #9c27b0;">';
                 content += '<div style="font-weight: 600; margin-bottom: 8px; color: white;">🔍 OpenGrok源码搜索</div>';
                 content += '<div style="max-height: 400px; overflow-y: auto;">';
 
                 data.source_search_results.forEach(item => {
-                    // 构建 OpenGrok URL（添加 Android16/ 前缀）
-                    const itemUrl = item.url || `http://10.10.10.203:8080/source/xref/Android16/${item.path}#${item.line}`;
+                    // 优先使用 item.url，如果没有则根据配置生成
+                    let itemUrl = item.url;
+                    if (!itemUrl) {
+                        itemUrl = buildOpenGrokUrl(item.path, item.line);
+                    }
+
+                    // 调试信息
+                    if (!itemUrl && DEBUG) {
+                        console.debug('[OpenGrok] No URL for item:', {
+                            hasItemUrl: !!item.url,
+                            configValid: OPENGROK_CONFIG.isValid,
+                            path: item.path
+                        });
+                    }
+
                     // 使用 display_path（如果有），否则使用 path
                     const displayPath = item.display_path || item.path;
                     content += `
@@ -5289,7 +5421,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                                 </div>
                                 ${itemUrl ? `<a href="${itemUrl}" target="_blank" style="font-size: 11px; color: #667eea; text-decoration: none; white-space: nowrap; font-weight: 600;">
                                     在 OpenGrok 中查看 →
-                                </a>` : ''}
+                                </a>` : '<span style="font-size: 10px; color: #999;">无链接</span>'}
                             </div>
                             <div style="font-family: monospace; font-size: 11px; color: #616161; margin-bottom: 4px;">
                                 📁 ${displayPath}
@@ -5320,8 +5452,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
         }
 
     } catch (error) {
-        modal.querySelector('.modal-title').textContent = '❌ 分析失败';
-        modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">请求失败: ${error.message}</div>`;
+        showModalError(modal, `请求失败: ${error.message}`);
     }
 }
 
