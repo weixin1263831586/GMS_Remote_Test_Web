@@ -5,7 +5,8 @@
 """
 import socket
 import logging
-from typing import Tuple, Optional, Dict, Any
+import re
+from typing import Tuple, Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -204,3 +205,97 @@ class CommonUtils:
         if '@' in host:
             return host.split('@', 1)[1]
         return host
+
+
+class StackTraceUtils:
+    """堆栈跟踪解析工具类"""
+
+    # 排除的工具类（这些类通常不是真正的失败位置）
+    EXCLUDED_CLASSES = {
+        'Assert', 'TestRunner', 'TestCase', 'TestUtil', 'CtsTestUtil',
+        'Mock', 'FrameworkMethod', 'Failures'
+    }
+
+    # 预编译正则表达式（性能优化）
+    FAILURE_LOCATION_PATTERNS = [
+        # 优先匹配测试类（com.android.xxx.TestClass.method(TestFile.java:line)）
+        re.compile(r'at\s+([a-z][a-z0-9.]*)\.([A-Z][\w]*)\.(\w+)\(([\w.$]+)\.(kt|java):(\d+)\)'),
+        # 备用：直接匹配文件名
+        re.compile(r'\(([\w.$]+)\.(kt|java):(\d+)\)'),
+    ]
+
+    @classmethod
+    def extract_failure_location(cls, stack_trace: str) -> Optional[Dict[str, str]]:
+        """
+        从堆栈跟踪中提取失败位置信息（优先提取测试类，排除工具类）
+
+        Args:
+            stack_trace: 堆栈跟踪字符串
+
+        Returns:
+            dict with keys: file_name, file_type, line_number
+            或 None（如果无法提取）
+
+        Examples:
+            >>> extract_failure_location("at com.android.gpu.vts.OpenGlEsTest.checkOpenGlEsDeqpLevelIsHighEnough(OpenGlEsTest.java:77)")
+            {'file_name': 'OpenGlEsTest', 'file_type': 'java', 'line_number': '77'}
+        """
+        if not stack_trace:
+            return None
+
+        # 收集所有匹配项
+        all_matches = []
+        for pattern in cls.FAILURE_LOCATION_PATTERNS:
+            for match in pattern.finditer(stack_trace):
+                all_matches.append(match)
+
+        # 优先返回测试类的位置（排除工具类）
+        for match in all_matches:
+            groups = match.groups()
+            # 根据不同的模式提取文件名
+            if len(groups) >= 5:  # 完整模式：package, class, method, file, ext, line
+                file_name = groups[3]
+                file_type = groups[4]
+                line_number = groups[5]
+                class_name = groups[1]
+
+                # 跳过工具类
+                if class_name in cls.EXCLUDED_CLASSES or file_name in cls.EXCLUDED_CLASSES:
+                    continue
+
+                return {
+                    'file_name': file_name,
+                    'file_type': file_type,
+                    'line_number': line_number
+                }
+            elif len(groups) >= 3:  # 简单模式：(file.ext:line)
+                file_name = groups[0]
+                file_type = groups[1]
+                line_number = groups[2]
+
+                # 跳过工具类
+                if file_name in cls.EXCLUDED_CLASSES:
+                    continue
+
+                return {
+                    'file_name': file_name,
+                    'file_type': file_type,
+                    'line_number': line_number
+                }
+
+        # 如果没有找到测试类，返回第一个非工具类的位置
+        for match in all_matches:
+            groups = match.groups()
+            if len(groups) >= 3:
+                file_name = groups[0] if len(groups) < 5 else groups[3]
+                file_type = groups[1] if len(groups) < 5 else groups[4]
+                line_number = groups[2] if len(groups) < 5 else groups[5]
+
+                if file_name not in cls.EXCLUDED_CLASSES:
+                    return {
+                        'file_name': file_name,
+                        'file_type': file_type,
+                        'line_number': line_number
+                    }
+
+        return None

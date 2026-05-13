@@ -129,6 +129,7 @@ class UniversalAIAnalyzer:
 
             if provider_result.get('success'):
                 result['success'] = True
+                result['root_cause'] = provider_result.get('root_cause', '')
                 result['analysis'] = provider_result.get('analysis')
                 result['suggestions'] = provider_result.get('suggestions', [])
                 result['solution'] = provider_result.get('solution')
@@ -174,15 +175,6 @@ class UniversalAIAnalyzer:
 
             # 获取 API 格式（优先使用配置中的 api_format 字段）
             api_format = self._get_api_format(provider_name, config)
-
-            import os
-            env_api_key = os.environ.get('ANTHROPIC_AUTH_TOKEN')
-            env_base_url = os.environ.get('ANTHROPIC_BASE_URL')
-
-            if env_api_key and provider_name == 'qwen':
-                api_key = env_api_key
-            if env_base_url and provider_name == 'qwen':
-                base_url = env_base_url.rstrip('/')
 
             # 根据 API 格式构建请求
             if api_format == self.API_FORMAT_ANTHROPIC:
@@ -233,6 +225,7 @@ class UniversalAIAnalyzer:
 
                 return {
                     'success': True,
+                    'root_cause': parsed.get('root_cause', ''),
                     'analysis': parsed.get('analysis'),
                     'suggestions': parsed.get('suggestions', []),
                     'solution': parsed.get('solution')
@@ -304,25 +297,42 @@ class UniversalAIAnalyzer:
 请分析上述信息并按以下JSON格式返回（只返回JSON，不要有其他内容）：
 ```json
 {
-  "analysis": "问题分析：简要描述失败的根本原因",
+  "root_cause": "🎯 根本原因：一句话总结失败的核心原因（不超过50字）",
+  "analysis": "📊 详细分析：\\n1. 错误类型\\n2. 触发条件\\n3. 影响范围\\n4. 相关代码逻辑",
   "suggestions": [
-    "建议1：具体的修改步骤",
-    "建议2：验证方法",
-    "建议3：预防措施"
+    "✅ 建议一：具体的修改步骤",
+    "✅ 建议二：验证方法",
+    "✅ 建议三：预防措施"
   ],
   "solution": {
-    "problem_description": "问题描述",
-    "error_type": "错误类型",
-    "fix_strategy": "修复策略",
-    "code_example": "代码示例（如果有）"
+    "problem_description": "详细问题描述",
+    "error_type": "错误类型分类",
+    "fix_strategy": "修复策略说明",
+    "code_example": "代码示例（Java格式）"
   }
 }
 ```
 
-要求：
-1. 分析要准确、具体
-2. 建议要可操作、实用
-3. 代码示例要简洁明了（使用Java）
+分析要求（适用于所有类型报错）：
+1. **root_cause必须以🎯开头**，一句话精准定位核心问题：
+   - 配置问题："配置项xxx缺失/错误/不匹配"
+   - 权限问题："缺少xxx权限导致操作失败"
+   - 依赖问题："xxx依赖缺失/版本不兼容"
+   - 超时问题："xxx操作超时（超过N秒）"
+   - 断言失败："期望值xxx与实际值yyy不匹配"
+   - 空指针/异常："调用xxx方法时抛出异常"
+
+2. **analysis必须以📊开头**，4个维度详细分析：
+   - 错误类型：明确异常类型（AssertionError/NullPointerException/TimeoutException等）
+   - 触发条件：什么场景/输入/状态下触发
+   - 影响范围：影响哪些模块/测试/功能
+   - 相关代码逻辑：涉及的关键代码/配置/API调用
+
+3. **suggestions必须以✅开头**，每条建议：
+   - 具体可操作（避免"检查相关配置"这种模糊说法）
+   - 针对根本原因（不是绕过问题）
+   - 优先级排序（先解决根本问题，再考虑workaround）
+
 4. 只返回JSON格式，不要有markdown标记或其他文字
 """
         return prompt
@@ -346,8 +356,28 @@ class UniversalAIAnalyzer:
 
             if start >= 0 and end > start:
                 json_str = text[start:end]
-                return json.loads(json_str)
+                try:
+                    parsed = json.loads(json_str)
+
+                    # 确保emoji前缀
+                    if 'root_cause' in parsed and not parsed['root_cause'].startswith('🎯'):
+                        parsed['root_cause'] = f"🎯 {parsed['root_cause']}"
+
+                    if 'analysis' in parsed and not parsed['analysis'].startswith('📊'):
+                        parsed['analysis'] = f"📊 {parsed['analysis']}"
+
+                    if 'suggestions' in parsed:
+                        parsed['suggestions'] = [
+                            f"✅ {s}" if not s.startswith('✅') else s
+                            for s in parsed['suggestions']
+                        ]
+
+                    return parsed
+                except json.JSONDecodeError as e:
+                    logger.warning(f"JSON解析失败: {str(e)}，回退到文本解析")
+                    return self._parse_text_response(response_text)
             else:
+                logger.warning("未找到JSON格式，回退到文本解析")
                 return self._parse_text_response(response_text)
 
         except json.JSONDecodeError:
@@ -361,17 +391,27 @@ class UniversalAIAnalyzer:
 
         for line in lines:
             line = line.strip()
+            if not line:
+                continue
             if '分析' in line or '问题' in line:
                 continue
             elif line.startswith('-') or line.startswith('*') or line.startswith('•'):
                 suggestions.append(line.lstrip('-*•').strip())
+            elif line.startswith('建议') or 'suggest' in line.lower():
+                suggestions.append(line)
             elif line:
                 if not suggestions:
                     analysis.append(line)
                 else:
-                    suggestions.append(line)
+                    # 如果已经开始收集建议，继续添加
+                    if len(suggestions) > 0 or '建议' in line:
+                        suggestions.append(line)
+
+        # 从分析文本中提取根本原因（第一行）
+        root_cause = f"🎯 {analysis[0]}" if analysis else "🎯 测试失败，需要进一步分析"
 
         return {
+            'root_cause': root_cause,
             'analysis': '\n'.join(analysis) if analysis else '无法解析详细分析',
             'suggestions': suggestions if suggestions else ['查看源码和错误信息进行排查'],
             'solution': {

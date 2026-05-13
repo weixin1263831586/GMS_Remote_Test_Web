@@ -3334,6 +3334,9 @@ function closeModal(modalId) {
     if (modal) {
         // 对于动态创建的模态框（直接移除）
         if (id.startsWith('source-analysis-modal-') || id.startsWith('ai-analysis-modal-')) {
+            // 先从 ModalManager 移除（清理 Esc 监听器）
+            ModalManager.close(id);
+
             modal.style.display = 'none';
             // 延迟删除，确保动画完成
             setTimeout(() => {
@@ -4782,13 +4785,13 @@ function displayReportAnalysis(data) {
                         <button onclick="aiAnalyzeFailureReport('${testCaseName}', \`${reasonText.substring(0, 500).replace(/`/g, '\\`')}\`)" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);">🤖 报错分析</button>
                     </div>
 
-                    <div style="margin-bottom: 8px; padding-right: 140px;">
+                    <div style="margin-bottom: 8px; padding-right: 240px;">
                         <div style="font-size: 12px; color: var(--text-secondary);">测试模块: <span style="font-weight: 600; color: var(--text-primary);">${moduleName}</span></div>
                     </div>
-                    <div style="margin-bottom: 8px; padding-right: 150px;">
+                    <div style="margin-bottom: 8px; padding-right: 240px;">
                         <div style="font-size: 12px; color: var(--text-secondary);">测试用例: <span style="font-family: 'Courier New', monospace; color: var(--primary-color); word-break: break-all;">${testCaseName}</span></div>
                     </div>
-                    <div style="padding-right: 150px;">
+                    <div style="padding-right: 240px;">
                         <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">失败详情</div>
                         <div class="failure-reason" id="failure-reason-${idx}" style="font-size: 11px; font-family: 'Courier New', monospace; white-space: pre-wrap; word-wrap: break-word;">${formattedStackTrace}</div>
                     </div>
@@ -4802,37 +4805,373 @@ function displayReportAnalysis(data) {
     }
 }
 
-// AI分析失败用例
-async function aiAnalyzeFailureReport(testName, errorMessage) {
-    const modalId = 'ai-analysis-modal-' + Date.now();
+// 提取类名的辅助函数
+function extractClassNames(testName, errorMessage) {
+    const classNames = new Set();
+
+    // 1. 从测试名称中提取类名（格式：com.android.test.ClassName#methodName）
+    const testClassMatch = testName.match(/^([\w.]+)#/);
+    if (testClassMatch) {
+        classNames.add(testClassMatch[1]);
+    }
+
+    // 2. 从错误消息中提取实际的测试类（格式：ClassName#methodName）
+    const errorTestMatch = errorMessage.match(/([\w.]+Test)#(\w+)/);
+    if (errorTestMatch) {
+        const actualTestClass = errorTestMatch[1];
+        classNames.add(actualTestClass);
+        console.log(`[源码搜索] 从错误消息提取实际测试类: ${actualTestClass}`);
+    }
+
+    // 3. 从堆栈跟踪中提取实际失败的类（优先级最高）
+    // 匹配格式: at com.example.ClassName.method(ClassName.kt:294)
+    const stackTraceFilePattern = /at\s+[\w.$]+\.run\(([\w.]+)\.(kt|java):(\d+)\)/;
+    const stackFileMatch = errorMessage.match(stackTraceFilePattern);
+    if (stackFileMatch) {
+        const actualFile = stackFileMatch[1]; // 如: AppFunctionManagerTest
+        const extension = stackFileMatch[2];  // kt 或 java
+        const lineNumber = stackFileMatch[3]; // 行号
+
+        // 从文件名提取类名（去掉内部类后缀）
+        const actualClass = actualFile.split('$')[0];
+        classNames.add(actualClass);
+        console.log(`[源码搜索] 从堆栈跟踪提取实际失败位置: ${actualClass}.${extension}:${lineNumber}`);
+    }
+
+    // 4. 从堆栈跟踪中提取所有相关类（at com.example.Class.method）
+    const stackTracePattern = /at\s+([\w.]+)\./g;
+    let match;
+    while ((match = stackTracePattern.exec(errorMessage)) !== null) {
+        const className = match[1];
+        // 过滤掉常见的Java/Android框架类
+        if (!className.startsWith('java.') &&
+            !className.startsWith('javax.') &&
+            !className.startsWith('android.') &&
+            !className.startsWith('androidx.') &&
+            !className.startsWith('com.google.')) {
+            // 去掉内部类后缀（$1$2等）
+            const cleanClassName = className.split('$')[0];
+            classNames.add(cleanClassName);
+        }
+    }
+
+    // 5. 从错误消息中提取其他类名（Java类名模式）
+    const javaClassPattern = /(?:\s|^|at\s)([a-z][\w.]*\.[A-Z][\w\$]*)/g;
+    while ((match = javaClassPattern.exec(errorMessage)) !== null) {
+        const className = match[1];
+        if (!className.startsWith('java.') &&
+            !className.startsWith('javax.') &&
+            !className.startsWith('android.') &&
+            !className.startsWith('androidx.') &&
+            !className.startsWith('com.google.')) {
+            classNames.add(className);
+        }
+    }
+
+    const result = Array.from(classNames).slice(0, 5);
+    console.log(`[源码搜索] 最终提取的类名列表: ${result.join(', ')}`);
+    return result;
+}
+
+// 从堆栈跟踪中提取实际的失败位置信息
+function extractFailureLocation(errorMessage) {
+    // 匹配格式: at com.example.ClassName.method(ClassName.kt:294)
+    // 或者: at com.example.ClassName.method(Class.java:100)
+    const patterns = [
+        /at\s+[\w.$]+\.run\(([\w.]+)\.(kt|java):(\d+)\)/,  // .kt:294 或 .java:100
+        /at\s+[\w.$]+\.(\w+)\(([\w.]+)\.(kt|java):(\d+)\)/,  // 备用模式
+    ];
+
+    for (const pattern of patterns) {
+        const match = errorMessage.match(pattern);
+        if (match) {
+            // 根据匹配组提取信息
+            let fileName, fileType, lineNumber;
+
+            if (match.length === 4) {
+                // 第一个模式: match[1]=文件名, match[2]=扩展名, match[3]=行号
+                fileName = match[1];
+                fileType = match[2];
+                lineNumber = match[3];
+            } else if (match.length === 5) {
+                // 第二个模式: match[2]=文件名, match[3]=扩展名, match[4]=行号
+                fileName = match[2];
+                fileType = match[3];
+                lineNumber = match[4];
+            }
+
+            if (fileName && fileType && lineNumber) {
+                const location = {
+                    file_name: fileName,
+                    file_type: fileType,  // 'kt' 或 'java'
+                    line_number: lineNumber,
+                    extension: fileType  // 兼容字段
+                };
+
+                console.log(`[源码搜索] 📍 从堆栈跟踪提取失败位置:`, location);
+                return location;
+            }
+        }
+    }
+
+    console.log(`[源码搜索] ⚠️ 堆栈跟踪中未找到文件位置信息`);
+    return null;
+}
+
+// 从错误信息中提取搜索关键词（优化版）
+function extractKeywordsFromError(testCaseName, errorMessage) {
+    console.log(`[源码分析] 开始提取关键词，测试用例: ${testCaseName}`);
+
+    // 1. 优先从测试用例名中提取核心功能名
+    const functionMatch = testCaseName.match(/test(?:Atom|Statsd)_([A-Z][a-zA-Z0-9_]*)/);
+    if (functionMatch) {
+        const functionName = functionMatch[1];
+        console.log(`[源码分析] 提取到功能名: ${functionName}`);
+        return functionName;
+    }
+
+    // 2. 从测试用例名中提取类名
+    const classMatch = testCaseName.match(/([A-Z][a-zA-Z0-9_]*)Test/);
+    if (classMatch) {
+        const className = classMatch[1];
+        console.log(`[源码分析] 提取到类名: ${className}`);
+        return className;
+    }
+
+    // 3. 从堆栈信息中提取失败的类名（排除工具类）
+    const stackLines = errorMessage.split('\n');
+    for (const line of stackLines) {
+        const stackMatch = line.match(/at\s+([\w.$]+)\(([\w.]+):(\d+)\)/);
+        if (stackMatch) {
+            const fullClassName = stackMatch[1];
+            const fileName = stackMatch[2];
+
+            if (!fileName.includes('TestUtil') &&
+                !fileName.includes('TestRunner') &&
+                !fileName.includes('Assert') &&
+                !fileName.includes('Mock')) {
+
+                const classNameParts = fullClassName.split('.');
+                const mainClassName = classNameParts[classNameParts.length - 1];
+                const cleanClassName = mainClassName.split('$')[0];
+
+                if (cleanClassName.length > 3 &&
+                    !cleanClassName.includes('Util') &&
+                    !cleanClassName.includes('Helper')) {
+
+                    console.log(`[源码分析] 从堆栈提取类名: ${cleanClassName}`);
+                    return cleanClassName;
+                }
+            }
+        }
+    }
+
+    // 4. 默认返回测试用例名的前部分
+    const parts = testCaseName.split(/[.#_]/);
+    const fallback = parts[parts.length - 1] || testCaseName;
+    console.log(`[源码分析] 使用默认关键词: ${fallback}`);
+    return fallback;
+}
+
+// 源码分析失败用例（根据堆栈信息定位）
+async function analyzeFailureWithSource(testName, errorMessage) {
+    const modalId = 'source-analysis-modal-' + Date.now();
     const modal = document.createElement('div');
     modal.id = modalId;
-    modal.className = 'modal show';
-    modal.style.cssText = 'display: flex; z-index: 10000;';
+    modal.className = 'modal';
+    modal.style.cssText = 'z-index: 10000;';
 
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 700px; max-height: 80vh; overflow-y: auto;">
+        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
             <div class="modal-header">
-                <span class="modal-title">🤖 报错分析中...</span>
-                <span class="modal-close" onclick="closeModal('${modalId}')">&times;</span>
+                <span class="modal-title">🔍 源码分析 - 正在定位失败位置...</span>
+                <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
             </div>
             <div class="modal-body">
                 <div style="text-align: center; padding: 40px;">
-                    <div style="font-size: 48px; margin-bottom: 20px;">🤖</div>
-                    <div style="color: var(--text-secondary);">正在分析失败原因，请稍候...</div>
+                    <div style="font-size: 48px; margin-bottom: 20px;">🔍</div>
+                    <div style="color: var(--text-secondary); margin-bottom: 12px;">正在分析堆栈信息...</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">自动提取文件位置并搜索源码</div>
                 </div>
             </div>
         </div>
     `;
 
-    // 注册到 ModalManager
-    ModalManager.registerDynamic(modal);
+    document.body.appendChild(modal);
+    ModalManager.open(modalId);
 
     try {
+        // 从堆栈跟踪提取失败位置
+        const failureLocation = extractFailureLocation(errorMessage);
+
+        // 提取搜索关键词
+        const classNames = extractClassNames(testName, errorMessage);
+        const keywords = classNames.length > 0 ? classNames[0] : extractKeywordsFromError(testName, errorMessage);
+
+        // 构建快速访问卡片（等后端返回后再构建，使用实际路径）
+        let quickLinksHtml = '';
+
+        // 调用 AI 分析获取源码搜索结果
         const formData = createFormData(AnalysisMode.AI, {
             test_name: testName,
             error_message: errorMessage,
-            stack_trace: errorMessage
+            stack_trace: errorMessage,
+            class_names: JSON.stringify(classNames),
+            failure_location: failureLocation ? JSON.stringify(failureLocation) : '',
+            include_source_search: 'true'
+        });
+
+        const response = await fetch('/api/reports/analyze', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            const errorDetail = result.detail || result.error || '未知错误';
+            modal.querySelector('.modal-title').textContent = '❌ 分析失败';
+            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${errorDetail}</div>`;
+            return;
+        }
+
+        modal.querySelector('.modal-title').textContent = '🔍 源码分析结果';
+
+        if (result.success) {
+            const data = result.data;
+            let content = '';
+
+            // 如果有失败位置，构建快速访问卡片（使用后端返回的实际路径）
+            if (failureLocation && data.source_search_results && data.source_search_results.length > 0) {
+                // 找到匹配失败位置的搜索结果
+                const exactMatch = data.source_search_results.find(item =>
+                    item.path.includes(failureLocation.file_name) &&
+                    item.file_type === failureLocation.file_type
+                );
+
+                if (exactMatch) {
+                    const openGrokUrl = `http://10.10.10.203:8080/source/xref/Android16/${exactMatch.path}#${exactMatch.line}`;
+                    content += `
+                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                            <div style="color: white; font-size: 14px; font-weight: 600; margin-bottom: 12px;">🎯 快速访问 - 失败位置</div>
+                            <div style="background: rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 12px; margin-bottom: 10px;">
+                                <div style="color: rgba(255, 255, 255, 0.8); font-size: 11px; margin-bottom: 4px;">📁 失败位置</div>
+                                <div style="color: white; font-family: 'Courier New', monospace; font-size: 13px; margin-bottom: 8px;">
+                                    ${exactMatch.path.split('/').pop()} :${failureLocation.line_number}
+                                </div>
+                                <a href="${openGrokUrl}" target="_blank" style="display: inline-block; padding: 6px 12px; background: white; color: #667eea; text-decoration: none; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                                    🚀 直接跳转到源码 ↗
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            // 显示源码搜索结果
+            if (data.source_search_results && data.source_search_results.length > 0) {
+                content += '<div style="margin-top: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px; border-left: 3px solid #9c27b0;">';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: #9c27b0;">🔍 AI 智能源码搜索</div>';
+                content += '<div style="max-height: 400px; overflow-y: auto;">';
+
+                data.source_search_results.forEach(item => {
+                    const fileIcon = item.file_type === 'kt' ? '🔷' : (item.file_type === 'java' ? '☕' : '📄');
+                    const itemUrl = `http://10.10.10.203:8080/source/xref/Android16/${item.path}#${item.line}`;
+                    content += `
+                        <div style="background: white; border-radius: 4px; padding: 10px; margin-bottom: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span style="font-size: 14px;">${fileIcon}</span>
+                                    <span style="font-family: monospace; font-size: 12px; color: #1976d2; font-weight: 600;">
+                                        ${item.type}
+                                    </span>
+                                </div>
+                                <a href="${itemUrl}" target="_blank" style="font-size: 11px; color: #667eea; text-decoration: none; white-space: nowrap; font-weight: 600;">
+                                    在 OpenGrok 中查看 →
+                                </a>
+                            </div>
+                            <div style="font-family: monospace; font-size: 11px; color: #616161; margin-bottom: 4px;">
+                                📁 ${item.path}
+                            </div>
+                            <div style="font-family: monospace; font-size: 10px; color: #424242; background: #f5f5f5; padding: 6px; border-radius: 3px;">
+                                行 ${item.line || 'N/A'} ${item.project ? '· 项目：' + item.project : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                content += '</div></div>';
+            }
+
+            modal.querySelector('.modal-body').innerHTML = content || '<div style="padding: 20px; text-align: center;">未找到源码搜索结果</div>';
+        }
+    } catch (error) {
+        modal.querySelector('.modal-title').textContent = '❌ 分析失败';
+        modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${error.message}</div>`;
+    }
+}
+
+// AI分析失败用例（自动搜索源码）
+async function aiAnalyzeFailureReport(testName, errorMessage) {
+    const modalId = 'ai-analysis-modal-' + Date.now();
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';  // 不直接添加 show 类
+    modal.style.cssText = 'z-index: 10000;';
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 800px; max-height: 85vh; overflow-y: auto;">
+            <div class="modal-header">
+                <span class="modal-title">🤖 正在分析报错并搜索源码...</span>
+                <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; padding: 40px;">
+                    <div style="font-size: 48px; margin-bottom: 20px;">🤖</div>
+                    <div style="color: var(--text-secondary); margin-bottom: 12px;">正在分析失败原因，请稍候...</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">自动提取类名并搜索相关源码</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // 添加到 DOM
+    document.body.appendChild(modal);
+
+    // 使用 ModalManager 打开（这样 Esc 键才会生效）
+    ModalManager.open(modalId);
+
+    try {
+        // 自动提取类名
+        const classNames = extractClassNames(testName, errorMessage);
+
+        // 从堆栈跟踪提取失败位置
+        const failureLocation = extractFailureLocation(errorMessage);
+
+        // 更新模态框显示正在搜索源码
+        // 将类名列表格式化为多行显示
+        const classNamesList = classNames.map((name, index) => {
+            const prefix = index === 0 ? '' : '├ ';
+            return `${prefix}${name}`;
+        }).join('<br>');
+
+        modal.querySelector('.modal-body').innerHTML = `
+            <div style="text-align: center; padding: 40px;">
+                <div style="font-size: 30px; margin-bottom: 20px;">🔍</div>
+                <div style="color: var(--text-secondary); margin-bottom: 12px;">正在搜索相关源码...</div>
+                <div style="font-size: 16px; color: var(--text-secondary); margin-bottom: 8px;">找到 ${classNames.length} 个相关类</div>
+                <div style="font-size: 16px; font-family: 'Courier New', monospace; color: var(--primary-color); text-align: left; display: inline-block; max-width: 90%;">${classNamesList}</div>
+                ${failureLocation ? `<div style="font-size: 16px; color: var(--success-color); margin-top: 8px;">📍 失败位置: ${failureLocation.file_name}.${failureLocation.file_type}:${failureLocation.line_number}</div>` : ''}
+            </div>
+        `;
+
+        const formData = createFormData(AnalysisMode.AI, {
+            test_name: testName,
+            error_message: errorMessage,
+            stack_trace: errorMessage,
+            class_names: JSON.stringify(classNames),
+            failure_location: failureLocation ? JSON.stringify(failureLocation) : '',
+            include_source_search: 'true'  // 启用源码搜索
         });
 
         const response = await fetch('/api/reports/analyze', {
@@ -4927,6 +5266,40 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                 content += '</div></div>';
             }
 
+            // OpenGrok源码搜索结果 (rk_codesearch)
+            if (data.source_search_results && data.source_search_results.length > 0) {
+                content += '<div style="margin-top: 16px; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 6px; border-left: 3px solid #9c27b0;">';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: white;">🔍 OpenGrok源码搜索</div>';
+                content += '<div style="max-height: 400px; overflow-y: auto;">';
+
+                data.source_search_results.forEach(item => {
+                    // 构建 OpenGrok URL（添加 Android16/ 前缀）
+                    const itemUrl = item.url || `http://10.10.10.203:8080/source/xref/Android16/${item.path}#${item.line}`;
+                    // 使用 display_path（如果有），否则使用 path
+                    const displayPath = item.display_path || item.path;
+                    content += `
+                        <div style="background: white; border-radius: 4px; padding: 10px; margin-bottom: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <div style="font-family: monospace; font-size: 12px; color: #1976d2; font-weight: 600;">
+                                    ${item.type}
+                                </div>
+                                ${itemUrl ? `<a href="${itemUrl}" target="_blank" style="font-size: 11px; color: #667eea; text-decoration: none; white-space: nowrap; font-weight: 600;">
+                                    在 OpenGrok 中查看 →
+                                </a>` : ''}
+                            </div>
+                            <div style="font-family: monospace; font-size: 11px; color: #616161; margin-bottom: 4px;">
+                                📁 ${displayPath}
+                            </div>
+                            <div style="font-family: monospace; font-size: 10px; color: #424242; background: #f5f5f5; padding: 6px; border-radius: 3px; overflow-x: auto;">
+                                行 ${item.line} ${item.project ? '· 项目: ' + item.project : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                content += '</div></div>';
+            }
+
 
             // AI标记
             if (data.ai_enabled === false) {
@@ -4960,10 +5333,16 @@ async function aiAnalyzeFailure(testName, errorMessage, module = '') {
         // 显示加载提示
         showToast('🤖 报错分析...', 'info');
 
+        // 提取类名和堆栈信息
+        const classNames = extractClassNames(testName, errorMessage);
+        const stackTrace = errorMessage; // errorMessage 包含完整的错误信息
+
         const formData = createFormData(AnalysisMode.AI, {
             test_name: testName,
             error_message: errorMessage,
-            module: module
+            stack_trace: stackTrace,
+            module: module,
+            class_names: JSON.stringify(classNames)
         });
 
         const response = await fetch('/api/reports/analyze', {
@@ -5152,146 +5531,6 @@ function copyAIAnalysis(modalId) {
     });
 }
 
-// ==================== OpenGrok源码分析 ====================
-
-/**
- * 打开源码分析弹框
- */
-function openSourceAnalysisModal() {
-    const modal = document.getElementById('source-analysis-modal');
-    if (modal) {
-        modal.classList.add('show');
-        // 清空之前的搜索结果
-        document.getElementById('opengrok-results').style.display = 'none';
-        document.getElementById('opengrok-results-list').innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">请输入关键词进行搜索</div>';
-        ModalManager.open('source-analysis-modal');
-    }
-}
-
-/**
- * 关闭源码分析弹框
- */
-function closeSourceAnalysisModal() {
-    const modal = document.getElementById('source-analysis-modal');
-    if (modal) {
-        modal.classList.remove('show');
-    }
-    ModalManager.close('source-analysis-modal');
-}
-
-/**
- * 执行源码搜索
- */
-async function searchSourceCode() {
-    const query = document.getElementById('opengrok-query').value.trim();
-    const searchField = document.getElementById('opengrok-search-field').value;
-    const project = document.getElementById('opengrok-project').value;
-    const fileType = document.getElementById('opengrok-type').value;
-    const resultsDiv = document.getElementById('opengrok-results');
-    const resultsList = document.getElementById('opengrok-results-list');
-
-    if (!query) {
-        showToast('请输入搜索关键词', 'warning');
-        return;
-    }
-
-    // 显示加载状态
-    resultsDiv.style.display = 'block';
-    resultsList.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">搜索中...</div>';
-
-    try {
-        const response = await fetch('/api/opengrok/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                query: query,
-                search_field: searchField,
-                project: project,
-                type: fileType,
-                limit: 15
-            })
-        });
-
-        const data = await response.json();
-
-        if (data.success && data.results && data.results.length > 0) {
-            // 渲染搜索结果
-            resultsList.innerHTML = data.results.map(item => {
-                const opengrokUrl = `http://10.10.10.203:8080/source/xref/${item.file}#${item.line}`;
-                return `
-                    <div style="background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; margin-bottom: 10px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                            <div style="font-family: monospace; font-size: 11px; color: #1976d2; font-weight: 600;">
-                                ${item.file}
-                            </div>
-                            <a href="${opengrokUrl}" target="_blank" style="font-size: 10px; color: #9c27b0; text-decoration: none; white-space: nowrap;">
-                                查看源码 ↗
-                            </a>
-                        </div>
-                        <div style="font-family: monospace; font-size: 10px; color: var(--text-secondary); margin-bottom: 5px;">
-                            Line ${item.line}
-                        </div>
-                        <div style="font-family: monospace; font-size: 11px; color: #424242; background: white; padding: 8px; border-radius: 3px; overflow-x: auto; white-space: pre-wrap;">
-                            ${escapeHtml(item.context)}
-                        </div>
-                    </div>
-                `;
-            }).join('');
-
-            showToast(`找到 ${data.count} 条结果`, 'success');
-        } else {
-            resultsList.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">未找到匹配的结果</div>';
-            showToast('未找到匹配的结果', 'info');
-        }
-    } catch (error) {
-        console.error('[OpenGrok] Search error:', error);
-        resultsList.innerHTML = '<div style="text-align: center; color: var(--danger-color); padding: 20px;">搜索失败: ' + error.message + '</div>';
-        showToast('搜索失败: ' + error.message, 'error');
-    }
-}
-
-/**
- * 在OpenGrok网站打开搜索结果
- */
-function openOpenGrokLink() {
-    const query = document.getElementById('opengrok-query').value.trim();
-    const searchField = document.getElementById('opengrok-search-field').value;
-    const project = document.getElementById('opengrok-project').value;
-
-    if (!query) {
-        showToast('请输入搜索关键词', 'warning');
-        return;
-    }
-
-    // 构建OpenGrok URL
-    let url = 'http://10.10.10.203:8080/source/search?';
-
-    const params = new URLSearchParams();
-    params.append('q', query);
-
-    // 根据搜索字段设置参数
-    if (searchField === 'full') {
-        params.append('full', query);
-    } else if (searchField === 'def') {
-        params.append('defs', query);
-    } else if (searchField === 'symbol') {
-        params.append('refs', query);
-    } else if (searchField === 'path') {
-        params.append('path', query);
-    }
-
-    // 添加项目过滤
-    if (project) {
-        params.append('project', project);
-    }
-
-    url += params.toString();
-
-    // 在新标签页打开
-    window.open(url, '_blank');
-    showToast('已在OpenGrok网站打开搜索', 'success');
-}
-
 // HTML实体映射（模块级常量，避免重复创建）
 const HTML_ENTITIES = Object.freeze({
     '&': '&amp;',
@@ -5326,7 +5565,7 @@ window.deleteReport = deleteReport;
 window.downloadReport = downloadReport;
 window.retryReportWithSuite = retryReportWithSuite;
 window.analyzeReport = analyzeReport;
-window.openOpenGrokLink = openOpenGrokLink;
+window.loadTestReports = loadTestReports;
 window.showSshdInstallGuide = showSshdInstallGuide;
 window.closeSshdInstallGuide = closeSshdInstallGuide;
 window.autoInstallUsbipd = autoInstallUsbipd;

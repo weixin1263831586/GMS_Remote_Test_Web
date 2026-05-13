@@ -1,0 +1,60 @@
+{
+  "command_id": "rk_codesearch",
+  "description": "Code search plugin for project listing and source search with smart ranking and definition-first results",
+  "readme": "README.md",
+  "skill_md": "SKILL.md",
+  "version": "1.1.0",
+  "handler_template": "python3 {__plugin_dir__}/run.py {action} {?keywords:--keywords {keywords}} {?keyword_mode:--keyword-mode {keyword_mode}} {?search_field:--search-field {search_field}} {?project:--project {project}} {?type:--type {type}} {?limit:--limit {limit}}",
+  "parameters_schema": {
+    "action": {
+      "type": "string",
+      "required": true,
+      "description": "Action: list_projects, search"
+    },
+    "keywords": {
+      "type": "string",
+      "required": false,
+      "description": "Comma-separated search tokens for search, e.g. ProcessUtils,getPidsByName. Tokens must not contain spaces."
+    },
+    "keyword_mode": {
+      "type": "string",
+      "required": false,
+      "description": "How to join keywords for search: and (default) or or."
+    },
+    "search_field": {
+      "type": "string",
+      "required": false,
+      "description": "Search field for action=search: smart (default), full, path, def, symbol"
+    },
+    "project": {
+      "type": "string",
+      "required": false,
+      "description": "Optional project filter. For multiple projects, separate with commas."
+    },
+    "type": {
+      "type": "string",
+      "required": false,
+      "description": "Optional file type filter for search. Supported values: c, cxx, java, kotlin, python, sh, golang, rust."
+    },
+    "limit": {
+      "type": "integer",
+      "required": false,
+      "description": "Maximum number of file results to print for action=search. Defaults to config.default_limit (15 if unset)."
+    }
+  },
+  "timeout_sec": 120,
+  "requires_env": false,
+  "enabled": true,
+  "required_configs": [
+    {
+      "file": "config/config.json",
+      "key": "base_url",
+      "description": "Code search service base URL"
+    },
+    {
+      "file": "config/config.json",
+      "key": "token",
+      "description": "Code search service bearer token"
+    }
+  ]
+}

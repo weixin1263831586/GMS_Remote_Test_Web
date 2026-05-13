@@ -4551,11 +4551,28 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
     if class_names is None:
         class_names = []
 
-    # 使用OpenGrok搜索相关源码
-    opengrok_results = []
+    # 从堆栈跟踪中提取失败位置（使用可复用工具）
+    from core.common_utils import StackTraceUtils
+    failure_location = StackTraceUtils.extract_failure_location(stack_trace)
+    if failure_location:
+        logger.info(f"从堆栈提取失败位置: {failure_location['file_name']}.{failure_location['file_type']}:{failure_location['line_number']}")
+
+    # 使用 rk_codesearch 搜索相关源码（优先使用失败位置）
+    source_search_results = []
     if class_names:
-        opengrok_results = search_opengrok_sources(class_names[:3])  # 限制搜索前3个类名
-        logger.info(f"OpenGrok搜索到 {len(opengrok_results)} 条源码结果")
+        from core.report_analyzer import analyzer
+
+        # 如果有精确的失败位置，只搜索一次避免重复
+        if failure_location:
+            results = analyzer.search_source_code(failure_location['file_name'], failure_location=failure_location, max_results=1)
+            source_search_results.extend(results)
+        else:
+            # 没有失败位置时，搜索前3个类名
+            for class_name in class_names[:3]:
+                results = analyzer.search_source_code(class_name, max_results=1)
+                source_search_results.extend(results)
+
+        logger.info(f"rk_codesearch 搜索到 {len(source_search_results)} 条源码结果")
 
     # 优先使用通用AI分析器
     try:
@@ -4573,7 +4590,7 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
             method_name=failure_info.get('method_name'),
             error_message=error_message,
             stack_trace=stack_trace,
-            auto_fetch_source=True  # 启用自动源码获取
+            auto_fetch_source=False  # 禁用AI内部源码获取，使用rk_codesearch结果
         )
 
         if result['success']:
@@ -4584,28 +4601,21 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
             ai_config = config.get('ai_models', {}).get('providers', {}).get(provider_name, {})
             provider_display = ai_config.get('name', f'{provider_name.upper()} AI')
 
+            # 简化响应结构，直接使用AI返回的emoji格式
             response = {
+                'root_cause': result.get('root_cause', ''),
                 'analysis': result.get('analysis', ''),
                 'suggestions': result.get('suggestions', []),
-                'root_cause': result.get('solution', {}).get('problem_description', ''),
-                'related_docs': [],
                 'ai_enabled': True,
                 'ai_model': provider_display,
-                'ai_provider': provider_name
+                'ai_provider': provider_name,
+                'stack_trace': stack_trace
             }
 
-            # 添加源码信息
-            if result.get('source_info'):
-                source_info = result['source_info']
-                response['source_code_fetched'] = True
-                response['source_url'] = source_info.get('source_url', '')
-                response['source_file_path'] = source_info.get('file_path', '')
-                logger.info(f"分析包含源码: {source_info.get('file_path', 'unknown')}")
-
-            # 添加OpenGrok搜索结果
-            if opengrok_results:
-                response['opengrok_results'] = opengrok_results
-                logger.info(f"添加了 {len(opengrok_results)} 条OpenGrok搜索结果")
+            # 添加源码搜索结果（供前端显示OpenGrok链接）
+            if source_search_results:
+                response['source_search_results'] = source_search_results
+                logger.info(f"添加了 {len(source_search_results)} 条源码搜索结果")
 
             return response
         else:
