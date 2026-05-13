@@ -154,12 +154,11 @@ class TestReportManager:
                 return None
 
             analysis = {
+                'report_name': report_timestamp,  # 显示报告时间戳
                 'summary': result.get('summary', {}),
-                'device_info': {
+                'details': {
                     'device': result.get('details', {}).get('device', ''),
-                    'android_version': result.get('details', {}).get('android_version', '')
-                },
-                'test_info': {
+                    'android_version': result.get('details', {}).get('android_version', ''),
                     'start_time': result.get('details', {}).get('start_time', ''),
                     'test_type': result.get('details', {}).get('test_type', '')
                 },
