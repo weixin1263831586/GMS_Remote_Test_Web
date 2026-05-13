@@ -824,57 +824,118 @@ class ReportAnalyzer:
             return self._report_to_dict(report)
         return None
 
-    def search_source_code(self, class_name: str, method_name: str = None, max_results: int = 5) -> List[Dict[str, str]]:
+    def search_source_code(self, class_name: str, failure_location: dict = None, max_results: int = 5) -> List[Dict[str, str]]:
         """
-        使用 rk_codesearch 搜索源码
+        使用 rk_codesearch 搜索源码（优先使用失败位置信息）
 
         Args:
             class_name: 类名 (如 com.android.cts.permission.PermissionTest)
-            method_name: 方法名 (可选)
+            failure_location: 从堆栈提取的失败位置 {file_name, file_type, line_number}
             max_results: 最大返回结果数
 
         Returns:
-            List[Dict]: 搜索结果列表，每个包含 {project, path, line, type}
+            List[Dict]: 搜索结果列表，每个包含 {project, path, line, type, file_type}
         """
         import subprocess
-        import os
 
         codesearch_script = '/home/hcq/GMS_Remote_Test/web_app/skills/rk_codesearch/run.py'
 
         try:
-            # 构建搜索关键词
-            keywords = []
+            # 如果有精确失败位置，优先使用
+            if failure_location:
+                file_name = failure_location.get('file_name', '')
+                file_type = failure_location.get('file_type', '')
+                line_number = failure_location.get('line_number', '')
 
-            # 提取简单类名
+                # 直接使用文件名搜索（更精确）
+                simple_name = file_name.split('$')[0]  # 去除内部类后缀
+
+                cmd = [
+                    'python3',
+                    codesearch_script,
+                    'search',
+                    '--keywords', simple_name,
+                    '--search-field', 'path',
+                    '--limit', '10'
+                ]
+
+                try:
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        cwd='/home/hcq/GMS_Remote_Test/web_app/skills/rk_codesearch'
+                    )
+                except subprocess.TimeoutExpired:
+                    logger.warning("代码搜索超时（30秒）")
+                    return []
+                except Exception as e:
+                    logger.error(f"代码搜索异常: {e}")
+                    return []
+
+                if result.returncode != 0:
+                    return []
+
+                # 解析输出，找到匹配的文件
+                search_results = []
+                lines = result.stdout.strip().split('\n')
+
+                target_file = f"{simple_name}.{file_type}"
+
+                for i, line in enumerate(lines):
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    # 查找包含目标文件的路径
+                    if target_file in line or (simple_name in line and f".{file_type}" in line):
+                        # 提取项目信息
+                        project = ''
+                        for j in range(i + 1, min(len(lines), i + 3)):
+                            if lines[j].strip().startswith('project:'):
+                                project = lines[j].strip().split(':', 1)[1].strip()
+                                break
+
+                        search_results.append({
+                            'type': 'definition',
+                            'path': line.replace('[definition] ', '').strip() if line.startswith('[definition]') else line,
+                            'line': line_number,
+                            'file_type': file_type,
+                            'project': project,
+                            'is_exact_location': True
+                        })
+                        break
+
+                if search_results:
+                    return search_results[:max_results]
+
+            # 没有失败位置时，使用类名搜索定义
             simple_class_name = class_name.split('.')[-1]
-            keywords.append(simple_class_name)
 
-            # 如果有方法名，添加到搜索
-            if method_name:
-                keywords.append(method_name)
-
-            # 单关键词搜索更准确（多关键词是 AND 模式，要求同时出现）
-            search_keywords = keywords if len(keywords) == 1 else [simple_class_name]
-
-            # 构建命令
             cmd = [
                 'python3',
                 codesearch_script,
                 'search',
-                '--keywords', ','.join(search_keywords),
+                '--keywords', simple_class_name,
                 '--search-field', 'def',
-                '--type', 'java',
                 '--limit', str(max_results)
             ]
 
-            # 执行搜索
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd='/home/hcq/GMS_Remote_Test/web_app/skills/rk_codesearch'
-            )
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    cwd='/home/hcq/GMS_Remote_Test/web_app/skills/rk_codesearch'
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning("代码搜索超时（30秒）")
+                return []
+            except Exception as e:
+                logger.error(f"代码搜索异常: {e}")
+                return []
 
             if result.returncode != 0:
                 return []
@@ -890,31 +951,27 @@ class ReportAnalyzer:
                     i += 1
                     continue
 
-                # 解析结果类型和路径 (格式："[definition] path/to/file.java")
                 if line.startswith('[') and ']' in line:
                     bracket_content = line[1:line.index(']')]
                     rest_of_line = line[line.index(']')+1:].strip()
 
                     result_item = {
                         'type': bracket_content,
-                        'path': rest_of_line
+                        'path': rest_of_line,
+                        'file_type': 'kt' if rest_of_line.endswith('.kt') else 'java'
                     }
 
-                    # 向下查找 project 信息（格式："  project: Android16"，在结果行之后）
                     for j in range(i + 1, min(len(lines), i + 3)):
                         next_line = lines[j].strip()
                         if next_line.startswith('project:'):
                             result_item['project'] = next_line.split(':', 1)[1].strip()
                             break
                         elif next_line.startswith('['):
-                            # 遇到另一个结果，停止查找
                             break
 
-                    # 继续向下查找行号信息 (格式："  57: public class...")
                     for j in range(i + 1, min(len(lines), i + 4)):
                         next_line = lines[j].strip()
                         if next_line and not next_line.startswith('project:') and not next_line.startswith('['):
-                            # 尝试提取行号
                             if ':' in next_line:
                                 line_num_part = next_line.split(':')[0].strip()
                                 if line_num_part.isdigit():
@@ -925,18 +982,22 @@ class ReportAnalyzer:
 
                 i += 1
 
-            return search_results[:max_results]
+            # 去重：按路径去重
+            seen_paths = set()
+            unique_results = []
+            for item in search_results:
+                if item['path'] not in seen_paths:
+                    seen_paths.add(item['path'])
+                    unique_results.append(item)
+
+            return unique_results[:max_results]
 
         except subprocess.TimeoutExpired:
             logger.warning("代码搜索超时")
             return []
-        except FileNotFoundError:
-            logger.warning(f"代码搜索脚本不存在: {codesearch_script}")
-            return []
         except Exception as e:
-            logger.error(f"代码搜索异常: {e}")
+            logger.error(f"代码搜索异常：{e}")
             return []
-
     def _report_to_dict(self, report: TestReport) -> Dict:
         """将报告对象转换为字典（兼容旧格式）"""
         return {
