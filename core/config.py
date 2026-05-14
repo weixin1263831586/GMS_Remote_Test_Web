@@ -136,7 +136,6 @@ class ConfigManager:
         # 加载动态配置并合并
         dynamic_config = self._load_dynamic_config()
         if dynamic_config:
-            # AI配置优先使用静态配置（config.json），防止被动态配置覆盖
             ai_config = config.get('ai_models', {})
             config.update(dynamic_config)
             if ai_config:
@@ -225,7 +224,7 @@ class ConfigManager:
             ValueError: 如果配置无效
         """
         ai_models = config.get('ai_models', {})
-        if not ai_models.get('enabled', False):
+        if not ai_models or not ai_models.get('enabled', False):
             return
 
         primary_provider = ai_models.get('primary_provider')

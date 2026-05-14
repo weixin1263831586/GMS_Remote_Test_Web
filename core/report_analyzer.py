@@ -824,10 +824,8 @@ class ReportAnalyzer:
             return self._report_to_dict(report)
         return None
 
-    def search_source_code(self, class_name: str, failure_location: dict = None, max_results: int = 5) -> List[Dict[str, str]]:
+    def rk_codesearch(self, class_name: str, failure_location: dict = None, max_results: int = 5) -> List[Dict[str, str]]:
         """
-        使用 rk_codesearch 搜索源码（优先使用失败位置信息）
-
         Args:
             class_name: 类名 (如 com.android.cts.permission.PermissionTest)
             failure_location: 从堆栈提取的失败位置 {file_name, file_type, line_number}
