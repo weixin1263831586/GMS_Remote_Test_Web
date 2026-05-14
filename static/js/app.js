@@ -1331,6 +1331,7 @@ function renderDevices() {
         deviceCanvas.style.display = 'flex';
         deviceCanvas.style.justifyContent = 'center';
         deviceCanvas.style.alignItems = 'center';
+        deviceCanvas.style.minHeight = '150px'; // 确保无设备时有默认高度
         return;
     }
 
@@ -2508,7 +2509,8 @@ async function checkRouting() {
         const clientIp = document.getElementById('client-ip').value.trim();
 
         if (!testHostIp || !clientIp) {
-            pingResult.innerHTML = '<div class="ping-error">请填写测试主机IP和客户端IP</div>';
+            pingResult.textContent = '请填写测试主机IP和客户端IP';
+            pingResult.className = 'ping-error';
             return;
         }
 
@@ -2523,7 +2525,8 @@ async function checkRouting() {
         }
 
         if (!isValidIP(testHostIp) || !isValidIP(clientIp)) {
-            pingResult.innerHTML = '<div class="ping-error">IP地址格式不正确，请输入有效的IPv4地址 (例如: 192.168.1.100)</div>';
+            pingResult.textContent = 'IP地址格式不正确，请输入有效的IPv4地址 (例如: 192.168.1.100)';
+            pingResult.className = 'ping-error';
             return;
         }
 
@@ -2680,10 +2683,12 @@ async function checkRouting() {
                     }
                 }
             } else {
-                pingResult.innerHTML = `<div class="ping-error">测试失败: ${result.error}</div>`;
+                pingResult.textContent = `测试失败: ${result.error}`;
+                pingResult.className = 'ping-error';
             }
         } catch (error) {
-            pingResult.innerHTML = `<div class="ping-error">测试失败: ${error.message}</div>`;
+            pingResult.textContent = `测试失败: ${error.message}`;
+            pingResult.className = 'ping-error';
         }
     });
 
@@ -5301,10 +5306,13 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
 
         const result = await response.json();
 
+        console.log('[AI Analysis] API响应:', result);
+
         // 检查HTTP状态码
         if (!response.ok) {
             // 处理HTTP错误（FastAPI的HTTPException返回 {detail: "error message"}）
             const errorDetail = result.detail || result.error || '未知错误';
+            console.error('[AI Analysis] HTTP错误:', response.status, errorDetail);
             showModalError(modal, `分析失败: ${errorDetail}`);
             return;
         }
@@ -5314,13 +5322,21 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
 
         if (result.success) {
             const data = result.data;
+
+            // 验证必需字段
+            if (!data.root_cause && !data.analysis && !data.suggestions) {
+                console.error('[AI Analysis] 返回数据缺少必需字段:', data);
+                showModalError(modal, 'AI分析结果格式异常，缺少必需字段。请查看后端日志了解详情。');
+                return;
+            }
+
             let content = '';
 
             // 根本原因
             if (data.root_cause) {
                 content += '<div style="margin-bottom: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px; border-left: 3px solid var(--warning-color);">';
                 content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--warning-color);">🎯 根本原因</div>';
-                content += `<div style="font-size: 13px; line-height: 1.6;">${data.root_cause}</div>`;
+                content += `<div style="font-size: 13px; line-height: 1.6;">${escapeHtml(data.root_cause)}</div>`;
                 content += '</div>';
             }
 
@@ -5328,7 +5344,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
             if (data.analysis) {
                 content += '<div style="margin-bottom: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px;">';
                 content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--primary-color);">📊 详细分析</div>';
-                content += `<div style="font-size: 13px; line-height: 1.6; white-space: pre-wrap;">${data.analysis}</div>`;
+                content += `<div style="font-size: 13px; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(data.analysis)}</div>`;
                 content += '</div>';
             }
 
@@ -5338,7 +5354,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                 content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--success-color);">✅ 解决建议</div>';
                 content += '<ol style="margin: 4px 0; padding-left: 20px; font-size: 13px; line-height: 1.8;">';
                 data.suggestions.forEach((suggestion, index) => {
-                    content += `<li style="margin-bottom: 6px;">${suggestion}</li>`;
+                    content += `<li style="margin-bottom: 6px;">${escapeHtml(suggestion)}</li>`;
                 });
                 content += '</ol></div>';
             }
@@ -6572,4 +6588,3 @@ window.copyToClipboard = function(text, element) {
         element: element
     });
 };
-

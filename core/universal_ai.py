@@ -5,10 +5,17 @@
 import requests
 import logging
 import json
+import re
+import time
 from typing import Dict, Optional, List
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+# Emoji 常量用于 AI 分析结果
+EMOJI_TARGET = "🎯"
+EMOJI_CHART = "📊"
+EMOJI_CHECK = "✅"
 
 class UniversalAIAnalyzer:
     """通用AI模型分析器"""
@@ -206,7 +213,33 @@ class UniversalAIAnalyzer:
 
             logger.info(f"[{provider_name}] Request URL: {url}, Model: {model}, Format: {api_format}")
 
-            response = requests.post(url, headers=headers, json=data, timeout=self.timeout)
+            # 增加重试机制和更好的错误处理
+            max_retries = 2
+            retry_delay = 1
+
+            for attempt in range(max_retries):
+                try:
+                    response = requests.post(
+                        url,
+                        headers={'Connection': 'keep-alive', **headers},
+                        json=data,
+                        timeout=self.timeout
+                    )
+                    break  # 成功则退出重试循环
+                except requests.exceptions.ConnectionError as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"[{provider_name}] 连接失败，{retry_delay}秒后重试 ({attempt+1}/{max_retries}): {str(e)[:100]}")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # 指数退避
+                    else:
+                        return {'success': False, 'error': f'连接失败: {str(e)}'}
+                except requests.exceptions.Timeout as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"[{provider_name}] 请求超时，{retry_delay}秒后重试 ({attempt+1}/{max_retries})")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                    else:
+                        return {'success': False, 'error': f'请求超时: {str(e)}'}
 
             if response.status_code == 200:
                 result = response.json()
@@ -324,15 +357,21 @@ class UniversalAIAnalyzer:
 """
 
         prompt += """
-请分析上述信息并按以下JSON格式返回（只返回JSON，不要有其他内容）：
-```json
+请分析上述信息并按以下JSON格式返回。
+
+**重要要求**：
+1. 只返回纯JSON格式，不要包含markdown代码块标记（```json 或 ```）
+2. 不要包含任何解释性文字，直接以 { 开始，以 } 结束
+3. 确保JSON格式完全正确，可以被标准JSON解析器解析
+
+返回格式：
 {
-  "root_cause": "🎯 根本原因：一句话总结失败的核心原因（不超过50字）",
-  "analysis": "📊 详细分析：\\n1. 错误类型\\n2. 触发条件\\n3. 影响范围\\n4. 相关代码逻辑",
+  "root_cause": EMOJI_TARGET + " 根本原因描述（不超过50字）",
+  "analysis": EMOJI_CHART + " 详细分析：\\n1. 错误类型：xxx\\n2. 触发条件：xxx\\n3. 影响范围：xxx\\n4. 相关代码逻辑：xxx",
   "suggestions": [
-    "✅ 建议一：具体的修改步骤",
-    "✅ 建议二：验证方法",
-    "✅ 建议三：预防措施"
+    EMOJI_CHECK + "建议一：具体的修改步骤",
+    EMOJI_CHECK + "建议二：验证方法",
+    EMOJI_CHECK + "建议三：预防措施"
   ],
   "solution": {
     "problem_description": "详细问题描述",
@@ -341,7 +380,6 @@ class UniversalAIAnalyzer:
     "code_example": "代码示例（Java格式）"
   }
 }
-```
 
 分析要求（适用于所有类型报错）：
 1. **root_cause必须以🎯开头**，一句话精准定位核心问题：
@@ -363,9 +401,84 @@ class UniversalAIAnalyzer:
    - 针对根本原因（不是绕过问题）
    - 优先级排序（先解决根本问题，再考虑workaround）
 
-4. 只返回JSON格式，不要有markdown标记或其他文字
+4. 只返回纯JSON格式，不要有markdown标记或其他文字
 """
         return prompt
+
+    def _extract_json_from_reasoning(self, reasoning: str) -> Optional[str]:
+        """从 reasoning 字段中提取最终的 JSON 输出
+
+        推理模型可能在 reasoning 的最后部分输出最终的 JSON，
+        我们需要查找最后一个完整的 JSON 对象。
+        """
+        try:
+            logger.debug(f"[AI Parse] Reasoning 长度: {len(reasoning)}, 最后 500 字符: {reasoning[-500:]}")
+
+            # 查找所有可能的 JSON 对象（从 { 开始到对应的 } 结束）
+            json_candidates = []
+            depth = 0
+            start = -1
+            in_string = False
+            escape_next = False
+
+            for i, char in enumerate(reasoning):
+                if escape_next:
+                    escape_next = False
+                    continue
+
+                if char == '\\':
+                    escape_next = True
+                    continue
+                elif char == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+
+                # 只在非字符串状态下计算括号
+                if not in_string:
+                    if char == '{':
+                        if depth == 0:
+                            start = i
+                        depth += 1
+                    elif char == '}':
+                        depth -= 1
+                        if depth == 0 and start >= 0:
+                            json_candidates.append((start, i, reasoning[start:i+1]))
+                            start = -1
+
+            logger.info(f"[AI Parse] 找到 {len(json_candidates)} 个 JSON 候选")
+
+            # 尝试解析最后一个（且最长的）JSON 对象（通常是最终输出）
+            # 按长度排序，优先尝试较长的 JSON（更完整）
+            json_candidates.sort(key=lambda x: len(x[2]), reverse=True)
+
+            for start_pos, end_pos, json_str in json_candidates:
+                try:
+                    parsed = json.loads(json_str)
+                    # 验证是否包含预期的字段且格式正确
+                    if all(key in parsed for key in ['root_cause', 'analysis']):
+                        # 进一步验证：检查值不是以 "Thinking" 或 "**" 开头（排除思考过程）
+                        root_cause = parsed.get('root_cause', '')
+                        analysis = parsed.get('analysis', '')
+
+                        if not (root_cause.startswith('Thinking') or
+                                root_cause.startswith('**') or
+                                analysis.startswith('Thinking') or
+                                analysis.startswith('**')):
+                            logger.info(f"[AI Parse] 从 reasoning 中提取到有效 JSON (位置 {start_pos}-{end_pos}, 长度: {len(json_str)})")
+                            logger.debug(f"[AI Parse] 提取的 JSON keys: {list(parsed.keys())}")
+                            return json_str
+                        else:
+                            logger.debug(f"[AI Parse] 跳过思考过程 JSON (位置 {start_pos}-{end_pos})")
+                except json.JSONDecodeError as e:
+                    logger.debug(f"[AI Parse] JSON 解析失败: {e}, 字符串: {json_str[:100]}...")
+                    continue
+
+            logger.warning("[AI Parse] 未能在 reasoning 中找到有效的 JSON")
+            return None
+
+        except Exception as e:
+            logger.error(f"[AI Parse] 提取 JSON 时出错: {e}")
+            return None
 
     def _parse_response(self, response_text: str) -> Dict:
         """解析LLM响应"""
@@ -383,84 +496,150 @@ class UniversalAIAnalyzer:
                     ]
                 }
 
+            logger.debug(f"[AI Parse] 响应长度: {len(response_text)}, 前500字符: {response_text[:500]}")
+
             # 移除可能的markdown标记
             text = response_text.strip()
-            if text.startswith('```json'):
-                text = text[7:]
-            if text.startswith('```'):
-                text = text[3:]
-            if text.endswith('```'):
-                text = text[:-3]
+
+            # 优化：一次性移除所有markdown代码块标记，包括各种变体
+            text = re.sub(r'```(?:json|JSON|javascript)?', '', text, flags=re.IGNORECASE)
             text = text.strip()
 
-            # 查找JSON
+            # 查找JSON对象
             start = text.find('{')
             end = text.rfind('}') + 1
 
             if start >= 0 and end > start:
                 json_str = text[start:end]
-                try:
-                    parsed = json.loads(json_str)
 
-                    # 确保emoji前缀
-                    if 'root_cause' in parsed and not parsed['root_cause'].startswith('🎯'):
-                        parsed['root_cause'] = f"🎯 {parsed['root_cause']}"
+                # 尝试多层次的JSON修复策略
+                parsed = None
+                parse_attempts = [
+                    # 1. 直接解析
+                    lambda: json.loads(json_str),
+                    # 2. 清理控制字符后解析
+                    lambda: json.loads(''.join(char for char in json_str if char.isprintable() or char in '\n\r\t')),
+                    # 3. 规范化空白后解析
+                    lambda: json.loads(' '.join(''.join(char for char in json_str if char.isprintable() or char in '\n\r\t').split())),
+                    # 4. 移除注释后解析
+                    lambda: json.loads(re.sub(r'//.*?\n|/\*.*?\*/', '', json_str)),
+                    # 5. 修复常见的中英文标点问题
+                    lambda: json.loads(json_str.replace('，', ',').replace('：', ':').replace('"', '"').replace('"', '"'))
+                ]
 
-                    if 'analysis' in parsed and not parsed['analysis'].startswith('📊'):
-                        parsed['analysis'] = f"📊 {parsed['analysis']}"
+                for i, attempt in enumerate(parse_attempts):
+                    try:
+                        parsed = attempt()
+                        if i > 0:
+                            logger.info(f"JSON解析成功（使用了策略{i+1}）")
+                        break
+                    except (json.JSONDecodeError, ValueError) as e:
+                        if i < len(parse_attempts) - 1:
+                            logger.debug(f"JSON解析策略{i+1}失败: {str(e)[:100]}")
+                        continue
 
-                    if 'suggestions' in parsed:
-                        parsed['suggestions'] = [
-                            f"✅ {s}" if not s.startswith('✅') else s
-                            for s in parsed['suggestions']
-                        ]
-
-                    return parsed
-                except json.JSONDecodeError as e:
-                    logger.warning(f"JSON解析失败: {str(e)}，回退到文本解析")
+                if parsed is None:
+                    logger.warning(f"所有JSON解析策略都失败，回退到文本解析。原始JSON片段: {json_str[:200]}")
                     return self._parse_text_response(response_text)
+
+                if 'root_cause' in parsed and not parsed['root_cause'].startswith('🎯'):
+                    parsed['root_cause'] = f"{EMOJI_TARGET} {parsed['root_cause']}"
+
+                if 'analysis' in parsed and not parsed['analysis'].startswith('📊'):
+                    parsed['analysis'] = f"{EMOJI_CHART}  {parsed['analysis']}"
+
+                if 'suggestions' in parsed:
+                    parsed['suggestions'] = [
+                        f"{EMOJI_CHECK}  {s}" if not s.startswith('✅') else s
+                        for s in parsed['suggestions']
+                    ]
+
+                # 验证必需字段
+                if not all(key in parsed for key in ['root_cause', 'analysis', 'suggestions']):
+                    logger.warning(f"[AI Parse] JSON缺少必需字段，现有字段: {list(parsed.keys())}")
+                    # 补充缺失字段
+                    if 'root_cause' not in parsed:
+                        parsed['root_cause'] = '🎯 AI分析结果不完整'
+                    if 'analysis' not in parsed:
+                        parsed['analysis'] = '📊 AI未返回详细分析'
+                    if 'suggestions' not in parsed:
+                        parsed['suggestions'] = ['✅ 查看源码和错误信息进行排查']
+
+                logger.info(f"[AI Parse] JSON解析成功，包含字段: {list(parsed.keys())}")
+                return parsed
             else:
                 logger.warning("未找到JSON格式，回退到文本解析")
                 return self._parse_text_response(response_text)
 
-        except json.JSONDecodeError:
+        except Exception as e:
+            logger.error(f"解析响应时发生异常: {str(e)}，回退到文本解析")
             return self._parse_text_response(response_text)
 
     def _parse_text_response(self, text: str) -> Dict:
-        """解析文本格式响应"""
-        lines = text.split('\n')
-        analysis = []
-        suggestions = []
+        """解析文本格式响应（回退方案）"""
+        try:
+            logger.info("[AI Parse] 使用文本解析回退方案")
 
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            if '分析' in line or '问题' in line:
-                continue
-            elif line.startswith('-') or line.startswith('*') or line.startswith('•'):
-                suggestions.append(line.lstrip('-*•').strip())
-            elif line.startswith('建议') or 'suggest' in line.lower():
-                suggestions.append(line)
-            elif line:
-                if not suggestions:
-                    analysis.append(line)
-                else:
-                    # 如果已经开始收集建议，继续添加
-                    if len(suggestions) > 0 or '建议' in line:
-                        suggestions.append(line)
+            lines = text.split('\n')
+            analysis = []
+            suggestions = []
 
-        # 从分析文本中提取根本原因（第一行）
-        root_cause = f"🎯 {analysis[0]}" if analysis else "🎯 测试失败，需要进一步分析"
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                if '分析' in line or '问题' in line:
+                    continue
+                elif line.startswith('-') or line.startswith('*') or line.startswith('•'):
+                    suggestions.append(line.lstrip('-*•').strip())
+                elif line.startswith('建议') or 'suggest' in line.lower():
+                    suggestions.append(line)
+                elif line:
+                    if not suggestions:
+                        analysis.append(line)
+                    else:
+                        # 如果已经开始收集建议，继续添加
+                        if len(suggestions) > 0 or '建议' in line:
+                            suggestions.append(line)
 
+            # 从分析文本中提取根本原因（第一行）
+            root_cause = f"{EMOJI_TARGET} {analysis[0]}" if analysis else EMOJI_TARGET + " 测试失败，需要进一步分析"
+
+            # 如果没有提取到任何有用信息，返回基于规则的分析
+            if not analysis and not suggestions:
+                logger.warning("[AI Parse] 文本解析也未提取到有用信息，返回通用分析")
+                return self._get_fallback_analysis()
+
+            return {
+                'root_cause': root_cause,
+                'analysis': '\n'.join(analysis) if analysis else '无法解析详细分析',
+                'suggestions': suggestions if suggestions else ['查看源码和错误信息进行排查'],
+                'solution': {
+                    'problem_description': '\n'.join(analysis[:3]) if analysis else '需要进一步分析',
+                    'error_type': 'Unknown',
+                    'fix_strategy': 'manual_review'
+                }
+            }
+        except Exception as e:
+            logger.error(f"[AI Parse] 文本解析也失败: {str(e)}，返回默认分析")
+            return self._get_fallback_analysis()
+
+    def _get_fallback_analysis(self) -> Dict:
+        """获取回退分析结果"""
         return {
-            'root_cause': root_cause,
-            'analysis': '\n'.join(analysis) if analysis else '无法解析详细分析',
-            'suggestions': suggestions if suggestions else ['查看源码和错误信息进行排查'],
+            'root_cause': '🎯 AI响应格式异常，无法解析',
+            'analysis': '📊 AI模型返回了无法识别的格式。可能原因：\n1. AI模型配置错误\n2. API返回格式不符合预期\n3. 网络传输问题导致数据损坏',
+            'suggestions': [
+                '✅ 检查AI模型配置是否正确',
+                '✅ 查看后端日志了解详细错误信息',
+                '✅ 尝试重新进行分析',
+                '✅ 联系管理员检查AI服务状态'
+            ],
             'solution': {
-                'problem_description': '\n'.join(analysis[:3]) if analysis else '需要进一步分析',
-                'error_type': 'Unknown',
-                'fix_strategy': 'manual_review'
+                'problem_description': 'AI模型返回格式异常，需要技术支持',
+                'error_type': 'AI_Parse_Error',
+                'fix_strategy': '检查AI配置和日志',
+                'code_example': '// 无法提供代码示例，因为AI响应格式异常'
             }
         }
 
@@ -474,7 +653,52 @@ class UniversalAIAnalyzer:
         Returns:
             dict: 包含源码信息，如果失败返回None
         """
-        return None
+        try:
+            # 参数验证
+            if not class_name or not isinstance(class_name, str):
+                logger.warning(f"无效的类名参数: {class_name}")
+                return None
+
+            # 使用本地的 rk_codesearch 技能来查找源码
+            from core.report_analyzer import ReportAnalyzer
+
+            # 创建临时分析器实例
+            temp_analyzer = ReportAnalyzer()
+
+            # 调用 rk_codesearch 方法搜索源码
+            search_results = temp_analyzer.rk_codesearch(class_name, max_results=3)
+
+            if search_results and len(search_results) > 0:
+                # 取第一个搜索结果
+                first_result = search_results[0]
+
+                # 构建返回结果
+                result = {
+                    'file_path': first_result.get('path', ''),
+                    'line': first_result.get('line', ''),
+                    'file_type': first_result.get('file_type', 'java'),
+                    'project': first_result.get('project', ''),
+                    'url': first_result.get('url', ''),
+                    'content': f"// 源码文件: {first_result.get('path', '')}\n" +
+                              f"// 项目: {first_result.get('project', '')}\n" +
+                              f"// OpenGrok链接: {first_result.get('url', '未找到链接')}\n" +
+                              f"//\n" +
+                              f"// 注意: 完整源码内容请通过OpenGrok链接查看\n" +
+                              f"// 该文件为 {first_result.get('file_type', 'java')} 格式\n"
+                }
+
+                logger.info(f"成功通过 rk_codesearch 获取源码信息: {first_result.get('path', 'unknown')}")
+                return result
+            else:
+                logger.warning(f"rk_codesearch 未找到类 {class_name} 的源码")
+                return None
+
+        except ImportError:
+            logger.error("无法导入 ReportAnalyzer，请检查 core.report_analyzer 模块")
+            return None
+        except Exception as e:
+            logger.error(f"获取Android源码失败: {e}")
+            return None
 
 
 # 全局实例
@@ -484,8 +708,8 @@ def get_universal_analyzer() -> UniversalAIAnalyzer:
     """获取通用AI分析器实例"""
     global _universal_analyzer
     from core.config import config_manager
-    config = config_manager.load_config()
-    ai_config = config.get('ai_models', {})
+
+    ai_config = config_manager.get_ai_config()
 
     # 每次都重新创建实例以确保使用最新配置
     _universal_analyzer = UniversalAIAnalyzer(ai_config)

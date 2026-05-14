@@ -4414,19 +4414,18 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
     if failure_location:
         logger.info(f"从堆栈提取失败位置: {failure_location['file_name']}.{failure_location['file_type']}:{failure_location['line_number']}")
 
-    # 使用 rk_codesearch 搜索相关源码（优先使用失败位置）
     source_search_results = []
     if class_names:
         from core.report_analyzer import analyzer
 
         # 如果有精确的失败位置，只搜索一次避免重复
         if failure_location:
-            results = analyzer.search_source_code(failure_location['file_name'], failure_location=failure_location, max_results=1)
+            results = analyzer.rk_codesearch(failure_location['file_name'], failure_location=failure_location, max_results=1)
             source_search_results.extend(results)
         else:
             # 没有失败位置时，搜索前3个类名
             for class_name in class_names[:3]:
-                results = analyzer.search_source_code(class_name, max_results=1)
+                results = analyzer.rk_codesearch(class_name, max_results=1)
                 source_search_results.extend(results)
 
         logger.info(f"rk_codesearch 搜索到 {len(source_search_results)} 条源码结果")
@@ -4447,16 +4446,14 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
             method_name=failure_info.get('method_name'),
             error_message=error_message,
             stack_trace=stack_trace,
-            auto_fetch_source=False  # 禁用AI内部源码获取，使用rk_codesearch结果
+            auto_fetch_source=True  # 启用自动获取源码
         )
 
         if result['success']:
             provider_name = result.get('provider', 'unknown')
-            # 从配置获取模型显示名称
-            from core.config import config_manager as cm
-            config = cm.load_config()
-            ai_config = config.get('ai_models', {}).get('providers', {}).get(provider_name, {})
-            provider_display = ai_config.get('name', f'{provider_name.upper()} AI')
+            # 使用统一的配置接口获取 provider 配置
+            provider_config = config_manager.get_ai_provider_config(provider_name)
+            provider_display = provider_config.get('name', f'{provider_name.upper()} AI') if provider_config else f'{provider_name.upper()} AI'
 
             # 简化响应结构，直接使用AI返回的emoji格式
             response = {
@@ -4468,6 +4465,15 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
                 'ai_provider': provider_name,
                 'stack_trace': stack_trace
             }
+
+            # 添加源码信息（如果成功获取）
+            if result.get('source_info'):
+                source_info = result['source_info']
+                response['source_code_fetched'] = True
+                response['source_file_path'] = source_info.get('file_path', '')
+                response['source_url'] = source_info.get('url', '')
+                response['source_project'] = source_info.get('project', '')
+                logger.info(f"成功获取源码信息: {source_info.get('file_path', 'unknown')}")
 
             # 添加源码搜索结果（供前端显示OpenGrok链接）
             if source_search_results:
