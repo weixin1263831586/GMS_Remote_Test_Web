@@ -158,7 +158,8 @@ class TestReportManager:
                 'summary': result.get('summary', {}),
                 'details': {
                     'device': result.get('details', {}).get('device', ''),
-                    'android_version': result.get('details', {}).get('android_version', ''),
+                    'suite_version': result.get('details', {}).get('suite_version', ''),       # 套件版本（如 16.1_r2）
+                    'android_version': result.get('details', {}).get('android_version', ''),   # Android版本（build_version_release）
                     'start_time': result.get('details', {}).get('start_time', ''),
                     'test_type': result.get('details', {}).get('test_type', '')
                 },
