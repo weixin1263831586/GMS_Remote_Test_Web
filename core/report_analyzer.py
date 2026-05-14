@@ -42,7 +42,8 @@ class TestReport:
     """测试报告数据类"""
     test_type: str
     device: str
-    android_version: str
+    suite_version: str      # 测试套件版本（如 16.1_r2）
+    android_version: str    # Android版本（从 build_version_release 获取）
     start_time: str
     total: int
     pass_count: int
@@ -100,7 +101,8 @@ class XMLReportParser:
         # 提取基本信息
         test_type = self._get_test_type(root)
         device = self._get_device_info(root)
-        android_version = self._get_android_version(root)
+        suite_version = self._get_suite_version(root)      # 套件版本（如 16.1_r2）
+        android_version = self._get_android_version(root)  # Android版本（build_version_release）
         start_time = self._get_start_time(root)
 
         # 提取统计信息
@@ -115,6 +117,7 @@ class XMLReportParser:
         return TestReport(
             test_type=test_type,
             device=device,
+            suite_version=suite_version,
             android_version=android_version,
             start_time=start_time,
             total=total,
@@ -166,10 +169,10 @@ class XMLReportParser:
 
         return '未知设备'
 
-    def _get_android_version(self, root) -> str:
-        """获取测试套件版本（suite_version）"""
+    def _get_suite_version(self, root) -> str:
+        """获取测试套件版本（suite_version，如 16.1_r2）"""
         # 优先从Result根节点获取suite_version
-        for attr in ['suite_version', 'android_version', 'AndroidVersion']:
+        for attr in ['suite_version', 'version']:
             if root.get(attr):
                 return root.get(attr)
 
@@ -177,13 +180,32 @@ class XMLReportParser:
         if USE_LXML:
             build = root.xpath('.//Build')
             if build:
-                return build[0].get('version', build[0].get('sdk', '15'))
+                return build[0].get('suite_version', build[0].get('version', ''))
         else:
             build = root.find('.//Build')
             if build is not None:
-                return build.get('version', build.get('sdk', '15'))
+                return build.get('suite_version', build.get('version', ''))
 
-        return '15'
+        return ''
+
+    def _get_android_version(self, root) -> str:
+        """获取Android版本（build_version_release）"""
+        # 优先从Result根节点获取build_version_release
+        for attr in ['build_version_release', 'android_version', 'AndroidVersion']:
+            if root.get(attr):
+                return root.get(attr)
+
+        # 从Build节点获取build_version_release
+        if USE_LXML:
+            build = root.xpath('.//Build')
+            if build:
+                return build[0].get('build_version_release', '')
+        else:
+            build = root.find('.//Build')
+            if build is not None:
+                return build.get('build_version_release', '')
+
+        return ''
 
     def _get_start_time(self, root) -> str:
         """获取开始时间"""
@@ -428,6 +450,7 @@ class HostLogParser:
         return TestReport(
             test_type=test_type,
             device=device,
+            suite_version=suite_version,
             android_version=android_version,
             start_time=start_time,
             total=total,
@@ -1035,7 +1058,8 @@ class ReportAnalyzer:
             'details': {
                 'test_type': report.test_type,
                 'device': report.device,
-                'android_version': report.android_version,
+                'suite_version': report.suite_version,        # 套件版本（如 16.1_r2）
+                'android_version': report.android_version,    # Android版本（build_version_release）
                 'start_time': report.start_time
             },
             'failures': [

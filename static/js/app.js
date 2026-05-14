@@ -4832,9 +4832,13 @@ function displayReportAnalysis(data) {
             ${data.details && data.details.android_version ? `
                 <div>
                     <span class="summary-label">套件版本：</span>
-                    <span class="summary-value">${data.details.android_version}</span>
+                    <span class="summary-value">${data.details.suite_version}</span>
                 </div>
             ` : ''}
+            <div>
+                <span class="summary-label">Android版本：</span>
+                <span class="summary-value">${data.details.android_version}</span>
+            </div>
             <div>
                 <span class="summary-label">总用例数：</span>
                 <span class="summary-value">${summary.total || 0}</span>
