@@ -6,6 +6,7 @@ GMS测试报告分析器 - 统一的报告解析模块
 import os
 import zipfile
 import tarfile
+import shutil
 import logging
 import re
 import glob
@@ -804,25 +805,38 @@ class ReportAnalyzer:
         # 确保临时目录存在
         os.makedirs(self.temp_dir, exist_ok=True)
 
+        report = None
+
         # 如果是压缩包，先解压
         if file_path.endswith(('.zip', '.tar.gz', '.tgz')):
-            if not self.file_handler.extract_archive(file_path):
-                return None
-            # 优先查找XML文件
-            xml_path = self.file_handler.find_xml_file()
-            if xml_path:
-                report = self.parser.parse_file(xml_path)
-                if report:
-                    return self._report_to_dict(report)
+            # 创建子目录用于解压，避免多次分析时文件残留
+            extract_dir = os.path.join(self.temp_dir, 'extract')
+            if os.path.exists(extract_dir):
+                shutil.rmtree(extract_dir)
+            os.makedirs(extract_dir)
 
-            # 如果没有XML，尝试分析host_log
-            host_log_path = self.file_handler.find_host_log()
-            if host_log_path:
-                report = self.host_log_parser.parse_log_dir(self.temp_dir)
-                if report:
-                    return self._report_to_dict(report)
+            # 临时替换file_handler的temp_dir为子目录
+            original_temp_dir = self.file_handler.temp_dir
+            self.file_handler.temp_dir = extract_dir
 
-            return None
+            try:
+                if not self.file_handler.extract_archive(file_path):
+                    return None
+
+                # 优先查找XML文件
+                xml_path = self.file_handler.find_xml_file()
+                if xml_path:
+                    report = self.parser.parse_file(xml_path)
+
+                # 如果没有XML，尝试分析host_log
+                if not report:
+                    host_log_path = self.file_handler.find_host_log()
+                    if host_log_path:
+                        report = self.host_log_parser.parse_log_dir(extract_dir)
+            finally:
+                # 恢复原始temp_dir
+                self.file_handler.temp_dir = original_temp_dir
+
         elif file_path.endswith('.xml'):
             report = self.parser.parse_file(file_path)
         else:

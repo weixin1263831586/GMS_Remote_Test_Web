@@ -38,11 +38,18 @@ import urllib.error
 import io
 import zipfile
 from datetime import datetime, timedelta
+from cryptography.fernet import Fernet
+from urllib.parse import urlparse
+import hashlib
+import base64
 from typing import Dict, Any, List, Optional, Union
 from contextlib import asynccontextmanager
 from collections import deque
 from enum import Enum
 import asyncio
+import aiohttp
+import tempfile
+import shutil
 
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Body, Query
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
@@ -321,6 +328,30 @@ from modules.test_logs_manager import test_logs_manager
 
 # 导入USB监控模块
 from core.usb_monitor import init_usb_monitor, start_usb_monitor, stop_usb_monitor
+
+# Redmine URL 模式常量
+REDMINE_ISSUE_PATTERN = r'/issues/(\d+)'
+REDMINE_ATTACHMENT_PATTERN = r'/attachments/(\d+)'
+
+def create_basic_auth_header(username: str, password: str) -> Dict[str, str]:
+    """创建 Basic Authentication 头"""
+    credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+    return {'Authorization': f'Basic {credentials}'}
+
+def build_redmine_download_url(base_url: str, attachment_id: str) -> str:
+    """构建 Redmine 附件下载 URL"""
+    return f"{base_url}/attachments/download/{attachment_id}/"
+
+def extract_filename_from_content_disposition(content_disposition: str) -> Optional[str]:
+    """从 Content-Disposition header 中提取文件名"""
+    if not content_disposition:
+        return None
+    # 匹配 filename*=UTF-8''xxx 或 filename="xxx" 或 filename=xxx
+    filename_match = re.search(r"filename\*=UTF-8''([^\;]+)|filename=\"([^\"]+)\"|filename=([^\s;]+)", content_disposition)
+    if filename_match:
+        filename = filename_match.group(1) or filename_match.group(2) or filename_match.group(3)
+        return urllib.parse.unquote(filename) if filename else None
+    return None
 
 def extract_report_name_from_upload(files: List[UploadFile]) -> str:
     """
@@ -3632,6 +3663,452 @@ async def download_report(
             content={'success': False, 'error': str(e)},
             status_code=500
         )
+
+@app.post("/api/reports/analyze-url")
+async def analyze_report_from_url(request: Request):
+    """
+    从 URL 下载并分析测试报告（支持 Redmine 附件自动下载）
+
+    参数：
+        url: 附件的 URL 地址
+        redmine_username: Redmine 用户名（可选）
+        redmine_password: Redmine 密码（可选）
+
+    功能：
+        1. 自动从 Redmine 下载附件（使用存储的或提供的凭证）
+        2. 支持一次配置，永久自动下载
+        3. 凭证加密存储
+    """
+    try:
+        # 解析请求参数
+        body = await request.json()
+        url = body.get('url', '').strip()
+        redmine_username = body.get('redmine_username', '').strip()
+        redmine_password = body.get('redmine_password', '').strip()
+
+        if not url:
+            return JSONResponse(
+                content={'success': False, 'error': '缺少 URL 参数'},
+                status_code=400
+            )
+
+        logger.info(f"[Report Analysis] 收到 URL 分析请求: {url}")
+
+        # 从 URL 中提取文件名
+        parsed_url = urlparse(url)
+        filename = os.path.basename(parsed_url.path) or 'downloaded_file.zip'
+
+        # 检测是否为 Redmine URL (获取配置一次，复用整个请求)
+        redmine_config = None
+        try:
+            redmine_config = config_manager.get_redmine_config()
+            is_redmine = redmine_config['domain'] in url.lower()
+        except ValueError:
+            # 如果Redmine未配置，不进行Redmine处理
+            is_redmine = False
+
+        # Redmine URL 处理
+        if is_redmine:
+            issue_match = re.search(REDMINE_ISSUE_PATTERN, url)
+            if issue_match and '/attachments/' not in url:
+                # 是问题页面，需要提取附件
+                issue_id = issue_match.group(1)
+                logger.info(f"[Report Analysis] 检测到 Redmine 问题页面: {issue_id}")
+
+                # 调用提取附件的逻辑
+                try:
+                    # 复用已获取的配置，避免重复调用
+                    if redmine_config:
+                        base_url = redmine_config['base_url']
+                    else:
+                        logger.warning(f"[Report Analysis] Redmine配置不可用")
+                        return JSONResponse(
+                            content={'success': False, 'error': 'Redmine 配置不可用'},
+                            status_code=404
+                        )
+
+                    stored_creds = await load_redmine_credentials()
+                    if stored_creds:
+                        api_url = f"{base_url}/issues/{issue_id}.json?include=attachments"
+                        username = stored_creds.get('username')
+                        password = stored_creds.get('password')
+                        headers = {}
+                        headers.update(create_basic_auth_header(username, password))
+                        logger.info(f"[Report Analysis] 使用存储的 Redmine 凭证查询问题 {issue_id}")
+                    else:
+                        # 如果没有配置凭证，使用配置文件中的域名
+                        api_url = f"{base_url}/issues/{issue_id}.json?include=attachments"
+                        headers = {}
+                        logger.warning(f"[Report Analysis] 未找到存储的 Redmine 凭证，使用配置文件中的域名和匿名查询")
+
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                            if response.status != 200:
+                                return JSONResponse(
+                                    content={'success': False, 'error': f'无法访问问题页面: HTTP {response.status}'},
+                                    status_code=400
+                                )
+
+                            data = await response.json()
+                            attachments = data.get('issue', {}).get('attachments', [])
+
+                            if not attachments:
+                                return JSONResponse(
+                                    content={'success': False, 'error': f'问题 {issue_id} 没有附件'},
+                                    status_code=404
+                                )
+
+                            # 获取第一个附件
+                            first_attachment = attachments[0]
+                            attachment_id = first_attachment.get('id')
+                            filename = first_attachment.get('filename', f'attachment_{attachment_id}')
+
+                            # 转换为附件下载 URL
+                            url = build_redmine_download_url(base_url, attachment_id)
+                            logger.info(f"[Report Analysis] 从问题页面提取附件: {filename} -> {url}")
+                except Exception as extract_error:
+                    logger.error(f"[Report Analysis] 提取附件失败: {extract_error}")
+                    return JSONResponse(
+                        content={'success': False, 'error': f'无法提取附件: {str(extract_error)}'},
+                        status_code=500
+                    )
+            else:
+                # 匹配 /attachments/数字 格式
+                redmine_attach_match = re.search(REDMINE_ATTACHMENT_PATTERN, url)
+                if redmine_attach_match and '/attachments/download/' not in url:
+                    attachment_id = redmine_attach_match.group(1)
+                    # 尝试从问题页面获取真实的文件名
+                    logger.info(f"[Report Analysis] 检测到 Redmine 附件 URL，ID: {attachment_id}")
+                    # 使用正确的下载 URL 格式，文件名留空让 Redmine 使用原始文件名
+                    url = build_redmine_download_url(redmine_config['base_url'], attachment_id)
+                    logger.info(f"[Report Analysis] 转换为 Redmine 下载 URL: {url}")
+                    # 更新 filename 用于保存
+                    filename = 'downloaded_file.zip'
+
+        # 下载文件
+        logger.info(f"[Report Analysis] 正在下载附件: {filename}")
+
+
+        temp_dir = tempfile.mkdtemp(prefix='redmine_download_')
+        temp_file_path = os.path.join(temp_dir, filename)
+
+        try:
+            # 构建 HTTP headers
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+
+            # 处理 Redmine 认证
+            if is_redmine:
+                # 如果提供了凭证，使用并保存
+                if redmine_username and redmine_password:
+                    headers.update(create_basic_auth_header(redmine_username, redmine_password))
+                    logger.info(f"[Report Analysis] 使用提供的 Redmine 凭证: {redmine_username}")
+                    # 保存凭证供下次使用
+                    await save_redmine_credentials(redmine_username, redmine_password)
+                else:
+                    # 尝试从存储中获取凭证
+                    stored_creds = await load_redmine_credentials()
+                    if stored_creds:
+                        redmine_username = stored_creds.get('username')
+                        redmine_password = stored_creds.get('password')
+                        headers.update(create_basic_auth_header(redmine_username, redmine_password))
+                        logger.info(f"[Report Analysis] 使用存储的 Redmine 凭证: {redmine_username}")
+                    else:
+                        logger.warning("[Report Analysis] 未找到 Redmine 凭证，返回需要认证标志")
+                        return JSONResponse(
+                            content={
+                                'success': False,
+                                'error': '未配置 Redmine 凭证，请输入用户名和密码',
+                                'requires_auth': True,
+                                'is_redmine': True
+                            },
+                            status_code=401
+                        )
+
+            # 下载文件
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=120), headers=headers) as response:
+                    # 处理响应
+                    if response.status == 401 or response.status == 403:
+                        if is_redmine:
+                            return JSONResponse(
+                                content={
+                                    'success': False,
+                                    'error': 'Redmine 认证失败。请检查用户名和密码。',
+                                    'requires_auth': True,
+                                    'is_redmine': True
+                                },
+                                status_code=403
+                            )
+                        else:
+                            return JSONResponse(
+                                content={'success': False, 'error': f'下载失败，HTTP {response.status}'},
+                                status_code=400
+                            )
+                    elif response.status != 200:
+                        logger.error(f"[Report Analysis] 下载失败: HTTP {response.status}")
+                        return JSONResponse(
+                            content={'success': False, 'error': f'下载失败，HTTP {response.status}'},
+                            status_code=400
+                        )
+
+                    # 下载文件内容
+                    downloaded_size = 0
+                    # 从 Content-Disposition header 获取真实文件名
+                    real_filename = extract_filename_from_content_disposition(
+                        response.headers.get('Content-Disposition', '')
+                    ) or filename
+                    if real_filename != filename:
+                        logger.info(f"[Report Analysis] 从 Content-Disposition 获取文件名：{real_filename}")
+
+                    with open(temp_file_path, 'wb') as f:
+                        async for chunk in response.content.iter_chunked(8192):
+                            f.write(chunk)
+                            downloaded_size += len(chunk)
+
+                    logger.info(f"[Report Analysis] 下载完成：{downloaded_size} bytes")
+                    # 更新 filename 为真实文件名
+                    filename = real_filename
+
+
+            # 分析报告
+            logger.info(f"[Report Analysis] 分析报告文件: {temp_file_path}")
+            result = await analyze_report_file(temp_file_path, temp_dir)
+            if result:
+                logger.info(f"[Report Analysis] 分析完成 - 失败用例数: {len(result.get('failures', []))}")
+                if result.get('failures'):
+                    for i, failure in enumerate(result['failures'][:3]):
+                        logger.info(f"[Report Analysis]   失败 {i+1}: {failure.get('name', 'unknown')}")
+            else:
+                logger.warning("[Report Analysis] 分析结果为空")
+
+            # 清理临时文件
+            try:
+                shutil.rmtree(temp_dir)
+            except:
+                pass
+
+            if result:
+                # 从 URL 中提取报告名称
+                report_name = filename
+                # 如果是默认文件名，尝试从 URL 中提取更有意义的名称
+                if filename == 'downloaded_file.zip':
+                    # 从 URL 提取附件 ID 作为报告名称
+                    redmine_attach_match = re.search(r'/attachments/(\d+)', url)
+                    if redmine_attach_match:
+                        report_name = f'Redmine 附件 #{redmine_attach_match.group(1)}'
+                    else:
+                        report_name = 'Redmine 附件报告'
+                result['report_name'] = report_name
+                return JSONResponse(content={
+                    'success': True,
+                    'data': result,
+                    'filename': filename,
+                    'mode': 'url'
+                })
+            else:
+                return JSONResponse(
+                    content={'success': False, 'error': '报告分析失败'},
+                    status_code=500
+                )
+
+        except Exception as download_error:
+            # 清理临时文件
+            try:
+                shutil.rmtree(temp_dir)
+            except:
+                pass
+            raise download_error
+
+    except Exception as e:
+        logger.error(f"[Report Analysis] URL 分析失败: {e}")
+        return JSONResponse(
+            content={'success': False, 'error': f'下载或分析失败: {str(e)}'},
+            status_code=500
+        )
+
+@app.get("/api/config/redmine")
+async def get_redmine_config(request: Request):
+    """获取 Redmine 配置信息 - 供前端使用"""
+    try:
+        redmine_config = config_manager.get_redmine_config()
+        return JSONResponse(content={'success': True, 'data': redmine_config})
+    except ValueError as e:
+        return error_response(str(e), status_code=404)
+    except Exception as e:
+        return error_response(f'获取 Redmine 配置失败: {str(e)}', status_code=500)
+
+@app.post("/api/reports/extract-redmine-attachment")
+async def extract_redmine_attachment(request: Request):
+    """
+    从 Redmine 问题页面提取第一个附件 URL
+
+    参数：
+        issue_url: Redmine 问题页面 URL
+
+    返回：
+        attachment_url: 第一个附件的完整 URL
+        filename: 附件文件名
+    """
+    try:
+        body = await request.json()
+        issue_url = body.get('issue_url', '').strip()
+
+        if not issue_url:
+            return JSONResponse(
+                content={'success': False, 'error': '缺少 issue_url 参数'},
+                status_code=400
+            )
+
+        # 提取问题 ID
+        issue_match = re.search(REDMINE_ISSUE_PATTERN, issue_url)
+        if not issue_match:
+            return JSONResponse(
+                content={'success': False, 'error': '无效的问题 URL'},
+                status_code=400
+            )
+
+        issue_id = issue_match.group(1)
+        logger.info(f"[Redmine Extract] 提取问题 {issue_id} 的附件")
+
+        # 获取存储的凭证和配置
+        stored_creds = await load_redmine_credentials()
+        if not stored_creds:
+            return JSONResponse(
+                content={'success': False, 'error': '未配置 Redmine 凭证'},
+                status_code=401
+            )
+
+        # 构建 Redmine API URL（必须包含 ?include=attachments 才能获取附件）
+        try:
+            redmine_config = config_manager.get_redmine_config()
+            base_url = redmine_config['base_url']
+        except ValueError as e:
+            return JSONResponse(
+                content={'success': False, 'error': str(e)},
+                status_code=404
+            )
+
+        api_url = f"{base_url}/issues/{issue_id}.json?include=attachments"
+
+        username = stored_creds.get('username')
+        password = stored_creds.get('password')
+
+        headers = create_basic_auth_header(username, password)
+        headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status != 200:
+                    return JSONResponse(
+                        content={'success': False, 'error': f'无法访问问题页面: HTTP {response.status}'},
+                        status_code=400
+                    )
+
+                data = await response.json()
+                attachments = data.get('issue', {}).get('attachments', [])
+
+                if not attachments:
+                    return JSONResponse(
+                        content={'success': False, 'error': '该问题没有附件'},
+                        status_code=404
+                    )
+
+                # 获取第一个附件
+                first_attachment = attachments[0]
+                attachment_id = first_attachment.get('id')
+                filename = first_attachment.get('filename', f'attachment_{attachment_id}')
+
+                # 构建附件 URL
+                attachment_url = build_redmine_download_url(base_url, attachment_id)
+
+                logger.info(f"[Redmine Extract] 找到附件: {filename} (ID: {attachment_id})")
+
+                return JSONResponse(content={
+                    'success': True,
+                    'attachment_url': attachment_url,
+                    'filename': filename,
+                    'attachment_id': attachment_id
+                })
+
+    except Exception as e:
+        logger.error(f"[Redmine Extract] 提取附件失败: {e}")
+        return JSONResponse(
+            content={'success': False, 'error': f'提取附件失败: {str(e)}'},
+            status_code=500
+        )
+
+
+async def analyze_report_file(file_path: str, temp_dir: str = None) -> Optional[Dict]:
+    """分析报告文件"""
+    from core.report_analyzer import ReportAnalyzer
+
+    # 使用独立的 temp_dir 创建新的分析器实例，避免全局实例的状态污染
+    if temp_dir is None:
+        temp_dir = os.path.dirname(file_path)
+
+    analyzer = ReportAnalyzer(temp_dir=temp_dir)
+    return analyzer.analyze_file(file_path)
+
+async def save_redmine_credentials(username: str, password: str):
+    """加密保存 Redmine 凭证"""
+    try:
+        config_dir = os.path.join(os.path.dirname(__file__), 'configs')
+        os.makedirs(config_dir, exist_ok=True)
+
+        config_path = os.path.join(config_dir, 'redmine_auth.json')
+
+        encryption_key = base64.urlsafe_b64encode(hashlib.sha256(b'gms_remote_test_redmine_2024').digest())
+        cipher_suite = Fernet(encryption_key)
+        encrypted_password = cipher_suite.encrypt(password.encode()).decode()
+
+        with open(config_path, 'w') as f:
+            json.dump({
+                'username': username,
+                'encrypted_password': encrypted_password,
+                'updated_at': datetime.now().isoformat()
+            }, f)
+
+        logger.info(f"[Redmine Auth] 已保存用户 {username} 的认证信息")
+        return True
+
+    except Exception as e:
+        logger.error(f"[Redmine Auth] 保存凭证失败: {e}")
+        return False
+
+async def load_redmine_credentials():
+    """加载存储的 Redmine 凭证和配置"""
+    try:
+        config_path = os.path.join(os.path.dirname(__file__), 'configs', 'redmine_auth.json')
+
+        if not os.path.exists(config_path):
+            return None
+
+        with open(config_path, 'r') as f:
+            data = json.load(f)
+
+        # 解密密码
+        from cryptography.fernet import Fernet
+        import hashlib
+
+        encryption_key = base64.urlsafe_b64encode(hashlib.sha256(b'gms_remote_test_redmine_2024').digest())
+        cipher_suite = Fernet(encryption_key)
+
+        try:
+            decrypted_password = cipher_suite.decrypt(data['encrypted_password'].encode()).decode()
+            # 只返回凭证信息，域名配置由config_manager统一管理
+            return {
+                'username': data['username'],
+                'password': decrypted_password
+            }
+        except Exception as e:
+            logger.warning(f"[Redmine Auth] 解密失败: {e}")
+            return None
+
+    except Exception as e:
+        logger.error(f"[Redmine Auth] 加载凭证失败: {e}")
+        return None
 
 @app.post("/api/reports/analyze")
 async def analyze_reports(

@@ -18,6 +18,10 @@
         "base_url": "http://10.10.10.203:8080/source",
         "default_project": "Android16"
     },
+    "redmine": {
+        "domain": "redmine.rock-chips.com",
+        "base_url": "https://redmine.rock-chips.com"
+    },
     "ai_models": {
         "enabled": true,
         "primary_provider": "qwen",

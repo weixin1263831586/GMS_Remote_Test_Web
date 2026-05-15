@@ -22,6 +22,11 @@ const state = {
 const DEBUG = false;
 
 // OpenGrok配置 - 从后端API获取（异步加载，不阻塞启动）
+// Redmine配置缓存（减少重复API调用）
+let cachedRedmineConfig = null;
+let redmineConfigFetchTime = 0;
+const REDMINE_CONFIG_CACHE_TTL = 300000; // 5分钟缓存
+
 const OPENGROK_CONFIG = {
     _loaded: false,
     _baseUrl: '',
@@ -80,6 +85,30 @@ function validateDeviceSelection() {
         return false;
     }
     return true
+}
+
+// 获取Redmine配置（带缓存）
+async function getRedmineConfig() {
+    const now = Date.now();
+
+    // 返回缓存配置（如果仍在有效期内）
+    if (cachedRedmineConfig && (now - redmineConfigFetchTime) < REDMINE_CONFIG_CACHE_TTL) {
+        return cachedRedmineConfig;
+    }
+
+    // 获取新配置
+    const configResponse = await fetch('/api/config/redmine');
+    const configResult = await configResponse.json();
+
+    if (!configResult.success || !configResult.data || !configResult.data.domain) {
+        throw new Error(configResult.error || 'Redmine 未配置或配置不完整');
+    }
+
+    // 更新缓存
+    cachedRedmineConfig = configResult.data;
+    redmineConfigFetchTime = now;
+
+    return cachedRedmineConfig;
 }
 
 // 性能优化工具
@@ -4572,6 +4601,14 @@ function initReportAnalysis() {
         e.preventDefault();
         uploadZone.classList.remove('drag-over');
 
+        // 检查是否有 URL（从网页拖拽，如 Redmine 附件）
+        const url = e.dataTransfer.getData('URL') || e.dataTransfer.getData('text/uri-list');
+        if (url) {
+            console.log('[Report Analysis] Detected URL drop:', url);
+            await handleRedmineAttachment(url);
+            return;
+        }
+
         const items = e.dataTransfer.items;
 
         // 如果有 items，尝试使用 DataTransferItem API（支持文件夹）
@@ -4667,6 +4704,299 @@ function initReportAnalysis() {
             handleReportFolder(e.target.files);
         }
     });
+}
+
+// 用于取消正在进行的请求
+let currentRedmineRequest = null;
+
+async function handleRedmineAttachment(url) {
+    const uploadZone = $('report-upload-zone');
+    const content = uploadZone?.querySelector('.report-upload-content');
+    const progress = $('report-upload-progress');
+    const progressFill = $('report-progress-fill');
+
+    if (!progress || !progressFill) return;
+
+    // 取消之前的请求
+    if (currentRedmineRequest) {
+        currentRedmineRequest.abort();
+        currentRedmineRequest = null;
+    }
+
+    // 显示进度
+    if (content) content.style.opacity = '0.5';
+    progress.style.opacity = '1';
+    progressFill.style.width = '10%';
+
+    try {
+        // 首先获取 Redmine 配置（带缓存，减少API调用）
+        let redmineDomain;
+
+        try {
+            const redmineConfig = await getRedmineConfig();
+            redmineDomain = redmineConfig.domain;
+        } catch (configError) {
+            console.error('[Redmine] 配置获取失败:', configError);
+            showToast('❌ Redmine 配置错误，请联系管理员', 'error');
+            return; // 终止处理
+        }
+
+        // 检测是否为 Redmine URL
+        if (url.includes(redmineDomain)) {
+            const issueMatch = url.match(/\/issues\/(\d+)/);
+            if (issueMatch && !url.includes('/attachments/')) {
+                // 是问题页面，尝试获取第一个附件
+                showToast('📋 检测到 Redmine 问题页面，正在提取附件...', 'info');
+                progressFill.style.width = '15%';
+
+                try {
+                    // 调用后端 API 提取附件
+                    const extractResponse = await fetch('/api/reports/extract-redmine-attachment', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ issue_url: url })
+                    });
+
+                    const extractResult = await extractResponse.json();
+
+                    if (extractResult.success && extractResult.attachment_url) {
+                        showToast(`📎 找到附件: ${extractResult.filename || '未知'}`, 'info');
+                        // 使用提取的附件 URL
+                        url = extractResult.attachment_url;
+                        console.log('[Report Analysis] Extracted attachment URL:', url);
+                    } else {
+                        throw new Error(extractResult.error || '无法提取附件');
+                    }
+                } catch (extractError) {
+                    showToast(`❌ ${extractError.message}`, 'error');
+                    setTimeout(() => {
+                        if (progress) progress.style.opacity = '0';
+                        if (content) content.style.opacity = '1';
+                    }, 2000);
+                    return;
+                }
+            }
+
+            showToast('🔐 检测到 Redmine 附件，使用服务器端下载...', 'info');
+            progressFill.style.width = '20%';
+
+            // 创建 AbortController 用于取消请求
+            const controller = new AbortController();
+            currentRedmineRequest = controller;
+
+            // 调用后端 API（使用服务器端存储的凭证）
+            const response = await fetch('/api/reports/analyze-url', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    url: url,
+                    use_redmine_auth: true  // 使用存储的 Redmine 凭证
+                }),
+                signal: controller.signal
+            });
+
+            progressFill.style.width = '70%';
+
+            const result = await response.json();
+
+            progressFill.style.width = '100%';
+
+            if (result.success) {
+                currentRedmineRequest = null;  // 重置请求控制器
+                setTimeout(() => {
+                    if (progress) progress.style.opacity = '0';
+                    if (content) content.style.opacity = '1';
+                    displayReportAnalysis(result.data);
+                    showToast(`✅ 成功分析: ${result.filename || '附件'}`, 'success');
+                }, 300);
+            } else {
+                currentRedmineRequest = null;  // 重置请求控制器
+                // 如果需要凭证，显示凭证输入框
+                if (result.requires_auth) {
+                    showRedmineAuthDialog(url, uploadZone, content, progress, progressFill);
+                } else {
+                    showToast('❌ 分析失败: ' + (result.error || '未知错误'), 'error');
+                    setTimeout(() => {
+                        if (progress) progress.style.opacity = '0';
+                        if (content) content.style.opacity = '1';
+                    }, 2000);
+                }
+            }
+            return;
+        }
+
+        // 非 Redmine URL，使用服务器端下载
+        showToast('正在从 URL 下载附件...', 'info');
+
+        progressFill.style.width = '30%';
+
+        // 创建 AbortController 用于取消请求
+        const controller = new AbortController();
+        currentRedmineRequest = controller;
+
+        const response = await fetch('/api/reports/analyze-url', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ url: url }),
+            signal: controller.signal
+        });
+
+        progressFill.style.width = '80%';
+
+        const result = await response.json();
+
+        progressFill.style.width = '100%';
+
+        if (result.success) {
+            currentRedmineRequest = null;  // 重置请求控制器
+            setTimeout(() => {
+                if (progress) progress.style.opacity = '0';
+                if (content) content.style.opacity = '1';
+                displayReportAnalysis(result.data);
+                showToast(`✅ 成功分析: ${result.filename || '附件'}`, 'success');
+            }, 300);
+        } else {
+            currentRedmineRequest = null;  // 重置请求控制器
+            showToast('❌ 分析失败: ' + (result.error || '未知错误'), 'error');
+            setTimeout(() => {
+                if (progress) progress.style.opacity = '0';
+                if (content) content.style.opacity = '1';
+            }, 2000);
+        }
+    } catch (error) {
+        currentRedmineRequest = null;  // 重置请求控制器
+        if (error.name === 'AbortError') {
+            console.log('请求被取消');
+            return;
+        }
+        console.error('URL attachment analysis error:', error);
+        showToast('❌ 分析失败: ' + error.message, 'error');
+        if (progress) progress.style.opacity = '0';
+        if (content) content.style.opacity = '1';
+    }
+}
+
+function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill) {
+    // 显示 Redmine 凭证输入对话框
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.style.cssText = 'z-index: 10000;';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <span class="modal-title">🔐 Redmine 认证</span>
+                <span class="modal-close" onclick="this.closest('.modal').remove(); resetReportUploadProgress();">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 15px;">请输入 Redmine 账号密码以自动下载附件：</p>
+                <div class="modal-form-row">
+                    <label>用户名</label>
+                    <input type="text" id="redmine-username" placeholder="输入 Redmine 用户名">
+                </div>
+                <div class="modal-form-row">
+                    <label>密码</label>
+                    <input type="password" id="redmine-password" placeholder="输入 Redmine 密码"
+                           onkeypress="if(event.key === 'Enter') submitRedmineAuth('${url}')">
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xs" onclick="this.closest('.modal').remove(); resetReportUploadProgress();">取消</button>
+                    <button class="btn-xs btn-primary" onclick="submitRedmineAuth('${url}')">确定</button>
+                </div>
+                <p style="font-size: 11px; color: var(--text-secondary); margin-top: 15px; text-align: center;">
+                    💾 凭证将被加密存储，下次无需重新输入
+                </p>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // 聚焦到用户名输入框
+    setTimeout(() => {
+        const usernameInput = document.getElementById('redmine-username');
+        if (usernameInput) usernameInput.focus();
+    }, 100);
+}
+
+function resetReportUploadProgress() {
+    const uploadZone = $('report-upload-zone');
+    const content = uploadZone?.querySelector('.report-upload-content');
+    const progress = $('report-upload-progress');
+    const progressFill = $('report-progress-fill');
+
+    if (progress) progress.style.opacity = '0';
+    if (progressFill) progressFill.style.width = '0%';
+    if (content) content.style.opacity = '1';
+}
+
+async function submitRedmineAuth(url) {
+    const username = document.getElementById('redmine-username')?.value;
+    const password = document.getElementById('redmine-password')?.value;
+
+    if (!username || !password) {
+        showToast('请输入用户名和密码', 'warning');
+        return;
+    }
+
+    // 关闭对话框
+    document.querySelector('.modal.show')?.remove();
+
+    // 显示进度
+    const uploadZone = $('report-upload-zone');
+    const content = uploadZone?.querySelector('.report-upload-content');
+    const progress = $('report-upload-progress');
+    const progressFill = $('report-progress-fill');
+
+    if (content) content.style.opacity = '0.5';
+    progress.style.opacity = '1';
+    progressFill.style.width = '30%';
+
+    try {
+        showToast('⬇️ 正在从 Redmine 下载附件...', 'info');
+
+        const response = await fetch('/api/reports/analyze-url', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                url: url,
+                redmine_username: username,
+                redmine_password: password
+            })
+        });
+
+        progressFill.style.width = '80%';
+
+        const result = await response.json();
+
+        progressFill.style.width = '100%';
+
+        if (result.success) {
+            setTimeout(() => {
+                if (progress) progress.style.opacity = '0';
+                if (content) content.style.opacity = '1';
+                displayReportAnalysis(result.data);
+                showToast(`✅ 成功分析: ${result.filename || '附件'}`, 'success');
+            }, 300);
+        } else {
+            showToast('❌ 分析失败: ' + (result.error || '未知错误'), 'error');
+            setTimeout(() => {
+                if (progress) progress.style.opacity = '0';
+                if (content) content.style.opacity = '1';
+            }, 2000);
+        }
+    } catch (error) {
+        console.error('Redmine auth error:', error);
+        showToast('❌ 分析失败: ' + error.message, 'error');
+        if (progress) progress.style.opacity = '0';
+        if (content) content.style.opacity = '1';
+    }
 }
 
 async function handleReportFile(file) {
@@ -4799,6 +5129,12 @@ function displayReportAnalysis(data) {
     const failuresDiv = $('report-failures');
     const failureList = $('report-failure-list');
 
+    // 清空之前的内容
+    if (summaryDiv) summaryDiv.innerHTML = '';
+    if (detailsDiv) detailsDiv.innerHTML = '';
+    if (failureList) failureList.innerHTML = '';
+    if (failuresDiv) failuresDiv.style.display = 'none';
+
     // 移除上传空状态类（缩小到固定高度）
     if (uploadZone) uploadZone.classList.remove('upload-empty');
 
@@ -4879,7 +5215,7 @@ function displayReportAnalysis(data) {
         const actionsDiv = $('report-failure-actions');
         if (actionsDiv) actionsDiv.innerHTML = '';
 
-        failureList.innerHTML = data.failures.map((failure, idx) => {
+        const failuresHTML = data.failures.map((failure, idx) => {
             // 解析失败信息
             const reasonText = failure.reason || '无失败原因';
 
@@ -4917,6 +5253,8 @@ function displayReportAnalysis(data) {
                 </div>
             `;
         }).join('');
+
+        failureList.innerHTML = failuresHTML;
     } else if (failuresDiv) {
         failuresDiv.style.display = 'none';
         const actionsDiv = $('report-failure-actions');
