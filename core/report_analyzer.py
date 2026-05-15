@@ -29,6 +29,35 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 
 
+def get_opengrok_project_for_android_version(android_version: str, opengrok_config: dict) -> str:
+    """
+    根据Android版本获取对应的OpenGrok项目
+
+    Args:
+        android_version: Android版本字符串 (如 "16", "16.1", "16_r3")
+        opengrok_config: OpenGrok配置字典
+
+    Returns:
+        对应的OpenGrok项目名，如果无法匹配则返回default_project
+    """
+    if not android_version or not opengrok_config:
+        return opengrok_config.get('default_project', 'Android16')
+
+    # 提取Android版本的主版本号
+    import re
+    match = re.match(r'(\d+)', android_version)
+    if match:
+        major_version = match.group(1)
+        project_mapping = opengrok_config.get('project_mapping', {})
+
+        # 根据主版本号查找对应项目
+        if major_version in project_mapping:
+            return project_mapping[major_version]
+
+    # 如果无法匹配，返回默认项目
+    return opengrok_config.get('default_project', 'Android16')
+
+
 @dataclass
 class TestFailure:
     """测试失败信息数据类"""
@@ -508,7 +537,7 @@ class HostLogParser:
         if match:
             return match.group(1)
 
-        return 'Unknown'
+        return ''  # 统一返回空字符串
 
     def _extract_start_time(self, log_content: str, log_dir: str) -> str:
         """提取开始时间"""
@@ -983,6 +1012,11 @@ class ReportAnalyzer:
             except Exception:
                 pass
 
+            # 根据Android版本动态选择OpenGrok项目
+            selected_project = get_opengrok_project_for_android_version(
+                self.report.android_version if self.report else '', opengrok_config
+            )
+
             # 解析输出
             search_results = []
             lines = result.stdout.strip().split('\n')
@@ -1004,10 +1038,10 @@ class ReportAnalyzer:
                         'file_type': 'kt' if rest_of_line.endswith('.kt') else 'java'
                     }
 
-                    # 生成OpenGrok URL（使用预加载的配置）
-                    if opengrok_config.get('base_url') and opengrok_config.get('default_project'):
+                    # 生成OpenGrok URL（使用动态选择的项目）
+                    if opengrok_config.get('base_url') and selected_project:
                         base_url = opengrok_config['base_url']
-                        project = opengrok_config['default_project']
+                        project = selected_project
                         result_item['_opengrok_base_url'] = base_url
                         result_item['_opengrok_project'] = project
 
