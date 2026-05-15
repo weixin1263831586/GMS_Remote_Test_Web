@@ -16,7 +16,15 @@
     "scrcpy_path": "/home/${ubuntu_user}/Software/scrcpy-linux-x86_64-v3.3.4/scrcpy",
     "opengrok": {
         "base_url": "http://10.10.10.203:8080/source",
-        "default_project": "Android16"
+        "default_project": "Android16",
+        "project_mapping": {
+            "13": "Android13",
+            "14": "Android14",
+            "15": "Android15",
+            "16": "Android16",
+            "17": "Android17",
+            "18": "Android18"
+        }
     },
     "redmine": {
         "domain": "redmine.rock-chips.com",

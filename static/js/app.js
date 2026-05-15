@@ -31,9 +31,25 @@ const OPENGROK_CONFIG = {
     _loaded: false,
     _baseUrl: '',
     _defaultProject: '',
+    _projectMapping: {},
 
     get isValid() {
         return !!(this._loaded && this._baseUrl && this._defaultProject);
+    },
+
+    getProjectForAndroidVersion(androidVersion) {
+        // 根据Android版本获取对应的项目（使用预编译的正则表达式）
+        if (!androidVersion || !this._projectMapping) {
+            return this._defaultProject;
+        }
+
+        // 提取主版本号（复用现有逻辑）
+        const versionMatch = androidVersion.match(/^(\d+)/);
+        if (versionMatch && versionMatch[1] && this._projectMapping[versionMatch[1]]) {
+            return this._projectMapping[versionMatch[1]];
+        }
+
+        return this._defaultProject;
     },
 
     init() {
@@ -49,8 +65,9 @@ const OPENGROK_CONFIG = {
                 if (result.success && result.data) {
                     this._baseUrl = result.data.base_url;
                     this._defaultProject = result.data.default_project;
+                    this._projectMapping = result.data.project_mapping || {};
                     this._loaded = true;
-                    debugLog('[OpenGrok] ✅ 配置已加载:', { baseUrl: this._baseUrl, defaultProject: this._defaultProject });
+                    debugLog('[OpenGrok] ✅ 配置已加载:', { baseUrl: this._baseUrl, defaultProject: this._defaultProject, projectMapping: this._projectMapping });
                 } else {
                     console.warn('[OpenGrok] ⚠️ 配置响应格式异常:', result);
                 }
@@ -4744,7 +4761,7 @@ async function handleRedmineAttachment(url) {
         // 检测是否为 Redmine URL
         if (url.includes(redmineDomain)) {
             const issueMatch = url.match(/\/issues\/(\d+)/);
-            if (issueMatch && !url.includes('/attachments/')) {
+            if (issueMatch) {
                 // 是问题页面，尝试获取第一个附件
                 showToast('📋 检测到 Redmine 问题页面，正在提取附件...', 'info');
                 progressFill.style.width = '15%';
@@ -4763,9 +4780,8 @@ async function handleRedmineAttachment(url) {
 
                     if (extractResult.success && extractResult.attachment_url) {
                         showToast(`📎 找到附件: ${extractResult.filename || '未知'}`, 'info');
-                        // 使用提取的附件 URL
-                        url = extractResult.attachment_url;
-                        console.log('[Report Analysis] Extracted attachment URL:', url);
+                        // 不替换URL，保持原始问题页面URL用于报告命名
+                        console.log('[Report Analysis] Found attachment:', extractResult.filename);
                     } else {
                         throw new Error(extractResult.error || '无法提取附件');
                     }
@@ -4779,7 +4795,7 @@ async function handleRedmineAttachment(url) {
                 }
             }
 
-            showToast('🔐 检测到 Redmine 附件，使用服务器端下载...', 'info');
+            showToast('🔐 检测到 Redmine URL，使用服务器端处理...', 'info');
             progressFill.style.width = '20%';
 
             // 创建 AbortController 用于取消请求
@@ -5122,6 +5138,10 @@ async function handleReportFolder(files) {
 function displayReportAnalysis(data) {
     if (DEBUG) console.log('[displayReportAnalysis] Called with data:', data);
 
+    // 保存当前报告名称到全局变量，供失败用例卡片使用（使用一次性状态）
+    window.currentReportName = data.report_name || '';
+    if (DEBUG) console.log('[displayReportAnalysis] Current report name:', window.currentReportName);
+
     const resultDiv = $('report-analysis-result');
     const uploadZone = $('report-upload-zone');
     const summaryDiv = $('report-summary');
@@ -5171,10 +5191,12 @@ function displayReportAnalysis(data) {
                     <span class="summary-value">${data.details.suite_version}</span>
                 </div>
             ` : ''}
-            <div>
-                <span class="summary-label">Android版本：</span>
-                <span class="summary-value">${data.details.android_version}</span>
-            </div>
+            ${data.details && data.details.android_version ? `
+                <div>
+                    <span class="summary-label">Android版本：</span>
+                    <span class="summary-value">${data.details.android_version}</span>
+                </div>
+            ` : ''}
             <div>
                 <span class="summary-label">总用例数：</span>
                 <span class="summary-value">${summary.total || 0}</span>
@@ -5233,11 +5255,17 @@ function displayReportAnalysis(data) {
                 .replace(/\n/g, '<br>')
                 .replace(/ /g, '&nbsp;');
 
+            // 从 report_name 中提取 Redmine issue ID（使用预编译的正则表达式）
+            const reportName = window.currentReportName || '';
+            const redmineIssueMatch = reportName.match(/^Redmine-(\d+)-/);
+            const issueIdFromReport = redmineIssueMatch ? redmineIssueMatch[1] : '';
+
             return `
                 <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 12px; margin-bottom: 12px; position: relative;">
                     <!-- 右上角按钮 -->
                     <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
                         <button onclick="aiAnalyzeFailureReport('${testCaseName}', \`${reasonText.substring(0, 500).replace(/`/g, '\\`')}\`)" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);">🤖 报错分析</button>
+                        ${issueIdFromReport ? `<button onclick="openRedmineReplyModal('${moduleName}', '${testCaseName}', '${idx}', '${issueIdFromReport}')" data-reason="${encodeURIComponent(reasonText)}" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(245, 87, 108, 0.3);">📝 Redmine回复</button>` : ''}
                     </div>
 
                     <div style="margin-bottom: 8px; padding-right: 240px;">
@@ -5247,8 +5275,9 @@ function displayReportAnalysis(data) {
                         <div style="font-size: 12px; color: var(--text-secondary);">测试用例: <span style="font-family: 'Courier New', monospace; color: var(--primary-color); word-break: break-all;">${testCaseName}</span></div>
                     </div>
                     <div style="padding-right: 240px;">
-                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">失败详情</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">报错信息</div>
                         <div class="failure-reason" id="failure-reason-${idx}" style="font-size: 11px; font-family: 'Courier New', monospace; white-space: pre-wrap; word-wrap: break-word;">${formattedStackTrace}</div>
+                        <div class="failure-reason-raw" id="failure-reason-raw-${idx}" style="display: none;">${reasonText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
                     </div>
                 </div>
             `;
@@ -6063,6 +6092,103 @@ window.showSshdInstallGuide = showSshdInstallGuide;
 window.closeSshdInstallGuide = closeSshdInstallGuide;
 window.autoInstallUsbipd = autoInstallUsbipd;
 window.resetReportAnalysis = resetReportAnalysis;
+window.openRedmineReplyModal = openRedmineReplyModal;
+
+// Redmine 回复对话框
+function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFromReport) {
+    const modalId = 'redmine-reply-modal-' + Date.now();
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';
+    modal.style.cssText = 'z-index: 10001;';
+
+    // 从隐藏的原始数据元素中获取完整的错误信息（保留换行和格式）
+    const failureReasonElement = document.getElementById(`failure-reason-raw-${failureIndex}`);
+    const failureReason = failureReasonElement ? failureReasonElement.textContent.trim() : '';
+
+    // 生成默认回复模板
+    const defaultReply = '**测试模块**: ' + moduleName + '\n\n' +
+        '**测试用例**: ' + testCaseName + '\n\n' +
+        '**报错信息**:\n' +
+        '<pre>\n' + failureReason + '\n</pre>';
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 700px; max-height: 85vh; overflow-y: auto;">
+            <div class="modal-header">
+                <span class="modal-title">📝 Redmine回复</span>
+                <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">Redmine Issue ID</label>
+                    <input type="text" id="redmine-issue-id-input" value="${issueIdFromReport}" placeholder="输入 Redmine Issue ID"
+                           style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 14px; font-family: 'Courier New', monospace;">
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">回复内容</label>
+                    <textarea id="redmine-reply-text" rows="12" placeholder="输入回复内容..."
+                              style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 13px; font-family: 'Courier New', monospace; white-space: pre-wrap; resize: vertical;">${defaultReply}</textarea>
+                </div>
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button onclick="ModalManager.close('${modalId}')"
+                            style="padding: 8px 16px; background: var(--secondary-bg); color: var(--text-primary); border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">取消</button>
+                    <button onclick="confirmAndSendRedmineReply('${modalId}')"
+                            style="padding: 8px 16px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 4px rgba(245, 87, 108, 0.3);">确认并发送</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    ModalManager.open(modalId);
+}
+
+// 确认并发送 Redmine 回复
+async function confirmAndSendRedmineReply(modalId) {
+    const issueId = document.getElementById('redmine-issue-id-input')?.value?.trim();
+    const replyText = document.getElementById('redmine-reply-text')?.value?.trim();
+
+    if (!issueId) {
+        showToast('❌ 请输入 Redmine Issue ID', 'error');
+        return;
+    }
+
+    if (!replyText) {
+        showToast('❌ 回复内容不能为空', 'error');
+        return;
+    }
+
+    try {
+        showToast('📤 正在发送回复...', 'info');
+
+        const response = await fetch('/api/redmine/reply', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                issue_id: issueId,
+                reply_text: replyText
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(`✅ 回复已成功发送到 Redmine #${issueId}`, 'success');
+            ModalManager.close(modalId);
+            // 可选：打开 Redmine 页面查看
+            setTimeout(() => {
+                window.open(`https://redmine.rock-chips.com/issues/${issueId}`, '_blank');
+            }, 1500);
+        } else {
+            showToast('❌ 发送失败：' + (result.error || result.detail || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('[Redmine Reply] Error:', error);
+        showToast('❌ 发送失败：' + error.message, 'error');
+    }
+}
 
 function resetReportAnalysis() {
     const resultDiv = $('report-analysis-result');
