@@ -165,6 +165,35 @@ class ConfigManager:
 
         return ai_models
 
+    def get_redmine_config(self) -> Dict[str, Any]:
+        """
+        获取 Redmine 配置（统一的配置访问接口）
+
+        Returns:
+            Redmine 配置字典，包含 domain 和 base_url
+
+        Raises:
+            ValueError: 如果 Redmine 未配置或配置不完整
+        """
+        config = self.load_config()
+        redmine_config = config.get('redmine', {})
+
+        # 如果配置为空或不完整，抛出异常
+        if not redmine_config or 'base_url' not in redmine_config:
+            raise ValueError(
+                'Redmine 未配置或配置不完整，请在 configs/config.json 中配置 redmine 段，'
+                '包含 domain 和 base_url 字段'
+            )
+
+        # 验证必需字段
+        if 'domain' not in redmine_config:
+            # 如果domain字段缺失，从base_url中提取
+            from urllib.parse import urlparse
+            parsed = urlparse(redmine_config['base_url'])
+            redmine_config['domain'] = parsed.netloc
+
+        return redmine_config
+
     def get_ai_provider_config(self, provider_name: str) -> Optional[Dict[str, Any]]:
         """
         获取指定 AI provider 的配置

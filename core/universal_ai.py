@@ -195,7 +195,10 @@ class UniversalAIAnalyzer:
                 data = {
                     "model": model,
                     "max_tokens": config.get('max_tokens', 2000),
-                    "messages": [{"role": "user", "content": prompt}]
+                    "messages": [{"role": "user", "content": prompt}],
+                    # 禁用推理模式，确保直接返回结果
+                    "disable_thinking": True,
+                    "skip_reasoning": True
                 }
             else:
                 # OpenAI 格式：/v1/chat/completions
@@ -207,7 +210,10 @@ class UniversalAIAnalyzer:
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": config.get('temperature', 0.3),
-                    "max_tokens": config.get('max_tokens', 2000)
+                    "max_tokens": config.get('max_tokens', 2000),
+                    # 禁用推理模式，确保直接返回结果
+                    "disable_thinking": True,
+                    "skip_reasoning": True
                 }
                 url = f"{base_url}/v1/chat/completions" if not (base_url.endswith('/chat/completions') or base_url.endswith('/completions')) else base_url
 
@@ -284,6 +290,34 @@ class UniversalAIAnalyzer:
                 else:
                     content = str(result)
 
+                # 检查是否包含推理过程文本（如 "Thinking Process"）
+                if 'Thinking Process' in content or 'thinking_process' in content.lower():
+                    logger.info(f"[{provider_name}] 检测到推理过程文本，尝试提取最终结果")
+
+                    # 尝试提取推理过程后的最终 JSON
+                    # 查找 "Thinking Process" 后的内容
+                    thinking_end = content.lower().find('thinking process')
+                    if thinking_end > 0:
+                        # 跳过 "Thinking Process" 标题和可能的冒号
+                        after_thinking = content[thinking_end + len('thinking process'):]
+                        # 查找下一个可能的 JSON 开始
+                        json_start = after_thinking.find('{')
+                        if json_start > 0:
+                            # 尝试从找到的 JSON 开始解析
+                            potential_json = after_thinking[json_start:]
+                            # 找到匹配的结束括号
+                            json_end = potential_json.rfind('}') + 1
+                            if json_end > json_start:
+                                extracted_content = potential_json[:json_end]
+                                try:
+                                    # 验证是否为有效 JSON
+                                    test_parse = json.loads(extracted_content)
+                                    if 'root_cause' in test_parse:
+                                        content = extracted_content
+                                        logger.info(f"[{provider_name}] 成功从推理过程中提取最终 JSON")
+                                except:
+                                    logger.warning(f"[{provider_name}] 提取的 JSON 无效，使用原始内容")
+
                 parsed = self._parse_response(content)
 
                 return {
@@ -359,10 +393,15 @@ class UniversalAIAnalyzer:
         prompt += """
 请分析上述信息并按以下JSON格式返回。
 
-**重要要求**：
-1. 只返回纯JSON格式，不要包含markdown代码块标记（```json 或 ```）
-2. 不要包含任何解释性文字，直接以 { 开始，以 } 结束
-3. 确保JSON格式完全正确，可以被标准JSON解析器解析
+**最关键要求（必须严格遵守）**：
+1. 你的回复必须且只能是一个纯JSON对象，不要包含任何其他内容
+2. 不要以"🎯 根本原因"或其他标题开头
+3. 不要包含"📊 详细分析"等解释性文字
+4. 直接以 { 开始，以 } 结束，中间就是JSON内容
+5. 确保JSON格式完全正确，可以被标准JSON解析器解析
+6. 绝对不要使用markdown代码块标记（```json 或 ```）
+7. **禁止输出推理过程或思考步骤** - 不要输出 "Thinking Process"、"分析步骤" 等内容
+8. **直接给出最终结果** - 不要解释你的分析过程，直接返回JSON格式的分析结果
 
 返回格式：
 {
@@ -496,14 +535,78 @@ class UniversalAIAnalyzer:
                     ]
                 }
 
-            logger.debug(f"[AI Parse] 响应长度: {len(response_text)}, 前500字符: {response_text[:500]}")
+            logger.info(f"[AI Parse] 原始响应长度: {len(response_text)}, 前800字符: {response_text[:800]}")
 
-            # 移除可能的markdown标记
-            text = response_text.strip()
+            # 检查是否包含推理过程文本
+            if 'Thinking Process' in response_text or 'thinking_process' in response_text.lower():
+                logger.info("[AI Parse] 检测到推理过程文本，尝试提取最终结果")
+
+                # 查找推理过程的结束位置
+                # 通常推理过程后会有最终的 JSON 输出
+                lines = response_text.split('\n')
+                result_lines = []
+                in_thinking = False
+                found_json = False
+
+                for line in lines:
+                    # 检测推理过程的开始
+                    if 'thinking process' in line.lower() or line.strip().startswith('thinking'):
+                        in_thinking = True
+                        continue
+
+                    # 检测推理过程的结束（找到 JSON 开始）
+                    if in_thinking and line.strip().startswith('{'):
+                        in_thinking = False
+                        found_json = True
+                        result_lines.append(line)
+                        continue
+
+                    # 如果已经找到 JSON，收集后续内容
+                    if found_json:
+                        result_lines.append(line)
+                    # 如果不在推理过程中，也收集内容
+                    elif not in_thinking:
+                        result_lines.append(line)
+
+                if found_json and result_lines:
+                    # 重新组装内容，从 JSON 开始的部分
+                    text = '\n'.join(result_lines)
+                    logger.info("[AI Parse] 提取了推理过程后的最终结果")
+                else:
+                    text = response_text
+            else:
+                text = response_text
+
+            # 移除可能的markdown标记和额外标题
+            text = text.strip()
+
+            # 记录清理前的文本
+            logger.debug(f"[AI Parse] 清理前文本: {text[:500]}")
+
+            # 移除常见的标题格式（如果出现在JSON之前）
+            patterns_to_remove = [
+                r'🎯\s*根本原因\s*\n?',
+                r'📊\s*详细分析\s*\n?',
+                r'✅\s*解决建议\s*\n?',
+                r'🤖\s*报错分析结果\s*\n?',
+            ]
+
+            for pattern in patterns_to_remove:
+                text = re.sub(pattern, '', text, flags=re.MULTILINE)
+
+            # 移除重复的emoji和花括号组合（更激进的清理）
+            # 移除 "🎯 {" 或 "🎯 {" 这种格式
+            text = re.sub(r'🎯\s*\{', '{', text)
+            # 移除 "📊 {" 这种格式
+            text = re.sub(r'📊\s*\{', '{', text)
+            # 移除行首的单独 emoji（保留在 JSON 内容中的 emoji）
+            text = re.sub(r'^[🎯📊✅]\s*\n?', '', text, flags=re.MULTILINE)
 
             # 优化：一次性移除所有markdown代码块标记，包括各种变体
             text = re.sub(r'```(?:json|JSON|javascript)?', '', text, flags=re.IGNORECASE)
             text = text.strip()
+
+            logger.debug(f"[AI Parse] 清理后文本: {text[:500]}")
 
             # 查找JSON对象
             start = text.find('{')
@@ -511,6 +614,22 @@ class UniversalAIAnalyzer:
 
             if start >= 0 and end > start:
                 json_str = text[start:end]
+
+                # 处理可能的嵌套空对象问题："{\n{...}" -> "{...}"
+                # 检查是否有连续的两个开始括号（后面跟随换行和另一个开始括号）
+                if json_str.startswith('{\n{') or json_str.startswith('{{'):
+                    # 找到第二个真正的JSON开始位置
+                    second_brace = json_str.find('{', 1)
+                    if second_brace > 0:
+                        # 尝试从第二个括号开始解析
+                        try:
+                            test_json = json_str[second_brace:]
+                            test_parsed = json.loads(test_json)
+                            if 'root_cause' in test_parsed:
+                                json_str = test_json
+                                logger.info(f"[AI Parse] 移除了外层的空对象包装")
+                        except:
+                            pass
 
                 # 尝试多层次的JSON修复策略
                 parsed = None
@@ -539,7 +658,8 @@ class UniversalAIAnalyzer:
                         continue
 
                 if parsed is None:
-                    logger.warning(f"所有JSON解析策略都失败，回退到文本解析。原始JSON片段: {json_str[:200]}")
+                    logger.error(f"所有JSON解析策略都失败，回退到文本解析。原始响应: {response_text[:500]}")
+                    logger.error(f"提取的JSON片段: {json_str[:200]}")
                     return self._parse_text_response(response_text)
 
                 if 'root_cause' in parsed and not parsed['root_cause'].startswith('🎯'):
@@ -579,7 +699,78 @@ class UniversalAIAnalyzer:
         """解析文本格式响应（回退方案）"""
         try:
             logger.info("[AI Parse] 使用文本解析回退方案")
+            logger.debug(f"[AI Parse] 待解析文本长度: {len(text)}, 前500字符: {text[:500]}")
 
+            # 检查文本中是否有 { 字符
+            has_braces = '{' in text and '}' in text
+            logger.info(f"[AI Parse] 文本包含花括号: {has_braces}")
+
+            # 首先尝试从文本中提取JSON（处理混合格式）
+            # 使用括号匹配算法来正确提取嵌套的JSON结构
+            json_candidates = []
+
+            depth = 0
+            start = -1
+            in_string = False
+            escape_next = False
+
+            for i, char in enumerate(text):
+                # 处理字符串转义
+                if escape_next:
+                    escape_next = False
+                    continue
+
+                if char == '\\':
+                    escape_next = True
+                    continue
+
+                # 处理字符串边界
+                if char == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+
+                # 只在非字符串状态下计算括号
+                if not in_string:
+                    if char == '{':
+                        if depth == 0:
+                            start = i
+                        depth += 1
+                    elif char == '}':
+                        depth -= 1
+                        if depth == 0 and start >= 0:
+                            json_candidates.append((start, i, text[start:i+1]))
+                            start = -1
+
+            logger.info(f"[AI Parse] 括号匹配找到 {len(json_candidates)} 个候选")
+
+            if json_candidates:
+                logger.info(f"[AI Parse] 找到 {len(json_candidates)} 个JSON候选")
+                for i, (start_pos, end_pos, json_str) in enumerate(json_candidates[:3]):  # 记录前3个
+                    logger.info(f"[AI Parse] JSON候选 #{i+1}: 位置={start_pos}-{end_pos}, 长度={len(json_str)}, 前100字符={json_str[:100]}")
+
+                # 按长度排序，优先尝试较长的JSON（更完整）
+                json_candidates.sort(key=lambda x: len(x[2]), reverse=True)
+
+                for start_pos, end_pos, json_str in json_candidates:
+                    try:
+                        logger.debug(f"[AI Parse] 尝试解析JSON (位置 {start_pos}-{end_pos}, 长度: {len(json_str)})")
+                        parsed = json.loads(json_str)
+                        # 验证是否包含我们需要的字段
+                        if 'root_cause' in parsed and 'analysis' in parsed:
+                            logger.info(f"[AI Parse] 从文本中成功提取完整JSON，长度: {len(json_str)}")
+
+                            # 确保格式正确
+                            if not parsed['root_cause'].startswith('🎯'):
+                                parsed['root_cause'] = f"🎯 {parsed['root_cause']}"
+                            if not parsed['analysis'].startswith('📊'):
+                                parsed['analysis'] = f"📊 {parsed['analysis']}"
+
+                            return parsed
+                    except json.JSONDecodeError as e:
+                        logger.debug(f"[AI Parse] JSON解析失败: {e}")
+                        continue
+
+            # 如果没有找到JSON，回退到原始的文本解析逻辑
             lines = text.split('\n')
             analysis = []
             suggestions = []

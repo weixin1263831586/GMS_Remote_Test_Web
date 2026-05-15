@@ -12,7 +12,7 @@
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260513-7" crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260514-11" crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -805,7 +805,13 @@
                     <div class="report-upload-content">
                         <div>📁</div>
                         <div>
-                            <div style="font-size: 14px; font-weight: 600; white-space: nowrap;">拖拽测试报告到此处</div>
+                            <div style="font-size: 16px; font-weight: 600; white-space: nowrap;">拖拽测试报告到此处</div>
+                            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                                支持 .zip、.xml、.tar.gz 等文件格式<br>
+                                1. 点击按钮"📤 上传报告"选择测试报告<br>
+                                2. 直接拖拽测试报告上传<br>
+                                3. 直接拖拽 Redmine 附件上传
+                            </div>
                         </div>
                         <button class="btn-xs" onclick="document.getElementById('report-file-input').click()" style="font-size: 12px; padding: 10px 20px;">
                             📤 上传报告
