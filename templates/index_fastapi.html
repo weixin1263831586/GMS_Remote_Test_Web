@@ -74,68 +74,7 @@
         .page-content.active {
             display: block;
         }
-        /* 终端页面样式 */
-        .terminal-main-container {
-            display: none;
-            flex-direction: column;
-            height: 100vh;
-            padding: 0;
-            gap: 0;
-            width: 100%;
-        }
-        .terminal-main-container.active {
-            display: flex;
-        }
-        .terminal-header-section {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 12px;
-            background: var(--light-bg);
-            border-bottom: 1px solid var(--border-color);
-            flex-shrink: 0;
-        }
-        .terminal-title-section {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .terminal-title {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-        .connection-info {
-            font-size: 11px;
-            color: var(--text-secondary);
-            padding: 4px 8px;
-            background: var(--darker-bg);
-            border-radius: 3px;
-        }
-        .connection-info span {
-            color: var(--text-primary);
-            font-weight: 500;
-        }
-        .terminal-status {
-            font-size: 10px;
-            padding: 4px 8px;
-            border-radius: 3px;
-            background: var(--darker-bg);
-            color: var(--text-secondary);
-            font-weight: 500;
-        }
-        .terminal-status.connected {
-            background: rgba(76, 175, 80, 0.2);
-            color: var(--success-color);
-        }
-        .terminal-status.disconnected {
-            background: rgba(244, 67, 54, 0.2);
-            color: var(--danger-color);
-        }
-        .terminal-controls {
-            display: flex;
-            gap: 6px;
-        }
+        /* 终端页面样式已移除，使用统一的 .container 和 .section-title */
         .btn-xs {
             padding: 4px 10px;
             font-size: 11px;
@@ -151,28 +90,14 @@
             background: var(--border-color);
             transform: translateY(-1px);
         }
-        .terminal-wrapper {
-            flex: 1;
-            background: #000;
-            border: none;
-            border-radius: 0;
-            overflow: hidden;
-            position: relative;
-            min-height: 0;
+        .terminal-status.connected {
+            background: rgba(76, 175, 80, 0.2);
+            color: var(--success-color);
         }
-        .terminal-wrapper.drag-over {
-            border: 3px dashed var(--primary-color);
-            background: rgba(76, 175, 80, 0.1);
+        .terminal-status.disconnected {
+            background: rgba(244, 67, 54, 0.2);
+            color: var(--danger-color);
         }
-        .terminal-wrapper.drag-over::after {
-            content: '📁 拖拽文件上传到主机/tmp';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 24px;
-            color: var(--primary-color);
-            font-weight: 600;
             pointer-events: none;
             z-index: 1000;
             text-align: center;
@@ -183,74 +108,8 @@
             height: 100%;
         }
         /* 桌面页面样式 */
-        .desktop-container {
-            display: none;
-            flex-direction: column;
-            height: 100vh;
-            padding: 0;
-        }
-        .desktop-container.active {
-            display: flex;
-        }
-        .vnc-canvas {
-            width: 100%;
-            height: 100vh;
-            background: #000;
-            position: relative;
-        }
-        .vnc-iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-        }
-        /* 桌面页面头部样式 */
-        .desktop-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 16px;
-            background: var(--light-bg);
-            border-bottom: 1px solid var(--border-color);
-            flex-shrink: 0;
-        }
-        .desktop-title-section {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .desktop-title {
-            font-size: 15px;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-        .host-selector {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .host-select {
-            padding: 6px 10px;
-            font-size: 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 3px;
-            background: var(--darker-bg);
-            color: var(--text-primary);
-            min-width: 200px;
-            cursor: pointer;
-        }
-        .host-select:hover {
-            border-color: var(--primary-color);
-        }
-        .host-controls {
-            display: flex;
-            gap: 6px;
-        }
-        .desktop-canvas {
-            flex: 1;
-            background: #000;
-            position: relative;
-            min-height: 0;
-        }
+        /* 桌面页面样式已移除，使用统一的 .container 和 .section-title */
+
         /* 主机管理弹框 */
         .host-input-group {
             display: flex;
@@ -605,25 +464,21 @@
         <!-- End of page-test -->
 
         <!-- 桌面页面 -->
-        <div class="desktop-container" id="page-desktop">
-            <!-- 桌面页面头部 -->
-            <div class="desktop-header">
-                <div class="desktop-title-section">
-                    <div class="desktop-title">🖥️ 主机桌面</div>
-                    <div class="host-selector">
-                        <select id="host-select" class="host-select" onchange="switchHost()">
-                            <option value="">加载中...</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="host-controls">
-                    <button class="btn-xs" onclick="refreshVNC()">🔄 刷新</button>
-                    <button class="btn-xs" onclick="showAddHostModal()">添加主机</button>
+        <div class="container page-content" id="page-desktop">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                <div class="section-title" style="margin: 0;">🖥️ 主机桌面</div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <select id="host-select" onchange="switchHost()" style="padding: 3px 6px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 11px;">
+                        <option value="">加载中...</option>
+                    </select>
+                    <button class="btn-xs" onclick="refreshVNC()" style="padding: 2px 6px; font-size: 10px;">🔄 刷新桌面</button>
+                    <button class="btn-xs" onclick="showAddHostModal()" style="padding: 2px 6px; font-size: 10px;">添加主机</button>
                 </div>
             </div>
+
             <!-- VNC 画布 -->
-            <div class="desktop-canvas" id="desktop-canvas">
-                <iframe id="vnc-frame" class="vnc-iframe"
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 80px); overflow: hidden;">
+                <iframe id="vnc-frame" style="width: 100%; height: 100%; border: none;"
                         src="http://{{ config.ubuntu_host }}:6080/vnc.html?autoconnect=true{% if config.vnc_password %}&password={{ config.vnc_password | urlencode }}{% endif %}"
                         frameborder="0"
                         allowfullscreen>
@@ -632,25 +487,20 @@
         </div>
 
         <!-- 终端页面 -->
-        <div class="terminal-main-container" id="page-terminal">
-            <!-- 终端头部 -->
-            <div class="terminal-header-section">
-                <div class="terminal-title-section">
-                    <div class="terminal-title">Ubuntu主机终端</div>
-                    <div class="connection-info">
-                        连接: <span>{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</span>
-                    </div>
-                    <div class="terminal-status" id="terminal-status">未连接</div>
-                </div>
-                <div class="terminal-controls">
-                    <button class="btn-xs" onclick="clearTerminal()">🧹 清空</button>
-                    <button class="btn-xs" onclick="reconnectTerminal()">🔄 重连</button>
+        <div class="container page-content" id="page-terminal">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                <div class="section-title" style="margin: 0;">💻 主机终端</div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <div style="font-size: 11px; color: var(--text-secondary);">连接: <span style="color: var(--text-primary); font-weight: 500;">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</span></div>
+                    <div class="terminal-status" id="terminal-status" style="font-size: 10px; padding: 3px 6px; border-radius: 3px; background: var(--darker-bg); color: var(--text-secondary);">未连接</div>
+                    <button class="btn-xs" onclick="clearTerminal()" style="padding: 2px 6px; font-size: 10px;">🧹</button>
+                    <button class="btn-xs" onclick="reconnectTerminal()" style="padding: 2px 6px; font-size: 10px;">🔄</button>
                 </div>
             </div>
 
             <!-- 终端区域 -->
-            <div class="terminal-wrapper" id="terminal-wrapper">
-                <div id="terminal"></div>
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 80px); overflow: hidden;">
+                <div id="terminal" style="width: 100%; height: 100%;"></div>
             </div>
         </div>
 
@@ -763,16 +613,16 @@
 
         <!-- 报告管理页面 -->
         <div class="container page-content" id="page-reports">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
                 <div class="section-title" style="margin: 0;">📊 报告管理</div>
-                <label style="display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--text-primary); cursor: pointer;">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-primary); cursor: pointer;">
                     <input type="checkbox" id="filter-user-checkbox" onchange="toggleUserReports()" style="cursor: pointer;">
                     查看本用户报告
                 </label>
             </div>
 
             <!-- 报告列表 -->
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 85px); overflow-y: auto;">
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 95px); overflow-y: auto;">
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead style="position: sticky; top: 0; z-index: 10;">
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
@@ -784,6 +634,7 @@
                             <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">总计</th>
                             <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">通过率</th>
                             <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
+
                         </tr>
                     </thead>
                     <tbody id="reports-table-body">
@@ -975,7 +826,7 @@
 
         <!-- 常用网址页面 -->
         <div class="container page-content" id="page-tools">
-            <div class="section-title" style="margin-bottom: 12px;">🔧 常用网址</div>
+            <div class="section-title">🔧 常用网址</div>
 
             <!-- 工具页面外框容器 - 固定高度支持滚动 -->
             <div class="tools-container" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; overflow: hidden; max-height: calc(100vh - 80px);">
@@ -3555,6 +3406,57 @@
             }
         });
 
+        // ==================== 方向键导航支持 ====================
+        document.addEventListener('keydown', function(e) {
+            // 只处理方向键
+            if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+
+            // 在输入框、文本域等元素中不拦截
+            const target = e.target;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
+                target.tagName === 'SELECT' || target.isContentEditable) {
+                return;
+            }
+
+            // 在终端页面，检查终端是否获得焦点
+            if (currentPage === 'terminal') {
+                const terminalElement = document.getElementById('terminal');
+                // 如果点击的是终端区域或者终端内有焦点，则不拦截方向键
+                if (terminalElement && (target === terminalElement || terminalElement.contains(target))) {
+                    return;
+                }
+            }
+
+            // 在桌面页面，检查iframe是否获得焦点
+            if (currentPage === 'desktop') {
+                const vncFrame = document.getElementById('vnc-frame');
+                // 如果点击的是VNC iframe，则不拦截方向键
+                if (vncFrame && (target === vncFrame || target === vncFrame.contentWindow)) {
+                    return;
+                }
+            }
+
+            // 按照侧边栏的顺序排列
+            const pages = ['test', 'desktop', 'terminal', 'devices', 'users', 'reports', 'report-analysis', 'api-docs', 'architecture', 'tools'];
+            const currentIndex = pages.indexOf(currentPage);
+
+            if (currentIndex === -1) return;
+
+            let newIndex;
+            if (e.key === 'ArrowUp') {
+                // 向上：前一个页面
+                newIndex = (currentIndex - 1 + pages.length) % pages.length;
+            } else {
+                // 向下：下一个页面
+                newIndex = (currentIndex + 1) % pages.length;
+            }
+
+            // 切换页面
+            const targetPage = pages[newIndex];
+            switchPage(targetPage, null);
+            e.preventDefault();
+        });
+
         function updateCategorySelect() {
             const select = document.getElementById('tool-category');
             if (!select) return;
@@ -3923,29 +3825,39 @@
             terminal.focus();
 
             // 点击聚焦
-            document.getElementById('terminal-wrapper').addEventListener('click', () => {
-                terminal.focus();
-            });
+            const terminalDiv = document.getElementById('terminal');
+            if (terminalDiv) {
+                terminalDiv.addEventListener('click', () => {
+                    terminal.focus();
+                });
+            }
 
             // 添加拖拽文件推送功能
-            const terminalWrapper = document.getElementById('terminal-wrapper');
+            const terminalContainer = terminalDiv ? terminalDiv.parentElement : null;
+            if (!terminalContainer) {
+                console.error('Terminal container not found');
+                return;
+            }
 
-            terminalWrapper.addEventListener('dragover', (e) => {
+            terminalContainer.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                terminalWrapper.classList.add('drag-over');
+                terminalContainer.style.border = '3px dashed var(--primary-color)';
+                terminalContainer.style.background = 'rgba(76, 175, 80, 0.1)';
             });
 
-            terminalWrapper.addEventListener('dragleave', (e) => {
+            terminalContainer.addEventListener('dragleave', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                terminalWrapper.classList.remove('drag-over');
+                terminalContainer.style.border = '1px solid var(--border-color)';
+                terminalContainer.style.background = 'var(--light-bg)';
             });
 
-            terminalWrapper.addEventListener('drop', async (e) => {
+            terminalContainer.addEventListener('drop', async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                terminalWrapper.classList.remove('drag-over');
+                terminalContainer.style.border = '1px solid var(--border-color)';
+                terminalContainer.style.background = 'var(--light-bg)';
 
                 const files = e.dataTransfer.files;
                 if (files.length === 0) return;
