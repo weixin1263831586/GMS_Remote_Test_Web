@@ -1530,6 +1530,182 @@ def hide_sensitive_info(config: dict) -> dict:
 
     return safe_config
 
+# ==================== 工具数据管理 ====================
+TOOLS_DATA_FILE = os.path.join(os.path.dirname(__file__), 'data', 'user_tools_data.json')
+
+def load_tools_data():
+    """加载所有用户的工具数据"""
+    try:
+        if os.path.exists(TOOLS_DATA_FILE):
+            with open(TOOLS_DATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+    except Exception as e:
+        logger.error(f"[ToolsData] Error loading tools data: {e}")
+        return {}
+
+def save_tools_data(tools_data):
+    """保存所有用户的工具数据"""
+    try:
+        with open(TOOLS_DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(tools_data, f, indent=4, ensure_ascii=False)
+        return True
+    except Exception as e:
+        logger.error(f"[ToolsData] Error saving tools data: {e}")
+        return False
+
+@app.post("/api/tools/save")
+@handle_api_errors
+async def save_user_tools(request: Request):
+    """保存用户的工具数据"""
+    try:
+        data = await request.json()
+        client_id = get_client_id_from_request(request)
+
+        if not client_id:
+            return error_response('Unable to identify user', status_code=400)
+
+        tools_data = data.get('tools')
+        if not isinstance(tools_data, dict):
+            return error_response('Invalid tools data format', status_code=400)
+
+        # 加载现有数据
+        all_tools_data = load_tools_data()
+
+        # 更新当前用户的数据
+        all_tools_data[client_id] = {
+            'tools': tools_data,
+            'last_updated': datetime.now().isoformat(),
+            'client_ip': request.client.host if request.client else 'unknown'
+        }
+
+        # 保存到文件
+        if save_tools_data(all_tools_data):
+            logger.info(f"[ToolsData] Saved tools data for {client_id}")
+            return JSONResponse(content={'success': True})
+        else:
+            return error_response('Failed to save tools data', status_code=500)
+
+    except Exception as e:
+        logger.error(f"[ToolsData] Error in save_user_tools: {e}")
+        return error_response(str(e), status_code=500)
+
+@app.get("/api/tools/load")
+@handle_api_errors
+async def load_user_tools(request: Request):
+    """加载用户的工具数据"""
+    try:
+        client_id = get_client_id_from_request(request)
+
+        if not client_id:
+            return error_response('Unable to identify user', status_code=400)
+
+        # 加载所有用户数据
+        all_tools_data = load_tools_data()
+
+        # 获取当前用户的数据
+        user_data = all_tools_data.get(client_id, {})
+        tools = user_data.get('tools', {})
+        last_updated = user_data.get('last_updated')
+
+        logger.info(f"[ToolsData] Loaded tools data for {client_id}, last_updated: {last_updated}")
+
+        return JSONResponse(content={
+            'success': True,
+            'tools': tools,
+            'last_updated': last_updated
+        })
+
+    except Exception as e:
+        logger.error(f"[ToolsData] Error in load_user_tools: {e}")
+        return error_response(str(e), status_code=500)
+
+@app.post("/api/tools/sync")
+@handle_api_errors
+async def sync_user_tools(request: Request):
+    """同步用户的工具数据（智能合并本地和服务器数据）"""
+    try:
+        data = await request.json()
+        client_id = get_client_id_from_request(request)
+
+        if not client_id:
+            return error_response('Unable to identify user', status_code=400)
+
+        local_tools = data.get('tools')
+        local_timestamp = data.get('timestamp')
+
+        if not isinstance(local_tools, dict):
+            return error_response('Invalid local tools data', status_code=400)
+
+        # 加载服务器数据
+        all_tools_data = load_tools_data()
+        server_user_data = all_tools_data.get(client_id, {})
+        server_tools = server_user_data.get('tools', {})
+        server_timestamp = server_user_data.get('last_updated')
+
+        # 智能合并策略：选择最新的数据
+        if server_timestamp and local_timestamp:
+            try:
+                server_time = datetime.fromisoformat(server_timestamp.replace('Z', '+00:00'))
+                local_time = datetime.fromisoformat(local_timestamp.replace('Z', '+00:00'))
+
+                if server_time > local_time:
+                    # 服务器数据更新，使用服务器数据
+                    merged_tools = server_tools
+                    source = 'server'
+                else:
+                    # 本地数据更新，使用本地数据
+                    merged_tools = local_tools
+                    source = 'local'
+
+                    # 更新服务器数据
+                    all_tools_data[client_id] = {
+                        'tools': local_tools,
+                        'last_updated': datetime.now().isoformat(),
+                        'client_ip': request.client.host if request.client else 'unknown'
+                    }
+                    save_tools_data(all_tools_data)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"[ToolsData] Error comparing timestamps: {e}, using local data")
+                merged_tools = local_tools
+                source = 'local'
+
+                # 更新服务器数据
+                all_tools_data[client_id] = {
+                    'tools': local_tools,
+                    'last_updated': datetime.now().isoformat(),
+                    'client_ip': request.client.host if request.client else 'unknown'
+                }
+                save_tools_data(all_tools_data)
+        elif local_tools:
+            # 只有本地数据，使用本地数据并更新服务器
+            merged_tools = local_tools
+            source = 'local'
+
+            all_tools_data[client_id] = {
+                'tools': local_tools,
+                'last_updated': datetime.now().isoformat(),
+                'client_ip': request.client.host if request.client else 'unknown'
+            }
+            save_tools_data(all_tools_data)
+        else:
+            # 使用服务器数据
+            merged_tools = server_tools
+            source = 'server'
+
+        logger.info(f"[ToolsData] Synced tools data for {client_id}, source: {source}")
+
+        return JSONResponse(content={
+            'success': True,
+            'tools': merged_tools,
+            'source': source,
+            'last_updated': all_tools_data.get(client_id, {}).get('last_updated')
+        })
+
+    except Exception as e:
+        logger.error(f"[ToolsData] Error in sync_user_tools: {e}")
+        return error_response(str(e), status_code=500)
+
 # ==================== 配置管理 ====================
 
 @app.get("/api/config/read")

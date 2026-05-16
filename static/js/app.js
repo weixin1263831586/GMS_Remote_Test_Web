@@ -5248,12 +5248,16 @@ function displayReportAnalysis(data) {
             const testCaseName = failure.name || '未知用例';
 
             // 格式化完整堆栈信息，保留换行和缩进
+            // 每行开头添加 4 个空格缩进
             const formattedStackTrace = (reasonText || '无失败原因')
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/\n/g, '<br>')
-                .replace(/ /g, '&nbsp;');
+                .split('\n')
+                .map(line => '&nbsp;&nbsp;&nbsp;&nbsp;' + line
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/ /g, '&nbsp;')
+                )
+                .join('<br>');
 
             // 从 report_name 中提取 Redmine issue ID（使用预编译的正则表达式）
             const reportName = window.currentReportName || '';
@@ -5275,7 +5279,7 @@ function displayReportAnalysis(data) {
                         <div style="font-size: 12px; color: var(--text-secondary);">测试用例: <span style="font-family: 'Courier New', monospace; color: var(--primary-color); word-break: break-all;">${testCaseName}</span></div>
                     </div>
                     <div style="padding-right: 240px;">
-                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">报错信息</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">报错信息: </div>
                         <div class="failure-reason" id="failure-reason-${idx}" style="font-size: 11px; font-family: 'Courier New', monospace; white-space: pre-wrap; word-wrap: break-word;">${formattedStackTrace}</div>
                         <div class="failure-reason-raw" id="failure-reason-raw-${idx}" style="display: none;">${reasonText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
                     </div>
@@ -6158,36 +6162,37 @@ async function confirmAndSendRedmineReply(modalId) {
         return;
     }
 
-    try {
-        showToast('📤 正在发送回复...', 'info');
+    // 立即关闭弹窗，提升响应速度
+    ModalManager.close(modalId);
+    showToast('📤 正在发送回复...', 'info');
 
-        const response = await fetch('/api/redmine/reply', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                issue_id: issueId,
-                reply_text: replyText
-            })
-        });
-
-        const result = await response.json();
-
+    // 异步发送请求，不阻塞 UI
+    fetch('/api/redmine/reply', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            issue_id: issueId,
+            reply_text: replyText
+        })
+    })
+    .then(response => response.json())
+    .then(result => {
         if (result.success) {
             showToast(`✅ 回复已成功发送到 Redmine #${issueId}`, 'success');
-            ModalManager.close(modalId);
             // 可选：打开 Redmine 页面查看
             setTimeout(() => {
                 window.open(`https://redmine.rock-chips.com/issues/${issueId}`, '_blank');
-            }, 1500);
+            }, 800);
         } else {
             showToast('❌ 发送失败：' + (result.error || result.detail || '未知错误'), 'error');
         }
-    } catch (error) {
+    })
+    .catch(error => {
         console.error('[Redmine Reply] Error:', error);
         showToast('❌ 发送失败：' + error.message, 'error');
-    }
+    });
 }
 
 function resetReportAnalysis() {

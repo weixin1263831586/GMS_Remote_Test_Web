@@ -201,6 +201,7 @@ body {
     min-height: 0;
 }
 
+
 .page-content.active {
     display: flex;
 }
@@ -1520,7 +1521,7 @@ select option {
 .report-upload-content {
     transition: var(--transition-normal);
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
     width: 100%;
     justify-content: center;
@@ -2057,4 +2058,370 @@ select option {
     color: var(--danger-color);
     font-size: 14px;
     text-align: center;
+}
+
+/* ==================== Tool Cards ==================== */
+.tool-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: var(--transition-normal);
+    position: relative;
+    overflow: hidden;
+}
+
+.tool-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--primary-gradient);
+    transform: scaleX(0);
+    transition: var(--transition-normal);
+}
+
+.tool-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--primary-color);
+}
+
+.tool-card:hover::before {
+    transform: scaleX(1);
+}
+
+.tool-card:active {
+    transform: translateY(-2px);
+}
+
+/* ==================== Emoji Picker ==================== */
+#emoji-picker {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+    padding: 8px;
+    background: var(--darker-bg);
+    border-radius: 6px;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+#emoji-picker::-webkit-scrollbar {
+    width: 6px;
+}
+
+#emoji-picker::-webkit-scrollbar-track {
+    background: var(--darker-bg);
+}
+
+#emoji-picker::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+#emoji-picker::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-color);
+}
+
+#emoji-picker button {
+    background: transparent;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: var(--transition-fast);
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#emoji-picker button:hover {
+    background: var(--lighter-bg);
+    transform: scale(1.1);
+}
+
+#emoji-picker button:active {
+    transform: scale(0.95);
+}
+
+/* ==================== Tools Page Design ==================== */
+
+/* Category Tabs Styling */
+.category-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition-normal);
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+
+.category-tab:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.category-tab.active {
+    box-shadow: var(--shadow-glow);
+}
+
+/* Category Sections */
+.category-section {
+    margin-bottom: 28px;
+}
+
+.category-section:last-child {
+    margin-bottom: 0;
+}
+
+.category-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.category-header span:first-child {
+    font-size: 18px;
+    margin-right: 6px;
+}
+
+.category-header span:nth-child(2) {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Tool Cards */
+.tool-card {
+    background: var(--card-bg);
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--border-color);
+    border-top: 3px solid var(--primary-color);
+    transition: var(--transition-normal);
+    cursor: pointer;
+    min-width: 120px;
+    max-width: 160px;
+}
+
+.tool-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-md);
+}
+
+.tool-icon {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--light-bg);
+    border-radius: 8px;
+    font-size: 20px;
+}
+
+.tool-icon img {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+}
+
+.tool-info {
+    text-align: center;
+    width: 100%;
+}
+
+.tool-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
+}
+
+.tool-url {
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tool-actions {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+}
+
+.tool-actions button {
+    flex: 1;
+    padding: 6px;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.btn-visit {
+    background: var(--primary-color);
+    color: white;
+}
+
+.btn-visit:hover {
+    opacity: 0.85;
+}
+
+.btn-edit {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.btn-edit:hover {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.btn-delete {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+}
+
+.btn-delete:hover {
+    background: var(--danger-color);
+    color: white;
+    border-color: var(--danger-color);
+}
+
+/* Tools Grid Container */
+.tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 16px;
+}
+
+/* Tools Scroll Container */
+#tools-scroll-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 20px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) var(--dark-bg);
+    min-height: 0;
+    /* 确保容器可以正确滚动 */
+}
+
+/* 自定义滚动条 - Webkit */
+#tools-scroll-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+#tools-scroll-container::-webkit-scrollbar-track {
+    background: var(--dark-bg);
+    border-radius: 4px;
+}
+
+#tools-scroll-container::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+#tools-scroll-container::-webkit-scrollbar-thumb:hover {
+    background: var(--border-light);
+}
+
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .category-tab {
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+
+    .tool-card {
+        padding: 10px 12px;
+        gap: 10px;
+    }
+
+    .tool-icon {
+        width: 32px;
+        height: 32px;
+        font-size: 18px;
+    }
+
+    .tool-icon img {
+        width: 20px;
+        height: 20px;
+    }
+
+    .tool-card {
+        min-width: 110px;
+        max-width: 140px;
+        padding: 16px;
+    }
+
+    .tool-title {
+        font-size: 13px;
+    }
+
+    .tools-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 12px;
+    }
+
+    .category-header {
+        margin-bottom: 10px;
+    }
+
+    .category-header span:first-child {
+        font-size: 16px;
+    }
+
+    .category-header span:nth-child(2) {
+        font-size: 14px;
+    }
+
+    /* 拖拽样式 */
+    .tool-card.dragging {
+        opacity: 0.4;
+        transform: scale(0.95);
+    }
+
+    .category-section.dragging {
+        opacity: 0.5;
+        transform: scale(0.98);
+    }
+
+    .tool-card[draggable="true"]:active {
+        cursor: grabbing;
+    }
+
+    .category-section[draggable="true"] .category-header:active {
+        cursor: grabbing;
+    }
 }
