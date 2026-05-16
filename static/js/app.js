@@ -3927,14 +3927,28 @@ function displayTestReports(reports) {
     if (!tbody) return;
 
     if (reports.length === 0) {
+        // 调整容器高度
+        const container = document.querySelector('#page-reports > div:last-child');
+        if (container) {
+            container.style.height = 'auto';
+            container.style.minHeight = '100px';
+        }
+
         tbody.innerHTML = `
             <tr>
-                <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                <td colspan="8" style="padding: 60px 40px; text-align: center; color: var(--text-secondary);">
                     暂无测试报告
                 </td>
             </tr>
         `;
         return;
+    }
+
+    // 恢复容器高度
+    const container = document.querySelector('#page-reports > div:last-child');
+    if (container) {
+        container.style.height = 'calc(100vh - 85px)';
+        container.style.minHeight = '';
     }
 
     // 使用 DocumentFragment 提高渲染性能
