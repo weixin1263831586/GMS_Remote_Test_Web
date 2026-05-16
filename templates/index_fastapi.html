@@ -42,7 +42,7 @@
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hash && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'architecture'].includes(hash)) {
+            if (hash && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'architecture', 'tools'].includes(hash)) {
                 targetPage = hash;
             } else {
                 targetPage = savedPage;
@@ -101,7 +101,7 @@
             gap: 8px;
         }
         .terminal-title {
-            font-size: 14px;
+            font-size: 12px;
             font-weight: 600;
             color: var(--text-primary);
         }
@@ -110,7 +110,7 @@
             color: var(--text-secondary);
             padding: 4px 8px;
             background: var(--darker-bg);
-            border-radius: 4px;
+            border-radius: 3px;
         }
         .connection-info span {
             color: var(--text-primary);
@@ -141,7 +141,7 @@
             font-size: 11px;
             background: var(--light-bg);
             border: 1px solid var(--border-color);
-            border-radius: 4px;
+            border-radius: 3px;
             color: var(--text-primary);
             cursor: pointer;
             transition: all 0.2s;
@@ -232,7 +232,7 @@
             padding: 6px 10px;
             font-size: 15px;
             border: 1px solid var(--border-color);
-            border-radius: 4px;
+            border-radius: 3px;
             background: var(--darker-bg);
             color: var(--text-primary);
             min-width: 200px;
@@ -261,7 +261,7 @@
             flex: 1;
             padding: 10px;
             border: 1px solid var(--border-color);
-            border-radius: 4px;
+            border-radius: 3px;
             background: var(--darker-bg);
             color: var(--text-primary);
             font-size: 15px;
@@ -417,6 +417,10 @@
                 <a href="#" class="sidebar-item" data-page="architecture" onclick="switchPage('architecture', event)">
                     <span class="sidebar-icon">🏗️</span>
                     <span class="sidebar-text">系统架构</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="tools" onclick="switchPage('tools', event)">
+                    <span class="sidebar-icon">🔧</span>
+                    <span class="sidebar-text">常用网址</span>
                 </a>
             </nav>
 
@@ -614,7 +618,7 @@
                 </div>
                 <div class="host-controls">
                     <button class="btn-xs" onclick="refreshVNC()">🔄 刷新</button>
-                    <button class="btn-xs" onclick="showAddHostModal()">➕ 添加主机</button>
+                    <button class="btn-xs" onclick="showAddHostModal()">添加主机</button>
                 </div>
             </div>
             <!-- VNC 画布 -->
@@ -759,7 +763,7 @@
 
         <!-- 报告管理页面 -->
         <div class="container page-content" id="page-reports">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <div class="section-title" style="margin: 0;">📊 报告管理</div>
                 <label style="display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--text-primary); cursor: pointer;">
                     <input type="checkbox" id="filter-user-checkbox" onchange="toggleUserReports()" style="cursor: pointer;">
@@ -807,7 +811,7 @@
                         <div>
                             <div style="font-size: 16px; font-weight: 600; white-space: nowrap;">拖拽测试报告到此处</div>
                             <div class="upload-instructions" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-                                支持 .zip、.xml、.tar.gz 等文件格式<br>
+                                支持 .zip、.xml、.tar.gz 等文件格式<br><br>
                                 1. 点击按钮"📤 上传报告"选择测试报告<br>
                                 2. 直接拖拽测试报告上传<br>
                                 3. 直接拖拽 Redmine 附件上传
@@ -826,7 +830,7 @@
             <!-- 分析结果区域 -->
             <div id="report-analysis-result" style="display: none;">
                 <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 10px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                         <div style="font-size: 16px; font-weight: 600;">📊 分析结果</div>
                         <button class="btn-xs" onclick="resetReportAnalysis()">清除</button>
                     </div>
@@ -845,7 +849,7 @@
                 <!-- 失败用例列表 -->
                 <div id="report-failures" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; display: none;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <div style="font-size: 14px; font-weight: 600;">❌ 失败用例</div>
+                        <div style="font-size: 12px; font-weight: 600;">❌ 失败用例</div>
                         <div id="report-failure-actions" style="display: flex; gap: 6px;">
                             <!-- 动态生成按钮 -->
                         </div>
@@ -888,7 +892,7 @@
             <!-- 搜索栏 -->
             <div style="margin-bottom: 10px;">
                 <input type="text" id="api-search-input" placeholder="🔍 搜索API路径或说明..."
-                       style="width: 100%; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 14px;"
+                       style="width: 100%; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 12px;"
                        oninput="debounceFilterApiDocs()">
             </div>
 
@@ -968,6 +972,112 @@
                 </table>
             </div>
         </div>
+
+        <!-- 常用网址页面 -->
+        <div class="container page-content" id="page-tools">
+            <div class="section-title" style="margin-bottom: 12px;">🔧 常用网址</div>
+
+            <!-- 工具页面外框容器 - 固定高度支持滚动 -->
+            <div class="tools-container" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; overflow: hidden; max-height: calc(100vh - 80px);">
+
+                <!-- 工具列表容器 - 可滚动区域 -->
+                <div id="tools-scroll-container" style="flex: 1; overflow-y: auto; padding: 0; min-height: 0;">
+                    <div id="tools-grid" style="padding: 4px 8px 8px 8px;">
+                        <!-- 工具卡片由 JavaScript 动态生成 -->
+                    </div>
+                </div>
+
+                <!-- 底部添加分类按钮 - 固定在容器底部 -->
+                <div style="padding-top: 8px; border-top: 1px solid var(--border-color); margin-top: 8px;">
+                    <button onclick="showAddCategoryModal()" style="width: 100%; padding: 8px 8px; background: var(--success-color); color: white; border: none; border-radius: 5px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px;"
+                                onmouseover="this.style.opacity='0.85';"
+                                onmouseout="this.style.opacity='1';">
+                        添加分类
+                    </button>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- 添加分类弹框 -->
+        <div id="category-modal" class="modal" style="display: none;">
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <span class="modal-title">添加分类</span>
+                    <span class="modal-close" onclick="closeCategoryModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-form-row">
+                        <label>分类名称:</label>
+                        <input type="text" id="category-name" placeholder="例如：娱乐" maxlength="20" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>选择图标:</label>
+                        <input type="text" id="category-icon" placeholder="例如：🎮" maxlength="2" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                    </div>
+                    <div class="modal-info-text">
+                        💡 提示：图标可以是1-2个Emoji字符
+                    </div>
+                    <div class="modal-buttons">
+                        <button class="btn-xxs" onclick="closeCategoryModal()">取消</button>
+                        <button class="btn-xxs btn-primary" onclick="saveCategory()">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 添加工具弹框 -->
+        <div id="tool-modal" class="modal" style="display: none;">
+            <div class="modal-content" style="max-width: 450px;">
+                <div class="modal-header">
+                    <span class="modal-title" id="tool-modal-title">添加工具</span>
+                    <span class="modal-close" onclick="closeToolModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="tool-index" value="-1" />
+                    <div class="modal-form-row">
+                        <label>分类:</label>
+                        <select id="tool-category" class="combo-box">
+                            <!-- 分类选项将由 JavaScript 动态生成 -->
+                        </select>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>图标 (Emoji):</label>
+                        <div style="display: flex; gap: 8px; flex: 1;">
+                            <input type="text" id="tool-icon" placeholder="例如：🌐 📚 🎵 🎮" maxlength="4" style="flex: 1;" />
+                            <button class="btn-xxs" onclick="showEmojiPicker()" style="background: var(--info-color); color: white; min-width: 60px;">🎨 选择</button>
+                        </div>
+                    </div>
+                    <div class="modal-form-row" id="emoji-picker-row" style="display: none;">
+                        <label></label>
+                        <div id="emoji-picker" style="display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; padding: 8px; background: var(--darker-bg); border-radius: 6px; max-height: 120px; overflow-y: auto;">
+                            <!-- Emoji 选项将由 JavaScript 动态生成 -->
+                        </div>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>标题:</label>
+                        <input type="text" id="tool-title" placeholder="例如：Google" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>链接 (URL):</label>
+                        <input type="text" id="tool-url" placeholder="例如：https://www.google.com" onblur="autoFetchIcon(this.value)" />
+                    </div>
+                    <div class="modal-info-text">
+                        💡 提示：输入网址后点击外部，系统会自动获取网站图标
+                    </div>
+                    <div id="icon-preview" style="display: none; text-align: center; margin-top: 8px; padding: 8px; background: var(--darker-bg); border-radius: 3px;">
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">图标预览：</div>
+                        <img id="preview-image" src="" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color);">
+                    </div>
+                    <div class="modal-buttons">
+                        <button class="btn-xxs" onclick="closeToolModal()">取消</button>
+                        <button class="btn-xxs btn-primary" onclick="saveTool()">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 导入工具弹框 -->
 
         <!-- 系统架构页面 -->
         <div class="container page-content" id="page-architecture">
@@ -1194,7 +1304,7 @@
     <div id="add-host-modal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 450px;">
             <div class="modal-header">
-                <span class="modal-title">➕ 添加VNC主机</span>
+                <span class="modal-title">添加VNC主机</span>
                 <span class="modal-close" onclick="closeAddHostModal()">&times;</span>
             </div>
             <div class="modal-body">
@@ -1234,7 +1344,7 @@
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="host-password-input" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--darker-bg);" onkeypress="handleHostPasswordKeyPress(event)" autocomplete="current-password" />
+                    <input type="password" id="host-password-input" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg);" onkeypress="handleHostPasswordKeyPress(event)" autocomplete="current-password" />
                 </div>
                 <div class="modal-info-text" style="margin-top: 10px;">
                     💡 密码将被加密保存供下次使用
@@ -1259,15 +1369,15 @@
                 </div>
                 <div class="modal-form-row">
                     <label>客户端IP:</label>
-                    <input type="text" id="ssh-client-ip" readonly style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--darker-bg);" />
+                    <input type="text" id="ssh-client-ip" readonly style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg);" />
                 </div>
                 <div class="modal-form-row">
                     <label>SSH用户:</label>
-                    <input type="text" id="ssh-username" placeholder="例如: hcq, root" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;" />
+                    <input type="text" id="ssh-username" placeholder="例如: hcq, root" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;" />
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="ssh-password" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;" onkeypress="handleSshKeyPress(event)" autocomplete="current-password" />
+                    <input type="password" id="ssh-password" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;" onkeypress="handleSshKeyPress(event)" autocomplete="current-password" />
                 </div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
                     💡 密码将被加密保存,下次访问自动使用
@@ -1288,13 +1398,13 @@
                 <span class="modal-close" onclick="closeInstallGuide()">&times;</span>
             </div>
             <div class="modal-body">
-                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 4px; color: #856404;">
+                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 3px; color: #856404;">
                     📋 检测到 Windows 主机缺少必要组件，需要安装 usbipd
                 </div>
 
                 <div style="margin-bottom: 15px;">
                     <div style="font-weight: 600; margin-bottom: 10px; color: var(--text-primary);">🔧 手动安装步骤：</div>
-                    <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px;">
+                    <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 3px; padding: 10px;">
                         <ol style="margin: 0; padding-left: 20px; color: var(--text-secondary); line-height: 1.8;">
                             <li>在 Windows 电脑上以<strong style="color: var(--danger-color);">【管理员身份】</strong>打开 PowerShell</li>
                             <li>安装命令：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; color: var(--primary-color);">winget install dorssel.usbipd-win --source winget</code></li>
@@ -1307,7 +1417,7 @@
 
                 <div id="install-progress" style="display: none; margin-bottom: 15px;">
                     <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">⏳ 正在自动安装...</div>
-                    <div style="background: var(--border-color); border-radius: 4px; height: 6px; overflow: hidden;">
+                    <div style="background: var(--border-color); border-radius: 3px; height: 6px; overflow: hidden;">
                         <div id="install-progress-bar" style="background: var(--primary-color); height: 100%; width: 0%; transition: width 0.3s;"></div>
                     </div>
                     <div id="install-status" style="margin-top: 4px; font-size: 15px; color: var(--text-secondary);">准备安装...</div>
@@ -1329,13 +1439,13 @@
                 <span class="modal-close" onclick="closeSshdInstallGuide()">&times;</span>
             </div>
             <div class="modal-body">
-                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 4px; color: #856404;">
+                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 3px; color: #856404;">
                     📋 未检测到 SSHD 服务，需要手动安装
                 </div>
 
                 <div style="margin-bottom: 15px;">
                     <div style="font-weight: 600; margin-bottom: 10px; color: var(--text-primary);">🔧 手动安装步骤：</div>
-                    <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; max-height: 400px; overflow-y: auto;">
+                    <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 3px; padding: 10px; max-height: 400px; overflow-y: auto;">
                         <pre id="sshd-guide-content" style="white-space: pre-wrap; word-wrap: break-word; font-family: 'Consolas', 'Monaco', monospace; font-size: 15px; line-height: 1.6; color: var(--text-secondary); margin: 0;"></pre>
                     </div>
                 </div>
@@ -2082,8 +2192,8 @@
             // 渲染设备列表
             tbody.innerHTML = devices.map(device => {
                 const sourceTypeBadge = device.source_type === 'local'
-                    ? '<span style="background: rgba(76, 175, 80, 0.2); color: var(--success-color); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">测试主机</span>'
-                    : '<span style="background: rgba(255, 152, 0, 0.2); color: var(--warning-color); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">USB/IP</span>';
+                    ? '<span style="background: rgba(76, 175, 80, 0.2); color: var(--success-color); padding: 4px 8px; border-radius: 3px; font-size: 11px; font-weight: 600;">测试主机</span>'
+                    : '<span style="background: rgba(255, 152, 0, 0.2); color: var(--warning-color); padding: 4px 8px; border-radius: 3px; font-size: 11px; font-weight: 600;">USB/IP</span>';
 
                 const statusBadge = device.status === 'online'
                     ? '<span style="color: var(--success-color); font-weight: 600; font-size: 11px;">● 在线</span>'
@@ -2133,7 +2243,7 @@
                             ${device.locked_by || '-'}
                         </td>
                         <td style="padding: 10px; text-align: center;">
-                            <button class="btn-xxs" onclick="openDeviceShell('${device.serial_no}')" style="background: var(--primary-color); font-size: 14px; padding: 8px 12px;">🐧 adb shell</button>
+                            <button class="btn-xxs" onclick="openDeviceShell('${device.serial_no}')" style="background: var(--primary-color); font-size: 12px; padding: 8px 12px;">🐧 adb shell</button>
                         </td>
                     </tr>
                 `;
@@ -2243,6 +2353,7 @@
             document.getElementById('page-report-analysis').classList.remove('active');
             document.getElementById('page-api-docs').classList.remove('active');
             document.getElementById('page-architecture').classList.remove('active');
+            document.getElementById('page-tools').classList.remove('active');
 
             // 显示目标页面
             document.getElementById(`page-${pageName}`).classList.add('active');
@@ -2256,13 +2367,14 @@
             const titles = {
                 'test': '测试界面 - GMS远程测试',
                 'desktop': '主机桌面 - GMS远程测试',
-                'terminal': '主机终端 - GMS程测试',
+                'terminal': '主机终端 - GMS远程测试',
                 'devices': '设备管理 - GMS远程测试',
                 'users': '用户管理 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
                 'api-docs': '系统接口 - GMS远程测试',
-                'architecture': '系统架构 - GMS远程测试'
+                'architecture': '系统架构 - GMS远程测试',
+                'tools': '常用网址 - GMS远程测试'
             };
             document.title = titles[pageName] || 'GMS远程测试';
 
@@ -2348,10 +2460,1127 @@
                     console.log('[Desktop] Default host ready');
                 }
             }
+
+            // 如果切换到常用网址页面，加载网址列表
+            if (pageName === 'tools') {
+                loadToolsList();
+            }
         }
 
         // 将 switchPage 导出到全局作用域，供外部脚本调用
         window.switchPage = switchPage;
+
+        // ==================== 自动获取网站图标 ====================
+        const commonSiteEmojis = {
+            // 使用真实 SVG 图标的网站
+            'github.com': 'https://github.githubassets.com/favicons/favicon.svg',
+            'gitlab.com': 'https://gitlab.com/assets/favicon-72a2cad5025aa931d6ea56c3201d1f18e68a8cd0feb995d52ae46c2e0a647592.png',
+            'google.com': 'https://www.google.com/favicon.ico',
+            'youtube.com': 'https://www.youtube.com/favicon.ico',
+            'twitter.com': 'https://twitter.com/favicon.ico',
+            'facebook.com': 'https://static.facebook.com/images/notifications/favicon.ico',
+            'linkedin.com': 'https://static.licdn.com/sc/h/al2o9zrvru7aqj8e1x2rzsrca',
+            'stackoverflow.com': 'https://stackoverflow.com/favicon.ico',
+            'reddit.com': 'https://www.redditstatic.com/desktop2x/img/favicon/favicon-32x32.png',
+            'wikipedia.org': 'https://www.wikipedia.org/favicon.ico',
+            'amazon.com': 'https://www.amazon.com/favicon.ico',
+            'netflix.com': 'https://assets.nflxext.com/us/ffe/siteui/common/icons/nficon2023.png',
+            'spotify.com': 'https://open.spotifycdn.com/cdn/images/favicon32.35b96dcb4ff7c2caa75b5cf448b60e3e.png',
+            'discord.com': 'https://discord.com/assets/8c9701d8b9fe777475d6d69cc5e0c91f.ico',
+            'slack.com': 'https://slack.com/favicon.ico',
+            'microsoft.com': 'https://www.microsoft.com/favicon.ico',
+            'apple.com': 'https://www.apple.com/favicon.ico',
+            'npmjs.com': 'https://static.npmjs.com/faviticon/favicon-32x32.png',
+            'docker.com': 'https://www.docker.com/favicon.ico',
+            'kubernetes.io': 'https://kubernetes.io/favicon.ico',
+            'redis.io': 'https://redis.io/favicon.ico',
+            'mongodb.com': 'https://www.mongodb.com/favicon.ico',
+            'mysql.com': 'https://www.mysql.com/favicon.ico',
+            'postgresql.org': 'https://www.postgresql.org/favicon.ico',
+            'nginx.org': 'https://nginx.org/favicon.ico',
+            'apache.org': 'https://www.apache.org/favicon.ico',
+            'python.org': 'https://www.python.org/favicon.ico',
+            'java.com': 'https://www.java.com/favicon.ico',
+            'golang.org': 'https://go.dev/favicon.ico',
+            'rust-lang.org': 'https://www.rust-lang.org/favicon.ico',
+            'grafana.com': 'https://grafana.com/favicon.ico',
+            'prometheus.io': 'https://prometheus.io/favicon.ico',
+            'jenkins.io': 'https://www.jenkins.io/favicon.ico',
+            'android.com': 'https://developer.android.com/favicon.ico',
+            'aws.amazon.com': 'https://aws.amazon.com/favicon.ico',
+            'azure.microsoft.com': 'https://azure.microsoft.com/favicon.ico',
+            'digitalocean.com': 'https://www.digitalocean.com/favicon.ico',
+
+            // 备用 Emoji
+            'bitbucket.org': '🪣',
+            'vercel.com': '▲',
+            'netlify.com': '▲',
+            'heroku.com': '🟣',
+            'shopify.com': '🛒',
+            'wordpress.org': '📝',
+            'woocommerce.com': '🛒',
+            'visualstudio.com': '🎨',
+            'firebase.google.com': '🔥',
+            'linux.org': '🐧',
+            'javascript.com': '💛',
+            'rust-lang.org': '🦀',
+            'golang.org': '🐹'
+        };
+
+        function autoFetchIcon(url) {
+            const urlInput = document.getElementById('tool-url');
+            const iconInput = document.getElementById('tool-icon');
+            const preview = document.getElementById('icon-preview');
+            const previewImage = document.getElementById('preview-image');
+
+            if (!url || !url.trim()) return;
+
+            try {
+                const urlObj = new URL(url);
+                const domain = urlObj.hostname;
+                const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
+
+                // 1. 优先使用预定义的 Emoji
+                if (commonSiteEmojis[domain]) {
+                    iconInput.value = commonSiteEmojis[domain];
+                    showIconPreview(iconInput.value);
+                    return;
+                }
+
+                // 2. 尝试多种方式获取真实图标
+                const iconUrls = [
+                    // 尝试直接访问常见的 favicon 路径
+                    `${baseUrl}/favicon.ico`,
+                    `${baseUrl}/favicon.svg`,
+                    `${baseUrl}/icon.svg`,
+                    `${baseUrl}/assets/favicon.svg`,
+                    `${baseUrl}/static/favicon.svg`,
+
+                    // 使用第三方服务
+                    `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
+                    `https://icons.duckduckgo.com/ip3/${domain}.ico`,
+                ];
+
+                // 优先尝试 SVG 图标（质量更高）
+                tryIconUrls(iconUrls, iconInput);
+
+            } catch (e) {
+                console.warn('URL 解析失败:', e);
+            }
+        }
+
+        async function tryIconUrls(iconUrls, iconInput) {
+            // 先尝试前几个高质量的 SVG 图标
+            const highQualityUrls = iconUrls.slice(0, 5);
+
+            for (const url of highQualityUrls) {
+                try {
+                    const isValid = await checkImageUrl(url);
+                    if (isValid) {
+                        iconInput.value = url;
+                        showIconPreview(url);
+                        return;
+                    }
+                } catch (err) {
+                    continue;
+                }
+            }
+
+            // 如果都失败了，使用 Google Favicon 作为备选
+            const fallbackUrl = iconUrls[iconUrls.length - 1];
+            iconInput.value = fallbackUrl;
+            showIconPreview(fallbackUrl);
+        }
+
+        function checkImageUrl(url) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => resolve(true);
+                img.onerror = () => resolve(false);
+                img.src = url;
+
+                // 超时处理
+                setTimeout(() => resolve(false), 3000);
+            });
+        }
+
+        function showIconPreview(iconValue) {
+            const preview = document.getElementById('icon-preview');
+            const previewImage = document.getElementById('preview-image');
+
+            if (!preview || !previewImage) return;
+
+            preview.style.display = 'block';
+
+            // 检查是否是图片格式
+            if (iconValue.startsWith('[img:') || iconValue.startsWith('[favicon:')) {
+                // 图片 URL
+                const imgUrl = iconValue.replace(/\[img:|\[favicon:/g, '').replace(']', '');
+                previewImage.src = imgUrl;
+                previewImage.style.display = 'inline-block';
+                preview.innerHTML = `<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">图标预览：</div>`;
+                preview.appendChild(previewImage);
+            } else if (iconValue.startsWith('http://') || iconValue.startsWith('https://')) {
+                // 直接的图片 URL
+                previewImage.src = iconValue;
+                previewImage.style.display = 'inline-block';
+                preview.innerHTML = `<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">图标预览：</div>`;
+                preview.appendChild(previewImage);
+            } else {
+                // Emoji
+                previewImage.style.display = 'none';
+                preview.innerHTML = `<div style="font-size: 32px;">${iconValue}</div>`;
+            }
+        }
+
+        // ==================== 常用网址管理（支持分类）====================
+        let categorizedTools = {};
+        let currentCategory = 'all';
+        const TOOLS_STORAGE_KEY = 'gms_tools_list';
+        const CATEGORIES_STORAGE_KEY = 'gms_tools_categories';
+
+        // 默认分类
+        const DEFAULT_CATEGORIES = {
+            'Rockchip': { icon: '🏢', color: '#ff6b6b' },
+            'Google': { icon: '🔍', color: '#4285f4' },
+            '开发工具': { icon: '🛠️', color: '#00d26a' },
+            '社交媒体': { icon: '💬', color: '#ff9500' }
+        };
+
+        // 常用 Emoji 列表
+        const commonEmojis = [
+            '🌐', '📚', '🎵', '🎮', '📊', '📈', '🔧', '⚙️',
+            '💻', '🖥️', '📱', '⌨️', '🖱️', '🔌', '💾', '💿',
+            '🎨', '🎬', '📷', '🎥', '📺', '📻', '🎧', '🎙️',
+            '⚡', '🔥', '💡', '🌟', '✨', '🎯', '🏆', '🎪',
+            '🌍', '🌎', '🌏', '🗺️', '🧭', '📍', '🔱', '⛰️',
+            '🚀', '✈️', '🛸', '🚁', '🚂', '🚗', '🏠', '🏢',
+            '📧', '📨', '📩', '📤', '📥', '📦', '📫', '📪',
+            '🔒', '🔓', '🔑', '🗝️', '🔐', '🔎', '🔍', '🔬'
+        ];
+
+        function loadToolsList() {
+            // 首先尝试从服务器同步数据
+            loadToolsFromServer().then(() => {
+                // 服务器同步完成后，继续处理本地数据
+                continueLoadingLocalData();
+            }).catch(() => {
+                // 如果服务器同步失败，继续处理本地数据
+                continueLoadingLocalData();
+            });
+        }
+
+        function continueLoadingLocalData() {
+            // 检查本地是否有数据
+            const categorizedStored = localStorage.getItem(CATEGORIES_STORAGE_KEY);
+            if (categorizedStored) {
+                try {
+                    const localTools = JSON.parse(categorizedStored);
+
+                    // 清理"其他"分类
+                    if (localTools['其他']) {
+                        // 将"其他"分类下的工具移动到 Rockchip
+                        if (localTools['Rockchip']) {
+                            localTools['Rockchip'] = localTools['Rockchip'].concat(localTools['其他']);
+                        } else {
+                            localTools['Rockchip'] = localTools['其他'];
+                        }
+                        delete localTools['其他'];
+                        saveCategories();
+                    }
+
+                    categorizedTools = localTools;
+                    renderToolsGrid();
+                    return;
+                } catch (e) {
+                    console.error('加载分类数据失败:', e);
+                }
+            }
+
+            // 加载旧数据并迁移
+            const stored = localStorage.getItem(TOOLS_STORAGE_KEY);
+            if (stored) {
+                try {
+                    const oldTools = JSON.parse(stored);
+                    categorizedTools = migrateToCategories(oldTools);
+                    saveCategories();
+                    renderToolsGrid();
+                    return;
+                } catch (e) {
+                    console.error('加载工具列表失败:', e);
+                }
+            }
+
+            // 使用默认数据
+            categorizedTools = {
+                'Rockchip': [
+                    { icon: '🏢', title: 'Rockchip 官网', url: 'https://www.rock-chips.com' }
+                ],
+                'Google': [
+                    { icon: '🔍', title: 'Google', url: 'https://www.google.com' },
+                    { icon: '📧', title: 'Gmail', url: 'https://gmail.com' }
+                ],
+                '开发工具': [
+                    { icon: '📦', title: 'GitHub', url: 'https://github.com' },
+                    { icon: '📊', title: 'Grafana', url: 'http://172.16.14.233:3000' }
+                ]
+            };
+
+            saveCategories();
+            renderToolsGrid();
+        }
+
+        function migrateToCategories(oldTools) {
+            const categorized = {};
+            const defaultCategories = Object.keys(DEFAULT_CATEGORIES);
+
+            // 初始化分类
+            defaultCategories.forEach(cat => {
+                categorized[cat] = [];
+            });
+
+            // 智能分类
+            oldTools.forEach(tool => {
+                const category = guessCategory(tool);
+                if (!categorized[category]) {
+                    categorized[category] = [];
+                }
+                categorized[category].push(tool);
+            });
+
+            return categorized;
+        }
+
+        function guessCategory(tool) {
+            const url = tool.url.toLowerCase();
+            const title = tool.title.toLowerCase();
+
+            // Rockchip 相关
+            if (url.includes('rockchip') || title.includes('rockchip')) {
+                return 'Rockchip';
+            }
+
+            // Google 相关
+            if (url.includes('google') || url.includes('gmail') || url.includes('youtube')) {
+                return 'Google';
+            }
+
+            // 开发工具
+            if (url.includes('github') || url.includes('gitlab') || url.includes('stackoverflow')) {
+                return '开发工具';
+            }
+
+
+            // 默认归到 Rockchip 分类
+            return 'Rockchip';
+        }
+
+        function saveCategories() {
+            // 保存到本地 localStorage
+            localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categorizedTools));
+
+            // 同步到服务器
+            syncToolsToServer();
+        }
+
+        // ==================== 服务器同步功能 ====================
+        let syncInProgress = false;
+        let lastSyncTime = null;
+
+        async function syncToolsToServer() {
+            if (syncInProgress) return;
+
+            syncInProgress = true;
+            try {
+                const response = await fetch('/api/tools/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tools: categorizedTools,
+                        timestamp: new Date().toISOString()
+                    })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    console.log('[ToolsSync] Data synced to server successfully');
+                    lastSyncTime = new Date().toISOString();
+                } else {
+                    console.error('[ToolsSync] Failed to sync data to server:', result.error);
+                }
+            } catch (error) {
+                console.error('[ToolsSync] Error syncing data to server:', error);
+            } finally {
+                syncInProgress = false;
+            }
+        }
+
+        async function loadToolsFromServer() {
+            try {
+                const response = await fetch('/api/tools/load');
+                const result = await response.json();
+
+                if (result.success && result.tools) {
+                    console.log('[ToolsSync] Data loaded from server:', result.last_updated);
+
+                    // 检查服务器数据是否比本地数据更新
+                    const localData = localStorage.getItem(CATEGORIES_STORAGE_KEY);
+                    if (result.tools && Object.keys(result.tools).length > 0) {
+                        // 如果本地没有数据，或者服务器有更新的数据，使用服务器数据
+                        if (!localData || Object.keys(JSON.parse(localData || '{}')).length === 0) {
+                            categorizedTools = result.tools;
+                            saveCategories();
+                            renderToolsGrid();
+                            showToast('已从服务器恢复工具数据', 'success');
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('[ToolsSync] Error loading data from server:', error);
+            }
+        }
+
+
+        function switchCategory(category) {
+            currentCategory = category;
+            renderToolsGrid();
+        }
+
+        function renderToolsGrid() {
+            const grid = document.getElementById('tools-grid');
+            if (!grid) return;
+
+            // 如果选择"全部"，按分类显示所有工具
+            if (currentCategory === 'all') {
+                renderAllCategories(grid);
+            } else {
+                // 显示特定分类的工具
+                renderSingleCategory(grid, currentCategory);
+            }
+        }
+
+        function renderAllCategories(grid) {
+            const categories = Object.keys(categorizedTools);
+
+            if (categories.length === 0) {
+                grid.innerHTML = `
+                    <div style="text-align: center; padding: 60px 20px; color: var(--text-muted);">
+                        <div style="font-size: 64px; margin-bottom: 20px;">📁</div>
+                        <div style="font-size: 16px; margin-bottom: 8px;">还没有工具</div>
+                        <div style="font-size: 13px;">点击下方按钮添加第一个工具</div>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            categories.forEach((category, catIndex) => {
+                const tools = categorizedTools[category];
+                // 允许显示空分类，不跳过
+
+                const categoryInfo = DEFAULT_CATEGORIES[category] || { icon: '📁', color: '#8e8e93' };
+
+                html += `
+                    <div class="category-section" data-category="${category}" data-category-index="${catIndex}" draggable="true" style="margin-bottom: 4px;">
+							<div class="category-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); cursor: move;">
+                            <div style="display: flex; align-items: center;">
+                                <span style="font-size: 16px; margin-right: 6px; cursor: grab;">${categoryInfo.icon}</span>
+                                <span style="font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;" onclick="editCategory('${category}')"><span class="category-name">${category}</span>
+                                <span style="margin-left: 10px; padding: 2px 8px; background: var(--light-bg); border-radius: 10px; font-size: 11px; color: var(--text-muted);">${tools.length}</span>
+                            </div>
+                            <div style="display: flex; gap: 6px;">
+                                <button onclick="addNewToolToCategory('${category}')" style="padding: 6px 16px; background: ${categoryInfo.color}; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
+                                    onmouseover="this.style.opacity='0.85';"
+                                    onmouseout="this.style.opacity='1';">
+                                    添加工具
+                                </button>
+                                <button onclick="deleteCategory('${category}')" style="padding: 6px 12px; background: var(--danger-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
+                                    onmouseover="this.style.opacity='0.85';"
+                                    onmouseout="this.style.opacity='1';"
+                                    title="删除分类">
+                                    🗑️
+                                </button>
+                            </div>
+                        </div>
+                        <div class="tools-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px;">
+                `;
+
+                tools.forEach((tool, index) => {
+                    const cardColor = categoryInfo.color;
+                    html += renderToolCard(tool, category, index, cardColor);
+                });
+
+                html += `
+                        </div>
+                    </div>
+                `;
+            });
+
+            grid.innerHTML = html;
+
+            // 初始化拖拽事件
+            setTimeout(() => initDragAndDrop(), 100);
+        }
+
+        function renderSingleCategory(grid, category) {
+            const tools = categorizedTools[category] || [];
+            const categoryInfo = DEFAULT_CATEGORIES[category] || { icon: '📁', color: '#8e8e93' };
+
+            if (tools.length === 0) {
+                grid.innerHTML = `
+                    <div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                        <div style="font-size: 48px; margin-bottom: 16px;">${categoryInfo.icon}</div>
+                        <div style="font-size: 14px; margin-bottom: 6px;">"${category}"分类下还没有工具</div>
+                        <div style="font-size: 12px;">点击右侧按钮添加工具到该分类</div>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `
+                <div class="category-section">
+                    <div class="category-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color);">
+                        <div style="display: flex; align-items: center;">
+                            <span style="font-size: 16px; margin-right: 6px;">${categoryInfo.icon}</span>
+                            <span style="font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;" onclick="editCategory(${category})"><span class="category-name">${category}</span>
+                            <span style="margin-left: 10px; padding: 2px 8px; background: var(--light-bg); border-radius: 10px; font-size: 11px; color: var(--text-muted);">${tools.length}</span>
+                        </div>
+                        <div style="display: flex; gap: 6px;">
+                            <button onclick="addNewToolToCategory('${category}')" style="padding: 6px 16px; background: ${categoryInfo.color}; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
+                                onmouseover="this.style.opacity='0.85';"
+                                onmouseout="this.style.opacity='1';">
+                                添加工具
+                            </button>
+                            <button onclick="deleteCategory('${category}')" style="padding: 6px 12px; background: var(--danger-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
+                                onmouseover="this.style.opacity='0.85';"
+                                onmouseout="this.style.opacity='1';"
+                                title="删除分类">
+                                🗑️
+                            </button>
+                        </div>
+                    </div>
+                    <div class="tools-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px;">
+            `;
+
+            tools.forEach((tool, index) => {
+                const cardColor = categoryInfo.color;
+                html += renderToolCard(tool, category, index, cardColor);
+            });
+
+            html += `
+                    </div>
+                </div>
+            `;
+
+            grid.innerHTML = html;
+
+            // 初始化拖拽事件
+            setTimeout(() => initDragAndDrop(), 100);
+        }
+
+        function renderToolCard(tool, category, index, cardColor) {
+            return `
+                <div class="tool-card" data-tool-category="${category}" data-tool-index="${index}" draggable="true"
+                     style="background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: grab; min-width: 100px; max-width: 130px;"
+                     onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='var(--shadow-md)'; this.style.borderColor='${cardColor}';"
+                     onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none'; this.style.borderColor='var(--border-color)';"
+                     ondragstart="handleToolDragStart(event)"
+                     ondragend="handleToolDragEnd(event)"
+                     ondragover="handleToolDragOver(event)"
+                     ondrop="handleToolDrop(event)"
+                     onclick="openToolLink('${tool.url}')">
+
+                    <div class="tool-icon" style="width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--light-bg); border-radius: 6px; font-size: 24px; pointer-events: none;">
+                        ${renderToolIcon(tool.icon)}
+                    </div>
+
+                    <div class="tool-info" style="text-align: center; width: 100%; pointer-events: none;">
+                        <div class="tool-title" style="font-size: 12px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;">
+                            ${tool.title}
+                        </div>
+                    </div>
+
+                    <div class="tool-actions" style="display: flex; gap: 3px; width: 100%;">
+                        <button class="btn-edit" onclick="event.stopPropagation(); editTool('${category}', ${index})"
+                                style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;"
+                                onmouseover="this.style.background='var(--primary-color)'; this.style.color='white'; this.style.borderColor='var(--primary-color)';"
+                                onmouseout="this.style.background='transparent'; this.style.color='var(--text-secondary)'; this.style.borderColor='var(--border-color)';">
+                            ✏️
+                        </button>
+                        <button class="btn-delete" onclick="event.stopPropagation(); deleteTool('${category}', ${index})"
+                                style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;"
+                                onmouseover="this.style.background='var(--danger-color)'; this.style.color='white'; this.style.borderColor='var(--danger-color)';"
+                                onmouseout="this.style.background='transparent'; this.style.color='var(--text-muted)'; this.style.borderColor='var(--border-color)';">
+                            🗑️
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderToolIcon(icon) {
+            if (!icon) return '🌐';
+
+            // 检查是否是图片格式 [img:url]
+            if (icon.startsWith('[img:')) {
+                const imgUrl = icon.replace('[img:', '').replace(']', '');
+                return `<img src="${imgUrl}" alt="图标" style="width: 100%; height: 100%; object-fit: contain;">`;
+            }
+
+            // 检查是否是 http/https 开头的图片链接
+            if (icon.startsWith('http://') || icon.startsWith('https://')) {
+                return `<img src="${icon}" alt="图标" style="width: 100%; height: 100%; object-fit: contain;" onerror="this.parentElement.innerHTML='🌐'">`;
+            }
+
+            // 检查是否是 favicon 格式 [favicon:url]
+            if (icon.startsWith('[favicon:')) {
+                const faviconUrl = icon.replace('[favicon:', '').replace(']', '');
+                return `<img src="${faviconUrl}" alt="图标" style="width: 100%; height: 100%; object-fit: contain;" onerror="this.parentElement.innerHTML='🌐'">`;
+            }
+
+            // 否则返回原始的 Emoji
+            return icon;
+        }
+
+        function openToolLink(url) {
+            if (!url) return;
+            // 如果 URL 不以 http 开头，自动添加 https://
+            const finalUrl = url.match(/^https?:\/\//) ? url : 'https://' + url;
+            window.open(finalUrl, '_blank');
+        }
+
+        // ==================== 拖拽排序功能 ====================
+        let draggedTool = null;
+        let draggedCategory = null;
+        let draggedCategoryIndex = null;
+
+        // 工具卡片拖拽事件处理
+        function handleToolDragStart(e) {
+            const card = e.target.closest('.tool-card');
+            if (!card) return;
+
+            draggedTool = {
+                category: card.dataset.toolCategory,
+                index: parseInt(card.dataset.toolIndex)
+            };
+
+            card.style.opacity = '0.4';
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        function handleToolDragEnd(e) {
+            const card = e.target.closest('.tool-card');
+            if (card) {
+                card.style.opacity = '1';
+            }
+
+            // 移除所有拖拽样式
+            document.querySelectorAll('.tool-card').forEach(c => {
+                c.style.transform = '';
+                c.style.boxShadow = '';
+            });
+
+            draggedTool = null;
+        }
+
+        function handleToolDragOver(e) {
+            e.preventDefault();
+            const card = e.target.closest('.tool-card');
+            if (!card || !draggedTool) return;
+
+            // 不允许在自己身上拖拽
+            if (card.dataset.toolCategory === draggedTool.category &&
+                parseInt(card.dataset.toolIndex) === draggedTool.index) {
+                return;
+            }
+
+            card.style.transform = 'scale(1.05)';
+            card.style.boxShadow = 'var(--shadow-lg)';
+        }
+
+        function handleToolDrop(e) {
+            e.preventDefault();
+            const card = e.target.closest('.tool-card');
+            if (!card || !draggedTool) return;
+
+            const targetCategory = card.dataset.toolCategory;
+            const targetIndex = parseInt(card.dataset.toolIndex);
+
+            // 不允许在自己身上拖拽
+            if (targetCategory === draggedTool.category &&
+                targetIndex === draggedTool.index) {
+                return;
+            }
+
+            // 移动工具
+            moveTool(draggedTool.category, draggedTool.index, targetCategory, targetIndex);
+
+            // 重新渲染
+            renderToolsGrid();
+        }
+
+        // 移动工具函数
+        function moveTool(fromCategory, fromIndex, toCategory, toIndex) {
+            const fromTools = categorizedTools[fromCategory];
+            const toTools = categorizedTools[toCategory];
+
+            if (!fromTools || !toTools) return;
+
+            // 移除工具
+            const [tool] = fromTools.splice(fromIndex, 1);
+
+            // 插入到目标位置
+            if (fromCategory === toCategory) {
+                // 同一分类内移动
+                if (fromIndex < toIndex) {
+                    toTools.splice(toIndex, 0, tool);
+                } else {
+                    toTools.splice(toIndex, 0, tool);
+                }
+            } else {
+                // 跨分类移动
+                toTools.splice(toIndex, 0, tool);
+            }
+
+            // 保存更改
+            saveCategories();
+        }
+
+        // 分类拖拽事件处理
+        function handleCategoryDragStart(e) {
+            const section = e.target.closest('.category-section');
+            if (!section) return;
+
+            draggedCategoryIndex = parseInt(section.dataset.categoryIndex);
+            draggedCategory = section.dataset.category;
+
+            e.target.style.opacity = '0.4';
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        function handleCategoryDragEnd(e) {
+            const sections = document.querySelectorAll('.category-section');
+            sections.forEach(s => {
+                s.style.opacity = '1';
+                s.style.transform = '';
+                s.style.boxShadow = '';
+            });
+
+            draggedCategory = null;
+            draggedCategoryIndex = null;
+        }
+
+        function handleCategoryDragOver(e) {
+            e.preventDefault();
+            const section = e.target.closest('.category-section');
+            if (!section || draggedCategoryIndex === null) return;
+
+            const targetIndex = parseInt(section.dataset.categoryIndex);
+            if (targetIndex === draggedCategoryIndex) return;
+
+            section.style.transform = 'scale(1.02)';
+            section.style.boxShadow = 'var(--shadow-lg)';
+        }
+
+        function handleCategoryDrop(e) {
+            e.preventDefault();
+            const section = e.target.closest('.category-section');
+            if (!section || draggedCategoryIndex === null) return;
+
+            const targetIndex = parseInt(section.dataset.categoryIndex);
+            if (targetIndex === draggedCategoryIndex) return;
+
+            // 移动分类
+            moveCategory(draggedCategoryIndex, targetIndex);
+
+            // 重新渲染
+            renderToolsGrid();
+        }
+
+        // 移动分类函数
+        function moveCategory(fromIndex, toIndex) {
+            const categories = Object.keys(categorizedTools);
+
+            if (fromIndex < 0 || fromIndex >= categories.length ||
+                toIndex < 0 || toIndex >= categories.length) {
+                return;
+            }
+
+            const categoryToMove = categories[fromIndex];
+
+            // 创建新的对象
+            const newOrder = {};
+            const entries = Object.entries(categorizedTools);
+
+            // 重新排序
+            if (fromIndex < toIndex) {
+                entries.forEach((entry, i) => {
+                    if (i === fromIndex) return; // 跳过要移动的项
+                    if (i === toIndex) {
+                        newOrder[categoryToMove] = categorizedTools[categoryToMove];
+                    }
+                    newOrder[entry[0]] = entry[1];
+                });
+            } else {
+                entries.forEach((entry, i) => {
+                    if (i === toIndex) {
+                        newOrder[categoryToMove] = categorizedTools[categoryToMove];
+                    }
+                    if (i === fromIndex) return; // 跳过要移动的项
+                    newOrder[entry[0]] = entry[1];
+                });
+            }
+
+            categorizedTools = newOrder;
+            saveCategories();
+        }
+
+        // 初始化拖拽功能
+        function initDragAndDrop() {
+            // 分类拖拽
+            document.querySelectorAll('.category-section').forEach(section => {
+                section.addEventListener('dragstart', handleCategoryDragStart);
+                section.addEventListener('dragend', handleCategoryDragEnd);
+                section.addEventListener('dragover', handleCategoryDragOver);
+                section.addEventListener('drop', handleCategoryDrop);
+            });
+        }
+
+        // 修改 renderAllCategories 函数，在渲染完成后调用 initDragAndDrop
+
+        function addNewTool() {
+            updateCategorySelect();
+
+            document.getElementById('tool-index').value = '-1';
+            document.getElementById('tool-category').value = currentCategory === 'all' ? 'Rockchip' : currentCategory;
+            document.getElementById('tool-modal-title').textContent = '添加工具';
+            document.getElementById('tool-icon').value = '🌐';
+            document.getElementById('tool-title').value = '';
+            document.getElementById('tool-url').value = '';
+            document.getElementById('emoji-picker-row').style.display = 'none';
+
+            // 显示模态框
+            const modal = document.getElementById('tool-modal');
+            modal.style.display = 'flex';
+            modal.classList.add('show');
+        }
+
+        function addNewToolToCategory(category) {
+            updateCategorySelect();
+
+            document.getElementById('tool-index').value = '-1';
+            document.getElementById('tool-category').value = category;
+            document.getElementById('tool-modal-title').textContent = '添加工具到 ' + category;
+            document.getElementById('tool-icon').value = '🌐';
+            document.getElementById('tool-title').value = '';
+            document.getElementById('tool-url').value = '';
+            document.getElementById('emoji-picker-row').style.display = 'none';
+
+            // 显示模态框
+            const modal = document.getElementById('tool-modal');
+            modal.style.display = 'flex';
+            modal.classList.add('show');
+        }
+
+        function editTool(category, index) {
+            updateCategorySelect();
+
+            const tool = categorizedTools[category]?.[index];
+            if (!tool) return;
+
+            document.getElementById('tool-index').value = `${category}|${index}`;
+            document.getElementById('tool-category').value = category;
+            document.getElementById('tool-modal-title').textContent = '✏️ 编辑工具';
+            document.getElementById('tool-icon').value = tool.icon || '🌐';
+            document.getElementById('tool-title').value = tool.title || '';
+            document.getElementById('tool-url').value = tool.url || '';
+            document.getElementById('emoji-picker-row').style.display = 'none';
+
+            // 显示模态框
+            const modal = document.getElementById('tool-modal');
+            modal.style.display = 'flex';
+            modal.classList.add('show');
+        }
+
+        function deleteTool(category, index) {
+            // 使用现有的确认对话框 (Promise-based)
+            showConfirmDialog('确认删除', '确定要删除这个工具吗？').then(confirmed => {
+                if (confirmed) {
+                    categorizedTools[category].splice(index, 1);
+
+                    // 如果分类为空，删除分类
+                    if (categorizedTools[category].length === 0) {
+                        delete categorizedTools[category];
+                        if (currentCategory === category) {
+                            currentCategory = 'all';
+                        }
+                    }
+
+                    saveCategories();
+                    renderToolsGrid();
+                    showToast('删除成功', 'success');
+                }
+            });
+        }
+
+        function saveTool() {
+            const indexValue = document.getElementById('tool-index').value;
+            const category = document.getElementById('tool-category').value;
+            const icon = document.getElementById('tool-icon').value.trim() || '🌐';
+            const title = document.getElementById('tool-title').value.trim();
+            let url = document.getElementById('tool-url').value.trim();
+
+            if (!title || !url) {
+                showToast('标题和链接不能为空', 'error');
+                return;
+            }
+
+            // 自动添加 https:// 前缀
+            if (!url.match(/^https?:\/\//)) {
+                url = 'https://' + url;
+            }
+
+            const tool = { icon, title, url };
+
+            if (indexValue === '-1') {
+                // 添加新工具
+                if (!categorizedTools[category]) {
+                    categorizedTools[category] = [];
+                }
+                categorizedTools[category].push(tool);
+            } else {
+                // 编辑现有工具
+                const [oldCategory, oldIndex] = indexValue.split('|');
+
+                // 如果分类发生变化
+                if (oldCategory !== category) {
+                    // 从旧分类删除
+                    categorizedTools[oldCategory].splice(parseInt(oldIndex), 1);
+
+                    // 如果旧分类为空，删除分类
+                    if (categorizedTools[oldCategory].length === 0) {
+                        delete categorizedTools[oldCategory];
+                    }
+
+                    // 添加到分类
+                    if (!categorizedTools[category]) {
+                        categorizedTools[category] = [];
+                    }
+                    categorizedTools[category].push(tool);
+                } else {
+                    // 同一分类内更新
+                    categorizedTools[category][parseInt(oldIndex)] = tool;
+                }
+            }
+
+            saveCategories();
+            renderToolsGrid();
+
+            // 关闭模态框 - 使用统一的关闭函数
+            closeToolModal();
+
+            showToast('保存成功', 'success');
+        }
+
+        function closeToolModal() {
+            const modal = document.getElementById('tool-modal');
+            modal.style.display = 'none';
+            modal.classList.remove('show');
+        }
+
+        function showAddCategoryModal() {
+            document.getElementById('category-name').value = '';
+            document.getElementById('category-icon').value = '📁';
+            const modal = document.getElementById('category-modal');
+            modal.style.display = 'flex';
+            modal.classList.add('show');
+        }
+
+        function closeCategoryModal() {
+            const modal = document.getElementById('category-modal');
+            modal.style.display = 'none';
+            modal.classList.remove('show');
+        }
+
+        function saveCategory() {
+            const name = document.getElementById('category-name').value.trim();
+            const icon = document.getElementById('category-icon').value.trim() || '📁';
+
+            if (!name) {
+                showToast('请输入分类名称', 'error');
+                return;
+            }
+
+            // 检查分类是否已存在
+            if (categorizedTools[name]) {
+                showToast('该分类已存在', 'error');
+                return;
+            }
+
+            // 添加分类
+            categorizedTools[name] = [];
+
+            // 更新默认分类配置
+            DEFAULT_CATEGORIES[name] = { icon: icon, color: '#8e8e93' };
+
+            saveCategories();
+            renderToolsGrid();
+            closeCategoryModal();
+            showToast('分类添加成功', 'success');
+        }
+
+        function editCategory(oldName) {
+            const categoryInfo = DEFAULT_CATEGORIES[oldName] || { icon: '📁', color: '#8e8e93' };
+            const categoryHeader = event.target.closest('.category-header');
+
+            if (!categoryHeader) return;
+
+            // 将分类名称替换为输入框
+            const nameSpan = categoryHeader.querySelector('.category-name');
+            if (!nameSpan) return;
+
+            const currentName = nameSpan.textContent;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentName;
+            input.style.cssText = 'font-size: 16px; font-weight: 600; color: var(--text-primary); background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; width: 150px;';
+
+            // 替换显示
+            nameSpan.style.display = 'none';
+            input.addEventListener('blur', function() {
+                const newName = this.value.trim();
+                if (newName && newName !== currentName) {
+                    if (categorizedTools[newName] && newName !== oldName) {
+                        showToast('该分类名称已存在', 'error');
+                        input.focus();
+                        return;
+                    }
+
+                    // 重命名分类
+                    categorizedTools[newName] = categorizedTools[oldName];
+                    delete categorizedTools[oldName];
+
+                    // 更新默认分类配置
+                    DEFAULT_CATEGORIES[newName] = categoryInfo;
+                    delete DEFAULT_CATEGORIES[oldName];
+
+                    saveCategories();
+                    renderToolsGrid();
+                    showToast('分类重命名成功', 'success');
+                } else {
+                    // 恢复原显示
+                    nameSpan.style.display = '';
+                    input.remove();
+                }
+            });
+
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    this.blur();
+                } else if (e.key === 'Escape') {
+                    nameSpan.style.display = '';
+                    input.remove();
+                }
+            });
+
+            nameSpan.parentNode.insertBefore(input, nameSpan);
+            input.focus();
+        }
+
+        function deleteCategory(categoryName) {
+            const tools = categorizedTools[categoryName] || [];
+
+            // 确认删除消息
+            let message = `确定要删除分类"${categoryName}"吗？`;
+            if (tools.length > 0) {
+                message += ` 该分类下有 ${tools.length} 个工具，删除分类后这些工具也会被删除。`;
+            }
+
+            // 使用现有的确认对话框 (Promise-based)
+            showConfirmDialog('确认删除', message).then(confirmed => {
+                if (confirmed) {
+                    // 删除分类及其工具
+                    delete categorizedTools[categoryName];
+                    delete DEFAULT_CATEGORIES[categoryName];
+
+                    // 保存并重新渲染
+                    saveCategories();
+                    renderToolsGrid();
+                    showToast(`分类"${categoryName}"已删除`, 'success');
+                }
+            });
+        }
+
+        function showEmojiPicker() {
+            const pickerRow = document.getElementById('emoji-picker-row');
+            const picker = document.getElementById('emoji-picker');
+
+            if (pickerRow.style.display === 'none') {
+                // 生成 Emoji 选项
+                picker.innerHTML = commonEmojis.map(emoji =>
+                    `<button onclick="selectEmoji('${emoji}')" style="background: transparent; border: none; font-size: 16px; cursor: pointer; padding: 2px 3px; border-radius: 3px;" onmouseover="this.style.background='var(--lighter-bg)'" onmouseout="this.style.background='transparent'">${emoji}</button>`
+                ).join('');
+                pickerRow.style.display = 'flex';
+            } else {
+                pickerRow.style.display = 'none';
+            }
+        }
+
+        function selectEmoji(emoji) {
+            document.getElementById('tool-icon').value = emoji;
+            document.getElementById('emoji-picker-row').style.display = 'none';
+        }
+
+        // ==================== 工具页面专用 Esc 键处理 ====================
+        document.addEventListener('keydown', function(e) {
+            // 只处理工具页面的 Esc 键
+            if (e.key !== 'Escape' || currentPage !== 'tools') return;
+
+            // 检查是否有打开的工具相关模态框
+            const toolModal = document.getElementById('tool-modal');
+            const categoryModal = document.getElementById('category-modal');
+
+            // 优先关闭工具模态框
+            if (toolModal && toolModal.classList.contains('show')) {
+                closeToolModal();
+                e.preventDefault();
+                return;
+            }
+
+            // 然后关闭分类模态框
+            if (categoryModal && categoryModal.classList.contains('show')) {
+                closeCategoryModal();
+                e.preventDefault();
+                return;
+            }
+        });
+
+        function updateCategorySelect() {
+            const select = document.getElementById('tool-category');
+            if (!select) return;
+
+            const categories = Object.keys(categorizedTools);
+
+            // 如果没有分类，使用默认分类
+            if (categories.length === 0) {
+                categories.push(...Object.keys(DEFAULT_CATEGORIES));
+            }
+
+            select.innerHTML = categories.map(category => {
+                const categoryInfo = DEFAULT_CATEGORIES[category] || { icon: '📁', color: '#8e8e93' };
+                return `<option value="${category}">${categoryInfo.icon} ${category}</option>`;
+            }).join('');
+
+            // 添加当前选中的分类（如果不在列表中）
+            if (currentCategory !== 'all' && !categories.includes(currentCategory)) {
+                const categoryInfo = DEFAULT_CATEGORIES[currentCategory] || { icon: '📁', color: '#8e8e93' };
+                const option = document.createElement('option');
+                option.value = currentCategory;
+                option.textContent = `${categoryInfo.icon} ${currentCategory}`;
+                select.appendChild(option);
+            }
+        }
+
 
         // ==================== 终端功能 ====================
         const terminalConfig = {
@@ -2899,9 +4128,11 @@
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
                 'api-docs': '系统接口 - GMS远程测试',
-                'architecture': '系统架构 - GMS远程测试'
+                'architecture': '系统架构 - GMS 远程测试',
+                'tools': '常用网址 - GMS 远程测试'
             };
             document.title = titles[targetPage] || 'GMS远程测试';
+            if (targetPage === 'tools') loadToolsList();
         });
     </script>
 
@@ -2913,113 +4144,113 @@
                 <span class="modal-close" onclick="closeUsageExamplesModal()">&times;</span>
             </div>
             <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
-                <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; line-height: 1.6; color: var(--text-primary);">
-                    <h3 style="color: var(--primary-color); margin-bottom: 16px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">🚀 完整测试流程指南</h3>
+                <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; line-height: 1.6; color: var(--text-primary);">
+                    <h3 style="color: var(--primary-color); margin-bottom: 10px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">🚀 完整测试流程指南</h3>
 
                     <!-- Step 1: 下载Skills包 -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📦 步骤1: 下载Skills包 (可在编译服务器205/206执行)</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">curl -s -OJ "http://172.16.14.233:5001/api/system/skills"</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📦 步骤1: 下载Skills包 (可在编译服务器205/206执行)</div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl -s -OJ "http://172.16.14.233:5001/api/system/skills"</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-1-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">source ./gms-remote-test/scripts/gms-remote-test.sh</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1-5')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-1-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">source ./gms-remote-test/scripts/gms-remote-test.sh</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1-5')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 加载 gms-rt-* 命令，每次新开终端都需要执行</div>
                     </div>
 
                     <!-- Step 2: 系统健康检查 -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">🏥 步骤2: 测试主机网络连通性检查</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-2" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-ssh-ping</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-2')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">🏥 步骤2: 测试主机网络连通性检查</div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-2" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-ssh-ping</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-2')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-vpn-status</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-vpn-status</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 检查VPN连接状态（如果需要VPN访问设备）</div>
                     </div>
 
                     <!-- Step 3: 设备检查 -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📱 步骤3: 设备检查</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-4" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-devices-list</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-4')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📱 步骤3: 设备检查</div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-4" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-devices-list</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-4')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有可用的测试设备，确认目标设备在列表中</div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-usbip-connect</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-usbip-connect</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 12px; color: #999;">💡 可连接本地 Windows 电脑的ADB设备用于测试</div>
                     </div>
 
                     <!-- Step 4: WiFi连接配置 (可选) -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📶 步骤4: WiFi连接配置 (可选)</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-devices-wifi-connect RK3572GMS4 SSID password</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-5')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📶 步骤4: WiFi连接配置 (可选)</div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-devices-wifi-connect RK3572GMS4 SSID password</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-5')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 如果设备需要WiFi连接执行测试时使用</div>
                     </div>
 
                     <!-- Step 5: 查看测试套件 -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📚 步骤5: 查看测试套件</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-6" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-suites</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-6')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📚 步骤5: 查看测试套件</div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-6" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-suites</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-6')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有配置的测试套件</div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-7" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-suites-result /home/hcq/GMS-Suite/android-vts-16.1_r2/android-vts/tools</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-7')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-7" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-suites-result /home/hcq/GMS-Suite/android-vts-16.1_r2/android-vts/tools</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-7')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 查看指定套件的测试结果历史</div>
                     </div>
 
                     <!-- Step 6: 启动测试 -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">▶️  步骤6: 启动测试</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">▶️  步骤6: 启动测试</div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
                             <code id="cmd-8" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; padding-right: 70px; display: block;">gms-rt-test-start RK3572GMS4 CTS /home/hcq/GMS-Suite/android-cts/tools</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-8')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-8')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 启动CTS测试，会自动锁定设备</div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
                             <code id="cmd-9" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; padding-right: 70px; display: block;">gms-rt-test-start RK3572GMS4 CTS CtsKeystoreTestCases android.keystore.cts.KeyAttestationTest#testRsaAttestation</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-9')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-9')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 运行指定模块和用例</div>
                     </div>
 
                     <!-- Step 7: 实时查看日志 -->
                     <div style="margin-bottom: 12px;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📊 步骤7: 实时查看测试日志</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-10" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-logs-stream</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-10')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📊 步骤7: 实时查看测试日志</div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-10" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-logs-stream</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-10')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 实时流式显示测试日志输出（使用Ctrl+C退出）</div>
                     </div>
@@ -3027,53 +4258,53 @@
 
                     <!-- Step 8: 查看测试结果 -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📈 步骤 8: 查看测试结果</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-11" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-reports-list</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-11')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📈 步骤 8: 查看测试结果</div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-11" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-reports-list</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-11')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有测试报告，查看最新测试结果</div>
                     </div>
 
                     <!-- Step 9: 清理测试环境（可选） -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">🧹 步骤 9: 清理测试环境 <span style="color: #999; font-size: 11px;">(可选)</span></div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-13" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-clean</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-13')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">🧹 步骤 9: 清理测试环境 <span style="color: #999; font-size: 11px;">(可选)</span></div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-13" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-clean</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-13')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 清理测试日志和临时文件，释放磁盘空间</div>
                     </div>
 
-                    <h3 style="color: var(--primary-color); margin-bottom: 16px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">🔄 retry测试流程指南</h3>
+                    <h3 style="color: var(--primary-color); margin-bottom: 10px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">🔄 retry测试流程指南</h3>
 
                     <!-- VTS Retry Workflow -->
-                    <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #333;">
+                    <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #333;">
                         <div style="color: var(--primary-color); font-weight: 600; margin-bottom: 4px; font-size: 15px;">步骤1: 查看测试结果</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-vts-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-suites-result /home/hcq/GMS-Suite/android-vts-16.1_r2/android-vts/tools</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-1')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-vts-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-suites-result /home/hcq/GMS-Suite/android-vts-16.1_r2/android-vts/tools</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-1')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
 
-                    <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #333;">
+                    <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #333;">
                         <div style="color: var(--primary-color); font-weight: 600; margin-bottom: 4px; font-size: 15px;">步骤2: 启动VTS重试</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-vts-2" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-start --retry 2026.04.17_14.32.32 RK3572GMS4 VTS</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-2')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-vts-2" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-start --retry 2026.04.17_14.32.32 RK3572GMS4 VTS</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-2')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
 
                     <div style="margin-bottom: 10px;">
                         <div style="color: var(--primary-color); font-weight: 600; margin-bottom: 4px; font-size: 15px;">步骤3: 查看日志</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-vts-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-logs-stream</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-vts-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-logs-stream</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
 
-                    <h3 style="color: var(--primary-color); margin-bottom: 16px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">💡 常用命令快速参考</h3>
-                    <div style="margin-top: 24px; padding: 12px; background: rgba(78, 205, 176, 0.1); border-left: 4px solid var(--primary-color); border-radius: 4px;">
+                    <h3 style="color: var(--primary-color); margin-bottom: 10px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">💡 常用命令快速参考</h3>
+                    <div style="margin-top: 24px; padding: 12px; background: rgba(78, 205, 176, 0.1); border-left: 4px solid var(--primary-color); border-radius: 3px;">
                         <div style="font-size: 12px; color: var(--text-secondary);">
                             <div style="margin-bottom: 4px;">• <code style="color: #4ec9b0;">gms-rt-devices-info</code> - 获取详细设备信息</div>
                             <div style="margin-bottom: 4px;">• <code style="color: #4ec9b0;">gms-rt-devices-user-locked</code> - 检查设备锁状态</div>
@@ -3101,7 +4332,7 @@
                 <div class="modal-form-row" style="display: flex; gap: 10px;">
                     <div style="flex: 1;">
                         <label>搜索字段:</label>
-                        <select id="opengrok-search-field" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;">
+                        <select id="opengrok-search-field" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;">
                             <option value="smart">智能搜索 (推荐)</option>
                             <option value="full">全文搜索</option>
                             <option value="def">定义搜索</option>
@@ -3111,7 +4342,7 @@
                     </div>
                     <div style="flex: 1;">
                         <label>项目:</label>
-                        <select id="opengrok-project" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;">
+                        <select id="opengrok-project" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;">
                             <option value="">所有项目</option>
                             <option value="Android14" selected>Android14</option>
                         </select>
@@ -3120,7 +4351,7 @@
 
                 <div class="modal-form-row">
                     <label>文件类型:</label>
-                    <select id="opengrok-type" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;">
+                    <select id="opengrok-type" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;">
                         <option value="">所有类型</option>
                         <option value="java">Java</option>
                         <option value="kotlin">Kotlin</option>
@@ -3141,10 +4372,10 @@
                 <!-- 搜索结果区域 -->
                 <div id="opengrok-results" style="margin-top: 20px; display: none;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <div style="font-size: 14px; font-weight: 600;">搜索结果</div>
+                        <div style="font-size: 12px; font-weight: 600;">搜索结果</div>
                         <button class="btn-xxs" onclick="openOpenGrokLink()" style="font-size: 11px;">🌐 在OpenGrok中打开</button>
                     </div>
-                    <div id="opengrok-results-list" style="max-height: 400px; overflow-y: auto; background: var(--light-bg); border-radius: 4px; padding: 10px; font-size: 12px;">
+                    <div id="opengrok-results-list" style="max-height: 400px; overflow-y: auto; background: var(--light-bg); border-radius: 3px; padding: 10px; font-size: 12px;">
                         <div style="text-align: center; color: var(--text-secondary); padding: 20px;">请输入关键词进行搜索</div>
                     </div>
                 </div>
@@ -3155,20 +4386,20 @@
 </body>
                     <!-- Step 8: 查看测试结果 -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">📈 步骤 8: 查看测试结果</div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-11" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-reports-list</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-11')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📈 步骤 8: 查看测试结果</div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-11" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-reports-list</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-11')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有测试报告，查看最新测试结果</div>
                     </div>
 
                     <!-- Step 9: 解锁设备（测试完成后） -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">🔓 步骤 9: 解锁设备 <span style="color: #ffc107; font-size: 11px;">(测试完成后)</span></div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-12" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-devices-bootloader-unlock RK3572GMS4</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-12')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">🔓 步骤 9: 解锁设备 <span style="color: #ffc107; font-size: 11px;">(测试完成后)</span></div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-12" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-devices-bootloader-unlock RK3572GMS4</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-12')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 测试完成后解锁设备 Bootloader，恢复设备到初始状态</div>
                         <div style="margin-top: 4px; font-size: 11px; color: #4ec9b0;">✅ 良好习惯：测试完成后及时解锁设备</div>
@@ -3176,10 +4407,10 @@
 
                     <!-- Step 10: 清理测试环境（可选） -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 14px;">🧹 步骤 10: 清理测试环境 <span style="color: #999; font-size: 11px;">(可选)</span></div>
-                        <div style="background: #252525; padding: 4px; border-radius: 4px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-13" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; padding-right: 70px; display: block;">gms-rt-test-clean</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-13')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">🧹 步骤 10: 清理测试环境 <span style="color: #999; font-size: 11px;">(可选)</span></div>
+                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                            <code id="cmd-13" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-clean</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-13')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 清理测试日志和临时文件，释放磁盘空间</div>
                     </div>

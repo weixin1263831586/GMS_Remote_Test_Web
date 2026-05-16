@@ -1,0 +1,39 @@
+{
+    "hcq@172.16.14.68": {
+        "tools": {
+            "Rockchip": [
+                {
+                    "icon": "🏢",
+                    "title": "Rockchip 官网",
+                    "url": "https://www.rock-chips.com"
+                }
+            ],
+            "Google": [
+                {
+                    "icon": "🔍",
+                    "title": "Google",
+                    "url": "https://www.google.com"
+                },
+                {
+                    "icon": "📧",
+                    "title": "Gmail",
+                    "url": "https://gmail.com"
+                }
+            ],
+            "开发工具": [
+                {
+                    "icon": "📊",
+                    "title": "Grafana",
+                    "url": "http://172.16.14.233:3000"
+                },
+                {
+                    "icon": "📦",
+                    "title": "GitHub",
+                    "url": "https://github.com"
+                }
+            ]
+        },
+        "last_updated": "2026-05-16T15:04:28.854684",
+        "client_ip": "172.16.14.68"
+    }
+}
