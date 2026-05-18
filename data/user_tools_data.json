@@ -3,6 +3,78 @@
         "tools": {
             "Rockchip": [
                 {
+                    "icon": "https://oa.rock-chips.com:8888/favicon.ico",
+                    "title": "OA",
+                    "url": "https://oa.rock-chips.com:8888"
+                },
+                {
+                    "icon": "https://redmine.rock-chips.com/favicon.ico",
+                    "title": "Redmine",
+                    "url": "https://redmine.rock-chips.com/my/page"
+                },
+                {
+                    "icon": "https://10.10.10.29/favicon.ico",
+                    "title": "Gerrit",
+                    "url": "https://view-source:https://10.10.10.29/q/owner:chaoqun.huang@rock-chips.com"
+                },
+                {
+                    "icon": "http://10.10.10.203:8080/source/default/img/apple-touch-icon.png",
+                    "title": "OpenGrok",
+                    "url": "http://10.10.10.203:8080/source/"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/10.10.10.3.ico",
+                    "title": "绩效考核",
+                    "url": "http://10.10.10.3"
+                }
+            ],
+            "Google": [
+                {
+                    "icon": "https://www.google.com/favicon.ico",
+                    "title": "Google",
+                    "url": "https://www.google.com"
+                },
+                {
+                    "icon": "https://www.gstatic.com/buganizer/img/v0/favicon.ico",
+                    "title": "Issue",
+                    "url": "https://partnerissuetracker.corp.google.com/issues?q=reporter:chaoqun.huang@rock-chips.corp-partner.google.com"
+                }
+            ],
+            "开发工具": [
+                {
+                    "icon": "https://github.githubassets.com/favicons/favicon.svg",
+                    "title": "GitHub",
+                    "url": "https://github.com"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/chatgpt.com.ico",
+                    "title": "ChatGPT",
+                    "url": "https://chatgpt.com/"
+                },
+                {
+                    "icon": "https://cdn.deepseek.com/chat/icon.png",
+                    "title": "DeepSeek",
+                    "url": "https://chat.deepseek.com/"
+                },
+                {
+                    "icon": "https://assets.alicdn.com/g/qwenweb/qwen-chat-fe/0.2.50/favicon.png",
+                    "title": "Qwen",
+                    "url": "https://chat.qwen.ai/"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/www.bigmodel.cn.ico",
+                    "title": "智谱",
+                    "url": "https://www.bigmodel.cn/coding-plan/personal/usage"
+                }
+            ]
+        },
+        "last_updated": "2026-05-18T09:07:16.112617",
+        "client_ip": "172.16.14.68"
+    },
+    "unknown@172.16.14.37": {
+        "tools": {
+            "Rockchip": [
+                {
                     "icon": "🏢",
                     "title": "Rockchip 官网",
                     "url": "https://www.rock-chips.com"
@@ -22,18 +94,18 @@
             ],
             "开发工具": [
                 {
-                    "icon": "📊",
-                    "title": "Grafana",
-                    "url": "http://172.16.14.233:3000"
-                },
-                {
                     "icon": "📦",
                     "title": "GitHub",
                     "url": "https://github.com"
+                },
+                {
+                    "icon": "📊",
+                    "title": "Grafana",
+                    "url": "http://172.16.14.233:3000"
                 }
             ]
         },
-        "last_updated": "2026-05-16T15:04:28.854684",
-        "client_ip": "172.16.14.68"
+        "last_updated": "2026-05-16T17:41:16.887352",
+        "client_ip": "172.16.14.37"
     }
 }

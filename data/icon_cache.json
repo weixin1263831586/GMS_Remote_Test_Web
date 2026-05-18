@@ -1,0 +1,122 @@
+{
+  "favicon:www.google.com": {
+    "success": true,
+    "icon_url": "https://www.google.com/favicon.ico",
+    "icon_type": "ico",
+    "source": "root",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-16T17:49:21.807045"
+  },
+  "favicon:github.com": {
+    "success": true,
+    "icon_url": "📦",
+    "icon_type": "emoji",
+    "source": "predefined",
+    "size": 0,
+    "error": "",
+    "cache_key": "favicon:github.com",
+    "timestamp": "2026-05-16T17:49:21.807072"
+  },
+  "favicon:www.rock-chips.com": {
+    "success": true,
+    "icon_url": "https://www.rock-chips.com/favicon.ico",
+    "icon_type": "ico",
+    "source": "root",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-16T17:49:21.807080"
+  },
+  "favicon:kubernetes.io": {
+    "success": true,
+    "icon_url": "☸️",
+    "icon_type": "emoji",
+    "source": "predefined",
+    "size": 0,
+    "error": "",
+    "cache_key": "favicon:kubernetes.io",
+    "timestamp": "2026-05-16T17:49:21.807086"
+  },
+  "favicon:redis.io": {
+    "success": true,
+    "icon_url": "🔴",
+    "icon_type": "emoji",
+    "source": "predefined",
+    "size": 0,
+    "error": "",
+    "cache_key": "favicon:redis.io",
+    "timestamp": "2026-05-16T17:49:21.807092"
+  },
+  "favicon:www.python.org": {
+    "success": true,
+    "icon_url": "https://www.python.org/static/apple-touch-icon-precomposed.png",
+    "icon_type": "png",
+    "source": "html",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-16T17:49:21.807098"
+  },
+  "favicon:www.docker.com": {
+    "success": true,
+    "icon_url": "https://www.google.com/s2/favicons?domain=www.docker.com&sz=128",
+    "icon_type": "api",
+    "source": "api_google",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-16T17:49:21.807104"
+  },
+  "favicon:www.deepseek.com": {
+    "success": true,
+    "icon_url": "https://www.deepseek.com/favicon.ico",
+    "icon_type": "unknown",
+    "source": "html",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-16T17:49:21.807110"
+  },
+  "favicon:chat.deepseek.com": {
+    "success": true,
+    "icon_url": "https://cdn.deepseek.com/chat/icon.png",
+    "icon_type": "png",
+    "source": "html",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-16T17:49:21.807116"
+  },
+  "favicon:chat.qwen.ai": {
+    "success": true,
+    "icon_url": "https://www.google.com/s2/favicons?domain=chat.qwen.ai&sz=128",
+    "icon_type": "api",
+    "source": "api_google",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-16T17:49:21.807122"
+  },
+  "favicon:partnerissuetracker.corp.google.com": {
+    "success": true,
+    "icon_url": "https://icons.duckduckgo.com/ip3/partnerissuetracker.corp.google.com.ico",
+    "icon_type": "api",
+    "source": "api_duckduckgo",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-16T17:49:21.807128"
+  },
+  "favicon:www.bigmodel.cn": {
+    "success": true,
+    "icon_url": "https://www.bigmodel.cn/img/icons/apple-touch-icon-152x152.png",
+    "icon_type": "png",
+    "source": "html",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-16T20:25:11.829079"
+  }
+}

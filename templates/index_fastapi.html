@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20260501-01">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260518-01">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260409-01-01"></script>
@@ -278,7 +278,7 @@
                     <span class="sidebar-text">系统架构</span>
                 </a>
                 <a href="#" class="sidebar-item" data-page="tools" onclick="switchPage('tools', event)">
-                    <span class="sidebar-icon">🔧</span>
+                    <span class="sidebar-icon">🌐</span>
                     <span class="sidebar-text">常用网址</span>
                 </a>
             </nav>
@@ -489,7 +489,7 @@
         <!-- 终端页面 -->
         <div class="container page-content" id="page-terminal">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-                <div class="section-title" style="margin: 0;">💻 主机终端</div>
+                <div class="section-title" style="margin: 0;">🐧 主机终端</div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <div style="font-size: 11px; color: var(--text-secondary);">连接: <span style="color: var(--text-primary); font-weight: 500;">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</span></div>
                     <div class="terminal-status" id="terminal-status" style="font-size: 10px; padding: 3px 6px; border-radius: 3px; background: var(--darker-bg); color: var(--text-secondary);">未连接</div>
@@ -826,7 +826,7 @@
 
         <!-- 常用网址页面 -->
         <div class="container page-content" id="page-tools">
-            <div class="section-title">🔧 常用网址</div>
+            <div class="section-title">🌐 常用网址</div>
 
             <!-- 工具页面外框容器 - 固定高度支持滚动 -->
             <div class="tools-container" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; overflow: hidden; max-height: calc(100vh - 80px);">
@@ -879,7 +879,7 @@
 
         <!-- 添加工具弹框 -->
         <div id="tool-modal" class="modal" style="display: none;">
-            <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-content" style="max-width: 450px; max-height: 80vh; overflow-y: auto;">
                 <div class="modal-header">
                     <span class="modal-title" id="tool-modal-title">添加工具</span>
                     <span class="modal-close" onclick="closeToolModal()">&times;</span>
@@ -893,24 +893,21 @@
                         </select>
                     </div>
                     <div class="modal-form-row">
-                        <label>图标 (Emoji):</label>
-                        <div style="display: flex; gap: 8px; flex: 1;">
-                            <input type="text" id="tool-icon" placeholder="例如：🌐 📚 🎵 🎮" maxlength="4" style="flex: 1;" />
-                            <button class="btn-xxs" onclick="showEmojiPicker()" style="background: var(--info-color); color: white; min-width: 60px;">🎨 选择</button>
-                        </div>
-                    </div>
-                    <div class="modal-form-row" id="emoji-picker-row" style="display: none;">
-                        <label></label>
-                        <div id="emoji-picker" style="display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; padding: 8px; background: var(--darker-bg); border-radius: 6px; max-height: 120px; overflow-y: auto;">
-                            <!-- Emoji 选项将由 JavaScript 动态生成 -->
-                        </div>
-                    </div>
-                    <div class="modal-form-row">
                         <label>标题:</label>
                         <input type="text" id="tool-title" placeholder="例如：Google" />
                     </div>
                     <div class="modal-form-row">
-                        <label>链接 (URL):</label>
+                        <label>图标:</label>
+                        <input type="text" id="tool-icon" placeholder="输入Emoji或图片URL" style="width: 100%;" />
+                    </div>
+                    <div class="modal-form-row" id="emoji-picker-row" style="margin-bottom: 8px;">
+                        <label></label>
+                        <div id="emoji-picker" class="emoji-picker-grid">
+                            <!-- Emoji 选项将由 JavaScript 动态生成 -->
+                        </div>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>链接:</label>
                         <input type="text" id="tool-url" placeholder="例如：https://www.google.com" onblur="autoFetchIcon(this.value)" />
                     </div>
                     <div class="modal-info-text">
@@ -918,7 +915,9 @@
                     </div>
                     <div id="icon-preview" style="display: none; text-align: center; margin-top: 8px; padding: 8px; background: var(--darker-bg); border-radius: 3px;">
                         <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">图标预览：</div>
-                        <img id="preview-image" src="" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color);">
+                        <div id="preview-container" style="width: 40px; height: 40px; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
+                            <img id="preview-image" src="" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;">
+                        </div>
                     </div>
                     <div class="modal-buttons">
                         <button class="btn-xxs" onclick="closeToolModal()">取消</button>
@@ -2378,7 +2377,7 @@
             'golang.org': '🐹'
         };
 
-        function autoFetchIcon(url) {
+        async function autoFetchIcon(url) {
             const urlInput = document.getElementById('tool-url');
             const iconInput = document.getElementById('tool-icon');
             const preview = document.getElementById('icon-preview');
@@ -2389,16 +2388,29 @@
             try {
                 const urlObj = new URL(url);
                 const domain = urlObj.hostname;
-                const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
 
-                // 1. 优先使用预定义的 Emoji
                 if (commonSiteEmojis[domain]) {
                     iconInput.value = commonSiteEmojis[domain];
                     showIconPreview(iconInput.value);
                     return;
                 }
 
-                // 2. 尝试多种方式获取真实图标
+                try {
+                    const response = await fetch(`/api/favicon/fetch?url=${encodeURIComponent(url)}`);
+                    if (response.ok) {
+                        const result = await response.json();
+                        if (result.success && result.icon_url) {
+                            iconInput.value = result.icon_url;
+                            showIconPreview(iconInput.value);
+                            console.log(`✅ 自动获取图标成功: ${result.icon_url} (${result.icon_type}, ${result.source})`);
+                            return;
+                        }
+                    }
+                } catch (apiError) {
+                    console.warn('API获取图标失败，尝试前端方式:', apiError);
+                }
+
+                const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
                 const iconUrls = [
                     // 尝试直接访问常见的 favicon 路径
                     `${baseUrl}/favicon.ico`,
@@ -2458,6 +2470,7 @@
         function showIconPreview(iconValue) {
             const preview = document.getElementById('icon-preview');
             const previewImage = document.getElementById('preview-image');
+            const previewContainer = document.getElementById('preview-container');
 
             if (!preview || !previewImage) return;
 
@@ -2468,19 +2481,17 @@
                 // 图片 URL
                 const imgUrl = iconValue.replace(/\[img:|\[favicon:/g, '').replace(']', '');
                 previewImage.src = imgUrl;
-                previewImage.style.display = 'inline-block';
-                preview.innerHTML = `<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">图标预览：</div>`;
-                preview.appendChild(previewImage);
+                previewImage.style.display = 'block';
+                previewContainer.innerHTML = `<img id="preview-image" src="${imgUrl}" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 32px;\\'>🌐</span>'">`;
             } else if (iconValue.startsWith('http://') || iconValue.startsWith('https://')) {
                 // 直接的图片 URL
                 previewImage.src = iconValue;
-                previewImage.style.display = 'inline-block';
-                preview.innerHTML = `<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">图标预览：</div>`;
-                preview.appendChild(previewImage);
+                previewImage.style.display = 'block';
+                previewContainer.innerHTML = `<img id="preview-image" src="${iconValue}" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 32px;\\'>🌐</span>'">`;
             } else {
                 // Emoji
                 previewImage.style.display = 'none';
-                preview.innerHTML = `<div style="font-size: 32px;">${iconValue}</div>`;
+                previewContainer.innerHTML = `<span style="font-size: 32px;">${iconValue || '🌐'}</span>`;
             }
         }
 
@@ -3108,7 +3119,7 @@
             document.getElementById('tool-icon').value = '🌐';
             document.getElementById('tool-title').value = '';
             document.getElementById('tool-url').value = '';
-            document.getElementById('emoji-picker-row').style.display = 'none';
+            // Emoji选择器现在默认显示，不需要隐藏逻辑
 
             // 显示模态框
             const modal = document.getElementById('tool-modal');
@@ -3125,7 +3136,7 @@
             document.getElementById('tool-icon').value = '🌐';
             document.getElementById('tool-title').value = '';
             document.getElementById('tool-url').value = '';
-            document.getElementById('emoji-picker-row').style.display = 'none';
+            // Emoji选择器现在默认显示，不需要隐藏逻辑
 
             // 显示模态框
             const modal = document.getElementById('tool-modal');
@@ -3145,7 +3156,7 @@
             document.getElementById('tool-icon').value = tool.icon || '🌐';
             document.getElementById('tool-title').value = tool.title || '';
             document.getElementById('tool-url').value = tool.url || '';
-            document.getElementById('emoji-picker-row').style.display = 'none';
+            // Emoji选择器现在默认显示，不需要隐藏逻辑
 
             // 显示模态框
             const modal = document.getElementById('tool-modal');
@@ -3362,24 +3373,8 @@
             });
         }
 
-        function showEmojiPicker() {
-            const pickerRow = document.getElementById('emoji-picker-row');
-            const picker = document.getElementById('emoji-picker');
-
-            if (pickerRow.style.display === 'none') {
-                // 生成 Emoji 选项
-                picker.innerHTML = commonEmojis.map(emoji =>
-                    `<button onclick="selectEmoji('${emoji}')" style="background: transparent; border: none; font-size: 16px; cursor: pointer; padding: 2px 3px; border-radius: 3px;" onmouseover="this.style.background='var(--lighter-bg)'" onmouseout="this.style.background='transparent'">${emoji}</button>`
-                ).join('');
-                pickerRow.style.display = 'flex';
-            } else {
-                pickerRow.style.display = 'none';
-            }
-        }
-
         function selectEmoji(emoji) {
             document.getElementById('tool-icon').value = emoji;
-            document.getElementById('emoji-picker-row').style.display = 'none';
         }
 
         // ==================== 工具页面专用 Esc 键处理 ====================
@@ -4295,6 +4290,18 @@
         </div>
     </div>
 </div> <!-- End of main-container -->
+
+<script>
+    // 初始化Emoji选择器
+    document.addEventListener('DOMContentLoaded', function() {
+        const picker = document.getElementById('emoji-picker');
+        if (picker && typeof commonEmojis !== 'undefined') {
+            picker.innerHTML = commonEmojis.map(emoji =>
+                `<button onclick="selectEmoji('${emoji}')" style="background: transparent; border: none; font-size: 16px; cursor: pointer; padding: 2px 3px; border-radius: 3px;" onmouseover="this.style.background='var(--lighter-bg)'" onmouseout="this.style.background='transparent'">${emoji}</button>`
+            ).join('');
+        }
+    });
+</script>
 </body>
                     <!-- Step 8: 查看测试结果 -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
