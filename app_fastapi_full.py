@@ -103,6 +103,10 @@ UPLOAD_PROGRESS_CLEANUP_INTERVAL = 60  # 清理间隔（秒）
 # GSI 固件烧写进度轮询配置
 GSI_PROGRESS_POLL_INTERVAL = 0.5  # 服务器端进度更新间隔（秒）
 
+# Favicon 获取配置
+DEFAULT_FAVICON_TIMEOUT = 10  # 默认超时时间（秒）
+MAX_BATCH_SIZE = 20  # 批量请求最大数量
+
 # ==================== 统一响应格式 ====================
 
 def success_response(data: Any = None, message: str = "Success") -> JSONResponse:
@@ -325,6 +329,7 @@ from core.test_report_db import test_report_db
 from modules.client_manager import client_manager
 from modules.device_lock_manager import device_lock_manager
 from modules.test_logs_manager import test_logs_manager
+from modules.icon_fetcher import IconFetcher
 
 # 导入USB监控模块
 from core.usb_monitor import init_usb_monitor, start_usb_monitor, stop_usb_monitor
@@ -1265,6 +1270,16 @@ async def root(request: Request):
     response.headers["Expires"] = "0"
     return response
 
+@app.get("/icon_fetcher_test.html", response_class=HTMLResponse)
+async def icon_fetcher_test(request: Request):
+    """图标获取器测试页面"""
+    response = templates.TemplateResponse(
+        "icon_fetcher_test.html",
+        {"request": request}
+    )
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
 @app.get("/api/system/health")
 @handle_api_errors
 async def health_check():
@@ -1705,6 +1720,106 @@ async def sync_user_tools(request: Request):
     except Exception as e:
         logger.error(f"[ToolsData] Error in sync_user_tools: {e}")
         return error_response(str(e), status_code=500)
+
+@app.get("/api/favicon/fetch")
+@handle_api_errors
+async def fetch_website_favicon(
+    request: Request,
+    url: str = Query(..., description="网站URL"),
+    timeout: int = Query(DEFAULT_FAVICON_TIMEOUT, description="超时时间（秒）")
+):
+    """获取网站的真实Favicon图标
+
+    支持从多种来源获取图标：
+    1. 从HTML页面中提取图标链接（最准确）
+    2. 尝试网站根目录的常见图标文件
+    3. 使用第三方图标服务（Google、DuckDuckGo）
+
+    Args:
+        url: 要获取图标的网站URL
+        timeout: 请求超时时间（秒）
+
+    Returns:
+        {
+            "success": true/false,
+            "icon_url": "图标URL",
+            "icon_type": "svg/ico/png等",
+            "source": "html/root/api",
+            "size": 图标尺寸
+        }
+    """
+    if not url or not url.strip():
+        return error_response('URL参数不能为空', status_code=400)
+
+    fetcher = IconFetcher(timeout=timeout)
+    try:
+        icon_result = await fetcher.fetch_icon_async(url)
+
+        if icon_result.success:
+            logger.info(f"[Favicon] Successfully fetched icon for {url}: {icon_result.icon_url}")
+            return success_response({
+                'icon_url': icon_result.icon_url,
+                'icon_type': icon_result.icon_type,
+                'source': icon_result.source,
+                'size': icon_result.size
+            })
+        else:
+            logger.warning(f"[Favicon] Failed to fetch icon for {url}: {icon_result.error}")
+            return error_response(
+                icon_result.error or '无法获取网站图标',
+                status_code=404,
+                detail={'fallback_icon': '🌐'}
+            )
+    finally:
+        await fetcher.close()
+
+@app.post("/api/favicon/batch")
+@handle_api_errors
+async def batch_fetch_favicons(request: Request):
+    """批量获取多个网站的Favicon图标
+
+    Body:
+        {
+            "urls": ["https://google.com", "https://github.com"],
+            "timeout": 10
+        }
+
+    Returns:
+        {
+            "success": true,
+            "results": [
+                {
+                    "url": "https://google.com",
+                    "success": true,
+                    "icon_url": "..."
+                },
+                ...
+            ]
+        }
+    """
+    data = await request.json()
+    urls = data.get('urls', [])
+    timeout = data.get('timeout', DEFAULT_FAVICON_TIMEOUT)
+
+    if not isinstance(urls, list):
+        return error_response('urls必须是数组格式', status_code=400)
+
+    if len(urls) > MAX_BATCH_SIZE:
+        return error_response(f'批量请求不能超过{MAX_BATCH_SIZE}个URL', status_code=400)
+
+    fetcher = IconFetcher(timeout=timeout)
+    try:
+        results = await fetcher.batch_fetch_icons_async(urls)
+        successful = sum(1 for r in results if r['success'])
+
+        return success_response({
+            'results': results,
+            'total': len(urls),
+            'successful': successful,
+            'failed': len(results) - successful
+        })
+    finally:
+        await fetcher.close()
 
 # ==================== 配置管理 ====================
 

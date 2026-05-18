@@ -2683,7 +2683,7 @@ async function checkRouting() {
                             </div>
                             <div class="route-check-terminal-actions">
                                 <button id="open-terminal-btn" class="btn-terminal" data-command="${result.route_commands?.linux?.[2] || ''}">
-                                    🖥️ 打开主机终端添加路由
+                                    🐧 打开主机终端添加路由
                                 </button>
                             </div>
                         </div>

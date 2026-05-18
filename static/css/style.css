@@ -1203,14 +1203,40 @@ select option {
 .modal-form-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 15px;
+    gap: 6px;
+    margin-bottom: 8px;
 }
 
 .modal-form-row label {
-    min-width: 120px;
+    min-width: 50px;
     color: var(--text-secondary);
     font-size: 13px;
+}
+
+/* 响应式设计 - 移动端优化 */
+@media (max-width: 768px) {
+    .modal-form-row {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .modal-form-row label {
+        min-width: 100%;
+        margin-bottom: 2px;
+    }
+
+    #emoji-picker {
+        grid-template-columns: repeat(8, 1fr) !important;
+    }
+
+    .modal-buttons {
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .modal-buttons button {
+        width: 100%;
+    }
 }
 
 .modal-form-row input[type="text"],
@@ -1240,6 +1266,10 @@ select option {
     gap: 10px;
     justify-content: flex-end;
     margin-top: 20px;
+}
+
+.modal-buttons button {
+    min-width: 80px;
 }
 
 .modal-info-text {
@@ -2100,15 +2130,30 @@ select option {
 }
 
 /* ==================== Emoji Picker ==================== */
-#emoji-picker {
+.emoji-picker-grid {
     display: grid;
-    grid-template-columns: repeat(8, 1fr);
-    gap: 4px;
-    padding: 8px;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 1px;
+    padding: 2px;
     background: var(--darker-bg);
-    border-radius: 6px;
-    max-height: 120px;
-    overflow-y: auto;
+    border-radius: 4px;
+    max-height: 80px;
+    overflow-x: hidden;
+}
+
+/* 响应式emoji选择器 */
+@media (max-width: 768px) {
+    .emoji-picker-grid {
+        grid-template-columns: repeat(8, 1fr);
+    }
+}
+
+@media (min-width: 1200px) {
+    .emoji-picker-grid {
+        grid-template-columns: repeat(12, 1fr);
+        gap: 1px;
+        padding: 2px;
+    }
 }
 
 #emoji-picker::-webkit-scrollbar {
@@ -2131,10 +2176,10 @@ select option {
 #emoji-picker button {
     background: transparent;
     border: none;
-    font-size: 20px;
+    font-size: 16px;
     cursor: pointer;
-    padding: 4px;
-    border-radius: 4px;
+    padding: 2px;
+    border-radius: 3px;
     transition: var(--transition-fast);
     aspect-ratio: 1;
     display: flex;
