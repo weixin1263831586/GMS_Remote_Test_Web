@@ -4,7 +4,7 @@
             "Rockchip": [
                 {
                     "icon": "https://oa.rock-chips.com:8888/favicon.ico",
-                    "title": "OA",
+                    "title": "Rockchip OA",
                     "url": "https://oa.rock-chips.com:8888"
                 },
                 {
@@ -15,7 +15,7 @@
                 {
                     "icon": "https://10.10.10.29/favicon.ico",
                     "title": "Gerrit",
-                    "url": "https://view-source:https://10.10.10.29/q/owner:chaoqun.huang@rock-chips.com"
+                    "url": "https://10.10.10.29/q/owner:chaoqun.huang@rock-chips.com"
                 },
                 {
                     "icon": "http://10.10.10.203:8080/source/default/img/apple-touch-icon.png",
@@ -23,9 +23,19 @@
                     "url": "http://10.10.10.203:8080/source/"
                 },
                 {
-                    "icon": "https://icons.duckduckgo.com/ip3/10.10.10.3.ico",
-                    "title": "绩效考核",
-                    "url": "http://10.10.10.3"
+                    "icon": "🌐",
+                    "title": "Remote Run Server",
+                    "url": "http://10.10.10.206:8393/"
+                },
+                {
+                    "icon": "https://crm.rock-chips.com/portal/index/theme1/bg3.jpg",
+                    "title": "CRM",
+                    "url": "https://crm.rock-chips.com/portal/r/w"
+                },
+                {
+                    "icon": "http://172.16.14.130:8080/images/favicon.ico",
+                    "title": "路由器端口转发",
+                    "url": "http://172.16.14.130:8080/Advanced_VirtualServer_Content.asp"
                 }
             ],
             "Google": [
@@ -35,16 +45,31 @@
                     "url": "https://www.google.com"
                 },
                 {
+                    "icon": "https://icons.duckduckgo.com/ip3/cs.android.com.ico",
+                    "title": "Android Code",
+                    "url": "https://cs.android.com/android/platform/superproject"
+                },
+                {
+                    "icon": "https://android-review.googlesource.com/favicon.ico",
+                    "title": "Google Gerrit",
+                    "url": "https://android-review.googlesource.com/dashboard/self"
+                },
+                {
                     "icon": "https://www.gstatic.com/buganizer/img/v0/favicon.ico",
-                    "title": "Issue",
+                    "title": "IssueTracker",
                     "url": "https://partnerissuetracker.corp.google.com/issues?q=reporter:chaoqun.huang@rock-chips.corp-partner.google.com"
+                },
+                {
+                    "icon": "https://drive.google.com/favicon.ico",
+                    "title": "Google Drive",
+                    "url": "https://drive.google.com/drive/home"
                 }
             ],
             "开发工具": [
                 {
                     "icon": "https://github.githubassets.com/favicons/favicon.svg",
                     "title": "GitHub",
-                    "url": "https://github.com"
+                    "url": "https://github.com/weixin1263831586?tab=repositories"
                 },
                 {
                     "icon": "https://icons.duckduckgo.com/ip3/chatgpt.com.ico",
@@ -57,18 +82,18 @@
                     "url": "https://chat.deepseek.com/"
                 },
                 {
-                    "icon": "https://assets.alicdn.com/g/qwenweb/qwen-chat-fe/0.2.50/favicon.png",
-                    "title": "Qwen",
-                    "url": "https://chat.qwen.ai/"
-                },
-                {
                     "icon": "https://icons.duckduckgo.com/ip3/www.bigmodel.cn.ico",
                     "title": "智谱",
                     "url": "https://www.bigmodel.cn/coding-plan/personal/usage"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/www.qianwen.com.ico",
+                    "title": "Qwen",
+                    "url": "https://www.qianwen.com/"
                 }
             ]
         },
-        "last_updated": "2026-05-18T09:07:16.112617",
+        "last_updated": "2026-05-19T09:17:04.091303",
         "client_ip": "172.16.14.68"
     },
     "unknown@172.16.14.37": {
