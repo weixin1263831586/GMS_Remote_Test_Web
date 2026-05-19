@@ -118,5 +118,65 @@
     "error": "",
     "cache_key": "",
     "timestamp": "2026-05-16T20:25:11.829079"
+  },
+  "favicon:oa.rock-chips.com:8888": {
+    "success": true,
+    "icon_url": "https://oa.rock-chips.com:8888/favicon.ico",
+    "icon_type": "ico",
+    "source": "root",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-18T10:23:26.971013"
+  },
+  "favicon:www.qianwen.com": {
+    "success": true,
+    "icon_url": "https://img.alicdn.com/imgextra/i4/O1CN01uar8u91DHWktnF2fl_!!6000000000191-2-tps-110-110.png",
+    "icon_type": "ico",
+    "source": "html",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-18T14:20:42.439353"
+  },
+  "favicon:drive.google.com": {
+    "success": true,
+    "icon_url": "https://drive.google.com/favicon.ico",
+    "icon_type": "ico",
+    "source": "root",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-18T14:46:50.984789"
+  },
+  "favicon:cs.android.com": {
+    "success": true,
+    "icon_url": "https://www.gstatic.com/devopsconsole/images/oss/favicons/oss-96x96.png",
+    "icon_type": "unknown",
+    "source": "html",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-18T14:48:01.020267"
+  },
+  "favicon:172.16.14.130:8080": {
+    "success": true,
+    "icon_url": "http://172.16.14.130:8080/images/favicon.png",
+    "icon_type": "unknown",
+    "source": "html",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-18T15:27:59.720152"
+  },
+  "favicon:android-review.googlesource.com": {
+    "success": true,
+    "icon_url": "https://android-review.googlesource.com/static/android.ico",
+    "icon_type": "unknown",
+    "source": "html",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-18T17:20:25.206999"
   }
 }

@@ -1422,7 +1422,7 @@
                 console.log('[Desktop] Switching to default host, starting VNC first');
                 const url = await startDefaultHostVNC(
                     defaultHost,
-                    '{{ config.ubuntu_password }}',
+                    '{{ config.ubuntu_pswd }}',
                     currentHost.vnc_password || '',
                     defaultUrl
                 );
