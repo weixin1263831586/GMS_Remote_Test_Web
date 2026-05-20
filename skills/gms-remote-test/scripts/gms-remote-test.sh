@@ -125,6 +125,30 @@ check_jq() {
     fi
 }
 
+# Internal: check if current machine is the test host (has local adb access)
+_is_test_host() {
+    local server_host=$(echo "$SERVER_URL" | sed 's|http://||' | sed 's|/.*||' | sed 's|:.*||')
+    local local_ips=$(hostname -I 2>/dev/null)
+    echo "$local_ips" | grep -q "$server_host" || [ "$server_host" = "localhost" ] || [ "$server_host" = "127.0.0.1" ]
+}
+
+# Internal: resolve SSH host/user/port for test host
+# Outputs: "host user port" (space-separated)
+_resolve_ssh_host() {
+    local host=$(echo "$SERVER_URL" | sed 's|http://||' | sed 's|/.*||' | sed 's|:.*||')
+    local config_files=(
+        "${GMS_WEB_APP_DIR}/configs/config.json"
+        "${HOME}/GMS_Remote_Test/web_app/configs/config.json"
+    )
+    for config_file in "${config_files[@]}"; do
+        if [ -f "$config_file" ]; then
+            local cfg_host=$(jq -r '.ubuntu_host // empty' "$config_file" 2>/dev/null)
+            [ -n "$cfg_host" ] && host="$cfg_host" && break
+        fi
+    done
+    echo "$host hcq 22"
+}
+
 # ==============================================================================
 # Device Management Commands
 # ==============================================================================
@@ -657,40 +681,73 @@ gms-rt-devices-scrcpy() {
     echo "$response" | jq '.'
 }
 
-# Execute shell command (direct local adb shell)
+# Execute shell command (local adb or SSH fallback to test host)
 gms-rt-devices-shell() {
     local device_id="$1"
     [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID [COMMAND]"; return 1; }
 
-    # Shift the first argument (device_id) and get the rest as command
     shift
     local shell_command="$*"
 
-    if ! command -v adb &> /dev/null; then
-        error "adb 命令未找到. 请确保 Android SDK 已安装并配置 PATH"
-        return 1
+    if _is_test_host && command -v adb &> /dev/null && adb devices 2>/dev/null | grep -q "$device_id"; then
+        if [ -n "$shell_command" ]; then
+            adb -s "$device_id" shell "$shell_command"
+        else
+            echo ""; echo "💻 打开设备Shell: $device_id..."
+            echo "🔌 使用 Ctrl+D 退出 shell"; echo ""
+            adb -s "$device_id" shell
+        fi
+        return 0
     fi
 
-    # Check if device is connected
-    if ! adb devices | grep -q "$device_id"; then
-        error "设备 $device_id 未找到或未连接"
-        echo "📱 当前连接的设备:"
-        adb devices
-        return 1
-    fi
+    local ssh_info=($(_resolve_ssh_host))
+    local host="${ssh_info[0]}" user="${ssh_info[1]}" port="${ssh_info[2]}"
+    [ -z "$host" ] && { error "无法确定测试主机地址"; return 1; }
+    ! command -v ssh &> /dev/null && { error "ssh 命令未找到. 请安装 OpenSSH 客户端"; return 1; }
 
-    # Check if command argument is provided
     if [ -n "$shell_command" ]; then
-        # Direct command execution mode
-        adb -s "$device_id" shell "$shell_command"
+        ssh -p "$port" "$user@$host" "adb -s $device_id shell $shell_command"
     else
-        # Interactive shell mode
-        echo ""
-        echo "💻 打开设备Shell: $device_id..."
-        echo "🔌 使用 Ctrl+D 退出 shell"
-        echo ""
-        adb -s "$device_id" shell
+        echo ""; echo "💻 打开设备Shell: $device_id... (via $user@$host)"
+        echo "🔌 使用 Ctrl+D 退出 shell"; echo ""
+        ssh -t -p "$port" "$user@$host" "adb -s $device_id shell"
     fi
+}
+
+# Push file to device (adb push)
+gms-rt-devices-push() {
+    local device_id="$1"
+    local local_path="$2"
+    local remote_path="$3"
+    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-push <DEVICE_ID> <LOCAL_FILE> <REMOTE_PATH>"; return 1; }
+    [ -z "$local_path" ] && { error "本地文件路径必填. 用法: gms-rt-devices-push <DEVICE_ID> <LOCAL_FILE> <REMOTE_PATH>"; return 1; }
+    [ -z "$remote_path" ] && { error "设备目标路径必填. 用法: gms-rt-devices-push <DEVICE_ID> <LOCAL_FILE> <REMOTE_PATH>"; return 1; }
+    [ ! -f "$local_path" ] && { error "文件不存在: $local_path"; return 1; }
+
+    local local_path=$(realpath "$local_path")
+    local filename=$(basename "$local_path")
+
+    if _is_test_host && command -v adb &> /dev/null && adb devices 2>/dev/null | grep -q "$device_id"; then
+        echo "📤 Pushing $filename to $device_id:$remote_path..."
+        adb -s "$device_id" push "$local_path" "$remote_path"
+        return $?
+    fi
+
+    local ssh_info=($(_resolve_ssh_host))
+    local host="${ssh_info[0]}" user="${ssh_info[1]}" port="${ssh_info[2]}"
+    [ -z "$host" ] && { error "无法确定测试主机地址"; return 1; }
+    ! command -v scp &> /dev/null && { error "scp 命令未找到. 请安装 OpenSSH 客户端"; return 1; }
+
+    local tmp_remote="/tmp/gms-rt-push-$$-$filename"
+
+    echo "📤 Step 1/2: Transferring $filename to test host..."
+    scp -P "$port" "$local_path" "$user@$host:$tmp_remote" || { error "文件传输失败"; return 1; }
+
+    echo "📤 Step 2/2: Pushing to device $device_id:$remote_path (via $user@$host)..."
+    local push_result=0
+    ssh -p "$port" "$user@$host" "adb -s $device_id push '$tmp_remote' '$remote_path'" || push_result=$?
+    ssh -p "$port" "$user@$host" "rm -f '$tmp_remote'" 2>/dev/null
+    return $push_result
 }
 
 # User locked devices
@@ -1668,6 +1725,7 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-remount            - Remount RW (with auto-reboot prompt)
   gms-rt-devices-wifi               - Connect to WiFi
   gms-rt-devices-shell              - Open interactive ADB shell
+  gms-rt-devices-push               - Push file to device (adb push)
   gms-rt-devices-scrcpy             - Show device screen
 
 ${YELLOW}File Management:${NC}
