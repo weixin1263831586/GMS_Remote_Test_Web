@@ -4,7 +4,6 @@
 处理日志文件列表、下载、保存等功能
 """
 
-import os
 import zipfile
 from datetime import datetime
 from typing import Dict, List, Optional, Any

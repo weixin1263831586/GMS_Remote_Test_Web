@@ -7,11 +7,10 @@ ADB转发 - 核心业务逻辑
 - 设备连接管理
 """
 
-import os
 import logging
 import time
 import shlex
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 from .ssh import ssh_manager
 from .config import config_manager

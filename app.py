@@ -5469,4 +5469,4 @@ if __name__ == '__main__':
         print(f"警告: VNC 服务自动启动失败: {str(e)}")
         print("你可以稍后通过 Web 界面的「启动VNC」按钮手动启动")
 
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)

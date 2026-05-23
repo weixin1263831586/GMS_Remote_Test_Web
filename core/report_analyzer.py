@@ -97,7 +97,6 @@ class XMLReportParser:
                 root = tree.getroot()
             else:
                 # 回退到ElementTree
-                import xml.etree.ElementTree as ET
                 tree = ET.parse(xml_path)
                 root = tree.getroot()
 
@@ -112,7 +111,6 @@ class XMLReportParser:
             if USE_LXML:
                 root = etree.fromstring(xml_content.encode('utf-8'), etree.XMLParser(remove_blank_text=True))
             else:
-                import xml.etree.ElementTree as ET
                 root = ET.fromstring(xml_content)
 
             return self._parse_root(root)
@@ -459,6 +457,7 @@ class HostLogParser:
 
         # 提取Android版本
         android_version = self._extract_android_version(log_content)
+        suite_version = "Unknown"
 
         # 提取开始时间
         start_time = self._extract_start_time(log_content, log_dir)

@@ -9,7 +9,7 @@ USB/IP - 核心业务逻辑
 
 import logging
 import time
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple
 
 from .ssh import ssh_manager
 from .config import config_manager

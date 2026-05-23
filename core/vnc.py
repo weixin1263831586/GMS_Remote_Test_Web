@@ -7,12 +7,11 @@ VNC管理 - 核心业务逻辑
 - 设备屏幕显示（scrcpy）
 """
 
-import os
 import logging
 import subprocess
 import socket
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from .ssh import ssh_manager
 from .config import config_manager
@@ -514,8 +513,6 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
         try:
             config = self.config_manager.load_config()
             host = config.get('ubuntu_host', '')
-            ubuntu_user = config.get('ubuntu_user', 'hcq')
-
             ssh = self.ssh_manager.get_connection(config)
             if not ssh:
                 return {'running': False, 'error': 'SSH连接失败'}
@@ -527,7 +524,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             vnc_count = int(stdout.strip()) if code == 0 else 0
 
             # 检查VNC端口
-            port_check = f"netstat -tuln | grep 6080"
+            port_check = "netstat -tuln | grep 6080"
             stdout, stderr, code = self.ssh_manager.execute_command(ssh, port_check)
 
             port_listening = code == 0 and '6080' in stdout

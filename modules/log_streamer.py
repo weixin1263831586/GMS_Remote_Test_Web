@@ -7,7 +7,7 @@
 
 import asyncio
 from collections import deque
-from typing import Dict, List, Optional
+from typing import Dict
 from datetime import datetime
 from fastapi import WebSocket
 import logging
@@ -112,7 +112,6 @@ class LogStreamer:
 
         # 清理队列
         if client_id in self.client_queues:
-            queue_size = len(self.client_queues[client_id])
             del self.client_queues[client_id]
 
         logger.info(f"[LogStreamer] Client {client_id} disconnected")
