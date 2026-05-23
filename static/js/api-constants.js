@@ -43,6 +43,7 @@ const API_CATEGORIES = {
     '/api/adb-forward': 'usbip',
     '/api/usbip': 'usbip',
     '/api/files': 'file',
+    '/api/apk': 'apk',
     '/api/burn': 'burn',
     '/api/system/websocket/': 'system',
     '/api/system/skills': 'system'
@@ -80,6 +81,7 @@ function getCategoryName(category) {
         'desktop': '🖥️ 主机桌面',
         'terminal': '🐧 主机终端',
         'usbip': '📡 USB/IP',
+        'apk': '📦 APK分析',
         'burn': '🔥 固件烧写',
         'file': '📁 文件管理',
         'system': '💚 系统管理',
@@ -108,6 +110,7 @@ function getCategoryOrder(category) {
         'usbip': 10,
         'burn': 11,
         'file': 12,
+        'apk': 13,
         'system': 14,
         'other': 999
     };
@@ -177,7 +180,7 @@ const API_DETAILS_MAP = {
         ],
         response: '{ "success": true, "results": [{"session": "0", "pass": "93608", "fail": "22", "modules": "128 of 131", "result_directory": "2026.04.04_17.05.42", "test_plan": "cts", "device_serial": "RK3572GMS1", "build_id": "BP4A.251205.006", "product": "rk3572_a16"}], "count": 18, "raw_output": "Session...", "cached": false, "query_time": 5.4 }',
         usage: 'gms-rt-test-suites-result ~/GMS-Suite/android-cts-16.1_r2-1/android-cts/tools',
-        curl_example: 'curl -X POST "http://172.16.14.233:5001/api/test/suites/result" -H "Content-Type: application/json" -d \'{"suite_path": "/home/hcq/GMS-Suite/android-cts-16.1_r2-1/android-cts/tools"}\''
+        curl_example: 'curl -X POST "http://server:5001/api/test/suites/result" -H "Content-Type: application/json" -d \'{"suite_path": "/home/hcq/GMS-Suite/android-cts-16.1_r2-1/android-cts/tools"}\''
     },
     '/api/test/clean': {
         title: '清理测试环境',
@@ -232,7 +235,7 @@ const API_DETAILS_MAP = {
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: 'ZIP文件下载',
         usage: '下载技能包用于离线部署或备份',
-        curl_example: 'curl -s -OJ "http://172.16.14.233:5001/api/system/skills"'
+        curl_example: 'curl -s -OJ "http://server:5001/api/system/skills"'
     },
     '/api/system/docs': {
         title: '获取API文档',
@@ -681,7 +684,7 @@ const API_DETAILS_MAP = {
         ],
         response: '{ "success": true, "remote_path": "/home/hcq/GMS-Suite/tmp/filename.ext", "message": "文件已上传到 /home/hcq/GMS-Suite/tmp/filename.ext" }',
         usage: 'gms-rt-terminal-push filename.ext',
-        curl_example: 'curl -X POST "http://172.16.14.233:5001/api/terminal/push" -F "file=@localfile.txt" -F "path=/home/hcq/GMS-Suite/tmp"'
+        curl_example: 'curl -X POST "http://server:5001/api/terminal/push" -F "file=@localfile.txt" -F "path=/home/hcq/GMS-Suite/tmp"'
     },
     '/api/terminal/open': {
         title: '打开主机终端',
@@ -690,7 +693,7 @@ const API_DETAILS_MAP = {
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "success": true, "host": "172.16.14.233", "user": "hcq", "port": 22, "connection_command": "ssh hcq@172.16.14.233", "instructions": ["1. 复制连接命令: ssh hcq@172.16.14.233", "2. 在终端中粘贴并执行连接命令", "3. 输入密码或使用SSH密钥认证", "4. 连接成功后，您将获得测试主机的终端访问权限"] }',
         usage: 'gms-rt-terminal-open',
-        curl_example: 'curl -s "http://172.16.14.233:5001/api/terminal/open" | jq \'.connection_command\''
+        curl_example: 'curl -s "http://server:5001/api/terminal/open" | jq \'.connection_command\''
     },
     '/api/opengrok/search': {
         title: 'OpenGrok搜索',

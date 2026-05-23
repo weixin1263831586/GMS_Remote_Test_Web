@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20260518-01">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260520-01">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260409-01-01"></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260514-11" crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260520-01" crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -42,7 +42,7 @@
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hash && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'architecture', 'tools'].includes(hash)) {
+            if (hash && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'apk-analysis', 'api-docs', 'architecture', 'tools'].includes(hash)) {
                 targetPage = hash;
             } else {
                 targetPage = savedPage;
@@ -67,170 +67,30 @@
         })();
     </script>
     <style>
-        /* 页面切换样式 */
-        .page-content {
-            display: none;
-        }
-        .page-content.active {
-            display: block;
-        }
-        /* 终端页面样式已移除，使用统一的 .container 和 .section-title */
-        .btn-xs {
-            padding: 4px 10px;
-            font-size: 11px;
-            background: var(--light-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 3px;
-            color: var(--text-primary);
-            cursor: pointer;
-            transition: all 0.2s;
-            font-weight: 500;
-        }
-        .btn-xs:hover {
-            background: var(--border-color);
-            transform: translateY(-1px);
-        }
-        .terminal-status.connected {
-            background: rgba(76, 175, 80, 0.2);
-            color: var(--success-color);
-        }
-        .terminal-status.disconnected {
-            background: rgba(244, 67, 54, 0.2);
-            color: var(--danger-color);
-        }
-            pointer-events: none;
-            z-index: 1000;
-            text-align: center;
-            white-space: nowrap;
-        }
-        #terminal {
-            width: 100%;
-            height: 100%;
-        }
-        /* 桌面页面样式 */
-        /* 桌面页面样式已移除，使用统一的 .container 和 .section-title */
-
-        /* 主机管理弹框 */
-        .host-input-group {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
-        .host-input {
-            flex: 1;
-            padding: 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 3px;
-            background: var(--darker-bg);
-            color: var(--text-primary);
-            font-size: 15px;
-            font-family: monospace;
-        }
-        .host-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-        .host-input::placeholder {
-            color: var(--text-secondary);
-        }
-
-        /* 筛选按钮样式 */
-        .filter-btn {
-            padding: 6px 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            background: var(--light-bg);
-            color: var(--text-primary);
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .filter-btn:hover {
-            background: var(--darker-bg);
-            border-color: var(--primary-color);
-        }
-        .filter-btn.active {
-            background: var(--primary-color);
-            color: white;
-            border-color: var(--primary-color);
-        }
-
-        /* 使用实例弹框特殊样式 - 白色背景 */
-        #usage-examples-modal.modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            width: 100vw;
-            height: 100vh;
-            background-color: rgba(0, 0, 0, 0.7);
-            justify-content: center;
-            align-items: center;
-            z-index: 9999;
-            padding: 20px;
-            box-sizing: border-box;
-        }
-        #usage-examples-modal .modal-content {
-            background: #1e1e1e !important;
-            border: 1px solid #333 !important;
-            border-radius: 8px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-            max-width: 90%;
-            max-height: 90%;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-        }
-        #usage-examples-modal .modal-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-            border-bottom: 1px solid #333 !important;
-            padding: 16px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        #usage-examples-modal .modal-title {
-            color: #ffffff !important;
-            font-size: 16px;
-            font-weight: 600;
-        }
-        #usage-examples-modal .modal-close {
-            color: #ffffff !important;
-            font-size: 24px;
-            cursor: pointer;
-            line-height: 1;
-        }
-        #usage-examples-modal .modal-close:hover {
-            color: #cccccc !important;
-        }
-        #usage-examples-modal .modal-body {
-            padding: 20px;
-            overflow-y: auto;
-            background: #1e1e1e;
-        }
-        #usage-examples-modal.modal.show {
-            display: flex !important;
-        }
-
-        /* 架构图页面样式 */
-        #page-architecture .architecture-container {
-            background: rgba(15, 23, 42, 0.5);
-            border-radius: 1rem;
-            border: 1px solid #1e293b;
-            padding: 1rem;
-            height: 92vh;
-            overflow: hidden;
-        }
-
-        #page-architecture .architecture-container iframe {
-            width: 100%;
-            height: 100%;
-            display: block;
-            border: none;
-            border-radius: 0.5rem;
-        }
+        .page-content { display: none; }
+        .page-content.active { display: block; }
+        .btn-xs { padding: 4px 10px; font-size: 11px; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 3px; color: var(--text-primary); cursor: pointer; transition: all 0.2s; font-weight: 500; }
+        .btn-xs:hover { background: var(--border-color); transform: translateY(-1px); }
+        .terminal-status.connected { background: rgba(76, 175, 80, 0.2); color: var(--success-color); }
+        .terminal-status.disconnected { background: rgba(244, 67, 54, 0.2); color: var(--danger-color); }
+        #terminal { width: 100%; height: 100%; }
+        .host-input-group { display: flex; gap: 8px; align-items: center; }
+        .host-input { flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg); color: var(--text-primary); font-size: 15px; font-family: monospace; }
+        .host-input:focus { outline: none; border-color: var(--primary-color); }
+        .host-input::placeholder { color: var(--text-secondary); }
+        .filter-btn { padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); color: var(--text-primary); font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        .filter-btn:hover { background: var(--darker-bg); border-color: var(--primary-color); }
+        .filter-btn.active { background: var(--primary-color); color: white; border-color: var(--primary-color); }
+        #usage-examples-modal.modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
+        #usage-examples-modal .modal-content { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); max-width: 90%; max-height: 90%; overflow: hidden; display: flex; flex-direction: column; }
+        #usage-examples-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid #333; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; }
+        #usage-examples-modal .modal-title { color: #fff; font-size: 16px; font-weight: 600; }
+        #usage-examples-modal .modal-close { color: #fff; font-size: 24px; cursor: pointer; line-height: 1; }
+        #usage-examples-modal .modal-close:hover { color: #ccc; }
+        #usage-examples-modal .modal-body { padding: 20px; overflow-y: auto; background: #1e1e1e; }
+        #usage-examples-modal.modal.show { display: flex !important; }
+        #page-architecture .architecture-container { background: rgba(15,23,42,0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1rem; height: 92vh; overflow: hidden; }
+        #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 0.5rem; }
     </style>
 </head>
 <body>
@@ -268,6 +128,10 @@
                 <a href="#" class="sidebar-item" data-page="report-analysis" onclick="switchPage('report-analysis', event)">
                     <span class="sidebar-icon">📈</span>
                     <span class="sidebar-text">报告分析</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="apk-analysis" onclick="switchPage('apk-analysis', event)">
+                    <span class="sidebar-icon"><img src="/static/icons/jadx-icon.webp" alt="APK"></span>
+                    <span class="sidebar-text">APK分析</span>
                 </a>
                 <a href="#" class="sidebar-item" data-page="api-docs" onclick="switchPage('api-docs', event)">
                     <span class="sidebar-icon">📡</span>
@@ -421,7 +285,6 @@
                         <button class="btn-xxs" onclick="checkSshd()">📡 检查SSHD</button>
                         <button class="btn-xxs" onclick="checkRouting()">📡 检查路由</button>
                         <button class="btn-xxs" id="vpn-connect-btn" onclick="connectVpn()">🔌 连接VPN</button>
-                        <button class="btn-xxs" onclick="checkVpnStatus()">📡 检查VPN</button>
                         <span id="vpn-status-label" class="vpn-status-label">状态: 未知</span>
                     </div>
                     <!-- 文件上传区 -->
@@ -479,7 +342,7 @@
             <!-- VNC 画布 -->
             <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 80px); overflow: hidden;">
                 <iframe id="vnc-frame" style="width: 100%; height: 100%; border: none;"
-                        src="http://{{ config.ubuntu_host }}:6080/vnc.html?autoconnect=true{% if config.vnc_password %}&password={{ config.vnc_password | urlencode }}{% endif %}"
+                        src="about:blank"
                         frameborder="0"
                         allowfullscreen>
                 </iframe>
@@ -707,6 +570,108 @@
                     </div>
                     <div id="report-failure-list" style="max-height: 580px; overflow-y: auto;">
                         <!-- 动态生成 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- APK分析页面 -->
+        <div class="container page-content" id="page-apk-analysis">
+            <div class="section-title section-title-with-icon">
+                <img src="/static/icons/jadx-icon.webp" alt="" class="section-title-icon" aria-hidden="true">
+                <span>APK分析</span>
+            </div>
+
+            <!-- 上传区域 -->
+            <div style="margin-bottom: 20px;">
+                <div id="apk-upload-zone" class="apk-upload-zone upload-empty">
+                    <input type="file" id="apk-file-input" accept=".apk" style="display: none;" />
+                    <div class="apk-upload-content">
+                        <div>📦</div>
+                        <div>
+                            <div style="font-size: 14px; font-weight: 600; white-space: nowrap;">拖拽APK文件到此处</div>
+                            <div class="upload-instructions" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                                支持 .apk 文件格式<br><br>
+                                1. 点击按钮"📤 选择APK文件"上传<br>
+                                2. 直接拖拽 APK 文件上传<br>
+                                3. 上传后点击"🔬 开始分析"反编译
+                            </div>
+                        </div>
+                        <button class="btn-xs" onclick="document.getElementById('apk-file-input').click()" style="font-size: 12px; padding: 10px 20px;">
+                            📤 选择APK文件
+                        </button>
+                    </div>
+                    <div class="apk-upload-progress" id="apk-upload-progress" style="display: none;">
+                        <div class="apk-upload-progress-bar" id="apk-progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 分析状态 -->
+            <div id="apk-analysis-status" style="display: none;">
+                <div class="apk-status-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-size: 14px; font-weight: 600;" id="apk-file-name">-</div>
+                            <div style="font-size: 12px; color: var(--text-secondary);" id="apk-analysis-state">准备分析...</div>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn-xs" id="apk-btn-analyze" onclick="startApkAnalysis()">🔬 开始分析</button>
+                            <button class="btn-xs" id="apk-btn-download" onclick="downloadApkSource()" style="display: none;">📥 下载源码</button>
+                            <button class="btn-xs" onclick="resetApkAnalysis()">🗑️ 清除</button>
+                        </div>
+                    </div>
+                    <div id="apk-analysis-progress-container" style="display: none; margin-top: 12px;">
+                        <div style="height: 4px; background: var(--darker-bg); border-radius: 2px; overflow: hidden;">
+                            <div id="apk-analysis-progress-bar" style="height: 100%; background: var(--success-color); width: 0%; transition: width 0.3s ease;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 分析结果区域 -->
+            <div id="apk-analysis-result" style="display: none;">
+                <!-- 标签页导航 -->
+                <div class="apk-tab-actions">
+                    <button class="filter-btn active" data-apk-tab="manifest" onclick="switchApkTab('manifest')">📋 Manifest</button>
+                    <button class="filter-btn" data-apk-tab="permissions" onclick="switchApkTab('permissions')">🔐 权限列表</button>
+                    <button class="filter-btn" data-apk-tab="source" onclick="switchApkTab('source')">💻 源码浏览</button>
+                </div>
+
+                <!-- Manifest信息 -->
+                <div id="apk-tab-manifest" class="apk-tab-panel">
+                    <div id="apk-manifest-info">
+                        <!-- 动态生成 -->
+                    </div>
+                    <details>
+                        <summary style="cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: 10px;">原始 XML</summary>
+                        <pre id="apk-raw-xml" style="background: var(--darker-bg); padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 11px; max-height: 400px; overflow-y: auto;"></pre>
+                    </details>
+                </div>
+
+                <!-- 权限列表 -->
+                <div id="apk-tab-permissions" class="apk-tab-panel" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="font-size: 14px; font-weight: 600;">🔐 权限列表 (<span id="apk-perm-count">0</span>)</div>
+                    </div>
+                    <div id="apk-permissions-list" style="max-height: 600px; overflow-y: auto;">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
+
+                <!-- 源码浏览 -->
+                <div id="apk-tab-source" class="apk-tab-panel" style="display: none;">
+                    <div class="apk-source-layout">
+                        <div id="apk-source-tree" class="apk-source-tree">
+                            <!-- 动态生成文件树 -->
+                        </div>
+                        <div id="apk-file-viewer" style="display: none; margin-top: 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <span id="apk-file-path" style="font-size: 12px; color: var(--text-secondary);"></span>
+                                <button class="btn-xs" onclick="closeApkFileViewer()">✕ 关闭</button>
+                            </div>
+                            <pre id="apk-file-content" style="background: var(--darker-bg); padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 11px; max-height: 500px; overflow-y: auto;"></pre>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -960,14 +925,16 @@
                 <span class="modal-close" onclick="closeWifiModal()">&times;</span>
             </div>
             <div class="modal-body">
+                <form id="wifi-form" onsubmit="event.preventDefault(); submitWifiConfig();" autocomplete="off">
                 <div class="modal-form-row">
                     <label>Wi-Fi 名称(SSID):</label>
-                    <input type="text" id="wifi-ssid" value="AndroidWifi" />
+                    <input type="text" id="wifi-ssid" value="AndroidWifi" autocomplete="off" />
                 </div>
                 <div class="modal-form-row">
                     <label>Wi-Fi 密码:</label>
                     <input type="password" id="wifi-password" value="1234567890" autocomplete="current-password" />
                 </div>
+                </form>
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeWifiModal()">取消</button>
                     <button class="btn-xxs btn-primary" onclick="submitWifiConfig()">连接</button>
@@ -984,14 +951,16 @@
                 <span class="modal-close" onclick="closeDevicePasswordModal()">&times;</span>
             </div>
             <div class="modal-body">
+                <form id="device-pswd-form" onsubmit="event.preventDefault(); submitDevicePassword();" autocomplete="off">
                 <div class="modal-form-row">
                     <label>设备主机:</label>
-                    <input type="text" id="device-host-display" />
+                    <input type="text" id="device-host-display" autocomplete="off" />
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
                     <input type="password" id="device-pswd" placeholder="请输入SSH密码" onkeypress="handleDevicePasswordKeyPress(event)" autocomplete="current-password" />
                 </div>
+                </form>
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeDevicePasswordModal()">取消</button>
                     <button class="btn-xxs btn-primary" onclick="submitDevicePassword()">确定</button>
@@ -1008,6 +977,7 @@
                 <span class="modal-close" onclick="closeUsernameDetectModal()">&times;</span>
             </div>
             <div class="modal-body">
+                <form id="username-detect-form" onsubmit="event.preventDefault(); submitUsernameDetect();" autocomplete="off">
                 <div class="modal-form-row">
                     <label>客户端IP:</label>
                     <input type="text" id="username-detect-ip" readonly />
@@ -1020,8 +990,9 @@
                     <label>SSH密码:</label>
                     <input type="password" id="username-detect-password" placeholder="请输入SSH密码进行验证" onkeypress="handleUsernameDetectKeyPress(event)" autocomplete="current-password" />
                 </div>
+                </form>
                 <div class="modal-ssh-info">
-                    <small>💡 系统将通过SSH连接验证用户名，验证成功后会自动保存您的身份信息。</small>
+                    <small>💡 系统将通过SSH连接验证用户名，验证成功后会自动保存用户信息。</small>
                 </div>
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeUsernameDetectModal()">取消</button>
@@ -1158,17 +1129,16 @@
                 <span class="modal-close" onclick="closeAddHostModal()">&times;</span>
             </div>
             <div class="modal-body">
-                <div class="modal-info-text" style="margin-bottom: 15px;">
-                    请输入远程主机连接信息（默认主机已存在于列表中，可快速打开）
-                </div>
+                <form id="add-host-form" onsubmit="event.preventDefault(); addNewHost();" autocomplete="off">
                 <div class="modal-form-row">
-                    <label>主机连接:</label>
-                    <input type="text" id="new-host-input" class="host-input" placeholder="例如: wlq@172.16.14.246" onkeypress="handleAddHostKeyPress(event)" />
+                    <label>主机地址:</label>
+                    <input type="text" id="new-host-input" class="host-input" placeholder="例如: wlq@172.16.14.246" onkeypress="handleAddHostKeyPress(event)" autocomplete="off" />
                 </div>
                 <div class="modal-form-row" style="margin-top: 12px;">
                     <label>VNC密码:</label>
                     <input type="password" id="new-host-vnc-password" class="host-input" placeholder="请输入该主机的VNC密码（将自动保存）" autocomplete="new-password" />
                 </div>
+                </form>
                 <div class="modal-info-text" style="margin-top: 10px;">
                     💡 添加新主机需要输入VNC密码，系统将自动保存<br>
                     🔑 下次连接该主机时无需再次输入密码
@@ -1192,10 +1162,13 @@
                 <div class="modal-info-text" style="margin-bottom: 15px;">
                     请输入 <span id="host-password-host" style="font-family: monospace; font-weight: 600;"></span> 的SSH密码
                 </div>
+                <form id="host-password-form" onsubmit="event.preventDefault(); submitHostPassword();" autocomplete="off">
+                <input type="text" name="username" style="display:none" autocomplete="username" />
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
                     <input type="password" id="host-password-input" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg);" onkeypress="handleHostPasswordKeyPress(event)" autocomplete="current-password" />
                 </div>
+                </form>
                 <div class="modal-info-text" style="margin-top: 10px;">
                     💡 密码将被加密保存供下次使用
                 </div>
@@ -1217,18 +1190,20 @@
                 <div class="modal-info-text" style="margin-bottom: 15px;">
                     检测到新客户端,请输入SSH密码以自动获取用户名
                 </div>
+                <form id="ssh-password-form" onsubmit="event.preventDefault(); submitSsh();" autocomplete="off">
                 <div class="modal-form-row">
                     <label>客户端IP:</label>
                     <input type="text" id="ssh-client-ip" readonly style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg);" />
                 </div>
                 <div class="modal-form-row">
                     <label>SSH用户:</label>
-                    <input type="text" id="ssh-username" placeholder="例如: hcq, root" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;" />
+                    <input type="text" id="ssh-username" placeholder="例如: hcq, root" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;" autocomplete="username" />
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
                     <input type="password" id="ssh-password" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;" onkeypress="handleSshKeyPress(event)" autocomplete="current-password" />
                 </div>
+                </form>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
                     💡 密码将被加密保存,下次访问自动使用
                 </div>
@@ -1470,6 +1445,29 @@
         let desktopHosts = [];
         let currentHost = null;
         let pendingHostConnection = null;
+        const DEFAULT_VNC_HOST = {{ config.ubuntu_host | tojson }};
+        const DEFAULT_VNC_PASSWORD = {{ config.vnc_password | default("", true) | tojson }};
+
+        function buildVncUrl(host, password = '') {
+            const params = new URLSearchParams({ autoconnect: 'true' });
+            if (password) params.set('password', password);
+
+            const canUseHttpsProxy = window.location.protocol === 'https:' &&
+                (host === DEFAULT_VNC_HOST || host === window.location.hostname);
+            if (canUseHttpsProxy) {
+                return `/novnc/vnc.html?${params.toString()}`;
+            }
+            return `http://${host}:6080/vnc.html?${params.toString()}`;
+        }
+
+        function normalizeVncUrl(url, password = '') {
+            try {
+                const parsed = new URL(url, window.location.origin);
+                return buildVncUrl(parsed.hostname, password || parsed.searchParams.get('password') || '');
+            } catch (e) {
+                return url;
+            }
+        }
 
         // 初始化主机列表
         function initDesktopHosts() {
@@ -1519,6 +1517,7 @@
 
             updateHostSelector();
             saveHostsToStorage();
+            setTimeout(() => loadVNCConnection(), 0);
         }
 
         // 更新主机选择器
@@ -1563,24 +1562,24 @@
             if (!vncFrame) return;
 
             const defaultHost = '{{ config.ubuntu_user }}@{{ config.ubuntu_host }}';
-            const defaultUrl = `http://{{ config.ubuntu_host }}:6080/vnc.html?autoconnect=true`;
+            const defaultUrl = buildVncUrl(DEFAULT_VNC_HOST, DEFAULT_VNC_PASSWORD);
 
             // 如果是默认主机，也需要先启动VNC服务
             if (currentHost.id === 'default') {
                 // 检查 iframe 是否已经是默认主机的 URL
                 if (vncFrame.src.includes(defaultUrl) || vncFrame.src.includes('{{ config.ubuntu_host }}')) {
-                    console.log('[Desktop] Already on default host');
+                    debugLog('[Desktop] Already on default host');
                     return;
                 }
                 // 需要切换回默认主机，先启动VNC服务
-                console.log('[Desktop] Switching to default host, starting VNC first');
+                debugLog('[Desktop] Switching to default host, starting VNC first');
                 const url = await startDefaultHostVNC(
                     defaultHost,
                     '{{ config.ubuntu_pswd }}',
-                    currentHost.vnc_password || '',
+                    currentHost.vnc_password || DEFAULT_VNC_PASSWORD,
                     defaultUrl
                 );
-                vncFrame.src = url;
+                vncFrame.src = normalizeVncUrl(url, currentHost.vnc_password || DEFAULT_VNC_PASSWORD);
                 return;
             }
 
@@ -1604,9 +1603,9 @@
                 }
 
                 // 使用后端返回的URL（可能包含密码）
-                vncFrame.src = result.url;
+                vncFrame.src = normalizeVncUrl(result.url, currentHost.vnc_password || '');
 
-                console.log('[Desktop] Switched to host:', currentHost.name);
+                debugLog('[Desktop] Switched to host:', currentHost.name);
             } catch (e) {
                 console.error('[VNC] Failed to start:', e);
                 showToast('VNC 启动失败', 'error');
@@ -1626,7 +1625,7 @@
                 vncFrame.src = currentSrc;
             }, 10);
 
-            console.log('[Desktop] VNC refreshed');
+            debugLog('[Desktop] VNC refreshed');
         }
 
         // 显示添加主机弹框
@@ -2163,7 +2162,7 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    console.log('[VNC] VNC service status:', result.message);
+                    debugLog('[VNC] VNC service status:', result.message);
                     vncChecked = true;
 
                     // 等待VNC服务完全启动
@@ -2201,12 +2200,16 @@
             document.getElementById('page-devices').classList.remove('active');
             document.getElementById('page-reports').classList.remove('active');
             document.getElementById('page-report-analysis').classList.remove('active');
+            document.getElementById('page-apk-analysis').classList.remove('active');
             document.getElementById('page-api-docs').classList.remove('active');
             document.getElementById('page-architecture').classList.remove('active');
             document.getElementById('page-tools').classList.remove('active');
 
             // 显示目标页面
             document.getElementById(`page-${pageName}`).classList.add('active');
+
+            // 清除DOM缓存，避免保留已隐藏页面的元素引用
+            if (typeof clearDomCache === 'function') clearDomCache();
 
             currentPage = pageName;
 
@@ -2222,6 +2225,7 @@
                 'users': '用户管理 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
+                'apk-analysis': 'APK分析 - GMS远程测试',
                 'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS远程测试',
                 'tools': '常用网址 - GMS远程测试'
@@ -2238,7 +2242,7 @@
                 if (!terminalInitialized || pendingAdbDevice || pendingCommand) {
                     // ADB模式需要重新初始化,先清理旧连接
                     if ((pendingAdbDevice || pendingCommand) && terminalInitialized) {
-                        console.log('Forcing terminal re-initialization');
+                        debugLog('Forcing terminal re-initialization');
                         isReconnecting = true;  // 标记为重新连接,隐藏断开消息
                         if (terminalSocket) {
                             terminalSocket.close();
@@ -2260,7 +2264,7 @@
                         updateSilentMode(false, 'route', pendingCommand);
                         sessionStorage.removeItem('pending_terminal_command');
                         sessionStorage.removeItem('command_source');
-                        console.log('Route command mode enabled, command:', pendingCommand);
+                        debugLog('Route command mode enabled, command:', pendingCommand);
                     }
 
                     initTerminal();
@@ -2294,6 +2298,11 @@
                 loadApiDocs();
             }
 
+            // 如果切换到APK分析页面，初始化上传区域
+            if (pageName === 'apk-analysis') {
+                initApkAnalysisPage();
+            }
+
             // 切换页面时重新fit终端（如果已初始化）
             if (pageName === 'terminal' && terminalInitialized && terminal) {
                 setTimeout(() => {
@@ -2307,7 +2316,7 @@
                     initDesktopHosts();
                     window.desktopHostsInitialized = true;
                     // 默认主机的VNC已在HTML中直接加载，无需调用API
-                    console.log('[Desktop] Default host ready');
+                    debugLog('[Desktop] Default host ready');
                 }
             }
 
@@ -2377,6 +2386,94 @@
             'golang.org': '🐹'
         };
 
+        const iconHtmlEscapeMap = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+
+        function escapeIconAttr(value) {
+            return String(value || '').replace(/[&<>"']/g, char => iconHtmlEscapeMap[char]);
+        }
+
+        function isRemoteIconUrl(iconValue) {
+            return typeof iconValue === 'string' && /^https?:\/\//i.test(iconValue);
+        }
+
+        function isImageIconUrl(iconValue) {
+            return typeof iconValue === 'string' && (
+                iconValue.startsWith('/static/') ||
+                iconValue.startsWith('/api/favicon/proxy') ||
+                isRemoteIconUrl(iconValue)
+            );
+        }
+
+        function proxiedIconUrl(iconValue) {
+            if (isRemoteIconUrl(iconValue)) {
+                return `/api/favicon/proxy?timeout=2&url=${encodeURIComponent(iconValue)}`;
+            }
+            return iconValue;
+        }
+
+        function unwrapIconValue(iconValue) {
+            if (typeof iconValue !== 'string') return '';
+            if (iconValue.startsWith('[img:')) {
+                return iconValue.replace('[img:', '').replace(']', '');
+            }
+            if (iconValue.startsWith('[favicon:')) {
+                return iconValue.replace('[favicon:', '').replace(']', '');
+            }
+            return iconValue;
+        }
+
+        function renderIconImage(iconValue, altText = '图标', size = '100%') {
+            const src = escapeIconAttr(proxiedIconUrl(unwrapIconValue(iconValue)));
+            const alt = escapeIconAttr(altText);
+            return `<img src="${src}" alt="${alt}" style="width: ${size}; height: ${size}; object-fit: contain;" onerror="this.parentElement.textContent='🌐'">`;
+        }
+
+        const ROCKCHIP_TOOL_ICON_OVERRIDES = {
+            'Rockchip OA': '/static/icons/favicons/3a57911f43fd8a9ccfaa8e3ed6cf6cb3461308d7a37e13775ab6414b785725c9.ico',
+            'Redmine': '/static/icons/favicons/1a43fcd157ab39c1746959e9ea5f993614b296573069cd78b5163c22dcbfa00c.png',
+            'Gerrit': '/static/icons/favicons/rockchip-gerrit.svg',
+            'OpenGrok': '/static/icons/favicons/rockchip-opengrok.svg',
+            'Remote Run Server': '/static/icons/favicons/rockchip-remote-run.svg',
+            'CRM': '/static/icons/favicons/rockchip-crm.svg',
+            '路由器端口转发': '/static/icons/favicons/rockchip-router.svg'
+        };
+
+        const ROCKCHIP_BROWSER_ICON_CANDIDATES = {
+            'Gerrit': 'https://10.10.10.29/favicon.ico',
+            'OpenGrok': 'http://10.10.10.203:8080/source/default/img/apple-touch-icon.png',
+            'CRM': 'https://crm.rock-chips.com/portal/index/theme1/bg3.jpg',
+            '路由器端口转发': 'http://172.16.14.130:8080/images/favicon.ico'
+        };
+
+        function renderIconImageWithFallback(primaryIcon, fallbackIcon, altText = '图标', size = '100%') {
+            const primarySrc = escapeIconAttr(unwrapIconValue(primaryIcon));
+            const fallbackSrc = escapeIconAttr(proxiedIconUrl(unwrapIconValue(fallbackIcon)));
+            const alt = escapeIconAttr(altText);
+            return `<img src="${primarySrc}" data-fallback-src="${fallbackSrc}" alt="${alt}" style="width: ${size}; height: ${size}; object-fit: contain;" onerror="const fb=this.getAttribute('data-fallback-src'); if(fb && this.src.indexOf(fb) === -1){this.src=fb;}else{this.parentElement.textContent='🌐';}">`;
+        }
+
+        function getDisplayToolIcon(icon, tool) {
+            const overrideIcon = tool?.title ? ROCKCHIP_TOOL_ICON_OVERRIDES[tool.title] : '';
+            const rawIcon = icon || '';
+            const unwrappedIcon = unwrapIconValue(rawIcon);
+            if (overrideIcon && (
+                !rawIcon ||
+                rawIcon === '🌐' ||
+                rawIcon === '/static/icons/site-default.svg' ||
+                rawIcon.startsWith('/api/favicon/proxy') ||
+                isRemoteIconUrl(unwrappedIcon)
+            )) {
+                return overrideIcon;
+            }
+            return rawIcon;
+        }
+
         async function autoFetchIcon(url) {
             const urlInput = document.getElementById('tool-url');
             const iconInput = document.getElementById('tool-icon');
@@ -2389,43 +2486,24 @@
                 const urlObj = new URL(url);
                 const domain = urlObj.hostname;
 
-                if (commonSiteEmojis[domain]) {
-                    iconInput.value = commonSiteEmojis[domain];
-                    showIconPreview(iconInput.value);
-                    return;
-                }
-
                 try {
                     const response = await fetch(`/api/favicon/fetch?url=${encodeURIComponent(url)}`);
                     if (response.ok) {
                         const result = await response.json();
-                        if (result.success && result.icon_url) {
-                            iconInput.value = result.icon_url;
+                        const iconData = result.data || result;
+                        if (result.success && iconData.icon_url) {
+                            iconInput.value = iconData.icon_url;
                             showIconPreview(iconInput.value);
-                            console.log(`✅ 自动获取图标成功: ${result.icon_url} (${result.icon_type}, ${result.source})`);
+                            debugLog(`✅ 自动获取图标成功: ${iconData.icon_url} (${iconData.icon_type}, ${iconData.source})`);
                             return;
                         }
                     }
                 } catch (apiError) {
-                    console.warn('API获取图标失败，尝试前端方式:', apiError);
+                    console.warn('API获取图标失败，使用本地兜底:', apiError);
                 }
 
-                const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
-                const iconUrls = [
-                    // 尝试直接访问常见的 favicon 路径
-                    `${baseUrl}/favicon.ico`,
-                    `${baseUrl}/favicon.svg`,
-                    `${baseUrl}/icon.svg`,
-                    `${baseUrl}/assets/favicon.svg`,
-                    `${baseUrl}/static/favicon.svg`,
-
-                    // 使用第三方服务
-                    `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
-                    `https://icons.duckduckgo.com/ip3/${domain}.ico`,
-                ];
-
-                // 优先尝试 SVG 图标（质量更高）
-                tryIconUrls(iconUrls, iconInput);
+                iconInput.value = commonSiteEmojis[domain] || '/static/icons/site-default.svg';
+                showIconPreview(iconInput.value);
 
             } catch (e) {
                 console.warn('URL 解析失败:', e);
@@ -2451,7 +2529,7 @@
 
             // 如果都失败了，使用 Google Favicon 作为备选
             const fallbackUrl = iconUrls[iconUrls.length - 1];
-            iconInput.value = fallbackUrl;
+            iconInput.value = proxiedIconUrl(fallbackUrl);
             showIconPreview(fallbackUrl);
         }
 
@@ -2460,7 +2538,7 @@
                 const img = new Image();
                 img.onload = () => resolve(true);
                 img.onerror = () => resolve(false);
-                img.src = url;
+                img.src = proxiedIconUrl(url);
 
                 // 超时处理
                 setTimeout(() => resolve(false), 3000);
@@ -2479,15 +2557,16 @@
             // 检查是否是图片格式
             if (iconValue.startsWith('[img:') || iconValue.startsWith('[favicon:')) {
                 // 图片 URL
-                const imgUrl = iconValue.replace(/\[img:|\[favicon:/g, '').replace(']', '');
-                previewImage.src = imgUrl;
+                const imgUrl = unwrapIconValue(iconValue);
+                const previewUrl = proxiedIconUrl(imgUrl);
+                previewImage.src = previewUrl;
                 previewImage.style.display = 'block';
-                previewContainer.innerHTML = `<img id="preview-image" src="${imgUrl}" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 32px;\\'>🌐</span>'">`;
-            } else if (iconValue.startsWith('http://') || iconValue.startsWith('https://')) {
-                // 直接的图片 URL
-                previewImage.src = iconValue;
+                previewContainer.innerHTML = `<img src="${escapeIconAttr(previewUrl)}" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 32px;\\'>🌐</span>'">`;
+            } else if (isImageIconUrl(iconValue)) {
+                const previewUrl = proxiedIconUrl(iconValue);
+                previewImage.src = previewUrl;
                 previewImage.style.display = 'block';
-                previewContainer.innerHTML = `<img id="preview-image" src="${iconValue}" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 32px;\\'>🌐</span>'">`;
+                previewContainer.innerHTML = `<img src="${escapeIconAttr(previewUrl)}" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 32px;\\'>🌐</span>'">`;
             } else {
                 // Emoji
                 previewImage.style.display = 'none';
@@ -2665,7 +2744,7 @@
 
                 const result = await response.json();
                 if (result.success) {
-                    console.log('[ToolsSync] Data synced to server successfully');
+                    debugLog('[ToolsSync] Data synced to server successfully');
                     lastSyncTime = new Date().toISOString();
                 } else {
                     console.error('[ToolsSync] Failed to sync data to server:', result.error);
@@ -2683,7 +2762,7 @@
                 const result = await response.json();
 
                 if (result.success && result.tools) {
-                    console.log('[ToolsSync] Data loaded from server:', result.last_updated);
+                    debugLog('[ToolsSync] Data loaded from server:', result.last_updated);
 
                     // 检查服务器数据是否比本地数据更新
                     const localData = localStorage.getItem(CATEGORIES_STORAGE_KEY);
@@ -2853,7 +2932,7 @@
                      onclick="openToolLink('${tool.url}')">
 
                     <div class="tool-icon" style="width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--light-bg); border-radius: 6px; font-size: 24px; pointer-events: none;">
-                        ${renderToolIcon(tool.icon)}
+                        ${renderToolIcon(tool.icon, tool)}
                     </div>
 
                     <div class="tool-info" style="text-align: center; width: 100%; pointer-events: none;">
@@ -2880,24 +2959,29 @@
             `;
         }
 
-        function renderToolIcon(icon) {
+        function renderToolIcon(icon, tool = null) {
+            const browserIcon = tool?.title ? ROCKCHIP_BROWSER_ICON_CANDIDATES[tool.title] : '';
+            const fallbackIcon = tool?.title ? ROCKCHIP_TOOL_ICON_OVERRIDES[tool.title] : '';
+            if (browserIcon && fallbackIcon) {
+                return renderIconImageWithFallback(browserIcon, fallbackIcon);
+            }
+
+            icon = getDisplayToolIcon(icon, tool);
             if (!icon) return '🌐';
 
             // 检查是否是图片格式 [img:url]
             if (icon.startsWith('[img:')) {
-                const imgUrl = icon.replace('[img:', '').replace(']', '');
-                return `<img src="${imgUrl}" alt="图标" style="width: 100%; height: 100%; object-fit: contain;">`;
+                return renderIconImage(icon);
             }
 
             // 检查是否是 http/https 开头的图片链接
-            if (icon.startsWith('http://') || icon.startsWith('https://')) {
-                return `<img src="${icon}" alt="图标" style="width: 100%; height: 100%; object-fit: contain;" onerror="this.parentElement.innerHTML='🌐'">`;
+            if (isImageIconUrl(icon)) {
+                return renderIconImage(icon);
             }
 
             // 检查是否是 favicon 格式 [favicon:url]
             if (icon.startsWith('[favicon:')) {
-                const faviconUrl = icon.replace('[favicon:', '').replace(']', '');
-                return `<img src="${faviconUrl}" alt="图标" style="width: 100%; height: 100%; object-fit: contain;" onerror="this.parentElement.innerHTML='🌐'">`;
+                return renderIconImage(icon);
             }
 
             // 否则返回原始的 Emoji
@@ -3432,7 +3516,7 @@
             }
 
             // 按照侧边栏的顺序排列
-            const pages = ['test', 'desktop', 'terminal', 'devices', 'users', 'reports', 'report-analysis', 'api-docs', 'architecture', 'tools'];
+            const pages = ['test', 'desktop', 'terminal', 'devices', 'users', 'reports', 'report-analysis', 'apk-analysis', 'api-docs', 'architecture', 'tools'];
             const currentIndex = pages.indexOf(currentPage);
 
             if (currentIndex === -1) return;
@@ -3522,23 +3606,24 @@
         }
 
         function connectTerminalSocket() {
-            console.log('Connecting to terminal WebSocket...');
+            debugLog('Connecting to terminal WebSocket...');
             updateTerminalStatus(false);
 
             // 生成唯一的client_id
             const clientId = 'terminal_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 
             // 创建WebSocket连接
-            const wsUrl = `ws://${window.location.host}/api/system/websocket/${clientId}`;
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/api/system/websocket/${clientId}`;
             terminalSocket = new WebSocket(wsUrl);
 
             terminalSocket.onopen = () => {
-                console.log('Terminal WebSocket connected');
+                debugLog('Terminal WebSocket connected');
                 updateTerminalStatus(true);
 
                 // 检查是否为路由命令模式
                 if (silentMode.type === 'route' && silentMode.pendingCommand) {
-                    console.log('Route command mode: enabling silent mode');
+                    debugLog('Route command mode: enabling silent mode');
                     updateSilentMode(true, 'route', silentMode.pendingCommand);
                     terminalSocket.send(JSON.stringify({
                         type: 'terminal_connect',
@@ -3552,7 +3637,7 @@
 
                 // 检查是否为ADB shell模式
                 if (pendingAdbDevice) {
-                    console.log('Opening ADB shell for device:', pendingAdbDevice);
+                    debugLog('Opening ADB shell for device:', pendingAdbDevice);
                     updateSilentMode(true, 'adb');
                     terminalSocket.send(JSON.stringify({
                         type: 'terminal_connect',
@@ -3576,7 +3661,7 @@
             };
 
             terminalSocket.onclose = () => {
-                console.log('Terminal WebSocket disconnected');
+                debugLog('Terminal WebSocket disconnected');
                 updateTerminalStatus(false);
                 // 只有在非重新连接时才显示断开消息
                 if (terminal && !isReconnecting) {
@@ -3610,7 +3695,7 @@
                                         /@.+[$#]\s*$/.test(recentText) ||
                                         recentText.includes(':~$') || recentText.includes(':~#')) {
 
-                                        console.log('Shell prompt detected for route command');
+                                        debugLog('Shell prompt detected for route command');
                                         const commandToSend = silentMode.pendingCommand;
 
                                         terminal.clear();
@@ -3627,7 +3712,7 @@
                                                     type: 'terminal_input',
                                                     input: commandToSend + '\r'
                                                 }));
-                                                console.log('Route command sent:', commandToSend);
+                                                debugLog('Route command sent:', commandToSend);
                                             }
                                         }, 500);
 
@@ -3636,7 +3721,7 @@
                                     }
                                 } else if (silentMode.type === 'adb') {
                                     if (/:\/ [$#]/.test(recentText) || /\w+:\S+ [$#]/.test(recentText)) {
-                                        console.log('ADB shell prompt detected');
+                                        debugLog('ADB shell prompt detected');
                                         const text = silentMode.buffer.join('');
                                         const lines = text.split('\r\n');
                                         terminal.write(lines.slice(-3).join('\r\n'));
@@ -3655,7 +3740,7 @@
                         updateTerminalStatus(false);
                         updateSilentMode(false);  // 出错时退出静默模式
                     } else if (msg.type === 'terminal_connected') {
-                        console.log('Terminal connected, mode:', msg.mode);
+                        debugLog('Terminal connected, mode:', msg.mode);
                         // 路由命令模式和ADB模式:不显示连接消息,让输出直接显示
                         if (msg.mode !== 'adb' && silentMode.type !== 'route') {
                             if (terminal) {
@@ -3670,7 +3755,7 @@
                         // 连接建立后立即发送当前终端大小，确保PTY大小匹配
                         if (terminal && terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
                             const dims = { cols: terminal.cols, rows: terminal.rows };
-                            console.log('Sending initial terminal size:', dims);
+                            debugLog('Sending initial terminal size:', dims);
                             terminalSocket.send(JSON.stringify({
                                 type: 'terminal_resize',
                                 cols: dims.cols,
@@ -3687,7 +3772,7 @@
         function initTerminal() {
             if (terminalInitialized) return;
 
-            console.log('Initializing terminal...');
+            debugLog('Initializing terminal...');
 
             // 动态加载 xterm.js（如果还没加载）
             if (typeof Terminal === 'undefined') {
@@ -3748,7 +3833,7 @@
                     }
                 });
 
-                console.log('FitAddon loaded');
+                debugLog('FitAddon loaded');
             } catch (e) {
                 console.error('FitAddon error:', e);
                 const container = document.getElementById('terminal');
@@ -3791,7 +3876,7 @@
 
                     // 立即恢复终端焦点
                     terminal.focus();
-                    console.log('复制成功:', selection);
+                    debugLog('复制成功:', selection);
                     return false;  // 阻止默认行为
                 }
 
@@ -3911,7 +3996,7 @@
             connectTerminalSocket();
 
             terminalInitialized = true;
-            console.log('Terminal initialized');
+            debugLog('Terminal initialized');
         }
 
         // 格式化文件大小
@@ -4010,13 +4095,13 @@
                 if (!window.desktopHostsInitialized) {
                     initDesktopHosts();
                     window.desktopHostsInitialized = true;
-                    console.log('[Desktop] Hosts initialized');
+                    debugLog('[Desktop] Hosts initialized');
 
                     // 检查是否需要切换VNC连接
                     const defaultHost = '{{ config.ubuntu_user }}@{{ config.ubuntu_host }}';
                     if (currentHost && currentHost.connection !== defaultHost) {
                         // 当前主机不是默认主机，需要切换VNC连接
-                        console.log('[Desktop] Switching to saved host:', currentHost.name);
+                        debugLog('[Desktop] Switching to saved host:', currentHost.name);
                         // 延迟执行，确保DOM已加载
                         setTimeout(() => {
                             loadVNCConnection();
@@ -4034,6 +4119,7 @@
                 'users': '用户管理 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
+                'apk-analysis': 'APK分析 - GMS远程测试',
                 'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS 远程测试',
                 'tools': '常用网址 - GMS 远程测试'
@@ -4058,7 +4144,7 @@
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📦 步骤1: 下载Skills包 (可在编译服务器205/206执行)</div>
                         <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl -s -OJ "http://172.16.14.233:5001/api/system/skills"</code>
+                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl -s -OJ "{{ request.url.scheme }}://{{ request.url.netloc }}/api/system/skills"</code>
                             <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
@@ -4100,8 +4186,8 @@
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
                         <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-usbip-connect</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <code id="cmd-usbip" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-usbip-connect</code>
+                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-usbip')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 12px; color: #999;">💡 可连接本地 Windows 电脑的ADB设备用于测试</div>
                     </div>
@@ -4303,34 +4389,4 @@
     });
 </script>
 </body>
-                    <!-- Step 8: 查看测试结果 -->
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📈 步骤 8: 查看测试结果</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-11" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-reports-list</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-11')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
-                        </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有测试报告，查看最新测试结果</div>
-                    </div>
-
-                    <!-- Step 9: 解锁设备（测试完成后） -->
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">🔓 步骤 9: 解锁设备 <span style="color: #ffc107; font-size: 11px;">(测试完成后)</span></div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-12" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-devices-bootloader-unlock RK3572GMS4</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-12')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
-                        </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 测试完成后解锁设备 Bootloader，恢复设备到初始状态</div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #4ec9b0;">✅ 良好习惯：测试完成后及时解锁设备</div>
-                    </div>
-
-                    <!-- Step 10: 清理测试环境（可选） -->
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">🧹 步骤 10: 清理测试环境 <span style="color: #999; font-size: 11px;">(可选)</span></div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-13" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-clean</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-13')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
-                        </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 清理测试日志和临时文件，释放磁盘空间</div>
-                    </div>
-
+</html>
