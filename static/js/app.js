@@ -11,6 +11,7 @@ const state = {
     usbipConnected: false,
     config: null,
     fileBrowser: { currentPath: '', selectedFile: null, targetInputId: null, mode: null },
+    suiteBrowser: { selectedSuitePath: '', currentPath: '', highlightPath: '' },
     // 性能优化
     domCache: {},
     lastLogCount: 0,
@@ -1246,7 +1247,11 @@ let isRefreshingTestSuites = false;
 
 async function loadTestSuites(forceRefresh = false) {
     if (isRefreshingTestSuites) {
-        return;
+        return testSuitesCache;
+    }
+
+    if (!forceRefresh && testSuitesCache.length > 0) {
+        return testSuitesCache;
     }
 
     isRefreshingTestSuites = true;
@@ -1258,6 +1263,7 @@ async function loadTestSuites(forceRefresh = false) {
             testSuitesCache = response.suites;
             renderTestSuitesDropdown();
             debugLog('[loadTestSuites] 已加载测试套件:', response.count, '个');
+            return testSuitesCache;
         } else {
             showToast('加载测试套件失败', 'error');
         }
@@ -1267,6 +1273,7 @@ async function loadTestSuites(forceRefresh = false) {
     } finally {
         isRefreshingTestSuites = false;
     }
+    return testSuitesCache;
 }
 
 function renderTestSuitesDropdown() {
@@ -1311,6 +1318,527 @@ function renderTestSuitesDropdown() {
     const currentTestType = $('test-type')?.value;
     if (currentTestType) {
         autoSelectTestSuite(currentTestType);
+    }
+}
+
+// ==================== Test Suite Browser ====================
+function getSuiteDisplayName(suite) {
+    if (!suite) return '-';
+    return suite.version || suite.binary || (suite.tools_path || '').split('/').filter(Boolean).slice(-2).join('/') || suite.tools_path || '-';
+}
+
+function getSuiteRootFromToolsPath(toolsPath) {
+    if (!toolsPath) return '';
+    return toolsPath.endsWith('/tools') ? toolsPath.slice(0, -'/tools'.length) : toolsPath;
+}
+
+function getSuiteReleasePath(suite) {
+    const toolsPath = suite?.tools_path || '';
+    const version = suite?.version || '';
+
+    if (toolsPath && version) {
+        const marker = `/${version}`;
+        const markerIndex = toolsPath.indexOf(marker);
+        if (markerIndex !== -1) {
+            return toolsPath.slice(0, markerIndex + marker.length);
+        }
+    }
+
+    const rootPath = getSuiteRootFromToolsPath(toolsPath);
+    const parts = rootPath.split('/').filter(Boolean);
+    if (parts.length >= 1 && /^android-[^/]+$/.test(parts[parts.length - 1])) {
+        parts.pop();
+        return `/${parts.join('/')}`;
+    }
+    return rootPath || toolsPath;
+}
+
+function getSuiteBrowserRouteParams() {
+    const rawHash = window.location.hash.substring(1);
+    const [page, query = ''] = rawHash.split('?');
+    if (page !== 'test-suites' || !query) {
+        return null;
+    }
+
+    const params = new URLSearchParams(query);
+    const suitePath = params.get('suite_path') || params.get('suite') || '';
+    const filePath = params.get('file') || '';
+    const directoryPath = params.get('path') || (filePath ? getParentSuitePath(filePath) : '');
+
+    if (!suitePath) {
+        return null;
+    }
+
+    return {
+        suitePath,
+        directoryPath,
+        filePath
+    };
+}
+
+function buildSuiteBrowserLink(path = '', type = 'file') {
+    const params = new URLSearchParams();
+    params.set('suite_path', state.suiteBrowser.selectedSuitePath);
+    if (type === 'directory') {
+        params.set('path', path || '');
+    } else {
+        params.set('file', path || '');
+    }
+
+    return `${window.location.origin}${window.location.pathname}${window.location.search}#test-suites?${params.toString()}`;
+}
+
+async function initTestSuiteBrowserPage() {
+    const listEl = $('suite-browser-list');
+    if (listEl) {
+        listEl.innerHTML = '<div class="suite-empty">正在加载...</div>';
+    }
+
+    await loadTestSuites();
+    renderTestSuiteBrowserList();
+
+    const routeParams = getSuiteBrowserRouteParams();
+    if (routeParams) {
+        state.suiteBrowser.highlightPath = routeParams.filePath || '';
+        await selectTestSuiteForBrowser(
+            routeParams.suitePath,
+            routeParams.directoryPath || '',
+            { preserveHighlight: true }
+        );
+        return;
+    }
+
+    if (state.suiteBrowser.selectedSuitePath) {
+        const selectedSuite = testSuitesCache.find(s => s.tools_path === state.suiteBrowser.selectedSuitePath);
+        if (selectedSuite) {
+            await selectTestSuiteForBrowser(selectedSuite.tools_path, state.suiteBrowser.currentPath || '');
+            return;
+        }
+    }
+
+    clearSuiteBrowserSelection('请选择左侧测试套件');
+}
+
+async function refreshTestSuiteBrowser() {
+    await loadTestSuites(true);
+    renderTestSuiteBrowserList();
+    const suitePath = state.suiteBrowser.selectedSuitePath || '';
+    if (!suitePath) {
+        clearSuiteBrowserSelection('请选择左侧测试套件');
+        return;
+    }
+
+    const selectedSuite = testSuitesCache.find(s => s.tools_path === suitePath);
+    if (selectedSuite) {
+        await selectTestSuiteForBrowser(suitePath, state.suiteBrowser.currentPath || '');
+    } else {
+        clearSuiteBrowserSelection('已选择的测试套件不存在');
+    }
+}
+
+function filterTestSuiteBrowserList() {
+    renderTestSuiteBrowserList();
+}
+
+function clearSuiteBrowserSelection(message) {
+    state.suiteBrowser.selectedSuitePath = '';
+    state.suiteBrowser.currentPath = '';
+    state.suiteBrowser.highlightPath = '';
+
+    const titleEl = $('suite-browser-title');
+    const pathEl = $('suite-browser-path');
+    const breadcrumb = $('suite-browser-breadcrumb');
+    if (titleEl) titleEl.textContent = '未选择测试套件';
+    if (pathEl) pathEl.textContent = '';
+    if (breadcrumb) breadcrumb.innerHTML = '';
+
+    renderTestSuiteBrowserList();
+    renderSuiteFileEmpty(message || '请选择左侧测试套件');
+}
+
+function setSuiteBrowserHighlightedPath(path) {
+    state.suiteBrowser.highlightPath = path || '';
+    const rows = document.querySelectorAll('#suite-file-list .suite-file-row');
+    rows.forEach(row => {
+        const isTarget = row.dataset.path === path;
+        row.classList.toggle('active', isTarget);
+    });
+}
+
+function renderTestSuiteBrowserList() {
+    const listEl = $('suite-browser-list');
+    const countEl = $('suite-browser-count');
+    if (!listEl) return;
+
+    const filterText = ($('suite-browser-filter')?.value || '').trim().toLowerCase();
+    const suites = testSuitesCache.filter(suite => {
+        const haystack = [
+            suite.test_type,
+            suite.version,
+            suite.tools_path,
+            suite.binary
+        ].join(' ').toLowerCase();
+        return !filterText || haystack.includes(filterText);
+    });
+
+    if (countEl) {
+        countEl.textContent = `${testSuitesCache.length} 个套件`;
+    }
+
+    if (suites.length === 0) {
+        listEl.innerHTML = '<div class="suite-empty">没有匹配的测试套件</div>';
+        return;
+    }
+
+    listEl.innerHTML = '';
+    suites.forEach(suite => {
+        const row = document.createElement('div');
+        row.className = `suite-suite-item ${suite.tools_path === state.suiteBrowser.selectedSuitePath ? 'active' : ''}`;
+        row.dataset.suitePath = suite.tools_path;
+
+        const badge = document.createElement('span');
+        badge.className = 'suite-type-badge';
+        badge.textContent = (suite.test_type || '-').toUpperCase();
+
+        const main = document.createElement('div');
+        main.className = 'suite-suite-main';
+        main.innerHTML = `
+            <div class="suite-suite-name">${escapeHtml(getSuiteDisplayName(suite))}</div>
+            <div class="suite-suite-path">${escapeHtml(getSuiteReleasePath(suite))}</div>
+        `;
+
+        row.append(badge, main);
+        row.addEventListener('click', () => selectTestSuiteForBrowser(suite.tools_path));
+        listEl.appendChild(row);
+    });
+}
+
+async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
+    const suite = testSuitesCache.find(s => s.tools_path === suitePath);
+    if (!suite) {
+        renderSuiteFileEmpty('测试套件不存在');
+        return;
+    }
+
+    state.suiteBrowser.selectedSuitePath = suite.tools_path;
+    state.suiteBrowser.currentPath = path || '';
+    if (!options.preserveHighlight) {
+        state.suiteBrowser.highlightPath = '';
+    }
+
+    const suiteSelect = document.getElementById('test-suite');
+    if (suiteSelect && suiteSelect.value !== suite.tools_path) {
+        suiteSelect.value = suite.tools_path;
+    }
+
+    const titleEl = $('suite-browser-title');
+    const pathEl = $('suite-browser-path');
+    if (titleEl) titleEl.textContent = `${(suite.test_type || '').toUpperCase()} ${getSuiteDisplayName(suite)}`;
+    if (pathEl) pathEl.textContent = getSuiteRootFromToolsPath(suite.tools_path);
+
+    renderTestSuiteBrowserList();
+    await loadSuiteBrowserDirectory(path || '');
+}
+
+async function loadSuiteBrowserDirectory(path = '') {
+    if (!state.suiteBrowser.selectedSuitePath) {
+        renderSuiteFileEmpty('请先选择测试套件');
+        return;
+    }
+
+    const fileList = $('suite-file-list');
+    if (fileList) {
+        fileList.innerHTML = '<div class="suite-empty">正在加载目录...</div>';
+    }
+
+    try {
+        const params = new URLSearchParams({
+            suite_path: state.suiteBrowser.selectedSuitePath,
+            path: path || ''
+        });
+        const result = await apiCall(`/api/test/suites/files?${params.toString()}`);
+        const data = result.data || {};
+        state.suiteBrowser.currentPath = data.path || '';
+        renderSuiteBreadcrumb(state.suiteBrowser.currentPath);
+        renderSuiteFiles(data.items || []);
+    } catch (error) {
+        renderSuiteFileEmpty(`加载失败: ${error.message}`);
+    }
+}
+
+function renderSuiteBreadcrumb(path) {
+    const breadcrumb = $('suite-browser-breadcrumb');
+    if (!breadcrumb) return;
+
+    const parts = (path || '').split('/').filter(Boolean);
+    breadcrumb.innerHTML = '';
+
+    const rootBtn = document.createElement('button');
+    rootBtn.className = 'btn-xs';
+    rootBtn.textContent = '根目录';
+    rootBtn.addEventListener('click', () => loadSuiteBrowserDirectory(''));
+    breadcrumb.appendChild(rootBtn);
+
+    if (parts.length === 0) return;
+
+    let current = '';
+    parts.forEach(part => {
+        current = current ? `${current}/${part}` : part;
+        const separator = document.createTextNode(' / ');
+        const btn = document.createElement('button');
+        btn.className = 'btn-xs';
+        btn.textContent = part;
+        const targetPath = current;
+        btn.addEventListener('click', () => loadSuiteBrowserDirectory(targetPath));
+        breadcrumb.append(separator, btn);
+    });
+}
+
+function renderSuiteFiles(items) {
+    const fileList = $('suite-file-list');
+    if (!fileList) return;
+
+    fileList.innerHTML = '';
+
+    if (state.suiteBrowser.currentPath) {
+        const parentRow = createSuiteFileRow({
+            name: '..',
+            path: getParentSuitePath(state.suiteBrowser.currentPath),
+            type: 'directory',
+            size: 0,
+            isParent: true
+        });
+        fileList.appendChild(parentRow);
+    }
+
+    if (!items.length) {
+        if (!state.suiteBrowser.currentPath) {
+            renderSuiteFileEmpty('目录为空');
+        }
+        return;
+    }
+
+    items.forEach(item => {
+        fileList.appendChild(createSuiteFileRow(item));
+    });
+
+    const activeRow = fileList.querySelector('.suite-file-row.active');
+    if (activeRow) {
+        activeRow.scrollIntoView({ block: 'center' });
+    }
+}
+
+function createSuiteFileRow(item) {
+    const row = document.createElement('div');
+    row.className = 'suite-file-row';
+    row.dataset.path = item.path || '';
+    if (item.path && item.path === state.suiteBrowser.highlightPath) {
+        row.classList.add('active');
+    }
+    row.addEventListener('click', () => {
+        if (!item.isParent) {
+            setSuiteBrowserHighlightedPath(item.path || '');
+        }
+    });
+
+    const icon = document.createElement('span');
+    icon.textContent = item.type === 'directory' ? '📁' : (item.is_apk ? '📦' : '📄');
+
+    const main = document.createElement('div');
+    main.className = 'suite-file-main';
+
+    const name = document.createElement('div');
+    name.className = 'suite-file-name';
+    name.textContent = item.name;
+
+    main.appendChild(name);
+
+    if (item.type !== 'directory') {
+        const meta = document.createElement('div');
+        meta.className = 'suite-file-meta';
+        meta.textContent = `${formatBytes(item.size || 0, true)}${item.is_apk ? ' · APK' : ''}`;
+        main.appendChild(meta);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'suite-file-actions';
+
+    if (item.type === 'directory') {
+        const openBtn = document.createElement('button');
+        openBtn.className = 'btn-xs';
+        openBtn.textContent = item.isParent ? '返回' : '打开';
+        openBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (!item.isParent) {
+                setSuiteBrowserHighlightedPath(item.path || '');
+            }
+            loadSuiteBrowserDirectory(item.path || '');
+        });
+        actions.appendChild(openBtn);
+
+        if (!item.isParent) {
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'btn-xs';
+            copyBtn.textContent = '分享链接';
+            copyBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                setSuiteBrowserHighlightedPath(item.path || '');
+                copySuiteBrowserLink(item.path || '', 'directory');
+            });
+            actions.appendChild(copyBtn);
+        }
+
+        row.addEventListener('dblclick', () => loadSuiteBrowserDirectory(item.path || ''));
+    } else {
+        if (item.is_apk) {
+            const analyzeBtn = document.createElement('button');
+            analyzeBtn.className = 'btn-xs';
+            analyzeBtn.textContent = '反编译APK';
+            analyzeBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                analyzeSuiteApk(item.path);
+            });
+            actions.appendChild(analyzeBtn);
+        }
+
+        const downloadBtn = document.createElement('button');
+        downloadBtn.className = 'btn-xs';
+        downloadBtn.textContent = item.is_apk ? '下载APK' : '下载';
+        downloadBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            downloadSuiteFile(item.path, item.name);
+        });
+        actions.appendChild(downloadBtn);
+
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'btn-xs';
+        copyBtn.textContent = '分享链接';
+        copyBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setSuiteBrowserHighlightedPath(item.path || '');
+            copySuiteBrowserLink(item.path || '', 'file');
+        });
+        actions.appendChild(copyBtn);
+
+        row.addEventListener('dblclick', () => downloadSuiteFile(item.path, item.name));
+    }
+
+    row.append(icon, main, actions);
+    return row;
+}
+
+function copySuiteBrowserLink(path, type = 'file') {
+    if (!state.suiteBrowser.selectedSuitePath) return;
+    copyText(buildSuiteBrowserLink(path, type), { successMsg: '链接已复制' });
+}
+
+if (!window.__suiteBrowserHashListenerInstalled) {
+    window.__suiteBrowserHashListenerInstalled = true;
+    window.addEventListener('hashchange', () => {
+        if (!getSuiteBrowserRouteParams()) {
+            return;
+        }
+
+        if (typeof window.switchPage === 'function') {
+            window.switchPage('test-suites', null);
+        } else {
+            initTestSuiteBrowserPage();
+        }
+    });
+}
+
+function getParentSuitePath(path) {
+    const parts = (path || '').split('/').filter(Boolean);
+    parts.pop();
+    return parts.join('/');
+}
+
+function renderSuiteFileEmpty(message) {
+    const fileList = $('suite-file-list');
+    if (fileList) {
+        fileList.innerHTML = `<div class="suite-empty">${escapeHtml(message)}</div>`;
+    }
+}
+
+function downloadSuiteFile(path, filename = '') {
+    if (!state.suiteBrowser.selectedSuitePath || !path) return;
+    const params = new URLSearchParams({
+        suite_path: state.suiteBrowser.selectedSuitePath,
+        path
+    });
+    let frame = document.getElementById('suite-download-frame');
+    if (!frame) {
+        frame = document.createElement('iframe');
+        frame.id = 'suite-download-frame';
+        frame.name = 'suite-download-frame';
+        frame.style.display = 'none';
+        document.body.appendChild(frame);
+    }
+
+    const link = document.createElement('a');
+    link.href = `/api/test/suites/download?${params.toString()}`;
+    link.download = filename || path.split('/').pop() || 'download';
+    link.target = frame.name;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+}
+
+async function analyzeSuiteApk(path) {
+    if (!state.suiteBrowser.selectedSuitePath || !path) return;
+
+    try {
+        showToast('正在准备 APK 分析任务...', 'info');
+        const result = await apiCall('/api/test/suites/apk/analyze', 'POST', {
+            suite_path: state.suiteBrowser.selectedSuitePath,
+            path
+        });
+        const task = result.data || {};
+        if (!task.task_id) {
+            showToast('创建 APK 分析任务失败', 'error');
+            return;
+        }
+
+        switchPage('apk-analysis', null);
+        initApkAnalysisPage();
+        stopApkPolling();
+
+        window.apkCurrentTaskId = task.task_id;
+        setApkUploadEmpty(false);
+
+        const fileSizeMB = task.size ? (task.size / (1024 * 1024)).toFixed(1) : '-';
+        $('apk-analysis-status').style.display = 'block';
+        $('apk-file-name').textContent = `${task.filename || path} (${fileSizeMB}MB)`;
+        $('apk-analysis-state').textContent = '已从测试套件导入，准备反编译';
+        $('apk-btn-analyze').style.display = 'inline-block';
+        $('apk-btn-analyze').disabled = false;
+        $('apk-btn-analyze').textContent = '🔬 开始分析';
+        $('apk-btn-download').style.display = 'none';
+        $('apk-analysis-result').style.display = 'none';
+        $('apk-analysis-progress-container').style.display = 'none';
+        $('apk-analysis-progress-bar').style.width = '0%';
+
+        const sourceTree = $('apk-source-tree');
+        if (sourceTree) {
+            sourceTree.dataset.loaded = '';
+            sourceTree.innerHTML = '';
+        }
+        const permList = $('apk-permissions-list');
+        if (permList) {
+            permList.dataset.loaded = '';
+            permList.innerHTML = '';
+        }
+        const manifestInfo = $('apk-manifest-info');
+        if (manifestInfo) manifestInfo.innerHTML = '';
+        const rawXml = $('apk-raw-xml');
+        if (rawXml) rawXml.textContent = '';
+        closeApkFileViewer();
+        switchApkTab('manifest');
+
+        await startApkAnalysis();
+    } catch (error) {
+        showToast(`准备 APK 分析失败: ${error.message}`, 'error');
     }
 }
 

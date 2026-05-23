@@ -3631,6 +3631,268 @@ async def list_suites(base_path: str = None):
         )
 
 
+def _normalize_suite_relative_path(path: Optional[str]) -> str:
+    """Normalize a browser path so it always remains relative to a suite root."""
+    rel_path = (path or '').replace('\\', '/').strip().strip('/')
+    if not rel_path:
+        return ''
+
+    parts = [part for part in rel_path.split('/') if part and part != '.']
+    if any(part == '..' for part in parts):
+        raise ValueError("非法路径")
+    return '/'.join(parts)
+
+
+def _get_suite_root_from_path(suite_path: str, config: Dict[str, Any]) -> str:
+    """Convert a selected suite tools path to the suite root directory."""
+    raw_path = (suite_path or '').replace('\\', '/').strip().rstrip('/')
+    if not raw_path or not raw_path.startswith('/'):
+        raise ValueError("测试套件路径无效")
+
+    suite_root = raw_path[:-len('/tools')] if raw_path.endswith('/tools') else raw_path
+    suite_root = suite_root.rstrip('/')
+    if not suite_root:
+        raise ValueError("测试套件路径无效")
+
+    base_path = (config.get('suites_path') or '').replace('\\', '/').strip().rstrip('/')
+    if base_path.startswith('/') and not (suite_root == base_path or suite_root.startswith(base_path + '/')):
+        raise ValueError("测试套件不在配置的套件目录内")
+
+    return suite_root
+
+
+def _build_suite_remote_path(suite_path: str, path: Optional[str], config: Dict[str, Any]) -> tuple:
+    suite_root = _get_suite_root_from_path(suite_path, config)
+    rel_path = _normalize_suite_relative_path(path)
+    remote_path = suite_root if not rel_path else f"{suite_root}/{rel_path}"
+    return suite_root, rel_path, remote_path
+
+
+_SUITE_SCRIPT_PREAMBLE = r"""
+import json, os, sys
+root = os.path.realpath(sys.argv[1])
+target = os.path.realpath(sys.argv[2])
+def emit(payload):
+    print(json.dumps(payload, ensure_ascii=False))
+if target != root and not target.startswith(root + os.sep):
+    emit({"success": False, "error": "非法路径"})
+    sys.exit(0)
+"""
+
+SUITE_FILE_LIST_SCRIPT = _SUITE_SCRIPT_PREAMBLE + r"""
+if not os.path.isdir(target):
+    emit({"success": False, "error": "目录不存在"})
+    sys.exit(0)
+
+items = []
+for name in sorted(os.listdir(target), key=lambda n: n.lower()):
+    full_path = os.path.join(target, name)
+    try:
+        real_path = os.path.realpath(full_path)
+        if real_path != root and not real_path.startswith(root + os.sep):
+            continue
+        st = os.stat(full_path)
+        is_dir = os.path.isdir(full_path)
+        rel = os.path.relpath(full_path, root)
+        items.append({
+            "name": name,
+            "path": "" if rel == "." else rel,
+            "type": "directory" if is_dir else "file",
+            "size": 0 if is_dir else st.st_size,
+            "modified": int(st.st_mtime),
+            "is_apk": (not is_dir) and name.lower().endswith(".apk"),
+        })
+    except OSError:
+        continue
+
+items.sort(key=lambda item: (item["type"] != "directory", item["name"].lower()))
+emit({
+    "success": True,
+    "path": "" if target == root else os.path.relpath(target, root),
+    "root": root,
+    "items": items,
+})
+"""
+
+SUITE_FILE_INFO_SCRIPT = _SUITE_SCRIPT_PREAMBLE + r"""
+if not os.path.isfile(target):
+    emit({"success": False, "error": "文件不存在"})
+    sys.exit(0)
+
+st = os.stat(target)
+emit({
+    "success": True,
+    "real_path": target,
+    "name": os.path.basename(target),
+    "size": st.st_size,
+    "modified": int(st.st_mtime),
+    "is_apk": target.lower().endswith(".apk"),
+})
+"""
+
+
+def _run_suite_file_script(ssh, script: str, suite_root: str, remote_path: str, timeout: int = 20) -> Dict[str, Any]:
+    cmd = f"python3 -c {shlex.quote(script)} {shlex.quote(suite_root)} {shlex.quote(remote_path)}"
+    output, error, code = ssh_manager.execute_command(ssh, cmd, timeout=timeout)
+    if code != 0:
+        raise RuntimeError(error.strip() or output.strip() or "远程文件操作失败")
+    try:
+        return json.loads(output.strip())
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"远程文件响应解析失败: {e}")
+
+
+@app.get("/api/test/suites/files")
+@handle_api_errors
+async def list_suite_files(
+    suite_path: str = Query(..., description="测试套件 tools 目录路径"),
+    path: str = Query('', description="套件内相对路径")
+):
+    """浏览测试套件目录内的文件。"""
+    config = config_manager.load_config()
+    try:
+        suite_root, rel_path, remote_path = _build_suite_remote_path(suite_path, path, config)
+    except ValueError as e:
+        return ApiResponse.error(str(e), status_code=400)
+
+    ssh = ssh_manager.get_connection(config)
+    if not ssh:
+        return ssh_connection_failed_response()
+
+    try:
+        payload = _run_suite_file_script(ssh, SUITE_FILE_LIST_SCRIPT, suite_root, remote_path)
+        if not payload.get('success'):
+            return ApiResponse.error(payload.get('error', '目录读取失败'), status_code=400)
+        return ApiResponse.success({
+            'suite_path': suite_path,
+            'suite_root': suite_root,
+            'path': payload.get('path', rel_path),
+            'items': payload.get('items', []),
+        })
+    finally:
+        ssh_manager.return_connection(ssh)
+
+
+@app.get("/api/test/suites/download")
+@handle_api_errors
+async def download_suite_file(
+    suite_path: str = Query(..., description="测试套件 tools 目录路径"),
+    path: str = Query(..., description="套件内相对文件路径")
+):
+    """下载测试套件目录内的指定文件。"""
+    config = config_manager.load_config()
+    try:
+        suite_root, _, remote_path = _build_suite_remote_path(suite_path, path, config)
+    except ValueError as e:
+        return ApiResponse.error(str(e), status_code=400)
+
+    ssh = ssh_manager.get_connection(config)
+    if not ssh:
+        return ssh_connection_failed_response()
+
+    try:
+        info = _run_suite_file_script(ssh, SUITE_FILE_INFO_SCRIPT, suite_root, remote_path)
+        if not info.get('success'):
+            ssh_manager.return_connection(ssh)
+            return ApiResponse.error(info.get('error', '文件不存在'), status_code=404)
+
+        sftp = ssh.open_sftp()
+        remote_file = sftp.open(info['real_path'], 'rb')
+    except Exception:
+        ssh_manager.return_connection(ssh)
+        raise
+
+    filename = info.get('name') or os.path.basename(remote_path) or 'download'
+    ascii_filename = re.sub(r'[^A-Za-z0-9._-]+', '_', filename) or 'download'
+    quoted_filename = urllib.parse.quote(filename)
+    media_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+
+    def iter_remote_file():
+        try:
+            while True:
+                chunk = remote_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            try:
+                remote_file.close()
+            finally:
+                try:
+                    sftp.close()
+                finally:
+                    ssh_manager.return_connection(ssh)
+
+    return StreamingResponse(
+        iter_remote_file(),
+        media_type=media_type,
+        headers={
+            'Content-Disposition': f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{quoted_filename}',
+            'Content-Length': str(info.get('size', 0)),
+        }
+    )
+
+
+class SuiteApkAnalyzeRequest(BaseModel):
+    suite_path: str
+    path: str
+
+
+@app.post("/api/test/suites/apk/analyze")
+@handle_api_errors
+async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest):
+    """把测试套件中的 APK 复制为 APK 分析任务。"""
+    config = config_manager.load_config()
+    try:
+        suite_root, _, remote_path = _build_suite_remote_path(req.suite_path, req.path, config)
+    except ValueError as e:
+        return ApiResponse.error(str(e), status_code=400)
+
+    ssh = ssh_manager.get_connection(config)
+    if not ssh:
+        return ssh_connection_failed_response()
+
+    task_id = str(uuid.uuid4())
+    sftp = None
+    try:
+        info = _run_suite_file_script(ssh, SUITE_FILE_INFO_SCRIPT, suite_root, remote_path)
+        if not info.get('success'):
+            return ApiResponse.error(info.get('error', '文件不存在'), status_code=404)
+        if not info.get('is_apk'):
+            return ApiResponse.error("仅支持 APK 文件反编译", status_code=400)
+        if int(info.get('size', 0)) > APK_MAX_FILE_SIZE:
+            return ApiResponse.error(f"文件过大，最大支持 {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
+
+        filename = _normalize_apk_filename(info.get('name') or os.path.basename(remote_path))
+        task_dir = _safe_join(APK_UPLOAD_DIR, task_id)
+        os.makedirs(task_dir, exist_ok=True)
+        apk_path = _safe_join(task_dir, filename)
+
+        sftp = ssh.open_sftp()
+        await asyncio.to_thread(sftp.get, info['real_path'], apk_path)
+
+        if os.path.getsize(apk_path) > APK_MAX_FILE_SIZE:
+            _cleanup_files([apk_path])
+            return ApiResponse.error(f"文件过大，最大支持 {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
+
+        _create_apk_task(task_id, apk_path, filename)
+        return ApiResponse.success({
+            'task_id': task_id,
+            'filename': filename,
+            'size': os.path.getsize(apk_path),
+            'source_path': req.path,
+        })
+    except ValueError as e:
+        return ApiResponse.error(str(e), status_code=400)
+    finally:
+        if sftp:
+            try:
+                sftp.close()
+            except Exception:
+                pass
+        ssh_manager.return_connection(ssh)
+
+
 class TradefedListResultsRequest(BaseModel):
     """Request model for tradefed list results"""
     suite_path: str

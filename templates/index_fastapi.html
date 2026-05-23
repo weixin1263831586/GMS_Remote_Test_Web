@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20260520-01">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260523-03">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260409-01-01"></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260520-01" crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260523-03" crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -38,12 +38,13 @@
         (function() {
             // 确定要显示的页面（在页面渲染前）
             const hash = window.location.hash.substring(1);
+            const hashPage = hash.split('?')[0];
             const savedPage = localStorage.getItem('gms_current_page') || 'test';
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hash && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'apk-analysis', 'api-docs', 'architecture', 'tools'].includes(hash)) {
-                targetPage = hash;
+            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'api-docs', 'architecture', 'tools'].includes(hashPage)) {
+                targetPage = hashPage;
             } else {
                 targetPage = savedPage;
             }
@@ -112,6 +113,10 @@
                 <a href="#" class="sidebar-item" data-page="terminal" onclick="switchPage('terminal', event)">
                     <span class="sidebar-icon">🐧</span>
                     <span class="sidebar-text">主机终端</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="test-suites" onclick="switchPage('test-suites', event)">
+                    <span class="sidebar-icon">📚</span>
+                    <span class="sidebar-text">测试套件</span>
                 </a>
                 <a href="#" class="sidebar-item" data-page="devices" onclick="switchPage('devices', event)">
                     <span class="sidebar-icon">📱</span>
@@ -575,6 +580,38 @@
             </div>
         </div>
 
+        <!-- 测试套件页面 -->
+        <div class="container page-content" id="page-test-suites">
+            <div class="section-title">📚 测试套件</div>
+
+            <div class="suite-browser-layout">
+                <div class="suite-browser-sidebar">
+                    <div class="suite-browser-toolbar">
+                        <button class="btn-xs" onclick="refreshTestSuiteBrowser()">🔄 刷新</button>
+                        <span id="suite-browser-count" class="suite-browser-count">0 个套件</span>
+                    </div>
+                    <input type="text" id="suite-browser-filter" class="suite-browser-filter" placeholder="筛选套件..."
+                           oninput="filterTestSuiteBrowserList()" />
+                    <div id="suite-browser-list" class="suite-browser-list">
+                        <div class="suite-empty">正在加载...</div>
+                    </div>
+                </div>
+
+                <div class="suite-browser-main">
+                    <div class="suite-browser-header">
+                        <div>
+                            <div id="suite-browser-title" class="suite-browser-title">请选择测试套件</div>
+                            <div id="suite-browser-path" class="suite-browser-path">-</div>
+                        </div>
+                    </div>
+                    <div id="suite-browser-breadcrumb" class="suite-browser-breadcrumb"></div>
+                    <div id="suite-file-list" class="suite-file-list">
+                        <div class="suite-empty">从左侧选择一个测试套件</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- APK分析页面 -->
         <div class="container page-content" id="page-apk-analysis">
             <div class="section-title section-title-with-icon">
@@ -644,8 +681,8 @@
                         <!-- 动态生成 -->
                     </div>
                     <details>
-                        <summary style="cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: 10px;">原始 XML</summary>
-                        <pre id="apk-raw-xml" style="background: var(--darker-bg); padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 11px; max-height: 400px; overflow-y: auto;"></pre>
+                        <summary style="cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: 10px;">AndroidManifest.xml</summary>
+                        <pre id="apk-raw-xml" style="background: var(--darker-bg); padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 11px; max-height: calc(100vh - 150px); overflow-y: auto;"></pre>
                     </details>
                 </div>
 
@@ -2200,6 +2237,7 @@
             document.getElementById('page-devices').classList.remove('active');
             document.getElementById('page-reports').classList.remove('active');
             document.getElementById('page-report-analysis').classList.remove('active');
+            document.getElementById('page-test-suites').classList.remove('active');
             document.getElementById('page-apk-analysis').classList.remove('active');
             document.getElementById('page-api-docs').classList.remove('active');
             document.getElementById('page-architecture').classList.remove('active');
@@ -2225,6 +2263,7 @@
                 'users': '用户管理 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
+                'test-suites': '测试套件 - GMS远程测试',
                 'apk-analysis': 'APK分析 - GMS远程测试',
                 'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS远程测试',
@@ -2296,6 +2335,11 @@
             // 如果切换到系统接口页面，加载API文档
             if (pageName === 'api-docs') {
                 loadApiDocs();
+            }
+
+            // 如果切换到测试套件页面，加载套件浏览器
+            if (pageName === 'test-suites') {
+                initTestSuiteBrowserPage();
             }
 
             // 如果切换到APK分析页面，初始化上传区域
@@ -3516,7 +3560,7 @@
             }
 
             // 按照侧边栏的顺序排列
-            const pages = ['test', 'desktop', 'terminal', 'devices', 'users', 'reports', 'report-analysis', 'apk-analysis', 'api-docs', 'architecture', 'tools'];
+            const pages = ['test', 'desktop', 'terminal', 'test-suites', 'devices', 'users', 'reports', 'report-analysis', 'apk-analysis', 'api-docs', 'architecture', 'tools'];
             const currentIndex = pages.indexOf(currentPage);
 
             if (currentIndex === -1) return;
@@ -4087,6 +4131,9 @@
                     window.reportsInitialized = true;
                 }
             }
+            if (targetPage === 'test-suites') {
+                initTestSuiteBrowserPage();
+            }
             if (targetPage === 'api-docs') {
                 loadApiDocs();
             }
@@ -4119,6 +4166,7 @@
                 'users': '用户管理 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
+                'test-suites': '测试套件 - GMS远程测试',
                 'apk-analysis': 'APK分析 - GMS远程测试',
                 'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS 远程测试',
