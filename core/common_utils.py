@@ -6,7 +6,8 @@
 import socket
 import logging
 import re
-from typing import Tuple, Optional, Dict, Any, List
+from typing import Tuple, Optional, Dict, Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,66 @@ class CommonUtils:
             local_hosts.append(local_ip)
 
         return host in local_hosts
+
+    @classmethod
+    def sanitize_url(cls, url: str) -> str:
+        """
+        清理和标准化URL
+
+        Args:
+            url: 原始URL
+
+        Returns:
+            清理后的URL
+
+        Examples:
+            >>> CommonUtils.sanitize_url("view-source:https://example.com")
+            'https://example.com'
+            >>> CommonUtils.sanitize_url("https://example.com/")
+            'https://example.com/'
+        """
+        if not url:
+            return url
+
+        # 移除常见的浏览器前缀
+        prefixes_to_remove = ['view-source:', 'view-source://', 'about:', 'about://']
+        for prefix in prefixes_to_remove:
+            if url.startswith(prefix):
+                url = url[len(prefix):]
+                break
+
+        # 验证URL格式
+        try:
+            parsed = urlparse(url)
+            if not parsed.scheme:
+                # 如果没有协议，尝试添加https
+                url = f"https://{url}"
+            elif parsed.scheme not in ['http', 'https']:
+                logger.warning(f"Unexpected URL scheme: {parsed.scheme}")
+        except Exception as e:
+            logger.warning(f"Invalid URL format: {url}, error: {e}")
+
+        return url
+
+    @classmethod
+    def validate_url(cls, url: str) -> bool:
+        """
+        验证URL格式是否有效
+
+        Args:
+            url: 待验证的URL
+
+        Returns:
+            URL是否有效
+        """
+        if not url:
+            return False
+
+        try:
+            result = urlparse(url)
+            return all([result.scheme, result.netloc]) and result.scheme in ['http', 'https']
+        except Exception:
+            return False
 
     @classmethod
     def parse_host_address(cls, host: str) -> Tuple[Optional[str], str]:

@@ -4,7 +4,6 @@
 处理客户端IP检测、用户识别等功能
 """
 
-import socket
 import paramiko
 from typing import Dict, Optional, Any
 from core.config import config_manager

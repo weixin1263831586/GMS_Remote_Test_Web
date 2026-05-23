@@ -7,8 +7,7 @@ import logging
 import json
 import re
 import time
-from typing import Dict, Optional, List
-from enum import Enum
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -627,7 +626,7 @@ class UniversalAIAnalyzer:
                             test_parsed = json.loads(test_json)
                             if 'root_cause' in test_parsed:
                                 json_str = test_json
-                                logger.info(f"[AI Parse] 移除了外层的空对象包装")
+                                logger.info("[AI Parse] 移除了外层的空对象包装")
                         except:
                             pass
 
@@ -873,8 +872,8 @@ class UniversalAIAnalyzer:
                     'content': f"// 源码文件: {first_result.get('path', '')}\n" +
                               f"// 项目: {first_result.get('project', '')}\n" +
                               f"// OpenGrok链接: {first_result.get('url', '未找到链接')}\n" +
-                              f"//\n" +
-                              f"// 注意: 完整源码内容请通过OpenGrok链接查看\n" +
+                              "//\n" +
+                              "// 注意: 完整源码内容请通过OpenGrok链接查看\n" +
                               f"// 该文件为 {first_result.get('file_type', 'java')} 格式\n"
                 }
 

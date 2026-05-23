@@ -9,9 +9,8 @@ import logging
 import asyncio
 import threading
 import time
-from typing import Callable, Optional, Set, List, Tuple
-from collections import deque
-from datetime import datetime, timedelta
+from typing import Callable, Optional, Set, List
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 

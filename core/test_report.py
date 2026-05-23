@@ -12,7 +12,6 @@ import os
 import logging
 import re
 from typing import Dict, Any, List, Optional
-from datetime import datetime
 
 from .test_report_db import test_report_db
 from .report_analyzer import ReportAnalyzer, HostLogParser

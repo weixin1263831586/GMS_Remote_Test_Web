@@ -13,7 +13,7 @@ import time
 import logging
 import shlex
 import asyncio
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 import paramiko
 
