@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CRM">
+  <rect width="64" height="64" rx="12" fill="#fff7ed"/>
+  <circle cx="24" cy="24" r="8" fill="#ea580c"/>
+  <circle cx="42" cy="24" r="8" fill="#f97316"/>
+  <path d="M14 48c2-9 8-14 18-14s16 5 18 14" fill="none" stroke="#9a3412" stroke-width="6" stroke-linecap="round"/>
+</svg>
