@@ -266,36 +266,44 @@
             <div class="sidebar-header">
                 <div class="sidebar-brand">GMS 远程测试</div>
             </div>
-            <nav class="sidebar-nav">
-                <a href="#" class="sidebar-item" data-page="test" onclick="switchPage('test', event)">
+            <nav class="sidebar-nav" id="sidebar-nav">
+                <a href="#" class="sidebar-item" data-page="test" data-page-order="0" onclick="switchPage('test', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📱</span>
                     <span class="sidebar-text">测试界面</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="desktop" onclick="switchPage('desktop', event)">
+                <a href="#" class="sidebar-item" data-page="desktop" data-page-order="1" onclick="switchPage('desktop', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🖥️</span>
                     <span class="sidebar-text">主机桌面</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="terminal" onclick="switchPage('terminal', event)">
+                <a href="#" class="sidebar-item" data-page="terminal" data-page-order="2" onclick="switchPage('terminal', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🐧</span>
                     <span class="sidebar-text">主机终端</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="devices" onclick="switchPage('devices', event)">
+                <a href="#" class="sidebar-item" data-page="devices" data-page-order="3" onclick="switchPage('devices', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📱</span>
                     <span class="sidebar-text">设备管理</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="users" onclick="switchPage('users', event)">
+                <a href="#" class="sidebar-item" data-page="users" data-page-order="4" onclick="switchPage('users', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">👥</span>
                     <span class="sidebar-text">用户管理</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="reports" onclick="switchPage('reports', event)">
+                <a href="#" class="sidebar-item" data-page="reports" data-page-order="5" onclick="switchPage('reports', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📊</span>
                     <span class="sidebar-text">测试报告</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="report-analysis" onclick="switchPage('report-analysis', event)">
+                <a href="#" class="sidebar-item" data-page="report-analysis" data-page-order="6" onclick="switchPage('report-analysis', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📈</span>
                     <span class="sidebar-text">报告分析</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="api-docs" onclick="switchPage('api-docs', event)">
+                <a href="#" class="sidebar-item" data-page="api-docs" data-page-order="7" onclick="switchPage('api-docs', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📡</span>
                     <span class="sidebar-text">系统接口</span>
                 </a>
@@ -2356,6 +2364,143 @@
                 'api-docs': '系统接口 - GMS 远程测试'
             };
             document.title = titles[targetPage] || 'GMS 远程测试';
+
+            // 加载保存的导航栏排序
+            loadSidebarOrder();
+        });
+
+        // ==================== 导航栏拖拽排序 ====================
+        let draggedItem = null;
+
+        // 加载保存的导航栏排序
+        async function loadSidebarOrder() {
+            let savedOrder = localStorage.getItem('gms_sidebar_order');
+
+            if (!savedOrder) {
+                try {
+                    const response = await fetch('/api/sidebar-order');
+                    const data = await response.json();
+                    if (data.success && data.order && data.order.length > 0) {
+                        savedOrder = JSON.stringify(data.order);
+                        localStorage.setItem('gms_sidebar_order', savedOrder);
+                    }
+                } catch (e) {
+                    console.error('[Sidebar] Failed to load from backend:', e);
+                }
+            }
+
+            if (!savedOrder) return;
+
+            try {
+                const order = JSON.parse(savedOrder);
+                const nav = document.getElementById('sidebar-nav');
+                if (!nav) return;
+
+                const items = Array.from(nav.querySelectorAll('.sidebar-item'));
+
+                order.forEach(pageName => {
+                    const item = items.find(el => el.dataset.page === pageName);
+                    if (item) {
+                        nav.appendChild(item);
+                    }
+                });
+            } catch (e) {
+                console.error('[Sidebar] Failed to load order:', e);
+            }
+        }
+
+        function saveSidebarOrder() {
+            const nav = document.getElementById('sidebar-nav');
+            if (!nav) return;
+
+            const items = Array.from(nav.querySelectorAll('.sidebar-item'));
+            const order = items.map(item => item.dataset.page);
+
+            localStorage.setItem('gms_sidebar_order', JSON.stringify(order));
+            saveSidebarOrderToBackend(order);
+        }
+
+        async function saveSidebarOrderToBackend(order) {
+            try {
+                await fetch('/api/sidebar-order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ order })
+                });
+            } catch (e) {
+                console.error('[Sidebar] Failed to save to backend:', e);
+            }
+        }
+
+        function initSidebarDragDrop() {
+            const nav = document.getElementById('sidebar-nav');
+            if (!nav) return;
+
+            nav.addEventListener('dragstart', function(e) {
+                const item = e.target.closest('.sidebar-item');
+                if (!item) return;
+
+                draggedItem = item;
+                item.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', item.dataset.page);
+            });
+
+            nav.addEventListener('dragend', function(e) {
+                const item = e.target.closest('.sidebar-item');
+                if (!item) return;
+
+                item.classList.remove('dragging');
+                draggedItem = null;
+
+                nav.querySelectorAll('.sidebar-item').forEach(el => {
+                    el.classList.remove('drag-over');
+                });
+
+                saveSidebarOrder();
+            });
+
+            nav.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+
+                const item = e.target.closest('.sidebar-item');
+                if (!item || item === draggedItem) return;
+
+                nav.querySelectorAll('.sidebar-item').forEach(el => {
+                    el.classList.remove('drag-over');
+                });
+                item.classList.add('drag-over');
+            });
+
+            nav.addEventListener('dragleave', function(e) {
+                const item = e.target.closest('.sidebar-item');
+                if (item) {
+                    item.classList.remove('drag-over');
+                }
+            });
+
+            nav.addEventListener('drop', function(e) {
+                e.preventDefault();
+
+                const targetItem = e.target.closest('.sidebar-item');
+                if (!targetItem || !draggedItem || targetItem === draggedItem) return;
+
+                const nav = document.getElementById('sidebar-nav');
+                const items = Array.from(nav.querySelectorAll('.sidebar-item'));
+                const dragIndex = items.indexOf(draggedItem);
+                const dropIndex = items.indexOf(targetItem);
+
+                if (dragIndex < dropIndex) {
+                    nav.insertBefore(draggedItem, targetItem.nextSibling);
+                } else {
+                    nav.insertBefore(draggedItem, targetItem);
+                }
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(initSidebarDragDrop, 500);
         });
     </script>
 </div> <!-- End of main-container -->

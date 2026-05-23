@@ -371,6 +371,59 @@ def save_dynamic_config(dynamic_config):
         print(f"Error saving dynamic config: {e}")
         return False
 
+
+def _get_dynamic_config_path():
+    """Get the path to dynamic config file"""
+    return os.path.join(os.path.dirname(__file__), 'config_dynamic.json')
+
+
+def _load_dynamic_config():
+    """Load dynamic configuration"""
+    config_path = _get_dynamic_config_path()
+    if os.path.exists(config_path):
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+
+def _save_dynamic_config_full(config):
+    """Save full dynamic configuration"""
+    config_path = _get_dynamic_config_path()
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+
+
+@app.route('/api/sidebar-order', methods=['POST'])
+def save_sidebar_order():
+    """Save sidebar navigation order"""
+    try:
+        data = request.json
+        order = data.get('order', [])
+
+        if not order:
+            return jsonify({'success': False, 'error': 'No order provided'}), 400
+
+        config = _load_dynamic_config()
+        config['sidebar_order'] = order
+        _save_dynamic_config_full(config)
+
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"Error saving sidebar order: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/sidebar-order', methods=['GET'])
+def get_sidebar_order():
+    """Get sidebar navigation order"""
+    try:
+        config = _load_dynamic_config()
+        order = config.get('sidebar_order', [])
+        return jsonify({'success': True, 'order': order})
+    except Exception as e:
+        print(f"Error getting sidebar order: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # ==================== Test Log Management ====================
 def save_test_logs(test_type, client_id, exit_code=None):
     """保存测试日志到文件"""
