@@ -2370,6 +2370,165 @@ select option {
     }
 }
 
+/* ==================== Test Suite Browser ==================== */
+.suite-browser-layout {
+    display: grid;
+    grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+    gap: 12px;
+    height: calc(100vh - 70px);
+    min-height: 420px;
+    overflow: hidden;
+}
+.suite-browser-sidebar,
+.suite-browser-main {
+    background: var(--light-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+.suite-browser-sidebar {
+    display: flex;
+    flex-direction: column;
+}
+.suite-browser-toolbar,
+.suite-browser-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+.suite-browser-count,
+.suite-browser-path,
+.suite-file-meta {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+.suite-browser-filter {
+    margin: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--darker-bg);
+    color: var(--text-primary);
+    font-size: 12px;
+}
+.suite-browser-list,
+.suite-file-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+}
+.suite-suite-item,
+.suite-file-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.suite-suite-item {
+    cursor: pointer;
+}
+.suite-suite-item:hover,
+.suite-suite-item.active,
+.suite-file-row:hover {
+    background: var(--lighter-bg);
+}
+.suite-file-row.active {
+    background: rgba(59, 130, 246, 0.14);
+    box-shadow: inset 3px 0 0 var(--primary-color);
+}
+.suite-suite-main,
+.suite-file-main {
+    min-width: 0;
+    flex: 1;
+}
+.suite-file-main {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    overflow: hidden;
+}
+.suite-suite-name,
+.suite-file-name,
+.suite-browser-title {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 12px;
+}
+.suite-file-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.suite-file-meta {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+.suite-suite-path,
+.suite-file-path {
+    color: var(--text-secondary);
+    font-size: 10px;
+    margin-top: 2px;
+    word-break: break-all;
+}
+.suite-browser-main {
+    display: flex;
+    flex-direction: column;
+}
+.suite-browser-breadcrumb {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 11px;
+    word-break: break-all;
+}
+.suite-file-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.suite-empty {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+.suite-type-badge {
+    flex-shrink: 0;
+    min-width: 42px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: rgba(59, 130, 246, 0.16);
+    color: var(--primary-color);
+    font-size: 10px;
+    text-align: center;
+    font-weight: 700;
+}
+
+@media (max-width: 900px) {
+    .suite-browser-layout {
+        grid-template-columns: 1fr;
+        height: auto;
+        min-height: calc(100vh - 130px);
+        overflow: visible;
+    }
+    .suite-browser-sidebar {
+        height: 40vh;
+        min-height: 260px;
+    }
+    .suite-browser-main {
+        height: calc(60vh - 24px);
+        min-height: 360px;
+    }
+}
+
 /* ==================== APK Analysis ==================== */
 .apk-upload-zone {
     border: 2px dashed var(--border-color);
@@ -2682,7 +2841,7 @@ select option {
     }
 }
 
-/* 原始 XML 显示 */
+/* AndroidManifest.xml */
 #apk-raw-xml {
     font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
     font-size: 11px;
