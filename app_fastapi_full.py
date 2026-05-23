@@ -22,7 +22,6 @@ import os
 import sys
 import logging
 import subprocess
-import configparser
 import socket
 import uuid
 import paramiko
@@ -36,12 +35,12 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import io
-import zipfile
 from datetime import datetime, timedelta
 from cryptography.fernet import Fernet
 from urllib.parse import urlparse
 import hashlib
 import base64
+import mimetypes
 from typing import Dict, Any, List, Optional, Union
 from contextlib import asynccontextmanager
 from collections import deque
@@ -50,8 +49,9 @@ import asyncio
 import aiohttp
 import tempfile
 import shutil
+import xml.etree.ElementTree as ET
 
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Body, Query
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, Body, Query
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.websockets import WebSocketState
 
@@ -302,6 +302,7 @@ async def lifespan(app: FastAPI):
 
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -315,7 +316,6 @@ from core.config import config_manager
 from core.ssh import ssh_manager, SSHD_INSTALL_GUIDE
 from core.file_utils import FileUtils
 from core.device import device_manager
-from core.test_runner import test_runner
 from core.test_report import test_report_manager
 from core.vnc import vnc_manager, calculate_window_positions
 from core.adb_forward import adb_forward_manager
@@ -407,9 +407,30 @@ logger = logging.getLogger(__name__)
 
 # ==================== 服务器配置常量 ====================
 SERVER_PORT = 5001
-SERVER_HOST = os.getenv('GMS_SERVER_HOST', '0.0.0.0')
+GMS_ENV = os.getenv('GMS_ENV', 'development').strip().lower()
+SERVER_HOST = os.getenv('GMS_SERVER_HOST', '127.0.0.1' if GMS_ENV == 'production' else '0.0.0.0')
 # 用于文档和示例的默认URL（使用占位符而非硬编码IP）
 DEFAULT_SERVER_URL = os.getenv('GMS_SERVER_URL', 'http://server:5001')
+PROXY_HEADERS_ENABLED = os.getenv(
+    'GMS_PROXY_HEADERS',
+    'true' if GMS_ENV == 'production' else 'false'
+).strip().lower() == 'true'
+FORWARDED_ALLOW_IPS = os.getenv('GMS_FORWARDED_ALLOW_IPS', '127.0.0.1')
+
+
+def _parse_csv_env(env_name: str, default: str) -> List[str]:
+    """Parse CSV environment variable into a normalized non-empty list."""
+    raw = os.getenv(env_name, default)
+    items = [item.strip() for item in raw.split(',') if item.strip()]
+    return items or [default]
+
+# ==================== APK分析配置常量 ====================
+JADX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tools', 'jadx', 'bin', 'jadx')
+APK_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'apk_uploads')
+APK_MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+APK_MAX_SOURCE_FILE_SIZE = 2 * 1024 * 1024  # 2MB - 单个源码文件查看上限
+APK_MAX_TASKS = 50  # 最大保存任务数
+JADX_TIMEOUT = 600  # jadx 反编译超时(秒)
 
 # ==================== FastAPI应用 ====================
 
@@ -438,38 +459,45 @@ app = FastAPI(
 )
 
 # CORS中间件
+CORS_ORIGINS = _parse_csv_env('CORS_ORIGINS', '*')
+ALLOW_CREDENTIALS = os.getenv('CORS_ALLOW_CREDENTIALS', 'false').strip().lower() == 'true'
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
+TRUSTED_HOSTS = _parse_csv_env('TRUSTED_HOSTS', '*')
+if TRUSTED_HOSTS != ['*']:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
+
 # 性能优化中间件：HTTP连接池和响应头优化
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
-# 添加GZip压缩中间件（移除BaseHTTPMiddleware以避免性能问题）
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+# 添加GZip压缩中间件（最小500字节启动压缩，提升传输效率）
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 @app.middleware("http")
 async def add_headers_middleware(request, call_next):
     """轻量级HTTP中间件 - 添加响应头"""
     response = await call_next(request)
 
-    # 添加响应头
-    response.headers["Connection"] = "keep-alive"
-    response.headers["Keep-Alive"] = "timeout=300, max=1000"
+    # 安全响应头
     response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
 
-    # 添加缓存控制（静态资源）
-    if request.url.path.startswith("/static/"):
-        response.headers["Cache-Control"] = "public, max-age=86400"
+    path = request.url.path
+    if path.startswith("/static/"):
+        response.headers["Cache-Control"] = "public, max-age=86400, immutable"
+    elif path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
 
     return response
 
-# 挂载静态文件
+# 挂载静态文件（启用缓存控制）
 static_dir = os.path.join(os.path.dirname(__file__), 'static')
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
@@ -492,6 +520,8 @@ templates.env.globals['url_for'] = lambda endpoint, filename='': (
 MAX_LOG_ENTRIES = 1000  # 最大日志条目数
 CLEANUP_INTERVAL_SECONDS = 3600  # 定期清理间隔（1小时）
 USER_STATE_MAX_AGE_HOURS = 24  # 用户状态最大存活时间
+UPLOAD_PROGRESS_MAX_AGE_SECONDS = 600  # 上传进度过期时间（10分钟）
+USBIP_STATE_MAX_AGE_SECONDS = 86400  # USB/IP状态过期时间（24小时）
 
 # ==================== 全局状态管理 ====================
 
@@ -521,6 +551,8 @@ class GlobalState:
         self.device_ssh_pools = {}
         self.device_ssh_pools_lock = threading.Lock()
         self.device_ssh_pools_max = 10  # 最大设备SSH连接池数量
+        self.apk_analysis_tasks = {}  # {task_id: {'status': str, 'progress': int, 'apk_path': str, 'output_dir': str, 'filename': str, 'timestamp': float, 'error': str or None}}
+        self.apk_analysis_tasks_lock = threading.Lock()
 
     def _close_ssh_safely(self, ssh):
         """安全关闭SSH连接"""
@@ -529,6 +561,17 @@ class GlobalState:
                 ssh.close()
         except Exception:
             pass
+
+    @staticmethod
+    def _cleanup_expired(data_dict, lock, max_age_seconds):
+        """通用过期清理辅助方法"""
+        now_ts = time.time()
+        with lock:
+            expired = [k for k, v in data_dict.items()
+                       if now_ts - v.get('timestamp', 0) > max_age_seconds]
+            for k in expired:
+                del data_dict[k]
+        return expired
 
     def cleanup_old_user_states(self):
         """清理超过指定时间的旧用户状态，防止内存泄漏"""
@@ -559,7 +602,36 @@ class GlobalState:
                         # 同时清理last_saved_log_file中的旧条目
                         self.last_saved_log_file.pop(client_id, None)
 
-                logger.info(f"Cleaned up {len(to_remove)} old user states (age > {USER_STATE_MAX_AGE_HOURS}h)")
+            # 以下清理逻辑独立于用户状态清理，每次都执行
+
+            # 清理上传进度（过期超过10分钟的）
+            expired_progress = self._cleanup_expired(
+                self.firmware_upload_progress, self.firmware_upload_progress_lock, UPLOAD_PROGRESS_MAX_AGE_SECONDS)
+
+            # 清理断开的终端SSH会话
+            with self.terminal_lock:
+                expired_sessions = []
+                for sid, session in list(self.terminal_ssh_sessions.items()):
+                    ws = session.get('websocket')
+                    if ws is None or (hasattr(ws, 'client_state') and ws.client_state == WebSocketState.DISCONNECTED):
+                        expired_sessions.append(sid)
+                for sid in expired_sessions:
+                    session = self.terminal_ssh_sessions.pop(sid)
+                    self._close_ssh_safely(session.get('ssh'))
+                    channel = session.get('channel')
+                    if channel:
+                        try:
+                            channel.close()
+                        except Exception:
+                            pass
+
+            # 清理USB/IP过期状态（超过24小时的）
+            expired_usbip = self._cleanup_expired(
+                self.usbip_states, self.usbip_states_lock, USBIP_STATE_MAX_AGE_SECONDS)
+
+            if to_remove or expired_progress or expired_sessions or expired_usbip:
+                logger.info(f"Cleanup: {len(to_remove)} user states, {len(expired_progress)} upload progress, "
+                           f"{len(expired_sessions)} SSH sessions, {len(expired_usbip)} USB/IP states")
         except Exception as e:
             logger.error(f"Error cleaning up user states: {e}")
 
@@ -641,14 +713,14 @@ class GlobalState:
         """
         device_host = config.get('device_host', pool_key)
         if not device_host:
-            logger.error(f"[Device SSH Pool] No device host in config")
+            logger.error("[Device SSH Pool] No device host in config")
             return None
 
         if '@' not in device_host:
             logger.error(f"[Device SSH Pool] Device host format should be user@host: {device_host}")
             return None
 
-        username, hostname = device_host.split('@', 1)
+        username, hostname = CommonUtils.parse_host_address(device_host)
         password = config.get('device_pswd', '')
 
         if not password:
@@ -867,7 +939,6 @@ class ApiResponse:
 # ==================== 工具函数 ====================
 
 from functools import wraps, lru_cache
-import asyncio
 
 def async_subprocess_run(cmd, **kwargs):
     """异步执行subprocess.run，避免阻塞事件循环"""
@@ -970,10 +1041,6 @@ def cached_xml_analysis(xml_path: str, mtime: float) -> Dict:
     """带缓存的XML分析结果"""
     from core.report_analyzer import ReportAnalyzer
     return ReportAnalyzer().analyze_file(xml_path)
-
-def get_config_cached() -> Dict:
-    """带缓存的配置加载"""
-    return config_manager.load_config()
 
 # ==================== 用户状态管理辅助函数 ====================
 
@@ -1080,9 +1147,6 @@ def get_client_id_from_request(request: Request) -> str:
         # 其次从请求头获取用户名
         username = request.headers.get('X-Client-Username')
         if not username or username == 'unknown':
-            # 尝试动态检测用户名（通过已保存的 SSH 凭据）
-            # ⚠️ 跳过SSH检测，直接返回unknown，避免阻塞API请求
-            # SSH检测会在用户首次访问时通过modal触发，而不是在API请求中
             username = 'unknown'
 
     return client_manager.get_client_id(client_ip, username)
@@ -1253,10 +1317,9 @@ class ScreenStartRequest(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    """主页 - 使用FastAPI专用模板（移除Socket.IO依赖）"""
+    """主页 - 使用FastAPI专用模板"""
     config = config_manager.load_config()
 
-    # 使用FastAPI专用模板（移除了Socket.IO）
     response = templates.TemplateResponse(
         "index_fastapi.html",
         {
@@ -1264,10 +1327,8 @@ async def root(request: Request):
             "config": config
         }
     )
-    # 添加缓存控制头，防止浏览器缓存旧代码
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
+    # HTML页面不缓存（确保用户获取最新版本）
+    response.headers["Cache-Control"] = "no-cache"
     return response
 
 @app.get("/icon_fetcher_test.html", response_class=HTMLResponse)
@@ -1757,12 +1818,15 @@ async def fetch_website_favicon(
 
         if icon_result.success:
             logger.info(f"[Favicon] Successfully fetched icon for {url}: {icon_result.icon_url}")
-            return success_response({
+            payload = {
                 'icon_url': icon_result.icon_url,
                 'icon_type': icon_result.icon_type,
                 'source': icon_result.source,
-                'size': icon_result.size
-            })
+                'size': icon_result.size,
+                'original_icon_url': icon_result.original_icon_url
+            }
+            # 兼容旧前端直接读取 result.icon_url，同时保留统一 data 响应。
+            return JSONResponse(content={'success': True, **payload, 'data': payload})
         else:
             logger.warning(f"[Favicon] Failed to fetch icon for {url}: {icon_result.error}")
             return error_response(
@@ -1772,6 +1836,35 @@ async def fetch_website_favicon(
             )
     finally:
         await fetcher.close()
+
+@app.get("/api/favicon/proxy")
+@handle_api_errors
+async def proxy_favicon(
+    request: Request,
+    url: str = Query(..., description="远程图标URL"),
+    timeout: int = Query(DEFAULT_FAVICON_TIMEOUT, description="超时时间（秒）")
+):
+    """把远程图标下载到本地后返回本地文件，失败时返回本地默认图标。"""
+    icon_path = IconFetcher.default_icon_path()
+
+    if url and IconFetcher.is_local_static_url(url):
+        local_path = IconFetcher.static_url_to_path(url)
+        if local_path and os.path.exists(local_path):
+            icon_path = local_path
+    elif url and IconFetcher.is_remote_url(url):
+        fetcher = IconFetcher(timeout=timeout)
+        try:
+            icon_result = await fetcher.localize_icon_url(url)
+            local_path = IconFetcher.static_url_to_path(icon_result.icon_url)
+            if icon_result.success and local_path and os.path.exists(local_path):
+                icon_path = local_path
+            else:
+                logger.debug(f"[FaviconProxy] Using fallback for {url}: {icon_result.error}")
+        finally:
+            await fetcher.close()
+
+    media_type = mimetypes.guess_type(icon_path)[0] or 'image/svg+xml'
+    return FileResponse(icon_path, media_type=media_type)
 
 @app.post("/api/favicon/batch")
 @handle_api_errors
@@ -1914,8 +2007,6 @@ async def get_connected_devices(
     # 跟踪用户访问
     client_id = get_client_id_from_request(request)
     get_or_create_user_state(client_id)
-
-    config = config_manager.load_config()
 
     # 先刷新设备列表（需要最新状态来清理记录）
     devices = device_manager.get_connected_devices()
@@ -2236,15 +2327,6 @@ async def devices_management():
     try:
         config = config_manager.load_config()
 
-        # 从持久化文件加载USB/IP设备来源
-        import json
-        try:
-            with open(config_manager.dynamic_config_path, 'r') as f:
-                dynamic_config = json.load(f)
-                persisted_usbip_sources = dynamic_config.get('usbip_devices_source', {})
-        except (FileNotFoundError, json.JSONDecodeError, KeyError):
-            persisted_usbip_sources = {}
-
         with SSHConnection(config) as ssh:
             # 获取基本设备列表
             output, _, _ = ssh_manager.execute_command(ssh, "adb devices", timeout=5)
@@ -2506,6 +2588,32 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
         )
 
 # ==================== OpenGrok源码搜索 ====================
+
+@app.get("/api/opengrok/search")
+@handle_api_errors
+async def opengrok_search(
+    query: str = Query(..., min_length=1, max_length=256, description="搜索关键词"),
+    full: bool = Query(False, description="是否全文搜索"),
+    max_results: int = Query(5, ge=1, le=20, description="最大结果数")
+):
+    """在源码中搜索代码，兼容 API 文档和技能入口。"""
+    search_query = query.strip()
+    if not search_query:
+        return ApiResponse.error("搜索关键词不能为空", status_code=400)
+
+    analyzer = ReportAnalyzer()
+    results = await asyncio.to_thread(
+        analyzer.rk_codesearch,
+        search_query,
+        None,
+        max_results
+    )
+    return ApiResponse.success({
+        "query": search_query,
+        "full": full,
+        "results": results,
+        "count": len(results)
+    })
 
 
 # ==================== 测试管理 ====================
@@ -2940,7 +3048,7 @@ async def run_test_background(
             # 2. 从数据库查找原始报告的测试类型
             # 3. 从retry_dir目录名检测
             if not test_type_lower and test_suite_tools:
-                await log_callback(f"🔍 从test_suite路径检测测试类型...", 'info')
+                await log_callback("🔍 从test_suite路径检测测试类型...", 'info')
                 test_type_lower = detect_test_type_from_suite_path(test_suite_tools)
                 if test_type_lower:
                     await log_callback(f"✓ 从test_suite检测到测试类型: {test_type_lower}", 'info')
@@ -2961,7 +3069,7 @@ async def run_test_background(
 
             # 如果仍然没有test_type，尝试从retry_dir目录名检测
             if not test_type_lower and retry_dir:
-                await log_callback(f"🔍 从目录名检测测试类型...", 'info')
+                await log_callback("🔍 从目录名检测测试类型...", 'info')
                 test_type_lower = detect_test_type_from_dir_path(retry_dir)
                 if test_type_lower:
                     await log_callback(f"✓ 从路径检测到{test_type_lower.upper()}测试", 'info')
@@ -2969,7 +3077,7 @@ async def run_test_background(
             # 如果仍然没有test_type，置空（让脚本自动检测或报错）
             if not test_type_lower:
                 test_type_lower = ''
-                await log_callback(f"⚠️ 未检测到测试类型，将由脚本自动检测", 'warning')
+                await log_callback("⚠️ 未检测到测试类型，将由脚本自动检测", 'warning')
 
             cmd_parts.extend([test_type_lower, "retry", timestamp])
             await log_callback(f"🔄 Retry模式: test_type={test_type_lower or '(自动检测)'}, timestamp={timestamp}", 'info')
@@ -3145,8 +3253,7 @@ async def run_test_background(
 
         except Exception as e:
             logger.error(f"保存测试报告失败: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("保存测试报告异常堆栈")
 
         # 清理资源
         if ssh:
@@ -3513,7 +3620,7 @@ async def list_suites(base_path: str = None):
                 'base_path': base_path
             })
 
-        except Exception as e:
+        except Exception:
             ssh_manager.return_connection(ssh)
             raise
     except Exception as e:
@@ -3582,8 +3689,6 @@ async def list_tradefed_results(
         config = config_manager.load_config()
         suite_path = req.suite_path
         tradefed_bin = req.tradefed_bin
-        current_time = time.time()
-
         logger.info(f"Querying test suite results for {suite_path} (no cache)")
 
         ssh = ssh_manager.get_connection(config)
@@ -3627,7 +3732,7 @@ async def list_tradefed_results(
                 'cached': False
             })
 
-        except Exception as e:
+        except Exception:
             ssh_manager.return_connection(ssh)
             raise
     except Exception as e:
@@ -3838,9 +3943,6 @@ async def download_report(
     2. 下载报告ZIP文件：?report_timestamp=xxx&download=true
     3. 查看单个文件内容（JSON）：?path=/xxx/xxx/invocation_summary.txt
     """
-    import io
-    import zipfile
-
     try:
         # 模式1&2：处理报告相关请求
         if report_timestamp:
@@ -3886,7 +3988,7 @@ async def download_report(
                 result = FileUtils.create_zip_from_multiple_directories(dir_mapping, zip_filename=f"{report_timestamp}.zip")
 
                 if result is None:
-                    logger.warning(f"[DOWNLOAD] 没有找到文件")
+                    logger.warning("[DOWNLOAD] 没有找到文件")
                     return JSONResponse(
                         content={'success': False, 'error': '没有找到文件'},
                         status_code=500
@@ -3962,7 +4064,7 @@ async def download_report(
                     'content_type': content_type
                 })
 
-            except Exception as e:
+            except Exception:
                 ssh_manager.return_connection(ssh)
                 raise
 
@@ -4040,7 +4142,7 @@ async def analyze_report_from_url(request: Request):
                     if redmine_config:
                         base_url = redmine_config['base_url']
                     else:
-                        logger.warning(f"[Report Analysis] Redmine配置不可用")
+                        logger.warning("[Report Analysis] Redmine配置不可用")
                         return JSONResponse(
                             content={'success': False, 'error': 'Redmine 配置不可用'},
                             status_code=404
@@ -4058,7 +4160,7 @@ async def analyze_report_from_url(request: Request):
                         # 如果没有配置凭证，使用配置文件中的域名
                         api_url = f"{base_url}/issues/{issue_id}.json?include=attachments"
                         headers = {}
-                        logger.warning(f"[Report Analysis] 未找到存储的 Redmine 凭证，使用配置文件中的域名和匿名查询")
+                        logger.warning("[Report Analysis] 未找到存储的 Redmine 凭证，使用配置文件中的域名和匿名查询")
 
                     async with aiohttp.ClientSession() as session:
                         async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
@@ -4349,7 +4451,7 @@ async def analyze_report_from_url(request: Request):
                             if len(REDMINE_ISSUE_ID_CACHE) >= REDMINE_ISSUE_ID_CACHE_MAX_SIZE:
                                 # OrderedDict的popitem(last=False)删除第一个（最旧）条目
                                 REDMINE_ISSUE_ID_CACHE.popitem(last=False)
-                                logger.info(f"[Report Analysis] 缓存已满，删除最旧条目")
+                                logger.info("[Report Analysis] 缓存已满，删除最旧条目")
 
                             # 存入缓存
                             REDMINE_ISSUE_ID_CACHE[attachment_id_for_cache] = original_issue_id
@@ -4767,7 +4869,7 @@ async def analyze_reports(
 
                     # 如果没有 test_result.xml，尝试使用日志分析器
                     if not xml_path:
-                        logger.info(f"未找到 test_result.xml，尝试使用HostLog日志分析器")
+                        logger.info("未找到 test_result.xml，尝试使用HostLog日志分析器")
                         result = analyzer.analyze_log_dir(temp_dir)
 
                         if not result:
@@ -4939,7 +5041,7 @@ import ipaddress
 
 def extract_ip_from_host(host_string: str) -> str:
     """从user@host或host字符串中提取IP地址"""
-    return host_string.split('@', 1)[1] if '@' in host_string else host_string
+    return CommonUtils.extract_ip_from_host(host_string)
 
 def get_client_ip_from_request_headers(request: Request) -> str:
     """从请求头中提取客户端IP，支持代理"""
@@ -5346,22 +5448,7 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
         logger.info(f"从堆栈提取失败位置: {failure_location['file_name']}.{failure_location['file_type']}:{failure_location['line_number']}")
 
     source_search_results = []
-    if class_names:
-        from core.report_analyzer import analyzer
-
-        # 如果有精确的失败位置，只搜索一次避免重复
-        if failure_location:
-            results = analyzer.rk_codesearch(failure_location['file_name'], failure_location=failure_location, max_results=1)
-            source_search_results.extend(results)
-        else:
-            # 没有失败位置时，搜索前3个类名
-            for class_name in class_names[:3]:
-                results = analyzer.rk_codesearch(class_name, max_results=1)
-                source_search_results.extend(results)
-
-        logger.info(f"rk_codesearch 搜索到 {len(source_search_results)} 条源码结果")
-
-    # 优先使用通用AI分析器
+    # 优先使用通用AI分析器（内部会自动进行源码搜索，无需手动重复搜索）
     try:
         from core.universal_ai import get_universal_analyzer
 
@@ -5409,7 +5496,6 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
             # 添加源码搜索结果（供前端显示OpenGrok链接）
             if source_search_results:
                 response['source_search_results'] = source_search_results
-                logger.info(f"添加了 {len(source_search_results)} 条源码搜索结果")
 
             return response
         else:
@@ -5541,6 +5627,11 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
     result = vnc_manager.start_vnc(host, password, vnc_password)
     return JSONResponse(content=result)
 
+@app.post("/api/vnc/start")
+async def start_desktop_vnc_legacy(req: Optional[VNCStartRequest] = Body(default=None)):
+    """兼容旧 Flask 前端接口：/api/vnc/start。"""
+    return await start_desktop_vnc(req)
+
 @app.post("/api/desktop/vnc/stop")
 async def stop_desktop_vnc():
     """停止Ubuntu主机桌面VNC"""
@@ -5561,13 +5652,7 @@ async def validate_desktop_host(req: dict = Body(...)):
                 status_code=400
             )
 
-        try:
-            user, ip = host_connection.split('@', 1)
-        except ValueError:
-            return JSONResponse(
-                content={'success': False, 'error': '主机格式错误'},
-                status_code=400
-            )
+        user, ip = CommonUtils.parse_host_address(host_connection)
 
         # 检查是否是本地主机
         is_local = CommonUtils.is_local_host(ip)
@@ -5623,6 +5708,11 @@ async def validate_desktop_host(req: dict = Body(...)):
             content={'success': False, 'error': str(e)},
             status_code=500
         )
+
+@app.post("/api/desktop/validate-host")
+async def validate_desktop_host_legacy(req: dict = Body(...)):
+    """兼容旧 Flask 前端接口：/api/desktop/validate-host。"""
+    return await validate_desktop_host(req)
 
 @app.post("/api/devices/scrcpy")
 async def show_device_screens(req: DeviceActionRequest):
@@ -5721,7 +5811,6 @@ async def show_device_screens(req: DeviceActionRequest):
                 })
 
             # 计算窗口位置：考虑已有设备，新设备放在后面
-            all_devices_count = len(existing_devices) + len(new_devices)
             positions = calculate_window_positions(
                 existing_devices + new_devices,
                 max_window_width=350
@@ -5798,7 +5887,7 @@ async def show_device_screens(req: DeviceActionRequest):
                 'desktop_url': '/desktop',
                 'note': '点击"主机桌面"查看屏幕' if vnc_available else 'VNC未启动，屏幕仅在本地显示'
             })
-        except Exception as e:
+        except Exception:
             ssh_manager.return_connection(ssh)
             raise
 
@@ -6328,10 +6417,6 @@ async def check_ssh_route(request: Request):
             'device_ip': device_ip,
             'network': ubuntu_network
         })
-        return JSONResponse(
-            content={"success": False, "error": str(e)},
-            status_code=500
-        )
 
 
 def _validate_ip_address(ip: str) -> bool:
@@ -6402,17 +6487,17 @@ def _generate_route_commands(test_network: str, target_network: str, test_host_i
 
     return {
         'windows': [
-            f"# 在测试主机上执行以下命令:",
-            f"# 添加到客户端网段的路由（通过测试主机网关）",
+            "# 在测试主机上执行以下命令:",
+            "# 添加到客户端网段的路由（通过测试主机网关）",
             f"route add {target_network} mask 255.255.255.0 {test_gateway}",
-            f"# 检查路由表: route print",
+            "# 检查路由表: route print",
             f"# 删除路由: route delete {target_network}"
         ],
         'linux': [
-            f"# 在测试主机上执行以下命令:",
-            f"# 添加到客户端网段的路由（通过测试主机网关）",
+            "# 在测试主机上执行以下命令:",
+            "# 添加到客户端网段的路由（通过测试主机网关）",
             f"sudo ip route add {target_network}/24 via {test_gateway}",
-            f"# 检查路由表: ip route show",
+            "# 检查路由表: ip route show",
             f"# 删除路由: sudo ip route del {target_network}/24"
         ]
     }
@@ -6459,7 +6544,7 @@ async def ping_route_test(request: Request):
 
                     # 读取ping输出（限制大小防止内存溢出）
                     ping_output = stdout.read(8192).decode('utf-8', errors='ignore')   # 8KB sufficient for ping
-                    error_output = stderr.read(2048).decode('utf-8', errors='ignore')   # 2KB sufficient for errors
+                    stderr.read(2048).decode('utf-8', errors='ignore')   # 2KB sufficient for errors
                     exit_status = stdout.channel.recv_exit_status()
 
                     ssh_manager.return_connection(ssh)
@@ -6524,9 +6609,9 @@ async def get_ssh_terminal_info():
             'connection_command': connection_string,
             'instructions': [
                 f"1. 复制连接命令: {connection_string}",
-                f"2. 在终端中粘贴并执行连接命令",
-                f"3. 输入密码或使用SSH密钥认证",
-                f"4. 连接成功后，您将获得测试主机的终端访问权限"
+                "2. 在终端中粘贴并执行连接命令",
+                "3. 输入密码或使用SSH密钥认证",
+                "4. 连接成功后，您将获得测试主机的终端访问权限"
             ]
         })
 
@@ -6644,7 +6729,7 @@ async def connect_vpn(
                 "message": message,
                 "output": (output[:500] if output else '')
             })
-        except Exception as e:
+        except Exception:
             ssh_manager.return_connection(ssh)
             raise
 
@@ -6681,7 +6766,7 @@ async def disconnect_vpn():
                 "success": True,
                 "message": "VPN 已断开"
             })
-        except Exception as e:
+        except Exception:
             ssh_manager.return_connection(ssh)
             raise
 
@@ -6873,7 +6958,6 @@ async def upload_file_chunk(
         chunk_path = os.path.join(session_dir, chunk_filename)
 
         content = await file.read()
-        write_time = time.time()
         with open(chunk_path, 'wb') as f:
             f.write(content)
 
@@ -7113,7 +7197,7 @@ async def burn_firmware(
         # 广播设备锁定状态（立即显示）
         logger.info(f"[Device Lock] 开始广播锁定状态到 {len(global_state.websocket_connections)} 个客户端")
         await broadcast_device_lock_update(locked_devices)
-        logger.info(f"[Device Lock] 锁定状态广播完成")
+        logger.info("[Device Lock] 锁定状态广播完成")
 
         # 现在才开始等待FormData（此时设备已经锁定并显示）
         form = await request.form()
@@ -7178,18 +7262,15 @@ async def burn_firmware(
                 logger.info(f"[Firmware Burn] Initialized upload progress tracking for {client_id}")
 
                 # 流式读取文件（边读边保存进度）
-                import io
-                firmware_chunks = []
                 received_size = 0
                 chunk_size = 1024 * 1024  # 1MB chunks
 
                 progress_update_threshold = 20 * 1024 * 1024  # 20MB更新一次
                 last_progress_update = 0
 
-                logger.info(f"[Firmware Burn] Starting to receive file in chunks...")
+                logger.info("[Firmware Burn] Starting to receive file in chunks...")
 
                 # 使用临时文件接收上传
-                import tempfile
                 with tempfile.NamedTemporaryFile(delete=False) as temp_file:
                     temp_path = temp_file.name
 
@@ -7345,7 +7426,7 @@ async def burn_firmware(
                     if client_id in global_state.firmware_upload_progress:
                         del global_state.firmware_upload_progress[client_id]
 
-                logger.info(f"[Firmware Burn] Firmware uploaded successfully, skipping local file check")
+                logger.info("[Firmware Burn] Firmware uploaded successfully, skipping local file check")
 
             # 如果没有上传文件，处理其他情况（远程文件或本地文件）
             else:
@@ -7519,7 +7600,6 @@ async def burn_firmware(
             stdin, stdout, stderr = ssh.exec_command(burn_cmd, get_pty=True, timeout=300)
 
             # 实时读取输出并发送到前端
-            import select
             output_buffer = []
 
             # 进度条状态
@@ -7623,7 +7703,7 @@ async def burn_firmware(
                 # 释放设备锁
                 logger.info(f"[Device Lock] 开始解锁设备: {locked_devices}")
                 await release_device_locks(client_id, locked_devices)
-                logger.info(f"[Device Lock] 设备解锁完成")
+                logger.info("[Device Lock] 设备解锁完成")
 
                 return JSONResponse(
                     content={'success': True, 'message': 'Firmware burn completed successfully'}
@@ -7657,7 +7737,7 @@ async def burn_firmware(
                 # 释放设备锁
                 logger.info(f"[Device Lock] 开始解锁设备: {locked_devices}")
                 await release_device_locks(client_id, locked_devices)
-                logger.info(f"[Device Lock] 设备解锁完成")
+                logger.info("[Device Lock] 设备解锁完成")
 
                 return JSONResponse(
                     content={'success': False, 'error': error_output or 'Firmware burn failed'}
@@ -7756,7 +7836,7 @@ async def burn_gsi(request: Request):
         # 广播设备锁定状态（立即显示）
         logger.info(f"[Device Lock] 开始广播锁定状态到 {len(global_state.websocket_connections)} 个客户端")
         await broadcast_device_lock_update(locked_devices)
-        logger.info(f"[Device Lock] 锁定状态广播完成")
+        logger.info("[Device Lock] 锁定状态广播完成")
 
         config = config_manager.load_config()
         ssh = ssh_manager.get_connection(config)
@@ -8041,6 +8121,455 @@ async def burn_sn(req: SNBurnRequest):
                 detail=str(e)
             )
 
+def _create_apk_task(task_id, apk_path, filename):
+    """创建APK分析任务并限制总数"""
+    os.makedirs(APK_UPLOAD_DIR, exist_ok=True)
+    with global_state.apk_analysis_tasks_lock:
+        if len(global_state.apk_analysis_tasks) >= APK_MAX_TASKS:
+            oldest = min(global_state.apk_analysis_tasks.items(), key=lambda t: t[1].get('timestamp', 0))
+            old_dir = os.path.join(APK_UPLOAD_DIR, oldest[0])
+            shutil.rmtree(old_dir, ignore_errors=True)
+            del global_state.apk_analysis_tasks[oldest[0]]
+        global_state.apk_analysis_tasks[task_id] = {
+            'status': 'uploaded', 'progress': 0,
+            'apk_path': apk_path, 'output_dir': None,
+            'filename': filename, 'timestamp': time.time(), 'error': None
+        }
+
+ANDROID_NS = 'http://schemas.android.com/apk/res/android'
+
+
+def _safe_join(base_dir: str, *parts: str) -> str:
+    """Join paths and ensure the result stays under base_dir."""
+    base_abs = os.path.abspath(base_dir)
+    target_abs = os.path.abspath(os.path.join(base_abs, *parts))
+    if os.path.commonpath([base_abs, target_abs]) != base_abs:
+        raise ValueError("非法路径")
+    return target_abs
+
+
+def _normalize_apk_filename(filename: Optional[str]) -> str:
+    """Normalize upload filenames to a safe APK basename."""
+    raw_name = (filename or '').replace('\\', '/')
+    basename = os.path.basename(raw_name).strip()
+    if not basename or basename in ('.', '..'):
+        raise ValueError("文件名无效")
+    if not basename.lower().endswith('.apk'):
+        raise ValueError("仅支持 .apk 文件")
+
+    stem, ext = os.path.splitext(basename)
+    stem = re.sub(r'[^A-Za-z0-9._ -]+', '_', stem).strip(' ._') or 'app'
+    return f"{stem}{ext.lower()}"
+
+
+def _normalize_apk_task_id(upload_id: Optional[str]) -> str:
+    """Use UUID task directories only; never trust path-like upload IDs."""
+    if not upload_id:
+        return str(uuid.uuid4())
+    try:
+        return str(uuid.UUID(str(upload_id)))
+    except (TypeError, ValueError):
+        raise ValueError("非法上传ID")
+
+
+def _cleanup_files(paths: List[str]):
+    for path in paths:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to remove temporary APK file {path}: {e}")
+
+
+def _get_apk_task(task_id: str, require_completed: bool = True):
+    """获取APK分析任务，返回 (task, error_response)"""
+    with global_state.apk_analysis_tasks_lock:
+        task = global_state.apk_analysis_tasks.get(task_id)
+    if not task:
+        return None, ApiResponse.error("任务不存在", status_code=404)
+    if require_completed and task['status'] != 'completed':
+        return None, ApiResponse.error("分析尚未完成", status_code=400)
+    return task, None
+
+
+def _read_manifest_xml(task):
+    """读取并返回 AndroidManifest.xml 的原始内容"""
+    manifest_path = os.path.join(task.get('output_dir', ''), 'resources', 'AndroidManifest.xml')
+    if not os.path.exists(manifest_path):
+        return None, "AndroidManifest.xml 未找到"
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        return f.read(), None
+
+
+async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
+    """后台运行 jadx 反编译"""
+    try:
+        with global_state.apk_analysis_tasks_lock:
+            if task_id in global_state.apk_analysis_tasks:
+                global_state.apk_analysis_tasks[task_id]['status'] = 'analyzing'
+                global_state.apk_analysis_tasks[task_id]['progress'] = 10
+                global_state.apk_analysis_tasks[task_id]['error'] = None
+
+        cmd = [JADX_PATH, '-d', output_dir, '--show-bad-code', apk_path]
+        result = await asyncio.to_thread(
+            subprocess.run, cmd, capture_output=True, text=True, timeout=JADX_TIMEOUT
+        )
+
+        if result.returncode != 0:
+            with global_state.apk_analysis_tasks_lock:
+                if task_id in global_state.apk_analysis_tasks:
+                    global_state.apk_analysis_tasks[task_id]['status'] = 'error'
+                    global_state.apk_analysis_tasks[task_id]['error'] = result.stderr[-500:] if result.stderr else 'jadx 反编译失败'
+            return
+
+        with global_state.apk_analysis_tasks_lock:
+            if task_id in global_state.apk_analysis_tasks:
+                global_state.apk_analysis_tasks[task_id]['status'] = 'completed'
+                global_state.apk_analysis_tasks[task_id]['progress'] = 100
+                global_state.apk_analysis_tasks[task_id]['output_dir'] = output_dir
+    except subprocess.TimeoutExpired:
+        with global_state.apk_analysis_tasks_lock:
+            if task_id in global_state.apk_analysis_tasks:
+                global_state.apk_analysis_tasks[task_id]['status'] = 'error'
+                global_state.apk_analysis_tasks[task_id]['error'] = 'jadx 反编译超时（超过600秒）'
+    except Exception as e:
+        with global_state.apk_analysis_tasks_lock:
+            if task_id in global_state.apk_analysis_tasks:
+                global_state.apk_analysis_tasks[task_id]['status'] = 'error'
+                global_state.apk_analysis_tasks[task_id]['error'] = str(e)
+
+
+@app.post("/api/apk/upload")
+@handle_api_errors
+async def upload_apk(
+    file: Optional[UploadFile] = File(None),
+    chunk_index: Optional[int] = Form(None),
+    total_chunks: Optional[int] = Form(None),
+    upload_id: Optional[str] = Form(None),
+):
+    """上传APK文件进行分析"""
+    if not file:
+        return ApiResponse.error("未提供文件", status_code=400)
+
+    try:
+        filename = _normalize_apk_filename(file.filename)
+        task_id = _normalize_apk_task_id(upload_id)
+        task_dir = _safe_join(APK_UPLOAD_DIR, task_id)
+        apk_path = _safe_join(task_dir, filename)
+    except ValueError as e:
+        return ApiResponse.error(str(e), status_code=400)
+
+    os.makedirs(task_dir, exist_ok=True)
+
+    if (chunk_index is None) != (total_chunks is None):
+        return ApiResponse.error("分片参数不完整", status_code=400)
+
+    if chunk_index is not None and total_chunks is not None:
+        if total_chunks <= 0 or chunk_index < 0 or chunk_index >= total_chunks:
+            return ApiResponse.error("分片参数无效", status_code=400)
+
+        chunk_path = _safe_join(task_dir, f"{filename}.part{chunk_index}")
+        chunk_data = await file.read()
+        if len(chunk_data) > APK_MAX_FILE_SIZE:
+            return ApiResponse.error(f"文件过大，最大支持 {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
+        with open(chunk_path, 'wb') as f:
+            f.write(chunk_data)
+
+        chunk_paths = [
+            _safe_join(task_dir, f"{filename}.part{i}")
+            for i in range(total_chunks)
+        ]
+        all_chunks_ready = all(
+            os.path.exists(path)
+            for path in chunk_paths
+        )
+
+        if all_chunks_ready:
+            total_size = sum(os.path.getsize(path) for path in chunk_paths)
+            if total_size > APK_MAX_FILE_SIZE:
+                _cleanup_files(chunk_paths + [apk_path])
+                return ApiResponse.error(f"文件过大，最大支持 {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
+
+            with open(apk_path, 'wb') as out_f:
+                for chunk_file in chunk_paths:
+                    with open(chunk_file, 'rb') as cf:
+                        out_f.write(cf.read())
+                    os.remove(chunk_file)
+
+            file_size = os.path.getsize(apk_path)
+            if file_size > APK_MAX_FILE_SIZE:
+                _cleanup_files([apk_path])
+                return ApiResponse.error(f"文件过大，最大支持 {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
+
+            _create_apk_task(task_id, apk_path, filename)
+            return ApiResponse.success({'task_id': task_id, 'filename': filename, 'size': file_size, 'uploaded': True})
+        else:
+            return ApiResponse.success({
+                'task_id': task_id, 'filename': filename,
+                'chunk_received': chunk_index + 1, 'total_chunks': total_chunks, 'uploaded': False
+            })
+    else:
+        file_data = await file.read()
+        if len(file_data) > APK_MAX_FILE_SIZE:
+            return ApiResponse.error(f"文件过大，最大支持 {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
+
+        with open(apk_path, 'wb') as f:
+            f.write(file_data)
+
+        file_size = len(file_data)
+        _create_apk_task(task_id, apk_path, filename)
+        return ApiResponse.success({'task_id': task_id, 'filename': filename, 'size': file_size})
+
+
+@app.post("/api/apk/analyze/{task_id}")
+@handle_api_errors
+async def analyze_apk(task_id: str):
+    """启动 jadx 反编译分析"""
+    with global_state.apk_analysis_tasks_lock:
+        task = global_state.apk_analysis_tasks.get(task_id)
+        task = dict(task) if task else None
+
+    if not task:
+        return ApiResponse.error("任务不存在", status_code=404)
+
+    if task['status'] == 'analyzing':
+        return ApiResponse.error("分析正在进行中", status_code=400)
+
+    if task['status'] == 'completed':
+        return ApiResponse.success({
+            'task_id': task_id,
+            'status': 'completed',
+            'progress': task.get('progress', 100),
+            'already_completed': True
+        })
+
+    if task['status'] not in ('uploaded', 'error'):
+        return ApiResponse.error(f"当前状态 {task['status']} 不允许启动分析", status_code=400)
+
+    apk_path = task['apk_path']
+    if not os.path.exists(apk_path):
+        return ApiResponse.error("APK文件不存在，请重新上传", status_code=404)
+
+    output_dir = os.path.join(APK_UPLOAD_DIR, task_id, 'jadx_output')
+
+    with global_state.apk_analysis_tasks_lock:
+        global_state.apk_analysis_tasks[task_id]['status'] = 'analyzing'
+        global_state.apk_analysis_tasks[task_id]['progress'] = 5
+        global_state.apk_analysis_tasks[task_id]['output_dir'] = output_dir
+        global_state.apk_analysis_tasks[task_id]['error'] = None
+
+    asyncio.create_task(_run_jadx_analysis(task_id, apk_path, output_dir))
+
+    return ApiResponse.success({'task_id': task_id, 'status': 'analyzing'})
+
+
+@app.get("/api/apk/status/{task_id}")
+@handle_api_errors
+async def get_apk_status(task_id: str):
+    """获取APK分析状态"""
+    with global_state.apk_analysis_tasks_lock:
+        task = global_state.apk_analysis_tasks.get(task_id)
+        task = dict(task) if task else None
+
+    if not task:
+        return ApiResponse.error("任务不存在", status_code=404)
+
+    return ApiResponse.success({
+        'task_id': task_id,
+        'status': task['status'],
+        'progress': task['progress'],
+        'filename': task.get('filename', ''),
+        'error': task.get('error')
+    })
+
+
+@app.get("/api/apk/manifest/{task_id}")
+@handle_api_errors
+async def get_apk_manifest(task_id: str):
+    """获取解析后的 AndroidManifest.xml"""
+    task, err = _get_apk_task(task_id)
+    if err:
+        return err
+
+    raw_xml, err = _read_manifest_xml(task)
+    if err:
+        return ApiResponse.error(err, status_code=404)
+
+    manifest_info = {}
+    try:
+        root = ET.fromstring(raw_xml)
+
+        manifest_info['package'] = root.get('package', '')
+        manifest_info['versionName'] = root.get(f'{{{ANDROID_NS}}}versionName', '')
+        manifest_info['versionCode'] = root.get(f'{{{ANDROID_NS}}}versionCode', '')
+
+        uses_sdk = root.find('uses-sdk')
+        if uses_sdk is not None:
+            manifest_info['minSdkVersion'] = uses_sdk.get(f'{{{ANDROID_NS}}}minSdkVersion', '')
+            manifest_info['targetSdkVersion'] = uses_sdk.get(f'{{{ANDROID_NS}}}targetSdkVersion', '')
+
+        application = root.find('application')
+        if application is not None:
+            for activity in application.findall('activity'):
+                for intent_filter in activity.findall('intent-filter'):
+                    for action in intent_filter.findall('action'):
+                        if action.get(f'{{{ANDROID_NS}}}name') == 'android.intent.action.MAIN':
+                            manifest_info['launchActivity'] = activity.get(f'{{{ANDROID_NS}}}name', '')
+                            break
+    except ET.ParseError as e:
+        logger.warning(f"APK manifest XML parse error for task {task_id}: {e}")
+
+    return ApiResponse.success({'manifest': manifest_info, 'raw_xml': raw_xml})
+
+
+@app.get("/api/apk/permissions/{task_id}")
+@handle_api_errors
+async def get_apk_permissions(task_id: str):
+    """获取APK权限列表"""
+    task, err = _get_apk_task(task_id)
+    if err:
+        return err
+
+    raw_xml, err = _read_manifest_xml(task)
+    if err:
+        return ApiResponse.error(err, status_code=404)
+
+    permissions = []
+    try:
+        root = ET.fromstring(raw_xml)
+        for perm in root.findall('uses-permission'):
+            perm_name = perm.get(f'{{{ANDROID_NS}}}name', '')
+            if perm_name:
+                short_name = perm_name.split('.')[-1] if '.' in perm_name else perm_name
+                permissions.append({'name': perm_name, 'short_name': short_name})
+    except ET.ParseError as e:
+        logger.warning(f"APK permissions XML parse error for task {task_id}: {e}")
+
+    return ApiResponse.success({'permissions': permissions, 'total': len(permissions)})
+
+
+@app.get("/api/apk/source/{task_id}")
+@handle_api_errors
+async def get_apk_source(task_id: str, path: str = "", view: bool = False):
+    """浏览反编译源码树或查看文件内容"""
+    task, err = _get_apk_task(task_id)
+    if err:
+        return err
+
+    sources_dir = _safe_join(task.get('output_dir', ''), 'sources')
+    if not os.path.exists(sources_dir):
+        return ApiResponse.error("源码目录不存在", status_code=404)
+
+    if view:
+        try:
+            file_path = _safe_join(sources_dir, path)
+        except ValueError:
+            return ApiResponse.error("非法路径", status_code=400)
+        if not os.path.isfile(file_path):
+            return ApiResponse.error("文件不存在", status_code=404)
+        file_size = os.path.getsize(file_path)
+        if file_size > APK_MAX_SOURCE_FILE_SIZE:
+            return ApiResponse.error(f"文件过大({file_size // 1024}KB)，超过{APK_MAX_SOURCE_FILE_SIZE // (1024*1024)}MB限制", status_code=400)
+
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            return ApiResponse.success({'path': path, 'content': content, 'size': file_size})
+        except Exception as e:
+            return ApiResponse.error(f"读取文件失败: {e}", status_code=500)
+    else:
+        try:
+            target_dir = _safe_join(sources_dir, path) if path else sources_dir
+        except ValueError:
+            return ApiResponse.error("非法路径", status_code=400)
+        if not os.path.isdir(target_dir):
+            return ApiResponse.error("目录不存在", status_code=404)
+
+        items = []
+        try:
+            for entry in sorted(os.scandir(target_dir), key=lambda e: (not e.is_dir(), e.name.lower())):
+                items.append({
+                    'name': entry.name,
+                    'type': 'dir' if entry.is_dir() else 'file',
+                    'path': os.path.relpath(entry.path, sources_dir),
+                    'size': entry.stat().st_size if entry.is_file() else 0
+                    })
+        except PermissionError:
+            return ApiResponse.error("权限不足", status_code=403)
+
+        return ApiResponse.success({'items': items, 'path': path, 'total': len(items)})
+
+
+@app.get("/api/apk/download/{task_id}")
+@handle_api_errors
+async def download_apk_source(task_id: str):
+    """下载反编译源码 ZIP"""
+    task, err = _get_apk_task(task_id)
+    if err:
+        return err
+
+    output_dir = task.get('output_dir', '')
+    if not os.path.exists(output_dir):
+        return ApiResponse.error("输出目录不存在", status_code=404)
+
+    filename = task.get('filename', 'app.apk').replace('.apk', '_decompiled')
+
+    zip_path = shutil.make_archive(
+        os.path.join(APK_UPLOAD_DIR, task_id, filename),
+        'zip', output_dir
+    )
+
+    def iterfile():
+        with open(zip_path, 'rb') as f:
+            yield from f
+        try:
+            os.remove(zip_path)
+        except Exception:
+            pass
+
+    return StreamingResponse(
+        iterfile(),
+        media_type='application/zip',
+        headers={'Content-Disposition': f'attachment; filename="{filename}.zip"'}
+    )
+
+
+@app.get("/api/apk/tasks")
+@handle_api_errors
+async def list_apk_tasks():
+    """列出所有APK分析任务"""
+    with global_state.apk_analysis_tasks_lock:
+        tasks = []
+        for tid, task in global_state.apk_analysis_tasks.items():
+            tasks.append({
+                'task_id': tid,
+                'filename': task.get('filename', ''),
+                'status': task['status'],
+                'progress': task['progress'],
+                'timestamp': task.get('timestamp', 0),
+                'error': task.get('error')
+            })
+
+    tasks.sort(key=lambda t: t.get('timestamp', 0), reverse=True)
+    return ApiResponse.success({'tasks': tasks, 'total': len(tasks)})
+
+
+@app.delete("/api/apk/task/{task_id}")
+@handle_api_errors
+async def delete_apk_task(task_id: str):
+    """删除APK分析任务及其文件"""
+    with global_state.apk_analysis_tasks_lock:
+        if task_id not in global_state.apk_analysis_tasks:
+            return ApiResponse.error("任务不存在", status_code=404)
+        global_state.apk_analysis_tasks.pop(task_id)
+
+    task_dir = os.path.join(APK_UPLOAD_DIR, task_id)
+    await asyncio.to_thread(shutil.rmtree, task_dir, ignore_errors=True)
+
+    return ApiResponse.success(message="任务已删除")
+
+
 # ==================== 其他功能 ====================
 
 @app.post("/api/files/list")
@@ -8109,7 +8638,7 @@ async def list_files(req: dict):
                 'path': path,
                 'files': files
             })
-        except Exception as e:
+        except Exception:
             ssh_manager.return_connection(ssh)
             raise
     except Exception as e:
@@ -8136,7 +8665,7 @@ def find_device_host_password(config, device_host):
     if '@' not in device_host:
         return None
 
-    username, hostname = device_host.split('@', 1)
+    username, hostname = CommonUtils.parse_host_address(device_host)
 
     # 从 client_ssh_credentials 中查找匹配的凭据
     for cred in config.get('client_ssh_credentials', []):
@@ -8263,7 +8792,7 @@ def parse_tradefed_list_results(output: str) -> List[Dict[str, Any]]:
                         'product': parts[9] if len(parts) > 9 else ''
                     }
                 results.append(result_entry)
-            except (ValueError, IndexError) as e:
+            except (ValueError, IndexError):
                 continue
 
     return results
@@ -8325,7 +8854,7 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
                     else:
                         stable_count = 0
                         last_output_length = current_length
-            except Exception as e:
+            except Exception:
                 # 如果超过指定时间没有新输出，认为命令已完成
                 if time.time() - last_output_time > STABLE_OUTPUT_TIMEOUT:
                     return output
@@ -8346,10 +8875,10 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
 
         # 发送命令序列，使用智能等待（优化超时）
         shell.send(f"export PATH={platform_tools_path}:$PATH\n")
-        wait_for_prompt(shell, ['\$ ', '\# ', '> '], timeout=2, poll_interval=0.05)
+        wait_for_prompt(shell, [r'\$ ', r'\# ', '> '], timeout=2, poll_interval=0.05)
 
         shell.send(f"cd {suite_path}\n")
-        wait_for_prompt(shell, ['\$ ', '\# ', '> '], timeout=2, poll_interval=0.05)
+        wait_for_prompt(shell, [r'\$ ', r'\# ', '> '], timeout=2, poll_interval=0.05)
 
         # 设置 TERM 为 dumb 以禁用 readline 功能，避免 ANSI 转义序列
         shell.send(f"TERM=dumb {tradefed_bin}\n")
@@ -8366,7 +8895,7 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
         time.sleep(0.5)
 
         shell.send("exit\n")
-        wait_for_prompt(shell, ['\$ ', '\# '], timeout=2, poll_interval=0.05)
+        wait_for_prompt(shell, [r'\$ ', r'\# '], timeout=2, poll_interval=0.05)
 
         # 读取所有剩余输出（使用更大的缓冲区和更多尝试）
         output = tradefed_output + command_output
@@ -8661,7 +9190,7 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
                         if channel.recv_ready():
                             data_chunk = channel.recv(4096)
                             if not data_chunk:
-                                logger.info(f"[TERMINAL] No data received, ADB connection closed")
+                                logger.info("[TERMINAL] No data received, ADB connection closed")
                                 break
 
                             try:
@@ -8796,7 +9325,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                         if channel.recv_ready():
                             data_chunk = channel.recv(4096)
                             if not data_chunk:
-                                logger.info(f"[TERMINAL] No data received, connection closed")
+                                logger.info("[TERMINAL] No data received, connection closed")
                                 break
 
                             try:
@@ -9282,7 +9811,7 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
     if method == 'POST':
         has_file = any(p.get('type') == 'file' for p in params)
         if not has_file:
-            help_text += f"Content-Type: application/json\n"
+            help_text += "Content-Type: application/json\n"
     help_text += "\n"
 
     # 参数说明（表格格式）
@@ -9510,45 +10039,8 @@ def generate_api_example(api):
     else:
         return f'curl -X {method} "{base_url}{path}"'
 
-# ==================== 主程序 ====================
 
-if __name__ == "__main__":
-    logger.info("Starting GMS Auto Test FastAPI Server on port 5001...")
-    logger.info("=" * 60)
-    logger.info("  GMS Auto Test - FastAPI Server (Port 5001)")
-    logger.info("  Framework: FastAPI (Pure)")
-    logger.info("  Version: 1.0.0")
-    logger.info("  Production Release")
-    logger.info("=" * 60)
-    logger.info("")
-
-    # 优化：移除后台清理任务，使用查询时自动清理（避免死锁）
-    logger.info("[Cleanup] Using lazy cleanup (removed background thread to prevent deadlock)")
-
-    logger.info("[Performance] Multi-worker mode enabled (4 workers)")
-    logger.info("[Performance] Using uvloop for high performance")
-    logger.info("[Performance] Using httptools for fast HTTP parsing")
-    logger.info("[Performance] HTTP connection pooling and GZip compression enabled")
-
-    # 运行FastAPI应用（使用字符串导入以支持多worker）
-    uvicorn.run(
-        "app_fastapi_full:app",  # 使用字符串导入
-        host=SERVER_HOST,
-        port=SERVER_PORT,
-        log_level='info',
-        # 优化大文件上传
-        timeout_keep_alive=600,  # 10分钟保持连接
-        # 性能优化配置
-        workers=4,  # 多worker模式提升并发性能
-        loop='uvloop',  # 使用uvloop高性能事件循环
-        http='httptools',  # 使用httptools C扩展HTTP解析
-        access_log=True,  # 启用访问日志
-        limit_concurrency=1000,  # 最大并发连接数
-        limit_max_requests=10000,  # 每个worker最大请求数后重启（防止内存泄漏）
-        # TCP优化
-        backlog=2048,  # TCP连接队列大小
-    )
-
+# ==================== Redmine 回复功能 ====================
 
 @app.post("/api/redmine/reply")
 async def redmine_reply(request: Request):
@@ -9569,7 +10061,6 @@ async def redmine_reply(request: Request):
         issue_id = body.get('issue_id', '').strip()
         reply_text = body.get('reply_text', '').strip()
 
-        # 验证参数（使用现有工具函数）
         if not issue_id:
             return error_response('缺少 issue_id 参数', status_code=400)
 
@@ -9578,30 +10069,21 @@ async def redmine_reply(request: Request):
 
         logger.info(f"[Redmine Reply] 准备发送回复到 Issue #{issue_id}")
 
-        # 获取存储的凭证
         stored_creds = await load_redmine_credentials()
         if not stored_creds:
             return error_response('未配置 Redmine 凭证', status_code=401)
 
-        # 获取 Redmine 配置
         try:
             redmine_config = config_manager.get_redmine_config()
             base_url = redmine_config['base_url']
         except ValueError as e:
             return error_response(str(e), status_code=404)
 
-        # 构建 API URL
         api_url = f"{base_url}/issues/{issue_id}.json"
         username = stored_creds.get('username')
         password = stored_creds.get('password')
 
-        # 构建请求
-        payload = {
-            'issue': {
-                'notes': reply_text
-            }
-        }
-
+        payload = {'issue': {'notes': reply_text}}
         headers = create_basic_auth_header(username, password)
         headers['Content-Type'] = 'application/json'
         headers['User-Agent'] = 'GMS Remote Test/1.0'
@@ -9621,3 +10103,42 @@ async def redmine_reply(request: Request):
     except Exception as e:
         logger.error(f"[Redmine Reply] 发送回复失败：{e}")
         return error_response(f'发送失败：{str(e)}', status_code=500)
+
+
+# ==================== 主程序 ====================
+
+if __name__ == "__main__":
+    logger.info("Starting GMS Auto Test FastAPI Server on port 5001...")
+    logger.info("=" * 60)
+    logger.info("  GMS Auto Test - FastAPI Server (Port 5001)")
+    logger.info("  Framework: FastAPI (Pure)")
+    logger.info("  Version: 4.0.0")
+    logger.info("  Production Release")
+    logger.info("=" * 60)
+    logger.info("")
+
+    # 性能优化配置
+    logger.info("[Performance] Using uvloop for high performance event loop")
+    logger.info("[Performance] Using httptools for fast HTTP parsing")
+    logger.info("[Performance] GZip compression enabled (min 500 bytes)")
+    logger.info("[Performance] Static file caching: 86400s (1 day)")
+    logger.info("[Performance] Connection keep-alive: 120s")
+    logger.info(f"[Runtime] GMS_ENV={GMS_ENV}, CORS_ORIGINS={CORS_ORIGINS}, TRUSTED_HOSTS={TRUSTED_HOSTS}")
+
+    # 运行FastAPI应用（单worker模式，因为lifespan事件与多worker不兼容）
+    # 如需多worker，请使用 gunicorn + uvicorn.workers.UvicornWorker
+    uvicorn.run(
+        "app_fastapi_full:app",
+        host=SERVER_HOST,
+        port=SERVER_PORT,
+        log_level='info',
+        proxy_headers=PROXY_HEADERS_ENABLED,
+        forwarded_allow_ips=FORWARDED_ALLOW_IPS if PROXY_HEADERS_ENABLED else "",
+        timeout_keep_alive=120,  # 2分钟保持连接（合理平衡资源占用）
+        loop='uvloop',  # 高性能事件循环
+        http='httptools',  # C扩展HTTP解析
+        access_log=(GMS_ENV != 'production'),
+        limit_concurrency=500,  # 最大并发连接数
+        limit_max_requests=5000,  # 每个worker最大请求数后重启（防内存泄漏）
+        backlog=1024,  # TCP连接队列大小
+    )

@@ -9,11 +9,14 @@ import asyncio
 import aiohttp
 import re
 from urllib.parse import urljoin, urlparse
-from typing import Optional, List, Dict, Any
+from typing import List, Dict, Any
 import logging
 from dataclasses import dataclass
 import json
 import os
+import glob
+import hashlib
+import mimetypes
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
@@ -30,6 +33,7 @@ class IconResult:
     size: int = 0        # 图标尺寸
     error: str = ""
     cache_key: str = ""  # 缓存键
+    original_icon_url: str = ""  # 原始远程图标地址
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -40,17 +44,21 @@ class IconResult:
             'source': self.source,
             'size': self.size,
             'error': self.error,
-            'cache_key': self.cache_key
+            'cache_key': self.cache_key,
+            'original_icon_url': self.original_icon_url
         }
 
 
 class IconFetcher:
     """网站图标获取器 - Web优化版本"""
 
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
     # 常量配置
     ICON_VALIDATION_TIMEOUT = 5  # 图标验证超时时间（秒）
     MAX_ICON_CANDIDATES = 5  # 最大图标候选数量
     IMAGE_CHUNK_SIZE = 1024  # 图片内容检查大小（字节）
+    MAX_ICON_DOWNLOAD_BYTES = 512 * 1024  # 最大图标下载大小，避免误缓存大图
 
     # 预定义的常见网站图标映射
     PREDEFINED_ICONS = {
@@ -93,7 +101,10 @@ class IconFetcher:
     }
 
     # 图标缓存文件路径
-    CACHE_FILE = "data/icon_cache.json"
+    CACHE_FILE = os.path.join(BASE_DIR, "data", "icon_cache.json")
+    LOCAL_ICON_DIR = os.path.join(BASE_DIR, "static", "icons", "favicons")
+    LOCAL_ICON_URL_PREFIX = "/static/icons/favicons"
+    DEFAULT_ICON_URL = "/static/icons/site-default.svg"
     CACHE_DURATION = timedelta(days=7)  # 缓存7天
     MAX_CACHE_SIZE = 1000  # 最大缓存条目数
 
@@ -137,9 +148,12 @@ class IconFetcher:
             valid_cache = {}
 
             for key, value in cache_data.items():
-                cache_time = datetime.fromisoformat(value.get('timestamp', ''))
-                if current_time - cache_time < self.CACHE_DURATION:
-                    valid_cache[key] = value
+                try:
+                    cache_time = datetime.fromisoformat(value.get('timestamp', ''))
+                    if current_time - cache_time < self.CACHE_DURATION:
+                        valid_cache[key] = value
+                except Exception:
+                    continue
 
             return valid_cache
         except FileNotFoundError:
@@ -207,6 +221,234 @@ class IconFetcher:
         self.cache[cache_key] = result.to_dict()
         self._save_cache({cache_key: self.cache[cache_key]})
 
+    @classmethod
+    def is_remote_url(cls, value: str) -> bool:
+        """判断是否为远程HTTP(S) URL"""
+        return isinstance(value, str) and value.lower().startswith(('http://', 'https://'))
+
+    @classmethod
+    def is_local_static_url(cls, value: str) -> bool:
+        """判断是否为本地静态图标 URL"""
+        return isinstance(value, str) and (
+            value.startswith(cls.LOCAL_ICON_URL_PREFIX + '/') or value == cls.DEFAULT_ICON_URL
+        )
+
+    @classmethod
+    def static_url_to_path(cls, url: str) -> str:
+        """将本地静态图标 URL 转为文件路径"""
+        if url == cls.DEFAULT_ICON_URL:
+            return os.path.join(cls.BASE_DIR, url.lstrip('/'))
+        if not isinstance(url, str) or not url.startswith(cls.LOCAL_ICON_URL_PREFIX + '/'):
+            return ""
+
+        filename = os.path.basename(urlparse(url).path)
+        if not filename:
+            return ""
+        return os.path.join(cls.LOCAL_ICON_DIR, filename)
+
+    @classmethod
+    def default_icon_path(cls) -> str:
+        """默认图标文件路径"""
+        return os.path.join(cls.BASE_DIR, cls.DEFAULT_ICON_URL.lstrip('/'))
+
+    def _local_url_for_path(self, path: str) -> str:
+        """本地文件路径转 URL"""
+        return f"{self.LOCAL_ICON_URL_PREFIX}/{os.path.basename(path)}"
+
+    def _local_cache_key(self, icon_url: str) -> str:
+        return f"iconfile:{hashlib.sha256(icon_url.encode('utf-8')).hexdigest()}"
+
+    def _icon_hash(self, icon_url: str) -> str:
+        return hashlib.sha256(icon_url.encode('utf-8')).hexdigest()
+
+    def _find_existing_local_icon(self, icon_url: str) -> str:
+        """查找远程图标是否已下载到本地"""
+        icon_hash = self._icon_hash(icon_url)
+        for path in glob.glob(os.path.join(self.LOCAL_ICON_DIR, f"{icon_hash}.*")):
+            if os.path.isfile(path):
+                return self._local_url_for_path(path)
+        return ""
+
+    def _extension_from_response(self, icon_url: str, content_type: str, data: bytes) -> str:
+        """根据响应和文件头推断图标扩展名"""
+        content_type = (content_type or '').split(';', 1)[0].strip().lower()
+        content_type_map = {
+            'image/svg+xml': '.svg',
+            'image/png': '.png',
+            'image/jpeg': '.jpg',
+            'image/jpg': '.jpg',
+            'image/gif': '.gif',
+            'image/webp': '.webp',
+            'image/x-icon': '.ico',
+            'image/vnd.microsoft.icon': '.ico',
+        }
+        if content_type in content_type_map:
+            return content_type_map[content_type]
+
+        guessed = mimetypes.guess_extension(content_type) if content_type else None
+        if guessed in {'.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico'}:
+            return '.jpg' if guessed == '.jpeg' else guessed
+
+        path_ext = os.path.splitext(urlparse(icon_url).path)[1].lower()
+        if path_ext in {'.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico'}:
+            return '.jpg' if path_ext == '.jpeg' else path_ext
+
+        if data[:4] == b'\x89PNG':
+            return '.png'
+        if data[:2] == b'\xff\xd8':
+            return '.jpg'
+        if data[:4] == b'GIF8':
+            return '.gif'
+        if data[:4].lower().startswith(b'<svg') or b'<svg' in data[:200].lower():
+            return '.svg'
+        if data[:4] == b'\x00\x00\x01\x00':
+            return '.ico'
+
+        return '.ico'
+
+    def _icon_type_from_extension(self, ext: str) -> str:
+        return ext.lstrip('.').lower() or 'unknown'
+
+    async def _download_icon_to_local(self, icon_url: str, source: str = "download") -> IconResult:
+        """下载远程图标到本地静态目录"""
+        if not self.is_remote_url(icon_url):
+            return IconResult(success=False, error="不是远程图标URL")
+
+        existing_url = self._find_existing_local_icon(icon_url)
+        if existing_url:
+            return IconResult(
+                success=True,
+                icon_url=existing_url,
+                icon_type=os.path.splitext(existing_url)[1].lstrip('.') or 'unknown',
+                source='local_cache',
+                original_icon_url=icon_url
+            )
+
+        try:
+            session = await self.get_session()
+            async with session.get(
+                icon_url,
+                allow_redirects=True,
+                timeout=aiohttp.ClientTimeout(total=min(self.timeout, self.ICON_VALIDATION_TIMEOUT))
+            ) as response:
+                if response.status != 200:
+                    return IconResult(success=False, error=f"HTTP {response.status}")
+
+                content_type = response.headers.get('Content-Type', '')
+                content_length = response.headers.get('Content-Length')
+                if content_length:
+                    try:
+                        if int(content_length) > self.MAX_ICON_DOWNLOAD_BYTES:
+                            return IconResult(success=False, error="图标文件过大")
+                    except ValueError:
+                        pass
+
+                chunks = []
+                total_size = 0
+                async for chunk in response.content.iter_chunked(8192):
+                    total_size += len(chunk)
+                    if total_size > self.MAX_ICON_DOWNLOAD_BYTES:
+                        return IconResult(success=False, error="图标文件过大")
+                    chunks.append(chunk)
+
+                data = b''.join(chunks)
+                if not data:
+                    return IconResult(success=False, error="图标内容为空")
+
+                content_type_lower = content_type.lower()
+                is_image_type = any(marker in content_type_lower for marker in ['image/', 'svg'])
+                if not is_image_type and not self._is_image_content(data):
+                    return IconResult(success=False, error="响应不是图片")
+
+                ext = self._extension_from_response(str(response.url), content_type, data)
+                filename = f"{self._icon_hash(icon_url)}{ext}"
+                os.makedirs(self.LOCAL_ICON_DIR, exist_ok=True)
+                local_path = os.path.join(self.LOCAL_ICON_DIR, filename)
+
+                if not os.path.exists(local_path):
+                    with open(local_path, 'wb') as f:
+                        f.write(data)
+
+                return IconResult(
+                    success=True,
+                    icon_url=self._local_url_for_path(local_path),
+                    icon_type=self._icon_type_from_extension(ext),
+                    source=source,
+                    size=len(data),
+                    original_icon_url=icon_url
+                )
+
+        except Exception as e:
+            logger.debug(f"下载图标到本地失败 {icon_url}: {e}")
+            return IconResult(success=False, error=str(e), original_icon_url=icon_url)
+
+    async def localize_icon_url(self, icon_url: str) -> IconResult:
+        """把任意图标值转换为本地可稳定访问的图标。"""
+        if not icon_url or not isinstance(icon_url, str):
+            return IconResult(success=False, error="图标URL为空", icon_url=self.DEFAULT_ICON_URL, icon_type='svg')
+
+        if not self.is_remote_url(icon_url):
+            return IconResult(success=True, icon_url=icon_url, icon_type='local' if self.is_local_static_url(icon_url) else 'emoji', source='local')
+
+        cache_key = self._local_cache_key(icon_url)
+        cached = self.cache.get(cache_key)
+        if cached:
+            cached_icon = cached.get('icon_url', '')
+            cached_path = self.static_url_to_path(cached_icon)
+            if cached_path and os.path.exists(cached_path):
+                return IconResult(
+                    success=True,
+                    icon_url=cached_icon,
+                    icon_type=cached.get('icon_type', 'unknown'),
+                    source='local_cache',
+                    size=cached.get('size', 0),
+                    original_icon_url=icon_url,
+                    cache_key=cache_key
+                )
+
+        downloaded = await self._download_icon_to_local(icon_url)
+        if downloaded.success:
+            downloaded.cache_key = cache_key
+            self._cache_result(cache_key, downloaded)
+            return downloaded
+
+        existing_url = self._find_existing_local_icon(icon_url)
+        if existing_url:
+            return IconResult(
+                success=True,
+                icon_url=existing_url,
+                icon_type=os.path.splitext(existing_url)[1].lstrip('.') or 'unknown',
+                source='local_cache',
+                original_icon_url=icon_url,
+                cache_key=cache_key
+            )
+
+        return IconResult(
+            success=False,
+            icon_url=self.DEFAULT_ICON_URL,
+            icon_type='svg',
+            source='fallback',
+            error=downloaded.error,
+            original_icon_url=icon_url,
+            cache_key=cache_key
+        )
+
+    async def _localize_result(self, result: IconResult, cache_key: str = "") -> IconResult:
+        """将抓取结果中的远程图标落盘为本地图标"""
+        if not result.success or not self.is_remote_url(result.icon_url):
+            if cache_key:
+                result.cache_key = cache_key
+            return result
+
+        local_result = await self.localize_icon_url(result.icon_url)
+        if local_result.success:
+            local_result.source = result.source if result.source.startswith('api_') else f"{result.source}_local"
+            local_result.cache_key = cache_key
+            return local_result
+
+        local_result.cache_key = cache_key
+        return local_result
+
     async def fetch_icon_async(self, url: str) -> IconResult:
         """
         异步获取网站图标
@@ -234,13 +476,56 @@ class IconFetcher:
             if cache_key in self.cache:
                 cached_data = self.cache[cache_key]
                 logger.info(f"使用缓存的图标: {domain}")
-                return IconResult(
-                    success=True,
-                    icon_url=cached_data['icon_url'],
-                    icon_type=cached_data['icon_type'],
-                    source='cache',
-                    cache_key=cache_key
-                )
+                cached_icon_url = cached_data.get('icon_url', '')
+                if not (cached_icon_url == self.DEFAULT_ICON_URL and cached_data.get('source') == 'fallback'):
+                    if self.is_remote_url(cached_icon_url):
+                        localized = await self.localize_icon_url(cached_icon_url)
+                        if localized.success:
+                            localized.source = 'cache_local'
+                            localized.cache_key = cache_key
+                            self._cache_result(cache_key, localized)
+                            return localized
+
+                        return IconResult(
+                            success=True,
+                            icon_url=self.DEFAULT_ICON_URL,
+                            icon_type='svg',
+                            source='fallback',
+                            cache_key=cache_key,
+                            original_icon_url=cached_icon_url
+                        )
+
+                    if self.is_local_static_url(cached_icon_url):
+                        cached_path = self.static_url_to_path(cached_icon_url)
+                        if cached_path and not os.path.exists(cached_path):
+                            original_url = cached_data.get('original_icon_url', '')
+                            if self.is_remote_url(original_url):
+                                localized = await self.localize_icon_url(original_url)
+                                if localized.success:
+                                    localized.source = 'cache_local'
+                                    localized.cache_key = cache_key
+                                    self._cache_result(cache_key, localized)
+                                    return localized
+
+                            return IconResult(
+                                success=True,
+                                icon_url=self.DEFAULT_ICON_URL,
+                                icon_type='svg',
+                                source='fallback',
+                                cache_key=cache_key,
+                                original_icon_url=original_url
+                            )
+
+                    return IconResult(
+                        success=True,
+                        icon_url=cached_icon_url,
+                        icon_type=cached_data.get('icon_type', ''),
+                        source='cache',
+                        cache_key=cache_key,
+                        original_icon_url=cached_data.get('original_icon_url', '')
+                    )
+
+                logger.info(f"忽略默认兜底缓存并重新尝试获取图标: {domain}")
 
             # 2. 检查预定义图标
             if domain in self.PREDEFINED_ICONS:
@@ -261,28 +546,37 @@ class IconFetcher:
             # 3. 从HTML获取图标
             html_result = await self._fetch_from_html(url)
             if html_result.success:
-                self._cache_result(cache_key, html_result)
-                return html_result
+                localized = await self._localize_result(html_result, cache_key)
+                if localized.success:
+                    self._cache_result(cache_key, localized)
+                    return localized
 
             # 4. 从根目录获取图标
             root_result = await self._fetch_from_root(url)
             if root_result.success:
-                self._cache_result(cache_key, root_result)
-                return root_result
+                localized = await self._localize_result(root_result, cache_key)
+                if localized.success:
+                    self._cache_result(cache_key, localized)
+                    return localized
 
             # 5. 使用第三方API
             api_result = await self._fetch_from_api(domain)
             if api_result.success:
-                self._cache_result(cache_key, api_result)
-                return api_result
+                localized = await self._localize_result(api_result, cache_key)
+                if localized.success:
+                    self._cache_result(cache_key, localized)
+                    return localized
 
             # 都失败了，返回默认图标
-            return IconResult(
-                success=False,
+            fallback = IconResult(
+                success=True,
                 error="无法获取网站图标",
-                icon_url="🌐",
-                icon_type="emoji"
+                icon_url=self.DEFAULT_ICON_URL,
+                icon_type="svg",
+                source="fallback",
+                cache_key=cache_key
             )
+            return fallback
 
         except Exception as e:
             logger.error(f"获取图标时出错: {e}")
