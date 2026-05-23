@@ -3,37 +3,37 @@
         "tools": {
             "Rockchip": [
                 {
-                    "icon": "https://oa.rock-chips.com:8888/favicon.ico",
+                    "icon": "/static/icons/favicons/3a57911f43fd8a9ccfaa8e3ed6cf6cb3461308d7a37e13775ab6414b785725c9.ico",
                     "title": "Rockchip OA",
                     "url": "https://oa.rock-chips.com:8888"
                 },
                 {
-                    "icon": "https://redmine.rock-chips.com/favicon.ico",
+                    "icon": "/static/icons/favicons/1a43fcd157ab39c1746959e9ea5f993614b296573069cd78b5163c22dcbfa00c.png",
                     "title": "Redmine",
                     "url": "https://redmine.rock-chips.com/my/page"
                 },
                 {
-                    "icon": "https://10.10.10.29/favicon.ico",
+                    "icon": "/static/icons/favicons/rockchip-gerrit.svg",
                     "title": "Gerrit",
                     "url": "https://10.10.10.29/q/owner:chaoqun.huang@rock-chips.com"
                 },
                 {
-                    "icon": "http://10.10.10.203:8080/source/default/img/apple-touch-icon.png",
+                    "icon": "/static/icons/favicons/rockchip-opengrok.svg",
                     "title": "OpenGrok",
                     "url": "http://10.10.10.203:8080/source/"
                 },
                 {
-                    "icon": "🌐",
+                    "icon": "/static/icons/favicons/rockchip-remote-run.svg",
                     "title": "Remote Run Server",
                     "url": "http://10.10.10.206:8393/"
                 },
                 {
-                    "icon": "https://crm.rock-chips.com/portal/index/theme1/bg3.jpg",
+                    "icon": "/static/icons/favicons/rockchip-crm.svg",
                     "title": "CRM",
                     "url": "https://crm.rock-chips.com/portal/r/w"
                 },
                 {
-                    "icon": "http://172.16.14.130:8080/images/favicon.ico",
+                    "icon": "/static/icons/favicons/rockchip-router.svg",
                     "title": "路由器端口转发",
                     "url": "http://172.16.14.130:8080/Advanced_VirtualServer_Content.asp"
                 }
@@ -43,6 +43,11 @@
                     "icon": "https://www.google.com/favicon.ico",
                     "title": "Google",
                     "url": "https://www.google.com"
+                },
+                {
+                    "icon": "https://www.google.com/a/cpanel/rock-chips.corp-partner.google.com/images/favicon.ico",
+                    "title": "Gmail",
+                    "url": "https://mail.google.com/mail/u/1/#inbox"
                 },
                 {
                     "icon": "https://icons.duckduckgo.com/ip3/cs.android.com.ico",
@@ -90,10 +95,15 @@
                     "icon": "https://icons.duckduckgo.com/ip3/www.qianwen.com.ico",
                     "title": "Qwen",
                     "url": "https://www.qianwen.com/"
+                },
+                {
+                    "icon": "https://bewild.ai/favicon-wildai.ico",
+                    "title": "WildAI",
+                    "url": "https://bewild.ai/transaction-record"
                 }
             ]
         },
-        "last_updated": "2026-05-19T09:17:04.091303",
+        "last_updated": "2026-05-23T11:08:18.398399",
         "client_ip": "172.16.14.68"
     },
     "unknown@172.16.14.37": {
@@ -132,5 +142,388 @@
         },
         "last_updated": "2026-05-16T17:41:16.887352",
         "client_ip": "172.16.14.37"
+    },
+    "hcq@172.16.14.74": {
+        "tools": {
+            "Rockchip": [
+                {
+                    "icon": "https://oa.rock-chips.com:8888/favicon.ico",
+                    "title": "Rockchip OA",
+                    "url": "https://oa.rock-chips.com:8888"
+                },
+                {
+                    "icon": "https://redmine.rock-chips.com/favicon.ico",
+                    "title": "Redmine",
+                    "url": "https://redmine.rock-chips.com/my/page"
+                },
+                {
+                    "icon": "https://10.10.10.29/favicon.ico",
+                    "title": "Gerrit",
+                    "url": "https://10.10.10.29/q/owner:chaoqun.huang@rock-chips.com"
+                },
+                {
+                    "icon": "http://10.10.10.203:8080/source/default/img/apple-touch-icon.png",
+                    "title": "OpenGrok",
+                    "url": "http://10.10.10.203:8080/source/"
+                },
+                {
+                    "icon": "🌐",
+                    "title": "Remote Run Server",
+                    "url": "http://10.10.10.206:8393/"
+                },
+                {
+                    "icon": "https://crm.rock-chips.com/portal/index/theme1/bg3.jpg",
+                    "title": "CRM",
+                    "url": "https://crm.rock-chips.com/portal/r/w"
+                },
+                {
+                    "icon": "/static/icons/site-default.svg",
+                    "title": "路由器端口转发",
+                    "url": "http://172.16.14.130:8080/Advanced_VirtualServer_Content.asp"
+                },
+                {
+                    "icon": "http://10.10.10.205:8091/assets/common/images/gitbucket.png?20260330150942",
+                    "title": "GitBucket",
+                    "url": "http://10.10.10.205:8091/Chaoqun/hcq"
+                }
+            ],
+            "Google": [
+                {
+                    "icon": "https://www.google.com/favicon.ico",
+                    "title": "Google",
+                    "url": "https://www.google.com"
+                },
+                {
+                    "icon": "https://www.google.com/a/cpanel/rock-chips.corp-partner.google.com/images/favicon.ico",
+                    "title": "Gmail",
+                    "url": "https://mail.google.com/mail/u/1/#inbox"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/cs.android.com.ico",
+                    "title": "Android Code",
+                    "url": "https://cs.android.com/android/platform/superproject"
+                },
+                {
+                    "icon": "https://android-review.googlesource.com/favicon.ico",
+                    "title": "Google Gerrit",
+                    "url": "https://android-review.googlesource.com/dashboard/self"
+                },
+                {
+                    "icon": "https://www.gstatic.com/buganizer/img/v0/favicon.ico",
+                    "title": "IssueTracker",
+                    "url": "https://partnerissuetracker.corp.google.com/issues?q=reporter:chaoqun.huang@rock-chips.corp-partner.google.com"
+                },
+                {
+                    "icon": "https://drive.google.com/favicon.ico",
+                    "title": "Google Drive",
+                    "url": "https://drive.google.com/drive/home"
+                }
+            ],
+            "开发工具": [
+                {
+                    "icon": "https://github.githubassets.com/favicons/favicon.svg",
+                    "title": "GitHub",
+                    "url": "https://github.com/weixin1263831586?tab=repositories"
+                },
+                {
+                    "icon": "/static/icons/favicons/d3a51b309f9d26d8db7c0a81d8fc264114cb1c7b5d2aebb558c8eaa51a11cd55.png",
+                    "title": "ChatGPT",
+                    "url": "https://chatgpt.com"
+                },
+                {
+                    "icon": "https://cdn.deepseek.com/chat/icon.png",
+                    "title": "DeepSeek",
+                    "url": "https://chat.deepseek.com/"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/www.bigmodel.cn.ico",
+                    "title": "智谱",
+                    "url": "https://www.bigmodel.cn/coding-plan/personal/usage"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/www.qianwen.com.ico",
+                    "title": "Qwen",
+                    "url": "https://www.qianwen.com/"
+                },
+                {
+                    "icon": "https://bewild.ai/favicon-wildai.ico",
+                    "title": "WildAI",
+                    "url": "https://bewild.ai/transaction-record"
+                }
+            ]
+        },
+        "last_updated": "2026-05-23T11:16:09.570209",
+        "client_ip": "172.16.14.74"
+    },
+    "unknown@172.16.14.66": {
+        "tools": {
+            "Rockchip": [
+                {
+                    "icon": "https://oa.rock-chips.com:8888/favicon.ico",
+                    "title": "Rockchip OA",
+                    "url": "https://oa.rock-chips.com:8888"
+                },
+                {
+                    "icon": "https://redmine.rock-chips.com/favicon.ico",
+                    "title": "Redmine",
+                    "url": "https://redmine.rock-chips.com/my/page"
+                },
+                {
+                    "icon": "https://10.10.10.29/favicon.ico",
+                    "title": "Gerrit",
+                    "url": "https://10.10.10.29/q/owner:chaoqun.huang@rock-chips.com"
+                },
+                {
+                    "icon": "http://10.10.10.203:8080/source/default/img/apple-touch-icon.png",
+                    "title": "OpenGrok",
+                    "url": "http://10.10.10.203:8080/source/"
+                },
+                {
+                    "icon": "🌐",
+                    "title": "Remote Run Server",
+                    "url": "http://10.10.10.206:8393/"
+                },
+                {
+                    "icon": "https://crm.rock-chips.com/portal/index/theme1/bg3.jpg",
+                    "title": "CRM",
+                    "url": "https://crm.rock-chips.com/portal/r/w"
+                },
+                {
+                    "icon": "/static/icons/site-default.svg",
+                    "title": "路由器端口转发",
+                    "url": "http://172.16.14.130:8080/Advanced_VirtualServer_Content.asp"
+                },
+                {
+                    "icon": "http://10.10.10.205:8091/assets/common/images/gitbucket.png?20260330150942",
+                    "title": "GitBucket",
+                    "url": "http://10.10.10.205:8091/Chaoqun/hcq"
+                }
+            ],
+            "Google": [
+                {
+                    "icon": "https://www.google.com/favicon.ico",
+                    "title": "Google",
+                    "url": "https://www.google.com"
+                },
+                {
+                    "icon": "https://www.google.com/a/cpanel/rock-chips.corp-partner.google.com/images/favicon.ico",
+                    "title": "Gmail",
+                    "url": "https://mail.google.com/mail/u/1/#inbox"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/cs.android.com.ico",
+                    "title": "Android Code",
+                    "url": "https://cs.android.com/android/platform/superproject"
+                },
+                {
+                    "icon": "https://android-review.googlesource.com/favicon.ico",
+                    "title": "Google Gerrit",
+                    "url": "https://android-review.googlesource.com/dashboard/self"
+                },
+                {
+                    "icon": "https://www.gstatic.com/buganizer/img/v0/favicon.ico",
+                    "title": "IssueTracker",
+                    "url": "https://partnerissuetracker.corp.google.com/issues?q=reporter:chaoqun.huang@rock-chips.corp-partner.google.com"
+                },
+                {
+                    "icon": "https://drive.google.com/favicon.ico",
+                    "title": "Google Drive",
+                    "url": "https://drive.google.com/drive/home"
+                }
+            ],
+            "开发工具": [
+                {
+                    "icon": "https://github.githubassets.com/favicons/favicon.svg",
+                    "title": "GitHub",
+                    "url": "https://github.com/weixin1263831586?tab=repositories"
+                },
+                {
+                    "icon": "/static/icons/favicons/d3a51b309f9d26d8db7c0a81d8fc264114cb1c7b5d2aebb558c8eaa51a11cd55.png",
+                    "title": "ChatGPT",
+                    "url": "https://chatgpt.com"
+                },
+                {
+                    "icon": "https://cdn.deepseek.com/chat/icon.png",
+                    "title": "DeepSeek",
+                    "url": "https://chat.deepseek.com/"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/www.bigmodel.cn.ico",
+                    "title": "智谱",
+                    "url": "https://www.bigmodel.cn/coding-plan/personal/usage"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/www.qianwen.com.ico",
+                    "title": "Qwen",
+                    "url": "https://www.qianwen.com/"
+                },
+                {
+                    "icon": "https://bewild.ai/favicon-wildai.ico",
+                    "title": "WildAI",
+                    "url": "https://bewild.ai/transaction-record"
+                },
+                {
+                    "icon": "/static/icons/favicons/638e10eba5b902b462fc02d26eac303e8641d3cf80c3d952afa01430c1c52a43.ico",
+                    "title": "Ngrok",
+                    "url": "https://dashboard.ngrok.com/get-started/setup/windows"
+                }
+            ]
+        },
+        "last_updated": "2026-05-23T14:45:32.859133",
+        "client_ip": "172.16.14.66"
+    },
+    "unknown@2408:8448:10:1cfc:a435:ceff:fe76:bb08": {
+        "tools": {
+            "Rockchip": [
+                {
+                    "icon": "🏢",
+                    "title": "Rockchip 官网",
+                    "url": "https://www.rock-chips.com"
+                }
+            ],
+            "Google": [
+                {
+                    "icon": "🔍",
+                    "title": "Google",
+                    "url": "https://www.google.com"
+                },
+                {
+                    "icon": "📧",
+                    "title": "Gmail",
+                    "url": "https://gmail.com"
+                }
+            ],
+            "开发工具": [
+                {
+                    "icon": "📦",
+                    "title": "GitHub",
+                    "url": "https://github.com"
+                },
+                {
+                    "icon": "📊",
+                    "title": "Grafana",
+                    "url": "http://172.16.14.233:3000"
+                }
+            ]
+        },
+        "last_updated": "2026-05-23T14:47:28.525061",
+        "client_ip": "2408:8448:10:1cfc:a435:ceff:fe76:bb08"
+    },
+    "hcq@172.16.14.66": {
+        "tools": {
+            "Rockchip": [
+                {
+                    "icon": "https://oa.rock-chips.com:8888/favicon.ico",
+                    "title": "Rockchip OA",
+                    "url": "https://oa.rock-chips.com:8888"
+                },
+                {
+                    "icon": "https://redmine.rock-chips.com/favicon.ico",
+                    "title": "Redmine",
+                    "url": "https://redmine.rock-chips.com/my/page"
+                },
+                {
+                    "icon": "https://android-review.googlesource.com/favicon.ico",
+                    "title": "Gerrit",
+                    "url": "https://10.10.10.29/q/owner:chaoqun.huang@rock-chips.com"
+                },
+                {
+                    "icon": "http://10.10.10.203:8080/source/default/img/apple-touch-icon.png",
+                    "title": "OpenGrok",
+                    "url": "http://10.10.10.203:8080/source/"
+                },
+                {
+                    "icon": "🌐",
+                    "title": "Remote Run Server",
+                    "url": "http://10.10.10.206:8393/"
+                },
+                {
+                    "icon": "https://crm.rock-chips.com/portal/index/theme1/bg3.jpg",
+                    "title": "CRM",
+                    "url": "https://crm.rock-chips.com/portal/r/w"
+                },
+                {
+                    "icon": "/static/icons/site-default.svg",
+                    "title": "路由器端口转发",
+                    "url": "http://172.16.14.130:8080/Advanced_VirtualServer_Content.asp"
+                },
+                {
+                    "icon": "http://10.10.10.205:8091/assets/common/images/gitbucket.png?20260330150942",
+                    "title": "GitBucket",
+                    "url": "http://10.10.10.205:8091/Chaoqun/hcq"
+                }
+            ],
+            "Google": [
+                {
+                    "icon": "https://www.google.com/favicon.ico",
+                    "title": "Google",
+                    "url": "https://www.google.com"
+                },
+                {
+                    "icon": "https://www.google.com/a/cpanel/rock-chips.corp-partner.google.com/images/favicon.ico",
+                    "title": "Gmail",
+                    "url": "https://mail.google.com/mail/u/1/#inbox"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/cs.android.com.ico",
+                    "title": "Android Code",
+                    "url": "https://cs.android.com/android/platform/superproject"
+                },
+                {
+                    "icon": "https://android-review.googlesource.com/favicon.ico",
+                    "title": "Google Gerrit",
+                    "url": "https://android-review.googlesource.com/dashboard/self"
+                },
+                {
+                    "icon": "https://www.gstatic.com/buganizer/img/v0/favicon.ico",
+                    "title": "IssueTracker",
+                    "url": "https://partnerissuetracker.corp.google.com/issues?q=reporter:chaoqun.huang@rock-chips.corp-partner.google.com"
+                },
+                {
+                    "icon": "https://drive.google.com/favicon.ico",
+                    "title": "Google Drive",
+                    "url": "https://drive.google.com/drive/home"
+                }
+            ],
+            "开发工具": [
+                {
+                    "icon": "https://github.githubassets.com/favicons/favicon.svg",
+                    "title": "GitHub",
+                    "url": "https://github.com/weixin1263831586?tab=repositories"
+                },
+                {
+                    "icon": "/static/icons/favicons/d3a51b309f9d26d8db7c0a81d8fc264114cb1c7b5d2aebb558c8eaa51a11cd55.png",
+                    "title": "ChatGPT",
+                    "url": "https://chatgpt.com"
+                },
+                {
+                    "icon": "https://cdn.deepseek.com/chat/icon.png",
+                    "title": "DeepSeek",
+                    "url": "https://chat.deepseek.com/"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/www.bigmodel.cn.ico",
+                    "title": "智谱",
+                    "url": "https://www.bigmodel.cn/coding-plan/personal/usage"
+                },
+                {
+                    "icon": "https://icons.duckduckgo.com/ip3/www.qianwen.com.ico",
+                    "title": "Qwen",
+                    "url": "https://www.qianwen.com/"
+                },
+                {
+                    "icon": "https://bewild.ai/favicon-wildai.ico",
+                    "title": "WildAI",
+                    "url": "https://bewild.ai/transaction-record"
+                },
+                {
+                    "icon": "/static/icons/favicons/638e10eba5b902b462fc02d26eac303e8641d3cf80c3d952afa01430c1c52a43.ico",
+                    "title": "Ngrok",
+                    "url": "https://dashboard.ngrok.com/get-started/setup/windows"
+                }
+            ]
+        },
+        "last_updated": "2026-05-23T15:08:14.693181",
+        "client_ip": "172.16.14.66"
     }
 }

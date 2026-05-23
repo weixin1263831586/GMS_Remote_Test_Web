@@ -1,13 +1,14 @@
 {
   "favicon:www.google.com": {
     "success": true,
-    "icon_url": "https://www.google.com/favicon.ico",
+    "icon_url": "/static/icons/favicons/bf47859202c2733ba6f72f3244822f62ac0ddf23f3535c13ce7900c445cb429c.ico",
     "icon_type": "ico",
-    "source": "root",
-    "size": 0,
+    "source": "cache_local",
+    "size": 5430,
     "error": "",
-    "cache_key": "",
-    "timestamp": "2026-05-16T17:49:21.807045"
+    "cache_key": "favicon:www.google.com",
+    "original_icon_url": "https://www.google.com/favicon.ico",
+    "timestamp": "2026-05-23T10:56:42.088547"
   },
   "favicon:github.com": {
     "success": true,
@@ -119,16 +120,6 @@
     "cache_key": "",
     "timestamp": "2026-05-16T20:25:11.829079"
   },
-  "favicon:oa.rock-chips.com:8888": {
-    "success": true,
-    "icon_url": "https://oa.rock-chips.com:8888/favicon.ico",
-    "icon_type": "ico",
-    "source": "root",
-    "size": 0,
-    "error": "",
-    "cache_key": "",
-    "timestamp": "2026-05-18T10:23:26.971013"
-  },
   "favicon:www.qianwen.com": {
     "success": true,
     "icon_url": "https://img.alicdn.com/imgextra/i4/O1CN01uar8u91DHWktnF2fl_!!6000000000191-2-tps-110-110.png",
@@ -178,5 +169,256 @@
     "error": "",
     "cache_key": "",
     "timestamp": "2026-05-18T17:20:25.206999"
+  },
+  "favicon:mail.google.com": {
+    "success": true,
+    "icon_url": "https://mail.google.com/favicon.ico",
+    "icon_type": "ico",
+    "source": "root",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-19T17:47:02.011075"
+  },
+  "favicon:bewild.ai": {
+    "success": true,
+    "icon_url": "https://bewild.ai/favicon-wildai.ico",
+    "icon_type": "unknown",
+    "source": "html",
+    "size": 0,
+    "error": "",
+    "cache_key": "",
+    "timestamp": "2026-05-20T14:52:20.329463"
+  },
+  "iconfile:bf47859202c2733ba6f72f3244822f62ac0ddf23f3535c13ce7900c445cb429c": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/bf47859202c2733ba6f72f3244822f62ac0ddf23f3535c13ce7900c445cb429c.ico",
+    "icon_type": "ico",
+    "source": "download",
+    "size": 5430,
+    "error": "",
+    "cache_key": "iconfile:bf47859202c2733ba6f72f3244822f62ac0ddf23f3535c13ce7900c445cb429c",
+    "original_icon_url": "https://www.google.com/favicon.ico",
+    "timestamp": "2026-05-23T10:56:42.087103"
+  },
+  "iconfile:1a43fcd157ab39c1746959e9ea5f993614b296573069cd78b5163c22dcbfa00c": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/1a43fcd157ab39c1746959e9ea5f993614b296573069cd78b5163c22dcbfa00c.png",
+    "icon_type": "png",
+    "source": "download",
+    "size": 834,
+    "error": "",
+    "cache_key": "iconfile:1a43fcd157ab39c1746959e9ea5f993614b296573069cd78b5163c22dcbfa00c",
+    "original_icon_url": "https://www.google.com/s2/favicons?domain=redmine.rock-chips.com&sz=128",
+    "timestamp": "2026-05-23T10:57:01.099404"
+  },
+  "iconfile:3a57911f43fd8a9ccfaa8e3ed6cf6cb3461308d7a37e13775ab6414b785725c9": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/3a57911f43fd8a9ccfaa8e3ed6cf6cb3461308d7a37e13775ab6414b785725c9.ico",
+    "icon_type": "ico",
+    "source": "download",
+    "size": 2238,
+    "error": "",
+    "cache_key": "iconfile:3a57911f43fd8a9ccfaa8e3ed6cf6cb3461308d7a37e13775ab6414b785725c9",
+    "original_icon_url": "https://oa.rock-chips.com:8888/favicon.ico",
+    "timestamp": "2026-05-23T10:57:16.681341"
+  },
+  "iconfile:24371e6071330f4bfacda8cbbb5658eaa4d4fcb5b8319a7a389a078f5130d69b": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/24371e6071330f4bfacda8cbbb5658eaa4d4fcb5b8319a7a389a078f5130d69b.ico",
+    "icon_type": "ico",
+    "source": "download",
+    "size": 17884,
+    "error": "",
+    "cache_key": "iconfile:24371e6071330f4bfacda8cbbb5658eaa4d4fcb5b8319a7a389a078f5130d69b",
+    "original_icon_url": "https://www.google.com/a/cpanel/rock-chips.corp-partner.google.com/images/favicon.ico",
+    "timestamp": "2026-05-23T11:01:08.749541"
+  },
+  "iconfile:5302fe52471d5c2e978bf55df7a8c60fcdef0d89c64e01d4951909a0b11f1e47": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/5302fe52471d5c2e978bf55df7a8c60fcdef0d89c64e01d4951909a0b11f1e47.svg",
+    "icon_type": "svg",
+    "source": "download",
+    "size": 959,
+    "error": "",
+    "cache_key": "iconfile:5302fe52471d5c2e978bf55df7a8c60fcdef0d89c64e01d4951909a0b11f1e47",
+    "original_icon_url": "https://github.githubassets.com/favicons/favicon.svg",
+    "timestamp": "2026-05-23T11:01:09.117821"
+  },
+  "iconfile:415448a677fc1b973f63c5249f3de1a4e116e7b059ed38e1d78bc913c87d7ad9": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/415448a677fc1b973f63c5249f3de1a4e116e7b059ed38e1d78bc913c87d7ad9.ico",
+    "icon_type": "ico",
+    "source": "download",
+    "size": 5430,
+    "error": "",
+    "cache_key": "iconfile:415448a677fc1b973f63c5249f3de1a4e116e7b059ed38e1d78bc913c87d7ad9",
+    "original_icon_url": "https://android-review.googlesource.com/favicon.ico",
+    "timestamp": "2026-05-23T11:01:10.520654"
+  },
+  "iconfile:7aa446441eafcdf1371d6fd46e425cff12c41fdf502584f845d968e3eb0f57c8": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/7aa446441eafcdf1371d6fd46e425cff12c41fdf502584f845d968e3eb0f57c8.ico",
+    "icon_type": "ico",
+    "source": "local_cache",
+    "size": 0,
+    "error": "",
+    "cache_key": "iconfile:7aa446441eafcdf1371d6fd46e425cff12c41fdf502584f845d968e3eb0f57c8",
+    "original_icon_url": "https://bewild.ai/favicon-wildai.ico",
+    "timestamp": "2026-05-23T11:01:26.756360"
+  },
+  "iconfile:fb0198ffd97ed6665008ab81a42e12784649525b8f2066df434086ea60fe58b3": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/fb0198ffd97ed6665008ab81a42e12784649525b8f2066df434086ea60fe58b3.png",
+    "icon_type": "png",
+    "source": "local_cache",
+    "size": 0,
+    "error": "",
+    "cache_key": "iconfile:fb0198ffd97ed6665008ab81a42e12784649525b8f2066df434086ea60fe58b3",
+    "original_icon_url": "https://icons.duckduckgo.com/ip3/www.qianwen.com.ico",
+    "timestamp": "2026-05-23T11:01:26.780240"
+  },
+  "iconfile:7ff8ea42160a926f7d5726370a70cc31c98f19c31c3447865806d5e72beee06e": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/7ff8ea42160a926f7d5726370a70cc31c98f19c31c3447865806d5e72beee06e.png",
+    "icon_type": "png",
+    "source": "local_cache",
+    "size": 0,
+    "error": "",
+    "cache_key": "iconfile:7ff8ea42160a926f7d5726370a70cc31c98f19c31c3447865806d5e72beee06e",
+    "original_icon_url": "https://drive.google.com/favicon.ico",
+    "timestamp": "2026-05-23T11:01:26.785596"
+  },
+  "iconfile:a02490cf0de0145dbd2e70c73da1595666f0f52cd5296fff70bf81d14cfa132b": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/a02490cf0de0145dbd2e70c73da1595666f0f52cd5296fff70bf81d14cfa132b.png",
+    "icon_type": "png",
+    "source": "local_cache",
+    "size": 0,
+    "error": "",
+    "cache_key": "iconfile:a02490cf0de0145dbd2e70c73da1595666f0f52cd5296fff70bf81d14cfa132b",
+    "original_icon_url": "https://icons.duckduckgo.com/ip3/cs.android.com.ico",
+    "timestamp": "2026-05-23T11:01:26.787042"
+  },
+  "iconfile:bc3788632a35b7dc9434885692143723d62260d01196486b6b67d63b5ab95985": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/bc3788632a35b7dc9434885692143723d62260d01196486b6b67d63b5ab95985.png",
+    "icon_type": "png",
+    "source": "local_cache",
+    "size": 0,
+    "error": "",
+    "cache_key": "iconfile:bc3788632a35b7dc9434885692143723d62260d01196486b6b67d63b5ab95985",
+    "original_icon_url": "https://cdn.deepseek.com/chat/icon.png",
+    "timestamp": "2026-05-23T11:01:26.789896"
+  },
+  "iconfile:4b87848235d1ef3bc04964d6c0fe0b58aa89b721a4cef87d215232c3993ab3e7": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/4b87848235d1ef3bc04964d6c0fe0b58aa89b721a4cef87d215232c3993ab3e7.png",
+    "icon_type": "png",
+    "source": "local_cache",
+    "size": 0,
+    "error": "",
+    "cache_key": "iconfile:4b87848235d1ef3bc04964d6c0fe0b58aa89b721a4cef87d215232c3993ab3e7",
+    "original_icon_url": "https://icons.duckduckgo.com/ip3/www.bigmodel.cn.ico",
+    "timestamp": "2026-05-23T11:01:26.791159"
+  },
+  "iconfile:6df191d7057a399087d1c4296b85d77f238a598a504c9c6998883ffe564eff4a": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/6df191d7057a399087d1c4296b85d77f238a598a504c9c6998883ffe564eff4a.ico",
+    "icon_type": "ico",
+    "source": "local_cache",
+    "size": 0,
+    "error": "",
+    "cache_key": "iconfile:6df191d7057a399087d1c4296b85d77f238a598a504c9c6998883ffe564eff4a",
+    "original_icon_url": "https://www.gstatic.com/buganizer/img/v0/favicon.ico",
+    "timestamp": "2026-05-23T11:01:26.794865"
+  },
+  "iconfile:8047af73080310c1918570f69671967919c6e0b176b0f535581e3342973783e0": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/8047af73080310c1918570f69671967919c6e0b176b0f535581e3342973783e0.webp",
+    "icon_type": "webp",
+    "source": "local_cache",
+    "size": 0,
+    "error": "",
+    "cache_key": "iconfile:8047af73080310c1918570f69671967919c6e0b176b0f535581e3342973783e0",
+    "original_icon_url": "https://icons.duckduckgo.com/ip3/chatgpt.com.ico",
+    "timestamp": "2026-05-23T11:01:26.797334"
+  },
+  "favicon:oa.rock-chips.com:8888": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/3a57911f43fd8a9ccfaa8e3ed6cf6cb3461308d7a37e13775ab6414b785725c9.ico",
+    "icon_type": "ico",
+    "source": "root_local",
+    "size": 2238,
+    "error": "",
+    "cache_key": "favicon:oa.rock-chips.com:8888",
+    "original_icon_url": "https://oa.rock-chips.com:8888/favicon.ico",
+    "timestamp": "2026-05-23T11:04:10.664437"
+  },
+  "favicon:redmine.rock-chips.com": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/1a43fcd157ab39c1746959e9ea5f993614b296573069cd78b5163c22dcbfa00c.png",
+    "icon_type": "png",
+    "source": "api_google",
+    "size": 834,
+    "error": "",
+    "cache_key": "favicon:redmine.rock-chips.com",
+    "original_icon_url": "https://www.google.com/s2/favicons?domain=redmine.rock-chips.com&sz=128",
+    "timestamp": "2026-05-23T11:04:34.663570"
+  },
+  "iconfile:d3a51b309f9d26d8db7c0a81d8fc264114cb1c7b5d2aebb558c8eaa51a11cd55": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/d3a51b309f9d26d8db7c0a81d8fc264114cb1c7b5d2aebb558c8eaa51a11cd55.png",
+    "icon_type": "png",
+    "source": "download",
+    "size": 2232,
+    "error": "",
+    "cache_key": "iconfile:d3a51b309f9d26d8db7c0a81d8fc264114cb1c7b5d2aebb558c8eaa51a11cd55",
+    "original_icon_url": "https://www.google.com/s2/favicons?domain=chatgpt.com&sz=128",
+    "timestamp": "2026-05-23T11:15:28.627707"
+  },
+  "favicon:chatgpt.com": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/d3a51b309f9d26d8db7c0a81d8fc264114cb1c7b5d2aebb558c8eaa51a11cd55.png",
+    "icon_type": "png",
+    "source": "api_google",
+    "size": 2232,
+    "error": "",
+    "cache_key": "favicon:chatgpt.com",
+    "original_icon_url": "https://www.google.com/s2/favicons?domain=chatgpt.com&sz=128",
+    "timestamp": "2026-05-23T11:15:28.630145"
+  },
+  "iconfile:de53da4d8624d42c1444d24f143a23aca5ee3b5c055cbb02c44b72e36628e1f7": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/de53da4d8624d42c1444d24f143a23aca5ee3b5c055cbb02c44b72e36628e1f7.png",
+    "icon_type": "png",
+    "source": "download",
+    "size": 15440,
+    "error": "",
+    "cache_key": "iconfile:de53da4d8624d42c1444d24f143a23aca5ee3b5c055cbb02c44b72e36628e1f7",
+    "original_icon_url": "http://10.10.10.205:8091/assets/common/images/gitbucket.png?20260330150942",
+    "timestamp": "2026-05-23T14:33:49.119061"
+  },
+  "iconfile:638e10eba5b902b462fc02d26eac303e8641d3cf80c3d952afa01430c1c52a43": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/638e10eba5b902b462fc02d26eac303e8641d3cf80c3d952afa01430c1c52a43.ico",
+    "icon_type": "ico",
+    "source": "download",
+    "size": 270398,
+    "error": "",
+    "cache_key": "iconfile:638e10eba5b902b462fc02d26eac303e8641d3cf80c3d952afa01430c1c52a43",
+    "original_icon_url": "https://dashboard.ngrok.com/favicon.ico",
+    "timestamp": "2026-05-23T14:44:25.137906"
+  },
+  "favicon:dashboard.ngrok.com": {
+    "success": true,
+    "icon_url": "/static/icons/favicons/638e10eba5b902b462fc02d26eac303e8641d3cf80c3d952afa01430c1c52a43.ico",
+    "icon_type": "ico",
+    "source": "root_local",
+    "size": 270398,
+    "error": "",
+    "cache_key": "favicon:dashboard.ngrok.com",
+    "original_icon_url": "https://dashboard.ngrok.com/favicon.ico",
+    "timestamp": "2026-05-23T14:44:25.140342"
   }
 }
