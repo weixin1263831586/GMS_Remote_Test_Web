@@ -104,23 +104,63 @@ body {
 .sidebar-nav {
     flex: 1;
     padding: 8px 6px;
-    overflow-y: auto;
+}
+
+/* 拖拽手柄 */
+.drag-handle {
+    cursor: grab;
+    padding: 2px 4px;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.2s, color 0.2s;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-right: -4px;
+}
+
+.sidebar-item:hover .drag-handle {
+    opacity: 1;
+}
+
+.drag-handle:hover {
+    color: var(--primary-color);
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+/* 拖拽中的样式 */
+.sidebar-item.dragging {
+    opacity: 0.5;
+    background: var(--lighter-bg);
+    border: 1px dashed var(--border-color);
+}
+
+.sidebar-item.drag-over {
+    border-top: 2px solid var(--primary-color);
 }
 
 .sidebar-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px;
+    gap: 4px;
+    padding: 10px 8px;
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 14px;
+    font-size: 13px;
     transition: var(--transition-normal);
     border-radius: 8px;
-    margin-bottom: 3px;
+    margin-bottom: 2px;
     cursor: pointer;
     position: relative;
     overflow: hidden;
+    white-space: nowrap;
 }
 
 .sidebar-item::before {
