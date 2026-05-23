@@ -6,7 +6,7 @@ const state = {
     selectedDevices: new Set(),
     socket: null,
     sshConnected: false,
-    vpnConnected: false,
+    vpnConnected: null,
     adbForwardRunning: false,
     usbipConnected: false,
     config: null,
@@ -69,11 +69,11 @@ const OPENGROK_CONFIG = {
                     this._loaded = true;
                     debugLog('[OpenGrok] ✅ 配置已加载:', { baseUrl: this._baseUrl, defaultProject: this._defaultProject, projectMapping: this._projectMapping });
                 } else {
-                    console.warn('[OpenGrok] ⚠️ 配置响应格式异常:', result);
+                    debugLog('[OpenGrok] 配置响应格式异常:', result);
                 }
             })
             .catch(error => {
-                console.error('[OpenGrok] ❌ 配置加载失败:', error.message);
+                debugLog('[OpenGrok] 配置加载失败:', error.message);
             });
     }
 };
@@ -128,12 +128,23 @@ async function getRedmineConfig() {
     return cachedRedmineConfig;
 }
 
-// 性能优化工具
+// 性能优化工具 - DOM element caching with null-check and stale detection
 function $(id) {
-    if (!state.domCache[id]) {
-        state.domCache[id] = document.getElementById(id);
+    const cached = state.domCache[id];
+    if (cached) {
+        // Verify element is still in the DOM (handles page switches that remove elements)
+        if (cached.isConnected) return cached;
+        // Remove stale cache entry
+        delete state.domCache[id];
     }
-    return state.domCache[id];
+    const el = document.getElementById(id);
+    if (el) state.domCache[id] = el;
+    return el;
+}
+
+// Clear DOM cache (call when switching pages to avoid stale references)
+function clearDomCache() {
+    state.domCache = {};
 }
 
 // Debug logger wrapper (only logs when DEBUG is true)
@@ -188,38 +199,10 @@ function buildOpenGrokUrl(path, line = null) {
 }
 
 function debounce(func, wait) {
-    const modalId = `${type}-modal-${Date.now()}`;
-    const modal = document.createElement('div');
-    modal.id = modalId;
-    modal.className = 'modal';
-    modal.style.cssText = 'z-index: 10000;';
-
-    modal.innerHTML = `
-        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
-            <div class="modal-header">
-                <span class="modal-title">${title}</span>
-                <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div style="text-align: center; padding: 40px;">
-                    <div style="font-size: 48px; margin-bottom: 20px;">🔍</div>
-                    <div style="color: var(--text-secondary); margin-bottom: 12px;">${loadingMessage}</div>
-                </div>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(modal);
-    ModalManager.open(modalId);
-
-    return { modal, modalId };
-}
-
-function debounce(func, wait) {
-    let timeout;
+    let timer = null;
     return function(...args) {
-        clearTimeout(timeout);
-        timeout = setTimeout(() => func(...args), wait);
+        clearTimeout(timer);
+        timer = setTimeout(() => func.apply(this, args), wait);
     };
 }
 
@@ -252,6 +235,10 @@ const ModalManager = {
         const modal = document.getElementById(modalId);
         if (modal) {
             modal.classList.remove('show');
+            // 重置 inline display 样式，防止 Esc 关闭时 inline style 优先级高于 CSS 导致弹框残留
+            if (modal.style.display === 'flex') {
+                modal.style.display = 'none';
+            }
             this._removeActiveModal(modalId);
             this._cleanupEscListener();
         }
@@ -260,6 +247,9 @@ const ModalManager = {
     closeAll() {
         document.querySelectorAll('.modal.show').forEach(m => {
             m.classList.remove('show');
+            if (m.style.display === 'flex') {
+                m.style.display = 'none';
+            }
             this._removeActiveModal(m.id);
         });
         this._cleanupEscListener();
@@ -273,6 +263,9 @@ const ModalManager = {
                 this._addActiveModal(modalId);
                 this._ensureEscListener();
             } else {
+                if (modal.style.display === 'flex') {
+                    modal.style.display = 'none';
+                }
                 this._removeActiveModal(modalId);
                 this._cleanupEscListener();
             }
@@ -413,7 +406,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // 检查是否是 unknown 用户（apiCall 中会统一处理弹框）
                 if (userData.client_id.startsWith('unknown@')) {
-                    console.warn('[Init] Detected unknown client, will show username modal via apiCall');
+                    debugLog('[Init] Detected unknown client, will show username modal via apiCall');
                 } else {
                     // 已获取到正确的用户名，延迟检查 USB/IP 和 VPN 状态（避免阻塞关键请求）
                     setTimeout(() => {
@@ -421,16 +414,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                             checkUsbipStatus(),
                             checkVpnStatus()
                         ]).catch(error => {
-                            console.warn('[Init] Background status check failed:', error);
+                            debugLog('[Init] Background status check failed:', error);
                         });
                     }, 3000);  // 3秒后再检查
                 }
             }
         } else {
-            console.warn('[Init] Failed to call /api/users/current');
+            debugLog('[Init] Failed to call /api/users/current');
         }
     } catch (error) {
-        console.warn('[Init] Error getting current user:', error);
+        debugLog('[Init] Error getting current user:', error);
     }
 
     // 🔌 现在初始化WebSocket（需要clientId）
@@ -547,7 +540,7 @@ async function loadConfig() {
         const config = await apiCall('/api/config/read', 'GET');
         state.config = config;
     } catch (error) {
-        console.error('Failed to load config:', error);
+        debugLog('Failed to load config:', error);
         state.config = { ubuntu_user: 'hcq' };  // Fallback
     }
 }
@@ -579,14 +572,14 @@ function initWebSocket() {
             // 5秒后重连
             setTimeout(() => {
                 if (typeof io === 'undefined') {
-                    console.log('[WebSocket] Attempting to reconnect...');
+                    debugLog('[WebSocket] Attempting to reconnect...');
                     initWebSocket();
                 }
             }, 5000);
         };
 
         state.websocket.onerror = (error) => {
-            console.error('[WebSocket] Error:', error);
+            debugLog('[WebSocket] Error:', error);
         };
 
         state.websocket.onmessage = (event) => {
@@ -596,7 +589,7 @@ function initWebSocket() {
 
                 switch (messageType) {
                     case 'log_update':
-                        console.log('[WebSocket] log_update:', data.log);
+                        debugLog('[WebSocket] log_update:', data.log);
                         // 所有日志都添加到日志区域
                         addLogEntry(data.log, data.log_type || 'info');
                         break;
@@ -616,12 +609,12 @@ function initWebSocket() {
 
                     case 'device_lock_update':
                         // 快速更新设备锁定状态（不需要重新查询设备列表）
-                        console.log('[WebSocket] device_lock_update:', data);
+                        debugLog('[WebSocket] device_lock_update:', data);
                         if (data.devices && Array.isArray(data.devices)) {
                             let updated = false;
                             data.devices.forEach(update => {
                                 const deviceId = update.device_id;
-                                console.log(`[Device Lock] Updating ${deviceId}: locked=${update.locked}, by=${update.locked_by}`);
+                                debugLog(`[Device Lock] Updating ${deviceId}: locked=${update.locked}, by=${update.locked_by}`);
                                 // 更新 state.devices 中的锁定状态
                                 const device = state.devices.find(d => {
                                     const id = typeof d === 'string' ? d : d.device_id;
@@ -638,13 +631,13 @@ function initWebSocket() {
                                             locked_by: update.locked_by || '',
                                             locked_at: update.locked_at || ''
                                         };
-                                        console.log(`[Device Lock] Converted to object:`, state.devices[idx]);
+                                        debugLog(`[Device Lock] Converted to object:`, state.devices[idx]);
                                     } else {
                                         // 更新现有对象
                                         device.locked = update.locked;
                                         device.locked_by = update.locked_by || '';
                                         device.locked_at = update.locked_at || '';
-                                        console.log(`[Device Lock] Updated device:`, device);
+                                        debugLog(`[Device Lock] Updated device:`, device);
                                     }
                                 } else {
                                     console.warn(`[Device Lock] Device ${deviceId} not found in state.devices`);
@@ -653,10 +646,10 @@ function initWebSocket() {
 
                             // 重新渲染设备列表
                             if (updated) {
-                                console.log('[Device Lock] Re-rendering devices...');
+                                debugLog('[Device Lock] Re-rendering devices...');
                                 try {
                                     renderDevices();
-                                    console.log('[Device Lock] Render completed successfully');
+                                    debugLog('[Device Lock] Render completed successfully');
                                 } catch (error) {
                                     console.error('[Device Lock] Render failed:', error);
                                 }
@@ -668,7 +661,7 @@ function initWebSocket() {
 
                     case 'devices_changed':
                         // USB 设备插拔事件，自动刷新设备列表
-                        console.log('[WebSocket] devices_changed:', data.devices);
+                        debugLog('[WebSocket] devices_changed:', data.devices);
 
                         // 优先使用后端提供的 connected/disconnected 信息（更准确、更快）
                         let connected = data.connected || [];
@@ -710,7 +703,7 @@ function initWebSocket() {
                                     btn.textContent = '📱 本地设备';
                                     btn.disabled = false;
                                     state.usbipConnected = false;
-                                    console.log('[USB/IP] Button reset due to device disconnect');
+                                    debugLog('[USB/IP] Button reset due to device disconnect');
                                 }
                             }
                         }).catch(err => {
@@ -720,7 +713,7 @@ function initWebSocket() {
 
                     case 'firmware_progress':
                         // 固件烧写进度更新
-                        console.log('[WebSocket] firmware_progress:', data.percentage);
+                        debugLog('[WebSocket] firmware_progress:', data.percentage);
                         if (data.percentage !== undefined) {
                             // 只在百分比大于等于当前值时才更新（避免跳动）
                             const currentProgress = state.currentBurningProgress || 0;
@@ -756,7 +749,7 @@ function initWebSocket() {
                         break;
 
                     default:
-                        console.log('[WebSocket] Unknown message type:', messageType, data);
+                        debugLog('[WebSocket] Unknown message type:', messageType, data);
                 }
             } catch (error) {
                 console.error('[WebSocket] Error parsing message:', error);
@@ -777,7 +770,7 @@ function initWebSocket() {
 function initSocket() {
     // 检查Socket.IO是否可用（FastAPI版本使用WebSocket）
     if (typeof io === 'undefined') {
-        console.warn('[Socket.IO] Not available, using WebSocket instead (FastAPI)');
+        debugLog('[Socket.IO] Not available, using WebSocket instead (FastAPI)');
         initWebSocket();
         return;
     }
@@ -790,12 +783,12 @@ function initSocket() {
     });
 
     state.socket.on('disconnect', () => {
-        console.log('Disconnected from server');
+        debugLog('Disconnected from server');
         updateConnectionStatus(false);
     });
 
     state.socket.on('connected', (data) => {
-        console.log('[Socket.IO] Server confirmed connection, client_id:', data.client_id);
+        debugLog('[Socket.IO] Server confirmed connection, client_id:', data.client_id);
         // 在日志区域显示连接信息
         setTimeout(() => {
             const logOutput = document.getElementById('log-output');
@@ -811,7 +804,7 @@ function initSocket() {
     });
 
     state.socket.on('log_update', (data) => {
-        console.log('[Socket.IO] Received log_update:', data);
+        debugLog('[Socket.IO] Received log_update:', data);
         // 直接添加日志
         const logOutput = document.getElementById('log-output');
         if (logOutput) {
@@ -936,7 +929,7 @@ function autoSelectTestSuite(testType) {
         );
     }
 
-    console.log(`[autoSelectTestSuite] 测试类型: ${testType}, 找到 ${matchingSuites.length} 个匹配套件`);
+    debugLog(`[autoSelectTestSuite] 测试类型: ${testType}, 找到 ${matchingSuites.length} 个匹配套件`);
 
     if (matchingSuites.length > 0) {
         // 按版本号排序，选择版本号最大的
@@ -984,7 +977,7 @@ function autoSelectTestSuite(testType) {
             const versionA = extractVersion(a.version);
             const versionB = extractVersion(b.version);
 
-            console.log(`[版本比较] ${a.version} ->`, versionA, `vs ${b.version} ->`, versionB);
+            debugLog(`[版本比较] ${a.version} ->`, versionA, `vs ${b.version} ->`, versionB);
 
             // 先比较主版本号
             const maxMainLength = Math.max(versionA.main.length, versionB.main.length);
@@ -1005,7 +998,7 @@ function autoSelectTestSuite(testType) {
         $('test-suite').value = latestSuite.tools_path;
         addLogEntry(`自动选择最新测试套件: ${latestSuite.version}`, 'info');
 
-        console.log(`[autoSelectTestSuite] 已选择套件:`, {
+        debugLog(`[autoSelectTestSuite] 已选择套件:`, {
             version: latestSuite.version,
             path: latestSuite.tools_path,
             all_suites: matchingSuites.map(s => ({ version: s.version, path: s.tools_path }))
@@ -1146,7 +1139,23 @@ async function apiCall(url, method = 'GET', data = null) {
         }
 
         const response = await fetch(url, options);
-        const result = await response.json();
+        const contentType = response.headers.get('content-type') || '';
+        let result = null;
+
+        if (contentType.includes('application/json')) {
+            try {
+                result = await response.json();
+            } catch (jsonError) {
+                result = { success: response.ok, error: '响应 JSON 解析失败' };
+            }
+        } else {
+            const text = await response.text();
+            result = text ? { success: response.ok, message: text } : { success: response.ok };
+        }
+
+        if (!result || typeof result !== 'object') {
+            result = { success: response.ok };
+        }
 
         // 如果API返回了client_id，更新state.clientId
         if (result.client_id) {
@@ -1155,12 +1164,12 @@ async function apiCall(url, method = 'GET', data = null) {
 
             // 检查是否是unknown用户
             if (result.client_id.startsWith('unknown@')) {
-                console.warn(`[apiCall] Detected unknown client: ${result.client_id}`);
+                debugLog(`[apiCall] Detected unknown client: ${result.client_id}`);
 
                 // 只在第一次检测到unknown时显示弹框（避免重复弹窗）
                 if (!state.usernameDetectShown) {
                     state.usernameDetectShown = true;
-                    console.log('[apiCall] Showing username detect modal for:', result.ip);
+                    debugLog('[apiCall] Showing username detect modal for:', result.ip);
 
                     // 延迟显示弹框，确保页面已加载完成
                     setTimeout(() => {
@@ -1168,12 +1177,12 @@ async function apiCall(url, method = 'GET', data = null) {
                     }, 500);
                 }
             } else if (oldClientId !== result.client_id) {
-                console.log(`[apiCall] Updated state.clientId: ${oldClientId} → ${result.client_id}`);
+                debugLog(`[apiCall] Updated state.clientId: ${oldClientId} → ${result.client_id}`);
             }
         }
 
         if (!response.ok) {
-            const error = new Error(result.error || 'Request failed');
+            const error = new Error(result.error || result.message || 'Request failed');
             // Attach additional fields from error response
             if (result.need_password) {
                 error.needPassword = true;
@@ -1186,7 +1195,7 @@ async function apiCall(url, method = 'GET', data = null) {
 
         return result;
     } catch (error) {
-        console.error('API Error:', error);
+        debugLog('API Error:', error);
         // Only show toast if not suppressed (e.g., for password prompt)
         if (!error.suppressToast) {
             showToast(error.message, 'error');
@@ -1248,7 +1257,7 @@ async function loadTestSuites(forceRefresh = false) {
         if (response.success && response.suites) {
             testSuitesCache = response.suites;
             renderTestSuitesDropdown();
-            console.log('[loadTestSuites] 已加载测试套件:', response.count, '个');
+            debugLog('[loadTestSuites] 已加载测试套件:', response.count, '个');
         } else {
             showToast('加载测试套件失败', 'error');
         }
@@ -1317,25 +1326,25 @@ async function loadUsers(forceRefresh = false) {
         const url = forceRefresh ? '/api/users/list?force_refresh=1' : '/api/users/list';
         const response = await apiCall(url);
 
-        console.log('[loadUsers] API response:', response);
+        debugLog('[loadUsers] API response:', response);
 
         // 处理不同的响应格式
         let users = [];
         if (Array.isArray(response)) {
             users = response;
-            console.log('[loadUsers] Response is array, length:', users.length);
+            debugLog('[loadUsers] Response is array, length:', users.length);
         } else if (response && response.users && Array.isArray(response.users)) {
             users = response.users;
-            console.log('[loadUsers] Response has users array, length:', users.length);
+            debugLog('[loadUsers] Response has users array, length:', users.length);
         } else if (response && response.data && Array.isArray(response.data)) {
             users = response.data;
-            console.log('[loadUsers] Response has data array, length:', users.length);
+            debugLog('[loadUsers] Response has data array, length:', users.length);
         } else {
             console.warn('[loadUsers] Unexpected user list format:', response);
         }
 
         state.users = users;
-        console.log('[loadUsers] state.users set to:', state.users);
+        debugLog('[loadUsers] state.users set to:', state.users);
         // renderUsers() 已移除，使用 HTML 中的 displayUsersList() 避免重复渲染
     } catch (error) {
         console.error('加载用户列表失败:', error);
@@ -1405,15 +1414,14 @@ function renderDevices() {
     });
 
     // 使用DocumentFragment优化DOM操作
+    // Event delegation is used on the containers (setup below), so no individual onclick needed
     const renderDeviceItem = ({ deviceId, isLocked, lockedBy }) => {
         const div = document.createElement('div');
         const isSelected = state.selectedDevices.has(deviceId);
         div.className = `device-item ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`;
         div.dataset.deviceId = deviceId;
+        if (isLocked) div.dataset.locked = 'true';
 
-        if (!isLocked) {
-            div.onclick = () => toggleDevice(deviceId);
-        }
         div.title = isLocked ? `已被 ${lockedBy} 占用` : '点击选择设备';
 
         const checkbox = document.createElement('input');
@@ -1421,12 +1429,6 @@ function renderDevices() {
         checkbox.className = 'device-checkbox';
         checkbox.checked = isSelected;
         if (isLocked) checkbox.disabled = true;
-        if (!isLocked) {
-            checkbox.onclick = (e) => {
-                e.stopPropagation();
-                toggleDevice(deviceId);
-            };
-        }
 
         const info = document.createElement('div');
         info.className = 'device-info';
@@ -1470,6 +1472,23 @@ function renderDevices() {
     });
     rightContainer.innerHTML = '';
     rightContainer.appendChild(rightFragment);
+
+    // Setup event delegation on containers (only once, using data attributes)
+    const setupDeviceDelegation = (container) => {
+        if (container._delegated) return;
+        container._delegated = true;
+        container.addEventListener('click', (e) => {
+            if (e.target.classList.contains('device-checkbox') && !e.target.disabled) {
+                e.stopPropagation();
+            }
+            const item = e.target.closest('.device-item');
+            if (!item || item.dataset.locked === 'true') return;
+            const deviceId = item.dataset.deviceId;
+            if (deviceId) toggleDevice(deviceId);
+        });
+    };
+    setupDeviceDelegation(leftContainer);
+    setupDeviceDelegation(rightContainer);
 }
 
 function toggleDevice(deviceId) {
@@ -1506,7 +1525,7 @@ function selectAllDevices() {
             if (deviceObj && deviceObj.locked && !deviceObj.locked_by_self) {
                 // 设备被其他用户锁定，跳过
                 skippedLocked++;
-                console.log(`[SelectAll] Skipping locked device: ${deviceId} (locked by: ${deviceObj.locked_by})`);
+                debugLog(`[SelectAll] Skipping locked device: ${deviceId} (locked by: ${deviceObj.locked_by})`);
             } else {
                 // 设备未被锁定或被自己锁定，可以选择
                 state.selectedDevices.add(deviceId);
@@ -2087,7 +2106,7 @@ async function startDefaultHostVNC(defaultHost, defaultPassword, vncPassword, fa
         });
 
         if (result.success && result.url) {
-            console.log('[Desktop] Default host VNC started');
+            debugLog('[Desktop] Default host VNC started');
             return result.url;
         } else {
             // API失败，使用备用URL
@@ -2227,11 +2246,11 @@ async function setupUsbipForward() {
     // 防止并发操作
     if (btn.disabled) return;
 
-    console.log('[setupUsbipForward] Called, state.usbipConnected =', state.usbipConnected);
+    debugLog('[setupUsbipForward] Called, state.usbipConnected =', state.usbipConnected);
 
     if (state.usbipConnected) {
         // 断开连接
-        console.log('[setupUsbipForward] Disconnecting...');
+        debugLog('[setupUsbipForward] Disconnecting...');
         try {
             btn.textContent = '📱 断开中...';
             btn.disabled = true;
@@ -2249,7 +2268,7 @@ async function setupUsbipForward() {
         }
     } else {
         // 连接
-        console.log('[setupUsbipForward] Connecting...');
+        debugLog('[setupUsbipForward] Connecting...');
         try {
             btn.textContent = '📱 连接中...';
             btn.disabled = true;
@@ -2588,7 +2607,7 @@ async function checkRouting() {
                 });
             } catch (postError) {
                 // 如果POST API不可用（服务器未重启），使用GET API作为后备
-                console.log('POST API不可用，使用GET API作为后备');
+                debugLog('POST API不可用，使用GET API作为后备');
                 pingResult.innerHTML = '<div class="ping-testing">🔄 使用备用方法测试中...</div>';
 
                 // 使用现有的GET API，但手动分析结果
@@ -2748,21 +2767,16 @@ async function checkRouting() {
 
 async function connectVpn() {
     if (state.vpnConnected) {
-        try {
-            await apiCall('/api/vpn/disconnect', 'POST');
-            updateVpnStatus(false);
-            addLogEntry('VPN 已断开', 'info');
-        } catch (error) {
-            addLogEntry('断开 VPN 失败: ' + error.message, 'error');
-        }
-    } else {
-        try {
-            await apiCall('/api/vpn/connect', 'POST');
-            updateVpnStatus(true);
-            addLogEntry('VPN 已连接', 'success');
-        } catch (error) {
-            addLogEntry('连接 VPN 失败: ' + error.message, 'error');
-        }
+        await checkVpnStatus();
+        return;
+    }
+
+    try {
+        await apiCall('/api/vpn/connect', 'POST');
+        updateVpnStatus(true);
+        addLogEntry('VPN 已连接', 'success');
+    } catch (error) {
+        addLogEntry('连接 VPN 失败: ' + error.message, 'error');
     }
 }
 
@@ -2783,7 +2797,7 @@ function updateVpnStatus(connected) {
     if (connected) {
         label.textContent = '状态: 已连接';
         label.className = 'vpn-status-label connected';
-        btn.textContent = '🔌 断开VPN';
+        btn.textContent = '📡 检查VPN';
         state.vpnConnected = true;
     } else {
         label.textContent = '状态: 未连接';
@@ -3283,7 +3297,7 @@ async function startTest() {
             local_server: state.config?.local_server || ''
         });
 
-        console.log('[startTest] API call successful, setting testing = true');
+        debugLog('[startTest] API call successful, setting testing = true');
         state.testing = true;
         updateTestToggleButton(true);
         addLogEntry('测试已启动', 'success');
@@ -3444,9 +3458,10 @@ async function showConfig() {
 
     // Generate config form with actual values
     modalBody.innerHTML = `
+        <form onsubmit="event.preventDefault(); saveConfig();" autocomplete="off">
         <div class="modal-form-row">
             <label>测试主机用户:</label>
-            <input type="text" id="config-ubuntu-user" value="${config.ubuntu_user || ''}" />
+            <input type="text" id="config-ubuntu-user" value="${config.ubuntu_user || ''}" autocomplete="username" />
         </div>
         <div class="modal-form-row">
             <label>测试主机地址:</label>
@@ -3454,7 +3469,7 @@ async function showConfig() {
         </div>
         <div class="modal-form-row">
             <label>测试主机密码:</label>
-            <input type="password" id="config-ubuntu-pswd" placeholder="输入测试主机SSH密码(留空保持不变)" />
+            <input type="password" id="config-ubuntu-pswd" placeholder="输入测试主机SSH密码(留空保持不变)" autocomplete="current-password" />
         </div>
         <div class="modal-form-row">
             <label>设备主机地址:</label>
@@ -3462,7 +3477,7 @@ async function showConfig() {
         </div>
         <div class="modal-form-row">
             <label>设备主机密码:</label>
-            <input type="password" id="config-device-pswd" placeholder="输入设备主机SSH密码(留空保持不变)" />
+            <input type="password" id="config-device-pswd" placeholder="输入设备主机SSH密码(留空保持不变)" autocomplete="current-password" />
         </div>
         <div class="modal-form-row">
             <label>本地主机地址:</label>
@@ -3480,6 +3495,7 @@ async function showConfig() {
             <label>测试套件路径:</label>
             <input type="text" id="config-suites-path" value="${config.suites_path || ''}" />
         </div>
+        </form>
         <div class="modal-buttons">
             <button class="btn-xxs" onclick="closeModal()">取消</button>
             <button class="btn-xxs btn-primary" onclick="saveConfig()">保存</button>
@@ -3552,37 +3568,61 @@ async function saveConfig() {
 }
 
 // ==================== Logging ====================
+// Log batching queue for performance - coalesces multiple log entries into a single DOM update
+const _logQueue = [];
+let _logFlushScheduled = false;
+
 function addLogEntry(message, type = 'info') {
-    // 不使用缓存的$函数，直接获取元素（避免缓存null的问题）
-    const logOutput = document.getElementById('log-output');
-    if (!logOutput) {
-        console.warn('[Log] log-output element not found, message:', message);
-        return;
+    // Queue the log entry
+    _logQueue.push({ message, type, timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }) });
+
+    // Cap queue size to prevent memory spikes during rapid WebSocket bursts
+    if (_logQueue.length > 500) _logQueue.splice(0, _logQueue.length - 500);
+
+    // Schedule a flush if not already scheduled
+    if (!_logFlushScheduled) {
+        _logFlushScheduled = true;
+        requestAnimationFrame(flushLogQueue);
     }
+}
 
-    const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+function flushLogQueue() {
+    _logFlushScheduled = false;
 
-    const logEntry = document.createElement('div');
-    logEntry.className = `log-entry log-${type}`;
-    logEntry.textContent = `[${timestamp}] ${message}`;
+    const logOutput = document.getElementById('log-output');
+    if (!logOutput) return;
 
-    logOutput.appendChild(logEntry);
+    // Take all queued entries
+    const entries = _logQueue.splice(0, _logQueue.length);
+    if (entries.length === 0) return;
+
+    // Use DocumentFragment for batch DOM insertion
+    const fragment = document.createDocumentFragment();
+    entries.forEach(({ message, type, timestamp }) => {
+        const logEntry = document.createElement('div');
+        logEntry.className = `log-entry log-${type}`;
+        logEntry.textContent = `[${timestamp}] ${message}`;
+        fragment.appendChild(logEntry);
+    });
+
+    logOutput.appendChild(fragment);
     logOutput.scrollTop = logOutput.scrollHeight;
 
-    // 限制日志条目数量（500条足够），防止内存溢出和卡顿
+    // Batch trim old log entries (keep max 500)
     const maxLogs = 500;
     if (logOutput.children.length > maxLogs) {
-        // 批量删除旧日志，减少DOM操作
         const removeCount = logOutput.children.length - maxLogs;
-        for (let i = 0; i < removeCount; i++) {
-            logOutput.removeChild(logOutput.firstChild);
-        }
+        // Remove in bulk using range
+        const range = document.createRange();
+        range.setStartBefore(logOutput.firstChild);
+        range.setEndBefore(logOutput.children[removeCount]);
+        range.deleteContents();
     }
 }
 
 // 更新进度条 - 使用固件上传的进度条
 function updateProgressBar(percentage, message = '', title = '进度') {
-    console.log('[Progress] updateProgressBar called:', percentage, message, title);
+    debugLog('[Progress] updateProgressBar called:', percentage, message, title);
 
     const progressContainer = document.getElementById('upload-progress');
     const progressFill = document.getElementById('upload-progress-fill');
@@ -3607,7 +3647,7 @@ function updateProgressBar(percentage, message = '', title = '进度') {
         addLogEntry(message, 'info');
     }
 
-    console.log('[Progress] Updated to:', percentage);
+    debugLog('[Progress] Updated to:', percentage);
 
     // 如果进度完成，3秒后隐藏进度条
     if (percentage >= 100) {
@@ -3701,10 +3741,18 @@ function startStatusPolling() {
             }
 
             // 动态调整轮询间隔：如果测试正在运行，使用快速轮询；否则退避
+            // Use exponential backoff when no changes detected
             if (status.running) {
                 pollInterval = 2000;  // 测试运行时：2秒
             } else {
-                pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);  // 测试未运行时：逐渐增加到30秒
+                // If nothing changed since last poll, increase backoff faster
+                const stateChanged = (status.running !== state.testing) ||
+                                     (status.vpn_connected !== undefined && status.vpn_connected !== state.vpnConnected);
+                if (stateChanged) {
+                    pollInterval = 2000;  // Reset to fast polling on state change
+                } else {
+                    pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);  // 测试未运行时：逐渐增加到30秒
+                }
             }
 
         } catch (error) {
@@ -3836,33 +3884,33 @@ function showToast(message, type = 'info') {
     }, duration);
 }
 
-// Close modal when clicking outside
-window.onclick = function(event) {
-    const configModal = document.getElementById('config-modal');
-    const firmwareModal = document.getElementById('firmware-modal');
-    const fileBrowserModal = document.getElementById('file-browser-modal');
-    const gsiModal = document.getElementById('gsi-modal');
-    const snModal = document.getElementById('sn-modal');
-    if (event.target === configModal) {
-        closeModal();
+// Close modal when clicking outside - optimized with mapping to avoid repeated DOM lookups
+const _modalCloseHandlers = {
+    'config-modal': closeModal,
+    'firmware-modal': closeFirmwareModal,
+    'file-browser-modal': closeFileBrowserModal,
+    'gsi-modal': closeGsiModal,
+    'sn-modal': closeSnModal
+};
+
+document.addEventListener('click', function(event) {
+    const target = event.target;
+    if (target.classList && target.classList.contains('modal') && _modalCloseHandlers[target.id]) {
+        _modalCloseHandlers[target.id]();
     }
-    if (event.target === firmwareModal) {
-        closeFirmwareModal();
-    }
-    if (event.target === fileBrowserModal) {
-        closeFileBrowserModal();
-    }
-    if (event.target === gsiModal) {
-        closeGsiModal();
-    }
-    if (event.target === snModal) {
-        closeSnModal();
-    }
-}
+});
 
 // ==================== Test Reports ====================
 let reportsRefreshInterval = null;
 let currentUserFilter = false;  // 当前是否只显示本用户报告
+
+// Cleanup reports interval when leaving page (memory leak prevention)
+function cleanupReportsPolling() {
+    if (reportsRefreshInterval) {
+        clearInterval(reportsRefreshInterval);
+        reportsRefreshInterval = null;
+    }
+}
 
 async function loadTestReports(userOnly = false) {
     try {
@@ -4075,13 +4123,13 @@ async function retryReport(timestamp, testType) {
 
         // 等待页面切换完成后填充数据
         setTimeout(() => {
-            console.log(`[Retry] 开始填充数据, timestamp=${timestamp}, testType=${testType}`);
+            debugLog(`[Retry] 开始填充数据, timestamp=${timestamp}, testType=${testType}`);
 
             // 填入测试报告名称（字段ID是 retry-result）
             const reportNameInput = document.getElementById('retry-result');
             if (reportNameInput) {
                 reportNameInput.value = timestamp;
-                console.log(`[Retry] 已填入报告名称: ${timestamp}`);
+                debugLog(`[Retry] 已填入报告名称: ${timestamp}`);
             } else {
                 console.error('[Retry] 未找到 retry-result 元素');
             }
@@ -4091,7 +4139,7 @@ async function retryReport(timestamp, testType) {
             if (testTypeSelect) {
                 if (testType) {
                     testTypeSelect.value = testType;
-                    console.log(`[Retry] 已设置测试类型: ${testType}, 当前值: ${testTypeSelect.value}`);
+                    debugLog(`[Retry] 已设置测试类型: ${testType}, 当前值: ${testTypeSelect.value}`);
                 } else {
                     console.warn('[Retry] testType 为空');
                 }
@@ -4115,7 +4163,7 @@ async function retryReport(timestamp, testType) {
                 // 如果有匹配的测试类型，使用对应的路径
                 if (testType && suitePaths[testType]) {
                     suitePathInput.value = suitePaths[testType];
-                    console.log(`[Retry] 已设置测试套件路径: ${suitePaths[testType]}, 当前值: ${suitePathInput.value}`);
+                    debugLog(`[Retry] 已设置测试套件路径: ${suitePaths[testType]}, 当前值: ${suitePathInput.value}`);
                 } else {
                     console.warn(`[Retry] testType=${testType} 没有对应的套件路径`);
                 }
@@ -4124,7 +4172,7 @@ async function retryReport(timestamp, testType) {
             }
 
             // 打印所有相关元素的值以便调试
-            console.log('[Retry] 当前字段值:', {
+            debugLog('[Retry] 当前字段值:', {
                 reportName: document.getElementById('retry-result')?.value,
                 testType: document.getElementById('test-type')?.value,
                 suitePath: document.getElementById('test-suite')?.value
@@ -4150,13 +4198,13 @@ async function retryReportWithSuite(timestamp, testType, suitePath) {
 
         // 等待页面切换完成后填充数据
         setTimeout(() => {
-            console.log(`[Retry] 开始填充数据, timestamp=${timestamp}, testType=${testType}, suitePath=${suitePath}`);
+            debugLog(`[Retry] 开始填充数据, timestamp=${timestamp}, testType=${testType}, suitePath=${suitePath}`);
 
             // 填入测试报告名称（字段ID是 retry-result）
             const reportNameInput = document.getElementById('retry-result');
             if (reportNameInput) {
                 reportNameInput.value = timestamp;
-                console.log(`[Retry] 已填入报告名称: ${timestamp}`);
+                debugLog(`[Retry] 已填入报告名称: ${timestamp}`);
             } else {
                 console.error('[Retry] 未找到 retry-result 元素');
             }
@@ -4166,7 +4214,7 @@ async function retryReportWithSuite(timestamp, testType, suitePath) {
             if (testTypeSelect) {
                 if (testType) {
                     testTypeSelect.value = testType;
-                    console.log(`[Retry] 已设置测试类型: ${testType}, 当前值: ${testTypeSelect.value}`);
+                    debugLog(`[Retry] 已设置测试类型: ${testType}, 当前值: ${testTypeSelect.value}`);
                 } else {
                     console.warn('[Retry] testType 为空');
                 }
@@ -4180,7 +4228,7 @@ async function retryReportWithSuite(timestamp, testType, suitePath) {
                 if (suitePath && suitePath !== 'null' && suitePath !== '') {
                     // 使用报告中的原始测试套件路径
                     suitePathInput.value = suitePath;
-                    console.log(`[Retry] 已设置测试套件路径(原始): ${suitePath}, 当前值: ${suitePathInput.value}`);
+                    debugLog(`[Retry] 已设置测试套件路径(原始): ${suitePath}, 当前值: ${suitePathInput.value}`);
                 } else {
                     // 根据测试类型设置默认路径
                     const suitePaths = {
@@ -4194,7 +4242,7 @@ async function retryReportWithSuite(timestamp, testType, suitePath) {
 
                     if (testType && suitePaths[testType]) {
                         suitePathInput.value = suitePaths[testType];
-                        console.log(`[Retry] 已设置测试套件路径(默认): ${suitePaths[testType]}, 当前值: ${suitePathInput.value}`);
+                        debugLog(`[Retry] 已设置测试套件路径(默认): ${suitePaths[testType]}, 当前值: ${suitePathInput.value}`);
                     } else {
                         console.warn(`[Retry] testType=${testType} 没有对应的套件路径`);
                     }
@@ -4204,7 +4252,7 @@ async function retryReportWithSuite(timestamp, testType, suitePath) {
             }
 
             // 打印所有相关元素的值以便调试
-            console.log('[Retry] 当前字段值:', {
+            debugLog('[Retry] 当前字段值:', {
                 reportName: document.getElementById('retry-result')?.value,
                 testType: document.getElementById('test-type')?.value,
                 suitePath: document.getElementById('test-suite')?.value
@@ -4225,12 +4273,12 @@ async function retryReportWithSuite(timestamp, testType, suitePath) {
 
 async function downloadReport(timestamp) {
     try {
-        console.log('[downloadReport] Starting download for timestamp:', timestamp);
+        debugLog('[downloadReport] Starting download for timestamp:', timestamp);
         showToast('正在下载测试报告文件夹...', 'info');
 
         // 获取文件列表
         const listUrl = `/api/reports/download?report_timestamp=${timestamp}`;
-        console.log('[downloadReport] Fetching file list from:', listUrl);
+        debugLog('[downloadReport] Fetching file list from:', listUrl);
         const listResponse = await fetch(listUrl);
 
         if (!listResponse.ok) {
@@ -4247,21 +4295,21 @@ async function downloadReport(timestamp) {
         }
 
         const listData = await listResponse.json();
-        console.log('[downloadReport] File list data:', listData);
+        debugLog('[downloadReport] File list data:', listData);
 
         if (!listData.success || !listData.files || listData.files.length === 0) {
             showToast('下载失败：' + (listData.error || '没有找到文件'), 'error');
             return;
         }
 
-        console.log('[downloadReport] Found', listData.files.length, 'files');
+        debugLog('[downloadReport] Found', listData.files.length, 'files');
 
         // 检查浏览器是否支持文件系统访问 API（需要 HTTPS 或 localhost 环境）
         if ('showDirectoryPicker' in window) {
-            console.log('[downloadReport] Using File System Access API');
+            debugLog('[downloadReport] Using File System Access API');
             await downloadReportWithFileSystemAPI(timestamp, listData.files);
         } else {
-            console.log('[downloadReport] File System Access API not supported, falling back to ZIP');
+            debugLog('[downloadReport] File System Access API not supported, falling back to ZIP');
             // 回退到 ZIP 下载
             await downloadReportAsZip(timestamp);
         }
@@ -4325,7 +4373,7 @@ async function downloadReportWithFileSystemAPI(timestamp, files) {
                 await writable.close();
 
                 successCount++;
-                console.log(`Downloaded: ${file.relative_path}`);
+                debugLog(`Downloaded: ${file.relative_path}`);
             } catch (error) {
                 console.error(`Error downloading ${file.relative_path}:`, error);
                 failCount++;
@@ -4361,7 +4409,7 @@ async function downloadReportAsZip(timestamp) {
 
         // 检查 Content-Type
         const contentType = response.headers.get('Content-Type');
-        console.log('Response Content-Type:', contentType);
+        debugLog('Response Content-Type:', contentType);
 
         if (contentType && contentType.includes('application/json')) {
             // 如果返回的是 JSON 而不是文件，说明有错误
@@ -4381,11 +4429,11 @@ async function downloadReportAsZip(timestamp) {
                 filename = filenameMatch[1].replace(/['"]/g, '');
             }
         }
-        console.log('Downloading file as:', filename);
+        debugLog('Downloading file as:', filename);
 
         // 下载文件
         const blob = await response.blob();
-        console.log('Blob size:', blob.size, 'bytes');
+        debugLog('Blob size:', blob.size, 'bytes');
 
         if (blob.size === 0) {
             showToast('下载失败：文件为空', 'error');
@@ -4635,7 +4683,7 @@ function initReportAnalysis() {
         // 检查是否有 URL（从网页拖拽，如 Redmine 附件）
         const url = e.dataTransfer.getData('URL') || e.dataTransfer.getData('text/uri-list');
         if (url) {
-            console.log('[Report Analysis] Detected URL drop:', url);
+            debugLog('[Report Analysis] Detected URL drop:', url);
             await handleRedmineAttachment(url);
             return;
         }
@@ -4795,7 +4843,7 @@ async function handleRedmineAttachment(url) {
                     if (extractResult.success && extractResult.attachment_url) {
                         showToast(`📎 找到附件: ${extractResult.filename || '未知'}`, 'info');
                         // 不替换URL，保持原始问题页面URL用于报告命名
-                        console.log('[Report Analysis] Found attachment:', extractResult.filename);
+                        debugLog('[Report Analysis] Found attachment:', extractResult.filename);
                     } else {
                         throw new Error(extractResult.error || '无法提取附件');
                     }
@@ -4902,7 +4950,7 @@ async function handleRedmineAttachment(url) {
     } catch (error) {
         currentRedmineRequest = null;  // 重置请求控制器
         if (error.name === 'AbortError') {
-            console.log('请求被取消');
+            debugLog('请求被取消');
             return;
         }
         console.error('URL attachment analysis error:', error);
@@ -4925,15 +4973,17 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill)
             </div>
             <div class="modal-body">
                 <p style="margin-bottom: 15px;">请输入 Redmine 账号密码以自动下载附件：</p>
+                <form onsubmit="event.preventDefault(); submitRedmineAuth('${url}');" autocomplete="off">
                 <div class="modal-form-row">
                     <label>用户名</label>
-                    <input type="text" id="redmine-username" placeholder="输入 Redmine 用户名">
+                    <input type="text" id="redmine-username" placeholder="输入 Redmine 用户名" autocomplete="username">
                 </div>
                 <div class="modal-form-row">
                     <label>密码</label>
-                    <input type="password" id="redmine-password" placeholder="输入 Redmine 密码"
+                    <input type="password" id="redmine-password" placeholder="输入 Redmine 密码" autocomplete="current-password"
                            onkeypress="if(event.key === 'Enter') submitRedmineAuth('${url}')">
                 </div>
+                </form>
                 <div class="modal-buttons">
                     <button class="btn-xs" onclick="this.closest('.modal').remove(); resetReportUploadProgress();">取消</button>
                     <button class="btn-xs btn-primary" onclick="submitRedmineAuth('${url}')">确定</button>
@@ -5112,7 +5162,7 @@ async function handleReportFolder(files) {
             fileCount++;
         }
 
-        console.log(`Uploading ${fileCount} files...`);
+        debugLog(`Uploading ${fileCount} files...`);
         progressFill.style.width = '30%';
 
         const response = await fetch('/api/reports/analyze', {
@@ -5150,11 +5200,11 @@ async function handleReportFolder(files) {
 }
 
 function displayReportAnalysis(data) {
-    if (DEBUG) console.log('[displayReportAnalysis] Called with data:', data);
+    if (DEBUG) debugLog('[displayReportAnalysis] Called with data:', data);
 
     // 保存当前报告名称到全局变量，供失败用例卡片使用（使用一次性状态）
     window.currentReportName = data.report_name || '';
-    if (DEBUG) console.log('[displayReportAnalysis] Current report name:', window.currentReportName);
+    if (DEBUG) debugLog('[displayReportAnalysis] Current report name:', window.currentReportName);
 
     const resultDiv = $('report-analysis-result');
     const uploadZone = $('report-upload-zone');
@@ -5172,7 +5222,7 @@ function displayReportAnalysis(data) {
     // 移除上传空状态类（缩小到固定高度）
     if (uploadZone) uploadZone.classList.remove('upload-empty');
 
-    if (DEBUG) console.log('[displayReportAnalysis] Elements:', {
+    if (DEBUG) debugLog('[displayReportAnalysis] Elements:', {
         resultDiv,
         summaryDiv,
         detailsDiv,
@@ -5324,7 +5374,7 @@ function extractClassNames(testName, errorMessage) {
     if (errorTestMatch) {
         const actualTestClass = errorTestMatch[1];
         classNames.add(actualTestClass);
-        console.log(`[源码搜索] 从错误消息提取实际测试类: ${actualTestClass}`);
+        debugLog(`[源码搜索] 从错误消息提取实际测试类: ${actualTestClass}`);
     }
 
     // 3. 从堆栈跟踪中提取实际失败的类（优先级最高）
@@ -5339,7 +5389,7 @@ function extractClassNames(testName, errorMessage) {
         // 从文件名提取类名（去掉内部类后缀）
         const actualClass = actualFile.split('$')[0];
         classNames.add(actualClass);
-        console.log(`[源码搜索] 从堆栈跟踪提取实际失败位置: ${actualClass}.${extension}:${lineNumber}`);
+        debugLog(`[源码搜索] 从堆栈跟踪提取实际失败位置: ${actualClass}.${extension}:${lineNumber}`);
     }
 
     // 4. 从堆栈跟踪中提取所有相关类（at com.example.Class.method）
@@ -5373,7 +5423,7 @@ function extractClassNames(testName, errorMessage) {
     }
 
     const result = Array.from(classNames).slice(0, 5);
-    console.log(`[源码搜索] 最终提取的类名列表: ${result.join(', ')}`);
+    debugLog(`[源码搜索] 最终提取的类名列表: ${result.join(', ')}`);
     return result;
 }
 
@@ -5412,25 +5462,25 @@ function extractFailureLocation(errorMessage) {
                     extension: fileType  // 兼容字段
                 };
 
-                console.log(`[源码搜索] 📍 从堆栈跟踪提取失败位置:`, location);
+                debugLog(`[源码搜索] 📍 从堆栈跟踪提取失败位置:`, location);
                 return location;
             }
         }
     }
 
-    console.log(`[源码搜索] ⚠️ 堆栈跟踪中未找到文件位置信息`);
+    debugLog(`[源码搜索] ⚠️ 堆栈跟踪中未找到文件位置信息`);
     return null;
 }
 
 // 从错误信息中提取搜索关键词（优化版）
 function extractKeywordsFromError(testCaseName, errorMessage) {
-    console.log(`[源码分析] 开始提取关键词，测试用例: ${testCaseName}`);
+    debugLog(`[源码分析] 开始提取关键词，测试用例: ${testCaseName}`);
 
     // 1. 优先从测试用例名中提取核心功能名
     const functionMatch = testCaseName.match(/test(?:Atom|Statsd)_([A-Z][a-zA-Z0-9_]*)/);
     if (functionMatch) {
         const functionName = functionMatch[1];
-        console.log(`[源码分析] 提取到功能名: ${functionName}`);
+        debugLog(`[源码分析] 提取到功能名: ${functionName}`);
         return functionName;
     }
 
@@ -5438,7 +5488,7 @@ function extractKeywordsFromError(testCaseName, errorMessage) {
     const classMatch = testCaseName.match(/([A-Z][a-zA-Z0-9_]*)Test/);
     if (classMatch) {
         const className = classMatch[1];
-        console.log(`[源码分析] 提取到类名: ${className}`);
+        debugLog(`[源码分析] 提取到类名: ${className}`);
         return className;
     }
 
@@ -5463,7 +5513,7 @@ function extractKeywordsFromError(testCaseName, errorMessage) {
                     !cleanClassName.includes('Util') &&
                     !cleanClassName.includes('Helper')) {
 
-                    console.log(`[源码分析] 从堆栈提取类名: ${cleanClassName}`);
+                    debugLog(`[源码分析] 从堆栈提取类名: ${cleanClassName}`);
                     return cleanClassName;
                 }
             }
@@ -5473,7 +5523,7 @@ function extractKeywordsFromError(testCaseName, errorMessage) {
     // 4. 默认返回测试用例名的前部分
     const parts = testCaseName.split(/[.#_]/);
     const fallback = parts[parts.length - 1] || testCaseName;
-    console.log(`[源码分析] 使用默认关键词: ${fallback}`);
+    debugLog(`[源码分析] 使用默认关键词: ${fallback}`);
     return fallback;
 }
 
@@ -5695,7 +5745,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
 
         const result = await response.json();
 
-        console.log('[AI Analysis] API响应:', result);
+        debugLog('[AI Analysis] API响应:', result);
 
         // 检查HTTP状态码
         if (!response.ok) {
@@ -6083,7 +6133,7 @@ const HTML_ENTITIES = Object.freeze({
 // Escape HTML to prevent XSS (efficient regex-based implementation)
 function escapeHtml(text) {
     if (text === null || text === undefined) return '';
-    return text.replace(/[&<>"']/g, char => HTML_ENTITIES[char]);
+    return String(text).replace(/[&<>"']/g, char => HTML_ENTITIES[char]);
 }
 
 // ==================== 全局函数暴露 ====================
@@ -6231,7 +6281,7 @@ function resetReportAnalysis() {
         if (content) content.style.opacity = '1';
     }
 
-    console.log('[resetReportAnalysis] Report analysis reset complete');
+    debugLog('[resetReportAnalysis] Report analysis reset complete');
 }
 
 // 当前筛选状态
@@ -6565,9 +6615,8 @@ function getApiDetails(apiPath) {
 }
 
 // Module-level constants for server info (never change during page lifetime)
-const SERVER_HOST = window.location.hostname;
-const SERVER_PORT = window.location.port || '5001';
-const BASE_URL = `http://${SERVER_HOST}:${SERVER_PORT}`;
+const BASE_URL = window.location.origin;
+const WS_BASE_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
 
 /**
  * Generate curl command for an API endpoint
@@ -6696,9 +6745,8 @@ function generateCurlCommand(api, details) {
         const displayCmd = cmd.includes('\\') ? cmd.split('\n')[0] : cmd;
         return { display: displayCmd, full: cmd };
     } else if (api.method === 'WebSocket') {
-        const wsBaseUrl = `${SERVER_HOST}:${SERVER_PORT}`;
         const wsPath = apiPath.replace('{client_id}', 'YOUR_CLIENT_ID');
-        return { display: `wscat -c ws://${wsBaseUrl}${wsPath}`, full: `wscat -c ws://${wsBaseUrl}${wsPath}` };
+        return { display: `wscat -c ${WS_BASE_URL}${wsPath}`, full: `wscat -c ${WS_BASE_URL}${wsPath}` };
     }
     return { display: `curl -s ${BASE_URL}${apiPath}`, full: `curl -s ${BASE_URL}${apiPath}` };
 }
@@ -6881,7 +6929,7 @@ window.copyCurlCommandFromData = function(element) {
         showToast('✗ 复制失败: 未找到命令', 'error');
         return;
     }
-    console.log('[Copy] Attempting to copy:', text);
+    debugLog('[Copy] Attempting to copy:', text);
 
     let commandToCopy = text;
     let successMessage = '✓ curl命令已复制';
@@ -6960,10 +7008,10 @@ function copyText(text, options = {}) {
     } = options;
     const textToCopy = addJq ? text + ' | jq "."' : text;
 
-    console.log('[Copy] Copying text:', textToCopy);
+    debugLog('[Copy] Copying text:', textToCopy);
 
     const onSuccess = () => {
-        console.log('[Copy] Success');
+        debugLog('[Copy] Success');
         showToast(successMsg, 'success');
         if (element) {
             const originalColor = element.style.color;
@@ -7017,13 +7065,6 @@ window.copyCurlCommand = function(text) {
 };
 
 /**
-    } catch (err) {
-        console.error('[Copy] Fallback method error:', err);
-        showToast('✗ 复制失败: ' + err.message, 'error');
-    }
-}
-
-/**
  * 复制命令（使用示例专用）
  */
 window.copyCommand = function(elementId) {
@@ -7035,7 +7076,7 @@ window.copyCommand = function(elementId) {
     }
 
     const text = element.textContent || element.innerText;
-    console.log('[CopyCommand] Copying from element:', elementId, text);
+    debugLog('[CopyCommand] Copying from element:', elementId, text);
 
     copyText(text);
 };
@@ -7075,3 +7116,434 @@ window.copyToClipboard = function(text, element) {
         element: element
     });
 };
+
+// ==================== APK Analysis ====================
+
+window.apkCurrentTaskId = null;
+window.apkPollInterval = null;
+
+function stopApkPolling() {
+    clearInterval(window.apkPollInterval);
+    window.apkPollInterval = null;
+}
+
+function setApkUploadEmpty(empty) {
+    const uploadZone = $('apk-upload-zone');
+    if (uploadZone) {
+        uploadZone.classList.toggle('upload-empty', empty);
+    }
+}
+
+function initApkAnalysisPage() {
+    const uploadZone = $('apk-upload-zone');
+    const fileInput = $('apk-file-input');
+
+    if (!uploadZone || uploadZone.dataset.initialized) return;
+    uploadZone.dataset.initialized = 'true';
+    setApkUploadEmpty(!window.apkCurrentTaskId);
+
+    uploadZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadZone.classList.add('drag-over');
+    });
+    uploadZone.addEventListener('dragleave', () => {
+        uploadZone.classList.remove('drag-over');
+    });
+    uploadZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadZone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length > 0) {
+            handleApkFile(e.dataTransfer.files[0]);
+        }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleApkFile(e.target.files[0]);
+        }
+    });
+}
+
+async function handleApkFile(file) {
+    if (!file.name.toLowerCase().endsWith('.apk')) {
+        showToast('仅支持 .apk 文件', 'error');
+        return;
+    }
+
+    const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
+    showToast(`正在上传 ${file.name} (${fileSizeMB}MB)...`, 'info');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const resp = await fetch('/api/apk/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            stopApkPolling();
+            window.apkCurrentTaskId = data.data.task_id;
+            showToast(`上传成功: ${file.name}`, 'success');
+            setApkUploadEmpty(false);
+
+            $('apk-analysis-status').style.display = 'block';
+            $('apk-file-name').textContent = `${file.name} (${fileSizeMB}MB)`;
+            $('apk-analysis-state').textContent = '已上传，点击"开始分析"启动反编译';
+            $('apk-btn-analyze').style.display = 'inline-block';
+            $('apk-btn-analyze').disabled = false;
+            $('apk-btn-analyze').textContent = '🔬 开始分析';
+            $('apk-btn-download').style.display = 'none';
+            $('apk-analysis-result').style.display = 'none';
+            $('apk-analysis-progress-container').style.display = 'none';
+
+            const sourceTree = $('apk-source-tree');
+            if (sourceTree) {
+                sourceTree.dataset.loaded = '';
+                sourceTree.innerHTML = '';
+            }
+            const permList = $('apk-permissions-list');
+            if (permList) {
+                permList.dataset.loaded = '';
+                permList.innerHTML = '';
+            }
+            const manifestInfo = $('apk-manifest-info');
+            if (manifestInfo) manifestInfo.innerHTML = '';
+            const rawXml = $('apk-raw-xml');
+            if (rawXml) rawXml.textContent = '';
+            closeApkFileViewer();
+            switchApkTab('manifest');
+        } else {
+            showToast(`上传失败: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`上传失败: ${e.message}`, 'error');
+    }
+}
+
+async function startApkAnalysis() {
+    if (!window.apkCurrentTaskId) {
+        showToast('请先上传 APK 文件', 'error');
+        return;
+    }
+
+    const btn = $('apk-btn-analyze');
+    btn.disabled = true;
+    btn.textContent = '⏳ 分析中...';
+    $('apk-analysis-state').textContent = '正在反编译 APK...';
+    $('apk-analysis-progress-container').style.display = 'block';
+    $('apk-analysis-progress-bar').style.width = '5%';
+
+    try {
+        const data = await apiCall(`/api/apk/analyze/${window.apkCurrentTaskId}`, 'POST');
+
+        if (data.success) {
+            window.apkPollInterval = setInterval(pollApkStatus, STATUS_POLL_INTERVAL);
+            await pollApkStatus();
+        } else {
+            showToast(`分析失败: ${data.error}`, 'error');
+            btn.disabled = false;
+            btn.textContent = '🔬 开始分析';
+        }
+    } catch (e) {
+        showToast(`分析失败: ${e.message}`, 'error');
+        btn.disabled = false;
+        btn.textContent = '🔬 开始分析';
+    }
+}
+
+async function pollApkStatus() {
+    if (!window.apkCurrentTaskId) return;
+
+    try {
+        const data = await apiCall(`/api/apk/status/${window.apkCurrentTaskId}`);
+
+        if (!data.success) {
+            stopApkPolling();
+            $('apk-analysis-state').textContent = `状态查询失败: ${data.error || data.message || '未知错误'}`;
+            $('apk-btn-analyze').disabled = false;
+            $('apk-btn-analyze').textContent = '🔬 重新分析';
+            return;
+        }
+
+        const status = data.data;
+        if (!status || typeof status !== 'object') {
+            stopApkPolling();
+            $('apk-analysis-state').textContent = '状态查询失败: 响应数据为空';
+            $('apk-btn-analyze').disabled = false;
+            $('apk-btn-analyze').textContent = '🔬 重新分析';
+            return;
+        }
+        $('apk-analysis-progress-bar').style.width = status.progress + '%';
+        $('apk-analysis-state').textContent =
+            status.status === 'analyzing' ? `正在反编译... (${status.progress}%)` :
+            status.status === 'completed' ? '反编译完成' :
+            status.status === 'error' ? `错误: ${status.error}` : status.status;
+
+        if (status.status === 'completed') {
+            stopApkPolling();
+
+            $('apk-btn-analyze').style.display = 'none';
+            $('apk-btn-download').style.display = 'inline-block';
+            $('apk-analysis-state').textContent = '反编译完成 - 可查看结果';
+            $('apk-analysis-result').style.display = 'block';
+
+            loadApkManifest();
+            showToast('APK 分析完成', 'success');
+        } else if (status.status === 'error') {
+            stopApkPolling();
+
+            $('apk-btn-analyze').disabled = false;
+            $('apk-btn-analyze').textContent = '🔬 重新分析';
+            showToast(`分析失败: ${status.error}`, 'error');
+        }
+    } catch (e) {
+        stopApkPolling();
+        $('apk-analysis-state').textContent = `状态查询失败: ${e.message}`;
+        $('apk-btn-analyze').disabled = false;
+        $('apk-btn-analyze').textContent = '🔬 重新分析';
+    }
+}
+
+async function loadApkManifest() {
+    if (!window.apkCurrentTaskId) return;
+
+    try {
+        const data = await apiCall(`/api/apk/manifest/${window.apkCurrentTaskId}`);
+
+        if (!data.success) {
+            $('apk-manifest-info').innerHTML = `<div style="color: var(--danger-color);">加载失败: ${escapeHtml(data.error)}</div>`;
+            return;
+        }
+
+        const manifest = data.data.manifest;
+        const rawXml = data.data.raw_xml;
+
+        const version = [
+            manifest.versionName ? `版本名 ${manifest.versionName}` : '',
+            manifest.versionCode ? `版本号 ${manifest.versionCode}` : ''
+        ].filter(Boolean).join(' / ') || '-';
+        const sdk = [
+            manifest.minSdkVersion ? `min ${manifest.minSdkVersion}` : '',
+            manifest.targetSdkVersion ? `target ${manifest.targetSdkVersion}` : ''
+        ].filter(Boolean).join(' / ') || '-';
+        const fields = [
+            { label: '包名', value: manifest.package || '-', icon: '📦' },
+            { label: '版本', value: version, icon: '🏷️' },
+            { label: 'SDK', value: sdk, icon: '📱' },
+        ];
+
+        if (manifest.launchActivity) {
+            fields.push({ label: '启动 Activity', value: manifest.launchActivity, icon: '🚀' });
+        }
+
+        $('apk-manifest-info').innerHTML = fields.map(f =>
+            `<div class="apk-manifest-row">
+                <div class="apk-manifest-label">${escapeHtml(f.icon)} ${escapeHtml(f.label)}</div>
+                <div class="apk-manifest-value">${escapeHtml(f.value)}</div>
+            </div>`
+        ).join('');
+
+        $('apk-raw-xml').textContent = rawXml;
+    } catch (e) {
+        $('apk-manifest-info').innerHTML = `<div style="color: var(--danger-color);">加载失败: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function loadApkPermissions() {
+    if (!window.apkCurrentTaskId) return;
+
+    try {
+        const data = await apiCall(`/api/apk/permissions/${window.apkCurrentTaskId}`);
+
+        if (!data.success) {
+            $('apk-permissions-list').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">加载失败: ${escapeHtml(data.error)}</div>`;
+            return;
+        }
+
+        const permissions = data.data.permissions;
+        $('apk-perm-count').textContent = permissions.length;
+
+        if (permissions.length === 0) {
+            $('apk-permissions-list').innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">未发现权限声明</div>';
+            return;
+        }
+
+        $('apk-permissions-list').innerHTML = permissions.map((p, i) =>
+            `<div class="apk-permission-item">
+                <div class="apk-perm-left">
+                    <span class="apk-perm-index">${i + 1}.</span>
+                    <span class="apk-perm-name">${escapeHtml(p.name)}</span>
+                </div>
+                <span class="apk-perm-short">${escapeHtml(p.short_name)}</span>
+            </div>`
+        ).join('');
+    } catch (e) {
+        $('apk-permissions-list').innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function loadApkSourceTree(path = '') {
+    if (!window.apkCurrentTaskId) return;
+
+    try {
+        const data = await apiCall(`/api/apk/source/${window.apkCurrentTaskId}?path=${encodeURIComponent(path)}`);
+
+        if (!data.success) {
+            $('apk-source-tree').innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(data.error)}</div>`;
+            return;
+        }
+
+        const items = data.data.items;
+
+        if (items.length === 0) {
+            $('apk-source-tree').innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">目录为空</div>';
+            return;
+        }
+
+        if (!path) {
+            $('apk-source-tree').innerHTML = '';
+            renderApkSourceItems(items, $('apk-source-tree'), '');
+        } else {
+            const container = document.querySelector(`[data-apk-path="${path}"]`);
+            if (container) {
+                const childContainer = container.nextElementSibling;
+                if (childContainer && childContainer.classList.contains('apk-tree-children')) {
+                    childContainer.innerHTML = '';
+                    renderApkSourceItems(items, childContainer, path);
+                }
+            }
+        }
+    } catch (e) {
+        $('apk-source-tree').innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function renderApkSourceItems(items, container, parentPath) {
+    items.forEach(item => {
+        const itemDiv = document.createElement('div');
+
+        const itemHeader = document.createElement('div');
+        itemHeader.className = `apk-tree-item ${item.type}`;
+        itemHeader.setAttribute('data-apk-path', item.path);
+
+        const icon = item.type === 'dir' ? '📁' : '📄';
+        const iconSpan = document.createElement('span');
+        iconSpan.textContent = icon;
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = item.name;
+        itemHeader.append(iconSpan, nameSpan);
+
+        if (item.type === 'dir') {
+            const childContainer = document.createElement('div');
+            childContainer.className = 'apk-tree-children';
+
+            itemHeader.addEventListener('click', async () => {
+                if (childContainer.classList.contains('expanded')) {
+                    childContainer.classList.remove('expanded');
+                    itemHeader.querySelector('span').textContent = '📁';
+                    return;
+                }
+
+                if (childContainer.children.length === 0) {
+                    await loadApkSourceTree(item.path);
+                }
+
+                childContainer.classList.add('expanded');
+                itemHeader.querySelector('span').textContent = '📂';
+            });
+
+            itemDiv.appendChild(itemHeader);
+            itemDiv.appendChild(childContainer);
+        } else {
+            itemHeader.addEventListener('click', () => viewApkFile(item.path));
+            itemDiv.appendChild(itemHeader);
+        }
+
+        container.appendChild(itemDiv);
+    });
+}
+
+async function viewApkFile(filePath) {
+    if (!window.apkCurrentTaskId) return;
+
+    const viewer = $('apk-file-viewer');
+    const contentEl = $('apk-file-content');
+    const pathEl = $('apk-file-path');
+
+    pathEl.textContent = filePath;
+    contentEl.textContent = '加载中...';
+    viewer.style.display = 'block';
+
+    try {
+        const data = await apiCall(`/api/apk/source/${window.apkCurrentTaskId}?path=${encodeURIComponent(filePath)}&view=true`);
+
+        if (data.success) {
+            contentEl.textContent = data.data.content;
+        } else {
+            contentEl.textContent = `加载失败: ${data.error}`;
+        }
+    } catch (e) {
+        contentEl.textContent = `加载失败: ${e.message}`;
+    }
+}
+
+function closeApkFileViewer() {
+    $('apk-file-viewer').style.display = 'none';
+}
+
+function switchApkTab(tabName) {
+    document.querySelectorAll('[data-apk-tab]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.apkTab === tabName);
+    });
+
+    $('apk-tab-manifest').style.display = tabName === 'manifest' ? 'block' : 'none';
+    $('apk-tab-permissions').style.display = tabName === 'permissions' ? 'block' : 'none';
+    $('apk-tab-source').style.display = tabName === 'source' ? 'block' : 'none';
+
+    if (tabName === 'permissions' && !$('apk-permissions-list').dataset.loaded) {
+        $('apk-permissions-list').dataset.loaded = 'true';
+        loadApkPermissions();
+    }
+    if (tabName === 'source' && !$('apk-source-tree').dataset.loaded) {
+        $('apk-source-tree').dataset.loaded = 'true';
+        loadApkSourceTree('');
+    }
+}
+
+function downloadApkSource() {
+    if (!window.apkCurrentTaskId) return;
+    window.open(`/api/apk/download/${window.apkCurrentTaskId}`, '_blank');
+}
+
+function resetApkAnalysis() {
+    stopApkPolling();
+    window.apkCurrentTaskId = null;
+
+    setApkUploadEmpty(true);
+    $('apk-analysis-status').style.display = 'none';
+    $('apk-analysis-result').style.display = 'none';
+    $('apk-file-input').value = '';
+    $('apk-upload-progress').style.display = 'none';
+    $('apk-progress-fill').style.width = '0%';
+    $('apk-analysis-progress-container').style.display = 'none';
+    $('apk-analysis-progress-bar').style.width = '0%';
+
+    const sourceTree = $('apk-source-tree');
+    if (sourceTree) {
+        sourceTree.dataset.loaded = '';
+        sourceTree.innerHTML = '';
+    }
+    const permList = $('apk-permissions-list');
+    if (permList) {
+        permList.dataset.loaded = '';
+        permList.innerHTML = '';
+    }
+    const manifestInfo = $('apk-manifest-info');
+    if (manifestInfo) manifestInfo.innerHTML = '';
+    const rawXml = $('apk-raw-xml');
+    if (rawXml) rawXml.textContent = '';
+    closeApkFileViewer();
+}
