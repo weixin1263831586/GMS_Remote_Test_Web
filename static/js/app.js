@@ -6820,6 +6820,114 @@ window.closeSshdInstallGuide = closeSshdInstallGuide;
 window.autoInstallUsbipd = autoInstallUsbipd;
 window.resetReportAnalysis = resetReportAnalysis;
 window.openRedmineReplyModal = openRedmineReplyModal;
+window.copyNgrokUrl = copyNgrokUrl;
+window.loadNgrokPublicUrl = loadNgrokPublicUrl;
+
+// ==================== ngrok 公网地址 ====================
+
+/**
+ * 加载 ngrok 公网地址
+ */
+function loadNgrokPublicUrl() {
+    const label = document.getElementById('ngrok-url-label');
+
+    fetch('/api/ngrok/public-url')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.public_url) {
+                window.ngrokPublicUrl = data.public_url;
+                if (label) {
+                    label.textContent = data.public_url;
+                    label.style.color = 'var(--success-color)';
+                }
+            } else {
+                window.ngrokPublicUrl = '';
+                if (label) {
+                    label.textContent = '未运行 ngrok';
+                    label.style.color = 'var(--text-secondary)';
+                }
+            }
+        })
+        .catch(error => {
+            console.error('[ngrok] 加载失败:', error);
+            window.ngrokPublicUrl = '';
+            if (label) {
+                label.textContent = '获取失败';
+                label.style.color = 'var(--danger-color)';
+            }
+        });
+}
+
+/**
+ * 复制 ngrok 公网地址
+ */
+async function copyNgrokUrl() {
+    const label = document.getElementById('ngrok-url-label');
+
+    if (window.ngrokEnsureInProgress) {
+        showToast('正在准备公网地址...', 'info');
+        return;
+    }
+
+    window.ngrokEnsureInProgress = true;
+    let url = '';
+
+    try {
+        showToast('正在检查 ngrok...', 'info');
+        const response = await fetch('/api/ngrok/ensure-public-url', { method: 'POST' });
+        const data = await response.json();
+
+        if (!data.success || !data.public_url) {
+            const detail = data.detail && data.detail.stderr ? `：${data.detail.stderr.trim()}` : '';
+            throw new Error((data.error || '无法获取公网地址') + detail);
+        }
+
+        url = data.public_url;
+        window.ngrokPublicUrl = url;
+        if (label) {
+            label.textContent = url;
+            label.style.color = 'var(--success-color)';
+        }
+        if (data.started) {
+            showToast('ngrok 已启动，正在复制公网地址...', 'success');
+        }
+    } catch (error) {
+        window.ngrokPublicUrl = '';
+        if (label) {
+            label.textContent = '获取失败';
+            label.style.color = 'var(--danger-color)';
+        }
+        showToast(`获取公网地址失败：${error.message}`, 'error');
+        window.ngrokEnsureInProgress = false;
+        return;
+    }
+
+    const clipboardWrite = navigator.clipboard && navigator.clipboard.writeText
+        ? navigator.clipboard.writeText(url)
+        : Promise.reject(new Error('Clipboard API unavailable'));
+
+    clipboardWrite.then(() => {
+        showToast('✓ 公网地址已复制：' + url, 'success');
+    }).catch(() => {
+        // 备用复制方案
+        const textArea = document.createElement('textarea');
+        textArea.value = url;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            showToast('✓ 公网地址已复制：' + url, 'success');
+        } catch (e) {
+            showToast('复制失败', 'error');
+        }
+        document.body.removeChild(textArea);
+    }).finally(() => {
+        window.ngrokEnsureInProgress = false;
+    });
+}
+
 
 // Redmine 回复对话框
 function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFromReport) {

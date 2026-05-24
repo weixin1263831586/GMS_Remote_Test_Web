@@ -2038,20 +2038,34 @@ async def get_ai_config(request: Request):
 @app.get("/api/ngrok/public-url")
 async def get_ngrok_public_url(request: Request):
     """获取 ngrok 公网访问地址"""
-    from urllib.request import urlopen
-    import json
-
-    NGROK_API_URL = os.environ.get("GMS_NGROK_API_URL", "http://127.0.0.1:4040")
-
     try:
-        with urlopen(f"{NGROK_API_URL}/api/tunnels", timeout=5) as response:
-            data = json.loads(response.read().decode())
+        public_url = await asyncio.to_thread(_get_ngrok_public_url)
     except Exception as e:
         return error_response(f'无法获取 ngrok 信息：{str(e)}', status_code=503)
 
+    if public_url:
+        return JSONResponse(content={'success': True, 'public_url': public_url})
+
+    return error_response('没有找到有效的 ngrok 公网地址', status_code=404)
+
+
+ngrok_start_lock = asyncio.Lock()
+
+
+def _get_ngrok_api_url() -> str:
+    return os.environ.get("GMS_NGROK_API_URL", "http://127.0.0.1:4040").rstrip("/")
+
+
+def _get_ngrok_public_url(timeout: int = 5) -> Optional[str]:
+    """Read active ngrok public URL from the local ngrok API."""
+    ngrok_api_url = _get_ngrok_api_url()
+
+    with urllib.request.urlopen(f"{ngrok_api_url}/api/tunnels", timeout=timeout) as response:
+        data = json.loads(response.read().decode())
+
     tunnels = data.get("tunnels") or []
     if not tunnels:
-        return error_response('没有找到活动的 ngrok 隧道', status_code=404)
+        return None
 
     # 优先查找 https 隧道，且指向本地 5001 端口的
     preferred = []
@@ -2073,12 +2087,114 @@ async def get_ngrok_public_url(request: Request):
     candidates = preferred or fallback
     for url in candidates:
         if url.startswith("https://"):
-            return JSONResponse(content={'success': True, 'public_url': url})
+            return url
 
     if candidates:
-        return JSONResponse(content={'success': True, 'public_url': candidates[0]})
+        return candidates[0]
 
-    return error_response('没有找到有效的 ngrok 公网地址', status_code=404)
+    return None
+
+
+def _run_setup_ngrok_script(timeout: int) -> subprocess.CompletedProcess:
+    script_path = os.path.join(os.path.dirname(__file__), "scripts", "setup_ngrok.sh")
+    if not os.path.exists(script_path):
+        raise FileNotFoundError(f"setup_ngrok.sh not found: {script_path}")
+
+    return subprocess.run(
+        ["bash", script_path],
+        cwd=os.path.dirname(__file__),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=os.environ.copy()
+    )
+
+
+def _trim_process_output(text: str, limit: int = 4000) -> str:
+    if not text:
+        return ""
+    return text[-limit:]
+
+
+@app.post("/api/ngrok/ensure-public-url")
+async def ensure_ngrok_public_url(request: Request):
+    """确保 ngrok 正在运行，必要时启动脚本并返回公网访问地址。"""
+    try:
+        public_url = await asyncio.to_thread(_get_ngrok_public_url, 3)
+        if public_url:
+            return JSONResponse(content={
+                'success': True,
+                'public_url': public_url,
+                'started': False
+            })
+    except Exception as e:
+        logger.info(f"[ngrok] Local API not ready, will try to start ngrok: {e}")
+
+    async with ngrok_start_lock:
+        try:
+            public_url = await asyncio.to_thread(_get_ngrok_public_url, 3)
+            if public_url:
+                return JSONResponse(content={
+                    'success': True,
+                    'public_url': public_url,
+                    'started': False
+                })
+        except Exception:
+            pass
+
+        timeout = int(os.environ.get("GMS_NGROK_START_TIMEOUT", "45"))
+        try:
+            result = await asyncio.to_thread(_run_setup_ngrok_script, timeout)
+        except subprocess.TimeoutExpired as e:
+            return error_response(
+                f'ngrok 启动超时（>{timeout}s）',
+                status_code=504,
+                detail={
+                    'stdout': _trim_process_output(e.stdout if isinstance(e.stdout, str) else ''),
+                    'stderr': _trim_process_output(e.stderr if isinstance(e.stderr, str) else '')
+                }
+            )
+        except Exception as e:
+            return error_response(f'执行 setup_ngrok.sh 失败：{str(e)}', status_code=500)
+
+        if result.returncode != 0:
+            return error_response(
+                'setup_ngrok.sh 执行失败',
+                status_code=503,
+                detail={
+                    'returncode': result.returncode,
+                    'stdout': _trim_process_output(result.stdout),
+                    'stderr': _trim_process_output(result.stderr)
+                }
+            )
+
+        try:
+            public_url = await asyncio.to_thread(_get_ngrok_public_url, 5)
+        except Exception as e:
+            return error_response(
+                f'ngrok 已执行启动脚本，但无法读取公网地址：{str(e)}',
+                status_code=503,
+                detail={
+                    'stdout': _trim_process_output(result.stdout),
+                    'stderr': _trim_process_output(result.stderr)
+                }
+            )
+
+        if not public_url:
+            return error_response(
+                'ngrok 已执行启动脚本，但没有找到有效的公网地址',
+                status_code=503,
+                detail={
+                    'stdout': _trim_process_output(result.stdout),
+                    'stderr': _trim_process_output(result.stderr)
+                }
+            )
+
+        return JSONResponse(content={
+            'success': True,
+            'public_url': public_url,
+            'started': True
+        })
 
 
 @app.post("/api/config/update")

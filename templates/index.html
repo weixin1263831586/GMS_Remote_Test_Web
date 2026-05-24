@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS 远程测试</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260524-03">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260524-04">
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/xterm/xterm.css') }}">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <script src="{{ url_for('static', filename='vendor/xterm/xterm.min.js') }}"></script>
@@ -12,7 +12,7 @@
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="{{ url_for('static', filename='js/api-constants.js') }}?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=20260524-03"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=20260524-04"></script>
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
@@ -443,6 +443,11 @@
                 <!-- 操作控制区 -->
                 <div class="control-frame">
                     <div class="section-title">操作控制</div>
+                    <!-- ngrok 公网地址 -->
+                    <div class="ngrok-frame" style="display: flex; gap: 6px; align-items: center; margin-bottom: 8px;">
+                        <button class="btn-xxs" onclick="copyNgrokUrl()">🌐 复制公网地址</button>
+                        <span id="ngrok-url-label" class="ngrok-url-label" style="font-size: 11px; color: var(--text-secondary);">加载中...</span>
+                    </div>
                     <!-- VPN 控制按钮 -->
                     <div class="vpn-btn-frame">
                         <button class="btn-xxs" onclick="checkSshd()">📡 检查SSHD</button>
