@@ -555,7 +555,7 @@ function initWebSocket() {
 
         // 建立WebSocket连接
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/api/system/websocket/${clientId}`;
+        const wsUrl = `${protocol}//${window.location.host}/api/system/websocket/${encodeURIComponent(clientId)}`;
 
         debugLog(`[WebSocket] Connecting to: ${wsUrl}`);
         state.websocket = new WebSocket(wsUrl);
@@ -902,7 +902,7 @@ function onTestTypeChange() {
         addLogEntry('测试类型已更改，清空测试报告', 'info');
     }
 
-    autoSelectTestSuite(testType);
+    renderTestSuitesDropdown();
 }
 
 // 自动选择测试套件的函数
@@ -1120,14 +1120,9 @@ function createFormData(mode, params = {}, files = {}) {
 async function apiCall(url, method = 'GET', data = null) {
     try {
         const headers = {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...getClientIdentityHeaders()
         };
-
-        // 添加客户端用户名请求头（如果可用）
-        if (state.clientId && state.clientId !== 'unknown') {
-            const username = state.clientId.split('@')[0];
-            headers['X-Client-Username'] = username;
-        }
 
         const options = {
             method,
@@ -1203,6 +1198,38 @@ async function apiCall(url, method = 'GET', data = null) {
         }
         throw error;
     }
+}
+
+function safeHeaderPercentEncode(value) {
+    const text = String(value ?? '');
+    try {
+        return encodeURIComponent(text);
+    } catch (error) {
+        // Drop invalid surrogate code units before encoding; header values must stay ASCII.
+        return encodeURIComponent(text.replace(/[\uD800-\uDFFF]/g, ''));
+    }
+}
+
+function getClientIdentityHeaders() {
+    if (!state.clientId || state.clientId === 'unknown') {
+        return {};
+    }
+
+    const separatorIndex = state.clientId.lastIndexOf('@');
+    const username = separatorIndex >= 0
+        ? state.clientId.slice(0, separatorIndex)
+        : state.clientId;
+
+    return {
+        'X-Client-Username': safeHeaderPercentEncode(username),
+        'X-Client-Username-Encoding': 'percent'
+    };
+}
+
+function applyClientIdentityHeadersToXhr(xhr) {
+    Object.entries(getClientIdentityHeaders()).forEach(([key, value]) => {
+        xhr.setRequestHeader(key, value);
+    });
 }
 
 // ==================== Device Management ====================
@@ -1293,10 +1320,12 @@ function renderTestSuitesDropdown() {
     // 按测试类型分组
     const groupedSuites = {};
     testSuitesCache.forEach(suite => {
-        if (!groupedSuites[suite.test_type]) {
-            groupedSuites[suite.test_type] = [];
+        // GTS-ROOT 使用 GTS 分组
+        const groupType = suite.test_type.toLowerCase() === 'gts-root' ? 'gts' : suite.test_type.toLowerCase();
+        if (!groupedSuites[groupType]) {
+            groupedSuites[groupType] = [];
         }
-        groupedSuites[suite.test_type].push(suite);
+        groupedSuites[groupType].push(suite);
     });
 
     // 添加分组选项
@@ -1307,7 +1336,7 @@ function renderTestSuitesDropdown() {
         groupedSuites[testType].forEach(suite => {
             const option = document.createElement('option');
             option.value = suite.tools_path;
-            option.textContent = `${suite.version} - ${suite.tools_path}`;
+            option.textContent = suite.tools_path;
             group.appendChild(option);
         });
 
@@ -2318,6 +2347,22 @@ function browseLocalFileForFirmware() {
     fileInput.click();
 }
 
+async function browseRemoteFileForFirmware() {
+    const fileInput = document.getElementById('firmware-file-input');
+    if (fileInput) {
+        fileInput.value = '';
+    }
+
+    state.fileBrowser.mode = 'firmware';
+    state.fileBrowser.targetInputId = 'firmware-path';
+    state.fileBrowser.selectedFile = null;
+    document.getElementById('file-browser-title').textContent = '选择服务器固件';
+    ModalManager.open('file-browser-modal');
+
+    const defaultUser = state.config?.ubuntu_user || 'hcq';
+    await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
+}
+
 async function submitFirmwareBurn() {
     const firmwarePath = document.getElementById('firmware-path').value.trim();
     if (!firmwarePath) {
@@ -2327,10 +2372,7 @@ async function submitFirmwareBurn() {
 
     // 获取文件输入框
     const fileInput = document.getElementById('firmware-file-input');
-    if (!fileInput || !fileInput.files || !fileInput.files[0]) {
-        showToast('请选择固件文件', 'error');
-        return;
-    }
+    const selectedFirmwareFile = fileInput?.files?.[0] || null;
 
     const devices = Array.from(state.selectedDevices);
     try {
@@ -2341,25 +2383,38 @@ async function submitFirmwareBurn() {
         // 立即在UI上标记设备为锁定状态
         lockDevicesInUI(devices);
 
-        // 设置上传状态标记，防止刷新导致进度丢失
-        saveFirmwareUploadState(
-            fileInput.files[0].name,
-            fileInput.files[0].size,
-            Date.now()
-        );
-
-        // 添加beforeunload事件监听，警告用户不要刷新
         const warnBeforeRefresh = (e) => {
             e.preventDefault();
             e.returnValue = '固件上传中，刷新将中断上传！确定要离开吗？';
             return e.returnValue;
         };
-        window.addEventListener('beforeunload', warnBeforeRefresh);
+        const cleanupUploadState = () => {
+            if (selectedFirmwareFile) {
+                window.removeEventListener('beforeunload', warnBeforeRefresh);
+                clearFirmwareUploadState();
+            }
+        };
+
+        if (selectedFirmwareFile) {
+            // 设置上传状态标记，防止刷新导致进度丢失
+            saveFirmwareUploadState(
+                selectedFirmwareFile.name,
+                selectedFirmwareFile.size,
+                Date.now()
+            );
+
+            // 添加beforeunload事件监听，警告用户不要刷新
+            window.addEventListener('beforeunload', warnBeforeRefresh);
+        } else {
+            addLogEntry(`使用服务器固件路径，跳过本机上传: ${firmwarePath}`, 'info');
+        }
 
         // 准备FormData
         const formData = new FormData();
         formData.append('firmware_path', firmwarePath);
-        formData.append('firmware_file', fileInput.files[0]);
+        if (selectedFirmwareFile) {
+            formData.append('firmware_file', selectedFirmwareFile);
+        }
 
         // 使用XMLHttpRequest以显示上传进度
         const uploadResult = await new Promise((resolve, reject) => {
@@ -2367,14 +2422,14 @@ async function submitFirmwareBurn() {
 
             // 监听上传进度
             xhr.upload.addEventListener('progress', (e) => {
-                if (e.lengthComputable) {
+                if (selectedFirmwareFile && e.lengthComputable) {
                     const progress = (e.loaded / e.total) * 100;
                     // 保存进度到sessionStorage（用于刷新后恢复）
                     // 使用统一的状态管理函数
                     const startTime = parseInt(sessionStorage.getItem('firmwareUploadStartTime') || Date.now());
                     saveFirmwareUploadState(
-                        fileInput.files[0].name,
-                        fileInput.files[0].size,
+                        selectedFirmwareFile.name,
+                        selectedFirmwareFile.size,
                         startTime,
                         progress,
                         e.loaded,
@@ -2382,14 +2437,12 @@ async function submitFirmwareBurn() {
                     );
 
                     // 复用现有的上传进度条显示
-                    updateUploadProgress(progress, fileInput.files[0].name, e.loaded, e.total);
+                    updateUploadProgress(progress, selectedFirmwareFile.name, e.loaded, e.total);
                 }
             });
 
             xhr.addEventListener('load', () => {
-                // 上传完成，移除警告并清理状态
-                window.removeEventListener('beforeunload', warnBeforeRefresh);
-                clearFirmwareUploadState();
+                cleanupUploadState();
 
                 if (xhr.status === 200) {
                     try {
@@ -2404,22 +2457,17 @@ async function submitFirmwareBurn() {
             });
 
             xhr.addEventListener('error', () => {
-                // 上传失败，移除警告并清理状态
-                window.removeEventListener('beforeunload', warnBeforeRefresh);
-                clearFirmwareUploadState();
-
+                cleanupUploadState();
                 reject(new Error('Network error'));
             });
 
             xhr.addEventListener('abort', () => {
-                // 上传中断，移除警告并清理状态
-                window.removeEventListener('beforeunload', warnBeforeRefresh);
-                clearFirmwareUploadState();
-
+                cleanupUploadState();
                 reject(new Error('Upload aborted'));
             });
 
             xhr.open('POST', `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`);
+            applyClientIdentityHeadersToXhr(xhr);
             xhr.send(formData);
         });
 
@@ -2898,10 +2946,77 @@ function handleUsernameDetectEsc(event) {
 function handleUsernameDetectKeyPress(event) {
     if (event.key === 'Enter') {
         event.preventDefault();
-        if (event.target.id === 'username-detect-password') {
-            submitUsernameDetect();
-        }
+        submitUsernameDetect();
     }
+}
+
+async function postJson(url, payload) {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    let data = {};
+    try {
+        data = await response.json();
+    } catch (e) {
+        data = {};
+    }
+
+    if (!response.ok) {
+        const error = new Error(data.error || data.detail || `HTTP ${response.status}`);
+        error.status = response.status;
+        error.data = data;
+        throw error;
+    }
+
+    return data;
+}
+
+function isUsernameManualFallbackError(errorOrMessage) {
+    const message = String(errorOrMessage?.message || errorOrMessage || '').toLowerCase();
+    return [
+        'network is unreachable',
+        'no route to host',
+        'connection refused',
+        'timed out',
+        'timeout',
+        '连接超时',
+        '连接被拒绝',
+        '网络不可达',
+        '无法访问'
+    ].some(keyword => message.includes(keyword));
+}
+
+function updateUsernameDisplay(clientIp, username) {
+    const display = `${username}@${clientIp}`;
+    const identityEl = document.getElementById('client-identity');
+    if (identityEl) {
+        identityEl.textContent = display;
+    }
+
+    const deviceHostInput = document.getElementById('device-host');
+    if (deviceHostInput) {
+        deviceHostInput.value = display;
+        deviceHostInput.placeholder = '设备主机';
+    }
+}
+
+async function saveUsernameManually(clientIp, username) {
+    const response = await postJson('/api/users/set-username', {
+        ip: clientIp,
+        username
+    });
+
+    const savedUsername = response.username || username;
+    const clientId = response.client_id || `${savedUsername}@${clientIp}`;
+    state.clientId = clientId;
+    localStorage.setItem(`gms_username_${clientIp}`, savedUsername);
+    updateUsernameDisplay(clientIp, savedUsername);
+    debugLog('[UsernameDetect] Saved username:', clientId);
+
+    return savedUsername;
 }
 
 async function submitUsernameDetect() {
@@ -2914,44 +3029,56 @@ async function submitUsernameDetect() {
         return;
     }
 
-    if (!password) {
-        showToast('请输入SSH密码', 'error');
-        return;
-    }
-
+    const submitBtn = document.querySelector('#username-detect-modal .btn-primary');
+    const originalText = submitBtn.textContent;
     try {
-        // 显示加载状态
-        const submitBtn = document.querySelector('#username-detect-modal .btn-primary');
-        const originalText = submitBtn.textContent;
-        submitBtn.textContent = '验证中...';
+        submitBtn.textContent = password ? '验证中...' : '保存中...';
         submitBtn.disabled = true;
 
-        // 调用用户名检测API
-        const response = await apiCall('/api/users/detect', 'POST', {
-            ip: clientIp,
-            username: username,
-            password: password
-        });
+        let verifiedUsername = username;
+        let verifiedBySsh = false;
 
-        if (response.success) {
-            showToast(`✅ 用户名验证成功: ${username}`, 'success');
-            addLogEntry(`客户端识别成功: ${username}@${clientIp}`, 'success');
+        if (password) {
+            const response = await postJson('/api/users/detect', {
+                ip: clientIp,
+                username,
+                password
+            });
 
-            // 更新state.clientId
-            state.clientId = `${username}@${clientIp}`;
-            debugLog('[UsernameDetect] Updated state.clientId:', state.clientId);
-
-            closeUsernameDetectModal();
-        } else {
-            showToast(`❌ 用户名验证失败: ${response.error || '未知错误'}`, 'error');
+            if (response.success) {
+                verifiedUsername = response.username || username;
+                verifiedBySsh = true;
+            } else if (!response.manual_allowed) {
+                showToast(`❌ 用户名验证失败: ${response.error || '未知错误'}`, 'error');
+                return;
+            } else {
+                addLogEntry(`SSH 无法回连客户端，按手动用户名保存: ${username}@${clientIp}`, 'warning');
+            }
         }
+
+        const savedUsername = await saveUsernameManually(clientIp, verifiedUsername);
+        showToast(verifiedBySsh ? `✅ 用户名验证成功: ${savedUsername}` : `✅ 已保存用户名: ${savedUsername}`, 'success');
+        addLogEntry(`客户端识别成功: ${savedUsername}@${clientIp}`, 'success');
+
+        closeUsernameDetectModal();
     } catch (error) {
         console.error('[UsernameDetect] Error:', error);
+        if (password && isUsernameManualFallbackError(error)) {
+            try {
+                const savedUsername = await saveUsernameManually(clientIp, username);
+                showToast(`✅ SSH 不可达，已保存用户名: ${savedUsername}`, 'success');
+                addLogEntry(`SSH 无法回连客户端，已手动保存: ${savedUsername}@${clientIp}`, 'warning');
+                closeUsernameDetectModal();
+                return;
+            } catch (saveError) {
+                console.error('[UsernameDetect] Manual save failed:', saveError);
+                showToast(`❌ 保存失败: ${saveError.message}`, 'error');
+                return;
+            }
+        }
         showToast(`❌ 验证失败: ${error.message}`, 'error');
     } finally {
-        // 恢复按钮状态
-        const submitBtn = document.querySelector('#username-detect-modal .btn-primary');
-        submitBtn.textContent = '确定';
+        submitBtn.textContent = originalText;
         submitBtn.disabled = false;
     }
 }
@@ -3729,6 +3856,10 @@ function confirmFileSelection() {
         fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
+            const localFirmwareInput = document.getElementById('firmware-file-input');
+            if (localFirmwareInput) {
+                localFirmwareInput.value = '';
+            }
             addLogEntry(`已选择固件文件: ${fullPath}`, 'info');
         }
         closeFileBrowserModal();

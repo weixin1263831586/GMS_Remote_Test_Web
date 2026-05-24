@@ -38,6 +38,12 @@ class ConfigManager:
         # 配置文件已移动到 configs/ 目录
         self.config_path = os.path.join(base_dir, '..', 'configs', 'config.json')
         self.dynamic_config_path = os.path.join(base_dir, '..', 'configs', 'config_dynamic.json')
+        self.client_ssh_credentials_path = os.path.join(
+            base_dir,
+            '..',
+            'configs',
+            'client_ssh_credentials.local.json'
+        )
 
         # 缓存相关
         self._cache: Optional[Dict[str, Any]] = None
@@ -48,6 +54,7 @@ class ConfigManager:
         # 文件修改时间追踪
         self._static_mtime: float = 0
         self._dynamic_mtime: float = 0
+        self._credentials_mtime: float = 0
 
     def load_config(self, force_reload: bool = False) -> Dict[str, Any]:
         """
@@ -101,9 +108,17 @@ class ConfigManager:
                 dynamic_mtime = os.path.getmtime(self.dynamic_config_path)
             except FileNotFoundError:
                 dynamic_mtime = 0
+            try:
+                credentials_mtime = os.path.getmtime(self.client_ssh_credentials_path)
+            except FileNotFoundError:
+                credentials_mtime = 0
 
             # 如果文件修改时间变化，缓存失效
-            if static_mtime != self._static_mtime or dynamic_mtime != self._dynamic_mtime:
+            if (
+                static_mtime != self._static_mtime
+                or dynamic_mtime != self._dynamic_mtime
+                or credentials_mtime != self._credentials_mtime
+            ):
                 return False
 
         except Exception as e:
@@ -127,6 +142,10 @@ class ConfigManager:
                 self._dynamic_mtime = os.path.getmtime(self.dynamic_config_path)
             except FileNotFoundError:
                 self._dynamic_mtime = 0
+            try:
+                self._credentials_mtime = os.path.getmtime(self.client_ssh_credentials_path)
+            except FileNotFoundError:
+                self._credentials_mtime = 0
         except Exception as e:
             logger.warning(f"Error updating file mtime: {e}")
 
@@ -140,6 +159,10 @@ class ConfigManager:
             config.update(dynamic_config)
             if ai_config:
                 config['ai_models'] = ai_config
+
+        local_credentials = self._load_client_ssh_credentials()
+        if local_credentials is not None:
+            config['client_ssh_credentials'] = local_credentials
 
         return config
 
@@ -334,6 +357,43 @@ class ConfigManager:
             logger.error(f"Error loading dynamic config: {e}")
             return None
 
+    def _load_client_ssh_credentials(self) -> Optional[list]:
+        """从本地忽略文件加载客户端 SSH 凭据。"""
+        try:
+            with open(self.client_ssh_credentials_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return None
+        except Exception as e:
+            logger.error(f"Error loading client SSH credentials: {e}")
+            return None
+
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            credentials = data.get('client_ssh_credentials')
+            return credentials if isinstance(credentials, list) else []
+        logger.warning("Invalid client SSH credentials format")
+        return []
+
+    def save_client_ssh_credentials(self, credentials: list) -> bool:
+        """保存客户端 SSH 凭据到本地忽略文件，避免写入受跟踪配置。"""
+        try:
+            if credentials is None:
+                credentials = []
+            if not isinstance(credentials, list):
+                raise ValueError("client_ssh_credentials must be a list")
+
+            os.makedirs(os.path.dirname(self.client_ssh_credentials_path), exist_ok=True)
+            with open(self.client_ssh_credentials_path, 'w', encoding='utf-8') as f:
+                json.dump(credentials, f, indent=4, ensure_ascii=False)
+            logger.info(f"Saved client SSH credentials to {self.client_ssh_credentials_path}")
+            self.invalidate_cache()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving client SSH credentials: {e}")
+            return False
+
     def save_config(self, config: Dict[str, Any]) -> bool:
         """
         保存静态配置
@@ -364,9 +424,18 @@ class ConfigManager:
             是否保存成功
         """
         try:
+            dynamic_config = dict(dynamic_config or {})
+            credentials_marker = object()
+            credentials = dynamic_config.pop('client_ssh_credentials', credentials_marker)
+
+            os.makedirs(os.path.dirname(self.dynamic_config_path), exist_ok=True)
             with open(self.dynamic_config_path, 'w', encoding='utf-8') as f:
                 json.dump(dynamic_config, f, indent=4, ensure_ascii=False)
             logger.info(f"Saved dynamic config to {self.dynamic_config_path}")
+
+            if credentials is not credentials_marker:
+                if not self.save_client_ssh_credentials(credentials):
+                    return False
 
             # 保存后使缓存失效
             self.invalidate_cache()
@@ -387,10 +456,19 @@ class ConfigManager:
             完整的客户端配置字典
         """
         existing = self._load_dynamic_config() or {}
-        dynamic_config = {
-            'client_hosts': updates.get('client_hosts', existing.get('client_hosts', {})),
-            'client_ssh_credentials': updates.get('client_ssh_credentials', existing.get('client_ssh_credentials', []))
-        }
+        local_credentials = self._load_client_ssh_credentials()
+        existing_credentials = (
+            local_credentials
+            if local_credentials is not None
+            else existing.get('client_ssh_credentials', [])
+        )
+
+        dynamic_config = existing.copy()
+        dynamic_config['client_hosts'] = updates.get('client_hosts', existing.get('client_hosts', {}))
+        dynamic_config['client_ssh_credentials'] = updates.get(
+            'client_ssh_credentials',
+            existing_credentials
+        )
 
         # 只有在明确提供local_server时才保存（避免空值覆盖）
         if 'local_server' in updates and updates['local_server']:
