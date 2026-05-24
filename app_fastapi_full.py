@@ -34,7 +34,6 @@ import queue
 import urllib.request
 import urllib.parse
 import urllib.error
-import io
 from datetime import datetime, timedelta
 from cryptography.fernet import Fernet
 from urllib.parse import urlparse
@@ -147,6 +146,7 @@ TRADEFED_BINARY_MAP = {
 SPECIAL_TEST_TYPES = {
     'cts-v-host-tradefed': 'cts-v-host',
     'apts-tradefed': 'apts',
+    'gts-root-tradefed': 'gts-root',
 }
 
 # 预计算反向映射，避免每次调用函数时重复创建
@@ -397,6 +397,73 @@ def extract_report_name_from_upload(files: List[UploadFile]) -> str:
     first_file = files[0].filename
     folder_name = os.path.dirname(first_file) or os.path.basename(first_file)
     return folder_name
+
+
+def normalize_upload_relative_path(filename: Optional[str], allow_nested: bool = True) -> str:
+    """Normalize browser-provided upload names and keep them relative."""
+    raw_name = (filename or '').replace('\\', '/').strip()
+    if not raw_name:
+        raise ValueError("文件名无效")
+
+    normalized = os.path.normpath(raw_name).replace('\\', '/')
+    if normalized in ('.', '..') or normalized.startswith('../') or os.path.isabs(normalized):
+        raise ValueError("非法文件路径")
+
+    if not allow_nested:
+        normalized = os.path.basename(normalized)
+
+    if not normalized or normalized in ('.', '..'):
+        raise ValueError("文件名无效")
+    return normalized
+
+
+def safe_upload_target_path(base_dir: str, filename: Optional[str], allow_nested: bool = True) -> str:
+    """Build a safe destination path for an uploaded file."""
+    relative_path = normalize_upload_relative_path(filename, allow_nested=allow_nested)
+    base_abs = os.path.abspath(base_dir)
+    target_abs = os.path.abspath(os.path.join(base_abs, relative_path))
+    if os.path.commonpath([base_abs, target_abs]) != base_abs:
+        raise ValueError("非法文件路径")
+    return target_abs
+
+
+def copy_fileobj_to_path(source, destination: str, max_size: Optional[int] = None, chunk_size: int = 1024 * 1024) -> int:
+    """Copy a file-like object to disk in chunks and return bytes written."""
+    bytes_written = 0
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    with open(destination, 'wb') as target:
+        while True:
+            chunk = source.read(chunk_size)
+            if not chunk:
+                break
+            bytes_written += len(chunk)
+            if max_size is not None and bytes_written > max_size:
+                raise ValueError(f"文件过大，最大支持 {max_size // (1024 * 1024)}MB")
+            target.write(chunk)
+    return bytes_written
+
+
+async def save_upload_to_path(upload_file: UploadFile, destination: str, max_size: Optional[int] = None) -> int:
+    """Persist an UploadFile without loading the whole file into memory."""
+    await upload_file.seek(0)
+    return await asyncio.to_thread(copy_fileobj_to_path, upload_file.file, destination, max_size)
+
+
+def merge_files_to_path(source_paths: List[str], destination: str, chunk_size: int = 1024 * 1024) -> int:
+    """Merge files into destination using bounded memory."""
+    bytes_written = 0
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    with open(destination, 'wb') as outfile:
+        for source_path in source_paths:
+            with open(source_path, 'rb') as infile:
+                while True:
+                    chunk = infile.read(chunk_size)
+                    if not chunk:
+                        break
+                    outfile.write(chunk)
+                    bytes_written += len(chunk)
+    return bytes_written
+
 
 # 日志配置
 logging.basicConfig(
@@ -940,10 +1007,6 @@ class ApiResponse:
 
 from functools import wraps, lru_cache
 
-def async_subprocess_run(cmd, **kwargs):
-    """异步执行subprocess.run，避免阻塞事件循环"""
-    return asyncio.to_thread(subprocess.run, cmd, **kwargs)
-
 def handle_api_errors(func):
     """统一API错误处理装饰器 - 支持同步和异步函数"""
     @wraps(func)
@@ -1102,7 +1165,7 @@ def save_test_report_to_db(
 
         # 提取用户名
         if '@' in client_id:
-            report_info['user'] = client_id.split('@')[0]
+            report_info['user'] = parse_client_id(client_id)[0]
 
         # 解析XML获取测试结果统计（使用缓存）
         if os.path.exists(xml_path):
@@ -1146,6 +1209,8 @@ def get_client_id_from_request(request: Request) -> str:
     else:
         # 其次从请求头获取用户名
         username = request.headers.get('X-Client-Username')
+        if username and request.headers.get('X-Client-Username-Encoding') == 'percent':
+            username = urllib.parse.unquote(username)
         if not username or username == 'unknown':
             username = 'unknown'
 
@@ -1331,16 +1396,6 @@ async def root(request: Request):
     response.headers["Cache-Control"] = "no-cache"
     return response
 
-@app.get("/icon_fetcher_test.html", response_class=HTMLResponse)
-async def icon_fetcher_test(request: Request):
-    """图标获取器测试页面"""
-    response = templates.TemplateResponse(
-        "icon_fetcher_test.html",
-        {"request": request}
-    )
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    return response
-
 @app.get("/api/system/health")
 @handle_api_errors
 async def health_check():
@@ -1387,10 +1442,7 @@ async def get_client_info(request: Request):
     # 确保用户状态存在
     get_or_create_user_state(client_id)
 
-    # 解析client_id获取IP和用户名
-    parts = client_id.split('@')
-    username = parts[0] if len(parts) > 0 else 'unknown'
-    client_ip = parts[1] if len(parts) > 1 else 'unknown'
+    username, client_ip = parse_client_id(client_id)
 
     logger.info(f"[ClientInfo] GET - IP: {client_ip} | Username: {username} | ClientID: {client_id}")
 
@@ -1405,11 +1457,43 @@ def get_client_ip(request: Request, fallback_ip: Optional[str] = None) -> str:
     """提取客户端真实IP地址（支持代理）"""
     if fallback_ip:
         return fallback_ip
-    return (
-        request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or
-        request.headers.get('X-Real-IP') or
-        request.client.host if request.client else 'unknown'
-    )
+
+    forwarded_for = request.headers.get('X-Forwarded-For', '').strip()
+    if forwarded_for:
+        return forwarded_for.split(',')[0].strip()
+
+    real_ip = request.headers.get('X-Real-IP')
+    if real_ip:
+        return real_ip
+
+    return request.client.host if request.client else 'unknown'
+
+
+def parse_client_id(client_id: str) -> tuple[str, str]:
+    """解析 username@ip 格式，用户名里含 @ 时也能保留。"""
+    if not client_id or '@' not in client_id:
+        return client_id or 'unknown', 'unknown'
+    username, client_ip = client_id.rsplit('@', 1)
+    return username or 'unknown', client_ip or 'unknown'
+
+
+def is_manual_username_fallback_error(error: Optional[str]) -> bool:
+    """判断用户名识别失败是否属于可手动保存的网络不可达场景。"""
+    if not error:
+        return True
+    error_lower = error.lower()
+    return any(keyword in error_lower for keyword in (
+        'network is unreachable',
+        'no route to host',
+        'connection refused',
+        'timed out',
+        'timeout',
+        '连接超时',
+        '连接被拒绝',
+        '网络不可达',
+        '无法访问',
+    ))
+
 
 @app.post("/api/users/detect")
 async def detect_client(req: ClientInfoRequest, request: Request):
@@ -1428,10 +1512,16 @@ async def detect_client(req: ClientInfoRequest, request: Request):
             "username": username
         })
     else:
+        manual_allowed = (
+            not req.username
+            or not req.password
+            or is_manual_username_fallback_error(error)
+        )
         return JSONResponse(content={
             "success": False,
-            "error": error
-        }, status_code=401)
+            "error": error,
+            "manual_allowed": manual_allowed
+        }, status_code=200 if manual_allowed else 401)
 
 @app.post("/api/users/set-username")
 async def set_client_username(req: ClientInfoRequest, request: Request):
@@ -1469,7 +1559,7 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
                 old_state['client_username'] = username
                 global_state.user_states[new_client_id] = old_state
             # 或者更新已存在的 client_id 的用户名
-            elif client_ip in [k.split('@')[1] for k in global_state.user_states.keys()]:
+            elif client_ip in [parse_client_id(k)[1] for k in global_state.user_states.keys()]:
                 for key in list(global_state.user_states.keys()):
                     if key.endswith(f"@{client_ip}"):
                         global_state.user_states[key]['client_username'] = username
@@ -1492,8 +1582,6 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
             "success": False,
             "error": "保存配置失败"
         }, status_code=500)
-
-# NOTE: Duplicate /api/users/current routes removed - using the earlier implementation at line 1130
 
 @app.get("/api/users/list")
 @handle_api_errors
@@ -1521,10 +1609,7 @@ async def list_users():
                 except (ValueError, TypeError):
                     continue
 
-            # 解析client_id (user@ip)
-            parts = client_id.split('@')
-            username_from_id = parts[0] if len(parts) > 0 else 'unknown'
-            ip = parts[1] if len(parts) > 1 else 'unknown'
+            username_from_id, ip = parse_client_id(client_id)
 
             # 优先使用state中存储的username（更准确）
             username = state.get('client_username', username_from_id)
@@ -1949,16 +2034,63 @@ async def get_ai_config(request: Request):
 
     return JSONResponse(content={'success': True, 'data': ai_config})
 
+
+@app.get("/api/ngrok/public-url")
+async def get_ngrok_public_url(request: Request):
+    """获取 ngrok 公网访问地址"""
+    from urllib.request import urlopen
+    import json
+
+    NGROK_API_URL = os.environ.get("GMS_NGROK_API_URL", "http://127.0.0.1:4040")
+
+    try:
+        with urlopen(f"{NGROK_API_URL}/api/tunnels", timeout=5) as response:
+            data = json.loads(response.read().decode())
+    except Exception as e:
+        return error_response(f'无法获取 ngrok 信息：{str(e)}', status_code=503)
+
+    tunnels = data.get("tunnels") or []
+    if not tunnels:
+        return error_response('没有找到活动的 ngrok 隧道', status_code=404)
+
+    # 优先查找 https 隧道，且指向本地 5001 端口的
+    preferred = []
+    fallback = []
+
+    for tunnel in tunnels:
+        public_url = tunnel.get("public_url") or ""
+        if not public_url:
+            continue
+        config = tunnel.get("config") or {}
+        addr = str(config.get("addr") or "")
+        # 检查是否指向 5001 端口（GMS 服务端口）
+        if addr.endswith(":5001") or ":5001" in addr:
+            preferred.append(public_url)
+        else:
+            fallback.append(public_url)
+
+    # 优先返回 https 地址
+    candidates = preferred or fallback
+    for url in candidates:
+        if url.startswith("https://"):
+            return JSONResponse(content={'success': True, 'public_url': url})
+
+    if candidates:
+        return JSONResponse(content={'success': True, 'public_url': candidates[0]})
+
+    return error_response('没有找到有效的 ngrok 公网地址', status_code=404)
+
+
 @app.post("/api/config/update")
 async def update_config(req: dict):
     """更新配置 - 只修改动态配置，禁止修改config.json"""
     existing_dynamic = config_manager._load_dynamic_config() or {}
 
     # 动态配置字段（保存在 config_dynamic.json）
-    # 只保存客户端相关的动态配置
+    # 只允许保存运行时动态配置
     # 注意：client_ip 和 client_username 是运行时状态，不应保存到配置文件
     dynamic_keys = {
-        'client_hosts', 'client_ssh_credentials', 'local_server'
+        'client_hosts', 'client_ssh_credentials', 'local_server', 'sidebar_order'
     }
 
     # 检查是否有不允许修改的字段
@@ -1981,6 +2113,48 @@ async def update_config(req: dict):
         return JSONResponse(content={'success': True})
     else:
         raise HTTPException(status_code=500, detail="保存配置失败")
+
+
+def normalize_sidebar_order(raw_order: Any) -> List[str]:
+    """校验并去重侧边栏排序。"""
+    if not isinstance(raw_order, list):
+        raise HTTPException(status_code=400, detail="order 必须是数组")
+
+    order = []
+    seen = set()
+    for item in raw_order:
+        if not isinstance(item, str):
+            continue
+        page = item.strip()
+        if page and page not in seen:
+            order.append(page)
+            seen.add(page)
+
+    if not order:
+        raise HTTPException(status_code=400, detail="order 不能为空")
+    return order
+
+
+@app.get("/api/sidebar-order")
+async def get_sidebar_order():
+    """获取侧边栏导航顺序。"""
+    existing_dynamic = config_manager._load_dynamic_config() or {}
+    order = existing_dynamic.get('sidebar_order', [])
+    if not isinstance(order, list):
+        order = []
+    return JSONResponse(content={'success': True, 'order': order})
+
+
+@app.post("/api/sidebar-order")
+async def save_sidebar_order(req: dict = Body(default={})):
+    """保存侧边栏导航顺序。"""
+    order = normalize_sidebar_order(req.get('order'))
+    existing_dynamic = config_manager._load_dynamic_config() or {}
+    existing_dynamic['sidebar_order'] = order
+
+    if config_manager.save_dynamic_config(existing_dynamic):
+        return JSONResponse(content={'success': True, 'order': order})
+    raise HTTPException(status_code=500, detail="保存侧边栏排序失败")
 
 # ==================== 设备管理 ====================
 
@@ -3507,7 +3681,7 @@ async def save_current_log(req: dict):
         if client_id == 'test_client':
             user_id = config.get('ubuntu_user', 'hcq')
         else:
-            user_id = client_id.split('@')[0] if '@' in client_id else client_id
+            user_id = parse_client_id(client_id)[0] if '@' in client_id else client_id
 
         log_filename = f"{user_id}_{display_test_type}_{timestamp}.log"
         log_path = os.path.join(logs_dir, log_filename)
@@ -3600,9 +3774,12 @@ async def list_suites(base_path: str = None):
                     if test_type == 'cts-v-host':
                         continue
                     tools_dir = '/'.join(parts[:-1])
-                    version_dir = next((p for p in parts if p.startswith('android-') and (test_type in p or (test_type == 'gsi' and 'cts' in p))), "")
+                    version_dir = next((p for p in parts if p.startswith('android-') and (test_type in p or (test_type == 'gsi' and 'cts' in p) or (test_type == 'gts-root' and 'gts' in p))), "")
                     if test_type == 'gsi' and version_dir:
                         test_type = 'cts'
+                    # GTS-ROOT 使用 GTS 套件
+                    if test_type == 'gts-root' and version_dir:
+                        test_type = 'gts'
 
                     suites.append({
                         'test_type': test_type,
@@ -5083,12 +5260,15 @@ async def analyze_reports(
                 # 如果是单文件（XML、ZIP、TAR.GZ）
                 if len(all_files) == 1:
                     uploaded_file = all_files[0]
-                    temp_file_path = os.path.join(temp_dir, uploaded_file.filename)
+                    try:
+                        temp_file_path = safe_upload_target_path(temp_dir, uploaded_file.filename, allow_nested=False)
+                    except ValueError as e:
+                        return JSONResponse(
+                            status_code=400,
+                            content={'success': False, 'error': str(e)}
+                        )
 
-                    # 保存文件内容
-                    with open(temp_file_path, 'wb') as f:
-                        content = await uploaded_file.read()
-                        f.write(content)
+                    await save_upload_to_path(uploaded_file, temp_file_path)
 
                     # 使用 ReportAnalyzer 分析报告
                     analyzer = ReportAnalyzer(temp_dir=temp_dir)
@@ -5116,14 +5296,14 @@ async def analyze_reports(
                     # 保存所有文件到临时目录
                     for uploaded_file in all_files:
                         if uploaded_file.filename:
-                            # 保持相对路径结构
-                            file_path = os.path.join(temp_dir, uploaded_file.filename)
-                            # 确保目录存在
-                            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                            # 保存文件内容
-                            with open(file_path, 'wb') as f:
-                                content = await uploaded_file.read()
-                                f.write(content)
+                            try:
+                                file_path = safe_upload_target_path(temp_dir, uploaded_file.filename, allow_nested=True)
+                            except ValueError as e:
+                                return JSONResponse(
+                                    status_code=400,
+                                    content={'success': False, 'error': str(e)}
+                                )
+                            await save_upload_to_path(uploaded_file, file_path)
 
                     # 查找 test_result.xml 或 host_log（支持两种模式）
                     analyzer = ReportAnalyzer(temp_dir=temp_dir)
@@ -5304,21 +5484,6 @@ import ipaddress
 def extract_ip_from_host(host_string: str) -> str:
     """从user@host或host字符串中提取IP地址"""
     return CommonUtils.extract_ip_from_host(host_string)
-
-def get_client_ip_from_request_headers(request: Request) -> str:
-    """从请求头中提取客户端IP，支持代理"""
-    forwarded_for = request.headers.get('X-Forwarded-For', '').strip()
-    if forwarded_for:
-        return forwarded_for.split(',')[0].strip()
-
-    real_ip = request.headers.get('X-Real-IP')
-    if real_ip:
-        return real_ip
-
-    if request.client:
-        return request.client.host
-
-    return 'unknown'
 
 def are_same_network(ip1: str, ip2: str, prefix_len: int = 24) -> bool:
     """检查两个IP是否在同一网段"""
@@ -5875,15 +6040,17 @@ async def get_desktop_vnc_status():
 @app.post("/api/desktop/vnc/start")
 async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None)):
     """启动Ubuntu主机桌面VNC（Ubuntu桌面的VNC服务）"""
+    config = config_manager.load_config()
+    default_host = f"{config.get('ubuntu_user', 'hcq')}@{config.get('ubuntu_host', 'localhost')}"
+
     if req is None:
         # 如果没有提供请求体，使用配置文件的默认值
-        config = config_manager.load_config()
-        host = f"{config.get('ubuntu_user', 'hcq')}@{config.get('ubuntu_host', 'localhost')}"
+        host = default_host
         password = config.get('ubuntu_pswd', '')
         vnc_password = ''
     else:
-        host = req.host
-        password = req.password
+        host = req.host or default_host
+        password = req.password or (config.get('ubuntu_pswd', '') if host == default_host else '')
         vnc_password = req.vnc_password or ''
 
     result = vnc_manager.start_vnc(host, password, vnc_password)
@@ -6568,7 +6735,7 @@ async def check_ssh_route(request: Request):
     config = config_manager.load_config()
 
     ubuntu_host = config.get("ubuntu_host", "")
-    client_ip = get_client_ip_from_request_headers(request)
+    client_ip = get_client_ip(request)
 
     if not ubuntu_host or client_ip == 'unknown':
         return JSONResponse(content={
@@ -6586,13 +6753,16 @@ async def check_ssh_route(request: Request):
     connectivity_ok = False
     latency = None
     try:
-        import subprocess
-        result = subprocess.run(['ping', '-c', '1', '-W', '2', ubuntu_ip],
-                               capture_output=True, text=True, timeout=5)
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ['ping', '-c', '1', '-W', '2', ubuntu_ip],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
         if result.returncode == 0:
             connectivity_ok = True
             # 提取延迟时间
-            import re
             match = re.search(r'time=([\d.]+)', result.stdout)
             if match:
                 latency = f"{match.group(1)}ms"
@@ -7113,11 +7283,16 @@ async def upload_file(
         upload_dir = os.path.join(tempfile.gettempdir(), 'gms_uploads')
         os.makedirs(upload_dir, exist_ok=True)
 
-        # 保存到临时文件
-        temp_path = os.path.join(upload_dir, file.filename)
-        with open(temp_path, 'wb') as f:
-            content = await file.read()
-            f.write(content)
+        try:
+            temp_path = safe_upload_target_path(upload_dir, file.filename, allow_nested=False)
+        except ValueError as e:
+            return JSONResponse(
+                content={'success': False, 'error': str(e)},
+                status_code=400
+            )
+
+        safe_filename = os.path.basename(temp_path)
+        await save_upload_to_path(file, temp_path)
 
         try:
             # 连接远程服务器
@@ -7136,23 +7311,26 @@ async def upload_file(
                 target_dir = path.rstrip('/')
                 try:
                     with ssh.open_sftp() as sftp:
+                        ssh_manager.optimize_sftp_performance(sftp)
                         try:
                             sftp.stat(target_dir)
                         except IOError:
                             # 目录不存在，创建目录
                             sftp.mkdir(target_dir)
-                        remote_path = f"{target_dir}/{file.filename}"
+                        remote_path = f"{target_dir}/{safe_filename}"
                         sftp.put(temp_path, remote_path)
                 except Exception as e:
                     logger.error(f"Failed to upload to specified path: {e}")
                     # 如果指定路径失败，回退到默认路径
-                    remote_path = f"/home/{config['ubuntu_user']}/{file.filename}"
+                    remote_path = f"/home/{config['ubuntu_user']}/{safe_filename}"
                     with ssh.open_sftp() as sftp:
+                        ssh_manager.optimize_sftp_performance(sftp)
                         sftp.put(temp_path, remote_path)
             else:
                 # 使用默认路径
-                remote_path = f"/home/{config['ubuntu_user']}/{file.filename}"
+                remote_path = f"/home/{config['ubuntu_user']}/{safe_filename}"
                 with ssh.open_sftp() as sftp:
+                    ssh_manager.optimize_sftp_performance(sftp)
                     sftp.put(temp_path, remote_path)
 
             ssh_manager.return_connection(ssh)
@@ -7207,6 +7385,12 @@ async def upload_file_chunk(
     import json
 
     try:
+        if not upload_id or not file_name:
+            return JSONResponse(content={
+                'success': False,
+                'error': 'upload_id and file_name are required for chunk upload'
+            }, status_code=400)
+
         import time
         start_time = time.time()
         logger.info(f"[ChunkUpload] Received chunk {chunk_index}/{total_chunks} for {upload_id}")
@@ -7219,13 +7403,11 @@ async def upload_file_chunk(
         chunk_filename = f"chunk_{chunk_index:05d}"
         chunk_path = os.path.join(session_dir, chunk_filename)
 
-        content = await file.read()
-        with open(chunk_path, 'wb') as f:
-            f.write(content)
+        saved_size = await save_upload_to_path(file, chunk_path)
 
         elapsed = time.time() - start_time
-        speed = len(content) / elapsed / (1024 * 1024) if elapsed > 0 else 0
-        logger.info(f"[ChunkUpload] Saved chunk {chunk_index} ({len(content)} bytes) in {elapsed:.2f}s ({speed:.2f} MB/s)")
+        speed = saved_size / elapsed / (1024 * 1024) if elapsed > 0 else 0
+        logger.info(f"[ChunkUpload] Saved chunk {chunk_index} ({saved_size} bytes) in {elapsed:.2f}s ({speed:.2f} MB/s)")
 
         # 记录已上传的块
         chunks_file = os.path.join(session_dir, 'uploaded_chunks.json')
@@ -7246,13 +7428,12 @@ async def upload_file_chunk(
             merge_start = time.time()
             logger.info(f"[ChunkUpload] All chunks received for {upload_id}, merging...")
 
-            # 合并所有块
-            merged_file = os.path.join(session_dir, file_name)
-            with open(merged_file, 'wb') as outfile:
-                for i in range(total_chunks):
-                    chunk_path = os.path.join(session_dir, f"chunk_{i:05d}")
-                    with open(chunk_path, 'rb') as infile:
-                        outfile.write(infile.read())
+            merged_file = safe_upload_target_path(session_dir, file_name, allow_nested=False)
+            chunk_paths = [
+                os.path.join(session_dir, f"chunk_{i:05d}")
+                for i in range(total_chunks)
+            ]
+            merge_files_to_path(chunk_paths, merged_file)
 
             merge_time = time.time() - merge_start
             logger.info(f"[ChunkUpload] Merged {total_chunks} chunks in {merge_time:.2f}s")
@@ -7263,7 +7444,8 @@ async def upload_file_chunk(
 
             if ssh:
                 try:
-                    remote_path = f"/home/{config['ubuntu_user']}/{file_name}"
+                    remote_filename = os.path.basename(merged_file)
+                    remote_path = f"/home/{config['ubuntu_user']}/{remote_filename}"
                     upload_start = time.time()
 
                     with ssh.open_sftp() as sftp:
@@ -7376,6 +7558,133 @@ async def get_firmware_upload_progress(request: Request):
             })
         else:
             return JSONResponse(content={'in_progress': False})
+
+
+async def upload_firmware_to_test_host(
+    ssh,
+    client_id: str,
+    source,
+    remote_path: str,
+    filename: str,
+    file_size: int,
+) -> None:
+    """Upload firmware to the test host with shared progress reporting."""
+    import scp
+
+    upload_progress_data = {'current_percentage': 0.0, 'last_lock_update': 0.0}
+    upload_complete = threading.Event()
+    upload_error = [None]
+
+    def update_global_progress(percentage: float, sent: int):
+        if percentage - upload_progress_data['last_lock_update'] < 10:
+            return
+
+        try:
+            with global_state.firmware_upload_progress_lock:
+                global_state.firmware_upload_progress[client_id] = {
+                    'progress': percentage,
+                    'filename': filename,
+                    'uploaded_size': sent,
+                    'total_size': file_size,
+                    'timestamp': time.time(),
+                    'stage': 'uploading_to_server'
+                }
+            upload_progress_data['last_lock_update'] = percentage
+        except Exception as e:
+            logger.error(f"[Firmware Burn] Failed to update upload progress: {e}")
+
+    def upload_progress(_filename, size, sent):
+        percentage = (sent / size) * 100 if size > 0 else 0.0
+        upload_progress_data['current_percentage'] = percentage
+        logger.info(f"[Firmware Burn] Upload progress: {percentage:.2f}%")
+        update_global_progress(percentage, sent)
+
+    def upload_file_worker():
+        scp_client = None
+        try:
+            scp_client = scp.SCPClient(ssh.get_transport(), progress=upload_progress)
+            if hasattr(source, 'read'):
+                try:
+                    source.seek(0)
+                except Exception:
+                    pass
+                scp_client.putfo(source, remote_path, size=file_size)
+            else:
+                scp_client.put(source, remote_path)
+            logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_path}")
+        except Exception as e:
+            logger.error(f"[Firmware Burn] Upload error: {e}")
+            upload_error[0] = str(e)
+        finally:
+            if scp_client:
+                try:
+                    scp_client.close()
+                except Exception:
+                    pass
+            upload_complete.set()
+
+    try:
+        with global_state.firmware_upload_progress_lock:
+            global_state.firmware_upload_progress[client_id] = {
+                'progress': 0.0,
+                'filename': filename,
+                'uploaded_size': 0,
+                'total_size': file_size,
+                'timestamp': time.time(),
+                'stage': 'uploading_to_server'
+            }
+
+        await safe_websocket_send(client_id, {
+            'type': 'file_upload_progress',
+            'filename': filename,
+            'percentage': 0,
+            'total_size': file_size,
+            'uploaded_size': 0
+        })
+
+        upload_thread = threading.Thread(target=upload_file_worker, daemon=True)
+        upload_thread.start()
+
+        last_percentage = 0.0
+        last_update_time = time.time()
+        while not upload_complete.is_set():
+            await asyncio.sleep(1.0)
+            current_percentage = upload_progress_data.get('current_percentage', 0.0)
+            current_time = time.time()
+
+            if abs(current_percentage - last_percentage) > 1.0 and (current_time - last_update_time) > 2.0:
+                sent_size = int((current_percentage / 100) * file_size)
+                await safe_websocket_send(client_id, {
+                    'type': 'file_upload_progress',
+                    'filename': filename,
+                    'percentage': round(current_percentage, 2),
+                    'total_size': file_size,
+                    'uploaded_size': sent_size
+                })
+                last_percentage = current_percentage
+                last_update_time = current_time
+
+        upload_thread.join(timeout=300)
+        if upload_thread.is_alive():
+            raise RuntimeError("Upload timed out")
+        if upload_error[0]:
+            raise RuntimeError(f"Upload failed: {upload_error[0]}")
+
+        await safe_websocket_send(client_id, {
+            'type': 'file_upload_progress',
+            'filename': filename,
+            'percentage': 100,
+            'total_size': file_size,
+            'uploaded_size': file_size
+        })
+        await safe_websocket_send(client_id, {
+            'type': 'log_update',
+            'log': '✅ 固件文件上传完成',
+            'log_type': 'success'
+        })
+    finally:
+        with global_state.firmware_upload_progress_lock:
+            global_state.firmware_upload_progress.pop(client_id, None)
 
 @app.post("/api/burn/firmware")
 async def burn_firmware(
@@ -7490,6 +7799,7 @@ async def burn_firmware(
             if not os.path.exists(local_tool):
                 logger.error(f"[Firmware Burn] upgrade_tool not found: {local_tool}")
                 ssh_manager.return_connection(ssh)
+                await release_device_locks(client_id, locked_devices)
                 return JSONResponse(
                     content={'success': False, 'error': f'upgrade_tool not found: {local_tool}'}
                 )
@@ -7502,191 +7812,50 @@ async def burn_firmware(
             logger.info("[Firmware Burn] upgrade_tool uploaded successfully")
 
             # 2. 处理固件文件
-            import tempfile
-
             if firmware_file:
-                # 用户上传了文件 - 流式处理并实时报告进度
+                # UploadFile.file 已由 FastAPI/Starlette 管理，直接复用该流做 SCP，
+                # 避免后端再次复制到额外缓冲区。
                 logger.info(f"[Firmware Burn] Processing uploaded file: {firmware_file.filename}")
+                firmware_name = os.path.basename(firmware_file.filename or '').strip()
+                if not firmware_name:
+                    ssh_manager.return_connection(ssh)
+                    await release_device_locks(client_id, locked_devices)
+                    return JSONResponse(
+                        content={'success': False, 'error': 'Invalid firmware filename'}
+                    )
 
-                # 立即初始化上传状态（供前端查询）
-                firmware_name = firmware_file.filename
-                total_size = 0  # 初始未知
+                firmware_stream = firmware_file.file
 
-                with global_state.firmware_upload_progress_lock:
-                    global_state.firmware_upload_progress[client_id] = {
-                        'progress': 0.0,
-                        'filename': firmware_name,
-                        'uploaded_size': 0,
-                        'total_size': total_size,
-                        'timestamp': time.time(),
-                        'stage': 'receiving'  # 接收阶段
-                    }
-                logger.info(f"[Firmware Burn] Initialized upload progress tracking for {client_id}")
-
-                # 流式读取文件（边读边保存进度）
-                received_size = 0
-                chunk_size = 1024 * 1024  # 1MB chunks
-
-                progress_update_threshold = 20 * 1024 * 1024  # 20MB更新一次
-                last_progress_update = 0
-
-                logger.info("[Firmware Burn] Starting to receive file in chunks...")
-
-                # 使用临时文件接收上传
-                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-                    temp_path = temp_file.name
-
-                    while chunk := await firmware_file.read(chunk_size):
-                        temp_file.write(chunk)
-                        received_size += len(chunk)
-
-                        # 优化：只在达到阈值时更新进度，减少90%的锁操作
-                        if received_size - last_progress_update >= progress_update_threshold:
-                            with global_state.firmware_upload_progress_lock:
-                                if client_id in global_state.firmware_upload_progress:
-                                    global_state.firmware_upload_progress[client_id].update({
-                                        'uploaded_size': received_size,
-                                        'total_size': received_size,  # 接收期间，已接收=总大小
-                                        'timestamp': time.time()
-                                    })
-                            last_progress_update = received_size
-
-
-                # 文件接收完成
-                firmware_size = received_size
-                logger.info(f"[Firmware Burn] File fully received: {firmware_size} bytes")
-
-                # 读取完整文件到内存
-                with open(temp_path, 'rb') as f:
-                    firmware_content = f.read()
-
-                # 删除临时文件
-                os.unlink(temp_path)
-
-                firmware_bytes = io.BytesIO(firmware_content)
-
-                # 更新状态：准备SCP上传
-                with global_state.firmware_upload_progress_lock:
-                    if client_id in global_state.firmware_upload_progress:
-                        global_state.firmware_upload_progress[client_id].update({
-                            'total_size': firmware_size,
-                            'stage': 'uploading_to_server',
-                            'uploaded_size': 0  # 重置为0，开始追踪SCP上传
-                        })
+                try:
+                    firmware_stream.seek(0, os.SEEK_END)
+                    firmware_size = firmware_stream.tell()
+                    firmware_stream.seek(0)
+                except Exception as e:
+                    logger.error(f"[Firmware Burn] Failed to inspect uploaded firmware size: {e}")
+                    ssh_manager.return_connection(ssh)
+                    await release_device_locks(client_id, locked_devices)
+                    return JSONResponse(
+                        content={'success': False, 'error': f'Failed to inspect uploaded firmware size: {e}'}
+                    )
+                if firmware_size <= 0:
+                    ssh_manager.return_connection(ssh)
+                    await release_device_locks(client_id, locked_devices)
+                    return JSONResponse(
+                        content={'success': False, 'error': 'Uploaded firmware file is empty'}
+                    )
 
                 # 直接上传到测试主机
                 remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_name}"
-                logger.info(f"[Firmware Burn] Directly uploading to test host: {remote_firmware}")
+                logger.info(f"[Firmware Burn] Streaming uploaded firmware to test host: {remote_firmware} ({firmware_size} bytes)")
 
-                # 用于存储上传进度的全局变量（供回调访问）
-                upload_progress_data = {'current_percentage': 0, 'last_lock_update': 0}
-
-                # 自定义SCP进度回调
-                def upload_progress(filename, size, sent):
-                    percentage = (sent / size) * 100 if size > 0 else 0
-                    upload_progress_data['current_percentage'] = percentage
-                    logger.info(f"[Firmware Burn] Upload progress: {percentage:.2f}%")
-
-                    # 优化：只当进度变化超过10%时更新全局状态，减少95%的锁操作
-                    if percentage - upload_progress_data['last_lock_update'] >= 10:
-                        try:
-                            with global_state.firmware_upload_progress_lock:
-                                global_state.firmware_upload_progress[client_id] = {
-                                    'progress': percentage,
-                                    'filename': firmware_name,
-                                    'uploaded_size': sent,
-                                    'total_size': firmware_size,
-                                    'timestamp': time.time()
-                                }
-                            upload_progress_data['last_lock_update'] = percentage
-                        except Exception as e:
-                            logger.error(f"[Firmware Burn] Failed to update global progress: {e}")
-
-                # 使用线程执行SCP上传
-                import threading
-                upload_complete = threading.Event()
-                upload_error = [None]
-
-                def upload_file_thread():
-                    try:
-                        # 使用SCP的putfo方法直接从内存上传
-                        scp_client = scp.SCPClient(ssh.get_transport(), progress=upload_progress)
-                        scp_client.putfo(firmware_bytes, remote_firmware)
-                        scp_client.close()
-                        logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_firmware}")
-                    except Exception as e:
-                        logger.error(f"[Firmware Burn] Upload error: {e}")
-                        upload_error[0] = str(e)
-                    finally:
-                        upload_complete.set()
-
-                # 发送上传开始消息
-                await safe_websocket_send(client_id, {
-                    'type': 'file_upload_progress',
-                    'filename': firmware_name,
-                    'percentage': 0,
-                    'total_size': firmware_size,
-                    'uploaded_size': 0
-                })
-
-                # 启动上传线程
-                upload_thread = threading.Thread(target=upload_file_thread)
-                upload_thread.start()
-
-                # 定期更新进度到前端
-                last_percentage = 0
-                last_update_time = time.time()
-                while not upload_complete.is_set():
-                    await asyncio.sleep(1.0)  # 增加到1秒间隔
-                    current_percentage = upload_progress_data.get('current_percentage', 0)
-                    current_time = time.time()
-
-                    # 只有当百分比变化超过1%且距离上次更新超过2秒时才发送更新
-                    if abs(current_percentage - last_percentage) > 1.0 and (current_time - last_update_time) > 2.0:
-                        sent_size = int((current_percentage / 100) * firmware_size)
-                        await safe_websocket_send(client_id, {
-                            'type': 'file_upload_progress',
-                            'filename': firmware_name,
-                            'percentage': round(current_percentage, 2),
-                            'total_size': firmware_size,
-                            'uploaded_size': sent_size
-                        })
-                        last_percentage = current_percentage
-                        last_update_time = current_time
-
-                # 等待线程完成
-                upload_thread.join(timeout=300)  # 5分钟超时
-
-                # 检查上传是否成功
-                if upload_error[0]:
-                    # 清理全局进度状态
-                    with global_state.firmware_upload_progress_lock:
-                        if client_id in global_state.firmware_upload_progress:
-                            del global_state.firmware_upload_progress[client_id]
-
-                    ssh_manager.return_connection(ssh)
-                    return JSONResponse(
-                        content={'success': False, 'error': f'Upload failed: {upload_error[0]}'}
-                    )
-
-                # 发送上传完成消息
-                await safe_websocket_send(client_id, {
-                    'type': 'file_upload_progress',
-                    'filename': firmware_name,
-                    'percentage': 100,
-                    'total_size': firmware_size,
-                    'uploaded_size': firmware_size
-                })
-                await safe_websocket_send(client_id, {
-                    'type': 'log_update',
-                    'log': '✅ 固件文件上传完成',
-                    'log_type': 'success'
-                })
-
-                # 清理全局进度状态
-                with global_state.firmware_upload_progress_lock:
-                    if client_id in global_state.firmware_upload_progress:
-                        del global_state.firmware_upload_progress[client_id]
+                await upload_firmware_to_test_host(
+                    ssh,
+                    client_id,
+                    firmware_stream,
+                    remote_firmware,
+                    firmware_name,
+                    firmware_size
+                )
 
                 logger.info("[Firmware Burn] Firmware uploaded successfully, skipping local file check")
 
@@ -7694,130 +7863,65 @@ async def burn_firmware(
             else:
                 # 现在处理固件文件（远程路径或本地文件）
                 logger.info(f"[Firmware Burn] Processing firmware: {firmware_path}")
-                firmware_name = os.path.basename(firmware_path)
+                firmware_name = os.path.basename(firmware_path.rstrip('/'))
                 remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_name}"
+                local_firmware_path = None
 
-                # 判断是本地文件还是远程文件
-                if os.path.exists(firmware_path):
-                    # 本地文件，需要上传
-                    file_size = os.path.getsize(firmware_path)
-                    logger.info(f"[Firmware Burn] Uploading local file: {firmware_path} ({file_size} bytes)")
-
-                    # 用于存储上传进度的全局变量（供回调访问）
-                    upload_progress_data = {'current_percentage': 0}
-
-                    # 自定义SCP进度回调
-                    def upload_progress(filename, size, sent):
-                        percentage = (sent / size) * 100 if size > 0 else 0
-                        upload_progress_data['current_percentage'] = percentage
-                        logger.info(f"[Firmware Burn] Upload progress: {percentage:.2f}%")
-
-                    # 使用线程执行SCP上传
-                    import threading
-                    upload_complete = threading.Event()
-                    upload_error = [None]
-
-                    def upload_file_thread():
-                        try:
-                            scp_client = scp.SCPClient(ssh.get_transport(), progress=upload_progress)
-                            scp_client.put(firmware_path, remote_firmware)
-                            scp_client.close()
-                            logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_firmware}")
-                        except Exception as e:
-                            logger.error(f"[Firmware Burn] Upload error: {e}")
-                            upload_error[0] = str(e)
-                        finally:
-                            upload_complete.set()
-
-                    # 发送上传开始消息
-                    if client_id in global_state.websocket_connections:
-                        try:
-                            await safe_websocket_send(client_id, {
-                                'type': 'file_upload_progress',
-                                'filename': firmware_name,
-                                'percentage': 0,
-                                'total_size': file_size,
-                                'uploaded_size': 0
-                            })
-                        except (WebSocketDisconnect, ConnectionError, KeyError):
-                            pass
-
-                    # 启动上传线程
-                    upload_thread = threading.Thread(target=upload_file_thread)
-                    upload_thread.start()
-
-                    # 定期更新进度到前端
-                    last_percentage = 0
-                    last_update_time = time.time()
-                    while not upload_complete.is_set():
-                        await asyncio.sleep(1.0)  # 增加到1秒间隔
-                        current_percentage = upload_progress_data.get('current_percentage', 0)
-                        current_time = time.time()
-
-                        # 只有当百分比变化超过1%且距离上次更新超过2秒时才发送更新
-                        if abs(current_percentage - last_percentage) > 1.0 and (current_time - last_update_time) > 2.0:
-                            if client_id in global_state.websocket_connections:
-                                try:
-                                    sent_size = int((current_percentage / 100) * file_size)
-                                    await safe_websocket_send(client_id, {
-                                        'type': 'file_upload_progress',
-                                        'filename': firmware_name,
-                                        'percentage': round(current_percentage, 2),
-                                        'total_size': file_size,
-                                        'uploaded_size': sent_size
-                                    })
-                                except (WebSocketDisconnect, ConnectionError, KeyError):
-                                    pass
-                                last_percentage = current_percentage
-                                last_update_time = current_time
-
-                    # 等待线程完成
-                    upload_thread.join(timeout=300)
-
-                    # 检查上传是否成功
-                    if upload_error[0]:
-                        ssh_manager.return_connection(ssh)
-                        return JSONResponse(
-                            content={'success': False, 'error': f'Upload failed: {upload_error[0]}'}
-                        )
-
-                    # 发送上传完成消息
-                    if client_id in global_state.websocket_connections:
-                        try:
-                            await safe_websocket_send(client_id, {
-                                'type': 'file_upload_progress',
-                                'filename': firmware_name,
-                                'percentage': 100,
-                                'total_size': file_size,
-                                'uploaded_size': file_size
-                            })
-                            await safe_websocket_send(client_id, {
-                                'type': 'log_update',
-                                'log': '✅ 固件文件上传完成',
-                                'log_type': 'success'
-                            })
-                        except (WebSocketDisconnect, ConnectionError, KeyError):
-                            pass
-
-                    logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_firmware}")
-                elif firmware_path.startswith('/') or firmware_path.startswith('./'):
-                    # 远程文件路径
-                    logger.info(f"[Firmware Burn] Using remote file: {firmware_path}")
-                    remote_firmware = firmware_path
-                else:
-                    # 可能只是文件名，尝试在 GMS-Suite 目录中查找
-                    logger.info(f"[Firmware Burn] Searching for file in GMS-Suite: {firmware_path}")
-                    check_cmd = f"ls /home/{config['ubuntu_user']}/GMS-Suite/{firmware_path} 2>/dev/null && echo 'found' || echo 'not_found'"
+                # 绝对路径/相对路径优先按测试主机文件处理，避免同机部署时把远程文件再次SCP到自身。
+                if firmware_path.startswith('/') or firmware_path.startswith('./'):
+                    quoted_firmware_path = shlex.quote(firmware_path)
+                    check_cmd = f"test -f {quoted_firmware_path} && echo 'found' || echo 'not_found'"
                     output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
 
                     if 'found' in output:
-                        remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_path}"
+                        logger.info(f"[Firmware Burn] Using remote file: {firmware_path}")
+                        remote_firmware = firmware_path
+                    elif os.path.exists(firmware_path):
+                        local_firmware_path = firmware_path
+                    else:
+                        ssh_manager.return_connection(ssh)
+                        await release_device_locks(client_id, locked_devices)
+                        return JSONResponse(
+                            content={'success': False, 'error': f'Firmware file not found: {firmware_path}. Please use a valid test-host path or upload the file.'}
+                        )
+                elif os.path.exists(firmware_path):
+                    local_firmware_path = firmware_path
+                else:
+                    # 可能只是文件名，尝试在 GMS-Suite 目录中查找
+                    logger.info(f"[Firmware Burn] Searching for file in GMS-Suite: {firmware_path}")
+                    remote_candidate = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_path}"
+                    check_cmd = f"test -f {shlex.quote(remote_candidate)} && echo 'found' || echo 'not_found'"
+                    output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
+
+                    if 'found' in output:
+                        remote_firmware = remote_candidate
                         logger.info(f"[Firmware Burn] File found: {remote_firmware}")
                     else:
                         ssh_manager.return_connection(ssh)
+                        await release_device_locks(client_id, locked_devices)
                         return JSONResponse(
                             content={'success': False, 'error': f'Firmware file not found: {firmware_path}. Please use a full path or upload the file first.'}
                         )
+
+                if local_firmware_path:
+                    file_size = os.path.getsize(local_firmware_path)
+                    if file_size <= 0:
+                        ssh_manager.return_connection(ssh)
+                        await release_device_locks(client_id, locked_devices)
+                        return JSONResponse(
+                            content={'success': False, 'error': 'Firmware file is empty'}
+                        )
+                    logger.info(f"[Firmware Burn] Uploading local file: {local_firmware_path} ({file_size} bytes)")
+                    await upload_firmware_to_test_host(
+                        ssh,
+                        client_id,
+                        local_firmware_path,
+                        remote_firmware,
+                        firmware_name,
+                        file_size
+                    )
+
+                    logger.info(f"[Firmware Burn] Firmware uploaded to: {remote_firmware}")
 
             # 3. 让设备进入 Loader 模式
             logger.info("[Firmware Burn] Entering Loader mode...")
@@ -7837,6 +7941,7 @@ async def burn_firmware(
             # 检查是否有设备进入 loader 模式（0设备=失败）
             if "List of rockusb connected(0)" in output or "List of rockusb connected" not in output:
                 ssh_manager.return_connection(ssh)
+                await release_device_locks(client_id, locked_devices)
                 return JSONResponse(
                     content={'success': False, 'error': f'No Loader devices detected. Output:\n{output}'}
                 )
@@ -7845,7 +7950,7 @@ async def burn_firmware(
 
             # 5. 烧写固件（upgrade_tool 会自动处理所有设备）
             logger.info("[Firmware Burn] Starting firmware burning...")
-            burn_cmd = f"cd {gms_suite_dir} && ./upgrade_tool uf {shlex.quote(firmware_name)}"
+            burn_cmd = f"cd {gms_suite_dir} && ./upgrade_tool uf {shlex.quote(remote_firmware)}"
 
             # 发送开始消息
             if client_id in global_state.websocket_connections:
@@ -8532,11 +8637,11 @@ async def upload_apk(
             return ApiResponse.error("分片参数无效", status_code=400)
 
         chunk_path = _safe_join(task_dir, f"{filename}.part{chunk_index}")
-        chunk_data = await file.read()
-        if len(chunk_data) > APK_MAX_FILE_SIZE:
-            return ApiResponse.error(f"文件过大，最大支持 {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
-        with open(chunk_path, 'wb') as f:
-            f.write(chunk_data)
+        try:
+            await save_upload_to_path(file, chunk_path, APK_MAX_FILE_SIZE)
+        except ValueError as e:
+            _cleanup_files([chunk_path])
+            return ApiResponse.error(str(e), status_code=400)
 
         chunk_paths = [
             _safe_join(task_dir, f"{filename}.part{i}")
@@ -8553,11 +8658,8 @@ async def upload_apk(
                 _cleanup_files(chunk_paths + [apk_path])
                 return ApiResponse.error(f"文件过大，最大支持 {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
 
-            with open(apk_path, 'wb') as out_f:
-                for chunk_file in chunk_paths:
-                    with open(chunk_file, 'rb') as cf:
-                        out_f.write(cf.read())
-                    os.remove(chunk_file)
+            merge_files_to_path(chunk_paths, apk_path)
+            _cleanup_files(chunk_paths)
 
             file_size = os.path.getsize(apk_path)
             if file_size > APK_MAX_FILE_SIZE:
@@ -8572,14 +8674,12 @@ async def upload_apk(
                 'chunk_received': chunk_index + 1, 'total_chunks': total_chunks, 'uploaded': False
             })
     else:
-        file_data = await file.read()
-        if len(file_data) > APK_MAX_FILE_SIZE:
-            return ApiResponse.error(f"文件过大，最大支持 {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
+        try:
+            file_size = await save_upload_to_path(file, apk_path, APK_MAX_FILE_SIZE)
+        except ValueError as e:
+            _cleanup_files([apk_path])
+            return ApiResponse.error(str(e), status_code=400)
 
-        with open(apk_path, 'wb') as f:
-            f.write(file_data)
-
-        file_size = len(file_data)
         _create_apk_task(task_id, apk_path, filename)
         return ApiResponse.success({'task_id': task_id, 'filename': filename, 'size': file_size})
 
@@ -9437,7 +9537,7 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
         })
 
         # 启动后台读取线程
-        def read_output():
+        def read_adb_shell_output():
             """后台线程持续读取终端输出"""
             try:
                 while True:
@@ -9488,7 +9588,7 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
                 logger.info(f"[TERMINAL] ADB read thread exiting for {session_id}")
 
         # 在后台线程中启动读取
-        thread = threading.Thread(target=read_output, daemon=True)
+        thread = threading.Thread(target=read_adb_shell_output, daemon=True)
         thread.start()
 
         logger.info(f"[TERMINAL] ADB Shell connected for device {serial_no}")
@@ -9572,7 +9672,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
         })
 
         # 启动后台读取线程
-        def read_output():
+        def read_ssh_terminal_output():
             """后台线程持续读取终端输出"""
             try:
                 while True:
@@ -9642,7 +9742,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                     pass
 
         # 启动读取线程
-        thread = threading.Thread(target=read_output, daemon=True, name=f"terminal_read_{session_id}")
+        thread = threading.Thread(target=read_ssh_terminal_output, daemon=True, name=f"terminal_read_{session_id}")
         thread.start()
 
     except paramiko.AuthenticationException:

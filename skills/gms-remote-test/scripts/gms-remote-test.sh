@@ -33,6 +33,7 @@ NC=$(printf '\033[0m')
 # Network timeout constants
 PING_TIMEOUT=2
 CURL_TIMEOUT=30  # 30 seconds for slow API endpoints (e.g., test results)
+CURL_BURN_TIMEOUT="${GMS_CURL_BURN_TIMEOUT:-1800}"  # firmware transfer + burn can take much longer
 CURL_EXIT_CANNOT_CONNECT=7
 CURL_EXIT_OPERATION_TIMEOUT=28
 
@@ -122,6 +123,7 @@ check_http_response() {
 check_jq() {
     if ! command -v jq &> /dev/null; then
         error "jq is required but not installed. Please install: sudo apt-get install jq"
+        return 1
     fi
 }
 
@@ -136,6 +138,8 @@ _is_test_host() {
 # Outputs: "host user port" (space-separated)
 _resolve_ssh_host() {
     local host=$(echo "$SERVER_URL" | sed 's|http://||' | sed 's|/.*||' | sed 's|:.*||')
+    local user="hcq"
+    local port="22"
     local config_files=(
         "${GMS_WEB_APP_DIR}/configs/config.json"
         "${HOME}/GMS_Remote_Test/web_app/configs/config.json"
@@ -143,10 +147,94 @@ _resolve_ssh_host() {
     for config_file in "${config_files[@]}"; do
         if [ -f "$config_file" ]; then
             local cfg_host=$(jq -r '.ubuntu_host // empty' "$config_file" 2>/dev/null)
+            local cfg_user=$(jq -r '.ubuntu_user // empty' "$config_file" 2>/dev/null)
+            local cfg_port=$(jq -r '.ssh_port // .ubuntu_port // empty' "$config_file" 2>/dev/null)
+            [ -n "$cfg_user" ] && user="$cfg_user"
+            [ -n "$cfg_port" ] && port="$cfg_port"
             [ -n "$cfg_host" ] && host="$cfg_host" && break
         fi
     done
-    echo "$host hcq 22"
+
+    if [ "$host" = "$(echo "$SERVER_URL" | sed 's|http://||' | sed 's|/.*||' | sed 's|:.*||')" ] && command -v jq &> /dev/null; then
+        local api_config=$(api_call "/config/read" 2>/dev/null)
+        if [ -n "$api_config" ]; then
+            local api_host=$(echo "$api_config" | jq -r '.ubuntu_host // empty' 2>/dev/null)
+            local api_user=$(echo "$api_config" | jq -r '.ubuntu_user // empty' 2>/dev/null)
+            [ -n "$api_host" ] && host="$api_host"
+            [ -n "$api_user" ] && user="$api_user"
+        fi
+    fi
+
+    host="${GMS_BURN_SSH_HOST:-$host}"
+    user="${GMS_BURN_SSH_USER:-$user}"
+    port="${GMS_BURN_SSH_PORT:-$port}"
+    echo "$host $user $port"
+}
+
+_shell_quote() {
+    printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
+}
+
+_urlencode() {
+    jq -rn --arg value "$1" '$value | @uri'
+}
+
+_post_firmware_burn_path() {
+    local remote_path="$1"
+    local devices="$2"
+    local wipe_data="$3"
+    local device_list
+    device_list=$(echo "$devices" | tr ' ' ',')
+
+    curl -sS -w "\nHTTP_STATUS:%{http_code}" \
+        --max-time "$CURL_BURN_TIMEOUT" \
+        -X POST "${API_BASE}/burn/firmware" \
+        -F "firmware_path=${remote_path}" \
+        -F "devices=${device_list}" \
+        -F "wipe_data=${wipe_data}"
+}
+
+_post_firmware_burn_upload() {
+    local firmware_path="$1"
+    local devices="$2"
+    local wipe_data="$3"
+    local device_list
+    local device_query
+    device_list=$(echo "$devices" | tr ' ' ',')
+    device_query=$(_urlencode "$device_list")
+
+    curl -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
+        --max-time "$CURL_BURN_TIMEOUT" \
+        -X POST "${API_BASE}/burn/firmware?devices=${device_query}" \
+        -F "firmware_file=@${firmware_path}" \
+        -F "firmware_path=$(basename "$firmware_path")" \
+        -F "wipe_data=${wipe_data}"
+}
+
+_copy_firmware_to_test_host() {
+    local firmware_path="$1"
+    local remote_dir="$2"
+    local ssh_host="$3"
+    local ssh_user="$4"
+    local ssh_port="$5"
+    local remote_path="${remote_dir%/}/$(basename "$firmware_path")"
+    local quoted_remote_dir
+    quoted_remote_dir=$(_shell_quote "$remote_dir")
+
+    info "Preparing remote firmware directory: ${ssh_user}@${ssh_host}:${remote_dir}" >&2
+    ssh -p "$ssh_port" "${ssh_user}@${ssh_host}" "mkdir -p ${quoted_remote_dir}" >/dev/null || return 1
+
+    if command -v rsync &> /dev/null; then
+        info "Transferring firmware with rsync delta/partial support..." >&2
+        rsync -a --partial --inplace --info=progress2 -s \
+            -e "ssh -p ${ssh_port}" \
+            "$firmware_path" "${ssh_user}@${ssh_host}:${remote_dir%/}/" >&2 || return 1
+    else
+        warning "rsync not found; falling back to scp. Install rsync for faster repeat transfers." >&2
+        scp -P "$ssh_port" -p "$firmware_path" "${ssh_user}@${ssh_host}:${remote_dir%/}/" >&2 || return 1
+    fi
+
+    echo "$remote_path"
 }
 
 # ==============================================================================
@@ -219,26 +307,45 @@ gms-rt-burn-firmware() {
     local firmware_path="$1"
     local devices="$2"
     local wipe_data="${3:-true}"
+    local upload_mode="${GMS_BURN_UPLOAD_MODE:-auto}"
 
     [ -z "$firmware_path" ] && { error "Firmware path required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data]"; return 1; }
     [ -z "$devices" ] && { error "Devices required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data]"; return 1; }
     [ ! -f "$firmware_path" ] && { error "Firmware file not found: $firmware_path"; return 1; }
+    check_jq || return 1
 
     echo "🔥 Burning firmware: $firmware_path to devices: $devices..."
-    echo "⏳ Uploading firmware (this may take a few minutes)..."
+    local response=""
 
-    # Get terminal width for progress bars
-    local term_width=${COLUMNS:-$(tput cols 2>/dev/null || echo 80)}
-    local bar_width=$((term_width * 60 / 100))
+    if [ "$upload_mode" != "http" ]; then
+        local ssh_host ssh_user ssh_port remote_dir remote_path
+        read -r ssh_host ssh_user ssh_port <<< "$(_resolve_ssh_host)"
+        remote_dir="${GMS_BURN_REMOTE_DIR:-/home/${ssh_user}/GMS-Suite}"
 
-    # Set COLUMNS for curl progress bar width (60% of terminal)
-    export COLUMNS=$bar_width
+        echo "🚀 Direct mode: ${ssh_user}@${ssh_host}:${remote_dir}"
+        if remote_path=$(_copy_firmware_to_test_host "$firmware_path" "$remote_dir" "$ssh_host" "$ssh_user" "$ssh_port"); then
+            echo "🔥 Starting burn using remote firmware path: $remote_path"
+            response=$(_post_firmware_burn_path "$remote_path" "$devices" "$wipe_data")
+        elif [ "$upload_mode" = "direct" ]; then
+            error "Direct firmware transfer failed"
+            return 1
+        else
+            warning "Direct transfer failed; falling back to HTTP upload"
+        fi
+    fi
 
-    # Use api_call with custom curl args for file upload with progress bar
-    local curl_args="-# -o /dev/stdout -F \"firmware_file=@$firmware_path\" -F \"devices=$devices\" -F \"wipe_data=$wipe_data\""
-    local response=$(api_call "/burn/firmware" "POST" "" "$curl_args")
+    if [ -z "$response" ]; then
+        echo "⏳ Uploading firmware through API (slower fallback)..."
 
-    unset COLUMNS
+        # Get terminal width for progress bars
+        local term_width=${COLUMNS:-$(tput cols 2>/dev/null || echo 80)}
+        local bar_width=$((term_width * 60 / 100))
+
+        # Set COLUMNS for curl progress bar width (60% of terminal)
+        export COLUMNS=$bar_width
+        response=$(_post_firmware_burn_upload "$firmware_path" "$devices" "$wipe_data")
+        unset COLUMNS
+    fi
 
     local body
     if ! body=$(check_http_response "$response"); then
@@ -256,6 +363,10 @@ gms-rt-burn-firmware() {
         echo "$body" | jq '.' 2>/dev/null || echo "$body"
         return 1
     fi
+}
+
+gms-burn-firmware() {
+    gms-rt-burn-firmware "$@"
 }
 
 # Burn GSI image to devices

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS 远程测试</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260524-03">
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/xterm/xterm.css') }}">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <script src="{{ url_for('static', filename='vendor/xterm/xterm.min.js') }}"></script>
@@ -12,7 +12,7 @@
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="{{ url_for('static', filename='js/api-constants.js') }}?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=20260411"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=20260524-03"></script>
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
@@ -991,8 +991,9 @@
                 <div class="modal-form-row">
                     <label>固件文件:</label>
                     <div class="input-with-btn">
-                        <input type="text" id="firmware-path" placeholder="请选择固件文件 (*.img, *.bin, *.update)" />
-                        <button class="btn-small" onclick="browseLocalFileForFirmware()">📁</button>
+                        <input type="text" id="firmware-path" placeholder="选择本机文件或输入服务器固件路径" />
+                        <button class="btn-small" onclick="browseLocalFileForFirmware()">本机</button>
+                        <button class="btn-small" onclick="browseRemoteFileForFirmware()">服务器</button>
                     </div>
                 </div>
                 <div class="modal-info-text">
@@ -1347,7 +1348,7 @@
                     id: 'default',
                     name: defaultHost,
                     connection: defaultHost,
-                    password: '{{ config.ubuntu_pswd | default("", true) }}',
+                    password: '',
                     vnc_password: ''  // 默认主机不需要VNC密码
                 });
             } else if (defaultIndex !== 0) {
@@ -1422,14 +1423,14 @@
             if (currentHost.id === 'default') {
                 // 检查 iframe 是否已经是默认主机的 URL
                 if (vncFrame.src.includes(defaultUrl) || vncFrame.src.includes('{{ config.ubuntu_host }}')) {
-                    console.log('[Desktop] Already on default host');
+                    debugLog('[Desktop] Already on default host');
                     return;
                 }
                 // 需要切换回默认主机，先启动VNC服务
-                console.log('[Desktop] Switching to default host, starting VNC first');
+                debugLog('[Desktop] Switching to default host, starting VNC first');
                 const url = await startDefaultHostVNC(
                     defaultHost,
-                    '{{ config.ubuntu_pswd }}',
+                    '',
                     currentHost.vnc_password || '',
                     defaultUrl
                 );
@@ -1459,7 +1460,7 @@
                 // 使用后端返回的URL（可能包含密码）
                 vncFrame.src = result.url;
 
-                console.log('[Desktop] Switched to host:', currentHost.name);
+                debugLog('[Desktop] Switched to host:', currentHost.name);
             } catch (e) {
                 console.error('[VNC] Failed to start:', e);
                 showToast('VNC 启动失败', 'error');
@@ -1479,7 +1480,7 @@
                 vncFrame.src = currentSrc;
             }, 10);
 
-            console.log('[Desktop] VNC refreshed');
+            debugLog('[Desktop] VNC refreshed');
         }
 
         // 显示添加主机弹框
@@ -1985,7 +1986,7 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    console.log('[VNC] VNC service status:', result.message);
+                    debugLog('[VNC] VNC service status:', result.message);
                     vncChecked = true;
 
                     // 等待VNC服务完全启动
@@ -2084,7 +2085,7 @@
                     initDesktopHosts();
                     window.desktopHostsInitialized = true;
                     // 默认主机的VNC已在HTML中直接加载，无需调用API
-                    console.log('[Desktop] Default host ready');
+                    debugLog('[Desktop] Default host ready');
                 }
             }
         }
@@ -2092,8 +2093,7 @@
         // ==================== 终端功能 ====================
         const terminalConfig = {
             ssh_host: '{{ config.ubuntu_host }}',
-            ssh_user: '{{ config.ubuntu_user }}',
-            ssh_password: '{{ config.ubuntu_pswd | default("", true) }}'
+            ssh_user: '{{ config.ubuntu_user }}'
         };
 
         function updateTerminalStatus(connected) {
@@ -2106,7 +2106,7 @@
         }
 
         function connectTerminalSocket() {
-            console.log('Connecting to terminal Socket.IO...');
+            debugLog('Connecting to terminal Socket.IO...');
             updateTerminalStatus(false);
 
             terminalSocket = io({
@@ -2114,19 +2114,18 @@
             });
 
             terminalSocket.on('connect', () => {
-                console.log('Terminal Socket.IO connected');
+                debugLog('Terminal Socket.IO connected');
                 updateTerminalStatus(true);
 
                 // 请求SSH连接
                 terminalSocket.emit('terminal_connect', {
                     host: terminalConfig.ssh_host,
-                    user: terminalConfig.ssh_user,
-                    password: terminalConfig.ssh_password
+                    user: terminalConfig.ssh_user
                 });
             });
 
             terminalSocket.on('disconnect', () => {
-                console.log('Terminal Socket.IO disconnected');
+                debugLog('Terminal Socket.IO disconnected');
                 updateTerminalStatus(false);
                 if (terminal) {
                     terminal.writeln('\r\n\x1b[31m⚠️ 连接已断开\x1b[0m\r\n');
@@ -2148,7 +2147,7 @@
             });
 
             terminalSocket.on('terminal_connected', () => {
-                console.log('SSH connected');
+                debugLog('SSH connected');
                 if (terminal) {
                     terminal.clear();
                     terminal.writeln('\x1b[32m✅ 已连接到 Ubuntu 主机\x1b[0m');
@@ -2161,7 +2160,7 @@
         function initTerminal() {
             if (terminalInitialized) return;
 
-            console.log('Initializing terminal...');
+            debugLog('Initializing terminal...');
 
             if (typeof Terminal === 'undefined') {
                 console.error('Terminal is not defined!');
@@ -2213,7 +2212,7 @@
                     }
                 });
 
-                console.log('FitAddon loaded');
+                debugLog('FitAddon loaded');
             } catch (e) {
                 console.error('FitAddon error:', e);
                 const container = document.getElementById('terminal');
@@ -2250,7 +2249,7 @@
             connectTerminalSocket();
 
             terminalInitialized = true;
-            console.log('Terminal initialized');
+            debugLog('Terminal initialized');
         }
 
         // 终端控制函数
@@ -2337,13 +2336,13 @@
                 if (!window.desktopHostsInitialized) {
                     initDesktopHosts();
                     window.desktopHostsInitialized = true;
-                    console.log('[Desktop] Hosts initialized');
+                    debugLog('[Desktop] Hosts initialized');
 
                     // 检查是否需要切换VNC连接
                     const defaultHost = '{{ config.ubuntu_user }}@{{ config.ubuntu_host }}';
                     if (currentHost && currentHost.connection !== defaultHost) {
                         // 当前主机不是默认主机，需要切换VNC连接
-                        console.log('[Desktop] Switching to saved host:', currentHost.name);
+                        debugLog('[Desktop] Switching to saved host:', currentHost.name);
                         // 延迟执行，确保DOM已加载
                         setTimeout(() => {
                             loadVNCConnection();
@@ -2372,17 +2371,45 @@
         // ==================== 导航栏拖拽排序 ====================
         let draggedItem = null;
 
-        // 加载保存的导航栏排序
+        function getSidebarPages(nav) {
+            return Array.from(nav.querySelectorAll('.sidebar-item'))
+                .map(item => item.dataset.page)
+                .filter(Boolean);
+        }
+
+        function getSidebarStorageKey(nav) {
+            return `gms_sidebar_order:${getSidebarPages(nav).join('|')}`;
+        }
+
+        function applySidebarOrder(nav, order) {
+            const items = Array.from(nav.querySelectorAll('.sidebar-item'));
+            const itemByPage = new Map(items.map(item => [item.dataset.page, item]));
+            const currentPages = getSidebarPages(nav);
+            const orderedPages = order.filter(page => itemByPage.has(page));
+            const remainingPages = currentPages.filter(page => !orderedPages.includes(page));
+
+            orderedPages.concat(remainingPages).forEach(page => {
+                nav.appendChild(itemByPage.get(page));
+            });
+        }
+
         async function loadSidebarOrder() {
-            let savedOrder = localStorage.getItem('gms_sidebar_order');
+            const nav = document.getElementById('sidebar-nav');
+            if (!nav) return;
+
+            const storageKey = getSidebarStorageKey(nav);
+            let savedOrder = localStorage.getItem(storageKey) || localStorage.getItem('gms_sidebar_order');
 
             if (!savedOrder) {
                 try {
                     const response = await fetch('/api/sidebar-order');
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
                     const data = await response.json();
                     if (data.success && data.order && data.order.length > 0) {
                         savedOrder = JSON.stringify(data.order);
-                        localStorage.setItem('gms_sidebar_order', savedOrder);
+                        localStorage.setItem(storageKey, savedOrder);
                     }
                 } catch (e) {
                     console.error('[Sidebar] Failed to load from backend:', e);
@@ -2393,17 +2420,9 @@
 
             try {
                 const order = JSON.parse(savedOrder);
-                const nav = document.getElementById('sidebar-nav');
-                if (!nav) return;
-
-                const items = Array.from(nav.querySelectorAll('.sidebar-item'));
-
-                order.forEach(pageName => {
-                    const item = items.find(el => el.dataset.page === pageName);
-                    if (item) {
-                        nav.appendChild(item);
-                    }
-                });
+                if (!Array.isArray(order)) return;
+                applySidebarOrder(nav, order);
+                localStorage.setItem(storageKey, JSON.stringify(getSidebarPages(nav)));
             } catch (e) {
                 console.error('[Sidebar] Failed to load order:', e);
             }
@@ -2413,20 +2432,26 @@
             const nav = document.getElementById('sidebar-nav');
             if (!nav) return;
 
-            const items = Array.from(nav.querySelectorAll('.sidebar-item'));
-            const order = items.map(item => item.dataset.page);
+            const order = getSidebarPages(nav);
 
-            localStorage.setItem('gms_sidebar_order', JSON.stringify(order));
+            localStorage.setItem(getSidebarStorageKey(nav), JSON.stringify(order));
             saveSidebarOrderToBackend(order);
         }
 
         async function saveSidebarOrderToBackend(order) {
             try {
-                await fetch('/api/sidebar-order', {
+                const response = await fetch('/api/sidebar-order', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ order })
                 });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.success === false) {
+                    throw new Error(data.error || 'Save failed');
+                }
             } catch (e) {
                 console.error('[Sidebar] Failed to save to backend:', e);
             }

@@ -7,16 +7,13 @@ import subprocess
 import threading
 import time
 import queue
-import configparser
 import socket
 import shlex
 import traceback
-import uuid
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, Response, session
-from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
+from flask_socketio import SocketIO, emit, join_room, leave_room
 from functools import wraps
-from flask import request as flask_request
 import paramiko
 from paramiko import AuthenticationException, SSHException
 
@@ -24,6 +21,7 @@ from paramiko import AuthenticationException, SSHException
 from core.report_analyzer import ReportAnalyzer
 # 导入测试报告数据库模块
 from core.test_report_db import test_report_db
+from core.config import config_manager
 
 # Flask 应用
 app = Flask(__name__)
@@ -246,7 +244,10 @@ def handle_connect():
     client_id = get_client_id()
     join_room(client_id)
     print(f"[Socket.IO] Client connected: {client_id}, room joined")
-    emit('connected', {'client_id': client_id})
+    emit('connected', {
+        'client_id': client_id,
+        'data': 'Connected to GMS Auto Test Server'
+    })
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -320,61 +321,20 @@ def get_device_locks_status():
 # ==================== Configuration ====================
 def load_config():
     """Load configuration from config.json and config_dynamic.json"""
-    base_dir = os.path.dirname(__file__)
-
-    # 加载静态配置
-    config_path = os.path.join(base_dir, 'config.json')
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-            # Substitute ubuntu_user
-            ubuntu_user = config.get('ubuntu_user', 'hcq')
-            for key, value in config.items():
-                if isinstance(value, str) and '${ubuntu_user}' in value:
-                    config[key] = value.replace('${ubuntu_user}', ubuntu_user)
-    except Exception as e:
-        print(f"Error loading config: {e}")
-        config = {}
-
-    # 加载动态配置
-    dynamic_path = os.path.join(base_dir, 'config_dynamic.json')
-    try:
-        with open(dynamic_path, 'r', encoding='utf-8') as f:
-            dynamic_config = json.load(f)
-            config.update(dynamic_config)
-    except FileNotFoundError:
-        pass  # 动态配置文件不存在时使用默认值
-    except Exception as e:
-        print(f"Error loading dynamic config: {e}")
-
-    return config
+    return config_manager.load_config(force_reload=True)
 
 def save_config(config):
     """Save configuration to config.json"""
-    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
-    try:
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
-        return True
-    except Exception as e:
-        print(f"Error saving config: {e}")
-        return False
+    return config_manager.save_config(config)
 
 def save_dynamic_config(dynamic_config):
     """Save dynamic configuration to config_dynamic.json"""
-    dynamic_path = os.path.join(os.path.dirname(__file__), 'config_dynamic.json')
-    try:
-        with open(dynamic_path, 'w', encoding='utf-8') as f:
-            json.dump(dynamic_config, f, indent=4, ensure_ascii=False)
-        return True
-    except Exception as e:
-        print(f"Error saving dynamic config: {e}")
-        return False
+    return config_manager.save_dynamic_config(dynamic_config)
 
 
 def _get_dynamic_config_path():
     """Get the path to dynamic config file"""
-    return os.path.join(os.path.dirname(__file__), 'config_dynamic.json')
+    return config_manager.dynamic_config_path
 
 
 def _load_dynamic_config():
@@ -388,26 +348,38 @@ def _load_dynamic_config():
 
 def _save_dynamic_config_full(config):
     """Save full dynamic configuration"""
-    config_path = _get_dynamic_config_path()
-    with open(config_path, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=4, ensure_ascii=False)
+    if not config_manager.save_dynamic_config(config):
+        raise RuntimeError("Failed to save dynamic config")
 
 
 @app.route('/api/sidebar-order', methods=['POST'])
 def save_sidebar_order():
     """Save sidebar navigation order"""
     try:
-        data = request.json
+        data = request.json or {}
         order = data.get('order', [])
 
-        if not order:
+        if not isinstance(order, list):
+            return jsonify({'success': False, 'error': 'order must be a list'}), 400
+
+        normalized_order = []
+        seen = set()
+        for page in order:
+            if not isinstance(page, str):
+                continue
+            page = page.strip()
+            if page and page not in seen:
+                normalized_order.append(page)
+                seen.add(page)
+
+        if not normalized_order:
             return jsonify({'success': False, 'error': 'No order provided'}), 400
 
         config = _load_dynamic_config()
-        config['sidebar_order'] = order
+        config['sidebar_order'] = normalized_order
         _save_dynamic_config_full(config)
 
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'order': normalized_order})
     except Exception as e:
         print(f"Error saving sidebar order: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -522,6 +494,7 @@ def save_test_report_to_db(client_id, config, test_params, user_logs):
 
         if os.path.exists(xml_path):
             try:
+                analyzer = ReportAnalyzer()
                 result = analyzer.analyze_file(xml_path)
                 if result:
                     report_info.update({
@@ -903,7 +876,7 @@ def run_test_suite(config, test_params, client_id):
         user_state['logs'].append(error_msg)
         emit_log_update(client_id, error_msg, 'error')
         # Print full traceback to server logs
-        print(f"[ERROR] Exception in run_test_suite:")
+        print("[ERROR] Exception in run_test_suite:")
         print(traceback.format_exc())
 
         # 异常时也保存日志
@@ -1224,7 +1197,7 @@ def stop_test():
             # 使用 ps 查找包含该环境变量标记的进程
             find_cmd = f"ps eww -e | grep 'GMS_TEST_PGID={process_group_id}' | grep -v grep | awk '{{print $1}}'"
             user_state['logs'].append(f"[{datetime.now().strftime('%H:%M:%S')}] 🧹 正在终止测试进程组: {process_group_id}...")
-            socketio.emit('log_update', {'log': f"🧹 正在终止测试进程组..."}, room=client_id)
+            socketio.emit('log_update', {'log': "🧹 正在终止测试进程组..."}, room=client_id)
 
             # 获取进程ID并杀死
             output, error, code = execute_ssh_command(ssh, find_cmd)
@@ -2465,7 +2438,6 @@ def show_device_screen():
                 pending_devices.append(device)
 
         # 4. Calculate window positions for tiled layout (matching GUI lines 2740-2760)
-        import math
         total_devices = len(pending_devices) + len(running_devices)
         all_devices = sorted(running_devices + pending_devices)
 
@@ -2526,7 +2498,6 @@ def show_device_screen():
             output, error, code = execute_ssh_command(ssh, scrcpy_cmd)
 
             # Wait for scrcpy to start and verify
-            import time
             time.sleep(0.2)  # Give scrcpy time to start (matching GUI line 2216)
 
             # Check if scrcpy process is running
@@ -2969,7 +2940,7 @@ def stop_usbip():
         # 注意：不清除设备来源记录，因为设备仍然在测试主机上
         with usbip_states_lock:
             usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
-        print(f"[USB/IP Stop] Connection cleared (device source preserved)")
+        print("[USB/IP Stop] Connection cleared (device source preserved)")
         return jsonify({'success': True, 'message': '本地设备已断开'})
 
     try:
@@ -2982,18 +2953,18 @@ def stop_usbip():
         with usbip_states_lock:
             usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
 
-        print(f"[USB/IP Stop] Connection cleared (device source preserved)")
+        print("[USB/IP Stop] Connection cleared (device source preserved)")
 
         return jsonify({
             'success': True,
             'message': '本地设备已断开'
         })
-    except Exception as e:
+    except Exception:
         win_ssh.close()
         # 即使失败也清除连接状态，但保留设备来源记录
         with usbip_states_lock:
             usbip_states[client_id] = {'connected': False, 'timestamp': time.time()}
-        print(f"[USB/IP Stop] Connection cleared on error (device source preserved)")
+        print("[USB/IP Stop] Connection cleared on error (device source preserved)")
         return jsonify({'success': True, 'message': '本地设备已断开'})
 
 
@@ -3300,7 +3271,6 @@ def parse_failures_html_content(html_content):
         # Extract test details from testdetails table
         # Match each test with its module section
         lines = html_content.split('\n')
-        current_idx = 0
         current_module_idx = 0
 
         for i, line in enumerate(lines):
@@ -3471,10 +3441,8 @@ def extract_log_errors(log_content, log_type):
 
 # ==================== Report Analysis ====================
 import xml.etree.ElementTree as ET
-import tempfile
 import zipfile
 import tarfile
-import shutil
 
 # 递归解压辅助函数（借鉴自 GMS Failure Extractor）
 def extract_archive_recursive(archive_path, extract_dir, processed_archives=None):
@@ -3539,7 +3507,7 @@ def extract_archive_recursive(archive_path, extract_dir, processed_archives=None
                     except:
                         pass
 
-        except Exception as e:
+        except Exception:
             # 跳过解压失败的文件
             pass
 
@@ -3616,7 +3584,7 @@ def extract_nested_archive(tar_path, extract_dir):
     try:
         with tarfile.open(tar_path, 'r:gz') as tar_ref:
             tar_ref.extractall(extract_dir)
-    except Exception as e:
+    except Exception:
         pass
 
 def find_xml_file(directory):
@@ -3695,13 +3663,6 @@ def parse_directory_fallback(directory_path):
             r' junit\.framework\.AssertionFailedError:\s*([^\s]+)',  # AssertionFailedError: testClass.testMethod
             r'java\.lang\.AssertionError:\s*([^\s]+)',  # AssertionError: testClass.testMethod
             r'java\.lang\.\w+Exception:\s*([^\s]+)',  # Any Java exception
-        ]
-
-        # 提取堆栈跟踪
-        stack_patterns = [
-            r'(?:at\s+)?([a-zA-Z0-9_.]+\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\(.*?\)[\r\n]{1,2}(?:\s+at\s+[^\r\n]+)*)',
-            r'Exception:[\r\n]+((?:\s+at\s+[^\r\n]+[\r\n]+)+)',
-            r'Caused by:[\r\n]+((?:\s+at\s+[^\r\n]+[\r\n]+)+)',
         ]
 
         seen_failures = set()  # 避免重复
@@ -3825,7 +3786,7 @@ def parse_test_result_xml(xml_path):
         # 尝试1: 从Summary节点获取（可能是属性或子节点）
         summary = root.find('Summary')
         if summary is not None:
-            print(f"[XML解析] Summary node found, checking format...")
+            print("[XML解析] Summary node found, checking format...")
 
             # 尝试从Summary的属性获取
             pass_attr = summary.get('pass', summary.get('Pass', '0'))
@@ -3846,7 +3807,7 @@ def parse_test_result_xml(xml_path):
             print(f"[XML解析] Summary found: pass={pass_count}, fail={fail_count}, total={total}")
         else:
             # 尝试2: 从根节点属性获取
-            print(f"[XML解析] No Summary node, trying root attributes...")
+            print("[XML解析] No Summary node, trying root attributes...")
             for attr_name in ['passed', 'Passed', 'pass', 'Pass', 'tests_passed']:
                 if root.get(attr_name):
                     pass_count = int(root.get(attr_name))
@@ -3861,7 +3822,7 @@ def parse_test_result_xml(xml_path):
 
         # 尝试3: 从总数和失败数计算
         if total == 0:
-            print(f"[XML解析] Still 0, trying total tests...")
+            print("[XML解析] Still 0, trying total tests...")
             for attr_name in ['tests', 'Tests', 'total', 'Total']:
                 if root.get(attr_name) and root.get(attr_name).isdigit():
                     total = int(root.get(attr_name))
@@ -4092,11 +4053,7 @@ def parse_test_result_xml(xml_path):
         raise Exception(f"解析XML失败: {str(e)}")
 
 # ==================== Android Source Code Analysis ====================
-import urllib.parse
-import urllib.request
-import json as json_module
 import re
-from html.parser import HTMLParser
 
 def parse_cts_failure_info(test_name, error_message):
     """
@@ -4687,7 +4644,7 @@ def start_screen_mirroring():
             'newly_started': newly_started,
             'already_running': already_running_devices,
             'failed': failed_devices,
-            'desktop_url': f"/desktop",
+            'desktop_url': "/desktop",
             'note': '点击"主机桌面"查看屏幕' if vnc_available else 'VNC未启动，屏幕仅在本地显示'
         })
     except Exception as e:
@@ -4960,8 +4917,6 @@ def burn_firmware():
     devices = data.get('devices', [])
     system_img = data.get('system_img', '')
     vendor_img = data.get('vendor_img', '')
-    misc_img = data.get('misc_img', f"/home/{config['ubuntu_user']}/GMS-Suite/misc.img")
-
     if not devices:
         return jsonify({'success': False, 'error': 'No devices selected'}), 400
 
@@ -4969,6 +4924,7 @@ def burn_firmware():
         return jsonify({'success': False, 'error': 'System image path is required'}), 400
 
     config = load_config()
+    misc_img = data.get('misc_img', f"/home/{config['ubuntu_user']}/GMS-Suite/misc.img")
     ssh = get_ssh_connection(config)
     if not ssh:
         return jsonify({'success': False, 'error': 'SSH connection failed'}), 500
@@ -5238,12 +5194,6 @@ def burn_sn():
         return_ssh_connection(ssh)
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# ==================== SocketIO Events ====================
-@socketio.on('connect')
-def handle_connect():
-    """Handle client connection"""
-    emit('connected', {'data': 'Connected to GMS Auto Test Server'})
-
 @socketio.on('refresh_devices')
 def handle_refresh_devices():
     """Handle device refresh request"""
@@ -5262,6 +5212,7 @@ def handle_terminal_connect(data):
     import threading
 
     try:
+        start_time = time.time()
         config = load_config()
         host = data.get('host', config.get('ubuntu_host'))
         user = data.get('user', config.get('ubuntu_user'))
@@ -5301,7 +5252,7 @@ def handle_terminal_connect(data):
                     compress=True  # Enable compression for faster data transfer
                 )
                 connected = True
-                print(f"[TERMINAL] Connected using key authentication")
+                print("[TERMINAL] Connected using key authentication")
             except Exception as e:
                 last_error = e
                 print(f"[TERMINAL] Key auth failed: {e}")
@@ -5318,7 +5269,7 @@ def handle_terminal_connect(data):
                     compress=True
                 )
                 connected = True
-                print(f"[TERMINAL] Connected using password authentication")
+                print("[TERMINAL] Connected using password authentication")
             except Exception as e:
                 last_error = e
                 print(f"[TERMINAL] Password auth failed: {e}")
@@ -5352,14 +5303,13 @@ def handle_terminal_connect(data):
                 'connected_at': time.time()
             }
 
-        print(f"[TERMINAL] Terminal session created for {sid} (connect time: {time.time() - float(connected) if isinstance(connected, float) else 'N/A'})")
+        print(f"[TERMINAL] Terminal session created for {sid} (connect time: {time.time() - start_time:.2f}s)")
         emit('terminal_connected')
 
         # Start reading thread
         def read_output():
             """Thread to continuously read terminal output"""
             try:
-                buffer = ''
                 while True:
                     # Check if session still exists
                     if sid not in terminal_ssh:
@@ -5371,7 +5321,7 @@ def handle_terminal_connect(data):
                         data_chunk = terminal_ssh[sid]['channel'].recv(1024)
                         if not data_chunk:
                             # Connection closed
-                            print(f"[TERMINAL] No data received, connection可能已关闭")
+                            print("[TERMINAL] No data received, connection可能已关闭")
                             break
 
                         # Decode and emit

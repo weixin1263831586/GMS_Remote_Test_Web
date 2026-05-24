@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20260523-03">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260524-03">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260409-01-01"></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260523-03" crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260524-03" crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -1033,19 +1033,19 @@
                 </div>
                 <div class="modal-form-row">
                     <label>用户名:</label>
-                    <input type="text" id="username-detect-username" placeholder="请输入SSH用户名" onkeypress="handleUsernameDetectKeyPress(event)" autocomplete="username" />
+                    <input type="text" id="username-detect-username" placeholder="请输入客户端用户名" onkeypress="handleUsernameDetectKeyPress(event)" autocomplete="username" />
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="username-detect-password" placeholder="请输入SSH密码进行验证" onkeypress="handleUsernameDetectKeyPress(event)" autocomplete="current-password" />
+                    <input type="password" id="username-detect-password" placeholder="可选，用于SSH验证" onkeypress="handleUsernameDetectKeyPress(event)" autocomplete="current-password" />
                 </div>
                 </form>
                 <div class="modal-ssh-info">
-                    <small>💡 系统将通过SSH连接验证用户名，验证成功后会自动保存用户信息。</small>
+                    <small>SSH可达时会验证用户名；通过 ngrok 等外网访问时可留空密码直接保存。</small>
                 </div>
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeUsernameDetectModal()">取消</button>
-                    <button class="btn-xxs btn-primary" onclick="submitUsernameDetect()">验证并保存</button>
+                    <button class="btn-xxs btn-primary" onclick="submitUsernameDetect()">保存</button>
                 </div>
             </div>
         </div>
@@ -1062,8 +1062,9 @@
                 <div class="modal-form-row">
                     <label>固件文件:</label>
                     <div class="input-with-btn">
-                        <input type="text" id="firmware-path" placeholder="请选择固件文件 (*.img, *.bin, *.update)" />
-                        <button class="btn-small" onclick="browseLocalFileForFirmware()">📁</button>
+                        <input type="text" id="firmware-path" placeholder="选择本机文件或输入服务器固件路径" />
+                        <button class="btn-small" onclick="browseLocalFileForFirmware()">本机</button>
+                        <button class="btn-small" onclick="browseRemoteFileForFirmware()">服务器</button>
                     </div>
                 </div>
                 <div class="modal-info-text">
@@ -1233,11 +1234,11 @@
     <div id="ssh-password-modal" class="modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center;">
         <div class="modal-content" style="max-width: 400px; width: 90%;">
             <div class="modal-header">
-                <span class="modal-title">🔑 输入SSH密码</span>
+                <span class="modal-title">🔑 客户端用户名</span>
             </div>
             <div class="modal-body">
                 <div class="modal-info-text" style="margin-bottom: 15px;">
-                    检测到新客户端,请输入SSH密码以自动获取用户名
+                    检测到新客户端，请输入用户名；SSH密码可选，用于局域网内自动验证。
                 </div>
                 <form id="ssh-password-form" onsubmit="event.preventDefault(); submitSsh();" autocomplete="off">
                 <div class="modal-form-row">
@@ -1250,15 +1251,15 @@
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="ssh-password" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;" onkeypress="handleSshKeyPress(event)" autocomplete="current-password" />
+                    <input type="password" id="ssh-password" placeholder="可选，用于SSH验证" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;" onkeypress="handleSshKeyPress(event)" autocomplete="current-password" />
                 </div>
                 </form>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
-                    💡 密码将被加密保存,下次访问自动使用
+                    通过 ngrok 等外网访问时，服务器通常无法 SSH 回连客户端，可留空密码直接保存用户名。
                 </div>
                 <div class="modal-buttons" style="margin-top: 20px;">
                     <button class="btn-xxs" onclick="closeSshModal()">取消</button>
-                    <button class="btn-xxs btn-primary" onclick="submitSsh()">连接</button>
+                    <button class="btn-xxs btn-primary" onclick="submitSsh()">保存</button>
                 </div>
             </div>
         </div>
@@ -1453,40 +1454,52 @@
             const username = document.getElementById('ssh-username').value.trim();
             const password = document.getElementById('ssh-password').value;
 
-            if (!username || !password) {
-                showToast('请输入用户名和密码', 'error');
+            if (!username) {
+                showToast('请输入用户名', 'error');
                 return;
             }
 
-            showToast('正在连接...', 'info');
+            showToast(password ? '正在验证...' : '正在保存...', 'info');
 
             try {
-                const resp = await fetch('/api/users/detect', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ip: clientInfo.ip, username, password })
-                });
-                const data = await resp.json();
+                let savedUsername = username;
 
-                if (data.success) {
-                    clientInfo.username = data.username;
-                    const storageKey = `gms_username_${clientInfo.ip}`;
-                    localStorage.setItem(storageKey, data.username);
-                    updateClientDisplay();
-                    closeSshModal();
-                    showToast(`已识别: ${data.username}`, 'success');
-
-                    // 记录到服务器（使用 /api/users/set-username 接口）
-                    await fetch('/api/users/set-username', {
+                if (password) {
+                    const resp = await fetch('/api/users/detect', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username: data.username, ip: clientInfo.ip })
+                        body: JSON.stringify({ ip: clientInfo.ip, username, password })
                     });
-                } else {
-                    showToast(data.error || '连接失败', 'error');
+                    const data = await resp.json();
+
+                    if (data.success) {
+                        savedUsername = data.username || username;
+                    } else if (!data.manual_allowed) {
+                        showToast(data.error || '连接失败', 'error');
+                        return;
+                    }
                 }
+
+                await saveUsernameManually(clientInfo.ip, savedUsername);
+                clientInfo.username = savedUsername;
+                updateClientDisplay();
+                closeSshModal();
+                showToast(`已保存: ${savedUsername}`, 'success');
             } catch (e) {
-                showToast('连接失败', 'error');
+                if (password && isUsernameManualFallbackError(e)) {
+                    try {
+                        await saveUsernameManually(clientInfo.ip, username);
+                        clientInfo.username = username;
+                        updateClientDisplay();
+                        closeSshModal();
+                        showToast(`SSH 不可达，已保存: ${username}`, 'success');
+                        return;
+                    } catch (saveError) {
+                        showToast(saveError.message || '保存失败', 'error');
+                        return;
+                    }
+                }
+                showToast(e.message || '连接失败', 'error');
             }
         }
 
@@ -1541,7 +1554,7 @@
                     id: 'default',
                     name: defaultHost,
                     connection: defaultHost,
-                    password: '{{ config.ubuntu_pswd | default("", true) }}',
+                    password: '',
                     vnc_password: ''  // 默认主机不需要VNC密码
                 });
             } else if (defaultIndex !== 0) {
@@ -1624,7 +1637,7 @@
                 debugLog('[Desktop] Switching to default host, starting VNC first');
                 const url = await startDefaultHostVNC(
                     defaultHost,
-                    '{{ config.ubuntu_pswd }}',
+                    '',
                     currentHost.vnc_password || DEFAULT_VNC_PASSWORD,
                     defaultUrl
                 );
@@ -3623,8 +3636,7 @@
         // ==================== 终端功能 ====================
         const terminalConfig = {
             ssh_host: '{{ config.ubuntu_host }}',
-            ssh_user: '{{ config.ubuntu_user }}',
-            ssh_password: '{{ config.ubuntu_pswd | default("", true) }}'
+            ssh_user: '{{ config.ubuntu_user }}'
         };
 
         // 终端静默模式处理（统一管理ADB和路由命令）
@@ -3686,8 +3698,7 @@
                         type: 'terminal_connect',
                         mode: 'ssh',
                         host: terminalConfig.ssh_host,
-                        user: terminalConfig.ssh_user,
-                        password: terminalConfig.ssh_password
+                        user: terminalConfig.ssh_user
                     }));
                     return;
                 }
@@ -3701,8 +3712,7 @@
                         mode: 'adb',
                         serial_no: pendingAdbDevice,
                         host: terminalConfig.ssh_host,
-                        user: terminalConfig.ssh_user,
-                        password: terminalConfig.ssh_password
+                        user: terminalConfig.ssh_user
                     }));
                     pendingAdbDevice = null;
                 } else {
@@ -3711,8 +3721,7 @@
                         type: 'terminal_connect',
                         mode: 'ssh',
                         host: terminalConfig.ssh_host,
-                        user: terminalConfig.ssh_user,
-                        password: terminalConfig.ssh_password
+                        user: terminalConfig.ssh_user
                     }));
                 }
             };
@@ -4195,16 +4204,45 @@
         // ==================== 导航栏拖拽排序 ====================
         let draggedItem = null;
 
+        function getSidebarPages(nav) {
+            return Array.from(nav.querySelectorAll('.sidebar-item'))
+                .map(item => item.dataset.page)
+                .filter(Boolean);
+        }
+
+        function getSidebarStorageKey(nav) {
+            return `gms_sidebar_order:${getSidebarPages(nav).join('|')}`;
+        }
+
+        function applySidebarOrder(nav, order) {
+            const items = Array.from(nav.querySelectorAll('.sidebar-item'));
+            const itemByPage = new Map(items.map(item => [item.dataset.page, item]));
+            const currentPages = getSidebarPages(nav);
+            const orderedPages = order.filter(page => itemByPage.has(page));
+            const remainingPages = currentPages.filter(page => !orderedPages.includes(page));
+
+            orderedPages.concat(remainingPages).forEach(page => {
+                nav.appendChild(itemByPage.get(page));
+            });
+        }
+
         async function loadSidebarOrder() {
-            let savedOrder = localStorage.getItem('gms_sidebar_order');
+            const nav = document.getElementById('sidebar-nav');
+            if (!nav) return;
+
+            const storageKey = getSidebarStorageKey(nav);
+            let savedOrder = localStorage.getItem(storageKey) || localStorage.getItem('gms_sidebar_order');
 
             if (!savedOrder) {
                 try {
                     const response = await fetch('/api/sidebar-order');
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
                     const data = await response.json();
                     if (data.success && data.order && data.order.length > 0) {
                         savedOrder = JSON.stringify(data.order);
-                        localStorage.setItem('gms_sidebar_order', savedOrder);
+                        localStorage.setItem(storageKey, savedOrder);
                     }
                 } catch (e) {
                     console.error('[Sidebar] Failed to load from backend:', e);
@@ -4215,17 +4253,9 @@
 
             try {
                 const order = JSON.parse(savedOrder);
-                const nav = document.getElementById('sidebar-nav');
-                if (!nav) return;
-
-                const items = Array.from(nav.querySelectorAll('.sidebar-item'));
-
-                order.forEach(pageName => {
-                    const item = items.find(el => el.dataset.page === pageName);
-                    if (item) {
-                        nav.appendChild(item);
-                    }
-                });
+                if (!Array.isArray(order)) return;
+                applySidebarOrder(nav, order);
+                localStorage.setItem(storageKey, JSON.stringify(getSidebarPages(nav)));
             } catch (e) {
                 console.error('[Sidebar] Failed to load order:', e);
             }
@@ -4235,20 +4265,26 @@
             const nav = document.getElementById('sidebar-nav');
             if (!nav) return;
 
-            const items = Array.from(nav.querySelectorAll('.sidebar-item'));
-            const order = items.map(item => item.dataset.page);
+            const order = getSidebarPages(nav);
 
-            localStorage.setItem('gms_sidebar_order', JSON.stringify(order));
+            localStorage.setItem(getSidebarStorageKey(nav), JSON.stringify(order));
             saveSidebarOrderToBackend(order);
         }
 
         async function saveSidebarOrderToBackend(order) {
             try {
-                await fetch('/api/sidebar-order', {
+                const response = await fetch('/api/sidebar-order', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ order })
                 });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.success === false) {
+                    throw new Error(data.error || 'Save failed');
+                }
             } catch (e) {
                 console.error('[Sidebar] Failed to save to backend:', e);
             }
