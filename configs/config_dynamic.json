@@ -2,5 +2,19 @@
     "client_hosts": {
         "172.16.14.68": "hcq",
         "172.16.14.66": "hcq"
-    }
+    },
+    "sidebar_order": [
+        "test",
+        "desktop",
+        "terminal",
+        "devices",
+        "users",
+        "reports",
+        "report-analysis",
+        "apk-analysis",
+        "api-docs",
+        "architecture",
+        "test-suites",
+        "tools"
+    ]
 }

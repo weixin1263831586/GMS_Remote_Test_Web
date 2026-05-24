@@ -6,6 +6,8 @@
 import socket
 import logging
 import re
+import subprocess
+import os
 from typing import Tuple, Optional, Dict, Any
 from urllib.parse import urlparse
 
@@ -33,6 +35,43 @@ class CommonUtils:
             return None
 
     @classmethod
+    def get_local_ips(cls) -> set:
+        """获取本机所有可识别 IP 地址。"""
+        local_ips = set(cls.LOCAL_HOSTS)
+        local_ip = cls.get_local_ip()
+        if local_ip:
+            local_ips.add(local_ip)
+
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None):
+                addr = info[4][0]
+                if addr:
+                    local_ips.add(addr)
+        except Exception as e:
+            logger.debug(f"Failed to getaddrinfo local host: {e}")
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(('8.8.8.8', 80))
+                local_ips.add(sock.getsockname()[0])
+        except Exception as e:
+            logger.debug(f"Failed to detect outbound local IP: {e}")
+
+        try:
+            result = subprocess.run(
+                ['hostname', '-I'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                local_ips.update(ip for ip in result.stdout.split() if ip)
+        except Exception as e:
+            logger.debug(f"Failed to run hostname -I: {e}")
+
+        return local_ips
+
+    @classmethod
     def is_local_host(cls, host: str) -> bool:
         """
         检查是否为本地主机
@@ -43,12 +82,14 @@ class CommonUtils:
         Returns:
             是否为本地主机
         """
-        local_hosts = cls.LOCAL_HOSTS.copy()
-        local_ip = cls.get_local_ip()
-        if local_ip:
-            local_hosts.append(local_ip)
+        if not host:
+            return False
 
-        return host in local_hosts
+        if '@' in host:
+            host = host.rsplit('@', 1)[1]
+
+        host = host.strip().strip('[]')
+        return host in cls.get_local_ips()
 
     @classmethod
     def sanitize_url(cls, url: str) -> str:
@@ -205,7 +246,7 @@ class CommonUtils:
         return cls.create_result_dict(False, '', error, data)
 
     @staticmethod
-    def sanitize_path(path: str, default_user: str = 'hcq') -> str:
+    def sanitize_path(path: str, default_user: str = None) -> str:
         """
         清理路径中的占位符
 
@@ -217,6 +258,7 @@ class CommonUtils:
             替换后的路径
         """
         if '${ubuntu_user}' in path:
+            default_user = default_user or os.environ.get('USER') or 'gms'
             return path.replace('${ubuntu_user}', default_user)
         return path
 

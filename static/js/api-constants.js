@@ -167,7 +167,7 @@ const API_DETAILS_MAP = {
         description: '列出可用的测试套件',
         method: 'GET',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "success": true, "suites": [{"test_type": "cts", "version": "android-cts-16_r4", "tools_path": "...", "full_path": "...", "binary": "cts-tradefed"}], "count": 9, "base_path": "/home/hcq/GMS-Suite" }',
+        response: '{ "success": true, "suites": [{"test_type": "cts", "version": "android-cts-16_r4", "tools_path": "...", "full_path": "...", "binary": "cts-tradefed"}], "count": 9, "base_path": "~/GMS-Suite" }',
         usage: 'gms-rt-test-suites'
     },
     '/api/test/suites/result': {
@@ -175,12 +175,12 @@ const API_DETAILS_MAP = {
         description: '查询指定测试套件的测试结果（Tradefed list results命令）',
         method: 'POST',
         params: [
-            { name: 'suite_path', type: 'string', required: true, desc: '测试套件tools目录路径，如 /home/hcq/GMS-Suite/android-cts-16.1_r2-1/android-cts/tools' },
+            { name: 'suite_path', type: 'string', required: true, desc: '测试套件tools目录路径，如 ~/GMS-Suite/android-cts/tools' },
             { name: 'tradefed_bin', type: 'string', required: false, desc: 'Tradefed二进制文件名（可选，自动检测）' }
         ],
         response: '{ "success": true, "results": [{"session": "0", "pass": "93608", "fail": "22", "modules": "128 of 131", "result_directory": "2026.04.04_17.05.42", "test_plan": "cts", "device_serial": "RK3572GMS1", "build_id": "BP4A.251205.006", "product": "rk3572_a16"}], "count": 18, "raw_output": "Session...", "cached": false, "query_time": 5.4 }',
         usage: 'gms-rt-test-suites-result ~/GMS-Suite/android-cts-16.1_r2-1/android-cts/tools',
-        curl_example: 'curl -X POST "http://server:5001/api/test/suites/result" -H "Content-Type: application/json" -d \'{"suite_path": "/home/hcq/GMS-Suite/android-cts-16.1_r2-1/android-cts/tools"}\''
+        curl_example: 'curl -X POST "http://server:5001/api/test/suites/result" -H "Content-Type: application/json" -d \'{"suite_path": "~/GMS-Suite/android-cts/tools"}\''
     },
     '/api/test/clean': {
         title: '清理测试环境',
@@ -260,7 +260,7 @@ const API_DETAILS_MAP = {
         description: '获取完整系统配置（包含所有字段和敏感信息）',
         method: 'GET',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "ubuntu_user": "hcq", "ubuntu_host": "172.16.14.233", "ubuntu_pswd": "..."}',
+        response: '{ "ubuntu_user": "gms", "ubuntu_host": "192.168.1.10", "ubuntu_pswd": "..."}',
         usage: '查看完整配置信息'
     },
     '/api/config/update': {
@@ -300,7 +300,7 @@ const API_DETAILS_MAP = {
             { name: 'username', type: 'string', required: true, desc: '用户名（不能为unknown）' },
             { name: 'ip', type: 'string', required: false, desc: '客户端IP地址（可选，默认自动获取）' }
         ],
-        response: '{ "success": true, "username": "hjf", "ip": "10.10.10.206", "client_id": "hjf@10.10.10.206" }',
+        response: '{ "success": true, "username": "user", "ip": "192.168.1.20", "client_id": "user@192.168.1.20" }',
         usage: '手动设置用户名'
     },
     '/api/users/list': {
@@ -485,7 +485,7 @@ const API_DETAILS_MAP = {
         title: '验证Ubuntu主机桌面',
         description: '验证Ubuntu主机SSH连接并检查VNC服务可用性',
         params: [
-            { name: 'host', type: 'string', required: true, desc: '主机地址（格式：user@ip，如hcq@172.16.14.233）' },
+            { name: 'host', type: 'string', required: true, desc: '主机地址（格式：user@ip，如user@192.168.1.10）' },
             { name: 'password', type: 'string', required: false, desc: 'SSH登录密码（可选）' }
         ],
         response: '{ "success": true, "message": "SSH连接成功，VNC服务可用" }',
@@ -495,7 +495,7 @@ const API_DETAILS_MAP = {
         title: '查询Ubuntu主机桌面VNC状态',
         description: '查询Ubuntu主机桌面VNC服务状态',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "success": true, "running": true, "url": "http://172.16.14.233:6080/vnc.html" }',
+        response: '{ "success": true, "running": true, "url": "http://192.168.1.10:6080/vnc.html" }',
         usage: '检查VNC服务运行状态'
     },
     '/api/desktop/vnc/start': {
@@ -506,7 +506,7 @@ const API_DETAILS_MAP = {
             { name: 'password', type: 'string', required: false, desc: 'SSH登录密码' },
             { name: 'vnc_password', type: 'string', required: false, desc: 'VNC访问密码（可选）' }
         ],
-        response: '{ "success": true, "url": "http://172.16.14.233:6080/vnc.html" }',
+        response: '{ "success": true, "url": "http://192.168.1.10:6080/vnc.html" }',
         usage: '启动Ubuntu主机桌面VNC服务'
     },
     '/api/desktop/vnc/stop': {
@@ -673,25 +673,25 @@ const API_DETAILS_MAP = {
     },
     '/api/terminal/push': {
         title: '推送文件到主机终端',
-        description: '上传文件到测试主机的指定目录（默认 /home/hcq/GMS-Suite/tmp，支持分块上传和断点续传）',
+        description: '上传文件到测试主机的指定目录（默认 ~/GMS-Suite/tmp，支持分块上传和断点续传）',
         method: 'POST',
         params: [
             { name: 'file', type: 'file', required: true, desc: '要上传的文件' },
-            { name: 'path', type: 'string', required: false, desc: '目标路径，默认 /home/hcq/GMS-Suite/tmp' },
+            { name: 'path', type: 'string', required: false, desc: '目标路径，默认 ~/GMS-Suite/tmp' },
             { name: 'chunk_index', type: 'int', required: false, desc: '分块索引（分块上传时使用）' },
             { name: 'total_chunks', type: 'int', required: false, desc: '总分块数（分块上传时使用）' },
             { name: 'upload_id', type: 'string', required: false, desc: '上传任务ID（分块上传时使用）' }
         ],
-        response: '{ "success": true, "remote_path": "/home/hcq/GMS-Suite/tmp/filename.ext", "message": "文件已上传到 /home/hcq/GMS-Suite/tmp/filename.ext" }',
+        response: '{ "success": true, "remote_path": "~/GMS-Suite/tmp/filename.ext", "message": "文件已上传到 ~/GMS-Suite/tmp/filename.ext" }',
         usage: 'gms-rt-terminal-push filename.ext',
-        curl_example: 'curl -X POST "http://server:5001/api/terminal/push" -F "file=@localfile.txt" -F "path=/home/hcq/GMS-Suite/tmp"'
+        curl_example: 'curl -X POST "http://server:5001/api/terminal/push" -F "file=@localfile.txt" -F "path=~/GMS-Suite/tmp"'
     },
     '/api/terminal/open': {
         title: '打开主机终端',
         description: '获取SSH终端连接信息，用于建立SSH连接到测试主机',
         method: 'GET',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "success": true, "host": "172.16.14.233", "user": "hcq", "port": 22, "connection_command": "ssh hcq@172.16.14.233", "instructions": ["1. 复制连接命令: ssh hcq@172.16.14.233", "2. 在终端中粘贴并执行连接命令", "3. 输入密码或使用SSH密钥认证", "4. 连接成功后，您将获得测试主机的终端访问权限"] }',
+        response: '{ "success": true, "host": "192.168.1.10", "user": "gms", "port": 22, "connection_command": "ssh gms@192.168.1.10", "instructions": ["1. 复制连接命令: ssh gms@192.168.1.10", "2. 在终端中粘贴并执行连接命令", "3. 输入密码或使用SSH密钥认证", "4. 连接成功后，您将获得测试主机的终端访问权限"] }',
         usage: 'gms-rt-terminal-open',
         curl_example: 'curl -s "http://server:5001/api/terminal/open" | jq \'.connection_command\''
     },

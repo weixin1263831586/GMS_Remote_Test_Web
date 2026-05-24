@@ -3,6 +3,7 @@ SSH管理器 - 同步SSH操作
 """
 import paramiko
 import logging
+import os
 from typing import Tuple, Optional, Dict, Any
 from contextlib import contextmanager
 import queue
@@ -86,11 +87,11 @@ class SSHManager:
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
             host = config.get('host') or config.get('ubuntu_host')
-            username = config.get('username') or config.get('ubuntu_user', 'hcq')
+            username = config.get('username') or config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
             password = config.get('password') or config.get('ubuntu_pswd', '')
 
             if config.get('use_key_auth', False):
-                key_path = config.get('private_key_path', '~/.ssh/id_rsa')
+                key_path = os.path.expanduser(config.get('private_key_path', '~/.ssh/id_rsa'))
                 key = paramiko.RSAKey.from_private_key_file(key_path)
                 ssh.connect(
                     host,

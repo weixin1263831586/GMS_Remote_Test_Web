@@ -542,8 +542,12 @@ async function loadConfig() {
         state.config = config;
     } catch (error) {
         debugLog('Failed to load config:', error);
-        state.config = { ubuntu_user: 'hcq' };  // Fallback
+        state.config = { ubuntu_user: 'gms' };  // Fallback
     }
+}
+
+function getDefaultUbuntuUser() {
+    return state.config?.ubuntu_user || 'gms';
 }
 
 // ==================== WebSocket Connection (FastAPI) ====================
@@ -2359,7 +2363,7 @@ async function browseRemoteFileForFirmware() {
     document.getElementById('file-browser-title').textContent = '选择服务器固件';
     ModalManager.open('file-browser-modal');
 
-    const defaultUser = state.config?.ubuntu_user || 'hcq';
+    const defaultUser = getDefaultUbuntuUser();
     await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
 }
 
@@ -2492,7 +2496,7 @@ async function burnGsiImage() {
     }
 
     // Set default script path
-    const defaultUser = state.config?.ubuntu_user || 'hcq';
+    const defaultUser = getDefaultUbuntuUser();
     const scriptInput = document.getElementById('gsi-script');
     if (scriptInput && !scriptInput.value) {
         scriptInput.value = `/home/${defaultUser}/GMS-Suite/run_GSI_Burn.sh`;
@@ -2522,7 +2526,7 @@ async function browseLocalFileForGsiScript() {
     ModalManager.open('file-browser-modal');
 
     // Load initial directory (GMS-Suite)
-    const defaultUser = state.config?.ubuntu_user || 'hcq';
+    const defaultUser = getDefaultUbuntuUser();
     await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
 }
 
@@ -2542,7 +2546,7 @@ async function browseLocalFileForGsiSystem() {
     ModalManager.open('file-browser-modal');
 
     // Load initial directory (GMS-Suite)
-    const defaultUser = state.config?.ubuntu_user || 'hcq';
+    const defaultUser = getDefaultUbuntuUser();
     await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
 }
 
@@ -3669,7 +3673,7 @@ async function browseRemoteFile(mode) {
     ModalManager.open('file-browser-modal');
 
     // Load initial directory - use test suite results directory
-    const defaultUser = state.config?.ubuntu_user || 'hcq';
+    const defaultUser = getDefaultUbuntuUser();
     let defaultPath = `/home/${defaultUser}/GMS-Suite`;
 
     // Get current test suite selection
@@ -3888,7 +3892,7 @@ function navigateToParent() {
 
 // Navigate to root directory
 function navigateToRoot() {
-    const defaultUser = state.config?.ubuntu_user || 'hcq';
+    const defaultUser = getDefaultUbuntuUser();
     const rootPath = `/home/${defaultUser}/GMS-Suite`;
 
     // Always navigate to GMS-Suite root directory
@@ -6821,9 +6825,45 @@ window.autoInstallUsbipd = autoInstallUsbipd;
 window.resetReportAnalysis = resetReportAnalysis;
 window.openRedmineReplyModal = openRedmineReplyModal;
 window.copyNgrokUrl = copyNgrokUrl;
+window.copyDeployCommand = copyDeployCommand;
 window.loadNgrokPublicUrl = loadNgrokPublicUrl;
 
 // ==================== ngrok 公网地址 ====================
+
+/**
+ * 复制部署脚本命令
+ */
+function copyDeployCommand() {
+    const protocol = window.location.protocol;
+    const host = window.location.hostname;
+    const port = window.location.port || (protocol === 'https:' ? '443' : '80');
+
+    // 构建 curl 命令（直接执行安装）
+    const deployCommand = `curl -s ${protocol}//${host}:${port}/api/system/install-sh | bash`;
+
+    const clipboardWrite = navigator.clipboard && navigator.clipboard.writeText
+        ? navigator.clipboard.writeText(deployCommand)
+        : Promise.reject(new Error('Clipboard API unavailable'));
+
+    clipboardWrite.then(() => {
+        showToast('✓ 部署命令已复制', 'success');
+    }).catch(() => {
+        // 备用复制方案
+        const textArea = document.createElement('textarea');
+        textArea.value = deployCommand;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            showToast('✓ 部署命令已复制', 'success');
+        } catch (e) {
+            showToast('复制失败', 'error');
+        }
+        document.body.removeChild(textArea);
+    });
+}
 
 /**
  * 加载 ngrok 公网地址
@@ -7708,7 +7748,7 @@ window.copyCurlCommandFromData = function(element) {
     const isPlainTextEndpoint = text.includes('/api/test/logs/stream') ||
                                 text.includes('/api/terminal/ws') ||
                                 text.includes('/api/screen/ws') ||
-                                // 匹配根路径（如 "http://localhost:5001/" 或 "http://172.16.14.233:5001/"）
+                                // 匹配根路径（如 "http://localhost:5001/" 或 "http://192.168.1.10:5001/"）
                                 (text.match(/http:\/\/[^\/]+:\d+\/"$/) !== null);
 
     if (isWebSocketEndpoint) {

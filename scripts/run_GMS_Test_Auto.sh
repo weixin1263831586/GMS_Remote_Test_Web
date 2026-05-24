@@ -47,8 +47,8 @@ cat <<EOF
   --help                    显示帮助
 
 示例:
-  $0 cts CtsSecurityTestCases --device-args '-s RK3576GMS1' --test-suite /home/hcq/GMS-Suite/android-cts-16_r3-1/android-cts/tools --local-server hcq@10.10.10.206
-  $0 cts retry 2026.01.12_14.36.17.772_8696 --device-args '-s RK3576GMS1' --test-suite /home/hcq/GMS-Suite/android-cts-16_r3-1/android-cts/tools --local-server hcq@10.10.10.206
+  $0 cts CtsSecurityTestCases --device-args '-s DEVICE1' --test-suite "$HOME/GMS-Suite/android-cts/tools" --local-server "$USER@$(hostname -I | awk '{print $1}')"
+  $0 cts retry 2026.01.12_14.36.17.772_8696 --device-args '-s DEVICE1' --test-suite "$HOME/GMS-Suite/android-cts/tools" --local-server "$USER@$(hostname -I | awk '{print $1}')"
 
 支持测试类型: cts, gsi, gts, sts, vts, apts
 EOF
@@ -316,18 +316,18 @@ copy_to_remote_server() {
     local remote_target_dir="/home/$REMOTE_USER/gms_test_results/$timestamp"
     log "🌐 本地主机: ${REMOTE_USER}@${REMOTE_HOST}:${remote_target_dir}"
 
-    # 添加路由
-    #######################################
-    # Ubuntu主机执行下面命令免密
-    # sudo visudo
-    # hcq ALL=(root) NOPASSWD: /sbin/ip route add *, /sbin/ip route del *
-    #######################################
-    if ! ip route show | grep -q "10.10.10.0/24"; then
-        log "🛠️ 添加路由: 10.10.10.0/24 via 172.16.14.1"
-        sudo -n ip route add 10.10.10.0/24 via 172.16.14.1 || {
-            log "❌ 无法添加路由（请配置 sudo NOPASSWD）"
-            return 1
-        }
+    # 可选路由：不同网段回传结果时通过环境变量配置，避免绑定某台测试主机。
+    # 示例: GMS_COPY_ROUTE_NETWORK=10.10.10.0/24 GMS_COPY_ROUTE_GATEWAY=172.16.14.1
+    if [[ -n "${GMS_COPY_ROUTE_NETWORK:-}" && -n "${GMS_COPY_ROUTE_GATEWAY:-}" ]]; then
+        if ! ip route show | grep -q "${GMS_COPY_ROUTE_NETWORK}"; then
+            log "🛠️ 添加路由: ${GMS_COPY_ROUTE_NETWORK} via ${GMS_COPY_ROUTE_GATEWAY}"
+            sudo -n ip route add "${GMS_COPY_ROUTE_NETWORK}" via "${GMS_COPY_ROUTE_GATEWAY}" || {
+                log "❌ 无法添加路由（请检查安装脚本配置的 sudoers 或手动配置 NOPASSWD）"
+                return 1
+            }
+        fi
+    else
+        log "ℹ️ 未配置 GMS_COPY_ROUTE_NETWORK/GMS_COPY_ROUTE_GATEWAY，跳过回传路由添加"
     fi
 
     # 验证 SSH 连接

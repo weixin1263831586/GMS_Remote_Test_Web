@@ -4,6 +4,7 @@ set -euo pipefail
 DEVICE=""
 SYSTEM_IMG=""
 VENDOR_IMG=""
+GMS_SUITE_DIR="${GMS_SUITE_DIR:-${HOME}/GMS-Suite}"
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
@@ -53,7 +54,7 @@ fastboot -s "$DEVICE" delete-logical-partition product_b
 echo "💾 烧写 system 镜像..."
 fastboot -s "$DEVICE" flash system "$SYSTEM_IMG"
 
-fastboot -s "$DEVICE" flash misc /home/hcq/GMS-Suite/misc.img
+fastboot -s "$DEVICE" flash misc "${GMS_SUITE_DIR}/misc.img"
 
 if [[ -n "$VENDOR_IMG" ]]; then
     if [[ -f "$VENDOR_IMG" ]]; then
