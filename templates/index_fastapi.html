@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20260524-03">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260524-04">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260409-01-01"></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260524-03" crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260524-05" crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -299,10 +299,12 @@
                     <div class="section-title">操作控制</div>
                     <!-- VPN 控制按钮 -->
                     <div class="vpn-btn-frame">
+                        <button class="btn-xxs" onclick="copyNgrokUrl()">🌐 公网访问地址</button>
                         <button class="btn-xxs" onclick="checkSshd()">📡 检查SSHD</button>
                         <button class="btn-xxs" onclick="checkRouting()">📡 检查路由</button>
                         <button class="btn-xxs" id="vpn-connect-btn" onclick="connectVpn()">🔌 连接VPN</button>
                         <span id="vpn-status-label" class="vpn-status-label">状态: 未知</span>
+
                     </div>
                     <!-- 文件上传区 -->
                     <div class="upload-frame">
