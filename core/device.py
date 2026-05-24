@@ -2,11 +2,13 @@
 设备管理 - 核心业务逻辑
 """
 import logging
+import subprocess
 import time
 from typing import List, Dict, Any
 from .ssh import ssh_manager
 from .config import config_manager
 from .device_utils import DeviceUtils
+from .common_utils import CommonUtils
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,25 @@ class DeviceManager:
             设备ID列表
         """
         config = self.config_manager.load_config()
+
+        if ssh is None and CommonUtils.is_local_host(config.get('ubuntu_host', '')):
+            try:
+                result = subprocess.run(
+                    ['adb', 'devices'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode != 0:
+                    logger.warning(f"[Device] Local adb devices failed: {result.stderr.strip()}")
+                    return []
+                return DeviceUtils.parse_adb_devices(result.stdout)
+            except FileNotFoundError:
+                logger.warning("[Device] adb command not found on local host")
+                return []
+            except Exception as e:
+                logger.error(f"[Device] Error getting local devices: {e}")
+                return []
 
         if ssh is None:
             ssh = self.ssh_manager.get_connection(config)

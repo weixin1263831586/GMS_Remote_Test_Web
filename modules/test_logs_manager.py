@@ -5,6 +5,7 @@
 """
 
 import zipfile
+import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
@@ -15,12 +16,15 @@ class TestLogsManager:
 
     def __init__(self):
         web_app_dir = Path(__file__).resolve().parent.parent
+        user_logs_dir = Path(
+            os.environ.get('GMS_LOG_DIR', str(Path.home() / 'Logs'))
+        )
 
         self.log_dirs = [
             Path('/tmp/xts-root-dir'),
             Path('/tmp/test-logs'),
             Path('/tmp/test-logs/saved'),
-            Path('/home/hcq/Logs'),
+            user_logs_dir,
             web_app_dir / 'logs',
             web_app_dir / 'data' / 'logs'
         ]

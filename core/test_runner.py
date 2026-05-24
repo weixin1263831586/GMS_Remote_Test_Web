@@ -23,6 +23,11 @@ from .config import config_manager
 logger = logging.getLogger(__name__)
 
 
+def default_suites_path(config: Dict[str, Any]) -> str:
+    ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
+    return f"/home/{ubuntu_user}/GMS-Suite"
+
+
 class TestRunner:
     """
     测试运行器
@@ -80,7 +85,7 @@ class TestRunner:
             else:
                 host_config = {
                     'host': config.get('ubuntu_host', ''),
-                    'username': config.get('ubuntu_user', 'hcq'),
+                    'username': config.get('ubuntu_user') or os.environ.get('USER') or 'gms',
                 }
 
             # 建立SSH连接
@@ -174,7 +179,7 @@ class TestRunner:
                 return True
 
             # 上传脚本
-            suites_path = config.get('suites_path', '/home/hcq/GMS-Suite')
+            suites_path = config.get('suites_path') or default_suites_path(config)
             remote_script = os.path.join(suites_path, 'run_GMS_Test_Auto.sh')
 
             script_size = os.path.getsize(local_script)
@@ -218,7 +223,7 @@ class TestRunner:
             local_server = test_params.get('local_server', '')
             devices = test_params.get('devices', [])
 
-            suites_path = config.get('suites_path', '/home/hcq/GMS-Suite')
+            suites_path = config.get('suites_path') or default_suites_path(config)
             remote_script = os.path.join(suites_path, 'run_GMS_Test_Auto.sh')
 
             # 构建命令参数

@@ -398,8 +398,8 @@ class TestReportDB:
 
         Args:
             result_dirs: results 目录列表，如：
-                ['/home/hcq/GMS-Suite/android-gts-13.1-R1/android-gts/results',
-                 '/home/hcq/GMS-Suite/android-cts-16_r3-1/android-cts/results']
+                ['~/GMS-Suite/android-gts/android-gts/results',
+                 '~/GMS-Suite/android-cts/android-cts/results']
 
         Returns:
             int: 新增的报告数量

@@ -367,7 +367,7 @@ API_DOCS_LIST = [
         "path": "/api/desktop/validate",
         "description": "验证Ubuntu主机SSH连接并检查VNC服务可用性",
         "params": [
-            {"name": "host", "type": "string", "required": True, "desc": "主机地址（格式：user@ip，如hcq@172.16.14.233）"},
+            {"name": "host", "type": "string", "required": True, "desc": "主机地址（格式：user@ip，如gms@192.168.1.10）"},
             {"name": "password", "type": "string", "required": False, "desc": "SSH登录密码（可选）"}
         ],
         "category": "desktop",
@@ -579,12 +579,12 @@ API_DOCS_LIST = [
         "skill": "gms-rt-terminal-open",
         "response_example": {
             "success": True,
-            "host": "172.16.14.233",
-            "user": "hcq",
+            "host": "192.168.1.10",
+            "user": "gms",
             "port": 22,
-            "connection_command": "ssh hcq@172.16.14.233",
+            "connection_command": "ssh gms@192.168.1.10",
             "instructions": [
-                "1. 复制连接命令: ssh hcq@172.16.14.233",
+                "1. 复制连接命令: ssh gms@192.168.1.10",
                 "2. 在终端中粘贴并执行连接命令",
                 "3. 输入密码或使用SSH密钥认证",
                 "4. 连接成功后，您将获得测试主机的终端访问权限"
@@ -594,10 +594,10 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/terminal/push",
-        "description": "上传文件到测试主机的指定目录（默认 /home/hcq/GMS-Suite/tmp，支持分块上传和断点续传）",
+        "description": "上传文件到测试主机的指定目录（默认 ~/GMS-Suite/tmp，支持分块上传和断点续传）",
         "params": [
             {"name": "file", "type": "file", "required": True, "desc": "要上传的文件"},
-            {"name": "path", "type": "string", "required": False, "desc": "目标路径，默认 /home/hcq/GMS-Suite/tmp"},
+            {"name": "path", "type": "string", "required": False, "desc": "目标路径，默认 ~/GMS-Suite/tmp"},
             {"name": "chunk_index", "type": "int", "required": False, "desc": "分块索引（分块上传时使用）"},
             {"name": "total_chunks", "type": "int", "required": False, "desc": "总分块数（分块上传时使用）"},
             {"name": "upload_id", "type": "string", "required": False, "desc": "上传任务ID（分块上传时使用）"}
@@ -606,8 +606,8 @@ API_DOCS_LIST = [
         "skill": "gms-rt-terminal-push",
         "response_example": {
             "success": True,
-            "remote_path": "/home/hcq/GMS-Suite/tmp/filename.ext",
-            "message": "文件已上传到 /home/hcq/GMS-Suite/tmp/filename.ext"
+            "remote_path": "~/GMS-Suite/tmp/filename.ext",
+            "message": "文件已上传到 ~/GMS-Suite/tmp/filename.ext"
         }
     },
 

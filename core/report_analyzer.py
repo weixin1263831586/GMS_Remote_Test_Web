@@ -10,6 +10,7 @@ import shutil
 import logging
 import re
 import glob
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
@@ -901,7 +902,9 @@ class ReportAnalyzer:
         """
         import subprocess
 
-        codesearch_script = '/home/hcq/GMS_Remote_Test/web_app/skills/rk_codesearch/run.py'
+        web_app_dir = Path(__file__).resolve().parents[1]
+        codesearch_dir = web_app_dir / 'skills' / 'rk_codesearch'
+        codesearch_script = str(codesearch_dir / 'run.py')
 
         try:
             # 如果有精确失败位置，优先使用
@@ -928,7 +931,7 @@ class ReportAnalyzer:
                         capture_output=True,
                         text=True,
                         timeout=30,
-                        cwd='/home/hcq/GMS_Remote_Test/web_app/skills/rk_codesearch'
+                        cwd=str(codesearch_dir)
                     )
                 except subprocess.TimeoutExpired:
                     logger.warning("代码搜索超时（30秒）")
@@ -991,7 +994,7 @@ class ReportAnalyzer:
                     capture_output=True,
                     text=True,
                     timeout=30,
-                    cwd='/home/hcq/GMS_Remote_Test/web_app/skills/rk_codesearch'
+                    cwd=str(codesearch_dir)
                 )
             except subprocess.TimeoutExpired:
                 logger.warning("代码搜索超时（30秒）")

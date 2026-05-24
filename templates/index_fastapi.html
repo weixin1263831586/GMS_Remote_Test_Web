@@ -12,7 +12,7 @@
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260524-05" crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260524-07" crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -51,6 +51,23 @@
 
             // 保存目标页面供后续使用
             window.__targetPage = targetPage;
+
+            // 尝试获取保存的导航栏排序（从 localStorage）- 使用与保存时相同的 key
+            let savedOrder = null;
+            try {
+                // 直接使用 gms_sidebar_order（与 saveSidebarOrder 保持一致）
+                savedOrder = localStorage.getItem('gms_sidebar_order');
+                if (savedOrder) {
+                    savedOrder = JSON.parse(savedOrder);
+                    console.log('[Sidebar] Loaded order from localStorage:', savedOrder);
+                }
+            } catch (e) {
+                console.error('[Sidebar] Failed to parse saved order:', e);
+                savedOrder = null;
+            }
+
+            // 保存排序供 DOMContentLoaded 使用
+            window.__savedSidebarOrder = savedOrder;
 
             // 添加内联样式来立即显示正确的页面和导航栏选中状态
             var style = document.createElement('style');
@@ -299,6 +316,7 @@
                     <div class="section-title">操作控制</div>
                     <!-- VPN 控制按钮 -->
                     <div class="vpn-btn-frame">
+                        <button class="btn-xxs" onclick="copyDeployCommand()">📦 部署脚本</button>
                         <button class="btn-xxs" onclick="copyNgrokUrl()">🌐 公网访问地址</button>
                         <button class="btn-xxs" onclick="checkSshd()">📡 检查SSHD</button>
                         <button class="btn-xxs" onclick="checkRouting()">📡 检查路由</button>
@@ -1516,9 +1534,13 @@
             const params = new URLSearchParams({ autoconnect: 'true' });
             if (password) params.set('password', password);
 
-            const canUseHttpsProxy = window.location.protocol === 'https:' &&
-                (host === DEFAULT_VNC_HOST || host === window.location.hostname);
-            if (canUseHttpsProxy) {
+            const canUseSameOriginProxy =
+                host === DEFAULT_VNC_HOST ||
+                host === window.location.hostname ||
+                host === '127.0.0.1' ||
+                host === 'localhost';
+            if (canUseSameOriginProxy) {
+                params.set('path', 'websockify');
                 return `/novnc/vnc.html?${params.toString()}`;
             }
             return `http://${host}:6080/vnc.html?${params.toString()}`;
@@ -1637,13 +1659,13 @@
                 }
                 // 需要切换回默认主机，先启动VNC服务
                 debugLog('[Desktop] Switching to default host, starting VNC first');
-                const url = await startDefaultHostVNC(
+                await startDefaultHostVNC(
                     defaultHost,
                     '',
                     currentHost.vnc_password || DEFAULT_VNC_PASSWORD,
                     defaultUrl
                 );
-                vncFrame.src = normalizeVncUrl(url, currentHost.vnc_password || DEFAULT_VNC_PASSWORD);
+                vncFrame.src = defaultUrl;
                 return;
             }
 
@@ -2734,7 +2756,7 @@
                 ],
                 '开发工具': [
                     { icon: '📦', title: 'GitHub', url: 'https://github.com' },
-                    { icon: '📊', title: 'Grafana', url: 'http://172.16.14.233:3000' }
+                    { icon: '📊', title: 'Grafana', url: 'http://localhost:3000' }
                 ]
             };
 
@@ -4228,39 +4250,31 @@
             });
         }
 
-        async function loadSidebarOrder() {
+        // 页面加载时立即应用保存的导航栏排序（同步执行，防止闪烁）
+        (function applySavedSidebarOrder() {
+            const savedOrder = window.__savedSidebarOrder;
+            if (!savedOrder || !Array.isArray(savedOrder) || savedOrder.length === 0) return;
+
             const nav = document.getElementById('sidebar-nav');
             if (!nav) return;
 
-            const storageKey = getSidebarStorageKey(nav);
-            let savedOrder = localStorage.getItem(storageKey) || localStorage.getItem('gms_sidebar_order');
+            const itemByPage = new Map();
+            nav.querySelectorAll('.sidebar-item').forEach(item => {
+                itemByPage.set(item.dataset.page, item);
+            });
 
-            if (!savedOrder) {
-                try {
-                    const response = await fetch('/api/sidebar-order');
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}`);
-                    }
-                    const data = await response.json();
-                    if (data.success && data.order && data.order.length > 0) {
-                        savedOrder = JSON.stringify(data.order);
-                        localStorage.setItem(storageKey, savedOrder);
-                    }
-                } catch (e) {
-                    console.error('[Sidebar] Failed to load from backend:', e);
+            // 按保存的顺序重新排列导航项
+            savedOrder.forEach(page => {
+                const item = itemByPage.get(page);
+                if (item) {
+                    nav.appendChild(item);
                 }
-            }
+            });
+        })();
 
-            if (!savedOrder) return;
-
-            try {
-                const order = JSON.parse(savedOrder);
-                if (!Array.isArray(order)) return;
-                applySidebarOrder(nav, order);
-                localStorage.setItem(storageKey, JSON.stringify(getSidebarPages(nav)));
-            } catch (e) {
-                console.error('[Sidebar] Failed to load order:', e);
-            }
+        async function loadSidebarOrder() {
+            // 已经由 applySavedSidebarOrder 处理，无需再次加载
+            return;
         }
 
         function saveSidebarOrder() {
@@ -4269,6 +4283,8 @@
 
             const order = getSidebarPages(nav);
 
+            // 同时更新 localStorage 和后端
+            localStorage.setItem('gms_sidebar_order', JSON.stringify(order));
             localStorage.setItem(getSidebarStorageKey(nav), JSON.stringify(order));
             saveSidebarOrderToBackend(order);
         }
@@ -4360,7 +4376,28 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            setTimeout(initSidebarDragDrop, 500);
+            // 立即应用保存的导航栏排序（在 DOM 加载后）
+            const savedOrder = window.__savedSidebarOrder;
+            if (savedOrder && Array.isArray(savedOrder)) {
+                const nav = document.getElementById('sidebar-nav');
+                if (nav) {
+                    const itemByPage = new Map();
+                    nav.querySelectorAll('.sidebar-item').forEach(item => {
+                        itemByPage.set(item.dataset.page, item);
+                    });
+
+                    // 按保存的顺序重新排列导航项
+                    savedOrder.forEach(page => {
+                        const item = itemByPage.get(page);
+                        if (item) {
+                            nav.appendChild(item);
+                        }
+                    });
+                }
+            }
+
+            // 初始化拖拽功能
+            setTimeout(initSidebarDragDrop, 50);
         });
     </script>
 
@@ -4449,7 +4486,7 @@
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
                         <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-7" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-suites-result /home/hcq/GMS-Suite/android-vts-16.1_r2/android-vts/tools</code>
+                            <code id="cmd-7" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-suites-result ~/GMS-Suite/android-vts/tools</code>
                             <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-7')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 查看指定套件的测试结果历史</div>
@@ -4459,7 +4496,7 @@
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">▶️  步骤6: 启动测试</div>
                         <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-8" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; padding-right: 70px; display: block;">gms-rt-test-start RK3572GMS4 CTS /home/hcq/GMS-Suite/android-cts/tools</code>
+                            <code id="cmd-8" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; padding-right: 70px; display: block;">gms-rt-test-start RK3572GMS4 CTS ~/GMS-Suite/android-cts/tools</code>
                             <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-8')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 启动CTS测试，会自动锁定设备</div>
@@ -4510,7 +4547,7 @@
                     <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #333;">
                         <div style="color: var(--primary-color); font-weight: 600; margin-bottom: 4px; font-size: 15px;">步骤1: 查看测试结果</div>
                         <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-vts-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-suites-result /home/hcq/GMS-Suite/android-vts-16.1_r2/android-vts/tools</code>
+                            <code id="cmd-vts-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-suites-result ~/GMS-Suite/android-vts/tools</code>
                             <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-1')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>

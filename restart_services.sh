@@ -11,7 +11,11 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-PROJECT_DIR="/home/hcq/GMS_Remote_Test/web_app"
+PROJECT_DIR="${GMS_WEB_APP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+PYTHON_BIN="${GMS_PYTHON_BIN:-${PROJECT_DIR}/.venv/bin/python}"
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+    PYTHON_BIN="$(command -v python3)"
+fi
 cd "$PROJECT_DIR"
 
 echo -e "${BLUE}========================================${NC}"
@@ -35,7 +39,7 @@ echo ""
 
 # 2. 备份旧日志
 echo -e "${YELLOW}[2/4] 备份日志...${NC}"
-for log in fastapi.log flask.log; do
+for log in fastapi.log; do
     [[ -f "$log" ]] && mv "$log" "${log}.backup.$(date +%Y%m%d_%H%M%S)"
 done
 echo -e "${GREEN}✓ 日志已备份${NC}"
@@ -43,7 +47,7 @@ echo ""
 
 # 3. 停止旧服务
 echo -e "${YELLOW}[3/4] 停止旧服务...${NC}"
-for port in 5001 5000; do
+for port in 5001; do
     if lsof -i :"$port" >/dev/null 2>&1; then
         fuser -k "$port/tcp" 2>/dev/null || true
         sleep 1
@@ -58,20 +62,17 @@ echo ""
 echo -e "${YELLOW}[4/4] 启动新服务...${NC}"
 
 echo -e "  启动 FastAPI (5001)..."
-nohup python3 -m uvicorn app_fastapi_full:app \
+nohup setsid "${PYTHON_BIN}" -m uvicorn app_fastapi_full:app \
     --host 0.0.0.0 --port 5001 --log-level info --access-log \
-    >> fastapi.log 2>&1 &
-sleep 2
-
-echo -e "  启动 Flask (5000)..."
-nohup python3 app.py >> flask.log 2>&1 &
+    >> fastapi.log 2>&1 < /dev/null &
+echo $! > fastapi.pid
 sleep 2
 
 # 健康检查（增加超时和重试）
 echo -e "${BLUE}  进行健康检查...${NC}"
 sleep 3  # 等待服务完全启动
 
-for port in 5001 5000; do
+for port in 5001; do
     if timeout 5 curl -s -f "http://localhost:${port}/" >/dev/null 2>&1; then
         echo -e "${GREEN}  ✓ ${port} 启动成功${NC}"
     else
@@ -86,12 +87,10 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "📋 服务状态："
 echo -e "  FastAPI: ${GREEN}http://localhost:5001${NC} (主服务)"
-echo -e "  Flask:   ${GREEN}http://localhost:5000${NC} (VNC 服务)"
 echo ""
 echo -e "📊 查看日志："
 echo -e "  FastAPI: tail -f fastapi.log"
-echo -e "  Flask:   tail -f flask.log"
 echo ""
 echo -e "🔍 检查端口："
-echo -e "  lsof -i :5001 -i :5000"
+echo -e "  lsof -i :5001"
 echo ""

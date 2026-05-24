@@ -8,6 +8,7 @@ VNC管理 - 核心业务逻辑
 """
 
 import logging
+import os
 import subprocess
 import socket
 import time
@@ -218,7 +219,7 @@ class VNCManager:
             if not ssh:
                 return {'success': False, 'error': 'SSH连接失败'}
 
-            ubuntu_user = config.get('ubuntu_user', 'hcq')
+            ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
 
             # 如果提供了VNC密码，需要创建密码文件；否则使用免密模式
             if vnc_password:
@@ -389,13 +390,13 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
 
             if not host:
                 host = config.get('ubuntu_host', '')
-                ubuntu_user = config.get('ubuntu_user', 'hcq')
+                ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
             else:
                 # 从host中解析user
                 if '@' in host:
                     ubuntu_user, host = host.split('@', 1)
                 else:
-                    ubuntu_user = config.get('ubuntu_user', 'hcq')
+                    ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
 
             ssh = self.ssh_manager.get_connection(config)
             if not ssh:

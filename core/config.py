@@ -250,11 +250,11 @@ class ConfigManager:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
 
-                # 验证 AI 配置
-                self._validate_ai_config(config)
-
                 # 递归替换所有占位符（支持 ${ubuntu_user} 和环境变量 ${VAR_NAME}）
                 config_copy = self._replace_placeholders(config)
+
+                # 验证替换后的 AI 配置
+                self._validate_ai_config(config_copy)
 
                 return config_copy
 
@@ -313,6 +313,8 @@ class ConfigManager:
         elif isinstance(value, list):
             return [self._replace_placeholders(item, config) for item in value]
         elif isinstance(value, str):
+            full_placeholder_match = PLACEHOLDER_PATTERN.fullmatch(value)
+
             def replace_var(match):
                 var_expr = match.group(1)
                 # 检查是否有默认值
@@ -340,7 +342,12 @@ class ConfigManager:
                         return match.group(0)
 
             # 使用预编译的 regex pattern 替换所有 ${...} 格式的占位符
-            return PLACEHOLDER_PATTERN.sub(replace_var, value)
+            replaced = PLACEHOLDER_PATTERN.sub(replace_var, value)
+            if full_placeholder_match:
+                normalized = replaced.strip().lower()
+                if normalized in ('true', 'false'):
+                    return normalized == 'true'
+            return replaced
         else:
             return value
 
@@ -521,7 +528,7 @@ class ConfigManager:
         """
         if config is None:
             config = self.load_config()
-        return config.get('ubuntu_user', 'hcq')
+        return config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
 
     def get_ubuntu_host(self, config: Dict[str, Any] = None) -> str:
         """

@@ -23,6 +23,12 @@ import sys
 import logging
 import subprocess
 import socket
+import select
+import pty
+import fcntl
+import termios
+import struct
+import signal
 import uuid
 import paramiko
 import threading
@@ -40,7 +46,7 @@ from urllib.parse import urlparse
 import hashlib
 import base64
 import mimetypes
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
 from contextlib import asynccontextmanager
 from collections import deque
 from enum import Enum
@@ -483,6 +489,78 @@ PROXY_HEADERS_ENABLED = os.getenv(
     'true' if GMS_ENV == 'production' else 'false'
 ).strip().lower() == 'true'
 FORWARDED_ALLOW_IPS = os.getenv('GMS_FORWARDED_ALLOW_IPS', '127.0.0.1')
+
+
+def get_default_suites_path(config: Dict[str, Any]) -> str:
+    ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
+    return f"/home/{ubuntu_user}/GMS-Suite"
+
+
+def is_config_host_local(config: Dict[str, Any]) -> bool:
+    return CommonUtils.is_local_host(config.get('ubuntu_host', ''))
+
+
+def build_suite_info(full_path: str) -> Optional[Dict[str, str]]:
+    full_path = full_path.strip()
+    if not full_path:
+        return None
+
+    parts = full_path.split('/')
+    tradefed_name = parts[-1]
+    test_type = get_test_type_from_binary(tradefed_name)
+    if test_type == 'cts-v-host':
+        return None
+
+    tools_dir = '/'.join(parts[:-1])
+    version_dir = next(
+        (
+            p for p in parts
+            if p.startswith('android-')
+            and (
+                test_type in p
+                or (test_type == 'gsi' and 'cts' in p)
+                or (test_type == 'gts-root' and 'gts' in p)
+            )
+        ),
+        ""
+    )
+    if test_type == 'gsi' and version_dir:
+        test_type = 'cts'
+    if test_type == 'gts-root' and version_dir:
+        test_type = 'gts'
+
+    return {
+        'test_type': test_type,
+        'version': version_dir,
+        'tools_path': tools_dir,
+        'full_path': full_path,
+        'binary': tradefed_name
+    }
+
+
+def list_local_test_suites(base_path: str) -> List[Dict[str, str]]:
+    suites = []
+    if not os.path.isdir(base_path):
+        logger.info(f"[TestSuites] Local base path not found: {base_path}")
+        return suites
+
+    max_depth = 5
+    base_depth = base_path.rstrip(os.sep).count(os.sep)
+    for root, dirs, files in os.walk(base_path):
+        if root.rstrip(os.sep).count(os.sep) - base_depth >= max_depth:
+            dirs[:] = []
+        for file_name in files:
+            if not file_name.endswith('-tradefed'):
+                continue
+            full_path = os.path.join(root, file_name)
+            if not os.access(full_path, os.X_OK):
+                continue
+            suite = build_suite_info(full_path)
+            if suite:
+                suites.append(suite)
+
+    suites.sort(key=lambda item: (item['test_type'], item['version'], item['full_path']))
+    return suites
 
 
 def _parse_csv_env(env_name: str, default: str) -> List[str]:
@@ -2032,7 +2110,7 @@ async def get_ai_config(request: Request):
     if not ai_config:
         return error_response('AI 未配置或未启用，请在 configs/config.json 中配置 ai_models 段并设置 enabled: true', status_code=404)
 
-    return JSONResponse(content={'success': True, 'data': ai_config})
+    return JSONResponse(content={'success': True, 'data': hide_sensitive_info(ai_config.copy())})
 
 
 @app.get("/api/ngrok/public-url")
@@ -2390,7 +2468,7 @@ async def _manage_bootloader_lock(devices: List[str], action: str) -> JSONRespon
             # 本地脚本路径
             local_script = os.path.join(os.path.dirname(__file__), 'scripts', 'run_Device_Lock.sh')
             # 远程脚本路径
-            remote_script = f"/home/{config['ubuntu_user']}/GMS-Suite/run_Device_Lock.sh"
+            remote_script = os.path.join(get_default_suites_path(config), 'run_Device_Lock.sh')
 
             # 检查本地脚本是否存在
             if not os.path.exists(local_script):
@@ -2611,105 +2689,163 @@ async def get_device_info(req: DeviceActionRequest):
         logger.error(f"Error getting device info: {e}")
         return ApiResponse.error(str(e), status_code=500)
 
+def run_local_shell_command(command: str, timeout: int = 10) -> Tuple[str, str, int]:
+    """Run a shell command on the web_app host and return stdout, stderr, exit code."""
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            executable="/bin/bash",
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        return result.stdout, result.stderr, result.returncode
+    except subprocess.TimeoutExpired as e:
+        stdout = e.stdout if isinstance(e.stdout, str) else ""
+        stderr = e.stderr if isinstance(e.stderr, str) else ""
+        return stdout, stderr or f"Command timed out after {timeout}s", 124
+    except Exception as e:
+        return "", str(e), 1
+
+
+def build_management_props_command(device_ids: List[str]) -> str:
+    commands = []
+    for device_id in device_ids:
+        device_shell = (
+            f'echo "===DEVICE:{device_id}===" && '
+            'getprop ro.serialno && '
+            'getprop ro.product.model && '
+            'getprop ro.build.version.release && '
+            'dumpsys battery | grep level | cut -d: -f2 | tr -d " "'
+        )
+        commands.append(f"adb -s {shlex.quote(device_id)} shell {shlex.quote(device_shell)}")
+    return " ; ".join(commands)
+
+
+def parse_management_device_props(props_output: str) -> Dict[str, Dict[str, str]]:
+    device_data: Dict[str, Dict[str, str]] = {}
+    current_device = None
+
+    for line in props_output.split('\n'):
+        line = line.strip()
+        if line.startswith('===DEVICE:'):
+            current_device = line.split('===DEVICE:')[1].split('===')[0]
+            device_data[current_device] = {
+                'serial_no': '',
+                'model': '',
+                'android_version': '',
+                'battery_level': ''
+            }
+        elif current_device and line:
+            if not device_data[current_device]['serial_no']:
+                device_data[current_device]['serial_no'] = line
+            elif not device_data[current_device]['model']:
+                device_data[current_device]['model'] = line
+            elif not device_data[current_device]['android_version']:
+                device_data[current_device]['android_version'] = line
+            elif not device_data[current_device]['battery_level']:
+                device_data[current_device]['battery_level'] = line
+
+    return device_data
+
+
+def build_devices_management_payload(
+    device_ids: List[str],
+    device_data: Dict[str, Dict[str, str]],
+    config: Dict[str, Any]
+) -> Dict[str, Any]:
+    client_id = client_manager.get_client_id('127.0.0.1')
+    locks = device_lock_manager.get_all_locks()
+    devices_info = []
+    ubuntu_host = config.get("ubuntu_host", "")
+    ubuntu_user = config.get("ubuntu_user", "")
+
+    all_usbip_sources = {**global_state.usbip_devices_source, **usbip_manager.device_sources}
+    current_device_set = set(device_ids)
+    devices_to_remove = [dev_id for dev_id in all_usbip_sources if dev_id not in current_device_set]
+
+    if devices_to_remove:
+        logger.info(f"[Device Management] Cleaning up removed devices from memory: {devices_to_remove}")
+        with global_state.usbip_devices_source_lock:
+            for dev_id in devices_to_remove:
+                global_state.usbip_devices_source.pop(dev_id, None)
+        for dev_id in devices_to_remove:
+            usbip_manager.device_sources.pop(dev_id, None)
+
+    for device_id in device_ids:
+        props = device_data.get(device_id, {})
+        lock_info = locks.get(device_id, {})
+
+        if device_id in all_usbip_sources:
+            source_type = 'usbip'
+            source_host = all_usbip_sources.get(device_id, {}).get('source', 'Unknown')
+        else:
+            source_type = 'local'
+            source_host = f'{ubuntu_user}@{ubuntu_host}'
+
+        devices_info.append({
+            'device_id': device_id,
+            'serial_no': props.get('serial_no', device_id),
+            'model': props.get('model', ''),
+            'android_version': props.get('android_version', ''),
+            'battery_level': props.get('battery_level', ''),
+            'source_type': source_type,
+            'source_host': source_host,
+            'status': 'online',
+            'locked_by': lock_info.get('client_id', '') if device_id in locks else '',
+            'locked_by_self': (lock_info.get('client_id') == client_id) if device_id in locks else False
+        })
+
+    return {'devices': devices_info}
+
+
 @app.get("/api/devices/management")
 async def devices_management():
     """设备管理页面（获取所有设备的详细管理信息）"""
     try:
         config = config_manager.load_config()
 
+        if is_config_host_local(config):
+            output, error, code = await asyncio.to_thread(run_local_shell_command, "adb devices", 5)
+            if code != 0 and not output:
+                logger.warning(f"[Device Management] Local adb devices failed: {error}")
+                return JSONResponse(content={'devices': [], 'success': True, 'warning': error})
+
+            device_ids = DeviceUtils.parse_adb_devices(output)
+            if not device_ids:
+                return JSONResponse(content={'devices': [], 'success': True, 'source': 'local'})
+
+            props_cmd = build_management_props_command(device_ids)
+            props_output, props_error, props_code = await asyncio.to_thread(
+                run_local_shell_command, props_cmd, 15
+            )
+            if props_code != 0:
+                logger.warning(f"[Device Management] Local device properties failed: {props_error}")
+
+            payload = build_devices_management_payload(
+                device_ids,
+                parse_management_device_props(props_output),
+                config
+            )
+            payload.update({'success': True, 'source': 'local'})
+            return JSONResponse(content=payload)
+
         with SSHConnection(config) as ssh:
-            # 获取基本设备列表
             output, _, _ = ssh_manager.execute_command(ssh, "adb devices", timeout=5)
-            device_ids = [
-                line.split('\t')[0]
-                for line in output.split('\n')[1:]
-                if line.strip() and '\tdevice' in line
-            ]
+            device_ids = DeviceUtils.parse_adb_devices(output)
 
             if not device_ids:
                 return JSONResponse(content={'devices': []})
 
-            # 获取设备锁定状态
-            client_ip = '127.0.0.1'  # 本地调用
-            client_id = client_manager.get_client_id(client_ip)
-            locks = device_lock_manager.get_all_locks()
+            props_cmd = build_management_props_command(device_ids)
+            props_output, _, _ = ssh_manager.execute_command(ssh, props_cmd, timeout=15)
 
-            # 批量获取设备属性（包括电池电量）
-            device_props_cmd = " && ".join([
-                f"adb -s {device_id} shell 'echo \"===DEVICE:{device_id}===\" && getprop ro.serialno && getprop ro.product.model && getprop ro.build.version.release && dumpsys battery | grep level | cut -d: -f2 | tr -d \" \"'"
-                for device_id in device_ids
-            ])
-
-            props_output, _, _ = ssh_manager.execute_command(ssh, device_props_cmd, timeout=15)
-
-            # 解析批量输出
-            device_data = {}
-            current_device = None
-
-            for line in props_output.split('\n'):
-                line = line.strip()
-                if line.startswith('===DEVICE:'):
-                    current_device = line.split('===DEVICE:')[1].split('===')[0]
-                    device_data[current_device] = {'serial_no': '', 'model': '', 'android_version': '', 'battery_level': ''}
-                elif current_device and line:
-                    if not device_data[current_device]['serial_no']:
-                        device_data[current_device]['serial_no'] = line
-                    elif not device_data[current_device]['model']:
-                        device_data[current_device]['model'] = line
-                    elif not device_data[current_device]['android_version']:
-                        device_data[current_device]['android_version'] = line
-                    elif not device_data[current_device]['battery_level']:
-                        device_data[current_device]['battery_level'] = line
-
-            # 构建响应（与Flask版本保持一致）
-            devices_info = []
-            ubuntu_host = config.get("ubuntu_host", "")
-            ubuntu_user = config.get("ubuntu_user", "")
-
-            # 合并所有USB/IP设备来源字典（包括持久化的）
-            all_usbip_sources = {**global_state.usbip_devices_source, **usbip_manager.device_sources}
-
-            # 清理已不存在的设备来源记录（与Flask版本一致）
-            current_device_set = set(device_ids)
-            devices_to_remove = [dev_id for dev_id in all_usbip_sources if dev_id not in current_device_set]
-
-            if devices_to_remove:
-                logger.info(f"[Device Management] Cleaning up removed devices from memory: {devices_to_remove}")
-                # 这样设备重连后仍能识别为USB/IP设备
-                with global_state.usbip_devices_source_lock:
-                    for dev_id in devices_to_remove:
-                        global_state.usbip_devices_source.pop(dev_id, None)
-                # 从usbip_manager中清除（内存）
-                for dev_id in devices_to_remove:
-                    usbip_manager.device_sources.pop(dev_id, None)
-
-            for device_id in device_ids:
-                props = device_data.get(device_id, {})
-                lock_info = locks.get(device_id, {})
-
-                # 判断设备来源类型（与Flask版本一致）
-                if device_id in all_usbip_sources:
-                    source_type = 'usbip'
-                    source_host = all_usbip_sources.get(device_id, {}).get('source', 'Unknown')
-                else:
-                    source_type = 'local'
-                    source_host = f'{ubuntu_user}@{ubuntu_host}'
-
-                device_info = {
-                    'device_id': device_id,
-                    'serial_no': props.get('serial_no', device_id),
-                    'model': props.get('model', ''),
-                    'android_version': props.get('android_version', ''),
-                    'battery_level': props.get('battery_level', ''),
-                    'source_type': source_type,
-                    'source_host': source_host,
-                    'status': 'online',
-                    'locked_by': lock_info.get('client_id', '') if device_id in locks else '',
-                    'locked_by_self': (lock_info.get('client_id') == client_id) if device_id in locks else False
-                }
-                devices_info.append(device_info)
-
-            return JSONResponse(content={'devices': devices_info})
+            return JSONResponse(content=build_devices_management_payload(
+                device_ids,
+                parse_management_device_props(props_output),
+                config
+            ))
 
     except Exception as e:
         logger.error(f"Error getting devices management: {e}")
@@ -3265,7 +3401,7 @@ async def run_test_background(
         )
 
         if os.path.exists(local_script):
-            suites_path = config.get('suites_path', '/home/hcq/GMS-Suite')
+            suites_path = config.get('suites_path') or get_default_suites_path(config)
             remote_script = os.path.join(suites_path, 'run_GMS_Test_Auto.sh')
 
             script_size = os.path.getsize(local_script)
@@ -3323,7 +3459,7 @@ async def run_test_background(
             await release_device_locks(client_id, locked_devices)
             return
 
-        suites_path = config.get('suites_path', '/home/hcq/GMS-Suite')
+        suites_path = config.get('suites_path') or get_default_suites_path(config)
         remote_script = os.path.join(suites_path, 'run_GMS_Test_Auto.sh')
 
         # 构建命令参数
@@ -3795,7 +3931,7 @@ async def save_current_log(req: dict):
         display_test_type = "MANUAL" if not test_type or test_type.lower() == 'unknown' else test_type.upper()
 
         if client_id == 'test_client':
-            user_id = config.get('ubuntu_user', 'hcq')
+            user_id = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
         else:
             user_id = parse_client_id(client_id)[0] if '@' in client_id else client_id
 
@@ -3868,7 +4004,17 @@ async def list_suites(base_path: str = None):
     try:
         config = config_manager.load_config()
         # Use base_path from request or get from config
-        base_path = base_path or config.get('suites_path', '/home/hcq/GMS-Suite')
+        base_path = base_path or config.get('suites_path') or get_default_suites_path(config)
+
+        if is_config_host_local(config):
+            suites = list_local_test_suites(base_path)
+            return JSONResponse(content={
+                'success': True,
+                'suites': suites,
+                'count': len(suites),
+                'base_path': base_path,
+                'source': 'local'
+            })
 
         ssh = ssh_manager.get_connection(config)
         if not ssh:
@@ -3883,34 +4029,17 @@ async def list_suites(base_path: str = None):
             stripped_output = output.strip()
             if stripped_output:
                 for line in stripped_output.split('\n'):
-                    full_path = line.strip()
-                    parts = full_path.split('/')
-                    tradefed_name = parts[-1]
-                    test_type = get_test_type_from_binary(tradefed_name)
-                    if test_type == 'cts-v-host':
-                        continue
-                    tools_dir = '/'.join(parts[:-1])
-                    version_dir = next((p for p in parts if p.startswith('android-') and (test_type in p or (test_type == 'gsi' and 'cts' in p) or (test_type == 'gts-root' and 'gts' in p))), "")
-                    if test_type == 'gsi' and version_dir:
-                        test_type = 'cts'
-                    # GTS-ROOT 使用 GTS 套件
-                    if test_type == 'gts-root' and version_dir:
-                        test_type = 'gts'
-
-                    suites.append({
-                        'test_type': test_type,
-                        'version': version_dir,
-                        'tools_path': tools_dir,
-                        'full_path': full_path,
-                        'binary': tradefed_name
-                    })
+                    suite = build_suite_info(line)
+                    if suite:
+                        suites.append(suite)
 
             ssh_manager.return_connection(ssh)
             return JSONResponse(content={
                 'success': True,
                 'suites': suites,
                 'count': len(suites),
-                'base_path': base_path
+                'base_path': base_path,
+                'source': 'ssh'
             })
 
         except Exception:
@@ -5033,7 +5162,7 @@ async def analyze_report_from_url(request: Request):
             raise download_error
 
     except Exception as e:
-        logger.error(f"[Report Analysis] URL 分析失败: {e}")
+        logger.error(f"[Report Analysis] URL 分析失败: {e}", exc_info=True)
         return JSONResponse(
             content={'success': False, 'error': f'下载或分析失败: {str(e)}'},
             status_code=500
@@ -5529,6 +5658,44 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
 
     except Exception as e:
         logger.error(f"[SKILLS_DOWNLOAD] Error: {e}", exc_info=True)
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+
+
+@app.get("/api/system/install-sh")
+async def download_install_sh(request: Request):
+    """下载 install.sh 部署脚本
+
+    Returns:
+        install.sh 脚本文件
+    """
+    try:
+        logger.info("[INSTALL_SH_DOWNLOAD] 请求下载 install.sh")
+
+        install_sh_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'install.sh')
+
+        if not os.path.exists(install_sh_path):
+            logger.error(f"[INSTALL_SH_DOWNLOAD] 文件不存在：{install_sh_path}")
+            return JSONResponse(
+                content={'success': False, 'error': '部署脚本文件不存在'},
+                status_code=404
+            )
+
+        with open(install_sh_path, 'rb') as f:
+            content = f.read()
+
+        return Response(
+            content=content,
+            media_type="text/x-shellscript",
+            headers={
+                "Content-Disposition": "attachment; filename=\"install.sh\""
+            }
+        )
+
+    except Exception as e:
+        logger.exception(f"[INSTALL_SH_DOWNLOAD] 下载失败：{e}")
         return JSONResponse(
             content={'success': False, 'error': str(e)},
             status_code=500
@@ -6157,7 +6324,7 @@ async def get_desktop_vnc_status():
 async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None)):
     """启动Ubuntu主机桌面VNC（Ubuntu桌面的VNC服务）"""
     config = config_manager.load_config()
-    default_host = f"{config.get('ubuntu_user', 'hcq')}@{config.get('ubuntu_host', 'localhost')}"
+    default_host = f"{config.get('ubuntu_user') or os.environ.get('USER') or 'gms'}@{config.get('ubuntu_host', 'localhost')}"
 
     if req is None:
         # 如果没有提供请求体，使用配置文件的默认值
@@ -6182,6 +6349,88 @@ async def stop_desktop_vnc():
     """停止Ubuntu主机桌面VNC"""
     result = vnc_manager.stop_vnc()
     return JSONResponse(content=result)
+
+
+NOVNC_UPSTREAM_HTTP = os.getenv("GMS_NOVNC_UPSTREAM", "http://127.0.0.1:6080").rstrip("/")
+NOVNC_UPSTREAM_WS = NOVNC_UPSTREAM_HTTP.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
+
+
+def build_novnc_upstream_url(path: str, query_string: bytes = b"") -> str:
+    upstream_path = path.lstrip("/") or "vnc.html"
+    url = f"{NOVNC_UPSTREAM_HTTP}/{upstream_path}"
+    if query_string:
+        url = f"{url}?{query_string.decode('utf-8', errors='ignore')}"
+    return url
+
+
+@app.websocket("/novnc/websockify")
+@app.websocket("/novnc/novnc/websockify")
+async def novnc_websockify_proxy(websocket: WebSocket):
+    """Proxy noVNC websocket through the 5001 origin for HTTPS/ngrok access."""
+    await websocket.accept()
+    upstream_url = f"{NOVNC_UPSTREAM_WS}/websockify"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(upstream_url) as upstream:
+                async def client_to_upstream():
+                    while True:
+                        message = await websocket.receive()
+                        if message.get("type") == "websocket.disconnect":
+                            await upstream.close()
+                            break
+                        if message.get("bytes") is not None:
+                            await upstream.send_bytes(message["bytes"])
+                        elif message.get("text") is not None:
+                            await upstream.send_str(message["text"])
+
+                async def upstream_to_client():
+                    async for message in upstream:
+                        if message.type == aiohttp.WSMsgType.BINARY:
+                            await websocket.send_bytes(message.data)
+                        elif message.type == aiohttp.WSMsgType.TEXT:
+                            await websocket.send_text(message.data)
+                        elif message.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                            break
+
+                tasks = [
+                    asyncio.create_task(client_to_upstream()),
+                    asyncio.create_task(upstream_to_client())
+                ]
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for task in pending:
+                    task.cancel()
+                for task in done:
+                    task.result()
+    except Exception as e:
+        logger.error(f"[noVNC] WebSocket proxy error: {e}")
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
+
+
+@app.get("/novnc")
+@app.get("/novnc/{path:path}")
+async def novnc_http_proxy(request: Request, path: str = "vnc.html"):
+    """Proxy noVNC static files through the 5001 origin."""
+    upstream_url = build_novnc_upstream_url(path, request.scope.get("query_string", b""))
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(upstream_url) as upstream:
+                body = await upstream.read()
+                return Response(
+                    content=body,
+                    status_code=upstream.status,
+                    media_type=upstream.headers.get("content-type", "application/octet-stream"),
+                    headers={"Cache-Control": "no-store"}
+                )
+    except aiohttp.ClientConnectorError:
+        return error_response("noVNC 服务未运行，请先启动 VNC", status_code=503)
+    except Exception as e:
+        logger.error(f"[noVNC] HTTP proxy error: {e}")
+        return error_response(f"noVNC 代理失败：{str(e)}", status_code=502)
 
 
 @app.post("/api/desktop/validate")
@@ -6266,7 +6515,7 @@ async def show_device_screens(req: DeviceActionRequest):
         devices = req.devices
 
         config = config_manager.load_config()
-        ubuntu_user = config.get('ubuntu_user', 'hcq')
+        ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
         ubuntu_host = config.get('ubuntu_host', '')
 
         if not devices:
@@ -7146,7 +7395,7 @@ async def get_ssh_terminal_info():
 
         # Cache config values to avoid redundant get() calls
         ssh_host = config.get('ubuntu_host', 'localhost')
-        ssh_user = config.get('ubuntu_user', 'hcq')
+        ssh_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
         connection_string = f"ssh {ssh_user}@{ssh_host}"
 
         return JSONResponse(content={
@@ -7171,21 +7420,94 @@ async def get_ssh_terminal_info():
         )
 
 
+def get_primary_vpn_target(config: Dict[str, Any]) -> str:
+    vpn_target = config.get('vpn_target', 'www.google.com')
+    if isinstance(vpn_target, list):
+        vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
+    return str(vpn_target or 'www.google.com')
+
+
+def check_local_vpn_connected(vpn_target: str) -> bool:
+    for _ in range(2):
+        try:
+            result = subprocess.run(
+                ['ping', '-c', '1', '-W', '1', vpn_target],
+                capture_output=True,
+                text=True,
+                timeout=3
+            )
+            output = f"{result.stdout}\n{result.stderr}"
+            if result.returncode == 0 and ('1 received' in output or 'bytes from' in output):
+                return True
+        except Exception as e:
+            logger.debug(f"[VPN Status] Local ping check failed: {e}")
+
+    try:
+        result = subprocess.run(
+            ['nmcli', '-t', '-f', 'NAME,TYPE,STATE', 'connection', 'show', '--active'],
+            capture_output=True,
+            text=True,
+            timeout=3
+        )
+        output = result.stdout.lower()
+        return 'vpn' in output or 'tun' in output or 'tap' in output
+    except Exception as e:
+        logger.debug(f"[VPN Status] Local nmcli check failed: {e}")
+        return False
+
+
+def get_configured_vpn_connection_name(config: Dict[str, Any]) -> str:
+    return str(config.get('vpn_connection_name') or os.getenv('GMS_VPN_CONNECTION_NAME', '')).strip()
+
+
+def parse_first_vpn_connection(nmcli_output: str) -> str:
+    for line in nmcli_output.splitlines():
+        parts = line.split(':')
+        if len(parts) >= 2 and 'vpn' in parts[1].lower():
+            return parts[0].replace(r'\:', ':').strip()
+    return ""
+
+
+async def execute_config_host_command(config: Dict[str, Any], ssh, command: str, timeout: int) -> Tuple[str, str, int]:
+    if is_config_host_local(config):
+        return await asyncio.to_thread(run_local_shell_command, command, timeout)
+    return ssh_manager.execute_command(ssh, command, timeout=timeout)
+
+
+async def resolve_vpn_connection_name(config: Dict[str, Any], ssh=None, active_only: bool = False) -> str:
+    vpn_name = get_configured_vpn_connection_name(config)
+    if vpn_name:
+        return vpn_name
+
+    if active_only:
+        cmd = "nmcli -t -f NAME,TYPE,STATE connection show --active 2>/dev/null"
+    else:
+        cmd = "nmcli -t -f NAME,TYPE connection show 2>/dev/null"
+    output, _, _ = await execute_config_host_command(config, ssh, cmd, timeout=5)
+    return parse_first_vpn_connection(output)
+
+
 @app.get("/api/vpn/status")
 @handle_api_errors
 async def get_vpn_status():
     """获取VPN连接状态（多次ping提高可靠性）"""
     config = config_manager.load_config()
+    vpn_target = get_primary_vpn_target(config)
+
+    if is_config_host_local(config):
+        connected = await asyncio.to_thread(check_local_vpn_connected, vpn_target)
+        return JSONResponse(content={
+            "success": True,
+            "connected": connected,
+            "source": "local"
+        })
+
     ssh = ssh_manager.get_connection(config)
     if not ssh:
         return JSONResponse(
             content={"success": False, "error": "SSH连接失败"},
             status_code=500
         )
-
-    vpn_target = config.get('vpn_target', 'www.google.com')
-    if isinstance(vpn_target, list):
-        vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
 
     max_attempts = 2
     for attempt in range(max_attempts):
@@ -7232,20 +7554,36 @@ async def connect_vpn(
     """
     try:
         config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
+        ssh = None
+        if not is_config_host_local(config):
+            ssh = ssh_manager.get_connection(config)
+
+        if not is_config_host_local(config) and not ssh:
             return JSONResponse(
                 content={"success": False, "error": "SSH连接失败"},
                 status_code=500
             )
 
         try:
+            vpn_name = await resolve_vpn_connection_name(config, ssh, active_only=False)
+            if not vpn_name:
+                if ssh:
+                    ssh_manager.return_connection(ssh)
+                return JSONResponse(
+                    content={
+                        "success": False,
+                        "error": "未配置 VPN 连接名称，且未发现 NetworkManager VPN 连接。请设置 GMS_VPN_CONNECTION_NAME 或 configs/config.json 的 vpn_connection_name。"
+                    },
+                    status_code=400
+                )
+
             # 使用nmcli连接VPN
-            vpn_cmd = "sudo nmcli connection up hcq2"
-            output, error, code = ssh_manager.execute_command(
+            vpn_cmd = f"sudo nmcli connection up {shlex.quote(vpn_name)}"
+            output, error, code = await execute_config_host_command(
+                config,
                 ssh,
                 vpn_cmd,
-                timeout=20
+                20
             )
 
             await asyncio.sleep(2)
@@ -7258,11 +7596,12 @@ async def connect_vpn(
                 is_connected = True
                 message = 'VPN 已连接'
             elif 'unknown connection' in (error or ''):
-                ssh_manager.return_connection(ssh)
+                if ssh:
+                    ssh_manager.return_connection(ssh)
                 return JSONResponse(
                     content={
                         "success": False,
-                        "error": "VPN 连接 hcq2 不存在，请先在 NetworkManager 中配置"
+                        "error": f"VPN 连接 {vpn_name} 不存在，请先在 NetworkManager 中配置"
                     },
                     status_code=404
                 )
@@ -7270,15 +7609,18 @@ async def connect_vpn(
                 is_connected = False
                 message = f'VPN 连接失败: {error or output}'
 
-            ssh_manager.return_connection(ssh)
+            if ssh:
+                ssh_manager.return_connection(ssh)
             return JSONResponse(content={
                 "success": is_connected,
                 "connected": is_connected,
                 "message": message,
+                "vpn_connection_name": vpn_name,
                 "output": (output[:500] if output else '')
             })
         except Exception:
-            ssh_manager.return_connection(ssh)
+            if ssh:
+                ssh_manager.return_connection(ssh)
             raise
 
     except Exception as e:
@@ -7293,29 +7635,45 @@ async def disconnect_vpn():
     """断开VPN（使用nmcli）"""
     try:
         config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
+        ssh = None
+        if not is_config_host_local(config):
+            ssh = ssh_manager.get_connection(config)
+
+        if not is_config_host_local(config) and not ssh:
             return JSONResponse(
                 content={"success": False, "error": "SSH连接失败"},
                 status_code=500
             )
 
         try:
+            vpn_name = await resolve_vpn_connection_name(config, ssh, active_only=True)
+            if not vpn_name:
+                if ssh:
+                    ssh_manager.return_connection(ssh)
+                return JSONResponse(
+                    content={"success": True, "message": "未发现正在连接的 VPN"},
+                    status_code=200
+                )
+
             # 使用nmcli断开VPN
-            disconnect_cmd = "sudo nmcli connection down hcq2"
-            output, error, code = ssh_manager.execute_command(
+            disconnect_cmd = f"sudo nmcli connection down {shlex.quote(vpn_name)}"
+            output, error, code = await execute_config_host_command(
+                config,
                 ssh,
                 disconnect_cmd,
-                timeout=10
+                10
             )
 
-            ssh_manager.return_connection(ssh)
+            if ssh:
+                ssh_manager.return_connection(ssh)
             return JSONResponse(content={
-                "success": True,
-                "message": "VPN 已断开"
+                "success": code == 0,
+                "message": "VPN 已断开" if code == 0 else f"VPN 断开失败: {error or output}",
+                "vpn_connection_name": vpn_name
             })
         except Exception:
-            ssh_manager.return_connection(ssh)
+            if ssh:
+                ssh_manager.return_connection(ssh)
             raise
 
     except Exception as e:
@@ -7909,8 +8267,9 @@ async def burn_firmware(
         try:
             # 1. 上传 upgrade_tool 到测试主机
             logger.info("[Firmware Burn] Uploading upgrade_tool...")
+            gms_suite_dir = get_default_suites_path(config)
             local_tool = os.path.join(os.path.dirname(__file__), "tools", "upgrade_tool")
-            remote_tool = f"/home/{config['ubuntu_user']}/GMS-Suite/upgrade_tool"
+            remote_tool = os.path.join(gms_suite_dir, "upgrade_tool")
 
             if not os.path.exists(local_tool):
                 logger.error(f"[Firmware Burn] upgrade_tool not found: {local_tool}")
@@ -7961,7 +8320,7 @@ async def burn_firmware(
                     )
 
                 # 直接上传到测试主机
-                remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_name}"
+                remote_firmware = os.path.join(gms_suite_dir, firmware_name)
                 logger.info(f"[Firmware Burn] Streaming uploaded firmware to test host: {remote_firmware} ({firmware_size} bytes)")
 
                 await upload_firmware_to_test_host(
@@ -7980,7 +8339,7 @@ async def burn_firmware(
                 # 现在处理固件文件（远程路径或本地文件）
                 logger.info(f"[Firmware Burn] Processing firmware: {firmware_path}")
                 firmware_name = os.path.basename(firmware_path.rstrip('/'))
-                remote_firmware = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_name}"
+                remote_firmware = os.path.join(gms_suite_dir, firmware_name)
                 local_firmware_path = None
 
                 # 绝对路径/相对路径优先按测试主机文件处理，避免同机部署时把远程文件再次SCP到自身。
@@ -8005,7 +8364,7 @@ async def burn_firmware(
                 else:
                     # 可能只是文件名，尝试在 GMS-Suite 目录中查找
                     logger.info(f"[Firmware Burn] Searching for file in GMS-Suite: {firmware_path}")
-                    remote_candidate = f"/home/{config['ubuntu_user']}/GMS-Suite/{firmware_path}"
+                    remote_candidate = os.path.join(gms_suite_dir, firmware_path)
                     check_cmd = f"test -f {shlex.quote(remote_candidate)} && echo 'found' || echo 'not_found'"
                     output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
 
@@ -8050,7 +8409,6 @@ async def burn_firmware(
             await asyncio.sleep(8)
 
             # 4. 检查 Loader 设备
-            gms_suite_dir = f"/home/{config['ubuntu_user']}/GMS-Suite"
             check_cmd = f"cd {gms_suite_dir} && ./upgrade_tool ld"
             output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
 
@@ -8335,9 +8693,11 @@ async def burn_gsi(request: Request):
             # 1. 上传必要文件到测试主机
             logger.info("[GSI Burn] Uploading necessary files...")
 
+            gms_suite_dir = get_default_suites_path(config)
+
             # 上传脚本
             local_script = os.path.join(os.path.dirname(__file__), "scripts", "run_GSI_Burn.sh")
-            remote_script = f"/home/{config['ubuntu_user']}/GMS-Suite/run_GSI_Burn.sh"
+            remote_script = os.path.join(gms_suite_dir, "run_GSI_Burn.sh")
 
             if os.path.exists(local_script):
                 logger.info(f"[GSI Burn] Uploading script from: {local_script}")
@@ -8356,7 +8716,7 @@ async def burn_gsi(request: Request):
 
             # 上传 misc.img（从tools目录）
             local_misc = os.path.join(os.path.dirname(__file__), "tools", "misc.img")
-            remote_misc = f"/home/{config['ubuntu_user']}/GMS-Suite/misc.img"
+            remote_misc = os.path.join(gms_suite_dir, "misc.img")
 
             if os.path.exists(local_misc):
                 logger.info(f"[GSI Burn] Uploading misc.img from: {local_misc}")
@@ -8373,7 +8733,7 @@ async def burn_gsi(request: Request):
                 if os.path.exists(vendor_img):
                     # 本地文件，需要上传
                     vendor_name = os.path.basename(vendor_img)
-                    remote_vendor = f"/home/{config['ubuntu_user']}/GMS-Suite/{vendor_name}"
+                    remote_vendor = os.path.join(gms_suite_dir, vendor_name)
                     scp_client = scp.SCPClient(ssh.get_transport())
                     scp_client.put(vendor_img, remote_vendor)
                     scp_client.close()
@@ -9059,7 +9419,7 @@ async def list_files(req: dict):
 
         if not path:
             # Default to user home directory
-            path = f"/home/{config.get('ubuntu_user', 'hcq')}"
+            path = f"/home/{config.get('ubuntu_user') or os.environ.get('USER') or 'gms'}"
 
         ssh = ssh_manager.get_connection(config)
         if not ssh:
@@ -9289,7 +9649,14 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
     import re
 
     # 常量定义
-    PLATFORM_TOOLS_PATH = "/home/hcq/Software/platform-tools"
+    config = config_manager.load_config()
+    default_platform_tools = os.path.join(
+        "/home",
+        config.get('ubuntu_user') or os.environ.get('USER') or 'gms',
+        "Software",
+        "platform-tools"
+    )
+    PLATFORM_TOOLS_PATH = os.environ.get("GMS_PLATFORM_TOOLS_PATH", default_platform_tools)
     RECV_BUFFER_SIZE = 8192
     STABLE_OUTPUT_TIMEOUT = 2.0
     POLL_INTERVAL = 0.05
@@ -9464,22 +9831,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         with global_state.terminal_lock:
             if client_id in global_state.terminal_ssh_sessions:
                 session_info = global_state.terminal_ssh_sessions[client_id]
-                try:
-                    # 只有SSH模式才关闭SSH连接,ADB模式使用的是共享连接
-                    if session_info.get('mode') != 'adb':
-                        session_info['ssh'].close()
-                        logger.info(f"[TERMINAL] Closed SSH connection for {client_id}")
-                    else:
-                        # ADB模式:只关闭channel,不关闭SSH连接
-                        try:
-                            session_info['channel'].close()
-                            logger.info(f"[TERMINAL] Closed ADB channel for {client_id}")
-                        except (WebSocketDisconnect, ConnectionError, KeyError):
-                            pass
-                        # 归还SSH连接到连接池
-                        ssh_manager.return_connection(session_info['ssh'])
-                except Exception as e:
-                    logger.error(f"[TERMINAL] Error closing session for {client_id}: {e}")
+                close_terminal_session_resources(session_info)
                 del global_state.terminal_ssh_sessions[client_id]
 
 async def refresh_devices_websocket(client_id: str, websocket: WebSocket):
@@ -9588,28 +9940,126 @@ async def handle_tradefed_list_results(client_id: str, websocket: WebSocket, dat
             'error': str(e)
         })
 
+
+class LocalPtyChannel:
+    """Minimal Paramiko-like PTY channel for local terminal sessions."""
+
+    def __init__(self, command: List[str], cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None):
+        self.command = command
+        self.cwd = cwd or os.path.expanduser("~")
+        self.env = env or os.environ.copy()
+        self.pid, self.fd = pty.fork()
+        self.closed = False
+
+        if self.pid == 0:
+            try:
+                os.chdir(self.cwd)
+                os.execvpe(command[0], command, self.env)
+            except Exception as e:
+                os.write(2, f"Failed to start local terminal: {e}\n".encode("utf-8", errors="ignore"))
+                os._exit(127)
+
+        os.set_blocking(self.fd, False)
+
+    def recv_ready(self) -> bool:
+        if self.closed:
+            return False
+        readable, _, _ = select.select([self.fd], [], [], 0)
+        return bool(readable)
+
+    def recv(self, size: int) -> bytes:
+        if self.closed:
+            return b""
+        try:
+            return os.read(self.fd, size)
+        except BlockingIOError:
+            return b""
+        except OSError:
+            self.closed = True
+            return b""
+
+    def send(self, data: Union[str, bytes]) -> int:
+        if self.closed:
+            return 0
+        if isinstance(data, str):
+            data = data.encode("utf-8", errors="ignore")
+        return os.write(self.fd, data)
+
+    def resize_pty(self, width: int = 120, height: int = 30):
+        if self.closed:
+            return
+        packed = struct.pack("HHHH", height, width, 0, 0)
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, packed)
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        try:
+            os.kill(self.pid, signal.SIGHUP)
+        except OSError:
+            pass
+        try:
+            os.waitpid(self.pid, os.WNOHANG)
+        except OSError:
+            pass
+
+
+def close_terminal_session_resources(session_info: Dict[str, Any]):
+    mode = session_info.get('mode')
+    channel = session_info.get('channel')
+    ssh = session_info.get('ssh')
+
+    try:
+        if channel and mode in {'local', 'local_adb', 'adb'}:
+            channel.close()
+    except Exception:
+        pass
+
+    try:
+        if mode == 'adb' and ssh:
+            ssh_manager.return_connection(ssh)
+        elif ssh:
+            ssh.close()
+    except Exception:
+        pass
+
+
+def create_local_terminal_channel(command: Optional[List[str]] = None) -> LocalPtyChannel:
+    shell = os.environ.get("SHELL") or "/bin/bash"
+    terminal_command = command or [shell, "-l"]
+    env = os.environ.copy()
+    env.setdefault("TERM", "xterm-256color")
+    return LocalPtyChannel(terminal_command, cwd=os.path.expanduser("~"), env=env)
+
+
 async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_no: str, config: dict):
     """处理ADB Shell连接 - 通过SSH执行adb shell命令"""
     try:
-        # 先连接到SSH
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            await websocket.send_json({
-                'type': 'terminal_error',
-                'error': 'SSH连接失败'
-            })
-            return
+        if is_config_host_local(config):
+            ssh = None
+            channel = create_local_terminal_channel(['adb', '-s', serial_no, 'shell'])
+            backend_mode = 'local_adb'
+        else:
+            ssh = ssh_manager.get_connection(config)
+            if not ssh:
+                await websocket.send_json({
+                    'type': 'terminal_error',
+                    'error': 'SSH连接失败'
+                })
+                return
 
-        # 创建shell通道
-        channel = ssh.invoke_shell(term='xterm-256color')
-        channel.setblocking(0)
-
-        channel.resize_pty(width=80, height=24)
-
-        # 发送清屏和adb shell命令
-        channel.send('\n\n\n')
-        channel.send('clear\n')
-        channel.send(f'adb -s {serial_no} shell\n')
+            channel = ssh.invoke_shell(term='xterm-256color')
+            channel.setblocking(0)
+            channel.resize_pty(width=80, height=24)
+            channel.send('\n\n\n')
+            channel.send('clear\n')
+            channel.send(f'adb -s {serial_no} shell\n')
+            backend_mode = 'adb'
 
         # 保存会话
         loop = asyncio.get_event_loop()
@@ -9619,26 +10069,16 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
             # 关闭旧连接（如果存在）
             if session_id in global_state.terminal_ssh_sessions:
                 try:
-                    old_session = global_state.terminal_ssh_sessions[session_id]
-                    # 只有SSH模式才关闭SSH连接
-                    if old_session.get('mode') != 'adb':
-                        old_session['ssh'].close()
-                    else:
-                        # ADB模式:只关闭channel
-                        try:
-                            old_session['channel'].close()
-                        except (WebSocketDisconnect, ConnectionError, KeyError):
-                            pass
-                        ssh_manager.return_connection(old_session['ssh'])
+                    close_terminal_session_resources(global_state.terminal_ssh_sessions[session_id])
                 except (WebSocketDisconnect, ConnectionError, KeyError):
                     pass
 
             global_state.terminal_ssh_sessions[session_id] = {
-                'ssh': ssh,  # 这里保存的是SSH连接对象
+                'ssh': ssh,
                 'channel': channel,
                 'host': config.get('ubuntu_host'),
                 'user': config.get('ubuntu_user'),
-                'mode': 'adb',
+                'mode': backend_mode,
                 'serial_no': serial_no,
                 'connected_at': time.time(),
                 'websocket': websocket,
@@ -9737,6 +10177,75 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
 
         logger.info(f"[TERMINAL] SSH Connection request from {session_id} to {user}@{host}")
 
+        if CommonUtils.is_local_host(host):
+            channel = create_local_terminal_channel()
+            channel.resize_pty(width=80, height=24)
+            loop = asyncio.get_event_loop()
+
+            with global_state.terminal_lock:
+                if session_id in global_state.terminal_ssh_sessions:
+                    close_terminal_session_resources(global_state.terminal_ssh_sessions[session_id])
+
+                global_state.terminal_ssh_sessions[session_id] = {
+                    'ssh': None,
+                    'channel': channel,
+                    'host': host,
+                    'user': user,
+                    'mode': 'local',
+                    'connected_at': time.time(),
+                    'websocket': websocket,
+                    'event_loop': loop
+                }
+
+            logger.info(f"[TERMINAL] Local terminal session created for {session_id}")
+            await websocket.send_json({
+                'type': 'terminal_connected',
+                'mode': 'local'
+            })
+
+            def read_local_terminal_output():
+                try:
+                    while True:
+                        if session_id not in global_state.terminal_ssh_sessions:
+                            break
+
+                        try:
+                            current_channel = global_state.terminal_ssh_sessions[session_id]['channel']
+                            if current_channel.recv_ready():
+                                data_chunk = current_channel.recv(4096)
+                                if not data_chunk:
+                                    break
+                                text = data_chunk.decode('utf-8', errors='ignore')
+                                future = asyncio.run_coroutine_threadsafe(
+                                    websocket.send_json({
+                                        'type': 'terminal_data',
+                                        'data': text
+                                    }),
+                                    loop
+                                )
+                                future.result(timeout=5)
+                            else:
+                                time.sleep(0.01)
+                        except OSError:
+                            break
+                        except Exception as e:
+                            logger.error(f"[TERMINAL] Local read error: {e}")
+                            break
+                finally:
+                    with global_state.terminal_lock:
+                        if session_id in global_state.terminal_ssh_sessions:
+                            close_terminal_session_resources(global_state.terminal_ssh_sessions[session_id])
+                            del global_state.terminal_ssh_sessions[session_id]
+                            logger.info(f"[TERMINAL] Cleaned up local session {session_id}")
+
+            thread = threading.Thread(
+                target=read_local_terminal_output,
+                daemon=True,
+                name=f"terminal_local_read_{session_id}"
+            )
+            thread.start()
+            return
+
         # 使用 ssh_manager 创建SSH连接
         ssh_config = {
             'hostname': host,
@@ -9767,10 +10276,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
         with global_state.terminal_lock:
             # 关闭旧连接（如果存在）
             if session_id in global_state.terminal_ssh_sessions:
-                try:
-                    global_state.terminal_ssh_sessions[session_id]['ssh'].close()
-                except (WebSocketDisconnect, ConnectionError, KeyError):
-                    pass
+                close_terminal_session_resources(global_state.terminal_ssh_sessions[session_id])
 
             global_state.terminal_ssh_sessions[session_id] = {
                 'ssh': ssh,
@@ -9838,10 +10344,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                 # 清理连接
                 with global_state.terminal_lock:
                     if session_id in global_state.terminal_ssh_sessions:
-                        try:
-                            global_state.terminal_ssh_sessions[session_id]['ssh'].close()
-                        except (WebSocketDisconnect, ConnectionError, KeyError):
-                            pass
+                        close_terminal_session_resources(global_state.terminal_ssh_sessions[session_id])
                         del global_state.terminal_ssh_sessions[session_id]
                         logger.info(f"[TERMINAL] Cleaned up session {session_id}")
 
@@ -10112,7 +10615,7 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             'params': [
                 {'name': 'base_path', 'type': 'string', 'required': False, 'desc': '搜索路径，默认使用配置的 suites_path'}
             ],
-            'response': '{"success": true, "suites": [{"test_type": "cts", "version": "android-cts-16_r4", "tools_path": "...", "full_path": "...", "binary": "cts-tradefed"}], "count": 9, "base_path": "/home/hcq/GMS-Suite"}',
+            'response': '{"success": true, "suites": [{"test_type": "cts", "version": "android-cts-16_r4", "tools_path": "...", "full_path": "...", "binary": "cts-tradefed"}], "count": 9, "base_path": "~/GMS-Suite"}',
             'usage': 'gms-rt-test-suites'
         },
         '/api/devices/list': {
