@@ -19,7 +19,13 @@ async function uploadFileInChunks(file, url, options = {}) {
 
     const fileSize = file.size;
     const totalChunks = Math.ceil(fileSize / chunkSize);
-    const uploadId = `${file.name}_${Date.now()}`;
+    const uploadId = window.crypto && window.crypto.randomUUID
+        ? window.crypto.randomUUID()
+        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
 
     const formatBytes = getFormatBytes();
     console.log(`[ChunkUpload] Starting: ${file.name} (${formatBytes(fileSize)})`);
@@ -29,6 +35,7 @@ async function uploadFileInChunks(file, url, options = {}) {
     // 已上传的块
     let uploadedChunks = new Set();
     let failedChunks = [];
+    let completionResult = null;
 
     // 如果支持断点续传，检查已上传的块（可选，会稍微减慢初始速度）
     if (resume && false) { // 暂时禁用断点检查以提高速度
@@ -55,7 +62,7 @@ async function uploadFileInChunks(file, url, options = {}) {
         const chunk = file.slice(start, end);
 
         const formData = new FormData();
-        formData.append('file', chunk);
+        formData.append('file', chunk, file.name);
         formData.append('chunk_index', chunkIndex);
         formData.append('total_chunks', totalChunks);
         formData.append('upload_id', uploadId);
@@ -83,6 +90,9 @@ async function uploadFileInChunks(file, url, options = {}) {
                         try {
                             const result = JSON.parse(xhr.responseText);
                             if (result.success) {
+                                if (result.data && result.data.uploaded) {
+                                    completionResult = result;
+                                }
                                 uploadedChunks.add(chunkIndex);
                                 if (onProgress) {
                                     const progress = (uploadedChunks.size / totalChunks) * 100;
@@ -145,6 +155,10 @@ async function uploadFileInChunks(file, url, options = {}) {
         }
 
         console.log(`[ChunkUpload] Completed: ${uploadedChunks.size}/${totalChunks} chunks`);
+
+        if (completionResult) {
+            return completionResult;
+        }
 
         return {
             success: true,

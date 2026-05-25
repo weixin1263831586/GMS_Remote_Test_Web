@@ -6,10 +6,10 @@ GMS测试报告分析器 - 统一的报告解析模块
 import os
 import zipfile
 import tarfile
-import shutil
 import logging
 import re
 import glob
+import io
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -94,7 +94,7 @@ class XMLReportParser:
         try:
             if USE_LXML:
                 # 使用lxml解析,支持更大的文件和更快的速度
-                tree = etree.parse(xml_path, etree.XMLParser(remove_blank_text=True))
+                tree = etree.parse(xml_path, etree.XMLParser(remove_blank_text=True, huge_tree=True))
                 root = tree.getroot()
             else:
                 # 回退到ElementTree
@@ -106,11 +106,26 @@ class XMLReportParser:
             logger.error(f"XML解析失败: {e}")
             return None
 
+    def parse_stream(self, xml_stream) -> Optional[TestReport]:
+        """从文件流解析XML，避免为压缩包先解压落盘。"""
+        try:
+            if USE_LXML:
+                tree = etree.parse(xml_stream, etree.XMLParser(remove_blank_text=True, huge_tree=True))
+                root = tree.getroot()
+            else:
+                tree = ET.parse(xml_stream)
+                root = tree.getroot()
+
+            return self._parse_root(root)
+        except Exception as e:
+            logger.error(f"XML流解析失败: {e}")
+            return None
+
     def parse_content(self, xml_content: str) -> Optional[TestReport]:
         """解析XML内容字符串"""
         try:
             if USE_LXML:
-                root = etree.fromstring(xml_content.encode('utf-8'), etree.XMLParser(remove_blank_text=True))
+                root = etree.fromstring(xml_content.encode('utf-8'), etree.XMLParser(remove_blank_text=True, huge_tree=True))
             else:
                 root = ET.fromstring(xml_content)
 
@@ -121,9 +136,9 @@ class XMLReportParser:
 
     def _parse_root(self, root) -> Optional[TestReport]:
         """解析XML根节点"""
-        # 构建父节点映射
+        # lxml元素自带getparent()，不需要为大报告构建全量父节点映射。
         if USE_LXML:
-            self.parent_map = {c: p for p in root.iter() for c in p}
+            self.parent_map = None
         else:
             self.parent_map = {c: p for p in root.iter() for c in p}
 
@@ -164,14 +179,9 @@ class XMLReportParser:
                 return root.get(attr)
 
         # 从Build节点获取
-        if USE_LXML:
-            build = root.xpath('.//Build')
-            if build:
-                return build[0].get('test_type', build[0].get('testType', 'GTS'))
-        else:
-            build = root.find('.//Build')
-            if build is not None:
-                return build.get('test_type', build.get('testType', 'GTS'))
+        build = root.find('.//Build')
+        if build is not None:
+            return build.get('test_type', build.get('testType', 'GTS'))
 
         return 'GTS'
 
@@ -183,18 +193,11 @@ class XMLReportParser:
             return device
 
         # 从Build节点获取
-        if USE_LXML:
-            build = root.xpath('.//Build')
-            if build:
-                device = build[0].get('device_serial', build[0].get('serial', ''))
-                if device:
-                    return device
-        else:
-            build = root.find('.//Build')
-            if build is not None:
-                device = build.get('device_serial', build.get('serial', ''))
-                if device:
-                    return device
+        build = root.find('.//Build')
+        if build is not None:
+            device = build.get('device_serial', build.get('serial', ''))
+            if device:
+                return device
 
         return '未知设备'
 
@@ -206,14 +209,9 @@ class XMLReportParser:
                 return root.get(attr)
 
         # 从Build节点获取
-        if USE_LXML:
-            build = root.xpath('.//Build')
-            if build:
-                return build[0].get('suite_version', build[0].get('version', ''))
-        else:
-            build = root.find('.//Build')
-            if build is not None:
-                return build.get('suite_version', build.get('version', ''))
+        build = root.find('.//Build')
+        if build is not None:
+            return build.get('suite_version', build.get('version', ''))
 
         return ''
 
@@ -225,14 +223,9 @@ class XMLReportParser:
                 return root.get(attr)
 
         # 从Build节点获取build_version_release
-        if USE_LXML:
-            build = root.xpath('.//Build')
-            if build:
-                return build[0].get('build_version_release', '')
-        else:
-            build = root.find('.//Build')
-            if build is not None:
-                return build.get('build_version_release', '')
+        build = root.find('.//Build')
+        if build is not None:
+            return build.get('build_version_release', '')
 
         return ''
 
@@ -245,48 +238,35 @@ class XMLReportParser:
 
     def _get_summary(self, root) -> Tuple[int, int, int]:
         """获取摘要统计信息"""
-        if USE_LXML:
-            summary = root.xpath('.//Summary')
-            if summary:
-                # Summary节点有 pass 和 failed 属性，total需要计算
-                passed = int(summary[0].get('pass', summary[0].get('Passed', 0)))
-                failed = int(summary[0].get('failed', summary[0].get('Failed', 0)))
-                total = passed + failed
-                return total, passed, failed
-        else:
-            summary = root.find('.//Summary')
-            if summary is not None:
-                passed = int(summary.get('pass', summary.get('Passed', 0)))
-                failed = int(summary.get('failed', summary.get('Failed', 0)))
-                total = passed + failed
-                return total, passed, failed
+        summary = root.find('.//Summary')
+        if summary is not None:
+            passed = int(summary.get('pass', summary.get('Passed', 0)))
+            failed = int(summary.get('failed', summary.get('Failed', 0)))
+            total = passed + failed
+            return total, passed, failed
 
         # 如果没有Summary，手动统计
         return self._count_tests(root)
 
     def _count_tests(self, root) -> Tuple[int, int, int]:
         """手动统计测试用例"""
-        if USE_LXML:
-            test_cases = root.xpath('.//Test')
-            passed = sum(1 for tc in test_cases if tc.get('result', 'pass').lower() == 'pass')
-            failed = sum(1 for tc in test_cases if tc.get('result', 'pass').lower() == 'fail')
-            return len(test_cases), passed, failed
-        else:
-            test_cases = root.findall('.//Test')
-            passed = sum(1 for tc in test_cases if tc.get('result', 'pass').lower() == 'pass')
-            failed = sum(1 for tc in test_cases if tc.get('result', 'pass').lower() == 'fail')
-            return len(test_cases), passed, failed
+        total = 0
+        passed = 0
+        failed = 0
+        for tc in root.iter('Test'):
+            total += 1
+            result = tc.get('result', 'pass').lower()
+            if result == 'pass':
+                passed += 1
+            elif result == 'fail':
+                failed += 1
+        return total, passed, failed
 
     def _parse_failures(self, root) -> List[TestFailure]:
         """解析失败的测试用例"""
         failures = []
 
-        if USE_LXML:
-            test_cases = root.xpath('.//Test')
-        else:
-            test_cases = root.findall('.//Test')
-
-        for test_case in test_cases:
+        for test_case in root.iter('Test'):
             result_attr = test_case.get('result', test_case.get('Result', 'pass'))
             outcome = test_case.get('outcome', test_case.get('Outcome', ''))
 
@@ -312,16 +292,22 @@ class XMLReportParser:
 
         return failures
 
+    def _get_parent(self, element):
+        if USE_LXML:
+            return element.getparent()
+        if self.parent_map:
+            return self.parent_map.get(element)
+        return None
+
     def _get_module_name(self, test_case) -> str:
         """获取测试所属模块"""
         current = test_case
         while current is not None:
-            if current in self.parent_map:
-                current = self.parent_map[current]
-                if current is not None and current.tag == 'Module':
-                    return current.get('name', '未知模块')
-            else:
+            current = self._get_parent(current)
+            if current is None:
                 break
+            if current.tag == 'Module':
+                return current.get('name', '未知模块')
         return '未知模块'
 
     def _get_test_name(self, test_case) -> str:
@@ -329,8 +315,8 @@ class XMLReportParser:
         test_name = test_case.get('name', '未知用例')
 
         # 如果是Test节点，尝试组合完整名称
-        if test_case.tag == 'Test' and test_case in self.parent_map:
-            parent = self.parent_map[test_case]
+        if test_case.tag == 'Test':
+            parent = self._get_parent(test_case)
             if parent is not None and parent.tag == 'TestCase':
                 class_name = parent.get('name', '')
                 if class_name and test_name:
@@ -343,60 +329,27 @@ class XMLReportParser:
         reason = ''
         stack_trace = ''
 
-        if USE_LXML:
-            failure = test_case.find('Failure') if test_case.find('Failure') is not None else None
-            if failure is None:
-                failures = test_case.xpath('.//Failure')
-                if failures:
-                    failure = failures[0]
+        failure = test_case.find('Failure')
+        if failure is None:
+            failure = test_case.find('.//Failure')
+        if failure is not None:
+            reason = failure.get('message', '')
+            if failure.text:
+                stack_trace = failure.text.strip()
 
-            if failure is not None:
-                reason = failure.get('message', '')
-                if failure.text:
-                    stack_trace = failure.text.strip()
+        if not reason:
+            error = test_case.find('Error')
+            if error is None:
+                error = test_case.find('.//Error')
+            if error is not None:
+                reason = error.get('message', '')
+                if error.text:
+                    stack_trace = error.text.strip()
 
-            # 从Error节点获取
-            if not reason:
-                error = test_case.find('Error') if test_case.find('Error') is not None else None
-                if error is None:
-                    errors = test_case.xpath('.//Error')
-                    if errors:
-                        error = errors[0]
-
-                if error is not None:
-                    reason = error.get('message', '')
-                    if error.text:
-                        stack_trace = error.text.strip()
-
-            # 从StackTrace子节点获取
-            if not stack_trace:
-                stack_elem = test_case.find('.//StackTrace')
-                if stack_elem is None:
-                    stacks = test_case.xpath('.//StackTrace')
-                    if stacks:
-                        stack_elem = stacks[0]
-
-                if stack_elem is not None and stack_elem.text:
-                    stack_trace = stack_elem.text.strip()
-        else:
-            # 使用ElementTree
-            failure = test_case.find('Failure')
-            if failure is not None:
-                reason = failure.get('message', '')
-                if failure.text:
-                    stack_trace = failure.text.strip()
-
-            if not reason:
-                error = test_case.find('Error')
-                if error is not None:
-                    reason = error.get('message', '')
-                    if error.text:
-                        stack_trace = error.text.strip()
-
-            if not stack_trace:
-                stack_elem = test_case.find('.//StackTrace')
-                if stack_elem is not None and stack_elem.text:
-                    stack_trace = stack_elem.text.strip()
+        if not stack_trace:
+            stack_elem = test_case.find('.//StackTrace')
+            if stack_elem is not None and stack_elem.text:
+                stack_trace = stack_elem.text.strip()
 
         return reason or '无失败原因', stack_trace
 
@@ -438,6 +391,14 @@ class HostLogParser:
             return self._parse_log_content(log_content, log_dir)
         except Exception as e:
             logger.error(f"HostLog解析失败: {e}")
+            return None
+
+    def parse_content(self, log_content: str, log_dir: str = '') -> Optional[TestReport]:
+        """解析已读取的host_log内容。"""
+        try:
+            return self._parse_log_content(log_content, log_dir)
+        except Exception as e:
+            logger.error(f"HostLog内容解析失败: {e}")
             return None
 
     def _find_host_log(self, log_dir: str) -> Optional[str]:
@@ -828,6 +789,7 @@ class ReportAnalyzer:
         self.parser = XMLReportParser()
         self.host_log_parser = HostLogParser()
         self.file_handler = ReportFileHandler(temp_dir)
+        self.report = None
 
     def analyze_file(self, file_path: str) -> Optional[Dict]:
         """分析报告文件"""
@@ -836,44 +798,86 @@ class ReportAnalyzer:
 
         report = None
 
-        # 如果是压缩包，先解压
-        if file_path.endswith(('.zip', '.tar.gz', '.tgz')):
-            # 创建子目录用于解压，避免多次分析时文件残留
-            extract_dir = os.path.join(self.temp_dir, 'extract')
-            if os.path.exists(extract_dir):
-                shutil.rmtree(extract_dir)
-            os.makedirs(extract_dir)
+        lower_path = file_path.lower()
 
-            # 临时替换file_handler的temp_dir为子目录
-            original_temp_dir = self.file_handler.temp_dir
-            self.file_handler.temp_dir = extract_dir
-
-            try:
-                if not self.file_handler.extract_archive(file_path):
-                    return None
-
-                # 优先查找XML文件
-                xml_path = self.file_handler.find_xml_file()
-                if xml_path:
-                    report = self.parser.parse_file(xml_path)
-
-                # 如果没有XML，尝试分析host_log
-                if not report:
-                    host_log_path = self.file_handler.find_host_log()
-                    if host_log_path:
-                        report = self.host_log_parser.parse_log_dir(extract_dir)
-            finally:
-                # 恢复原始temp_dir
-                self.file_handler.temp_dir = original_temp_dir
-
-        elif file_path.endswith('.xml'):
+        if lower_path.endswith(('.zip', '.tar.gz', '.tgz', '.tar')):
+            report = self._analyze_archive(file_path)
+        elif lower_path.endswith('.xml'):
             report = self.parser.parse_file(file_path)
         else:
             logger.error(f"不支持的文件格式: {file_path}")
             return None
 
         if report:
+            self.report = report
             return self._report_to_dict(report)
+        return None
+
+    @staticmethod
+    def _archive_basename(member_name: str) -> str:
+        return os.path.basename(member_name.replace('\\', '/'))
+
+    @classmethod
+    def _is_test_result_member(cls, member_name: str) -> bool:
+        return cls._archive_basename(member_name) == 'test_result.xml'
+
+    @classmethod
+    def _is_host_log_member(cls, member_name: str) -> bool:
+        basename = cls._archive_basename(member_name)
+        return basename.startswith('host_log_') and basename.endswith('.txt')
+
+    def _parse_host_log_stream(self, stream, member_name: str) -> Optional[TestReport]:
+        with io.TextIOWrapper(stream, encoding='utf-8', errors='ignore') as text_stream:
+            return self.host_log_parser.parse_content(
+                text_stream.read(),
+                os.path.dirname(member_name.replace('\\', '/'))
+            )
+
+    def _analyze_archive(self, archive_path: str) -> Optional[TestReport]:
+        """直接从压缩包中读取目标文件，避免完整解压大报告。"""
+        lower_path = archive_path.lower()
+        try:
+            if lower_path.endswith('.zip'):
+                return self._analyze_zip_archive(archive_path)
+            return self._analyze_tar_archive(archive_path)
+        except Exception as e:
+            logger.error(f"压缩包分析失败: {e}")
+            return None
+
+    def _analyze_zip_archive(self, archive_path: str) -> Optional[TestReport]:
+        with zipfile.ZipFile(archive_path, 'r') as zf:
+            file_infos = [info for info in zf.infolist() if not info.is_dir()]
+
+            xml_info = next((info for info in file_infos if self._is_test_result_member(info.filename)), None)
+            if xml_info:
+                with zf.open(xml_info) as stream:
+                    return self.parser.parse_stream(stream)
+
+            host_log_info = next((info for info in file_infos if self._is_host_log_member(info.filename)), None)
+            if host_log_info:
+                with zf.open(host_log_info) as stream:
+                    return self._parse_host_log_stream(stream, host_log_info.filename)
+
+        return None
+
+    def _analyze_tar_archive(self, archive_path: str) -> Optional[TestReport]:
+        with tarfile.open(archive_path, 'r:*') as tf:
+            file_members = [member for member in tf.getmembers() if member.isfile()]
+
+            xml_member = next((member for member in file_members if self._is_test_result_member(member.name)), None)
+            if xml_member:
+                stream = tf.extractfile(xml_member)
+                if stream:
+                    with stream:
+                        return self.parser.parse_stream(stream)
+
+            host_log_member = next((member for member in file_members if self._is_host_log_member(member.name)), None)
+            if host_log_member:
+                stream = tf.extractfile(host_log_member)
+                if stream:
+                    with stream:
+                        return self._parse_host_log_stream(stream, host_log_member.name)
+
         return None
 
     def analyze_log_dir(self, log_dir: str) -> Optional[Dict]:

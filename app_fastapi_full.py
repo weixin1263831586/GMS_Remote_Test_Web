@@ -243,6 +243,8 @@ async def lifespan(app: FastAPI):
 
     cleanup_task = asyncio.create_task(periodic_cleanup_with_retry())
 
+    usb_dispatch_task = None
+
     # 初始化USB监控
     try:
         # 创建一个队列用于跨线程通信
@@ -264,6 +266,8 @@ async def lifespan(app: FastAPI):
 
             # 将事件放入队列，让后台任务处理
             try:
+                with global_state.device_cache_lock:
+                    global_state.device_cache = {'devices': [], 'timestamp': 0}
                 app.state.usb_event_queue.put({
                     'type': 'devices_changed',
                     'devices': devices,
@@ -273,6 +277,29 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Error queuing device change event: {e}")
 
+        async def dispatch_usb_events():
+            """后台分发USB事件，避免依赖状态轮询接口顺带消费队列。"""
+            while True:
+                try:
+                    event = app.state.usb_event_queue.get_nowait()
+                    with global_state.websocket_connections_lock:
+                        clients = list(global_state.websocket_connections.items())
+
+                    for client_id, ws in clients:
+                        try:
+                            if ws.client_state == WebSocketState.CONNECTED:
+                                await ws.send_json(event)
+                                logger.info(f"Sent USB event to client {client_id}: {event.get('type')}")
+                        except Exception as e:
+                            logger.debug(f"Error sending USB event to client {client_id}: {e}")
+                except queue.Empty:
+                    await asyncio.sleep(0.2)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"USB event dispatcher error: {e}")
+                    await asyncio.sleep(1)
+
         # 初始化并启动USB监控
         init_usb_monitor(
             device_getter=get_devices,
@@ -281,6 +308,7 @@ async def lifespan(app: FastAPI):
             use_udev=True
         )
         start_usb_monitor()
+        usb_dispatch_task = asyncio.create_task(dispatch_usb_events())
         logger.info("USB monitor started successfully")
     except Exception as e:
         logger.error(f"Failed to start USB monitor: {e}")
@@ -296,6 +324,13 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+
+    if usb_dispatch_task:
+        usb_dispatch_task.cancel()
+        try:
+            await usb_dispatch_task
+        except asyncio.CancelledError:
+            pass
 
     # 停止USB监控
     try:
@@ -698,6 +733,8 @@ class GlobalState:
         self.device_ssh_pools_max = 10  # 最大设备SSH连接池数量
         self.apk_analysis_tasks = {}  # {task_id: {'status': str, 'progress': int, 'apk_path': str, 'output_dir': str, 'filename': str, 'timestamp': float, 'error': str or None}}
         self.apk_analysis_tasks_lock = threading.Lock()
+        self.apk_upload_locks = {}
+        self.apk_upload_locks_lock = threading.Lock()
 
     def _close_ssh_safely(self, ssh):
         """安全关闭SSH连接"""
@@ -2356,7 +2393,8 @@ async def save_sidebar_order(req: dict = Body(default={})):
 @handle_api_errors
 async def get_connected_devices(
     request: Request,
-    help: bool = Query(False)
+    help: bool = Query(False),
+    force_refresh: bool = Query(False)
 ):
     """获取所有已连接的设备列表（与adb devices相同）"""
     # 检查是否需要显示帮助
@@ -2377,7 +2415,7 @@ async def get_connected_devices(
     get_or_create_user_state(client_id)
 
     # 先刷新设备列表（需要最新状态来清理记录）
-    devices = device_manager.get_connected_devices()
+    devices = await asyncio.to_thread(device_manager.get_connected_devices, force_refresh)
 
     # 清理已不存在的设备来源记录（与Flask版本一致）
     # 如果设备已不在当前设备列表中，说明设备已断开/移除，应该清除其来源记录
@@ -2394,9 +2432,15 @@ async def get_connected_devices(
 
     # 检查缓存（清理后检查）
     now = datetime.now().timestamp()
-    if now - global_state.device_cache['timestamp'] < DEVICE_CACHE_TTL:
+    if not force_refresh and now - global_state.device_cache['timestamp'] < DEVICE_CACHE_TTL:
         cached_devices = global_state.device_cache['devices']
-        return JSONResponse(content=cached_devices)
+        cached_device_set = {
+            item.get('device_id')
+            for item in cached_devices
+            if isinstance(item, dict) and item.get('device_id')
+        }
+        if cached_device_set == current_device_set:
+            return JSONResponse(content=cached_devices)
 
     devices_with_status = []
 
@@ -5289,7 +5333,7 @@ async def analyze_report_file(file_path: str, temp_dir: str = None) -> Optional[
         temp_dir = os.path.dirname(file_path)
 
     analyzer = ReportAnalyzer(temp_dir=temp_dir)
-    return analyzer.analyze_file(file_path)
+    return await asyncio.to_thread(analyzer.analyze_file, file_path)
 
 async def save_redmine_credentials(username: str, password: str):
     """加密保存 Redmine 凭证"""
@@ -5463,7 +5507,14 @@ async def analyze_reports(
                     parsed_class_names = []
 
             # 调用AI分析（包含OpenGrok源码搜索）
-            result = analyze_with_ai(test_name, error_message or '', stack_trace or '', module or '', parsed_class_names)
+            result = await asyncio.to_thread(
+                analyze_with_ai,
+                test_name,
+                error_message or '',
+                stack_trace or '',
+                module or '',
+                parsed_class_names
+            )
 
             return JSONResponse(content={
                 'success': True,
@@ -5517,7 +5568,7 @@ async def analyze_reports(
 
                     # 使用 ReportAnalyzer 分析报告
                     analyzer = ReportAnalyzer(temp_dir=temp_dir)
-                    result = analyzer.analyze_file(temp_file_path)
+                    result = await asyncio.to_thread(analyzer.analyze_file, temp_file_path)
 
                     if result:
                         result['report_name'] = extract_report_name_from_upload([uploaded_file])
@@ -5552,12 +5603,12 @@ async def analyze_reports(
 
                     # 查找 test_result.xml 或 host_log（支持两种模式）
                     analyzer = ReportAnalyzer(temp_dir=temp_dir)
-                    xml_path = analyzer.file_handler.find_xml_file()
+                    xml_path = await asyncio.to_thread(analyzer.file_handler.find_xml_file)
 
                     # 如果没有 test_result.xml，尝试使用日志分析器
                     if not xml_path:
                         logger.info("未找到 test_result.xml，尝试使用HostLog日志分析器")
-                        result = analyzer.analyze_log_dir(temp_dir)
+                        result = await asyncio.to_thread(analyzer.analyze_log_dir, temp_dir)
 
                         if not result:
                             return JSONResponse(
@@ -5579,7 +5630,7 @@ async def analyze_reports(
                         })
 
                     # 分析报告（使用 analyze_file 方法来获得正确的字典格式）
-                    result = analyzer.analyze_file(xml_path)
+                    result = await asyncio.to_thread(analyzer.analyze_file, xml_path)
 
                     if result:
                         result['report_name'] = extract_report_name_from_upload(all_files)
@@ -8979,6 +9030,11 @@ def _create_apk_task(task_id, apk_path, filename):
             'filename': filename, 'timestamp': time.time(), 'error': None
         }
 
+
+def _get_apk_upload_lock(task_id: str) -> asyncio.Lock:
+    with global_state.apk_upload_locks_lock:
+        return global_state.apk_upload_locks.setdefault(task_id, asyncio.Lock())
+
 ANDROID_NS = 'http://schemas.android.com/apk/res/android'
 
 
@@ -9054,7 +9110,16 @@ async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
                 global_state.apk_analysis_tasks[task_id]['progress'] = 10
                 global_state.apk_analysis_tasks[task_id]['error'] = None
 
-        cmd = [JADX_PATH, '-d', output_dir, '--show-bad-code', apk_path]
+        jadx_threads = min(max(os.cpu_count() or 2, 2), 8)
+        cmd = [
+            JADX_PATH,
+            '-d', output_dir,
+            '-j', str(jadx_threads),
+            '--log-level', 'error',
+            '--show-bad-code',
+            '-Pdex-input.verify-checksum=no',
+            apk_path
+        ]
         result = await asyncio.to_thread(
             subprocess.run, cmd, capture_output=True, text=True, timeout=JADX_TIMEOUT
         )
@@ -9090,13 +9155,14 @@ async def upload_apk(
     chunk_index: Optional[int] = Form(None),
     total_chunks: Optional[int] = Form(None),
     upload_id: Optional[str] = Form(None),
+    file_name: Optional[str] = Form(None),
 ):
     """上传APK文件进行分析"""
     if not file:
         return ApiResponse.error("未提供文件", status_code=400)
 
     try:
-        filename = _normalize_apk_filename(file.filename)
+        filename = _normalize_apk_filename(file_name or file.filename)
         task_id = _normalize_apk_task_id(upload_id)
         task_dir = _safe_join(APK_UPLOAD_DIR, task_id)
         apk_path = _safe_join(task_dir, filename)
@@ -9123,18 +9189,34 @@ async def upload_apk(
             _safe_join(task_dir, f"{filename}.part{i}")
             for i in range(total_chunks)
         ]
-        all_chunks_ready = all(
-            os.path.exists(path)
-            for path in chunk_paths
-        )
+        upload_lock = _get_apk_upload_lock(task_id)
+        async with upload_lock:
+            if os.path.exists(apk_path):
+                file_size = os.path.getsize(apk_path)
+                return ApiResponse.success({
+                    'task_id': task_id,
+                    'filename': filename,
+                    'size': file_size,
+                    'uploaded': True
+                })
 
-        if all_chunks_ready:
+            all_chunks_ready = all(
+                os.path.exists(path)
+                for path in chunk_paths
+            )
+
+            if not all_chunks_ready:
+                return ApiResponse.success({
+                    'task_id': task_id, 'filename': filename,
+                    'chunk_received': chunk_index + 1, 'total_chunks': total_chunks, 'uploaded': False
+                })
+
             total_size = sum(os.path.getsize(path) for path in chunk_paths)
             if total_size > APK_MAX_FILE_SIZE:
                 _cleanup_files(chunk_paths + [apk_path])
                 return ApiResponse.error(f"文件过大，最大支持 {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
 
-            merge_files_to_path(chunk_paths, apk_path)
+            await asyncio.to_thread(merge_files_to_path, chunk_paths, apk_path)
             _cleanup_files(chunk_paths)
 
             file_size = os.path.getsize(apk_path)
@@ -9144,11 +9226,6 @@ async def upload_apk(
 
             _create_apk_task(task_id, apk_path, filename)
             return ApiResponse.success({'task_id': task_id, 'filename': filename, 'size': file_size, 'uploaded': True})
-        else:
-            return ApiResponse.success({
-                'task_id': task_id, 'filename': filename,
-                'chunk_received': chunk_index + 1, 'total_chunks': total_chunks, 'uploaded': False
-            })
     else:
         try:
             file_size = await save_upload_to_path(file, apk_path, APK_MAX_FILE_SIZE)
@@ -9404,6 +9481,8 @@ async def delete_apk_task(task_id: str):
 
     task_dir = os.path.join(APK_UPLOAD_DIR, task_id)
     await asyncio.to_thread(shutil.rmtree, task_dir, ignore_errors=True)
+    with global_state.apk_upload_locks_lock:
+        global_state.apk_upload_locks.pop(task_id, None)
 
     return ApiResponse.success(message="任务已删除")
 

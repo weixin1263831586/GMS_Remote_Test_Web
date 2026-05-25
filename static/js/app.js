@@ -16,6 +16,7 @@ const state = {
     domCache: {},
     lastLogCount: 0,
     pendingDeviceRefresh: null,
+    deviceRefreshPromise: null,
     isRefreshingDevices: false
 };
 
@@ -1238,14 +1239,15 @@ function applyClientIdentityHeadersToXhr(xhr) {
 
 // ==================== Device Management ====================
 async function loadDevices(forceRefresh = false) {
-    // 防止重复刷新
     if (state.isRefreshingDevices) {
-        return;
+        state.pendingDeviceRefresh = Boolean(state.pendingDeviceRefresh || forceRefresh);
+        return state.deviceRefreshPromise || Promise.resolve(state.devices);
     }
 
     state.isRefreshingDevices = true;
+    state.pendingDeviceRefresh = null;
 
-    try {
+    state.deviceRefreshPromise = (async () => {
         // 添加 force_refresh 参数来强制绕过缓存
         const url = forceRefresh ? '/api/devices/list?force_refresh=1' : '/api/devices/list';
         const devices = await apiCall(url);
@@ -1265,10 +1267,27 @@ async function loadDevices(forceRefresh = false) {
 
         // 不再自动检查 USB/IP 状态，避免覆盖连接状态
         // USB/IP 状态只在连接/断开操作时更新
+        return devices;
+    })();
+
+    try {
+        return await state.deviceRefreshPromise;
     } catch (error) {
         addLogEntry('加载设备列表失败: ' + error.message, 'error');
+        throw error;
     } finally {
         state.isRefreshingDevices = false;
+        state.deviceRefreshPromise = null;
+
+        if (state.pendingDeviceRefresh !== null) {
+            const pendingForceRefresh = state.pendingDeviceRefresh;
+            state.pendingDeviceRefresh = null;
+            setTimeout(() => {
+                loadDevices(pendingForceRefresh).catch((error) => {
+                    debugLog('[Devices] Pending refresh failed:', error);
+                });
+            }, 100);
+        }
     }
 }
 
@@ -5758,14 +5777,9 @@ async function handleReportFile(file) {
     try {
         const formData = createFormData(AnalysisMode.UPLOAD, { file: file });
 
-        progressFill.style.width = '50%';
-
-        const response = await fetch('/api/reports/analyze', {
-            method: 'POST',
-            body: formData
+        const result = await postFormDataWithProgress('/api/reports/analyze', formData, (percent) => {
+            progressFill.style.width = `${Math.min(95, Math.max(5, percent * 0.95))}%`;
         });
-
-        const result = await response.json();
 
         progressFill.style.width = '100%';
 
@@ -5788,6 +5802,42 @@ async function handleReportFile(file) {
         if (progress) progress.style.opacity = '0';
         if (content) content.style.opacity = '1';
     }
+}
+
+function postFormDataWithProgress(url, formData, onProgress) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+
+        xhr.upload.addEventListener('progress', (event) => {
+            if (event.lengthComputable && onProgress) {
+                onProgress((event.loaded / event.total) * 100, event.loaded, event.total);
+            }
+        });
+
+        xhr.addEventListener('load', () => {
+            let result = null;
+            try {
+                result = JSON.parse(xhr.responseText || '{}');
+            } catch (error) {
+                reject(new Error('服务器返回无效JSON'));
+                return;
+            }
+
+            if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(result);
+                return;
+            }
+
+            reject(new Error(result.error || result.detail || `HTTP ${xhr.status}`));
+        });
+
+        xhr.addEventListener('error', () => reject(new Error('网络错误')));
+        xhr.addEventListener('abort', () => reject(new Error('上传已取消')));
+
+        xhr.open('POST', url);
+        applyClientIdentityHeadersToXhr(xhr);
+        xhr.send(formData);
+    });
 }
 
 async function handleReportFolder(files) {
@@ -5815,25 +5865,14 @@ async function handleReportFolder(files) {
             // 使用 webkitRelativePath 或文件名
             const filename = file.webkitRelativePath || file.name;
 
-            // 创建新的 File 对象，确保文件名正确
-            const fileWithPath = new File([file], filename, {
-                type: file.type,
-                lastModified: file.lastModified
-            });
-
-            formData.append('files[]', fileWithPath);
+            formData.append('files[]', file, filename);
             fileCount++;
         }
 
         debugLog(`Uploading ${fileCount} files...`);
-        progressFill.style.width = '30%';
-
-        const response = await fetch('/api/reports/analyze', {
-            method: 'POST',
-            body: formData
+        const result = await postFormDataWithProgress('/api/reports/analyze', formData, (percent) => {
+            progressFill.style.width = `${Math.min(95, Math.max(5, percent * 0.95))}%`;
         });
-
-        const result = await response.json();
 
         progressFill.style.width = '100%';
 
@@ -7980,17 +8019,24 @@ async function handleApkFile(file) {
     const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
     showToast(`正在上传 ${file.name} (${fileSizeMB}MB)...`, 'info');
 
-    const formData = new FormData();
-    formData.append('file', file);
+    const uploadProgress = $('apk-upload-progress');
+    const uploadProgressFill = $('apk-progress-fill');
+    if (uploadProgress) uploadProgress.style.display = 'block';
+    if (uploadProgressFill) uploadProgressFill.style.width = '0%';
 
     try {
-        const resp = await fetch('/api/apk/upload', {
-            method: 'POST',
-            body: formData
+        const data = await window.uploadFileWithProgress(file, '/api/apk/upload', {
+            useChunkUpload: true,
+            chunkSize: 32 * 1024 * 1024,
+            onProgress: (percent) => {
+                if (uploadProgressFill) {
+                    uploadProgressFill.style.width = `${Math.min(100, Math.max(1, percent))}%`;
+                }
+            }
         });
-        const data = await resp.json();
+        if (uploadProgressFill) uploadProgressFill.style.width = '100%';
 
-        if (data.success) {
+        if (data.success && data.data) {
             stopApkPolling();
             window.apkCurrentTaskId = data.data.task_id;
             showToast(`上传成功: ${file.name}`, 'success');
@@ -8027,6 +8073,11 @@ async function handleApkFile(file) {
         }
     } catch (e) {
         showToast(`上传失败: ${e.message}`, 'error');
+    } finally {
+        setTimeout(() => {
+            if (uploadProgress) uploadProgress.style.display = 'none';
+            if (uploadProgressFill) uploadProgressFill.style.width = '0%';
+        }, 500);
     }
 }
 
