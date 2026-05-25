@@ -174,12 +174,9 @@ class USBMonitor:
 
                     logger.debug(f"[USBMonitor] USB event: {action} - {device_info}")
 
-                    # 检测到USB add或remove事件后，延迟一小段时间再检查设备列表
-                    # 这样可以让adb有足够时间识别设备
-                    time.sleep(0.5)
-
-                    # 检查设备列表是否变化
-                    self._check_and_notify_devices()
+                    # ADB枚举通常滞后于udev事件。连续检查几次，避免插入瞬间
+                    # adb devices 仍为空导致前端错过刷新。
+                    self._check_until_stable()
 
             except Exception as e:
                 if self._running:
@@ -243,16 +240,18 @@ class USBMonitor:
                     f"[USBMonitor] 检测到潜在变化 (1/{self.debounce_count}): "
                     f"{current_devices - self._current_devices} / {self._current_devices - current_devices}"
                 )
-                return
+                if self._debounce_counter < self.debounce_count:
+                    return
 
-            # 连续检测到相同变化
-            self._debounce_counter += 1
+            else:
+                # 连续检测到相同变化
+                self._debounce_counter += 1
 
-            if self._debounce_counter < self.debounce_count:
-                logger.debug(
-                    f"[USBMonitor] 确认变化进度 ({self._debounce_counter}/{self.debounce_count})"
-                )
-                return
+                if self._debounce_counter < self.debounce_count:
+                    logger.debug(
+                        f"[USBMonitor] 确认变化进度 ({self._debounce_counter}/{self.debounce_count})"
+                    )
+                    return
 
             # 达到防抖阈值，确认是真正的变化
             old_devices = self._current_devices
@@ -281,10 +280,18 @@ class USBMonitor:
         except Exception as e:
             logger.error(f"[USBMonitor] 检查设备时出错: {e}")
 
+    def _check_until_stable(self, attempts: int = 5, delay: float = 0.7):
+        """USB事件后做多次ADB枚举确认，覆盖ADB server延迟发现设备的情况。"""
+        for _ in range(attempts):
+            if not self._running:
+                return
+            time.sleep(delay)
+            self._check_and_notify_devices()
+
     def force_check(self):
         """强制立即检查设备列表变化"""
         if self._running:
-            self._check_and_notify_devices()
+            self._check_until_stable(attempts=3, delay=0.6)
 
 
 # 全局USB监控器实例

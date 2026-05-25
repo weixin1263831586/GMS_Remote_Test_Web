@@ -9,12 +9,12 @@
         "terminal",
         "devices",
         "users",
+        "test-suites",
         "reports",
         "report-analysis",
         "apk-analysis",
         "api-docs",
         "architecture",
-        "test-suites",
         "tools"
     ]
 }
