@@ -364,6 +364,7 @@ from core.usbip import usbip_manager
 from core.common_utils import CommonUtils
 from core.device_utils import DeviceUtils
 from core.report_analyzer import ReportAnalyzer
+from core.security_audit import classify_request_source, security_audit_logger
 from core.test_report_db import test_report_db
 
 # 导入管理模块
@@ -660,16 +661,268 @@ from starlette.middleware.gzip import GZipMiddleware
 # 添加GZip压缩中间件（最小500字节启动压缩，提升传输效率）
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
+
+AUDIT_SKIP_PREFIXES = (
+    '/static/',
+    '/novnc/',
+    '/api/security-audit/page-view',
+    '/api/security-audit/logs',
+    '/api/security-audit/detail',
+    '/api/security-audit/export',
+    '/api/notifications',
+)
+AUDIT_SKIP_PATHS = {'/favicon.ico'}
+AUDIT_WEB_READONLY_NOISE_PATHS = {
+    '/',
+    '/templates/architecture.html',
+    '/api/config/ai',
+    '/api/config/opengrok',
+    '/api/config/read',
+    '/api/config/redmine',
+    '/api/desktop/vnc/status',
+    '/api/devices/list',
+    '/api/devices/management',
+    '/api/devices/user-locked',
+    '/api/reports/list',
+    '/api/ssh/sshd',
+    '/api/system/docs',
+    '/api/system/health',
+    '/api/system/help',
+    '/api/system/skills',
+    '/api/test/logs/get',
+    '/api/test/logs/list',
+    '/api/test/status',
+    '/api/test/suites',
+    '/api/test/suites/files',
+    '/api/tools/load',
+    '/api/usbip/status',
+    '/api/users/current',
+    '/api/users/list',
+    '/api/vpn/status',
+}
+AUDIT_WEB_READONLY_NOISE_PREFIXES = (
+    '/api/favicon/',
+)
+AUDIT_PAGE_VIEW_SKIP_PAGES = {'security-audit'}
+
+
+def can_audit_path(path: str) -> bool:
+    if path in AUDIT_SKIP_PATHS:
+        return False
+    return not any(path.startswith(prefix) for prefix in AUDIT_SKIP_PREFIXES)
+
+
+def should_audit_request(path: str, source: str, method: str) -> bool:
+    if not can_audit_path(path):
+        return False
+
+    method_upper = method.upper()
+    if source == 'web' and method_upper in {'GET', 'HEAD'}:
+        if path in AUDIT_WEB_READONLY_NOISE_PATHS:
+            return False
+        if any(path.startswith(prefix) for prefix in AUDIT_WEB_READONLY_NOISE_PREFIXES):
+            return False
+
+    return True
+
+
+def get_audit_operation(path: str, method: str) -> str:
+    if path == '/':
+        return '打开Web首页'
+    if path.startswith('/api/'):
+        return f"{method} {path}"
+    return f"{method} {path}"
+
+
+MAX_AUDIT_REQUEST_BODY_BYTES = 64 * 1024
+MAX_AUDIT_RESPONSE_BODY_BYTES = 128 * 1024
+
+
+def _safe_int(value: Optional[str], default: int = 0) -> int:
+    try:
+        return int(value or default)
+    except (TypeError, ValueError):
+        return default
+
+
+async def summarize_audit_request(request: Request, should_audit: bool) -> Dict[str, Any]:
+    """Build a safe request summary without recording file contents or secrets."""
+    if not should_audit:
+        return {}
+
+    content_type = (request.headers.get('content-type') or '').lower()
+    content_length = _safe_int(request.headers.get('content-length'))
+    summary = {
+        'content_type': content_type.split(';')[0] if content_type else '',
+        'content_length': content_length,
+        'query': security_audit_logger.sanitize_mapping(dict(request.query_params)),
+    }
+
+    if request.method.upper() not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        return summary
+
+    if content_length > MAX_AUDIT_REQUEST_BODY_BYTES:
+        if 'multipart/form-data' in content_type:
+            summary['body'] = {
+                'body_type': 'multipart',
+                'captured': False,
+                'reason': '文件上传内容不记录',
+            }
+        else:
+            summary['body'] = {
+                'captured': False,
+                'reason': f'请求体超过 {MAX_AUDIT_REQUEST_BODY_BYTES} 字节',
+            }
+        return summary
+
+    if 'application/json' not in content_type and 'application/x-www-form-urlencoded' not in content_type:
+        if 'multipart/form-data' in content_type:
+            summary['body'] = {
+                'body_type': 'multipart',
+                'captured': False,
+                'reason': '文件上传内容不记录',
+            }
+        return summary
+
+    body = await request.body()
+    body_sent = False
+
+    async def replay_body():
+        nonlocal body_sent
+        if body_sent:
+            return {'type': 'http.request', 'body': b'', 'more_body': False}
+        body_sent = True
+        return {'type': 'http.request', 'body': body, 'more_body': False}
+
+    request._receive = replay_body
+
+    if 'application/json' in content_type:
+        summary['body'] = security_audit_logger.summarize_json_body(body)
+    else:
+        summary['body'] = security_audit_logger.summarize_form_body(body)
+    return summary
+
+
+async def summarize_audit_response(response) -> Tuple[Any, Dict[str, Any]]:
+    """Capture small JSON responses for audit detail and rebuild the response."""
+    if response is None:
+        return response, {}
+
+    content_type = (response.headers.get('content-type') or '').lower()
+    content_encoding = (response.headers.get('content-encoding') or '').lower()
+    content_length = _safe_int(response.headers.get('content-length'))
+
+    summary = {
+        'content_type': content_type.split(';')[0] if content_type else '',
+        'content_length': content_length,
+    }
+
+    if 'application/json' not in content_type or content_encoding:
+        return response, summary
+    if content_length > MAX_AUDIT_RESPONSE_BODY_BYTES:
+        summary.update({'captured': False, 'reason': '响应体过大'})
+        return response, summary
+    if not hasattr(response, 'body_iterator'):
+        return response, summary
+
+    body_parts = []
+    async for chunk in response.body_iterator:
+        if isinstance(chunk, str):
+            chunk = chunk.encode('utf-8')
+        body_parts.append(chunk)
+
+    body = b''.join(body_parts)
+    summary['content_length'] = len(body)
+    try:
+        parsed = json.loads(body.decode('utf-8'))
+        if isinstance(parsed, dict):
+            summary['body'] = security_audit_logger.sanitize_mapping(parsed)
+        else:
+            summary['body'] = security_audit_logger.sanitize_value('response', parsed)
+    except Exception as e:
+        summary['parse_error'] = str(e)
+        summary['preview'] = body[:300].decode('utf-8', errors='replace')
+
+    headers = dict(response.headers)
+    headers.pop('content-length', None)
+    rebuilt = Response(
+        content=body,
+        status_code=response.status_code,
+        headers=headers,
+        media_type=response.media_type
+    )
+    return rebuilt, summary
+
+
 @app.middleware("http")
 async def add_headers_middleware(request, call_next):
     """轻量级HTTP中间件 - 添加响应头"""
-    response = await call_next(request)
+    path = request.url.path
+    request_source = classify_request_source(request.headers.get('user-agent', ''), path)
+    should_audit = should_audit_request(path, request_source, request.method)
+    start_time = time.perf_counter()
+    response = None
+    error_text = None
+    request_summary = {}
+    response_summary = {}
+
+    try:
+        try:
+            request_summary = await summarize_audit_request(request, should_audit)
+        except Exception as request_audit_error:
+            logger.debug(f"Security audit request summary failed: {request_audit_error}")
+            request_summary = {'captured': False, 'reason': '请求摘要采集失败'}
+        response = await call_next(request)
+    except Exception as e:
+        error_text = str(e)
+        raise
+    finally:
+        status_code = response.status_code if response is not None else 500
+        final_should_audit = should_audit or (status_code >= 400 and can_audit_path(path))
+
+        if final_should_audit and response is not None:
+            try:
+                response, response_summary = await summarize_audit_response(response)
+            except Exception as response_audit_error:
+                logger.debug(f"Security audit response summary failed: {response_audit_error}")
+
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+        if final_should_audit:
+            try:
+                client_id = get_client_id_from_request(request)
+                username, client_ip = parse_client_id(client_id)
+            except Exception:
+                client_ip = get_client_ip(request)
+                username = 'unknown'
+                client_id = f'{username}@{client_ip}'
+
+            try:
+                security_audit_logger.log_event({
+                    'action_type': 'api' if path.startswith('/api/') else 'page_visit',
+                    'source': request_source,
+                    'operation': get_audit_operation(path, request.method),
+                    'method': request.method,
+                    'path': path,
+                    'query': security_audit_logger.sanitize_mapping(dict(request.query_params)),
+                    'request_summary': request_summary,
+                    'response_summary': response_summary,
+                    'status_code': status_code,
+                    'duration_ms': duration_ms,
+                    'client_ip': client_ip,
+                    'client_id': client_id,
+                    'username': username,
+                    'user_agent': request.headers.get('user-agent', '')[:300],
+                    'content_length': request.headers.get('content-length', ''),
+                    'error': error_text,
+                })
+            except Exception as audit_error:
+                logger.debug(f"Security audit log failed: {audit_error}")
 
     # 安全响应头
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
 
-    path = request.url.path
     if path.startswith("/static/"):
         response.headers["Cache-Control"] = "public, max-age=86400, immutable"
     elif path.startswith("/api/"):
@@ -728,6 +981,8 @@ class GlobalState:
         self.usbip_devices_source_lock = threading.Lock()  # USB/IP设备来源锁（与Flask一致）
         self.test_logs_lock = threading.Lock()  # 测试日志锁
         self.last_saved_log_file = {}  # {client_id: log_file_path}
+        self.notifications = {}  # {client_id: deque([notification])}
+        self.notifications_lock = threading.Lock()
         self.device_ssh_pools = {}
         self.device_ssh_pools_lock = threading.Lock()
         self.device_ssh_pools_max = 10  # 最大设备SSH连接池数量
@@ -1015,6 +1270,89 @@ async def safe_websocket_send(client_id: str, message: dict):
         except Exception as e:
             logger.debug(f"Failed to send WebSocket message to {client_id}: {e}")
 
+
+VALID_NOTIFICATION_LEVELS = {'info', 'success', 'warning', 'error'}
+MAX_NOTIFICATIONS_PER_CLIENT = 200
+
+
+def store_notification(
+    client_id: str,
+    title: str,
+    message: str = "",
+    level: str = "info",
+    category: str = "system",
+    data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """保存通知到内存历史，供页面通知中心读取。"""
+    normalized_level = level if level in VALID_NOTIFICATION_LEVELS else 'info'
+    record = {
+        'id': str(uuid.uuid4()),
+        'timestamp': datetime.now().isoformat(timespec='seconds'),
+        'title': str(title or '通知')[:120],
+        'message': str(message or '')[:600],
+        'level': normalized_level,
+        'category': str(category or 'system')[:50],
+        'read': False,
+        'data': data or {},
+    }
+    key = client_id or 'unknown'
+    with global_state.notifications_lock:
+        if key not in global_state.notifications:
+            global_state.notifications[key] = deque(maxlen=MAX_NOTIFICATIONS_PER_CLIENT)
+        global_state.notifications[key].append(record)
+    return record
+
+
+async def push_notification(
+    client_id: str,
+    title: str,
+    message: str = "",
+    level: str = "info",
+    category: str = "system",
+    data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """保存并通过 WebSocket 推送通知。"""
+    record = store_notification(client_id, title, message, level, category, data)
+    await safe_websocket_send(client_id, {
+        'type': 'notification',
+        'notification': record
+    })
+    return record
+
+
+def list_client_notifications(client_id: str, limit: int = 100) -> Dict[str, Any]:
+    limit = max(1, min(int(limit or 100), MAX_NOTIFICATIONS_PER_CLIENT))
+    key = client_id or 'unknown'
+    with global_state.notifications_lock:
+        records = list(global_state.notifications.get(key, []))
+    records = list(reversed(records))[:limit]
+    unread_count = sum(1 for record in records if not record.get('read'))
+    return {'records': records, 'unread_count': unread_count}
+
+
+def mark_client_notifications_read(client_id: str, ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    key = client_id or 'unknown'
+    id_set = set(ids or [])
+    updated = 0
+    with global_state.notifications_lock:
+        records = global_state.notifications.get(key, deque())
+        for record in records:
+            if not id_set or record.get('id') in id_set:
+                if not record.get('read'):
+                    record['read'] = True
+                    updated += 1
+        unread_count = sum(1 for record in records if not record.get('read'))
+    return {'updated': updated, 'unread_count': unread_count}
+
+
+def clear_client_notifications(client_id: str) -> Dict[str, Any]:
+    key = client_id or 'unknown'
+    with global_state.notifications_lock:
+        removed = len(global_state.notifications.get(key, []))
+        global_state.notifications[key] = deque(maxlen=MAX_NOTIFICATIONS_PER_CLIENT)
+    return {'removed': removed, 'unread_count': 0}
+
+
 async def broadcast_device_change(devices: List[str], disconnected: List[str] = None, connected: List[str] = None, source: str = 'usb_monitor'):
     """广播设备变化事件到所有 WebSocket 客户端
 
@@ -1040,10 +1378,36 @@ async def broadcast_device_change(devices: List[str], disconnected: List[str] = 
     with global_state.websocket_connections_lock:
         clients = list(global_state.websocket_connections.items())
 
+    notification_level = ''
+    notification_title = ''
+    notification_message = ''
+    if disconnected:
+        notification_level = 'warning'
+        notification_title = 'USB设备断开'
+        notification_message = '断开：' + ', '.join(disconnected)
+    elif connected:
+        notification_level = 'success'
+        notification_title = 'USB设备已连接'
+        notification_message = '连接：' + ', '.join(connected)
+
     for client_id, ws in clients:
         try:
             if ws.client_state == WebSocketState.CONNECTED:
-                await ws.send_json(message)
+                client_message = dict(message)
+                if notification_title:
+                    client_message['notification'] = store_notification(
+                        client_id,
+                        notification_title,
+                        notification_message,
+                        notification_level,
+                        'device',
+                        {
+                            'connected': connected or [],
+                            'disconnected': disconnected or [],
+                            'source': source,
+                        }
+                    )
+                await ws.send_json(client_message)
         except Exception as e:
             logger.debug(f"Failed to broadcast to {client_id}: {e}")
 
@@ -1493,6 +1857,27 @@ class ScreenStartRequest(BaseModel):
     device_id: str
     duration: int = 60
 
+
+class NotificationCreateRequest(BaseModel):
+    """前端主动创建通知请求"""
+    title: str = Field(..., max_length=120)
+    message: str = Field(default="", max_length=600)
+    level: str = Field(default="info", max_length=20)
+    category: str = Field(default="system", max_length=50)
+    data: Optional[Dict[str, Any]] = None
+
+
+class NotificationReadRequest(BaseModel):
+    """通知已读请求；ids 为空时表示全部标记已读。"""
+    ids: Optional[List[str]] = None
+
+
+class SecurityPageViewRequest(BaseModel):
+    """前端页面访问审计请求"""
+    page: str = Field(..., max_length=80)
+    title: Optional[str] = Field(default="", max_length=160)
+    hash: Optional[str] = Field(default="", max_length=160)
+
 # ==================== 基础端点 ====================
 
 @app.get("/", response_class=HTMLResponse)
@@ -1535,6 +1920,151 @@ async def health_check():
             "test_logs_manager": "✓"
         }
     })
+
+
+@app.get("/api/notifications")
+@handle_api_errors
+async def get_notifications(request: Request, limit: int = Query(100, ge=1, le=200)):
+    """获取当前客户端通知列表。"""
+    client_id = get_client_id_from_request(request)
+    return ApiResponse.success(list_client_notifications(client_id, limit))
+
+
+@app.post("/api/notifications")
+@handle_api_errors
+async def create_notification(req: NotificationCreateRequest, request: Request):
+    """创建当前客户端本地通知，用于前端检测到的状态变化。"""
+    client_id = get_client_id_from_request(request)
+    record = store_notification(
+        client_id,
+        req.title,
+        req.message,
+        req.level,
+        req.category,
+        req.data
+    )
+    return ApiResponse.success({'notification': record})
+
+
+@app.post("/api/notifications/mark-read")
+@handle_api_errors
+async def mark_notifications_read(req: NotificationReadRequest, request: Request):
+    """将当前客户端通知标记为已读；未传 ids 时标记全部。"""
+    client_id = get_client_id_from_request(request)
+    return ApiResponse.success(mark_client_notifications_read(client_id, req.ids))
+
+
+@app.post("/api/notifications/clear")
+@handle_api_errors
+async def clear_notifications(request: Request):
+    """清空当前客户端通知。"""
+    client_id = get_client_id_from_request(request)
+    return ApiResponse.success(clear_client_notifications(client_id))
+
+
+@app.post("/api/security-audit/page-view")
+@handle_api_errors
+async def record_security_page_view(req: SecurityPageViewRequest, request: Request):
+    """记录前端子页面访问，用于补齐 hash 路由无法被后端直接感知的问题。"""
+    if req.page in AUDIT_PAGE_VIEW_SKIP_PAGES:
+        return ApiResponse.success({'skipped': True})
+
+    client_id = get_client_id_from_request(request)
+    username, client_ip = parse_client_id(client_id)
+    record = security_audit_logger.log_event({
+        'action_type': 'page_view',
+        'source': 'web',
+        'operation': f"访问页面 {req.page}",
+        'page': req.page,
+        'title': req.title or '',
+        'hash': req.hash or '',
+        'method': request.method,
+        'path': '/#' + req.page,
+        'status_code': 200,
+        'duration_ms': 0,
+        'client_ip': client_ip,
+        'client_id': client_id,
+        'username': username,
+        'user_agent': request.headers.get('user-agent', '')[:300],
+    })
+    return ApiResponse.success({'id': record['id']})
+
+
+@app.get("/api/security-audit/logs")
+@handle_api_errors
+async def list_security_audit_logs(
+    limit: int = Query(200, ge=1, le=1000),
+    source: Optional[str] = Query(None),
+    action_type: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, max_length=120)
+):
+    """查询安全审计记录。"""
+    if source and source not in {'web', 'cli'}:
+        return ApiResponse.error("source 参数无效", status_code=400)
+    if action_type and action_type not in {'api', 'page_view', 'page_visit'}:
+        return ApiResponse.error("action_type 参数无效", status_code=400)
+    result = await asyncio.to_thread(
+        security_audit_logger.read_events,
+        limit,
+        source,
+        action_type,
+        q
+    )
+    return ApiResponse.success(result)
+
+
+def get_related_logs_for_audit(record: Dict[str, Any], limit: int = 80) -> Dict[str, Any]:
+    client_id = record.get('client_id') or ''
+    related = {
+        'client_id': client_id,
+        'recent_client_logs': [],
+        'saved_log_file': '',
+        'saved_log_tail': [],
+    }
+    if not client_id:
+        return related
+
+    with global_state.test_logs_lock:
+        related['recent_client_logs'] = list(global_state.test_logs.get(client_id, []))[-limit:]
+        saved_log_file = global_state.last_saved_log_file.get(client_id, '')
+
+    if saved_log_file and os.path.exists(saved_log_file):
+        related['saved_log_file'] = saved_log_file
+        try:
+            with open(saved_log_file, 'r', encoding='utf-8', errors='replace') as f:
+                related['saved_log_tail'] = list(deque(f, maxlen=limit))
+        except Exception as e:
+            related['saved_log_tail'] = [f'读取关联日志失败: {e}']
+
+    return related
+
+
+@app.get("/api/security-audit/detail/{event_id}")
+@handle_api_errors
+async def get_security_audit_detail(event_id: str):
+    """获取单条安全审计详情，包括请求摘要、响应摘要和关联日志。"""
+    record = await asyncio.to_thread(security_audit_logger.get_event, event_id)
+    if not record:
+        return ApiResponse.error("审计记录不存在", status_code=404)
+
+    related_logs = await asyncio.to_thread(get_related_logs_for_audit, record)
+    return ApiResponse.success({
+        'record': record,
+        'related_logs': related_logs,
+    })
+
+
+@app.get("/api/security-audit/export")
+@handle_api_errors
+async def export_security_audit_logs():
+    """导出安全审计 JSONL 文件。"""
+    if not os.path.exists(security_audit_logger.log_path):
+        return ApiResponse.error("暂无审计记录", status_code=404)
+    return FileResponse(
+        security_audit_logger.log_path,
+        media_type='application/x-ndjson',
+        filename='security_audit.jsonl'
+    )
 
 @app.get("/templates/architecture.html")
 async def get_architecture():
@@ -3736,9 +4266,19 @@ async def run_test_background(
         # 更新状态为停止
         update_user_state_field(client_id, {'running': False, 'devices': []})
 
+        notification = store_notification(
+            client_id,
+            '测试任务已结束',
+            '测试执行已结束，请查看日志和报告确认结果。',
+            'info',
+            'test',
+            {'devices': locked_devices}
+        )
+
         # 发送 test_complete 事件
         await safe_websocket_send(client_id, {
-            'type': 'test_complete'
+            'type': 'test_complete',
+            'notification': notification,
         })
 
 @app.post("/api/test/stop")
@@ -8592,6 +9132,15 @@ async def burn_firmware(
                     except (WebSocketDisconnect, ConnectionError, KeyError):
                         pass
 
+                await push_notification(
+                    client_id,
+                    '固件烧写完成',
+                    f"设备：{', '.join(devices)}",
+                    'success',
+                    'firmware',
+                    {'devices': devices, 'firmware': firmware_name}
+                )
+
                 # 释放设备锁
                 logger.info(f"[Device Lock] 开始解锁设备: {locked_devices}")
                 await release_device_locks(client_id, locked_devices)
@@ -8626,6 +9175,15 @@ async def burn_firmware(
                     except (WebSocketDisconnect, ConnectionError, KeyError):
                         pass
 
+                await push_notification(
+                    client_id,
+                    '固件烧写失败',
+                    (error_output or 'Firmware burn failed')[:300],
+                    'error',
+                    'firmware',
+                    {'devices': devices, 'firmware': firmware_name, 'exit_status': exit_status}
+                )
+
                 # 释放设备锁
                 logger.info(f"[Device Lock] 开始解锁设备: {locked_devices}")
                 await release_device_locks(client_id, locked_devices)
@@ -8641,6 +9199,15 @@ async def burn_firmware(
 
             # 释放设备锁
             await release_device_locks(client_id, locked_devices)
+
+            await push_notification(
+                client_id,
+                '固件烧写异常',
+                str(e)[:300],
+                'error',
+                'firmware',
+                {'devices': devices, 'firmware': firmware_name}
+            )
 
             return JSONResponse(
                 content={'success': False, 'error': str(e)}
@@ -8928,10 +9495,27 @@ async def burn_gsi(request: Request):
             # 检查是否全部成功
             all_success = all(r['success'] for r in results)
             if all_success:
+                await push_notification(
+                    client_id,
+                    'GSI烧写完成',
+                    f"设备：{', '.join(devices)}",
+                    'success',
+                    'firmware',
+                    {'devices': devices, 'results': results}
+                )
                 return JSONResponse(
                     content={'success': True, 'message': 'GSI burn completed successfully', 'results': results}
                 )
             else:
+                failed_devices = [r.get('device') for r in results if not r.get('success')]
+                await push_notification(
+                    client_id,
+                    'GSI烧写失败',
+                    f"失败设备：{', '.join(failed_devices)}",
+                    'error',
+                    'firmware',
+                    {'devices': devices, 'results': results}
+                )
                 return JSONResponse(
                     content={'success': False, 'error': 'Some devices failed', 'results': results}
                 )
@@ -8939,6 +9523,14 @@ async def burn_gsi(request: Request):
         except Exception as e:
             ssh_manager.return_connection(ssh)
             logger.error(f"[GSI Burn] Error: {e}")
+            await push_notification(
+                client_id,
+                'GSI烧写异常',
+                str(e)[:300],
+                'error',
+                'firmware',
+                {'devices': devices}
+            )
 
             # 释放所有设备锁
             await release_device_locks(client_id, locked_devices)

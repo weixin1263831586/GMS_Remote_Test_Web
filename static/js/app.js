@@ -17,7 +17,10 @@ const state = {
     lastLogCount: 0,
     pendingDeviceRefresh: null,
     deviceRefreshPromise: null,
-    isRefreshingDevices: false
+    isRefreshingDevices: false,
+    notifications: [],
+    unreadNotifications: 0,
+    browserNotificationsEnabled: localStorage.getItem('gms_browser_notifications') === 'true'
 };
 
 // Debug flag - set to false in production to disable console logs
@@ -393,6 +396,7 @@ async function callDeviceApi(endpoint, additionalData = {}) {
 document.addEventListener('DOMContentLoaded', async () => {
     initEventListeners();
     initDragDrop();
+    renderNotificationList();
 
     // 非阻塞加载OpenGrok配置（不等待，让它在后台加载）
     OPENGROK_CONFIG.init();
@@ -410,6 +414,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (userData.client_id.startsWith('unknown@')) {
                     debugLog('[Init] Detected unknown client, will show username modal via apiCall');
                 } else {
+                    loadNotifications();
                     // 已获取到正确的用户名，延迟检查 USB/IP 和 VPN 状态（避免阻塞关键请求）
                     setTimeout(() => {
                         Promise.all([
@@ -511,6 +516,10 @@ function checkPendingFirmwareUpload() {
 
         addLogEntry(message, 'warning');
         showToast('固件上传已中断，请重新上传', 'warning');
+        createLocalNotification('固件上传中断', `${fileName} 上传中断于 ${progress.toFixed(1)}%`, 'warning', 'firmware-upload', {
+            filename: fileName,
+            progress
+        });
 
         // 显示进度条为警告状态（黄色）
         if (progress > 0 && totalSize > 0) {
@@ -605,6 +614,9 @@ function initWebSocket() {
                         state.currentBurningProgress = 0;  // 重置进度
                         updateTestToggleButton(false);
                         addLogEntry('测试完成', 'success');
+                        if (data.notification) {
+                            handleRealtimeNotification(data.notification, { toast: false });
+                        }
                         showToast('测试完成', 'success');
                         break;
 
@@ -668,6 +680,9 @@ function initWebSocket() {
                     case 'devices_changed':
                         // USB 设备插拔事件，自动刷新设备列表
                         debugLog('[WebSocket] devices_changed:', data.devices);
+                        if (data.notification) {
+                            handleRealtimeNotification(data.notification, { toast: false });
+                        }
 
                         // 优先使用后端提供的 connected/disconnected 信息（更准确、更快）
                         let connected = data.connected || [];
@@ -715,6 +730,10 @@ function initWebSocket() {
                         }).catch(err => {
                             console.error('Failed to refresh devices:', err);
                         });
+                        break;
+
+                    case 'notification':
+                        handleRealtimeNotification(data.notification);
                         break;
 
                     case 'firmware_progress':
@@ -832,6 +851,10 @@ function initSocket() {
         showToast('测试完成', 'success');
         // 刷新设备列表，更新设备锁定状态
         loadDevices(true);
+    });
+
+    state.socket.on('notification', (data) => {
+        handleRealtimeNotification(data.notification || data);
     });
 
     state.socket.on('vpn_status_update', (data) => {
@@ -3471,6 +3494,7 @@ async function checkVpnStatus() {
 function updateVpnStatus(connected) {
     const label = document.getElementById('vpn-status-label');
     const btn = document.getElementById('vpn-connect-btn');
+    const previous = state.vpnConnected;
 
     if (connected) {
         label.textContent = '状态: 已连接';
@@ -3482,6 +3506,10 @@ function updateVpnStatus(connected) {
         label.className = 'vpn-status-label disconnected';
         btn.textContent = '🔌 连接VPN';
         state.vpnConnected = false;
+    }
+
+    if (previous === true && connected === false) {
+        createLocalNotification('VPN已断开', 'VPN 连接状态变为未连接', 'warning', 'vpn');
     }
 }
 
@@ -4564,6 +4592,208 @@ function showToast(message, type = 'info') {
     setTimeout(() => {
         toast.className = `toast ${type}`;
     }, duration);
+}
+
+// ==================== Notification Center ====================
+function normalizeNotification(notification) {
+    const now = new Date().toISOString();
+    return {
+        id: notification?.id || `local-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        timestamp: notification?.timestamp || now,
+        title: notification?.title || '通知',
+        message: notification?.message || '',
+        level: ['success', 'warning', 'error', 'info'].includes(notification?.level) ? notification.level : 'info',
+        category: notification?.category || 'system',
+        read: Boolean(notification?.read),
+        data: notification?.data || {}
+    };
+}
+
+function formatNotificationTime(timestamp) {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return timestamp;
+    return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function updateNotificationBadge() {
+    const badge = $('notification-badge');
+    if (!badge) return;
+    const count = state.unreadNotifications || 0;
+    badge.textContent = count > 99 ? '99+' : String(count);
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+}
+
+function renderNotificationList() {
+    const list = $('notification-list');
+    if (!list) return;
+
+    if (!state.notifications.length) {
+        list.innerHTML = '<div class="notification-empty">暂无通知</div>';
+        updateNotificationBadge();
+        return;
+    }
+
+    list.innerHTML = state.notifications.map(item => `
+        <div class="notification-item ${escapeHtml(item.level)} ${item.read ? '' : 'unread'}"
+             data-notification-id="${escapeHtml(item.id)}"
+             onclick="markNotificationRead('${escapeHtml(item.id)}')">
+            <div class="notification-level-dot"></div>
+            <div>
+                <div class="notification-title">${escapeHtml(item.title)}</div>
+                <div class="notification-message">${escapeHtml(item.message || '')}</div>
+                <div class="notification-time">${escapeHtml(formatNotificationTime(item.timestamp))}</div>
+            </div>
+        </div>
+    `).join('');
+    updateNotificationBadge();
+}
+
+function mergeNotification(notification) {
+    const normalized = normalizeNotification(notification);
+    const existingIndex = state.notifications.findIndex(item => item.id === normalized.id);
+    if (existingIndex >= 0) {
+        state.notifications[existingIndex] = normalized;
+    } else {
+        state.notifications.unshift(normalized);
+        state.notifications = state.notifications.slice(0, 200);
+    }
+    state.unreadNotifications = state.notifications.filter(item => !item.read).length;
+    renderNotificationList();
+    return normalized;
+}
+
+function shouldShowBrowserNotification() {
+    return state.browserNotificationsEnabled &&
+        'Notification' in window &&
+        Notification.permission === 'granted' &&
+        document.visibilityState !== 'visible';
+}
+
+function showBrowserNotification(notification) {
+    if (!shouldShowBrowserNotification()) return;
+    try {
+        const browserNotification = new Notification(notification.title, {
+            body: notification.message || '',
+            tag: notification.id,
+            silent: false
+        });
+        browserNotification.onclick = () => {
+            window.focus();
+            closeNotificationPanel();
+            toggleNotificationPanel();
+        };
+    } catch (error) {
+        debugLog('[Notification] Browser notification failed:', error);
+    }
+}
+
+function handleRealtimeNotification(notification, options = {}) {
+    if (!notification) return;
+    const item = mergeNotification(notification);
+    if (options.toast !== false) {
+        showToast(`${item.title}${item.message ? ': ' + item.message : ''}`, item.level);
+    }
+    if (options.browser !== false) {
+        showBrowserNotification(item);
+    }
+}
+
+async function loadNotifications() {
+    try {
+        const result = await apiCall('/api/notifications?limit=100', 'GET');
+        const payload = result.data || {};
+        state.notifications = (payload.records || []).map(normalizeNotification);
+        state.unreadNotifications = payload.unread_count ?? state.notifications.filter(item => !item.read).length;
+        renderNotificationList();
+    } catch (error) {
+        debugLog('[Notification] Load failed:', error);
+    }
+}
+
+function toggleNotificationPanel() {
+    const panel = $('notification-panel');
+    if (!panel) return;
+    panel.classList.toggle('show');
+    if (panel.classList.contains('show')) {
+        loadNotifications();
+    }
+}
+
+function closeNotificationPanel() {
+    const panel = $('notification-panel');
+    if (panel) panel.classList.remove('show');
+}
+
+async function requestBrowserNotificationPermission() {
+    if (!('Notification' in window)) {
+        showToast('当前浏览器不支持系统通知', 'warning');
+        return;
+    }
+    if (!window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        showToast('浏览器通知需要 HTTPS 或 localhost', 'warning');
+        return;
+    }
+
+    const permission = Notification.permission === 'default'
+        ? await Notification.requestPermission()
+        : Notification.permission;
+
+    if (permission === 'granted') {
+        state.browserNotificationsEnabled = true;
+        localStorage.setItem('gms_browser_notifications', 'true');
+        showToast('浏览器通知已开启', 'success');
+    } else {
+        state.browserNotificationsEnabled = false;
+        localStorage.setItem('gms_browser_notifications', 'false');
+        showToast('浏览器通知未授权', 'warning');
+    }
+}
+
+async function markNotificationRead(id) {
+    const item = state.notifications.find(notification => notification.id === id);
+    if (item && !item.read) {
+        item.read = true;
+        state.unreadNotifications = Math.max(0, state.unreadNotifications - 1);
+        renderNotificationList();
+    }
+    try {
+        await apiCall('/api/notifications/mark-read', 'POST', { ids: [id] });
+    } catch (error) {
+        debugLog('[Notification] Mark read failed:', error);
+    }
+}
+
+async function markAllNotificationsRead() {
+    state.notifications.forEach(item => { item.read = true; });
+    state.unreadNotifications = 0;
+    renderNotificationList();
+    try {
+        await apiCall('/api/notifications/mark-read', 'POST', {});
+    } catch (error) {
+        debugLog('[Notification] Mark all read failed:', error);
+    }
+}
+
+async function clearNotifications() {
+    state.notifications = [];
+    state.unreadNotifications = 0;
+    renderNotificationList();
+    try {
+        await apiCall('/api/notifications/clear', 'POST', {});
+    } catch (error) {
+        debugLog('[Notification] Clear failed:', error);
+    }
+}
+
+async function createLocalNotification(title, message = '', level = 'info', category = 'system', data = {}) {
+    try {
+        const result = await apiCall('/api/notifications', 'POST', { title, message, level, category, data });
+        const notification = result.data?.notification;
+        handleRealtimeNotification(notification || { title, message, level, category, data });
+    } catch (error) {
+        handleRealtimeNotification({ title, message, level, category, data });
+    }
 }
 
 // Close modal when clicking outside - optimized with mapping to avoid repeated DOM lookups
@@ -8150,12 +8380,18 @@ async function pollApkStatus() {
 
             loadApkManifest();
             showToast('APK 分析完成', 'success');
+            createLocalNotification('APK分析完成', status.filename || '反编译完成，可查看结果', 'success', 'apk', {
+                task_id: window.apkCurrentTaskId
+            });
         } else if (status.status === 'error') {
             stopApkPolling();
 
             $('apk-btn-analyze').disabled = false;
             $('apk-btn-analyze').textContent = '🔬 重新分析';
             showToast(`分析失败: ${status.error}`, 'error');
+            createLocalNotification('APK分析失败', status.error || '反编译失败', 'error', 'apk', {
+                task_id: window.apkCurrentTaskId
+            });
         }
     } catch (e) {
         stopApkPolling();
@@ -8405,3 +8641,280 @@ function resetApkAnalysis() {
     if (rawXml) rawXml.textContent = '';
     closeApkFileViewer();
 }
+
+// ==================== Security Audit ====================
+
+function recordSecurityPageView(pageName) {
+    if (!pageName) return;
+    fetch('/api/security-audit/page-view', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...getClientIdentityHeaders()
+        },
+        body: JSON.stringify({
+            page: pageName,
+            title: document.title || '',
+            hash: window.location.hash || ''
+        })
+    }).catch(error => debugLog('[SecurityAudit] page view record failed:', error));
+}
+
+function getSecurityAuditFilterParams() {
+    const params = new URLSearchParams();
+    params.set('limit', '300');
+
+    const source = $('audit-source-filter')?.value || '';
+    const actionType = $('audit-type-filter')?.value || '';
+    const query = $('audit-search-input')?.value?.trim() || '';
+
+    if (source) params.set('source', source);
+    if (actionType) params.set('action_type', actionType);
+    if (query) params.set('q', query);
+    return params;
+}
+
+async function loadSecurityAudit() {
+    const tbody = $('security-audit-table-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                加载中...
+            </td>
+        </tr>
+    `;
+
+    try {
+        const params = getSecurityAuditFilterParams();
+        const result = await apiCall(`/api/security-audit/logs?${params.toString()}`);
+        const payload = result.data || {};
+        updateSecurityAuditStats(payload.stats || {});
+        renderSecurityAuditRows(payload.records || []);
+    } catch (error) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" style="padding: 40px; text-align: center; color: var(--danger-color);">
+                    加载失败: ${escapeHtml(error.message)}
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function updateSecurityAuditStats(stats) {
+    const setText = (id, value) => {
+        const el = $(id);
+        if (el) el.textContent = value ?? 0;
+    };
+    setText('audit-total-count', stats.total);
+    setText('audit-web-count', stats.web);
+    setText('audit-cli-count', stats.cli);
+    setText('audit-error-count', stats.errors);
+}
+
+function getAuditSourceLabel(source) {
+    if (source === 'cli') {
+        return '<span style="color: var(--warning-color); font-weight: 600;">CLI</span>';
+    }
+    if (source === 'web') {
+        return '<span style="color: var(--success-color); font-weight: 600;">Web</span>';
+    }
+    return `<span style="color: var(--text-secondary);">${escapeHtml(source || '-')}</span>`;
+}
+
+function getAuditStatusLabel(statusCode) {
+    const code = Number(statusCode || 0);
+    const color = code >= 500 ? 'var(--danger-color)' : code >= 400 ? 'var(--warning-color)' : 'var(--success-color)';
+    return `<span style="color: ${color}; font-weight: 600;">${code || '-'}</span>`;
+}
+
+function formatAuditTime(timestamp) {
+    if (!timestamp) return '-';
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return timestamp;
+    return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function renderSecurityAuditRows(records) {
+    const tbody = $('security-audit-table-body');
+    if (!tbody) return;
+
+    if (!records.length) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                    暂无审计记录
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = records.map(record => {
+        const userIpText = `${record.username || 'unknown'} / ${record.client_ip || '-'}`;
+        const path = record.page ? `#${record.page}` : (record.path || '');
+        const detail = [
+            record.method ? `${record.method}` : '',
+            path,
+            record.query && Object.keys(record.query).length ? JSON.stringify(record.query) : ''
+        ].filter(Boolean).join(' ');
+        const operation = record.operation || detail || '-';
+        const operationLine = [operation, detail && detail !== operation ? detail : ''].filter(Boolean).join('  |  ');
+        const rowTitle = [
+            '点击查看审计详情',
+            `时间: ${formatAuditTime(record.timestamp)}`,
+            `用户/IP: ${userIpText}`,
+            `操作: ${operationLine}`,
+        ].join('\n');
+
+        return `
+            <tr data-audit-id="${escapeHtml(record.id || '')}" style="border-bottom: 1px solid var(--border-color); cursor: pointer; height: 34px;" title="${escapeHtml(rowTitle)}">
+                <td style="padding: 7px 8px; font-size: 12px; color: var(--text-secondary); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(formatAuditTime(record.timestamp))}</td>
+                <td style="padding: 7px 8px; font-size: 12px; text-align: center; white-space: nowrap;">${getAuditSourceLabel(record.source)}</td>
+                <td style="padding: 7px 8px; font-size: 12px; text-align: center; white-space: nowrap;">${getAuditStatusLabel(record.status_code)}</td>
+                <td style="padding: 7px 8px; font-size: 12px; color: var(--text-secondary); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(userIpText)}</td>
+                <td style="padding: 7px 8px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    <span style="color: var(--text-primary); font-weight: 600;">${escapeHtml(operationLine)}</span>
+                </td>
+                <td style="padding: 7px 8px; font-size: 12px; color: var(--text-secondary); text-align: center; white-space: nowrap;">${escapeHtml(String(record.duration_ms ?? 0))} ms</td>
+            </tr>
+        `;
+    }).join('');
+
+    tbody.querySelectorAll('[data-audit-id]').forEach(row => {
+        row.addEventListener('click', () => showSecurityAuditDetail(row.dataset.auditId));
+    });
+}
+
+function formatAuditJson(value) {
+    if (value === undefined || value === null || value === '') return '-';
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch (error) {
+        return String(value);
+    }
+}
+
+function renderAuditDetailBlock(title, content, options = {}) {
+    const isJson = options.json !== false;
+    const text = isJson ? formatAuditJson(content) : String(content || '-');
+    return `
+        <div style="background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+            <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">${escapeHtml(title)}</div>
+            <pre style="margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 11px; line-height: 1.45; color: var(--text-secondary);">${escapeHtml(text)}</pre>
+        </div>
+    `;
+}
+
+function ensureSecurityAuditDetailModal() {
+    let modal = $('security-audit-detail-modal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'security-audit-detail-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: min(980px, 92vw); max-height: 88vh; overflow: hidden; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <span class="modal-title">安全审计详情</span>
+                <span class="modal-close" onclick="closeSecurityAuditDetailModal()">&times;</span>
+            </div>
+            <div class="modal-body" id="security-audit-detail-body" style="overflow: auto; padding-right: 4px;">
+                加载中...
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) closeSecurityAuditDetailModal();
+    });
+    return modal;
+}
+
+function closeSecurityAuditDetailModal() {
+    const modal = $('security-audit-detail-modal');
+    if (modal) {
+        modal.classList.remove('show');
+        modal.style.display = '';
+    }
+}
+
+function renderRelatedAuditLogs(relatedLogs) {
+    const recentLogs = relatedLogs?.recent_client_logs || [];
+    const savedTail = relatedLogs?.saved_log_tail || [];
+    const blocks = [];
+
+    if (recentLogs.length) {
+        blocks.push(renderAuditDetailBlock('最近页面操作日志', recentLogs));
+    }
+
+    if (relatedLogs?.saved_log_file) {
+        blocks.push(renderAuditDetailBlock('已保存日志文件', relatedLogs.saved_log_file, { json: false }));
+    }
+
+    if (savedTail.length) {
+        blocks.push(renderAuditDetailBlock('已保存日志尾部', savedTail.join(''), { json: false }));
+    }
+
+    return blocks.join('') || renderAuditDetailBlock('关联日志', '暂无关联日志', { json: false });
+}
+
+async function showSecurityAuditDetail(auditId) {
+    if (!auditId) return;
+    const modal = ensureSecurityAuditDetailModal();
+    const body = $('security-audit-detail-body');
+    modal.style.display = '';
+    modal.classList.add('show');
+    body.innerHTML = '加载中...';
+
+    try {
+        const result = await apiCall(`/api/security-audit/detail/${encodeURIComponent(auditId)}`);
+        const payload = result.data || {};
+        const record = payload.record || {};
+        const relatedLogs = payload.related_logs || {};
+        const metadata = {
+            id: record.id,
+            timestamp: record.timestamp,
+            source: record.source,
+            action_type: record.action_type,
+            operation: record.operation,
+            method: record.method,
+            path: record.path,
+            page: record.page,
+            status_code: record.status_code,
+            duration_ms: record.duration_ms,
+            username: record.username,
+            client_ip: record.client_ip,
+            client_id: record.client_id,
+            user_agent: record.user_agent,
+            error: record.error || ''
+        };
+
+        body.innerHTML = `
+            ${renderAuditDetailBlock('基本信息', metadata)}
+            ${renderAuditDetailBlock('请求参数摘要', record.request_summary || record.query || {})}
+            ${renderAuditDetailBlock('执行结果摘要', record.response_summary || {})}
+            ${renderRelatedAuditLogs(relatedLogs)}
+        `;
+    } catch (error) {
+        body.innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function exportSecurityAudit() {
+    window.open('/api/security-audit/export', '_blank');
+}
+
+window.recordSecurityPageView = recordSecurityPageView;
+window.loadSecurityAudit = loadSecurityAudit;
+window.showSecurityAuditDetail = showSecurityAuditDetail;
+window.closeSecurityAuditDetailModal = closeSecurityAuditDetailModal;
+window.exportSecurityAudit = exportSecurityAudit;
+window.toggleNotificationPanel = toggleNotificationPanel;
+window.closeNotificationPanel = closeNotificationPanel;
+window.requestBrowserNotificationPermission = requestBrowserNotificationPermission;
+window.markNotificationRead = markNotificationRead;
+window.markAllNotificationsRead = markAllNotificationsRead;
+window.clearNotifications = clearNotifications;

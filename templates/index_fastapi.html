@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20260524-04">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260526-01">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
-    <script src="/static/js/chunk-upload.js?v=20260524-08"></script>
+    <script src="/static/js/chunk-upload.js?v=20260525-01"></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260524-08" crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260525-05" crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -43,7 +43,7 @@
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'api-docs', 'architecture', 'tools'].includes(hashPage)) {
+            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'tools'].includes(hashPage)) {
                 targetPage = hashPage;
             } else {
                 targetPage = savedPage;
@@ -149,32 +149,37 @@
                     <span class="sidebar-icon">👥</span>
                     <span class="sidebar-text">用户管理</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="reports" data-page-order="6" onclick="switchPage('reports', event)">
+                <a href="#" class="sidebar-item" data-page="security-audit" data-page-order="6" onclick="switchPage('security-audit', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">🛡️</span>
+                    <span class="sidebar-text">安全审计</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="reports" data-page-order="7" onclick="switchPage('reports', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📊</span>
                     <span class="sidebar-text">报告管理</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="report-analysis" data-page-order="7" onclick="switchPage('report-analysis', event)">
+                <a href="#" class="sidebar-item" data-page="report-analysis" data-page-order="8" onclick="switchPage('report-analysis', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📈</span>
                     <span class="sidebar-text">报告分析</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="apk-analysis" data-page-order="8" onclick="switchPage('apk-analysis', event)">
+                <a href="#" class="sidebar-item" data-page="apk-analysis" data-page-order="9" onclick="switchPage('apk-analysis', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon"><img src="/static/icons/jadx-icon.webp" alt="APK"></span>
                     <span class="sidebar-text">APK分析</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="api-docs" data-page-order="9" onclick="switchPage('api-docs', event)">
+                <a href="#" class="sidebar-item" data-page="api-docs" data-page-order="10" onclick="switchPage('api-docs', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📡</span>
                     <span class="sidebar-text">系统接口</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="architecture" data-page-order="10" onclick="switchPage('architecture', event)">
+                <a href="#" class="sidebar-item" data-page="architecture" data-page-order="11" onclick="switchPage('architecture', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🏗️</span>
                     <span class="sidebar-text">系统架构</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="tools" data-page-order="11" onclick="switchPage('tools', event)">
+                <a href="#" class="sidebar-item" data-page="tools" data-page-order="12" onclick="switchPage('tools', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🌐</span>
                     <span class="sidebar-text">常用网址</span>
@@ -182,11 +187,15 @@
             </nav>
 
             <!-- 客户端信息区 -->
-            <div style="padding: 10px 10px; margin-top: auto; border-top: 1px solid var(--border-color); background: var(--light-bg); text-align: center;">
-                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600;">
-                    👤 客户端
+            <div class="client-info-panel">
+                <div class="client-info-header">
+                    <span>👤 客户端</span>
+                    <button id="notification-toggle" class="notification-toggle" onclick="toggleNotificationPanel()" title="通知提醒">
+                        🔔
+                        <span id="notification-badge" class="notification-badge" style="display: none;">0</span>
+                    </button>
                 </div>
-                <div style="font-size: 10px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                <div class="client-identity-line">
                     <span id="client-identity" style="color: var(--success-color); font-family: monospace;">检测中...</span>
                 </div>
             </div>
@@ -438,6 +447,69 @@
                         </tr>
                     </thead>
                     <tbody id="users-table-body">
+                        <tr>
+                            <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 安全审计页面 -->
+        <div class="container page-content" id="page-security-audit">
+            <div class="section-title">🛡️ 安全审计</div>
+
+            <div style="display: flex; gap: 15px; margin-bottom: 10px;">
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="audit-total-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">审计记录</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="audit-web-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Web访问</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="audit-cli-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">CLI操作</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--danger-color);" id="audit-error-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">异常请求</div>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 120px 140px minmax(180px, 1fr) auto auto; gap: 8px; align-items: center; margin-bottom: 10px;">
+                <select id="audit-source-filter" class="combo-box" onchange="loadSecurityAudit()">
+                    <option value="">全部来源</option>
+                    <option value="web">Web</option>
+                    <option value="cli">CLI</option>
+                </select>
+                <select id="audit-type-filter" class="combo-box" onchange="loadSecurityAudit()">
+                    <option value="">全部类型</option>
+                    <option value="page_view">页面访问</option>
+                    <option value="api">接口操作</option>
+                    <option value="page_visit">入口访问</option>
+                </select>
+                <input id="audit-search-input" class="entry-field" type="text" placeholder="搜索用户、IP、接口、页面" onkeydown="if(event.key==='Enter') loadSecurityAudit()" />
+                <button class="btn-xs" onclick="loadSecurityAudit()">🔄 刷新</button>
+                <button class="btn-xs" onclick="exportSecurityAudit()">📥 导出</button>
+            </div>
+
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 245px); overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                    <thead style="position: sticky; top: 0; z-index: 10;">
+                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 145px;">时间</th>
+                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 70px;">来源</th>
+                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 70px;">状态</th>
+                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 220px;">用户/IP</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
+                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 80px;">耗时</th>
+                        </tr>
+                    </thead>
+                    <tbody id="security-audit-table-body">
                         <tr>
                             <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
@@ -1191,6 +1263,22 @@
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
 
+    <!-- Notification Center -->
+    <div id="notification-panel" class="notification-panel">
+        <div class="notification-panel-header">
+            <span>通知提醒</span>
+            <button class="notification-close" onclick="closeNotificationPanel()" title="关闭">×</button>
+        </div>
+        <div class="notification-actions">
+            <button class="btn-xxs" onclick="requestBrowserNotificationPermission()">浏览器通知</button>
+            <button class="btn-xxs" onclick="markAllNotificationsRead()">全部已读</button>
+            <button class="btn-xxs" onclick="clearNotifications()">清空</button>
+        </div>
+        <div id="notification-list" class="notification-list">
+            <div class="notification-empty">暂无通知</div>
+        </div>
+    </div>
+
     <!-- 添加主机弹框 -->
     <div id="add-host-modal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 450px;">
@@ -1245,41 +1333,6 @@
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeHostPasswordModal()">取消</button>
                     <button class="btn-xxs btn-primary" onclick="submitHostPassword()">连接</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- SSH密码输入弹框 -->
-    <div id="ssh-password-modal" class="modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center;">
-        <div class="modal-content" style="max-width: 400px; width: 90%;">
-            <div class="modal-header">
-                <span class="modal-title">🔑 客户端用户名</span>
-            </div>
-            <div class="modal-body">
-                <div class="modal-info-text" style="margin-bottom: 15px;">
-                    检测到新客户端，请输入用户名；SSH密码可选，用于局域网内自动验证。
-                </div>
-                <form id="ssh-password-form" onsubmit="event.preventDefault(); submitSsh();" autocomplete="off">
-                <div class="modal-form-row">
-                    <label>客户端IP:</label>
-                    <input type="text" id="ssh-client-ip" readonly style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg);" />
-                </div>
-                <div class="modal-form-row">
-                    <label>SSH用户:</label>
-                    <input type="text" id="ssh-username" placeholder="例如: hcq, root" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;" autocomplete="username" />
-                </div>
-                <div class="modal-form-row">
-                    <label>SSH密码:</label>
-                    <input type="password" id="ssh-password" placeholder="可选，用于SSH验证" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;" onkeypress="handleSshKeyPress(event)" autocomplete="current-password" />
-                </div>
-                </form>
-                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
-                    通过 ngrok 等外网访问时，服务器通常无法 SSH 回连客户端，可留空密码直接保存用户名。
-                </div>
-                <div class="modal-buttons" style="margin-top: 20px;">
-                    <button class="btn-xxs" onclick="closeSshModal()">取消</button>
-                    <button class="btn-xxs btn-primary" onclick="submitSsh()">保存</button>
                 </div>
             </div>
         </div>
@@ -1427,7 +1480,10 @@
                         clientInfo.username = detectData.username;
                         localStorage.setItem(storageKey, detectData.username);
                     } else {
-                        showSshModal();
+                        if (typeof state !== 'undefined' && !state.usernameDetectShown) {
+                            state.usernameDetectShown = true;
+                            showUsernameDetectModal(clientInfo.ip);
+                        }
                         return;
                     }
                 }
@@ -1444,82 +1500,6 @@
 
             } catch (e) {
                 console.error('[ClientInfo]', e);
-            }
-        }
-
-        // 显示SSH凭据输入框
-        function showSshModal() {
-            const modal = document.getElementById('ssh-password-modal');
-            modal.style.display = 'flex';
-            modal.classList.add('show');
-            document.getElementById('ssh-client-ip').value = clientInfo.ip;
-            document.getElementById('ssh-username').value = '';
-            document.getElementById('ssh-password').value = '';
-            ModalManager.open('ssh-password-modal');
-        }
-
-        function closeSshModal() {
-            const modal = document.getElementById('ssh-password-modal');
-            modal.style.display = 'none';
-            modal.classList.remove('show');
-            ModalManager.close('ssh-password-modal');
-        }
-
-        function handleSshKeyPress(e) {
-            if (e.key === 'Enter') submitSsh();
-        }
-
-        // 提交SSH凭据
-        async function submitSsh() {
-            const username = document.getElementById('ssh-username').value.trim();
-            const password = document.getElementById('ssh-password').value;
-
-            if (!username) {
-                showToast('请输入用户名', 'error');
-                return;
-            }
-
-            showToast(password ? '正在验证...' : '正在保存...', 'info');
-
-            try {
-                let savedUsername = username;
-
-                if (password) {
-                    const resp = await fetch('/api/users/detect', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ip: clientInfo.ip, username, password })
-                    });
-                    const data = await resp.json();
-
-                    if (data.success) {
-                        savedUsername = data.username || username;
-                    } else if (!data.manual_allowed) {
-                        showToast(data.error || '连接失败', 'error');
-                        return;
-                    }
-                }
-
-                await saveUsernameManually(clientInfo.ip, savedUsername);
-                clientInfo.username = savedUsername;
-                updateClientDisplay();
-                closeSshModal();
-                showToast(`已保存: ${savedUsername}`, 'success');
-            } catch (e) {
-                if (password && isUsernameManualFallbackError(e)) {
-                    try {
-                        await saveUsernameManually(clientInfo.ip, username);
-                        clientInfo.username = username;
-                        updateClientDisplay();
-                        closeSshModal();
-                        showToast(`SSH 不可达，已保存: ${username}`, 'success');
-                        return;
-                    } catch (saveError) {
-                        showToast(saveError.message || '保存失败', 'error');
-                        return;
-                    }
-                }
-                showToast(e.message || '连接失败', 'error');
             }
         }
 
@@ -2283,6 +2263,7 @@
             document.getElementById('page-desktop').classList.remove('active');
             document.getElementById('page-terminal').classList.remove('active');
             document.getElementById('page-users').classList.remove('active');
+            document.getElementById('page-security-audit').classList.remove('active');
             document.getElementById('page-devices').classList.remove('active');
             document.getElementById('page-reports').classList.remove('active');
             document.getElementById('page-report-analysis').classList.remove('active');
@@ -2310,6 +2291,7 @@
                 'terminal': '主机终端 - GMS远程测试',
                 'devices': '设备管理 - GMS远程测试',
                 'users': '用户管理 - GMS远程测试',
+                'security-audit': '安全审计 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
                 'test-suites': '测试套件 - GMS远程测试',
@@ -2319,6 +2301,9 @@
                 'tools': '常用网址 - GMS远程测试'
             };
             document.title = titles[pageName] || 'GMS远程测试';
+            if (typeof recordSecurityPageView === 'function') {
+                recordSecurityPageView(pageName);
+            }
 
             // 如果切换到终端页面且未初始化，则初始化终端
             // 如果是ADB模式(pendingAdbDevice存在),强制重新初始化
@@ -2366,6 +2351,10 @@
             } else {
                 // 离开用户页面时停止自动刷新
                 stopUsersAutoRefresh();
+            }
+
+            if (pageName === 'security-audit') {
+                loadSecurityAudit();
             }
 
             // 如果切换到设备管理页面，加载设备列表
@@ -4168,6 +4157,9 @@
             if (targetPage === 'users') {
                 loadUsersList();
             }
+            if (targetPage === 'security-audit') {
+                loadSecurityAudit();
+            }
             if (targetPage === 'devices') {
                 loadDevicesManagement();
             }
@@ -4210,6 +4202,7 @@
                 'terminal': '主机终端 - GMS远程测试',
                 'devices': '设备管理 - GMS远程测试',
                 'users': '用户管理 - GMS远程测试',
+                'security-audit': '安全审计 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
                 'test-suites': '测试套件 - GMS远程测试',
@@ -4219,6 +4212,9 @@
                 'tools': '常用网址 - GMS 远程测试'
             };
             document.title = titles[targetPage] || 'GMS远程测试';
+            if (typeof recordSecurityPageView === 'function') {
+                recordSecurityPageView(targetPage);
+            }
             if (targetPage === 'tools') loadToolsList();
 
             // 加载保存的导航栏排序

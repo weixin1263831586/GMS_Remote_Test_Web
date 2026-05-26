@@ -101,6 +101,69 @@ body {
     z-index: 1;
 }
 
+.notification-toggle {
+    position: relative;
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--darker-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 13px;
+}
+
+.notification-toggle:hover {
+    background: var(--bg-color);
+    border-color: var(--primary-color);
+}
+
+.notification-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--danger-color);
+    color: #fff;
+    font-size: 10px;
+    line-height: 16px;
+    font-weight: 700;
+}
+
+.client-info-panel {
+    padding: 10px;
+    margin-top: auto;
+    border-top: 1px solid var(--border-color);
+    background: var(--light-bg);
+    text-align: center;
+}
+
+.client-info-header {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.client-identity-line {
+    color: var(--text-primary);
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .sidebar-nav {
     flex: 1;
     padding: 8px 6px;
@@ -1362,6 +1425,124 @@ select option {
 .toast.warning {
     border-left: 5px solid var(--warning-color);
     background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, var(--card-bg) 100%);
+}
+
+.notification-panel {
+    position: fixed;
+    bottom: 12px;
+    left: 142px;
+    width: min(420px, calc(100vw - 160px));
+    max-height: calc(100vh - 24px);
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow-lg);
+    z-index: 10020;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.notification-panel.show {
+    display: flex;
+}
+
+.notification-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.notification-close {
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.notification-close:hover {
+    background: var(--light-bg);
+    color: var(--text-primary);
+}
+
+.notification-actions {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.notification-list {
+    overflow-y: auto;
+    max-height: calc(100vh - 120px);
+}
+
+.notification-item {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: 8px 1fr;
+    gap: 10px;
+}
+
+.notification-item:hover {
+    background: var(--light-bg);
+}
+
+.notification-item.unread {
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.notification-level-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-top: 7px;
+    background: var(--primary-color);
+}
+
+.notification-item.success .notification-level-dot { background: var(--success-color); }
+.notification-item.warning .notification-level-dot { background: var(--warning-color); }
+.notification-item.error .notification-level-dot { background: var(--danger-color); }
+
+.notification-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.notification-message {
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.notification-time {
+    margin-top: 5px;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.notification-empty {
+    padding: 28px 12px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 12px;
 }
 
 /* ==================== Scrollbar ==================== */
