@@ -10320,6 +10320,99 @@ def _read_manifest_xml(task):
         return f.read(), None
 
 
+JAVA_IDENTIFIER_RE = r'[A-Za-z_$][A-Za-z0-9_$]*'
+JAVA_CLASS_DEF_RE = re.compile(rf'\b(?:public|protected|private|static|final|abstract|\s)*(class|interface|enum)\s+({JAVA_IDENTIFIER_RE})\b')
+JAVA_METHOD_DEF_RE = re.compile(rf'\b(?:public|protected|private|static|final|synchronized|native|abstract|strictfp|\s)+[\w$<>\[\].?,\s]+\s+({JAVA_IDENTIFIER_RE})\s*\([^;]*\)\s*(?:throws\b[^{{;]*)?(?:\{{|$)')
+JAVA_FIELD_DEF_RE = re.compile(rf'\b(?:public|protected|private|static|final|volatile|transient|\s)+[\w$<>\[\].?,\s]+\s+({JAVA_IDENTIFIER_RE})\s*(?:=|;|,)')
+JAVA_LOCAL_DEF_RE = re.compile(rf'\b(?:final\s+)?(?:[A-Za-z_$][\w$<>.\[\]?]*)(?:\s*<[^;=()]+>)?(?:\[\])?\s+({JAVA_IDENTIFIER_RE})\s*(?:=|;|,)')
+JAVA_CONTROL_WORDS = {'if', 'for', 'while', 'switch', 'catch', 'return', 'throw', 'new', 'case', 'do', 'else', 'try', 'finally'}
+APK_SYMBOL_INDEX_MAX_FILE_SIZE = 2 * 1024 * 1024
+
+
+def _get_apk_sources_dir(task) -> str:
+    return _safe_join(task.get('output_dir', ''), 'sources')
+
+
+def _add_apk_symbol(symbols: Dict[str, List[Dict[str, Any]]], name: str, kind: str, path: str, line: int, column: int):
+    if not name or name in JAVA_CONTROL_WORDS:
+        return
+    symbols.setdefault(name, []).append({
+        'name': name,
+        'kind': kind,
+        'path': path,
+        'line': line,
+        'column': column,
+    })
+
+
+def _index_java_source_file(sources_dir: str, file_path: str, symbols: Dict[str, List[Dict[str, Any]]]):
+    if os.path.getsize(file_path) > APK_SYMBOL_INDEX_MAX_FILE_SIZE:
+        return
+
+    rel_path = os.path.relpath(file_path, sources_dir)
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            for line_no, line in enumerate(f, start=1):
+                stripped = line.strip()
+                if not stripped or stripped.startswith('//') or stripped.startswith('*') or stripped.startswith('/*'):
+                    continue
+
+                for match in JAVA_CLASS_DEF_RE.finditer(line):
+                    _add_apk_symbol(symbols, match.group(2), match.group(1), rel_path, line_no, match.start(2) + 1)
+
+                method_match = JAVA_METHOD_DEF_RE.search(line)
+                if method_match:
+                    name = method_match.group(1)
+                    if name not in JAVA_CONTROL_WORDS:
+                        _add_apk_symbol(symbols, name, 'method', rel_path, line_no, method_match.start(1) + 1)
+                    continue
+
+                for match in JAVA_FIELD_DEF_RE.finditer(line):
+                    _add_apk_symbol(symbols, match.group(1), 'field', rel_path, line_no, match.start(1) + 1)
+
+                for match in JAVA_LOCAL_DEF_RE.finditer(line):
+                    name = match.group(1)
+                    prefix = line[:match.start(1)].strip()
+                    if '(' in prefix and ')' not in prefix:
+                        continue
+                    _add_apk_symbol(symbols, name, 'local', rel_path, line_no, match.start(1) + 1)
+    except UnicodeError:
+        logger.warning(f"Failed to decode Java source for APK symbol index: {file_path}")
+
+
+def _build_apk_symbol_index(task_id: str, task: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    with global_state.apk_analysis_tasks_lock:
+        cached = global_state.apk_analysis_tasks.get(task_id, {}).get('symbol_index')
+        if cached is not None:
+            return cached
+
+    sources_dir = _get_apk_sources_dir(task)
+    symbols: Dict[str, List[Dict[str, Any]]] = {}
+    if not os.path.isdir(sources_dir):
+        return symbols
+
+    for root, _, files in os.walk(sources_dir):
+        for filename in files:
+            if filename.endswith('.java'):
+                _index_java_source_file(sources_dir, os.path.join(root, filename), symbols)
+
+    with global_state.apk_analysis_tasks_lock:
+        if task_id in global_state.apk_analysis_tasks:
+            global_state.apk_analysis_tasks[task_id]['symbol_index'] = symbols
+    return symbols
+
+
+def _score_apk_symbol_candidate(candidate: Dict[str, Any], current_path: str, current_line: int) -> Tuple[int, int]:
+    score = 0
+    if candidate.get('path') == current_path:
+        score += 100
+        if current_line:
+            score -= abs(candidate.get('line', 0) - current_line)
+    if candidate.get('kind') in ('method', 'field', 'class', 'interface', 'enum'):
+        score += 20
+    return score, -candidate.get('line', 0)
+
+
 async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
     """后台运行 jadx 反编译"""
     try:
@@ -10633,6 +10726,31 @@ async def get_apk_source(task_id: str, path: str = "", view: bool = False):
             return ApiResponse.error("权限不足", status_code=403)
 
         return ApiResponse.success({'items': items, 'path': path, 'total': len(items)})
+
+
+@app.get("/api/apk/definition/{task_id}")
+@handle_api_errors
+async def find_apk_symbol_definition(task_id: str, symbol: str, path: str = "", line: int = 0):
+    """Find a best-effort Java symbol definition in decompiled APK sources."""
+    task, err = _get_apk_task(task_id)
+    if err:
+        return err
+
+    symbol = (symbol or '').strip()
+    if not re.fullmatch(JAVA_IDENTIFIER_RE, symbol):
+        return ApiResponse.error("符号名无效", status_code=400)
+
+    symbols = await asyncio.to_thread(_build_apk_symbol_index, task_id, task)
+    candidates = symbols.get(symbol, [])
+    if not candidates:
+        return ApiResponse.error(f"未找到定义: {symbol}", status_code=404)
+
+    best = sorted(
+        candidates,
+        key=lambda item: _score_apk_symbol_candidate(item, path, line),
+        reverse=True
+    )[0]
+    return ApiResponse.success({'definition': best, 'candidates': candidates[:20]})
 
 
 @app.get("/api/apk/download/{task_id}")
