@@ -736,7 +736,7 @@
                                 支持 .apk 文件格式<br><br>
                                 1. 点击按钮"📤 选择APK文件"上传<br>
                                 2. 直接拖拽 APK 文件上传<br>
-                                3. 上传后点击"🔬 开始分析"反编译
+                                3. 上传后自动反编译
                             </div>
                         </div>
                         <button class="btn-xs" onclick="document.getElementById('apk-file-input').click()" style="font-size: 12px; padding: 10px 20px;">
@@ -758,7 +758,6 @@
                             <div style="font-size: 12px; color: var(--text-secondary);" id="apk-analysis-state">准备分析...</div>
                         </div>
                         <div style="display: flex; gap: 8px;">
-                            <button class="btn-xs" id="apk-btn-analyze" onclick="startApkAnalysis()">🔬 开始分析</button>
                             <button class="btn-xs" id="apk-btn-download" onclick="downloadApkSource()" style="display: none;">📥 下载源码</button>
                             <button class="btn-xs" onclick="resetApkAnalysis()">🗑️ 清除</button>
                         </div>
@@ -785,7 +784,7 @@
                     <div id="apk-manifest-info">
                         <!-- 动态生成 -->
                     </div>
-                    <details>
+                    <details open>
                         <summary style="cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: 10px;">AndroidManifest.xml</summary>
                         <pre id="apk-raw-xml" style="background: var(--darker-bg); padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 11px; max-height: calc(100vh - 150px); overflow-y: auto;"></pre>
                     </details>
@@ -807,11 +806,10 @@
                         <div id="apk-source-tree" class="apk-source-tree">
                             <!-- 动态生成文件树 -->
                         </div>
+                        <div id="apk-source-resizer" class="apk-source-resizer" title="拖拽调整源码树宽度"></div>
                         <div id="apk-file-viewer" style="display: none; margin-top: 0;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                <span id="apk-file-path" style="font-size: 12px; color: var(--text-secondary);"></span>
-                                <button class="btn-xs" onclick="closeApkFileViewer()">✕ 关闭</button>
-                            </div>
+                            <div id="apk-file-tabs" class="apk-file-tabs"></div>
+                            <div id="apk-file-path" class="apk-file-path"></div>
                             <pre id="apk-file-content" style="background: var(--darker-bg); padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 11px; max-height: 500px; overflow-y: auto;"></pre>
                         </div>
                     </div>
