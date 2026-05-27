@@ -244,6 +244,13 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(periodic_cleanup_with_retry())
 
     usb_dispatch_task = None
+    public_tunnel_started = False
+
+    try:
+        await public_client_tunnel.start()
+        public_tunnel_started = True
+    except Exception as e:
+        logger.error(f"Failed to start public client tunnel listeners: {e}")
 
     # 初始化USB监控
     try:
@@ -332,6 +339,12 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
+    if public_tunnel_started:
+        try:
+            await public_client_tunnel.stop()
+        except Exception as e:
+            logger.error(f"Error stopping public client tunnel: {e}")
+
     # 停止USB监控
     try:
         stop_usb_monitor()
@@ -360,12 +373,13 @@ from core.device import device_manager
 from core.test_report import test_report_manager
 from core.vnc import vnc_manager, calculate_window_positions
 from core.adb_forward import adb_forward_manager
-from core.usbip import usbip_manager
+from core.usbip import usbip_manager, split_host_port, USBIPD_INSTALL_CMD, USBIPD_INSTALL_GUIDE
 from core.common_utils import CommonUtils
 from core.device_utils import DeviceUtils
 from core.report_analyzer import ReportAnalyzer
 from core.security_audit import classify_request_source, security_audit_logger
 from core.test_report_db import test_report_db
+from core.reverse_tunnel import public_client_tunnel
 
 # 导入管理模块
 from modules.client_manager import client_manager
@@ -670,6 +684,7 @@ AUDIT_SKIP_PREFIXES = (
     '/api/security-audit/detail',
     '/api/security-audit/export',
     '/api/notifications',
+    '/api/public-client/',
 )
 AUDIT_SKIP_PATHS = {'/favicon.ico'}
 AUDIT_WEB_READONLY_NOISE_PATHS = {
@@ -699,6 +714,7 @@ AUDIT_WEB_READONLY_NOISE_PATHS = {
     '/api/users/current',
     '/api/users/list',
     '/api/vpn/status',
+    '/api/public-client/status',
 }
 AUDIT_WEB_READONLY_NOISE_PREFIXES = (
     '/api/favicon/',
@@ -1158,6 +1174,7 @@ class GlobalState:
             return None
 
         username, hostname = CommonUtils.parse_host_address(device_host)
+        hostname, port = split_host_port(hostname)
         password = config.get('device_pswd', '')
 
         if not password:
@@ -1167,7 +1184,7 @@ class GlobalState:
         try:
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(hostname=hostname, username=username, password=password, timeout=10)
+            ssh.connect(hostname=hostname, port=port, username=username, password=password, timeout=10)
             logger.info(f"[Device SSH Pool] Connected to {pool_key}")
             return ssh
         except Exception as e:
@@ -2063,7 +2080,7 @@ async def export_security_audit_logs():
     return FileResponse(
         security_audit_logger.log_path,
         media_type='application/x-ndjson',
-        filename='security_audit.jsonl'
+        filename='security_audit.json'
     )
 
 @app.get("/templates/architecture.html")
@@ -2120,6 +2137,284 @@ def parse_client_id(client_id: str) -> tuple[str, str]:
         return client_id or 'unknown', 'unknown'
     username, client_ip = client_id.rsplit('@', 1)
     return username or 'unknown', client_ip or 'unknown'
+
+
+def get_client_source(ip: str) -> Dict[str, str]:
+    """按客户端 IP 判断来源类型。"""
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+        if ip_obj.is_private:
+            return {'source': 'internal', 'source_label': '内网'}
+        return {'source': 'public', 'source_label': '公网'}
+    except (ValueError, TypeError):
+        return {'source': 'unknown', 'source_label': '未知'}
+
+
+def is_public_origin_request(request: Optional[Request]) -> bool:
+    """Return True when the browser is accessing through a public/ngrok host."""
+    if not request:
+        return False
+    host = (request.headers.get('host') or '').lower()
+    forwarded_host = (request.headers.get('x-forwarded-host') or '').lower()
+    origin = (request.headers.get('origin') or '').lower()
+    combined = ' '.join([host, forwarded_host, origin])
+    return any(marker in combined for marker in (
+        'ngrok-free.dev',
+        'ngrok.app',
+        'ngrok.io',
+    ))
+
+
+DEFAULT_ANDROID_USBIP_VID_PIDS = ('2207:0006',)
+
+
+def parse_usbipd_android_busids(output: str, vid_pid: Optional[str] = None) -> List[str]:
+    """从 usbipd list 输出中提取 Android 设备 BUSID。"""
+    busids: List[str] = []
+    in_connected = False
+    vid_pids = {pid.lower() for pid in DEFAULT_ANDROID_USBIP_VID_PIDS}
+    if vid_pid:
+        vid_pids.add(vid_pid.lower())
+    android_markers = (
+        'android',
+        'adb',
+        'rk356',
+        'rockchip',
+    )
+
+    for line in (output or '').splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith('Connected:'):
+            in_connected = True
+            continue
+        if stripped.startswith('Persisted:'):
+            break
+        if not in_connected:
+            continue
+
+        lowered = stripped.lower()
+        if any(pid in lowered for pid in vid_pids) or any(marker in lowered for marker in android_markers):
+            parts = stripped.split()
+            if parts and '-' in parts[0]:
+                busids.append(parts[0])
+
+    return busids
+
+
+def parse_usbipd_busid_statuses(output: str) -> Dict[str, str]:
+    """Parse usbipd list Connected section into BUSID -> status."""
+    statuses: Dict[str, str] = {}
+    in_connected = False
+    for line in (output or '').splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith('Connected:'):
+            in_connected = True
+            continue
+        if stripped.startswith('Persisted:'):
+            break
+        if not in_connected:
+            continue
+        parts = stripped.split()
+        if parts and '-' in parts[0]:
+            lowered = stripped.lower()
+            if 'not shared' in lowered:
+                statuses[parts[0]] = 'not_shared'
+            elif 'attached' in lowered:
+                statuses[parts[0]] = 'attached'
+            elif 'shared' in lowered:
+                statuses[parts[0]] = 'shared'
+            else:
+                statuses[parts[0]] = 'unknown'
+    return statuses
+
+
+def resolve_public_tunnel_device_host(request: Optional[Request], client_id: str) -> tuple[Optional[str], Optional[str]]:
+    """Return (device_host, usbip_attach_host) for public-client agent mode."""
+    if not public_client_tunnel.is_connected() or not is_public_origin_request(request):
+        return None, None
+    username, _ = parse_client_id(client_id)
+    if not username or username == 'unknown':
+        status = public_client_tunnel.get_status()
+        username = status.get('username') or 'unknown'
+    device_host = public_client_tunnel.get_ssh_device_host(username)
+    if not device_host:
+        return None, None
+    return device_host, public_client_tunnel.get_usbip_attach_host()
+
+
+def public_client_required_payload(request: Optional[Request]) -> Dict[str, Any]:
+    base_url = get_request_base_url(request) if request else ''
+    return {
+        'public_client_required': True,
+        'agent_connected': public_client_tunnel.is_connected(),
+        'agent_install_url': f'{base_url}/api/public-client/install.ps1' if base_url else '/api/public-client/install.ps1',
+        'error': '公网访问无法直接回连 Windows 客户端。请先在公网 Windows 上运行 GMS 公网客户端 agent，并保持该 PowerShell 窗口打开。',
+    }
+
+
+async def probe_public_client_usbipd() -> Dict[str, Any]:
+    result = await public_client_tunnel.run_windows_command('usbipd --version', timeout=15)
+    output = (result.get('stdout') or '').strip() or (result.get('stderr') or '').strip()
+    return {
+        'installed': result.get('returncode', -1) == 0 and bool(output),
+        'version': output,
+        'raw': result,
+    }
+
+
+async def probe_public_client_admin() -> bool:
+    command = 'cmd /c net session >nul 2>&1'
+    result = await public_client_tunnel.run_windows_command(command, timeout=15)
+    return result.get('returncode', -1) == 0
+
+
+def detach_ubuntu_usbip_ports(ssh, remote_host: Optional[str] = '127.0.0.1', detach_all: bool = False) -> List[str]:
+    """Detach Ubuntu usbip ports that point to the public-client tunnel."""
+    detached: List[str] = []
+    stdout, stderr, code = usbip_manager.ssh_manager.execute_command(ssh, 'usbip port', timeout=10)
+    if code != 0:
+        logger.info(f"[USB/IP] usbip port returned {code}: {stderr or stdout}")
+        return detached
+
+    current_port: Optional[str] = None
+    current_block: List[str] = []
+    for line in (stdout or '').splitlines() + ['Port 999999:']:
+        port_match = re.match(r'\s*Port\s+(\d+):', line)
+        if port_match:
+            block_text = '\n'.join(current_block)
+            if current_port and (detach_all or (remote_host and remote_host in block_text)):
+                detach_out, detach_err, detach_code = usbip_manager.ssh_manager.execute_command(
+                    ssh,
+                    f'sudo usbip detach -p {current_port}',
+                    timeout=15
+                )
+                logger.info(
+                    f"[USB/IP] Detached stale Ubuntu usbip port {current_port}: "
+                    f"code={detach_code} out={detach_out} err={detach_err}"
+                )
+                detached.append(current_port)
+            current_port = port_match.group(1)
+            current_block = [line]
+        elif current_port:
+            current_block.append(line)
+
+    if detached:
+        time.sleep(2)
+    return detached
+
+
+def wait_for_adb_device_change(ssh, devices_before: set, timeout: int = 45) -> List[str]:
+    """Wait until adb sees devices added after usbip attach."""
+    deadline = time.time() + timeout
+    last_devices = set(devices_before)
+    while time.time() < deadline:
+        stdout, stderr, code = usbip_manager.ssh_manager.execute_command(ssh, 'adb devices', timeout=10)
+        if code == 0:
+            devices_now = set(DeviceUtils.parse_adb_devices(stdout))
+            last_devices = devices_now
+            new_devices = list(devices_now - devices_before)
+            if new_devices:
+                logger.info(f"[USB/IP] ADB devices appeared via USB/IP: {new_devices}")
+                return new_devices
+        else:
+            logger.info(f"[USB/IP] adb devices while waiting returned {code}: {stderr or stdout}")
+        time.sleep(3)
+
+    logger.warning(f"[USB/IP] Timed out waiting for ADB device. before={devices_before}, last={last_devices}")
+    return []
+
+
+def wait_for_adb_serial_ready(ssh, serial_no: str, timeout: int = 30) -> Dict[str, Any]:
+    """Wait until a specific ADB serial is in device state and shell responds."""
+    quoted_serial = shlex.quote(serial_no)
+    deadline = time.time() + timeout
+    last_output = ''
+    last_error = ''
+
+    usbip_manager.ssh_manager.execute_command(ssh, 'adb start-server', timeout=10)
+    while time.time() < deadline:
+        state_out, state_err, state_code = usbip_manager.ssh_manager.execute_command(
+            ssh,
+            f'adb -s {quoted_serial} get-state',
+            timeout=8
+        )
+        state_text = (state_out or state_err or '').strip()
+        last_output = state_out or ''
+        last_error = state_err or ''
+
+        if state_code == 0 and state_text == 'device':
+            shell_out, shell_err, shell_code = usbip_manager.ssh_manager.execute_command(
+                ssh,
+                f"adb -s {quoted_serial} shell echo ready",
+                timeout=10
+            )
+            last_output = shell_out or ''
+            last_error = shell_err or ''
+            if shell_code == 0 and 'ready' in shell_out:
+                return {'ready': True}
+
+        time.sleep(2)
+
+    devices_out, devices_err, _ = usbip_manager.ssh_manager.execute_command(ssh, 'adb devices', timeout=8)
+    return {
+        'ready': False,
+        'state': (last_output or last_error or '').strip(),
+        'devices': (devices_out or devices_err or '').strip(),
+    }
+
+
+def attach_public_usbip_on_ubuntu(config: Dict[str, Any], attach_host: str, bound_busids: List[str]) -> Dict[str, Any]:
+    """Run blocking Ubuntu-side USB/IP attach work outside the FastAPI event loop."""
+    ubuntu_ssh = usbip_manager.ssh_manager.get_connection(config)
+    if not ubuntu_ssh:
+        return {'success': False, 'error': '无法连接Ubuntu主机', 'rollback': False}
+
+    try:
+        stdout_before, _, _ = usbip_manager.ssh_manager.execute_command(ubuntu_ssh, 'adb devices', timeout=10)
+        devices_before = set(DeviceUtils.parse_adb_devices(stdout_before))
+        logger.info(f"[USB/IP] Public devices before attach: {devices_before}")
+
+        detach_ubuntu_usbip_ports(ubuntu_ssh, attach_host, detach_all=True)
+        usbip_manager._ensure_vhci_driver(ubuntu_ssh)
+
+        attached = []
+        attach_errors = []
+        for busid in bound_busids:
+            cmd = f'sudo usbip attach -r {attach_host} -b {busid}'
+            logger.info(f"[USB/IP] Public attaching {busid} from {attach_host}")
+            out, err, code = usbip_manager.ssh_manager.execute_command(ubuntu_ssh, cmd, timeout=25)
+            if code == 0:
+                attached.append(busid)
+            else:
+                detail = err or out or f'attach command timed out or returned {code}'
+                attach_errors.append(f'{busid}: {detail}')
+                logger.warning(f"[USB/IP] Public attach returned {code} for {busid}: {detail}")
+
+        device_list = wait_for_adb_device_change(ubuntu_ssh, devices_before, timeout=45)
+        if not device_list:
+            detach_ubuntu_usbip_ports(ubuntu_ssh, attach_host, detach_all=True)
+            detail = '; '.join(attach_errors) if attach_errors else 'ADB 设备未在 45 秒内枚举出来'
+            usbip_manager.ssh_manager.return_connection(ubuntu_ssh)
+            return {'success': False, 'error': f'USB/IP 连接失败: {detail}', 'rollback': True}
+
+        if not attached:
+            attached = bound_busids
+
+        usbip_manager.ssh_manager.return_connection(ubuntu_ssh)
+        return {
+            'success': True,
+            'message': f'✅ 成功连接{len(attached)}个设备: {", ".join(attached)}',
+            'devices': attached,
+            'device_list': device_list,
+        }
+    except Exception as e:
+        ubuntu_ssh.close()
+        logger.exception("Error in public-client Ubuntu attach")
+        return {'success': False, 'error': str(e) or repr(e), 'rollback': True}
 
 
 def is_manual_username_fallback_error(error: Optional[str]) -> bool:
@@ -2275,6 +2570,7 @@ async def list_users():
                         'client_id': client_id,
                         'username': username,
                         'ip': ip,
+                        **get_client_source(ip),
                         'running': state.get('running', False),
                         'devices': state.get('devices', []),
                         'last_seen': state.get('last_seen', ''),
@@ -2286,6 +2582,7 @@ async def list_users():
                     'client_id': client_id,
                     'username': username,
                     'ip': ip,
+                    **get_client_source(ip),
                     'running': state.get('running', False),
                     'devices': state.get('devices', []),
                     'last_seen': state.get('last_seen', ''),
@@ -2692,6 +2989,123 @@ async def get_ngrok_public_url(request: Request):
         return JSONResponse(content={'success': True, 'public_url': public_url})
 
     return error_response('没有找到有效的 ngrok 公网地址', status_code=404)
+
+
+def get_request_base_url(request: Request) -> str:
+    scheme = request.headers.get('x-forwarded-proto') or request.url.scheme
+    host = request.headers.get('x-forwarded-host') or request.headers.get('host') or request.url.netloc
+    return f"{scheme}://{host}".rstrip('/')
+
+
+@app.get("/api/public-client/status")
+async def get_public_client_status():
+    """返回公网客户端 agent / 反向隧道状态。"""
+    return JSONResponse(content={'success': True, 'data': public_client_tunnel.get_status()})
+
+
+@app.get("/api/public-client/agent.py")
+async def download_public_client_agent():
+    """下载公网 Windows 客户端 agent。"""
+    agent_path = os.path.join(os.path.dirname(__file__), 'scripts', 'public_client_agent.py')
+    return FileResponse(agent_path, media_type='text/x-python', filename='gms-public-client-agent.py')
+
+
+@app.get("/api/public-client/install.ps1")
+async def download_public_client_installer(request: Request, username: str = Query('', description='Windows SSH username')):
+    """下载一键启动公网客户端 agent 的 PowerShell 脚本。"""
+    base_url = get_request_base_url(request)
+    username_arg = f' --username "{username}"' if username else ''
+    script = f'''$ErrorActionPreference = "Stop"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$Server = "{base_url}"
+$Agent = Join-Path $env:TEMP "gms-public-client-agent.py"
+
+cmd /c net session > $null 2>&1
+if ($LASTEXITCODE -ne 0) {{
+    Write-Host "[GMS] Administrator privileges are required for usbipd bind. Relaunching as administrator ..."
+    Start-Process powershell -Verb RunAs -ArgumentList @(
+        "-ExecutionPolicy", "Bypass",
+        "-File", "`"$PSCommandPath`""
+    )
+    exit
+}}
+
+Get-CimInstance Win32_Process |
+    Where-Object {{ $_.CommandLine -like "*gms-public-client-agent.py*" -and $_.ProcessId -ne $PID }} |
+    ForEach-Object {{
+        Write-Host ("[GMS] Stopping old agent process PID {{0}}" -f $_.ProcessId)
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }}
+
+Write-Host "[GMS] Downloading public client agent from $Server ..."
+$Headers = @{{"ngrok-skip-browser-warning" = "true"}}
+Invoke-WebRequest "$Server/api/public-client/agent.py" -Headers $Headers -OutFile $Agent
+
+function Get-PythonCommand {{
+    $py = Get-Command py -ErrorAction SilentlyContinue
+    if ($py) {{
+        return [pscustomobject]@{{ Command = "py"; Args = @("-3", "-u") }}
+    }}
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if ($python -and $python.Source -and $python.Source -notmatch 'WindowsApps') {{
+        return [pscustomobject]@{{ Command = $python.Source; Args = @("-u") }}
+    }}
+    $python3 = Get-Command python3 -ErrorAction SilentlyContinue
+    if ($python3 -and $python3.Source -and $python3.Source -notmatch 'WindowsApps') {{
+        return [pscustomobject]@{{ Command = $python3.Source; Args = @("-u") }}
+    }}
+    return $null
+}}
+
+$PythonCmd = Get-PythonCommand
+if (-not $PythonCmd) {{
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if (-not $winget) {{
+        throw "Python is not installed and winget is unavailable. Install Python 3.12, then rerun this script."
+    }}
+    Write-Host "[GMS] Python not found. Installing Python 3.12 with winget ..."
+    winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+    $PythonCmd = Get-PythonCommand
+}}
+
+if (-not $PythonCmd) {{
+    $Candidates = @(
+        "$env:LocalAppData\\Programs\\Python\\Python312\\python.exe",
+        "$env:ProgramFiles\\Python312\\python.exe",
+        "${{env:ProgramFiles(x86)}}\\Python312\\python.exe"
+    )
+    foreach ($Candidate in $Candidates) {{
+        if (Test-Path $Candidate) {{
+            $PythonCmd = [pscustomobject]@{{ Command = $Candidate; Args = @("-u") }}
+            break
+        }}
+    }}
+}}
+
+if (-not $PythonCmd) {{
+    throw "Python was installed but was not found in PATH. Reopen PowerShell and rerun this script."
+}}
+
+if ($PythonCmd.Command -match 'WindowsApps') {{
+    throw "Detected Windows Store python alias. Please install Python 3.12 from python.org or use py.exe, then rerun this script."
+}}
+
+Write-Host "[GMS] Starting agent. Keep this PowerShell window open."
+Write-Host ("[GMS] Python command: {{0}}" -f $PythonCmd.Command)
+& $PythonCmd.Command @($PythonCmd.Args) $Agent --server $Server{username_arg}
+'''
+    return PlainTextResponse(script, media_type='text/plain; charset=utf-8')
+
+
+@app.websocket("/api/public-client/tunnel")
+async def public_client_tunnel_endpoint(
+    websocket: WebSocket,
+    client_id: str = Query('public-client'),
+    username: str = Query('unknown')
+):
+    """公网 Windows agent 反向 TCP 隧道。"""
+    await public_client_tunnel.handle_agent(websocket, client_id, username)
 
 
 ngrok_start_lock = asyncio.Lock()
@@ -3551,13 +3965,12 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
                 status_code=500
             )
 
-        # 验证设备是否在线
-        check_cmd = f"adb -s {req.serial_no} shell echo 'ready'"
-        output, error, code = ssh_manager.execute_command(ssh, check_cmd)
+        # 验证设备是否在线。USB/IP 设备刚枚举出来时 adb shell 可能还没准备好，需要短暂等待。
+        ready_result = await asyncio.to_thread(wait_for_adb_serial_ready, ssh, req.serial_no, 30)
 
         ssh_manager.return_connection(ssh)
 
-        if code == 0 and 'ready' in output:
+        if ready_result.get('ready'):
             # 将设备信息保存到会话中,供WebSocket终端使用
             client_id = get_client_id_from_request(request)
 
@@ -3576,8 +3989,10 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
                 "serial_no": req.serial_no
             })
         else:
+            detail = ready_result.get('state') or ready_result.get('devices') or '无响应'
+            logger.warning(f"[Device Shell] Device {req.serial_no} not ready: {detail}")
             return JSONResponse(
-                content={"success": False, "message": f"设备 {req.serial_no} 不在线或无响应"},
+                content={"success": False, "message": f"设备 {req.serial_no} 不在线或无响应: {detail}"},
                 status_code=400
             )
     except Exception as e:
@@ -7336,6 +7751,9 @@ async def get_usbip_status(request: Request, device_host: Optional[str] = None):
         client_id = device_host
     else:
         client_id = get_client_id_from_request(request)
+        tunnel_host, _ = resolve_public_tunnel_device_host(request, client_id)
+        if tunnel_host:
+            client_id = tunnel_host
 
     # 方法1：检查当前客户端的连接状态
     with global_state.usbip_states_lock:
@@ -7380,29 +7798,137 @@ async def start_usbip(
         # 从请求中获取参数
         request_data = req.model_dump() if req else {}
 
-        # 获取device_host（优先级：请求参数 > 配置文件 > client_id）
-        device_host = request_data.get('device_host') or config.get('usbip_device_host') or config.get('device_host')
-        if not device_host:
-            device_host = client_id
+        usbip_attach_host = None
+        tunnel_host = None
+        public_client_mode = False
+
+        # 获取device_host（优先级：请求参数 > 公网客户端隧道 > 配置文件 > client_id）
+        explicit_device_host = request_data.get('device_host')
+        if explicit_device_host:
+            device_host = explicit_device_host
+        else:
+            tunnel_host, tunnel_usbip_host = resolve_public_tunnel_device_host(request, client_id)
+            if tunnel_host:
+                device_host = tunnel_host
+                usbip_attach_host = tunnel_usbip_host
+                public_client_mode = is_public_origin_request(request)
+                logger.info(f"[USB/IP] Public client tunnel mode enabled: {device_host} attach={usbip_attach_host}")
+            else:
+                if is_public_origin_request(request):
+                    payload = public_client_required_payload(request)
+                    return ApiResponse.error(
+                        payload['error'],
+                        status_code=428,
+                        public_client_required=True,
+                        agent_install_url=payload['agent_install_url'],
+                        agent_connected=False
+                    )
+                device_host = config.get('usbip_device_host') or config.get('device_host') or client_id
 
         logger.info(f"[USB/IP] Using device_host: {device_host}")
 
         # 保存原始 Windows 设备主机地址，用于记录设备来源
         windows_device_host = device_host
 
-        # 获取密码
-        device_password = request_data.get('device_password') or find_device_host_password(config, device_host) or config.get('device_pswd', '')
+        if public_client_mode:
+            tunnel_status = public_client_tunnel.get_status()
+            if not tunnel_status.get('connected'):
+                payload = public_client_required_payload(request)
+                return ApiResponse.error(
+                    payload['error'],
+                    status_code=428,
+                    public_client_required=True,
+                    agent_install_url=payload['agent_install_url'],
+                    agent_connected=False
+                )
+            windows_usbipd = await probe_public_client_usbipd()
+            if not windows_usbipd.get('installed'):
+                return JSONResponse(content={
+                    'success': False,
+                    'error': '公网客户端已连接，但 Windows 主机未安装 usbipd',
+                    'install_guide': USBIPD_INSTALL_GUIDE.format(install_cmd=USBIPD_INSTALL_CMD),
+                    'installed': False
+                })
+            if not await probe_public_client_admin():
+                return ApiResponse.error(
+                    '公网客户端 agent 没有管理员权限，无法执行 usbipd bind。请关闭当前 agent 窗口，用管理员 PowerShell 重新运行 GMS 公网客户端命令。',
+                    status_code=403
+                )
 
-        if not device_password:
-            return ApiResponse.error(
-                f'未找到 {device_host} 的SSH凭据，请先在登录页面输入SSH密码',
-                status_code=401,
-                need_password=True,
-                device_host=device_host
+            taskkill_result = await public_client_tunnel.run_windows_command('taskkill /F /IM adb.exe /T', timeout=15)
+            if taskkill_result.get('returncode', -1) not in (0, 128, 255):
+                logger.warning(f"[USB/IP] taskkill adb failed: {taskkill_result}")
+
+            list_result = await public_client_tunnel.run_windows_command('usbipd list', timeout=20)
+            if list_result.get('returncode', -1) != 0:
+                return ApiResponse.error(
+                    f"获取 Windows usbipd 设备列表失败: {list_result.get('stderr') or list_result.get('stdout') or 'unknown error'}",
+                    status_code=500
+                )
+
+            vid_pid = config.get('usbip_vid_pid')
+            usbipd_list_output = '\n'.join([
+                list_result.get('stdout') or '',
+                list_result.get('stderr') or '',
+            ]).strip()
+            logger.info(f"[USB/IP] usbipd list output via public agent:\n{usbipd_list_output}")
+            busids = parse_usbipd_android_busids(usbipd_list_output, vid_pid=vid_pid)
+            busid_statuses = parse_usbipd_busid_statuses(usbipd_list_output)
+            if not busids:
+                return ApiResponse.error(
+                    f'未找到Android设备。usbipd list 输出: {usbipd_list_output or "empty"}',
+                    status_code=404
+                )
+
+            bound_busids = []
+            newly_bound = False
+            for busid in busids:
+                if busid_statuses.get(busid) in ('shared', 'attached'):
+                    logger.info(f"[USB/IP] {busid} is already {busid_statuses.get(busid)}, skip bind")
+                    bound_busids.append(busid)
+                    continue
+                bind_result = await public_client_tunnel.run_windows_command(f'usbipd bind --busid {busid}', timeout=30)
+                if bind_result.get('returncode', -1) != 0:
+                    stderr = bind_result.get('stderr') or bind_result.get('stdout') or 'unknown error'
+                    logger.warning(f"[USB/IP] bind failed for {busid}: {stderr}")
+                    # 如果已经共享，继续；否则直接报错
+                    if 'already' not in stderr.lower() and 'shared' not in stderr.lower():
+                        if 'access denied' in stderr.lower() or 'administrator privileges' in stderr.lower():
+                            return ApiResponse.error(
+                                '公网客户端 agent 没有管理员权限，无法执行 usbipd bind。请关闭所有 GMS agent PowerShell 窗口，用管理员 PowerShell 重新运行 GMS 公网客户端命令。',
+                                status_code=403
+                            )
+                        return ApiResponse.error(f'设备绑定失败: {busid} - {stderr}', status_code=500)
+                else:
+                    newly_bound = True
+                bound_busids.append(busid)
+            if newly_bound:
+                await asyncio.sleep(2)
+
+            result = await asyncio.to_thread(
+                attach_public_usbip_on_ubuntu,
+                config,
+                usbip_attach_host or '127.0.0.1',
+                bound_busids
             )
+            if not result.get('success'):
+                if result.get('rollback'):
+                    logger.info("[USB/IP] Public attach failed; keeping Windows usbipd bindings for faster retry")
+                return ApiResponse.error(result.get('error') or 'USB/IP 连接失败', status_code=500)
+        else:
+            # 获取密码
+            device_password = request_data.get('device_password') or find_device_host_password(config, device_host) or config.get('device_pswd', '')
 
-        # 直接调用高级封装方法（简化实现，与Flask版本一致）
-        result = usbip_manager.start_usbip(device_host, device_password)
+            if not device_password:
+                return ApiResponse.error(
+                    f'未找到 {device_host} 的SSH凭据，请先在登录页面输入SSH密码',
+                    status_code=401,
+                    need_password=True,
+                    device_host=device_host
+                )
+
+            # 直接调用高级封装方法（简化实现，与Flask版本一致）
+            result = usbip_manager.start_usbip(device_host, device_password, usbip_attach_host=usbip_attach_host)
 
         # 更新连接状态（使用线程锁 - 与Flask版本一致）
         if result.get('success'):
@@ -7457,13 +7983,19 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
         req: 请求体，包含 device_host 参数（可选）
     """
     config = config_manager.load_config()
+    client_id = get_client_id_from_request(request)
+    public_client_mode = False
 
     # 使用提供的主机或当前客户端
     if req and req.device_host:
         config['device_host'] = req.device_host
     else:
-        client_id = get_client_id_from_request(request)
-        config['device_host'] = client_id
+        tunnel_host, _ = resolve_public_tunnel_device_host(request, client_id)
+        if tunnel_host:
+            config['device_host'] = tunnel_host
+            public_client_mode = is_public_origin_request(request)
+        else:
+            config['device_host'] = client_id
 
     device_password = find_device_host_password(config, config['device_host'])
     if not device_password:
@@ -7472,10 +8004,40 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
     if device_password:
         config['device_pswd'] = device_password
 
+    devices_to_remove: List[str] = []
+
     try:
-        with DeviceSSHConnection(config) as win_ssh:
-            ssh_manager.execute_command(win_ssh, 'usbipd unbind --all', timeout=10)
-            await asyncio.sleep(2)
+        if public_client_mode:
+            if not public_client_tunnel.is_connected():
+                return ApiResponse.error(
+                    '公网客户端未连接，无法断开 USB/IP',
+                    status_code=428,
+                    public_client_required=True,
+                    agent_connected=False,
+                    agent_install_url=f"{get_request_base_url(request)}/api/public-client/install.ps1"
+                )
+            ubuntu_ssh = usbip_manager.ssh_manager.get_connection(config)
+            if ubuntu_ssh:
+                try:
+                    detach_ubuntu_usbip_ports(ubuntu_ssh, '127.0.0.1', detach_all=True)
+                    usbip_manager.ssh_manager.return_connection(ubuntu_ssh)
+                except Exception as e:
+                    ubuntu_ssh.close()
+                    logger.warning(f"[USB/IP Stop] detach Ubuntu usbip ports failed: {e}")
+            logger.info("[USB/IP Stop] Public mode keeps Windows usbipd bindings; only Ubuntu attach is detached")
+            await asyncio.sleep(1)
+            with global_state.usbip_devices_source_lock:
+                devices_to_remove = [
+                    device_id for device_id, device_info in global_state.usbip_devices_source.items()
+                    if device_info.get('source') == config['device_host']
+                ]
+                for device_id in devices_to_remove:
+                    del global_state.usbip_devices_source[device_id]
+                    logger.info(f"[USB/IP Stop] Removed device source: {device_id} from {config['device_host']}")
+        else:
+            with DeviceSSHConnection(config) as win_ssh:
+                ssh_manager.execute_command(win_ssh, 'usbipd unbind --all', timeout=10)
+                await asyncio.sleep(2)
 
             # 清除来自该主机的USB/IP设备来源记录（从多个位置）
             with global_state.usbip_devices_source_lock:
@@ -7517,21 +8079,21 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
                 except Exception as e:
                     logger.warning(f"[USB/IP Stop] Failed to persist device source removal: {e}")
 
-            # 更新 USB/IP 连接状态
-            with global_state.usbip_states_lock:
-                global_state.usbip_states[config['device_host']] = {'connected': False, 'timestamp': time.time()}
+        # 更新 USB/IP 连接状态
+        with global_state.usbip_states_lock:
+            global_state.usbip_states[config['device_host']] = {'connected': False, 'timestamp': time.time()}
 
-            # 构建断开设备的详细信息
-            disconnected_devices_info = format_device_list_info(devices_to_remove)
-            logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices{disconnected_devices_info}")
+        # 构建断开设备的详细信息
+        disconnected_devices_info = format_device_list_info(devices_to_remove)
+        logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices{disconnected_devices_info}")
 
-            # 主动触发设备列表刷新（避免等待 USB 监控器检测到变化，减少延迟）
-            await notify_device_change(devices_to_remove, "USB/IP Stop")
+        # 主动触发设备列表刷新（避免等待 USB 监控器检测到变化，减少延迟）
+        await notify_device_change(devices_to_remove, "USB/IP Stop")
 
-            return JSONResponse(content={
-                'success': True,
-                'message': f'本地设备已断开{disconnected_devices_info}'
-            })
+        return JSONResponse(content={
+            'success': True,
+            'message': f'本地设备已断开{disconnected_devices_info}'
+        })
     except HTTPException:
         # 无法连接到 Windows，只清除连接状态和设备来源记录
         with global_state.usbip_devices_source_lock:
@@ -7588,12 +8150,39 @@ async def install_usbipd(request: Request, device_host: Optional[str] = None):
     """
     try:
         config = config_manager.load_config()
+        client_id = get_client_id_from_request(request)
 
         # Use provided host or fallback to current client
         if device_host:
             config['device_host'] = device_host
         else:
-            config['device_host'] = get_client_id_from_request(request)
+            tunnel_host, _ = resolve_public_tunnel_device_host(request, client_id)
+            if is_public_origin_request(request):
+                tunnel_status = public_client_tunnel.get_status()
+                if tunnel_status.get('connected'):
+                    windows_usbipd = await probe_public_client_usbipd()
+                    installed = bool(windows_usbipd.get('installed'))
+                    logger.info(
+                        f"[USB/IP Install] public-client agent status: connected={tunnel_status.get('connected')}, "
+                        f"installed={installed}"
+                    )
+                    if installed:
+                        return JSONResponse(content={
+                            'success': True,
+                            'installed': True,
+                            'running': True,
+                            'version': windows_usbipd.get('version') or '',
+                            'message': f"usbipd 已安装{('，版本: ' + windows_usbipd.get('version')) if windows_usbipd.get('version') else ''}"
+                        })
+                    return JSONResponse(content={
+                        'success': False,
+                        'installed': False,
+                        'running': False,
+                        'install_guide': USBIPD_INSTALL_GUIDE.format(install_cmd=USBIPD_INSTALL_CMD),
+                        'error': '公网客户端已连接，但 Windows 主机未安装 usbipd'
+                    })
+
+            config['device_host'] = tunnel_host or client_id
 
         # Auto-find password from client_ssh_credentials
         device_password = find_device_host_password(config, config['device_host'])
@@ -7633,7 +8222,45 @@ async def check_ssh_sshd(request: Request, device_host: Optional[str] = Query(No
     config = config_manager.load_config()
     # 优先使用查询参数中的 device_host，否则使用请求中的客户端ID
     if not device_host:
-        device_host = get_client_id_from_request(request)
+        client_id = get_client_id_from_request(request)
+        tunnel_host, _ = resolve_public_tunnel_device_host(request, client_id)
+        if is_public_origin_request(request):
+            tunnel_status = public_client_tunnel.get_status()
+            windows_sshd = tunnel_status.get('windows_sshd') or {}
+            if tunnel_status.get('connected') and windows_sshd:
+                installed = bool(windows_sshd.get('installed'))
+                running = bool(windows_sshd.get('running'))
+                logger.info(
+                    f"[SSHD Check] public-client agent status: connected={tunnel_status.get('connected')}, "
+                    f"installed={installed}, running={running}"
+                )
+                return JSONResponse(content={
+                    'success': True,
+                    'installed': installed,
+                    'running': running,
+                    'install_guide': None if installed else SSHD_INSTALL_GUIDE
+                })
+            if tunnel_status.get('connected') and not windows_sshd:
+                logger.warning("[SSHD Check] public-client agent connected but did not report windows_sshd status")
+                return JSONResponse(content={
+                    'success': True,
+                    'installed': None,
+                    'running': None,
+                    'install_guide': None,
+                    'error': '公网客户端已连接，但当前 agent 版本未上报 Windows SSHD 状态。请重新运行最新的安装脚本更新 agent。'
+                })
+
+        if not tunnel_host and is_public_origin_request(request):
+            payload = public_client_required_payload(request)
+            return JSONResponse(content={
+                'success': False,
+                'checkable': False,
+                'installed': None,
+                'running': None,
+                'install_guide': None,
+                **payload,
+            }, status_code=428)
+        device_host = tunnel_host or client_id
 
     # 验证 device_host 格式
     if device_host and '@' not in device_host:
