@@ -1174,7 +1174,7 @@ async function apiCall(url, method = 'GET', data = null) {
             }
         } else {
             const text = await response.text();
-            result = text ? { success: response.ok, message: text } : { success: response.ok };
+            result = text ? { success: response.ok, message: normalizeApiTextError(text) } : { success: response.ok };
         }
 
         if (!result || typeof result !== 'object') {
@@ -1214,6 +1214,11 @@ async function apiCall(url, method = 'GET', data = null) {
             }
             if (result.device_host) error.deviceHost = result.device_host;
             if (result.install_guide) error.installGuide = result.install_guide;
+            if (result.public_client_required) {
+                error.publicClientRequired = true;
+                error.agentInstallUrl = result.agent_install_url;
+                error.suppressToast = true;
+            }
             throw error;
         }
 
@@ -1226,6 +1231,18 @@ async function apiCall(url, method = 'GET', data = null) {
         }
         throw error;
     }
+}
+
+function normalizeApiTextError(text) {
+    const message = String(text || '').trim();
+    const lower = message.toLowerCase();
+    if (lower.includes('ngrok gateway error') || lower.includes('err_ngrok_')) {
+        return '公网隧道临时不可用或请求被中断，请确认服务端未重启、agent 在线后重试';
+    }
+    if (lower.startsWith('<!doctype html') || lower.startsWith('<html')) {
+        return '服务器返回了 HTML 错误页，请稍后重试或查看服务端日志';
+    }
+    return message;
 }
 
 function safeHeaderPercentEncode(value) {
@@ -1768,7 +1785,7 @@ function createSuiteFileRow(item) {
         if (item.is_apk) {
             const analyzeBtn = document.createElement('button');
             analyzeBtn.className = 'btn-xs';
-            analyzeBtn.textContent = '反编译APK';
+            analyzeBtn.textContent = '反编译';
             analyzeBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
                 analyzeSuiteApk(item.path);
@@ -1778,7 +1795,7 @@ function createSuiteFileRow(item) {
 
         const downloadBtn = document.createElement('button');
         downloadBtn.className = 'btn-xs';
-        downloadBtn.textContent = item.is_apk ? '下载APK' : '下载';
+        downloadBtn.textContent = '下载';
         downloadBtn.addEventListener('click', (event) => {
             event.stopPropagation();
             downloadSuiteFile(item.path, item.name);
@@ -2909,7 +2926,9 @@ async function setupUsbipForward() {
                 btn.disabled = false;
 
                 // 检查是否需要SSH密码
-                if (result.need_password && result.device_host) {
+                if (result.public_client_required) {
+                    handlePublicClientRequired(result.agent_install_url);
+                } else if (result.need_password && result.device_host) {
                     showDevicePasswordModal(result.device_host);
                     addLogEntry('需要输入SSH密码以连接到 ' + result.device_host, 'warning');
                 } else if (result.error && result.error.includes('SSH连接失败')) {
@@ -2927,7 +2946,9 @@ async function setupUsbipForward() {
             btn.disabled = false;
 
             // 检查是否需要SSH密码
-            if (error.needPassword && error.deviceHost) {
+            if (error.publicClientRequired) {
+                handlePublicClientRequired(error.agentInstallUrl);
+            } else if (error.needPassword && error.deviceHost) {
                 showDevicePasswordModal(error.deviceHost);
                 addLogEntry('需要输入SSH密码以连接到 ' + error.deviceHost, 'warning');
             } else if (error.installGuide) {
@@ -3033,6 +3054,29 @@ function isUsernameManualFallbackError(errorOrMessage) {
         '网络不可达',
         '无法访问'
     ].some(keyword => message.includes(keyword));
+}
+
+function handlePublicClientRequired(agentInstallUrl) {
+    const installUrl = new URL(agentInstallUrl || '/api/public-client/install.ps1', window.location.origin);
+    installUrl.search = '';
+    const username = state.clientId && state.clientId !== 'unknown'
+        ? state.clientId.split('@').slice(0, -1).join('@')
+        : '';
+    const safeUsername = username.replace(/'/g, "''");
+
+    addLogEntry('⚠️ 公网访问需要先在 Windows 客户端运行 GMS 公网客户端 agent。', 'warning');
+    addLogEntry('以管理员身份运行【PowerShell】执行命令:', 'info', false);
+    addLogEntry('[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12', 'info', false);
+    addLogEntry('$Headers = @{"ngrok-skip-browser-warning" = "true"}', 'info', false);
+    if (username) {
+        addLogEntry(`$Username = '${safeUsername}'`, 'info', false);
+        addLogEntry('$EncodedUsername = [uri]::EscapeDataString($Username)', 'info', false);
+        addLogEntry(`iwr "${installUrl.toString()}?username=$EncodedUsername" -Headers $Headers -OutFile "$env:TEMP\\gms-public-client.ps1"`, 'info', false);
+    } else {
+        addLogEntry(`iwr "${installUrl.toString()}" -Headers $Headers -OutFile "$env:TEMP\\gms-public-client.ps1"`, 'info', false);
+    }
+    addLogEntry('powershell -ExecutionPolicy Bypass -File "$env:TEMP\\gms-public-client.ps1"', 'info', false);
+    showToast('请先运行公网客户端 agent，并保持 PowerShell 窗口打开', 'warning');
 }
 
 function updateUsernameDisplay(clientIp, username) {
@@ -3187,11 +3231,18 @@ async function checkSshd() {
     try {
         const result = await apiCall('/api/ssh/sshd', 'GET');
 
-        if (!result.installed) {
+        if (result.public_client_required) {
+            handlePublicClientRequired(result.agent_install_url);
+            return;
+        }
+
+        if (!result.installed && result.install_guide) {
             // SSHD 未安装，显示安装指南（已包含在 API 响应中）
             showSshdInstallGuide(result.install_guide);
         } else if (result.running) {
             addLogEntry(`SSHD 状态: 运行中`, 'success');
+        } else if (!result.installed) {
+            addLogEntry(`SSHD 状态: 无法确认是否已安装`, 'warning');
         } else {
             addLogEntry(`SSHD 状态: 已安装但未运行`, 'warning');
         }
@@ -3201,12 +3252,26 @@ async function checkSshd() {
             addLogEntry(`⚠️ ${result.error}`, 'warning');
         }
     } catch (error) {
+        if (error.publicClientRequired) {
+            handlePublicClientRequired(error.agentInstallUrl);
+            return;
+        }
         addLogEntry('检查 SSHD 失败: ' + error.message, 'error');
         // 即使检查失败，也尝试从服务器获取安装指南
         try {
             const result = await apiCall('/api/ssh/sshd', 'GET');
-            showSshdInstallGuide(result.install_guide);
+            if (result.public_client_required) {
+                handlePublicClientRequired(result.agent_install_url);
+            } else if (result.install_guide) {
+                showSshdInstallGuide(result.install_guide);
+            } else {
+                addLogEntry('无法加载安装指南', 'error');
+            }
         } catch (guideError) {
+            if (guideError.publicClientRequired) {
+                handlePublicClientRequired(guideError.agentInstallUrl);
+                return;
+            }
             addLogEntry('无法加载安装指南', 'error');
         }
     }
@@ -4282,9 +4347,14 @@ async function saveConfig() {
 const _logQueue = [];
 let _logFlushScheduled = false;
 
-function addLogEntry(message, type = 'info') {
+function addLogEntry(message, type = 'info', showTimestamp = true) {
     // Queue the log entry
-    _logQueue.push({ message, type, timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }) });
+    _logQueue.push({
+        message,
+        type,
+        showTimestamp,
+        timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    });
 
     // Cap queue size to prevent memory spikes during rapid WebSocket bursts
     if (_logQueue.length > 500) _logQueue.splice(0, _logQueue.length - 500);
@@ -4308,10 +4378,10 @@ function flushLogQueue() {
 
     // Use DocumentFragment for batch DOM insertion
     const fragment = document.createDocumentFragment();
-    entries.forEach(({ message, type, timestamp }) => {
+    entries.forEach(({ message, type, timestamp, showTimestamp }) => {
         const logEntry = document.createElement('div');
         logEntry.className = `log-entry log-${type}`;
-        logEntry.textContent = `[${timestamp}] ${message}`;
+        logEntry.textContent = showTimestamp ? `[${timestamp}] ${message}` : message;
         fragment.appendChild(logEntry);
     });
 
@@ -4714,9 +4784,18 @@ async function loadNotifications() {
 function toggleNotificationPanel() {
     const panel = $('notification-panel');
     if (!panel) return;
+    const isShowing = panel.classList.contains('show');
     panel.classList.toggle('show');
-    if (panel.classList.contains('show')) {
+    if (!isShowing) {
         loadNotifications();
+        // 添加 Esc 键关闭监听
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeNotificationPanel();
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
     }
 }
 
@@ -5469,6 +5548,9 @@ async function autoInstallUsbipd() {
             statusText.textContent = '❌ 安装失败: ' + (result.error || '未知错误');
             statusText.style.color = 'var(--danger-color, #dc3545)';
 
+            if (result.install_guide) {
+                showInstallGuide('usbipd 安装指南', result.install_guide);
+            }
             addLogEntry('usbipd 自动安装失败: ' + (result.error || '未知错误'), 'error');
         }
     } catch (error) {
@@ -5478,12 +5560,19 @@ async function autoInstallUsbipd() {
         statusText.textContent = '❌ 安装失败: ' + error.message;
         statusText.style.color = 'var(--danger-color, #dc3545)';
 
+        if (error.installGuide) {
+            showInstallGuide('usbipd 安装指南', error.installGuide);
+        }
         addLogEntry('usbipd 自动安装失败: ' + error.message, 'error');
     }
 }
 
 // ==================== SSHD 安装指南弹窗 ====================
 function showSshdInstallGuide(guide) {
+    if (!guide) {
+        addLogEntry('SSHD 安装指南为空，未打开弹框', 'warning');
+        return;
+    }
     const modal = document.getElementById('sshd-install-guide-modal');
     if (modal) {
         // 设置指南内容
@@ -8433,12 +8522,14 @@ async function loadApkManifest() {
             fields.push({ label: '启动 Activity', value: manifest.launchActivity, icon: '🚀' });
         }
 
-        $('apk-manifest-info').innerHTML = fields.map(f =>
-            `<div class="apk-manifest-row">
-                <div class="apk-manifest-label">${escapeHtml(f.icon)} ${escapeHtml(f.label)}</div>
-                <div class="apk-manifest-value">${escapeHtml(f.value)}</div>
-            </div>`
-        ).join('');
+        $('apk-manifest-info').innerHTML = `<div class="apk-manifest-row">
+            <div class="apk-manifest-label">📦 包名</div>
+            <div class="apk-manifest-value">${escapeHtml(manifest.package || '-')}</div>
+            <div class="apk-manifest-label">🏷️ 版本</div>
+            <div class="apk-manifest-value">${escapeHtml(version)}</div>
+            <div class="apk-manifest-label">📱 SDK</div>
+            <div class="apk-manifest-value">${escapeHtml(sdk)}</div>
+        </div>`;
 
         $('apk-raw-xml').textContent = rawXml;
     } catch (e) {
@@ -8523,12 +8614,9 @@ function renderApkSourceItems(items, container, parentPath) {
         itemHeader.className = `apk-tree-item ${item.type}`;
         itemHeader.setAttribute('data-apk-path', item.path);
 
-        const icon = item.type === 'dir' ? '📁' : '📄';
-        const iconSpan = document.createElement('span');
-        iconSpan.textContent = icon;
         const nameSpan = document.createElement('span');
         nameSpan.textContent = item.name;
-        itemHeader.append(iconSpan, nameSpan);
+        itemHeader.appendChild(nameSpan);
 
         if (item.type === 'dir') {
             const childContainer = document.createElement('div');
@@ -8537,7 +8625,6 @@ function renderApkSourceItems(items, container, parentPath) {
             itemHeader.addEventListener('click', async () => {
                 if (childContainer.classList.contains('expanded')) {
                     childContainer.classList.remove('expanded');
-                    itemHeader.querySelector('span').textContent = '📁';
                     return;
                 }
 
@@ -8546,7 +8633,6 @@ function renderApkSourceItems(items, container, parentPath) {
                 }
 
                 childContainer.classList.add('expanded');
-                itemHeader.querySelector('span').textContent = '📂';
             });
 
             itemDiv.appendChild(itemHeader);
@@ -8830,6 +8916,10 @@ function ensureSecurityAuditDetailModal() {
     modal.addEventListener('click', (event) => {
         if (event.target === modal) closeSecurityAuditDetailModal();
     });
+    // 支持 Esc 键关闭
+    modal.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeSecurityAuditDetailModal();
+    });
     return modal;
 }
 
@@ -8838,6 +8928,11 @@ function closeSecurityAuditDetailModal() {
     if (modal) {
         modal.classList.remove('show');
         modal.style.display = '';
+    }
+    // 移除全局 Esc 监听器
+    if (window._securityAuditEscHandler) {
+        document.removeEventListener('keydown', window._securityAuditEscHandler);
+        window._securityAuditEscHandler = null;
     }
 }
 
@@ -8868,6 +8963,17 @@ async function showSecurityAuditDetail(auditId) {
     modal.style.display = '';
     modal.classList.add('show');
     body.innerHTML = '加载中...';
+
+    // 添加全局 Esc 监听器
+    if (window._securityAuditEscHandler) {
+        document.removeEventListener('keydown', window._securityAuditEscHandler);
+    }
+    window._securityAuditEscHandler = (event) => {
+        if (event.key === 'Escape') {
+            closeSecurityAuditDetailModal();
+        }
+    };
+    document.addEventListener('keydown', window._securityAuditEscHandler);
 
     try {
         const result = await apiCall(`/api/security-audit/detail/${encodeURIComponent(auditId)}`);

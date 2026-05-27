@@ -30,7 +30,7 @@ class SecurityAuditLogger:
 
     def __init__(self, log_path: Optional[str] = None, max_read_lines: int = 5000):
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.log_path = log_path or os.path.join(base_dir, 'data', 'security_audit.jsonl')
+        self.log_path = log_path or os.path.join(base_dir, 'data', 'security_audit.json')
         self.max_read_lines = max_read_lines
         self._lock = threading.Lock()
 

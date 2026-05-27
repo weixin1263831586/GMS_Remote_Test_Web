@@ -25,6 +25,17 @@ USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行Power
 验证安装：usbipd --version'''
 
 
+def split_host_port(hostname: str, default_port: int = 22) -> Tuple[str, int]:
+    """Parse host[:port] for IPv4/hostname targets."""
+    if not hostname:
+        return hostname, default_port
+    if hostname.count(':') == 1:
+        host, port_text = hostname.rsplit(':', 1)
+        if port_text.isdigit():
+            return host, int(port_text)
+    return hostname, default_port
+
+
 class USBIPManager:
     """
     USB/IP管理器
@@ -45,7 +56,8 @@ class USBIPManager:
     def start_usbip(
         self,
         device_host: str,
-        device_password: str = None
+        device_password: str = None,
+        usbip_attach_host: str = None
     ) -> Dict[str, Any]:
         """
         启动USB/IP转发
@@ -85,7 +97,9 @@ class USBIPManager:
 
             # 连接Windows主机
             username, hostname = device_host.split('@', 1)
-            win_ssh = self._create_windows_ssh(hostname, username, device_password)
+            ssh_hostname, ssh_port = split_host_port(hostname)
+            usbip_attach_host = usbip_attach_host or config.get('usbip_attach_host') or ssh_hostname
+            win_ssh = self._create_windows_ssh(ssh_hostname, username, device_password, ssh_port)
 
             if not win_ssh:
                 return {'success': False, 'error': f'SSH连接失败到 {device_host}'}
@@ -135,7 +149,7 @@ class USBIPManager:
                     # Attach设备
                     attached, device_list = self._attach_devices(
                         ubuntu_ssh,
-                        hostname,
+                        usbip_attach_host,
                         busids
                     )
 
@@ -221,7 +235,7 @@ class USBIPManager:
 
     # ============ 辅助方法 ============
 
-    def _create_windows_ssh(self, hostname: str, username: str, password: str):
+    def _create_windows_ssh(self, hostname: str, username: str, password: str, port: int = 22):
         """创建Windows主机SSH连接"""
         try:
             import paramiko
@@ -229,6 +243,7 @@ class USBIPManager:
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             ssh.connect(
                 hostname=hostname,
+                port=port,
                 username=username,
                 password=password,
                 timeout=10
@@ -270,7 +285,16 @@ class USBIPManager:
 
             logger.info(f"USB/IP devices:\n{stdout}")
 
+            default_vid_pids = {'2207:0006'}
             vid_pid = config.get('usbip_vid_pid')
+            if vid_pid:
+                default_vid_pids.add(vid_pid.lower())
+            android_markers = (
+                'android',
+                'adb',
+                'rk356',
+                'rockchip',
+            )
 
             devices = []
             in_connected = False
@@ -281,7 +305,8 @@ class USBIPManager:
                 elif 'Persisted:' in line:
                     break
                 elif in_connected:
-                    if 'Android ADB Interface' in line or (vid_pid and vid_pid in line):
+                    line_lower = line.lower()
+                    if any(pid in line_lower for pid in default_vid_pids) or any(marker in line_lower for marker in android_markers):
                         parts = line.strip().split()
                         if parts and '-' in parts[0]:
                             devices.append(parts[0])

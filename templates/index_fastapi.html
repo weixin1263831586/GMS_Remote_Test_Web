@@ -12,7 +12,7 @@
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260525-05" crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260526-05" crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -440,6 +440,7 @@
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
                             <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">用户标识</th>
                             <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">IP地址</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 120px;">来源</th>
                             <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">状态</th>
                             <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">连接时间</th>
                             <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">最后活跃</th>
@@ -448,7 +449,7 @@
                     </thead>
                     <tbody id="users-table-body">
                         <tr>
-                            <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
                             </td>
                         </tr>
@@ -1932,7 +1933,7 @@
             if (users.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                        <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                             暂无在线用户
                         </td>
                     </tr>
@@ -1950,6 +1951,8 @@
                 const lastSeen = user.last_seen ? formatTime(user.last_seen) : '-';
                 const createdAt = user.created_at ? formatTime(user.created_at) : '-';
                 const devices = user.devices && user.devices.length > 0 ? user.devices.join(', ') : '-';
+                const sourceLabel = user.source_label || '-';
+                const sourceColor = user.source === 'internal' ? 'var(--primary-color)' : (user.source === 'public' ? 'var(--warning-color)' : 'var(--text-secondary)');
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
@@ -1958,6 +1961,9 @@
                         </td>
                         <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
                             ${user.ip}
+                        </td>
+                        <td style="padding: 10px; text-align: center; font-size: 11px; color: ${sourceColor}; font-weight: 600;">
+                            ${sourceLabel}
                         </td>
                         <td style="padding: 10px; text-align: center;">
                             <span style="color: ${statusColor}; font-weight: 600; font-size: 11px;">●</span>
@@ -3697,17 +3703,20 @@
             // 创建WebSocket连接
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/api/system/websocket/${clientId}`;
-            terminalSocket = new WebSocket(wsUrl);
+            const socket = new WebSocket(wsUrl);
+            terminalSocket = socket;
 
-            terminalSocket.onopen = () => {
+            socket.onopen = () => {
+                if (socket !== terminalSocket) return;
                 debugLog('Terminal WebSocket connected');
+                isReconnecting = false;
                 updateTerminalStatus(true);
 
                 // 检查是否为路由命令模式
                 if (silentMode.type === 'route' && silentMode.pendingCommand) {
                     debugLog('Route command mode: enabling silent mode');
                     updateSilentMode(true, 'route', silentMode.pendingCommand);
-                    terminalSocket.send(JSON.stringify({
+                    socket.send(JSON.stringify({
                         type: 'terminal_connect',
                         mode: 'ssh',
                         host: terminalConfig.ssh_host,
@@ -3720,7 +3729,7 @@
                 if (pendingAdbDevice) {
                     debugLog('Opening ADB shell for device:', pendingAdbDevice);
                     updateSilentMode(true, 'adb');
-                    terminalSocket.send(JSON.stringify({
+                    socket.send(JSON.stringify({
                         type: 'terminal_connect',
                         mode: 'adb',
                         serial_no: pendingAdbDevice,
@@ -3730,7 +3739,7 @@
                     pendingAdbDevice = null;
                 } else {
                     // 请求SSH连接
-                    terminalSocket.send(JSON.stringify({
+                    socket.send(JSON.stringify({
                         type: 'terminal_connect',
                         mode: 'ssh',
                         host: terminalConfig.ssh_host,
@@ -3739,7 +3748,8 @@
                 }
             };
 
-            terminalSocket.onclose = () => {
+            socket.onclose = () => {
+                if (socket !== terminalSocket) return;
                 debugLog('Terminal WebSocket disconnected');
                 updateTerminalStatus(false);
                 // 只有在非重新连接时才显示断开消息
@@ -3748,12 +3758,14 @@
                 }
             };
 
-            terminalSocket.onerror = (error) => {
+            socket.onerror = (error) => {
+                if (socket !== terminalSocket) return;
                 console.error('WebSocket error:', error);
                 updateTerminalStatus(false);
             };
 
-            terminalSocket.onmessage = (event) => {
+            socket.onmessage = (event) => {
+                if (socket !== terminalSocket) return;
                 try {
                     const msg = JSON.parse(event.data);
 
@@ -4095,8 +4107,10 @@
         }
 
         function reconnectTerminal() {
+            isReconnecting = true;
             if (terminalSocket) {
                 terminalSocket.close();
+                terminalSocket = null;
             }
             if (terminal) {
                 terminal.clear();
