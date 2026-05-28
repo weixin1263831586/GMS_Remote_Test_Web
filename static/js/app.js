@@ -845,12 +845,17 @@ function initSocket() {
     });
 
     state.socket.on('test_complete', () => {
+        console.log('[WebSocket] test_complete 事件触发');
         state.testing = false;
         updateTestToggleButton(false);
         addLogEntry('测试完成', 'success');
         showToast('测试完成', 'success');
         // 刷新设备列表，更新设备锁定状态
         loadDevices(true);
+        // 弹出右下角 Snackbar 通知
+        if (typeof window.showSnackbar === 'function') {
+            window.showSnackbar('测试任务完成', '测试已结束，请查看测试结果', 'success');
+        }
     });
 
     state.socket.on('notification', (data) => {
@@ -1347,7 +1352,8 @@ async function loadTestSuites(forceRefresh = false) {
     isRefreshingTestSuites = true;
 
     try {
-        const response = await apiCall('/api/test/suites');
+        // 使用 /api/test/suites?base_path=/home/hcq/GMS-Suite 来扫描整个 GMS-Suite 目录
+        const response = await apiCall('/api/test/suites?base_path=/home/hcq/GMS-Suite');
 
         if (response.success && response.suites) {
             testSuitesCache = response.suites;
@@ -1532,6 +1538,281 @@ function filterTestSuiteBrowserList() {
     renderTestSuiteBrowserList();
 }
 
+// ==================== 测试套件下载和解压 ====================
+
+// 暴露到全局作用域
+window.downloadTestSuite = async function downloadTestSuite() {
+    const urlInput = $('suite-download-url');
+    const downloadBtn = $('btn-download-suite');
+    const extractBtn = $('btn-extract-suite');
+    const progressDiv = $('suite-download-progress');
+    const progressBar = $('suite-progress-bar');
+    const progressPercent = $('suite-progress-percent');
+    const progressStatus = $('suite-progress-status');
+    const logDiv = $('suite-download-log');
+
+    console.log('[downloadTestSuite] urlInput:', urlInput);
+    console.log('[downloadTestSuite] downloadBtn:', downloadBtn);
+
+    if (!urlInput || !urlInput.value) {
+        showToast('请输入下载地址', 'error');
+        return;
+    }
+
+    const url = urlInput.value.trim();
+
+    console.log('[downloadTestSuite] URL:', url);
+
+    // 禁用按钮
+    if (downloadBtn) {
+        downloadBtn.disabled = true;
+        downloadBtn.textContent = '⬇️ 下载中...';
+    }
+    if (extractBtn) extractBtn.disabled = true;
+
+    // 显示进度
+    if (progressDiv) progressDiv.style.display = 'block';
+    if (logDiv) {
+        logDiv.style.display = 'block';
+        logDiv.innerHTML = '';
+    }
+
+    const log = (msg) => {
+        if (logDiv) {
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${time}] ${msg}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        console.log('[downloadTestSuite] ' + msg);
+    };
+
+    log(`开始下载：${url}`);
+    console.log('[downloadTestSuite] 开始 fetch 请求...');
+
+    try {
+        const response = await fetch('/api/test/suites/download-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: url,
+                save_dir: '/home/hcq/GMS-Suite'
+            })
+        });
+        console.log('[downloadTestSuite] fetch 响应状态:', response.status);
+
+        const result = await response.json();
+        console.log('[downloadTestSuite] 响应结果:', result);
+
+        if (result.success) {
+            log(`✅ 下载完成：${result.archive_path}`);
+            log(`📦 文件大小：${(result.file_size / 1024 / 1024).toFixed(2)} MB`);
+
+            if (progressBar) progressBar.style.width = '100%';
+            if (progressPercent) progressPercent.textContent = '100%';
+            if (progressStatus) progressStatus.textContent = '✅ 下载完成';
+
+            showToast(`下载完成：${result.message}`, 'success');
+
+            // 刷新测试套件列表
+            await refreshTestSuiteBrowser();
+        } else {
+            log(`❌ 下载失败：${result.error}`);
+            if (progressStatus) progressStatus.textContent = '❌ 下载失败';
+            showToast(`下载失败：${result.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('[downloadTestSuite] 异常:', error);
+        log(`❌ 错误：${error.message}`);
+        if (progressStatus) progressStatus.textContent = '❌ 错误';
+        showToast(`下载失败：${error.message}`, 'error');
+    } finally {
+        console.log('[downloadTestSuite] finally - 恢复按钮');
+        // 恢复按钮
+        if (downloadBtn) {
+            downloadBtn.disabled = false;
+            downloadBtn.textContent = '⬇️ 下载套件';
+        }
+        if (extractBtn) extractBtn.disabled = false;
+    }
+};
+
+// 页面加载完成后验证函数是否暴露成功
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('[Init] downloadTestSuite exposed:', typeof window.downloadTestSuite === 'function');
+    console.log('[Init] extractTestSuite exposed:', typeof window.extractTestSuite === 'function');
+    console.log('[Init] addLocalTestSuite exposed:', typeof window.addLocalTestSuite === 'function');
+    console.log('[Init] showAddLocalSuiteDialog exposed:', typeof window.showAddLocalSuiteDialog === 'function');
+});
+
+// 显示添加本地测试套件路径弹框
+window.showAddLocalSuiteDialog = function showAddLocalSuiteDialog() {
+    const modal = $('add-local-suite-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        const input = $('local-suite-path-input');
+        if (input) {
+            input.value = '';
+            input.focus();
+        }
+    }
+};
+
+// 关闭弹框
+window.closeAddLocalSuiteModal = function closeAddLocalSuiteModal() {
+    const modal = $('add-local-suite-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+};
+
+// 处理 Esc 键关闭弹框
+window.handleAddLocalSuiteKeydown = function handleAddLocalSuiteKeydown(event) {
+    if (event.key === 'Escape') {
+        closeAddLocalSuiteModal();
+    }
+    // 回车键提交
+    if (event.key === 'Enter') {
+        submitAddLocalSuite();
+    }
+};
+
+// 提交添加本地测试套件
+window.submitAddLocalSuite = async function submitAddLocalSuite() {
+    const pathInput = $('local-suite-path-input');
+    if (!pathInput || !pathInput.value) {
+        showToast('请输入本地路径', 'error');
+        return;
+    }
+
+    const localPath = pathInput.value.trim();
+    console.log('[submitAddLocalSuite] 本地路径:', localPath);
+
+    try {
+        const response = await fetch('/api/test/suites/add-local', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: localPath })
+        });
+
+        const result = await response.json();
+        console.log('[submitAddLocalSuite] 响应结果:', result);
+
+        if (result.success) {
+            showToast(`添加成功：${result.message}`, 'success');
+            closeAddLocalSuiteModal();
+            // 刷新测试套件列表
+            await refreshTestSuiteBrowser();
+        } else {
+            showToast(`添加失败：${result.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('[submitAddLocalSuite] 异常:', error);
+        showToast(`添加失败：${error.message}`, 'error');
+    }
+};
+
+// 暴露到全局作用域 - 添加本地测试套件路径（保留向后兼容）
+window.addLocalTestSuite = async function addLocalTestSuite() {
+    // 已废弃，改用弹框方式
+    showAddLocalSuiteDialog();
+};
+
+// 暴露到全局作用域
+window.extractTestSuite = async function extractTestSuite() {
+    const urlInput = $('suite-download-url');
+    const downloadBtn = $('btn-download-suite');
+    const extractBtn = $('btn-extract-suite');
+    const logDiv = $('suite-download-log');
+
+    // 获取最近下载的文件
+    try {
+        const response = await fetch('/api/test/suites?base_path=/home/hcq/GMS-Suite');
+        const result = await response.json();
+
+        // 查找最新的压缩包文件
+        const archiveExtensions = ['.zip', '.tar.gz', '.tgz', '.tar.bz2', '.tar'];
+        let archivePath = '';
+
+        if (result.suites && result.suites.length > 0) {
+            // 从套件列表中查找压缩包
+            for (const suite of result.suites) {
+                for (const ext of archiveExtensions) {
+                    if (suite.tools_path.endsWith(ext)) {
+                        archivePath = suite.tools_path;
+                        break;
+                    }
+                }
+                if (archivePath) break;
+            }
+        }
+
+        // 如果没有找到，使用 URL 输入框的值
+        if (!archivePath && urlInput && urlInput.value) {
+            const filename = urlInput.value.split('/').pop();
+            archivePath = `/home/hcq/GMS-Suite/${filename}`;
+        }
+
+        if (!archivePath) {
+            showToast('未找到可解压的压缩包', 'error');
+            return;
+        }
+
+        // 禁用按钮
+        if (extractBtn) {
+            extractBtn.disabled = true;
+            extractBtn.textContent = '📦 解压中...';
+        }
+        if (downloadBtn) downloadBtn.disabled = true;
+
+        if (logDiv) {
+            logDiv.style.display = 'block';
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${time}] 开始解压：${archivePath}\n`;
+        }
+
+        const response2 = await fetch('/api/test/suites/extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                archive_path: archivePath,
+                extract_dir: '/home/hcq/GMS-Suite'
+            })
+        });
+
+        const result2 = await response2.json();
+
+        if (result2.success) {
+            if (logDiv) {
+                const time = new Date().toLocaleTimeString();
+                logDiv.innerHTML += `[${time}] ✅ 解压完成：${result2.extracted_path}\n`;
+            }
+            showToast(`解压完成：${result2.message}`, 'success');
+
+            // 刷新测试套件列表
+            await refreshTestSuiteBrowser();
+        } else {
+            if (logDiv) {
+                const time = new Date().toLocaleTimeString();
+                logDiv.innerHTML += `[${time}] ❌ 解压失败：${result2.error}\n`;
+            }
+            showToast(`解压失败：${result2.error}`, 'error');
+        }
+    } catch (error) {
+        if (logDiv) {
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${time}] ❌ 错误：${error.message}\n`;
+        }
+        showToast(`解压失败：${error.message}`, 'error');
+    } finally {
+        // 恢复按钮
+        if (extractBtn) {
+            extractBtn.disabled = false;
+            extractBtn.textContent = '📦 解压套件';
+        }
+        if (downloadBtn) downloadBtn.disabled = false;
+    }
+}
+
 function clearSuiteBrowserSelection(message) {
     state.suiteBrowser.selectedSuitePath = '';
     state.suiteBrowser.currentPath = '';
@@ -1590,7 +1871,10 @@ function renderTestSuiteBrowserList() {
 
         const badge = document.createElement('span');
         badge.className = 'suite-type-badge';
-        badge.textContent = (suite.test_type || '-').toUpperCase();
+        let displayType = suite.test_type || '-';
+        // 将 cts-verifier 显示为 CTS-V
+        if (displayType === 'cts-verifier') displayType = 'cts-v';
+        badge.textContent = displayType.toUpperCase();
 
         const main = document.createElement('div');
         main.className = 'suite-suite-main';
@@ -1625,7 +1909,10 @@ async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
 
     const titleEl = $('suite-browser-title');
     const pathEl = $('suite-browser-path');
-    if (titleEl) titleEl.textContent = `${(suite.test_type || '').toUpperCase()} ${getSuiteDisplayName(suite)}`;
+    let displayType = suite.test_type || '';
+    // 将 cts-verifier 显示为 CTS-V
+    if (displayType === 'cts-verifier') displayType = 'cts-v';
+    if (titleEl) titleEl.textContent = `${displayType.toUpperCase()} ${getSuiteDisplayName(suite)}`;
     if (pathEl) pathEl.textContent = getSuiteRootFromToolsPath(suite.tools_path);
 
     renderTestSuiteBrowserList();
@@ -3050,7 +3337,9 @@ function isUsernameManualFallbackError(errorOrMessage) {
         '连接超时',
         '连接被拒绝',
         '网络不可达',
-        '无法访问'
+        '无法访问',
+        'authentication',
+        '认证失败'
     ].some(keyword => message.includes(keyword));
 }
 
@@ -4067,7 +4356,7 @@ async function startTest() {
             test_case: testCase,
             retry_dir: retryResult,
             test_suite: suitePath,
-            local_server: state.config?.local_server || ''
+            local_server: state.config?.local_server || state.clientId || ''
         });
 
         debugLog('[startTest] API call successful, setting testing = true');
@@ -4661,6 +4950,56 @@ function showToast(message, type = 'info') {
         toast.className = `toast ${type}`;
     }, duration);
 }
+
+// ==================== Snackbar 右下角通知 ====================
+
+// 暴露到全局作用域，确保模板中的函数可以调用
+window.showSnackbar = function showSnackbar(title, message, level = 'info', duration = 5000) {
+    console.log('[showSnackbar] 被调用:', { title, message, level });
+
+    const container = document.getElementById('snackbar-container');
+    console.log('[showSnackbar] container:', container);
+
+    if (!container) {
+        console.error('[Snackbar] Container not found! 无法显示通知');
+        return;
+    }
+
+    const icons = {
+        'success': '✅',
+        'error': '❌',
+        'warning': '⚠️',
+        'info': '📢'
+    };
+
+    const snackbar = document.createElement('div');
+    snackbar.className = `snackbar ${level}`;
+    snackbar.innerHTML = `
+        <span class="snackbar-icon">${icons[level] || icons.info}</span>
+        <div class="snackbar-content">
+            <div class="snackbar-title">${escapeHtml(title)}</div>
+            <div class="snackbar-message">${escapeHtml(message || '')}</div>
+        </div>
+        <button class="snackbar-close" onclick="this.parentElement.remove()">×</button>
+    `;
+
+    console.log('[showSnackbar] 创建 snackbar 元素:', snackbar);
+    container.appendChild(snackbar);
+    console.log('[showSnackbar] 已添加到容器');
+
+    // 自动关闭
+    setTimeout(() => {
+        if (snackbar.parentElement) {
+            snackbar.classList.add('snackbar-exit');
+            setTimeout(() => {
+                if (snackbar.parentElement) {
+                    snackbar.remove();
+                    console.log('[showSnackbar] 已移除 snackbar');
+                }
+            }, 300);
+        }
+    }, duration);
+};
 
 // ==================== Notification Center ====================
 function normalizeNotification(notification) {

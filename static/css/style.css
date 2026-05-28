@@ -2622,7 +2622,7 @@ select option {
     justify-content: space-between;
     align-items: center;
     gap: 8px;
-    padding: 10px;
+    padding: 8px;
     border-bottom: 1px solid var(--border-color);
 }
 .suite-browser-count,
