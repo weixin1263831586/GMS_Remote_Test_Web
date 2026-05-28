@@ -43,7 +43,7 @@
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'tools'].includes(hashPage)) {
+            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'tools', 'ai-assistant'].includes(hashPage)) {
                 targetPage = hashPage;
             } else {
                 targetPage = savedPage;
@@ -222,7 +222,7 @@
                     <span class="sidebar-icon">🐧</span>
                     <span class="sidebar-text">主机终端</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="users" data-page-order="5" onclick="switchPage('users', event)">
+                <a href="#" class="sidebar-item" data-page="users" data-page-order="3" onclick="switchPage('users', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">👥</span>
                     <span class="sidebar-text">用户管理</span>
@@ -232,45 +232,50 @@
                     <span class="sidebar-icon">📱</span>
                     <span class="sidebar-text">设备管理</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="reports" data-page-order="7" onclick="switchPage('reports', event)">
+                <a href="#" class="sidebar-item" data-page="reports" data-page-order="5" onclick="switchPage('reports', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📊</span>
                     <span class="sidebar-text">报告管理</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="report-analysis" data-page-order="8" onclick="switchPage('report-analysis', event)">
+                <a href="#" class="sidebar-item" data-page="report-analysis" data-page-order="6" onclick="switchPage('report-analysis', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📈</span>
                     <span class="sidebar-text">报告分析</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="apk-analysis" data-page-order="9" onclick="switchPage('apk-analysis', event)">
+                <a href="#" class="sidebar-item" data-page="apk-analysis" data-page-order="7" onclick="switchPage('apk-analysis', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon"><img src="/static/icons/jadx-icon.webp" alt="APK"></span>
                     <span class="sidebar-text">APK分析</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="test-suites" data-page-order="3" onclick="switchPage('test-suites', event)">
+                <a href="#" class="sidebar-item" data-page="test-suites" data-page-order="8" onclick="switchPage('test-suites', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📚</span>
                     <span class="sidebar-text">测试套件</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="api-docs" data-page-order="10" onclick="switchPage('api-docs', event)">
+                <a href="#" class="sidebar-item" data-page="api-docs" data-page-order="9" onclick="switchPage('api-docs', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📡</span>
                     <span class="sidebar-text">系统接口</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="architecture" data-page-order="11" onclick="switchPage('architecture', event)">
+                <a href="#" class="sidebar-item" data-page="architecture" data-page-order="10" onclick="switchPage('architecture', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🏗️</span>
                     <span class="sidebar-text">系统架构</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="tools" data-page-order="12" onclick="switchPage('tools', event)">
+                <a href="#" class="sidebar-item" data-page="tools" data-page-order="11" onclick="switchPage('tools', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🌐</span>
                     <span class="sidebar-text">常用网址</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="security-audit" data-page-order="6" onclick="switchPage('security-audit', event)">
+                <a href="#" class="sidebar-item" data-page="security-audit" data-page-order="12" onclick="switchPage('security-audit', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🛡️</span>
                     <span class="sidebar-text">安全审计</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="ai-assistant" data-page-order="13" onclick="switchPage('ai-assistant', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">🤖</span>
+                    <span class="sidebar-text">GMS助手</span>
                 </a>
             </nav>
 
@@ -1070,6 +1075,14 @@
                 </div>
 
             </div>
+        </div>
+
+        <!-- GMS助手页面 -->
+        <div class="container page-content" id="page-ai-assistant">
+            <div class="section-title">🤖 GMS助手</div>
+            <iframe id="ai-assistant-frame" src="http://172.16.14.248:5173/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
+                    style="width: 100%; height: calc(100vh - 120px); border: none; border-radius: 8px; background: var(--light-bg);">
+            </iframe>
         </div>
 
         <!-- 添加分类弹框 -->
@@ -2421,6 +2434,7 @@
             document.getElementById('page-api-docs').classList.remove('active');
             document.getElementById('page-architecture').classList.remove('active');
             document.getElementById('page-tools').classList.remove('active');
+            document.getElementById('page-ai-assistant').classList.remove('active');
 
             // 显示目标页面
             document.getElementById(`page-${pageName}`).classList.add('active');
@@ -2447,7 +2461,8 @@
                 'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS远程测试',
                 'tools': '常用网址 - GMS远程测试',
-                'security-audit': '安全审计 - GMS远程测试'
+                'security-audit': '安全审计 - GMS 远程测试',
+                'ai-assistant': 'GMS助手 - GMS 远程测试'
             };
             document.title = titles[pageName] || 'GMS远程测试';
             if (typeof recordSecurityPageView === 'function') {
@@ -2554,6 +2569,14 @@
             // 如果切换到常用网址页面，加载网址列表
             if (pageName === 'tools') {
                 loadToolsList();
+            }
+
+            // 如果切换到 GMS助手页面，刷新 iframe
+            if (pageName === 'ai-assistant') {
+                const iframe = document.getElementById('ai-assistant-frame');
+                if (iframe && iframe.src) {
+                    // 保持当前 URL，无需刷新
+                }
             }
         }
 
@@ -4366,13 +4389,16 @@
                 'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS 远程测试',
                 'tools': '常用网址 - GMS 远程测试',
-                'security-audit': '安全审计 - GMS远程测试',
+                'security-audit': '安全审计 - GMS 远程测试',
+                'ai-assistant': 'GMS助手 - GMS 远程测试'
             };
             document.title = titles[targetPage] || 'GMS远程测试';
             if (typeof recordSecurityPageView === 'function') {
                 recordSecurityPageView(targetPage);
             }
             if (targetPage === 'tools') loadToolsList();
+            if (targetPage === 'ai-assistant') {
+            }
 
             // 加载保存的导航栏排序
             loadSidebarOrder();
@@ -4407,6 +4433,11 @@
         (function applySavedSidebarOrder() {
             const savedOrder = window.__savedSidebarOrder;
             if (!savedOrder || !Array.isArray(savedOrder) || savedOrder.length === 0) return;
+
+            if (savedOrder[0] === 'ai-assistant') {
+                console.log('[Sidebar] GMS assistant is first, using default order');
+                return;
+            }
 
             const nav = document.getElementById('sidebar-nav');
             if (!nav) return;
