@@ -8627,6 +8627,7 @@ window.apkStatusPollInFlight = false;
 window.apkNotifiedTaskId = null;
 window.apkOpenFiles = new Map();
 window.apkActiveFilePath = null;
+window.apkCurrentFiles = [];
 
 function stopApkPolling() {
     clearInterval(window.apkPollInterval);
@@ -8642,14 +8643,22 @@ function setApkUploadEmpty(empty) {
 }
 
 function initApkAnalysisPage() {
-    const uploadZone = $('apk-upload-zone');
-    const fileInput = $('apk-file-input');
+    // 直接获取元素，不依赖缓存
+    const uploadZone = document.getElementById('apk-upload-zone');
+    const fileInput = document.getElementById('apk-file-input');
 
-    if (!uploadZone || uploadZone.dataset.initialized) return;
-    uploadZone.dataset.initialized = 'true';
+    if (!uploadZone || !fileInput) return;
+
+    // 如果事件已绑定，只更新状态
+    if (uploadZone.dataset.eventsBound === 'true') {
+        setApkUploadEmpty(!window.apkCurrentTaskId);
+        return;
+    }
+
     setApkUploadEmpty(!window.apkCurrentTaskId);
     initApkSourceResizer();
 
+    // 绑定拖拽事件
     uploadZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         uploadZone.classList.add('drag-over');
@@ -8665,11 +8674,14 @@ function initApkAnalysisPage() {
         }
     });
 
+    // 绑定文件选择事件
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
             handleApkFile(e.target.files[0]);
         }
     });
+
+    uploadZone.dataset.eventsBound = 'true';
 }
 
 function initApkSourceResizer() {
@@ -8982,6 +8994,8 @@ async function loadApkSourceTree(path = '') {
         }
 
         const items = data.data.items;
+
+        // 不再在加载时构建索引，改为首次搜索时构建
 
         if (items.length === 0) {
             $('apk-source-tree').innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">目录为空</div>';
@@ -9306,6 +9320,7 @@ function resetApkAnalysis() {
     stopApkPolling();
     window.apkCurrentTaskId = null;
     window.apkNotifiedTaskId = null;
+    resetApkFileIndex();
 
     setApkUploadEmpty(true);
     $('apk-analysis-status').style.display = 'none';
@@ -9315,6 +9330,12 @@ function resetApkAnalysis() {
     $('apk-progress-fill').style.width = '0%';
     $('apk-analysis-progress-container').style.display = 'none';
     $('apk-analysis-progress-bar').style.width = '0%';
+
+    // 重置上传区域状态，允许重新绑定事件
+    const uploadZone = document.getElementById('apk-upload-zone');
+    if (uploadZone) {
+        uploadZone.dataset.eventsBound = '';
+    }
 
     const sourceTree = $('apk-source-tree');
     if (sourceTree) {
@@ -9629,3 +9650,215 @@ window.requestBrowserNotificationPermission = requestBrowserNotificationPermissi
 window.markNotificationRead = markNotificationRead;
 window.markAllNotificationsRead = markAllNotificationsRead;
 window.clearNotifications = clearNotifications;
+
+// ==================== APK 文件搜索功能 ====================
+
+let apkSearchDebounceTimer = null;
+let apkFileIndex = new Map(); // 惰性缓存：path -> { name, type, children? }
+let apkIndexBuilt = false; // 索引是否已构建
+let apkIndexBuilding = false; // 是否正在构建索引
+
+function buildApkFileIndex(items, parentPath) {
+    // 缓存当前加载的目录层
+    for (const item of items) {
+        apkFileIndex.set(item.path, {
+            name: item.name,
+            type: item.type,
+            children: item.children?.map(c => c.path) || []
+        });
+    }
+}
+
+async function buildFullApkIndex() {
+    // 构建完整索引（首次搜索时调用）
+    if (apkIndexBuilt || apkIndexBuilding) return;
+    apkIndexBuilding = true;
+
+    try {
+        const rootData = await apiCall(`/api/apk/source/${window.apkCurrentTaskId}?path=`);
+        if (rootData.success && rootData.data.items) {
+            buildApkFileIndex(rootData.data.items, '');
+            // 递归缓存所有子目录（不管 children 是否有数据）
+            for (const item of rootData.data.items) {
+                if (item.type === 'dir') {
+                    await cacheApkDirectory(item.path);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[APK Index] Build failed:', e);
+    } finally {
+        apkIndexBuilding = false;
+        apkIndexBuilt = true;
+    }
+}
+
+async function cacheApkDirectory(path) {
+    // 递归缓存单个目录
+    try {
+        const data = await apiCall(`/api/apk/source/${window.apkCurrentTaskId}?path=${encodeURIComponent(path)}`);
+        if (data.success && data.data.items) {
+            buildApkFileIndex(data.data.items, path);
+            // 继续缓存子目录（不管 children 是否有数据）
+            for (const item of data.data.items) {
+                if (item.type === 'dir') {
+                    await cacheApkDirectory(item.path);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[APK Index] Cache dir failed:', path, e);
+    }
+}
+
+function resetApkFileIndex() {
+    apkFileIndex.clear();
+    apkIndexBuilt = false;
+    apkIndexBuilding = false;
+}
+
+function getApkFilesByQuery(query) {
+    // 惰性搜索：遍历索引找到匹配的文件
+    const matches = [];
+    const lowerQuery = query.toLowerCase();
+    for (const [path, info] of apkFileIndex) {
+        if (info.type === 'file' && info.name.toLowerCase().includes(lowerQuery)) {
+            matches.push({ path, name: info.name });
+            if (matches.length >= 20) break; // 提前退出
+        }
+    }
+    return matches;
+}
+
+async function filterApkFiles() {
+    const query = $('apk-file-search')?.value?.toLowerCase() || '';
+    const resultsEl = $('apk-search-results');
+
+    if (!query || query.length < 2) {
+        if (resultsEl) resultsEl.style.display = 'none';
+        return;
+    }
+
+    // 首次搜索时构建完整索引，并切换到源码预览标签
+    if (!apkIndexBuilt && !apkIndexBuilding) {
+        // 自动切换到源码预览标签
+        if (typeof switchApkTab === 'function') {
+            switchApkTab('source');
+        }
+        showToast('正在构建文件索引...', 'info');
+        await buildFullApkIndex();
+    }
+
+    // 等待索引构建完成
+    if (apkIndexBuilding) {
+        await new Promise(resolve => {
+            const check = setInterval(() => {
+                if (!apkIndexBuilding) {
+                    clearInterval(check);
+                    resolve();
+                }
+            }, 100);
+        });
+    }
+
+    // 过滤匹配的文件（最多 20 项）
+    const matches = getApkFilesByQuery(query);
+
+    if (!resultsEl || matches.length === 0) {
+        if (resultsEl) resultsEl.style.display = 'none';
+        return;
+    }
+
+    // 显示搜索结果
+    resultsEl.innerHTML = '';
+    for (const file of matches) {
+        const item = document.createElement('div');
+        item.className = 'apk-search-result-item';
+        item.onclick = () => jumpToApkFile(file.path);
+        item.innerHTML = `<span style="font-family: monospace;">${escapeHtml(file.name)}</span><span style="color: var(--text-secondary); font-size: 11px; margin-left: 8px;">${escapeHtml(file.path)}</span>`;
+        resultsEl.appendChild(item);
+    }
+    resultsEl.style.display = 'block';
+
+    // 定位搜索结果到搜索框下方，宽度与输入框一致
+    const searchEl = $('apk-file-search');
+    if (searchEl && resultsEl) {
+        const rect = searchEl.getBoundingClientRect();
+        resultsEl.style.position = 'absolute';
+        resultsEl.style.top = (rect.bottom + window.scrollY) + 'px';
+        resultsEl.style.left = (rect.left + window.scrollY) + 'px';
+        resultsEl.style.width = rect.width + 'px';
+    }
+}
+
+// Use generic debounce utility for APK search
+const debounceFilterApkFiles = debounce(filterApkFiles, 300);
+
+function jumpToApkFile(selectedPath) {
+    const query = $('apk-file-search')?.value?.toLowerCase() || '';
+    const resultsEl = $('apk-search-results');
+
+    // 如果没有指定路径，从搜索结果或缓存中查找
+    let path = selectedPath;
+    if (!path && query) {
+        const matches = getApkFilesByQuery(query);
+        if (matches.length > 0) {
+            path = matches[0].path;
+        }
+    }
+
+    if (!path) {
+        showToast('未找到匹配的文件', 'warning');
+        return;
+    }
+
+    // 关闭搜索结果
+    if (resultsEl) resultsEl.style.display = 'none';
+
+    // 打开文件
+    viewApkFile(path);
+
+    // 展开文件树到该文件
+    expandApkTreeToPath(path);
+}
+
+function clearApkSearch() {
+    const searchEl = $('apk-file-search');
+    const resultsEl = $('apk-search-results');
+    if (searchEl) searchEl.value = '';
+    if (resultsEl) resultsEl.style.display = 'none';
+}
+
+function expandApkTreeToPath(filePath) {
+    const parts = filePath.split('/');
+    let currentPath = '';
+
+    for (let i = 0; i < parts.length - 1; i++) {
+        currentPath = (currentPath ? currentPath + '/' : '') + parts[i];
+        const container = document.querySelector(`[data-apk-path="${CSS.escape(currentPath)}"]`);
+        if (container) {
+            const childContainer = container.querySelector('.apk-tree-children');
+            if (childContainer && childContainer.classList.contains('apk-tree-children')) {
+                childContainer.classList.add('expanded');
+            }
+        }
+    }
+}
+
+// 点击搜索结果外部时关闭
+document.addEventListener('click', (e) => {
+    const resultsEl = $('apk-search-results');
+    const searchEl = $('apk-file-search');
+    if (resultsEl && searchEl && !resultsEl.contains(e.target) && e.target !== searchEl) {
+        resultsEl.style.display = 'none';
+    }
+});
+
+// Export APK search functions to window
+window.filterApkFiles = filterApkFiles;
+window.jumpToApkFile = jumpToApkFile;
+window.clearApkSearch = clearApkSearch;
+window.expandApkTreeToPath = expandApkTreeToPath;
+window.debounceFilterApkFiles = debounceFilterApkFiles;
+window.handleApkFile = handleApkFile;
+window.initApkAnalysisPage = initApkAnalysisPage;
