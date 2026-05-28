@@ -12,7 +12,7 @@
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/app.js?v=20260528-11" defer crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260528-25" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -591,7 +591,7 @@
                 <button class="btn-xs" onclick="exportSecurityAudit()">📥 导出</button>
             </div>
 
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 245px); overflow-y: auto;">
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 220px); overflow-y: auto;">
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead style="position: sticky; top: 0; z-index: 10;">
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
@@ -858,7 +858,6 @@
                                 支持 .apk 文件格式<br><br>
                                 1. 点击按钮"📤 选择APK文件"上传<br>
                                 2. 直接拖拽 APK 文件上传<br>
-                                3. 上传后自动反编译
                             </div>
                         </div>
                         <button class="btn-xs" onclick="document.getElementById('apk-file-input').click()" style="font-size: 12px; padding: 10px 20px;">
@@ -875,9 +874,9 @@
             <div id="apk-analysis-status" style="display: none;">
                 <div class="apk-status-card">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
+                        <div style="display: flex; align-items: center; gap: 12px;">
                             <div style="font-size: 14px; font-weight: 600;" id="apk-file-name">-</div>
-                            <div style="font-size: 12px; color: var(--text-secondary);" id="apk-analysis-state">准备分析...</div>
+                            <div style="font-size: 12px; color: var(--success-color);" id="apk-analysis-state">准备分析...</div>
                         </div>
                         <div style="display: flex; gap: 8px;">
                             <button class="btn-xs" id="apk-btn-download" onclick="downloadApkSource()" style="display: none;">📥 下载源码</button>
@@ -894,12 +893,24 @@
 
             <!-- 分析结果区域 -->
             <div id="apk-analysis-result" style="display: none;">
-                <!-- 标签页导航 -->
+                <!-- 标签页导航 + 搜索框 -->
                 <div class="apk-tab-actions">
-                    <button class="filter-btn active" data-apk-tab="manifest" onclick="switchApkTab('manifest')">📋 Manifest</button>
-                    <button class="filter-btn" data-apk-tab="permissions" onclick="switchApkTab('permissions')">🔐 权限列表</button>
-                    <button class="filter-btn" data-apk-tab="source" onclick="switchApkTab('source')">💻 源码浏览</button>
+                    <div style="display: flex; gap: 4px;">
+                        <button class="filter-btn active" data-apk-tab="manifest" onclick="switchApkTab('manifest')">📋 Manifest</button>
+                        <button class="filter-btn" data-apk-tab="permissions" onclick="switchApkTab('permissions')">🔐 权限列表</button>
+                        <button class="filter-btn" data-apk-tab="source" onclick="switchApkTab('source')">💻 源码浏览</button>
+                    </div>
+                    <div class="apk-search-container">
+                        <input type="text" id="apk-file-search" class="apk-search-input" placeholder="🔍 搜索文件名..."
+                               oninput="debounceFilterApkFiles()"
+                               onkeydown="if(event.keyCode===13) jumpToApkFile()">
+                        <button class="btn-xs" onclick="jumpToApkFile()" title="打开文件">打开</button>
+                        <button class="btn-xs" onclick="clearApkSearch()" title="清除搜索">清除</button>
+                    </div>
                 </div>
+
+                <!-- 搜索结果下拉 -->
+                <div id="apk-search-results" class="apk-search-results"></div>
 
                 <!-- Manifest信息 -->
                 <div id="apk-tab-manifest" class="apk-tab-panel">
@@ -924,15 +935,17 @@
 
                 <!-- 源码浏览 -->
                 <div id="apk-tab-source" class="apk-tab-panel" style="display: none;">
-                    <div class="apk-source-layout">
-                        <div id="apk-source-tree" class="apk-source-tree">
-                            <!-- 动态生成文件树 -->
-                        </div>
-                        <div id="apk-source-resizer" class="apk-source-resizer" title="拖拽调整源码树宽度"></div>
-                        <div id="apk-file-viewer" style="display: none; margin-top: 0;">
-                            <div id="apk-file-tabs" class="apk-file-tabs"></div>
-                            <div id="apk-file-path" class="apk-file-path"></div>
-                            <pre id="apk-file-content" style="background: var(--darker-bg); padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 11px; max-height: 500px; overflow-y: auto;"></pre>
+                    <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 280px); display: flex; flex-direction: column;">
+                        <div class="apk-source-layout" style="flex: 1; overflow: hidden;">
+                            <div id="apk-source-tree" class="apk-source-tree" style="height: 100%; overflow-y: auto;">
+                                <!-- 动态生成文件树 -->
+                            </div>
+                            <div id="apk-source-resizer" class="apk-source-resizer" title="拖拽调整源码树宽度"></div>
+                            <div id="apk-file-viewer" style="display: none; flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden;">
+                                <div id="apk-file-tabs" class="apk-file-tabs" style="flex-shrink: 0;"></div>
+                                <div id="apk-file-path" class="apk-file-path" style="flex-shrink: 0;"></div>
+                                <pre id="apk-file-content" style="flex: 1; background: var(--darker-bg); padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 11px; overflow-y: auto; margin: 0;"></pre>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1081,7 +1094,7 @@
         <div class="container page-content" id="page-ai-assistant">
             <div class="section-title">🤖 GMS助手</div>
             <iframe id="ai-assistant-frame" src="http://172.16.14.248:5173/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
-                    style="width: 100%; height: calc(100vh - 120px); border: none; border-radius: 8px; background: var(--light-bg);">
+                    style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
         </div>
 
@@ -2546,7 +2559,11 @@
 
             // 如果切换到APK分析页面，初始化上传区域
             if (pageName === 'apk-analysis') {
-                initApkAnalysisPage();
+                setTimeout(() => {
+                    if (typeof window.initApkAnalysisPage === 'function') {
+                        window.initApkAnalysisPage();
+                    }
+                }, 50);
             }
 
             // 切换页面时重新fit终端（如果已初始化）
@@ -4582,6 +4599,16 @@
 
             // 初始化拖拽功能
             setTimeout(initSidebarDragDrop, 50);
+
+            // 初始化默认页面的组件（如果默认是 APK 分析页面）
+            const defaultPage = localStorage.getItem('gms_current_page') || 'test';
+            if (defaultPage === 'apk-analysis') {
+                setTimeout(() => {
+                    if (typeof window.initApkAnalysisPage === 'function') {
+                        window.initApkAnalysisPage();
+                    }
+                }, 100);
+            }
         });
     </script>
 
