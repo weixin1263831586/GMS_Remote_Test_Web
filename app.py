@@ -21,7 +21,7 @@ from paramiko import AuthenticationException, SSHException
 from core.report_analyzer import ReportAnalyzer
 # 导入测试报告数据库模块
 from core.test_report_db import test_report_db
-from core.config import config_manager
+from core.config import config_manager, get_ubuntu_user, get_ubuntu_host
 
 # Flask 应用
 app = Flask(__name__)
@@ -1853,7 +1853,7 @@ def start_vnc():
     import time
     config = load_config()
     ubuntu_host = config.get("ubuntu_host", "")
-    ubuntu_user = config.get("ubuntu_user", "hcq")
+    ubuntu_user = config_manager.get_ubuntu_user(config)
 
     # 检查是否是本地主机
     local_hosts = ['localhost', '127.0.0.1', '::1', socket.gethostname()]
@@ -2376,7 +2376,7 @@ def show_device_screen():
     data = request.json
     devices = data.get('devices', [])
     config = load_config()
-    ubuntu_user = config.get("ubuntu_user", "hcq")
+    ubuntu_user = config_manager.get_ubuntu_user(config)
     ubuntu_host = config.get("ubuntu_host", "")
 
     ssh = get_ssh_connection(config)
@@ -4516,8 +4516,8 @@ def start_screen_mirroring():
     data = request.json
     devices = data.get('devices', [])
     config = load_config()
-    ubuntu_user = config.get('ubuntu_user', 'hcq')
-    ubuntu_host = config.get('ubuntu_host', '')
+    ubuntu_user = config_manager.get_ubuntu_user(config)
+    ubuntu_host = config_manager.get_ubuntu_host(config)
 
     if not devices:
         return jsonify({'success': False, 'error': 'No devices selected'}), 400
@@ -5002,7 +5002,7 @@ def list_files():
 
     if not path:
         # Default to user home directory
-        path = f"/home/{config.get('ubuntu_user', 'hcq')}"
+        path = f"/home/{config_manager.get_ubuntu_user(config)}"
 
     ssh = get_ssh_connection(config)
     if not ssh:

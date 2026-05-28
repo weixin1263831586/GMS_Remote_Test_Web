@@ -11,8 +11,8 @@
     <script src="/static/js/chunk-upload.js?v=20260525-01"></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
-    <!-- 加载app.js - 必须在调用其中的函数之前加载 -->
-    <script src="/static/js/app.js?v=20260526-05" crossorigin="anonymous"></script>
+    <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
+    <script src="/static/js/app.js?v=20260528-11" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -107,8 +107,96 @@
         #usage-examples-modal .modal-close:hover { color: #ccc; }
         #usage-examples-modal .modal-body { padding: 20px; overflow-y: auto; background: #1e1e1e; }
         #usage-examples-modal.modal.show { display: flex !important; }
+        /* 弹框居中样式 */
+        #add-host-modal.modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
+        #add-local-suite-modal.modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
+        #host-password-modal.modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
         #page-architecture .architecture-container { background: rgba(15,23,42,0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1rem; height: 92vh; overflow: hidden; }
         #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 0.5rem; }
+    </style>
+    <style>
+        /* Snackbar 右下角通知样式 */
+        .snackbar-container {
+            position: fixed !important;
+            bottom: 20px;
+            right: 20px;
+            z-index: 999999 !important;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+        .snackbar {
+            background: #1e1e1e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 14px 18px;
+            min-width: 300px;
+            max-width: 450px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            pointer-events: auto;
+            animation: snackbar-slide-in 0.3s ease-out;
+            border-left: 4px solid var(--primary-color);
+            z-index: 999999 !important;
+            position: relative;
+        }
+        .snackbar.success { border-left-color: #4CAF50; }
+        .snackbar.error { border-left-color: #f44336; }
+        .snackbar.warning { border-left-color: #ff9800; }
+        .snackbar.info { border-left-color: var(--primary-color); }
+        @keyframes snackbar-slide-in {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .snackbar-exit {
+            animation: snackbar-slide-out 0.3s ease-in forwards;
+        }
+        @keyframes snackbar-slide-out {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+        .snackbar-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        .snackbar-content {
+            flex: 1;
+            min-width: 0;
+        }
+        .snackbar-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+        .snackbar-message {
+            font-size: 13px;
+            color: #aaa;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        .snackbar-close {
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+        .snackbar-close:hover {
+            background: #333;
+            color: #fff;
+        }
     </style>
 </head>
 <body>
@@ -121,7 +209,7 @@
             <nav class="sidebar-nav" id="sidebar-nav">
                 <a href="#" class="sidebar-item" data-page="test" data-page-order="0" onclick="switchPage('test', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
-                    <span class="sidebar-icon">📱</span>
+                    <span class="sidebar-icon">🤖</span>
                     <span class="sidebar-text">测试界面</span>
                 </a>
                 <a href="#" class="sidebar-item" data-page="desktop" data-page-order="1" onclick="switchPage('desktop', event)">
@@ -134,25 +222,15 @@
                     <span class="sidebar-icon">🐧</span>
                     <span class="sidebar-text">主机终端</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="test-suites" data-page-order="3" onclick="switchPage('test-suites', event)">
-                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
-                    <span class="sidebar-icon">📚</span>
-                    <span class="sidebar-text">测试套件</span>
-                </a>
-                <a href="#" class="sidebar-item" data-page="devices" data-page-order="4" onclick="switchPage('devices', event)">
-                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
-                    <span class="sidebar-icon">📱</span>
-                    <span class="sidebar-text">设备管理</span>
-                </a>
                 <a href="#" class="sidebar-item" data-page="users" data-page-order="5" onclick="switchPage('users', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">👥</span>
                     <span class="sidebar-text">用户管理</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="security-audit" data-page-order="6" onclick="switchPage('security-audit', event)">
+                <a href="#" class="sidebar-item" data-page="devices" data-page-order="4" onclick="switchPage('devices', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
-                    <span class="sidebar-icon">🛡️</span>
-                    <span class="sidebar-text">安全审计</span>
+                    <span class="sidebar-icon">📱</span>
+                    <span class="sidebar-text">设备管理</span>
                 </a>
                 <a href="#" class="sidebar-item" data-page="reports" data-page-order="7" onclick="switchPage('reports', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
@@ -169,6 +247,11 @@
                     <span class="sidebar-icon"><img src="/static/icons/jadx-icon.webp" alt="APK"></span>
                     <span class="sidebar-text">APK分析</span>
                 </a>
+                <a href="#" class="sidebar-item" data-page="test-suites" data-page-order="3" onclick="switchPage('test-suites', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">📚</span>
+                    <span class="sidebar-text">测试套件</span>
+                </a>
                 <a href="#" class="sidebar-item" data-page="api-docs" data-page-order="10" onclick="switchPage('api-docs', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📡</span>
@@ -184,13 +267,18 @@
                     <span class="sidebar-icon">🌐</span>
                     <span class="sidebar-text">常用网址</span>
                 </a>
+                <a href="#" class="sidebar-item" data-page="security-audit" data-page-order="6" onclick="switchPage('security-audit', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">🛡️</span>
+                    <span class="sidebar-text">安全审计</span>
+                </a>
             </nav>
 
             <!-- 客户端信息区 -->
             <div class="client-info-panel">
                 <div class="client-info-header">
                     <span>👤 客户端</span>
-                    <button id="notification-toggle" class="notification-toggle" onclick="toggleNotificationPanel()" title="通知提醒">
+                    <button id="notification-toggle" class="notification-toggle" onclick="toggleNotificationPanel()" title="消息通知">
                         🔔
                         <span id="notification-badge" class="notification-badge" style="display: none;">0</span>
                     </button>
@@ -689,6 +777,32 @@
         <div class="container page-content" id="page-test-suites">
             <div class="section-title">📚 测试套件</div>
 
+            <!-- 下载和解压区域 -->
+            <div class="suite-download-section" style="margin-bottom: 10px; padding: 8px; background: #1e1e1e; border-radius: 8px; border: 1px solid #333;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; margin-bottom: 8px;">
+                    <div style="flex: 1; min-width: 200px;">
+                        <input type="text" id="suite-download-url" class="combo-box" placeholder="测试套件下载地址，如：https://dl.google.com/android/cts/android-cts-14_r1-linux_x86-arm.zip" style="width: 100%; height: 36px;" />
+                    </div>
+                    <button id="btn-download-suite" class="btn-primary" onclick="downloadTestSuite()" style="white-space: nowrap; height: 32px; min-width: 100px;">
+                        ⬇️ 下载套件
+                    </button>
+                    <button id="btn-extract-suite" class="btn-primary" onclick="extractTestSuite()" style="white-space: nowrap; height: 32px; min-width: 100px;">
+                        📦 解压套件
+                    </button>
+                </div>
+                <!-- 下载进度 -->
+                <div id="suite-download-progress" style="display: none; margin-top: 10px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span id="suite-progress-status" style="font-size: 12px; color: #aaa; min-width: 80px;">正在下载...</span>
+                        <div style="flex: 1; background: #333; border-radius: 4px; height: 6px; overflow: hidden;">
+                            <div id="suite-progress-bar" style="background: linear-gradient(90deg, #4CAF50, #8BC34A); width: 0%; height: 100%; transition: width 0.3s;"></div>
+                        </div>
+                        <span id="suite-progress-percent" style="font-size: 12px; color: #4CAF50; min-width: 40px; text-align: right;">0%</span>
+                    </div>
+                    <div id="suite-download-log" style="margin-top: 8px; padding: 8px; background: #111; border-radius: 4px; font-size: 11px; color: #aaa; max-height: 100px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace;"></div>
+                </div>
+            </div>
+
             <div class="suite-browser-layout">
                 <div class="suite-browser-sidebar">
                     <div class="suite-browser-toolbar">
@@ -708,6 +822,9 @@
                             <div id="suite-browser-title" class="suite-browser-title">请选择测试套件</div>
                             <div id="suite-browser-path" class="suite-browser-path">-</div>
                         </div>
+                        <button id="btn-add-local-suite" class="btn-xs" onclick="showAddLocalSuiteDialog()" style="white-space: nowrap; height: 28px;">
+                            ➕ 添加本地路径
+                        </button>
                     </div>
                     <div id="suite-browser-breadcrumb" class="suite-browser-breadcrumb"></div>
                     <div id="suite-file-list" class="suite-file-list">
@@ -1067,7 +1184,7 @@
             <div class="modal-body">
                 <form id="wifi-form" onsubmit="event.preventDefault(); submitWifiConfig();" autocomplete="off">
                 <div class="modal-form-row">
-                    <label>Wi-Fi 名称(SSID):</label>
+                    <label>Wi-Fi 名称:</label>
                     <input type="text" id="wifi-ssid" value="AndroidWifi" autocomplete="off" />
                 </div>
                 <div class="modal-form-row">
@@ -1262,10 +1379,13 @@
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
 
+    <!-- Snackbar Notification (右下角弹框) -->
+    <div id="snackbar-container" class="snackbar-container"></div>
+
     <!-- Notification Center -->
     <div id="notification-panel" class="notification-panel">
         <div class="notification-panel-header">
-            <span>通知提醒</span>
+            <span>消息通知</span>
             <button class="notification-close" onclick="closeNotificationPanel()" title="关闭">×</button>
         </div>
         <div class="notification-actions">
@@ -1303,6 +1423,31 @@
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeAddHostModal()">取消</button>
                     <button class="btn-xxs btn-primary" onclick="addNewHost()">添加并连接</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加本地测试套件路径弹框 -->
+    <div id="add-local-suite-modal" class="modal" style="display: none;" onkeydown="handleAddLocalSuiteKeydown(event)">
+        <div class="modal-content" style="max-width: 550px;">
+            <div class="modal-header">
+                <span class="modal-title">➕ 添加本地测试套件路径</span>
+                <span class="modal-close" onclick="closeAddLocalSuiteModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="add-local-suite-form" onsubmit="event.preventDefault(); submitAddLocalSuite();" autocomplete="off">
+                <div class="modal-form-row">
+                    <label>套件路径:</label>
+                    <input type="text" id="local-suite-path-input" class="host-input" placeholder="/home/hcq/GMS-Suite/android-cts-verifier-16.1_r2/" onkeydown="handleAddLocalSuiteKeydown(event)" autocomplete="off" />
+                </div>
+                </form>
+                <div class="modal-info-text" style="margin-top: 10px;">
+                    💡 路径必须是已解压的测试套件目录
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeAddLocalSuiteModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitAddLocalSuite()">添加</button>
                 </div>
             </div>
         </div>
@@ -2293,16 +2438,16 @@
                 'test': '测试界面 - GMS远程测试',
                 'desktop': '主机桌面 - GMS远程测试',
                 'terminal': '主机终端 - GMS远程测试',
-                'devices': '设备管理 - GMS远程测试',
                 'users': '用户管理 - GMS远程测试',
-                'security-audit': '安全审计 - GMS远程测试',
+                'devices': '设备管理 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
-                'test-suites': '测试套件 - GMS远程测试',
                 'apk-analysis': 'APK分析 - GMS远程测试',
+                'test-suites': '测试套件 - GMS远程测试',
                 'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS远程测试',
-                'tools': '常用网址 - GMS远程测试'
+                'tools': '常用网址 - GMS远程测试',
+                'security-audit': '安全审计 - GMS远程测试'
             };
             document.title = titles[pageName] || 'GMS远程测试';
             if (typeof recordSecurityPageView === 'function') {
@@ -4212,16 +4357,16 @@
                 'test': '测试界面 - GMS远程测试',
                 'desktop': '主机桌面 - GMS远程测试',
                 'terminal': '主机终端 - GMS远程测试',
-                'devices': '设备管理 - GMS远程测试',
                 'users': '用户管理 - GMS远程测试',
-                'security-audit': '安全审计 - GMS远程测试',
+                'devices': '设备管理 - GMS远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
-                'test-suites': '测试套件 - GMS远程测试',
                 'apk-analysis': 'APK分析 - GMS远程测试',
+                'test-suites': '测试套件 - GMS远程测试',
                 'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS 远程测试',
-                'tools': '常用网址 - GMS 远程测试'
+                'tools': '常用网址 - GMS 远程测试',
+                'security-audit': '安全审计 - GMS远程测试',
             };
             document.title = titles[targetPage] || 'GMS远程测试';
             if (typeof recordSecurityPageView === 'function') {

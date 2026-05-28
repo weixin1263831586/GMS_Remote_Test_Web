@@ -279,7 +279,7 @@ const API_DETAILS_MAP = {
         title: '获取客户端信息',
         description: '获取客户端信息',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "ip": "172.16.14.248", "client_id": "hcq@172.16.14.248", "username": "hcq" }',
+        response: '{ "ip": "192.168.1.100", "client_id": "user@192.168.1.100", "username": "user" }',
         usage: '获取客户端身份信息'
     },
     '/api/users/detect': {
@@ -290,7 +290,7 @@ const API_DETAILS_MAP = {
             { name: 'username', type: 'string', required: false, desc: '用户名(可选)' },
             { name: 'password', type: 'string', required: false, desc: '密码(可选)' }
         ],
-        response: '{ "success": true, "username": "hcq" }',
+        response: '{ "success": true, "username": "user" }',
         usage: '自动识别当前用户'
     },
     '/api/users/set-username': {
@@ -300,14 +300,14 @@ const API_DETAILS_MAP = {
             { name: 'username', type: 'string', required: true, desc: '用户名（不能为unknown）' },
             { name: 'ip', type: 'string', required: false, desc: '客户端IP地址（可选，默认自动获取）' }
         ],
-        response: '{ "success": true, "username": "user", "ip": "192.168.1.20", "client_id": "user@192.168.1.20" }',
+        response: '{ "success": true, "username": "user", "ip": "192.168.1.20", "client_id": "user@192.168.1.100" }',
         usage: '手动设置用户名'
     },
     '/api/users/list': {
         title: '获取在线用户',
         description: '获取所有在线用户列表',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "users": [{ "client_id": "xxx", "username": "admin", "running": false }] }',
+        response: '{ "users": [{ "client_id": "user@192.168.1.100", "username": "user", "running": false }] }',
         usage: '查看当前在线用户及其设备使用情况'
     },
     '/api/devices/list': {
@@ -359,14 +359,14 @@ const API_DETAILS_MAP = {
         title: '设备管理信息',
         description: '获取所有设备的详细管理信息(设备列表、电池、来源等)',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '[{ "device_id": "xxx", "serial_no": "xxx", "model": "xxx", "android_version": "14", "battery_level": "85", "source_type": "usbip", "source_host": "172.16.14.68", "status": "online", "locked_by": "", "locked_by_self": false }]',
+        response: '[{ "device_id": "xxx", "serial_no": "xxx", "model": "xxx", "android_version": "14", "battery_level": "85", "source_type": "usbip", "source_host": "192.168.1.100", "status": "online", "locked_by": "", "locked_by_self": false }]',
         usage: '查看设备管理信息'
     },
     '/api/devices/user-locked': {
         title: '列出用户锁定设备',
         description: '列出用户锁定设备',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "success": true, "data": { "RF8TC2W4JNH": { "client_id": "hcq@172.16.14.68", "username": "hcq", "timestamp": "2026-04-04T15:30:00" } } }',
+        response: '{ "success": true, "data": { "RF8TC2W4JNH": { "client_id": "user@192.168.1.100", "username": "user", "timestamp": "2026-04-04T15:30:00" } } }',
         usage: '查看设备占用状态'
     },
     '/api/devices/reboot': {

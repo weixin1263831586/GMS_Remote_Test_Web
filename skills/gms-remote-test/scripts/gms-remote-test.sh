@@ -10,18 +10,33 @@
 if [ -n "${GMS_REMOTE_TEST_SERVER:-}" ]; then
     SERVER_URL="$GMS_REMOTE_TEST_SERVER"
 else
-    # Check if we're running on the server machine (172.16.14.233)
-    if hostname -I 2>/dev/null | grep -q "172.16.14.233"; then
-        SERVER_URL="http://localhost:5001"
-    else
-        SERVER_URL="http://172.16.14.233:5001"
+    # Check if we're running on the server machine (use dynamic IP detection)
+    # Try to get local IP using the same method as get_local_ip() in Python
+    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [ -z "$LOCAL_IP" ]; then
+        # Fallback: try to get IP from routing table
+        LOCAL_IP=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+')
     fi
+    if [ -z "$LOCAL_IP" ]; then
+        # Last resort: use hostname
+        LOCAL_IP=$(hostname 2>/dev/null || echo "localhost")
+    fi
+
+    # Store detected IP for later use
+    export DETECTED_LOCAL_IP="$LOCAL_IP"
+
+    # Check if server host is in environment or use detected IP
+    SERVER_HOST="${UBUNTU_HOST:-$DETECTED_LOCAL_IP}"
+    SERVER_URL="http://${SERVER_HOST}:5001"
 fi
 API_BASE="${SERVER_URL}/api"
 
 # GMS Web App Configuration Directory
 # Can be overridden by environment variable
-GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-/home/hcq/GMS_Remote_Test/web_app}"
+GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-${HOME}/GMS_Remote_Test/web_app}"
+
+# Default SSH user - use environment variable or current system user
+DEFAULT_SSH_USER="${UBUNTU_USER:-$(whoami)}"
 
 # Colors for output
 RED=$(printf '\033[0;31m')
@@ -138,7 +153,7 @@ _is_test_host() {
 # Outputs: "host user port" (space-separated)
 _resolve_ssh_host() {
     local host=$(echo "$SERVER_URL" | sed 's|http://||' | sed 's|/.*||' | sed 's|:.*||')
-    local user="hcq"
+    local user="$DEFAULT_SSH_USER"
     local port="22"
     local config_files=(
         "${GMS_WEB_APP_DIR}/configs/config.json"
@@ -363,10 +378,6 @@ gms-rt-burn-firmware() {
         echo "$body" | jq '.' 2>/dev/null || echo "$body"
         return 1
     fi
-}
-
-gms-burn-firmware() {
-    gms-rt-burn-firmware "$@"
 }
 
 # Burn GSI image to devices
@@ -1157,7 +1168,7 @@ gms-rt-ssh-sshd() {
         # 验证格式：必须包含 @ 符号
         if [[ "$device_host" != *@* ]]; then
             error "❌ 设备主机格式错误：'$device_host'"
-            echo "   正确格式应为：user@ip（例如：hcq@172.16.14.68）" >&2
+            echo "   正确格式应为：user@ip（例如：${DEFAULT_SSH_USER}@192.168.1.100）" >&2
             return 1
         fi
         echo "🔍 Checking SSHD status for $device_host..."
@@ -1240,8 +1251,8 @@ gms-rt-terminal-open() {
         echo ""
         echo "Examples:"
         echo "  gms-rt-terminal-open                    # Use API config"
-        echo "  gms-rt-terminal-open 172.16.14.233      # Specify host"
-        echo "  gms-rt-terminal-open 172.16.14.233 hcq  # Full parameters"
+        echo "  gms-rt-terminal-open 192.168.1.100      # Specify host"
+        echo "  gms-rt-terminal-open 192.168.1.100 $DEFAULT_SSH_USER  # Full parameters"
         echo ""
         return 0
     fi
@@ -1262,7 +1273,7 @@ gms-rt-terminal-open() {
                 config_host=$(grep -o '"ubuntu_host": *"[^"]*"' "$config_file" 2>/dev/null | cut -d'"' -f4)
                 if [ -n "$config_host" ]; then
                     host="$config_host"
-                    user="hcq"
+                    user="$DEFAULT_SSH_USER"
                     port="22"
                     echo "📂 Using local config: $config_file"
                     break
@@ -1311,7 +1322,7 @@ gms-rt-terminal-open() {
         echo ""
     else
         # 使用用户提供的参数（优先级高于API配置）
-        user="${user:-hcq}"
+        user="${user:-$DEFAULT_SSH_USER}"
         port="${port:-22}"
         echo "🖥️  Opening terminal on test host: $user@$host:$port"
     fi
@@ -1851,7 +1862,7 @@ ${YELLOW}Reports:${NC}
 ${YELLOW}SSH Management:${NC}
   gms-rt-ssh-ping                - Test SSH connectivity
   gms-rt-ssh-route               - Check SSH route
-  gms-rt-ssh-sshd          - Check SSHD status & install guide (optional: user@ip, e.g. hcq@172.16.14.68)
+  gms-rt-ssh-sshd          - Check SSHD status & install guide (optional: user@ip, e.g. ${DEFAULT_SSH_USER}@192.168.1.100)
 
 ${YELLOW}System:${NC}
   gms-rt-system-docs             - Get API documentation
@@ -1902,7 +1913,7 @@ ${YELLOW}Test Start (Retry Mode):${NC}
 
 ${YELLOW}Terminal:${NC}
   gms-rt-terminal-open
-  gms-rt-terminal-open 172.16.14.233 hcq
+  gms-rt-terminal-open 192.168.1.100 $DEFAULT_SSH_USER
   gms-rt-terminal-push ./config.json
 
 Server: ${GREEN}$SERVER_URL${NC}

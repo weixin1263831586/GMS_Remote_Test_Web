@@ -150,7 +150,7 @@ TRADEFED_BINARY_MAP = {
 
 # 特殊测试类型（不在主映射中）
 SPECIAL_TEST_TYPES = {
-    'cts-v-host-tradefed': 'cts-v-host',
+    'cts-v-host-tradefed': 'cts-v',
     'apts-tradefed': 'apts',
     'gts-root-tradefed': 'gts-root',
 }
@@ -542,15 +542,34 @@ FORWARDED_ALLOW_IPS = os.getenv('GMS_FORWARDED_ALLOW_IPS', '127.0.0.1')
 
 
 def get_default_suites_path(config: Dict[str, Any]) -> str:
-    ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
-    return f"/home/{ubuntu_user}/GMS-Suite"
+    """Get default suites path from config or environment"""
+    ubuntu_user = config_manager.get_ubuntu_user(config)
+    return config.get('suites_path', f"/home/{ubuntu_user}/GMS-Suite")
 
 
 def is_config_host_local(config: Dict[str, Any]) -> bool:
-    return CommonUtils.is_local_host(config.get('ubuntu_host', ''))
+    return CommonUtils.is_local_host(config_manager.get_ubuntu_host(config))
+
+
+def get_effective_local_server(client_id: str, requested_local_server: str = "") -> str:
+    """Resolve the callback host for the current client."""
+    if requested_local_server:
+        return requested_local_server
+
+    dynamic_config = config_manager._load_dynamic_config() or {}
+    dynamic_local_server = dynamic_config.get('local_server')
+    if dynamic_local_server:
+        return dynamic_local_server
+
+    return client_id
 
 
 def build_suite_info(full_path: str) -> Optional[Dict[str, str]]:
+    """Build suite info from tradefed binary path.
+
+    For cts-v, the tools_path should be the android-cts-verifier directory,
+    not the deep nested android-cts-v-host/tools path.
+    """
     full_path = full_path.strip()
     if not full_path:
         return None
@@ -558,10 +577,17 @@ def build_suite_info(full_path: str) -> Optional[Dict[str, str]]:
     parts = full_path.split('/')
     tradefed_name = parts[-1]
     test_type = get_test_type_from_binary(tradefed_name)
-    if test_type == 'cts-v-host':
-        return None
 
     tools_dir = '/'.join(parts[:-1])
+
+    # 特殊处理 cts-v：找到 android-cts-verifier 目录作为 tools_path
+    if test_type == 'cts-v':
+        # 从后向前查找 android-cts-verifier 目录
+        for i, part in enumerate(parts):
+            if part == 'android-cts-verifier':
+                tools_dir = '/'.join(parts[:i+1])
+                break
+
     version_dir = next(
         (
             p for p in parts
@@ -594,7 +620,7 @@ def list_local_test_suites(base_path: str) -> List[Dict[str, str]]:
         logger.info(f"[TestSuites] Local base path not found: {base_path}")
         return suites
 
-    max_depth = 5
+    max_depth = 8  # 增加深度以支持 verifier 等嵌套较深的套件
     base_depth = base_path.rstrip(os.sep).count(os.sep)
     for root, dirs, files in os.walk(base_path):
         if root.rstrip(os.sep).count(os.sep) - base_depth >= max_depth:
@@ -2951,6 +2977,9 @@ async def get_config(request: Request):
     get_or_create_user_state(client_id)
 
     config = config_manager.load_config()
+    # local_server 是客户端回传地址；没有显式动态配置时，按当前请求用户/IP 展示。
+    config['local_server'] = get_effective_local_server(client_id)
+
     # 隐藏敏感信息
     safe_config = hide_sensitive_info(config.copy())
     return JSONResponse(content=safe_config)
@@ -3746,8 +3775,8 @@ def build_devices_management_payload(
     client_id = client_manager.get_client_id('127.0.0.1')
     locks = device_lock_manager.get_all_locks()
     devices_info = []
-    ubuntu_host = config.get("ubuntu_host", "")
-    ubuntu_user = config.get("ubuntu_user", "")
+    ubuntu_host = config.get("ubuntu_host") or get_ubuntu_host()
+    ubuntu_user = config.get("ubuntu_user") or get_ubuntu_user()
 
     all_usbip_sources = {**global_state.usbip_devices_source, **usbip_manager.device_sources}
     current_device_set = set(device_ids)
@@ -4434,8 +4463,10 @@ async def run_test_background(
             if test_type_lower:
                 await log_callback(f"🔍 从套件路径检测到测试类型: {test_type_lower}", 'info')
 
-        # 修复：只有当test_params中没有local_server时才从config读取
-        local_server = test_params.get('local_server') or config.get('local_server', '')
+        local_server = get_effective_local_server(
+            client_id,
+            test_params.get('local_server', '')
+        )
         devices = test_params.get('devices', [])
 
         # 验证测试套件路径（非重试模式下必需）
@@ -4930,7 +4961,7 @@ async def save_current_log(req: dict):
         display_test_type = "MANUAL" if not test_type or test_type.lower() == 'unknown' else test_type.upper()
 
         if client_id == 'test_client':
-            user_id = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
+            user_id = config_manager.get_ubuntu_user(config)
         else:
             user_id = parse_client_id(client_id)[0] if '@' in client_id else client_id
 
@@ -5320,6 +5351,81 @@ class TradefedListResultsRequest(BaseModel):
     tradefed_bin: Optional[str] = None
 
 
+class TestSuiteDownloadRequest(BaseModel):
+    """Request model for downloading test suite from URL"""
+    url: str = Field(..., description="测试套件下载地址")
+    save_dir: Optional[str] = Field(default=None, description="保存目录（默认：/home/hcq/GMS-Suite）")
+
+
+class TestSuiteExtractRequest(BaseModel):
+    """Request model for extracting test suite archive"""
+    archive_path: str = Field(..., description="压缩包文件路径")
+    extract_dir: Optional[str] = Field(default=None, description="解压目录（默认：/home/hcq/GMS-Suite）")
+
+
+class TestSuiteAddLocalRequest(BaseModel):
+    """Request model for adding local test suite path"""
+    path: str = Field(..., description="本地测试套件路径")
+
+
+@app.post("/api/test/suites/add-local")
+@handle_api_errors
+async def add_local_test_suite(req: TestSuiteAddLocalRequest):
+    """添加本地测试套件路径到配置
+
+    Request:
+        path: str - 本地测试套件路径（如：/home/hcq/GMS-Suite/android-cts-verifier-16.1_r2/）
+
+    Response:
+        success: bool
+        message: str - 添加状态信息
+        path: str - 添加的路径
+    """
+    config = config_manager.load_config()
+
+    if not req.path:
+        return JSONResponse(
+            content={'success': False, 'error': '路径不能为空'},
+            status_code=400
+        )
+
+    # 检查路径是否存在
+    if is_config_host_local(config):
+        if not os.path.exists(req.path):
+            return JSONResponse(
+                content={'success': False, 'error': f'路径不存在：{req.path}'},
+                status_code=404
+            )
+        # 检查是否为目录
+        if not os.path.isdir(req.path):
+            return JSONResponse(
+                content={'success': False, 'error': f'路径不是目录：{req.path}'},
+                status_code=400
+            )
+    else:
+        # 远程 SSH 检查
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return ssh_connection_failed_response()
+
+        # 检查远程路径是否存在
+        check_cmd = f"[ -d '{req.path}' ] && echo 'exists' || echo 'not_exists'"
+        output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=10)
+        if output.strip() != 'exists':
+            return JSONResponse(
+                content={'success': False, 'error': f'路径不存在：{req.path}'},
+                status_code=404
+            )
+
+    # 路径验证通过，返回成功
+    # 注意：实际的套件识别由前端刷新 /api/test/suites 后自动完成
+    return JSONResponse(content={
+        'success': True,
+        'message': f'已添加本地路径：{os.path.basename(req.path.rstrip("/"))}',
+        'path': req.path
+    })
+
+
 @app.post("/api/test/suites/result")
 async def list_tradefed_results(
     h: Optional[str] = Query(None),
@@ -5424,6 +5530,266 @@ async def list_tradefed_results(
             content={'success': False, 'error': str(e)},
             status_code=500
         )
+
+
+# ==================== 测试套件下载和解压 ====================
+
+@app.post("/api/test/suites/download-url")
+@handle_api_errors
+async def download_test_suite_from_url(req: TestSuiteDownloadRequest):
+    """从指定 URL 下载测试套件（CTS/VTS/GTS/STS 等）
+
+    Request:
+        url: str - 测试套件下载地址
+        save_dir: Optional[str] - 保存目录（默认：/home/hcq/GMS-Suite）
+
+    Response:
+        success: bool
+        message: str - 下载状态信息
+        archive_path: str - 下载的压缩包路径
+        file_size: int - 文件大小（字节）
+    """
+    config = config_manager.load_config()
+
+    if not req.url:
+        return JSONResponse(
+            content={'success': False, 'error': '下载地址不能为空'},
+            status_code=400
+        )
+
+    # 使用默认路径
+    save_dir = req.save_dir or get_default_suites_path(config)
+
+    # 创建保存目录
+    os.makedirs(save_dir, exist_ok=True)
+
+    # 从 URL 解析文件名
+    parsed_url = urllib.parse.urlparse(req.url)
+    filename = os.path.basename(parsed_url.path) or 'test-suite.zip'
+
+    # 清理文件名
+    filename = re.sub(r'[^\w\-_.\[\]]', '_', filename)
+    archive_path = os.path.join(save_dir, filename)
+
+    if is_config_host_local(config):
+        # 本地下载
+        import subprocess
+
+        # 使用 curl 下载，支持进度显示，添加超时限制（30 分钟）
+        cmd = ['curl', '-L', '--connect-timeout', '30', '--max-time', '1800',
+               '-o', archive_path, req.url]
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            # 设置超时，避免无限等待
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=1900)
+            except asyncio.TimeoutError:
+                process.kill()
+                return JSONResponse(
+                    content={'success': False, 'error': '下载超时（超过 30 分钟）'},
+                    status_code=500
+                )
+
+            if process.returncode != 0:
+                error_msg = stderr.decode('utf-8', errors='ignore')
+                return JSONResponse(
+                    content={'success': False, 'error': f'下载失败：{error_msg}'},
+                    status_code=500
+                )
+        except Exception as e:
+            return JSONResponse(
+                content={'success': False, 'error': f'下载异常：{str(e)}'},
+                status_code=500
+            )
+
+        # 获取文件大小
+        file_size = os.path.getsize(archive_path)
+
+        return JSONResponse(content={
+            'success': True,
+            'message': f'下载完成：{filename}',
+            'archive_path': archive_path,
+            'file_size': file_size,
+            'download_method': 'local'
+        })
+
+    else:
+        # 远程 SSH 下载
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return ssh_connection_failed_response()
+
+        try:
+            # 使用 curl 下载
+            cmd = f"curl -L -o '{archive_path}' '{req.url}' 2>&1"
+            output, exit_code, _ = ssh_manager.execute_command(ssh, cmd, timeout=600)
+
+            if exit_code != 0:
+                return JSONResponse(
+                    content={'success': False, 'error': f'下载失败：{output}'},
+                    status_code=500
+                )
+
+            # 获取文件大小
+            size_cmd = f"stat -c%s '{archive_path}' 2>/dev/null || stat -f%z '{archive_path}' 2>/dev/null || echo 0"
+            size_output, _, _ = ssh_manager.execute_command(ssh, size_cmd, timeout=10)
+            file_size = int(size_output.strip())
+
+            return JSONResponse(content={
+                'success': True,
+                'message': f'下载完成：{filename}',
+                'archive_path': archive_path,
+                'file_size': file_size,
+                'download_method': 'ssh'
+            })
+
+        finally:
+            ssh_manager.return_connection(ssh)
+
+
+@app.post("/api/test/suites/extract")
+@handle_api_errors
+async def extract_test_suite_archive(req: TestSuiteExtractRequest):
+    """解压测试套件压缩包
+
+    Request:
+        archive_path: str - 压缩包文件路径
+        extract_dir: Optional[str] - 解压目录（默认：/home/hcq/GMS-Suite）
+
+    Response:
+        success: bool
+        message: str - 解压状态信息
+        extracted_path: str - 解压后的目录路径
+        files_count: int - 解压的文件数量
+    """
+    config = config_manager.load_config()
+
+    if not req.archive_path:
+        return JSONResponse(
+            content={'success': False, 'error': '压缩包路径不能为空'},
+            status_code=400
+        )
+
+    # 使用默认路径
+    extract_dir = req.extract_dir or get_default_suites_path(config)
+
+    # 检查文件是否存在（本地）
+    if is_config_host_local(config) and not os.path.exists(req.archive_path):
+        return JSONResponse(
+            content={'success': False, 'error': f'压缩包不存在：{req.archive_path}'},
+            status_code=404
+        )
+
+    # 创建解压目录
+    os.makedirs(extract_dir, exist_ok=True)
+
+    if is_config_host_local(config):
+        # 本地解压
+        import subprocess
+        import tarfile
+        import zipfile
+
+        try:
+            # 根据文件类型选择解压方式
+            if req.archive_path.endswith('.zip'):
+                with zipfile.ZipFile(req.archive_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dir)
+                    files_count = len(zip_ref.namelist())
+            elif req.archive_path.endswith(('.tar.gz', '.tgz')):
+                with tarfile.open(req.archive_path, 'r:gz') as tar_ref:
+                    tar_ref.extractall(extract_dir)
+                    files_count = len(tar_ref.getnames())
+            elif req.archive_path.endswith('.tar'):
+                with tarfile.open(req.archive_path, 'r') as tar_ref:
+                    tar_ref.extractall(extract_dir)
+                    files_count = len(tar_ref.getnames())
+            elif req.archive_path.endswith('.tar.bz2'):
+                with tarfile.open(req.archive_path, 'r:bz2') as tar_ref:
+                    tar_ref.extractall(extract_dir)
+                    files_count = len(tar_ref.getnames())
+            else:
+                # 尝试使用 tar 命令
+                cmd = ['tar', '-xf', req.archive_path, '-C', extract_dir]
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+
+                if process.returncode != 0:
+                    error_msg = stderr.decode('utf-8', errors='ignore')
+                    return JSONResponse(
+                        content={'success': False, 'error': f'解压失败：{error_msg}'},
+                        status_code=500
+                    )
+                files_count = 0  # 未知
+
+            # 获取解压后的目录
+            extracted_name = os.path.splitext(os.path.basename(req.archive_path))[0]
+            # 移除可能的.tar/.gz 等后缀
+            for ext in ['.tar', '.gz', '.bz2', '.zip', '.tgz']:
+                if extracted_name.endswith(ext):
+                    extracted_name = extracted_name[:-len(ext)]
+
+            extracted_path = os.path.join(extract_dir, extracted_name)
+
+            return JSONResponse(content={
+                'success': True,
+                'message': f'解压完成：{extracted_name}',
+                'extracted_path': extracted_path,
+                'files_count': files_count,
+                'extract_method': 'local'
+            })
+
+        except Exception as e:
+            return JSONResponse(
+                content={'success': False, 'error': f'解压失败：{str(e)}'},
+                status_code=500
+            )
+
+    else:
+        # 远程 SSH 解压
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return ssh_connection_failed_response()
+
+        try:
+            # 使用 tar 命令解压
+            cmd = f"tar -xf '{req.archive_path}' -C '{req.extract_dir}' 2>&1"
+            output, exit_code, _ = ssh_manager.execute_command(ssh, cmd, timeout=300)
+
+            if exit_code != 0:
+                return JSONResponse(
+                    content={'success': False, 'error': f'解压失败：{output}'},
+                    status_code=500
+                )
+
+            # 获取解压后的目录名
+            archive_name = os.path.basename(req.archive_path)
+            extracted_name = os.path.splitext(archive_name)[0]
+            for ext in ['.tar', '.gz', '.bz2', '.zip', '.tgz']:
+                if extracted_name.endswith(ext):
+                    extracted_name = extracted_name[:-len(ext)]
+
+            extracted_path = os.path.join(req.extract_dir, extracted_name)
+
+            return JSONResponse(content={
+                'success': True,
+                'message': f'解压完成：{extracted_name}',
+                'extracted_path': extracted_path,
+                'extract_method': 'ssh'
+            })
+
+        finally:
+            ssh_manager.return_connection(ssh)
+
 
 @app.get("/api/test/status")
 async def get_status(
@@ -7330,7 +7696,7 @@ async def get_desktop_vnc_status():
 async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None)):
     """启动Ubuntu主机桌面VNC（Ubuntu桌面的VNC服务）"""
     config = config_manager.load_config()
-    default_host = f"{config.get('ubuntu_user') or os.environ.get('USER') or 'gms'}@{config.get('ubuntu_host', 'localhost')}"
+    default_host = f"{config_manager.get_ubuntu_user(config)}@{config_manager.get_ubuntu_host(config) or 'localhost'}"
 
     if req is None:
         # 如果没有提供请求体，使用配置文件的默认值
@@ -7521,8 +7887,8 @@ async def show_device_screens(req: DeviceActionRequest):
         devices = req.devices
 
         config = config_manager.load_config()
-        ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
-        ubuntu_host = config.get('ubuntu_host', '')
+        ubuntu_user = config_manager.get_ubuntu_user(config)
+        ubuntu_host = config_manager.get_ubuntu_host(config)
 
         if not devices:
             # 尝试从已连接设备列表获取
@@ -8207,12 +8573,12 @@ async def install_usbipd(request: Request, device_host: Optional[str] = None):
 # ==================== VPN管理 ====================
 @app.get("/api/ssh/sshd")
 @handle_api_errors
-async def check_ssh_sshd(request: Request, device_host: Optional[str] = Query(None, description="设备主机地址 (user@ip 格式，如 hcq@172.16.14.68)")):
+async def check_ssh_sshd(request: Request, device_host: Optional[str] = Query(None, description="设备主机地址 (user@ip 格式，如 user@192.168.1.100)")):
     """检查SSH服务状态（如未安装则返回安装指南）
 
     通过SSH连接到Windows客户端检查SSHD服务状态。
     支持查询参数 device_host 来检查指定主机的状态。
-    注意：device_host 必须是 user@ip 格式，例如 hcq@172.16.14.68
+    注意：device_host 必须是 user@ip 格式，例如 user@192.168.1.100
     """
     def exec_ssh_cmd(ssh, cmd):
         """执行SSH命令并返回输出"""
@@ -8266,7 +8632,7 @@ async def check_ssh_sshd(request: Request, device_host: Optional[str] = Query(No
     if device_host and '@' not in device_host:
         return JSONResponse(content={
             'success': False,
-            'error': f'设备主机格式错误："{device_host}"。正确格式应为 user@ip，例如 hcq@172.16.14.68',
+            'error': f'设备主机格式错误："{device_host}"。正确格式应为 user@ip，例如 user@192.168.1.100',
             'installed': False,
             'running': False
         }, status_code=400)
@@ -8612,8 +8978,8 @@ async def get_ssh_terminal_info():
         config = config_manager.load_config()
 
         # Cache config values to avoid redundant get() calls
-        ssh_host = config.get('ubuntu_host', 'localhost')
-        ssh_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
+        ssh_host = config_manager.get_ubuntu_host(config) or 'localhost'
+        ssh_user = config_manager.get_ubuntu_user(config)
         connection_string = f"ssh {ssh_user}@{ssh_host}"
 
         return JSONResponse(content={
@@ -10835,7 +11201,7 @@ async def list_files(req: dict):
 
         if not path:
             # Default to user home directory
-            path = f"/home/{config.get('ubuntu_user') or os.environ.get('USER') or 'gms'}"
+            path = f"/home/{config_manager.get_ubuntu_user(config)}"
 
         ssh = ssh_manager.get_connection(config)
         if not ssh:
@@ -11068,7 +11434,7 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
     config = config_manager.load_config()
     default_platform_tools = os.path.join(
         "/home",
-        config.get('ubuntu_user') or os.environ.get('USER') or 'gms',
+        config_manager.get_ubuntu_user(config),
         "Software",
         "platform-tools"
     )
@@ -11492,8 +11858,8 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
             global_state.terminal_ssh_sessions[session_id] = {
                 'ssh': ssh,
                 'channel': channel,
-                'host': config.get('ubuntu_host'),
-                'user': config.get('ubuntu_user'),
+                'host': config.get('ubuntu_host') or get_ubuntu_host(),
+                'user': config.get('ubuntu_user') or get_ubuntu_user(),
                 'mode': backend_mode,
                 'serial_no': serial_no,
                 'connected_at': time.time(),
@@ -11576,8 +11942,8 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
     """处理终端SSH连接"""
     try:
         config = config_manager.load_config()
-        host = data.get('host', config.get('ubuntu_host'))
-        user = data.get('user', config.get('ubuntu_user'))
+        host = data.get('host', config.get('ubuntu_host') or get_ubuntu_host())
+        user = data.get('user', config.get('ubuntu_user') or get_ubuntu_user())
         password = data.get('password', config.get('ubuntu_pswd', ''))
         mode = data.get('mode', 'ssh')  # 'ssh' 或 'adb'
         serial_no = data.get('serial_no', '')
@@ -12091,7 +12457,7 @@ def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
             'title': '验证Ubuntu主机',
             'description': '验证Ubuntu主机SSH连接并检查VNC服务可用性（host格式：user@ip）',
             'params': [
-                {'name': 'host', 'type': 'string', 'required': True, 'desc': '主机地址（格式：user@ip，如hcq@192.168.1.100）'},
+                {'name': 'host', 'type': 'string', 'required': True, 'desc': '主机地址（格式：user@ip，如user@192.168.1.100）'},
                 {'name': 'password', 'type': 'string', 'required': False, 'desc': 'SSH登录密码（可选）'}
             ],
             'response': '{"success": true, "message": "SSH连接成功，VNC服务可用"}',

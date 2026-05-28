@@ -7,6 +7,8 @@ import logging
 import re
 import time
 import threading
+import socket
+import getpass
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -313,43 +315,71 @@ class ConfigManager:
         elif isinstance(value, list):
             return [self._replace_placeholders(item, config) for item in value]
         elif isinstance(value, str):
-            full_placeholder_match = PLACEHOLDER_PATTERN.fullmatch(value)
-
-            def replace_var(match):
-                var_expr = match.group(1)
-                # 检查是否有默认值
-                if ':' in var_expr:
-                    var_name, default_val = var_expr.split(':', 1)
-                    # 优先使用环境变量
-                    if var_name in os.environ:
-                        return os.environ[var_name]
-                    # 其次使用配置中的值
-                    elif config and var_name in config:
-                        return str(config[var_name])
-                    else:
-                        return default_val
-                else:
-                    var_name = var_expr
-                    # 优先使用环境变量
-                    if var_name in os.environ:
-                        return os.environ[var_name]
-                    # 其次使用配置中的值
-                    elif config and var_name in config:
-                        return str(config[var_name])
-                    else:
-                        # 保留原样（未找到替换值）
-                        logger.warning(f"Placeholder ${{{var_name}}} not found in config or environment")
-                        return match.group(0)
-
-            # 使用预编译的 regex pattern 替换所有 ${...} 格式的占位符
-            replaced = PLACEHOLDER_PATTERN.sub(replace_var, value)
-            if full_placeholder_match:
-                normalized = replaced.strip().lower()
-                if normalized in ('true', 'false'):
-                    return normalized == 'true'
-            return replaced
+            # 递归处理嵌套占位符，最多 3 层嵌套
+            for _ in range(3):
+                if '${' not in value:
+                    break
+                new_value = self._replace_single_placeholder(value, config)
+                if new_value == value:
+                    break
+                value = new_value
+            return value
         else:
             return value
+
+    def _replace_single_placeholder(self, value: str, config: Dict = None) -> str:
+        """替换字符串中的单个占位符"""
+        full_placeholder_match = PLACEHOLDER_PATTERN.fullmatch(value)
+
+        def replace_var(match):
+            var_expr = match.group(1)
+            # 检查是否有默认值
+            if ':' in var_expr:
+                var_name, default_val = var_expr.split(':', 1)
+                # 优先使用环境变量
+                if var_name in os.environ:
+                    return os.environ[var_name]
+                # 其次使用配置中的值
+                elif config and var_name in config:
+                    return str(config[var_name])
+                else:
+                    # 默认值可能也是占位符（如 ${USER}），需要进一步处理
+                    if '${' in default_val:
+                        return self._replace_single_placeholder(default_val, config)
+                    return default_val
+            else:
+                var_name = var_expr
+                placeholder = match.group(0)
+
+                # 优先使用环境变量
+                if var_name in os.environ:
+                    return os.environ[var_name]
+
+                # 常见部署占位符允许在环境变量缺失时兜底，避免 UI 显示 ${...}
+                if var_name == 'UBUNTU_HOST':
+                    return ''
+                if var_name == 'UBUNTU_USER':
+                    detected_user = get_ubuntu_user()
+                    if detected_user:
+                        return detected_user
+
+                # 其次使用配置中的值，但不要把同一个占位符原样递归替回去
+                if config and var_name in config:
+                    config_value = str(config[var_name])
+                    if config_value != placeholder:
+                        return config_value
+
+                # 保留原样（未找到替换值）
+                logger.warning(f"Placeholder ${{{var_name}}} not found in config or environment")
+                return placeholder
+
+        # 使用预编译的 regex pattern 替换所有 ${...} 格式的占位符
+        replaced = PLACEHOLDER_PATTERN.sub(replace_var, value)
+        if full_placeholder_match:
+            normalized = replaced.strip().lower()
+            if normalized in ('true', 'false'):
+                return normalized == 'true'
+        return replaced
 
     def _load_dynamic_config(self) -> Optional[Dict[str, Any]]:
         """加载动态配置"""
@@ -528,7 +558,7 @@ class ConfigManager:
         """
         if config is None:
             config = self.load_config()
-        return config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
+        return config.get('ubuntu_user') or get_ubuntu_user()
 
     def get_ubuntu_host(self, config: Dict[str, Any] = None) -> str:
         """
@@ -542,7 +572,7 @@ class ConfigManager:
         """
         if config is None:
             config = self.load_config()
-        return config.get('ubuntu_host', '')
+        return config.get('ubuntu_host') or get_ubuntu_host()
 
     def find_device_host_password(self, device_host: str, config: Dict[str, Any] = None) -> Optional[str]:
         """
@@ -575,3 +605,37 @@ class ConfigManager:
 
 # 全局配置管理器实例
 config_manager = ConfigManager()
+
+
+# ==================== 本地主机信息自动获取 ====================
+
+# Cache for local host info (avoid repeated system calls)
+_cached_ubuntu_user: Optional[str] = None
+_cached_ubuntu_host: Optional[str] = None
+
+def get_ubuntu_user() -> str:
+    """自动获取 Ubuntu 用户名（带缓存）"""
+    global _cached_ubuntu_user
+    if _cached_ubuntu_user is None:
+        _cached_ubuntu_user = os.environ.get('UBUNTU_USER') or os.environ.get('USER') or getpass.getuser() or 'gms'
+    return _cached_ubuntu_user
+
+
+def get_ubuntu_host() -> str:
+    """自动获取 Ubuntu 主机 IP 地址（带缓存）"""
+    global _cached_ubuntu_host
+    if _cached_ubuntu_host is None:
+        # 优先使用环境变量
+        env_host = os.environ.get('UBUNTU_HOST')
+        if env_host:
+            _cached_ubuntu_host = env_host
+        else:
+            # 自动检测本地 IP
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                    s.settimeout(2)
+                    s.connect(('8.8.8.8', 53))
+                    _cached_ubuntu_host = s.getsockname()[0]
+            except Exception:
+                _cached_ubuntu_host = ''
+    return _cached_ubuntu_host

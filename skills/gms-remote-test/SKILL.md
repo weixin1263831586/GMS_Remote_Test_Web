@@ -156,11 +156,11 @@ gms-rt-test-start "CTS_DEX" "--device device1"
 
 **2. API 直接调用**
 ```bash
-# GET 请求
-curl http://172.16.14.233:5001/api/devices/list
+# GET 请求（使用环境变量或自动检测的服务器地址）
+curl $GMS_REMOTE_TEST_SERVER/api/devices/list
 
 # POST 请求
-curl -X POST http://172.16.14.233:5001/api/devices/reboot \
+curl -X POST $GMS_REMOTE_TEST_SERVER/api/devices/reboot \
   -H "Content-Type: application/json" \
   -d '{"devices": ["device1", "device2"]}'
 ```
@@ -231,8 +231,10 @@ gms-rt-devices-bootloader-unlock "R58M1234567"
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| `GMS_REMOTE_TEST_SERVER` | 服务器地址 | `http://172.16.14.233:5001` |
-| `GMS_WEB_APP_DIR` | Web 应用目录 | `/home/hcq/GMS_Remote_Test/web_app` |
+| `GMS_REMOTE_TEST_SERVER` | 服务器地址 | `http://localhost:5001` (自动检测) |
+| `GMS_WEB_APP_DIR` | Web 应用目录 | `${HOME}/GMS_Remote_Test/web_app` |
+| `UBUNTU_USER` | Ubuntu 用户名 | 当前系统用户 |
+| `UBUNTU_HOST` | Ubuntu 主机 IP | 自动检测 |
 
 ---
 
@@ -243,8 +245,8 @@ gms-rt-devices-bootloader-unlock "R58M1234567"
 bash ~/.claude/skills/gms-remote-test/scripts/gms-remote-test.sh gms-rt-devices-list
 ```
 
-**Web Interface**: http://172.16.14.233:5001
-**API Docs**: http://172.16.14.233:5001/docs
+**Web Interface**: http://localhost:5001 (或 $GMS_REMOTE_TEST_SERVER)
+**API Docs**: http://localhost:5001/docs (或 $GMS_REMOTE_TEST_SERVER/docs)
 
 ## Platform Overview
 
