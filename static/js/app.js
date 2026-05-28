@@ -9294,7 +9294,12 @@ function switchApkTab(tabName) {
 
 function downloadApkSource() {
     if (!window.apkCurrentTaskId) return;
-    window.open(`/api/apk/download/${window.apkCurrentTaskId}`, '_blank');
+    const link = document.createElement('a');
+    link.href = `/api/apk/download/${window.apkCurrentTaskId}`;
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 function resetApkAnalysis() {
