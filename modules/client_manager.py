@@ -7,6 +7,7 @@
 import paramiko
 from typing import Dict, Optional, Any
 from core.config import config_manager
+from core.common_utils import CommonUtils
 
 
 class ClientManager:
@@ -134,7 +135,7 @@ class ClientManager:
         # 如果客户端 IP 与 local_server 中的 IP 匹配，通过 SSH 获取真实登录用户
         local_server = config.get('local_server', '')
         if '@' in local_server:
-            local_ip = local_server.split('@')[1]
+            local_ip = CommonUtils.extract_ip_from_host(local_server)
             if client_ip == local_ip:
                 # 尝试用已保存的凭据连接并执行 whoami
                 for cred in self.ssh_credentials:

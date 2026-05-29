@@ -18,13 +18,14 @@ from datetime import datetime
 import paramiko
 
 from .ssh import ssh_manager
-from .config import config_manager
+from .config import config_manager, get_ubuntu_user
+from .common_utils import CommonUtils
 
 logger = logging.getLogger(__name__)
 
 
 def default_suites_path(config: Dict[str, Any]) -> str:
-    ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
+    ubuntu_user = config.get('ubuntu_user') or get_ubuntu_user()
     return f"/home/{ubuntu_user}/GMS-Suite"
 
 
@@ -78,14 +79,15 @@ class TestRunner:
             # 获取主机配置
             device_host = test_params.get('device_host', '')
             if '@' in device_host:
+                username, host_ip = CommonUtils.parse_host_address(device_host)
                 host_config = {
-                    'host': device_host.split('@')[1],
-                    'username': device_host.split('@')[0],
+                    'host': host_ip,
+                    'username': username,
                 }
             else:
                 host_config = {
                     'host': config.get('ubuntu_host', ''),
-                    'username': config.get('ubuntu_user') or os.environ.get('USER') or 'gms',
+                    'username': config.get('ubuntu_user') or get_ubuntu_user(),
                 }
 
             # 建立SSH连接

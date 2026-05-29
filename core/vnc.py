@@ -15,7 +15,8 @@ import time
 from typing import Dict, Any, List
 
 from .ssh import ssh_manager
-from .config import config_manager
+from .config import config_manager, get_ubuntu_user
+from .common_utils import CommonUtils
 from .device_utils import DeviceUtils
 
 logger = logging.getLogger(__name__)
@@ -219,7 +220,7 @@ class VNCManager:
             if not ssh:
                 return {'success': False, 'error': 'SSH连接失败'}
 
-            ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
+            ubuntu_user = config.get('ubuntu_user') or get_ubuntu_user()
 
             # 如果提供了VNC密码，需要创建密码文件；否则使用免密模式
             if vnc_password:
@@ -302,7 +303,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                 self.ssh_manager.execute_command(ssh, novnc_cmd, timeout=10)
                 time.sleep(1)
 
-            target_ip = host.split('@')[-1] if '@' in host else host
+            target_ip = CommonUtils.extract_ip_from_host(host)
 
             self.ssh_manager.return_connection(ssh)
 
@@ -390,13 +391,13 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
 
             if not host:
                 host = config.get('ubuntu_host', '')
-                ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
+                ubuntu_user = config.get('ubuntu_user') or get_ubuntu_user()
             else:
                 # 从host中解析user
                 if '@' in host:
                     ubuntu_user, host = host.split('@', 1)
                 else:
-                    ubuntu_user = config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
+                    ubuntu_user = config.get('ubuntu_user') or get_ubuntu_user()
 
             ssh = self.ssh_manager.get_connection(config)
             if not ssh:

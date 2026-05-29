@@ -9,10 +9,11 @@ USB/IP - 核心业务逻辑
 
 import logging
 import time
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 
 from .ssh import ssh_manager
 from .config import config_manager
+from .common_utils import CommonUtils
 from .device_utils import DeviceUtils
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,61 @@ def split_host_port(hostname: str, default_port: int = 22) -> Tuple[str, int]:
         if port_text.isdigit():
             return host, int(port_text)
     return hostname, default_port
+
+# Shared USB/IP parsing constants
+DEFAULT_ANDROID_USBIP_VID_PIDS = ('2207:0006',)
+ANDROID_USBIP_MARKERS = ('android', 'adb', 'rk356', 'rockchip')
+
+
+def _iter_connected_lines(output: str):
+    """Yield stripped lines from the 'Connected:' section of usbipd list output."""
+    in_connected = False
+    for line in (output or '').splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith('Connected:'):
+            in_connected = True
+            continue
+        if stripped.startswith('Persisted:'):
+            break
+        if not in_connected:
+            continue
+        yield stripped
+
+
+def parse_usbipd_android_busids(output: str, vid_pid: Optional[str] = None) -> List[str]:
+    """从 usbipd list 输出中提取 Android 设备 BUSID。"""
+    vid_pids = {pid.lower() for pid in DEFAULT_ANDROID_USBIP_VID_PIDS}
+    if vid_pid:
+        vid_pids.add(vid_pid.lower())
+
+    busids: List[str] = []
+    for stripped in _iter_connected_lines(output):
+        lowered = stripped.lower()
+        if any(pid in lowered for pid in vid_pids) or any(marker in lowered for marker in ANDROID_USBIP_MARKERS):
+            parts = stripped.split()
+            if parts and '-' in parts[0]:
+                busids.append(parts[0])
+    return busids
+
+
+def parse_usbipd_busid_statuses(output: str) -> Dict[str, str]:
+    """Parse usbipd list Connected section into BUSID -> status."""
+    statuses: Dict[str, str] = {}
+    for stripped in _iter_connected_lines(output):
+        parts = stripped.split()
+        if parts and '-' in parts[0]:
+            lowered = stripped.lower()
+            if 'not shared' in lowered:
+                statuses[parts[0]] = 'not_shared'
+            elif 'attached' in lowered:
+                statuses[parts[0]] = 'attached'
+            elif 'shared' in lowered:
+                statuses[parts[0]] = 'shared'
+            else:
+                statuses[parts[0]] = 'unknown'
+    return statuses
 
 
 class USBIPManager:
@@ -96,7 +152,7 @@ class USBIPManager:
                 }
 
             # 连接Windows主机
-            username, hostname = device_host.split('@', 1)
+            username, hostname = CommonUtils.parse_host_address(device_host)
             ssh_hostname, ssh_port = split_host_port(hostname)
             usbip_attach_host = usbip_attach_host or config.get('usbip_attach_host') or ssh_hostname
             win_ssh = self._create_windows_ssh(ssh_hostname, username, device_password, ssh_port)
@@ -285,32 +341,7 @@ class USBIPManager:
 
             logger.info(f"USB/IP devices:\n{stdout}")
 
-            default_vid_pids = {'2207:0006'}
-            vid_pid = config.get('usbip_vid_pid')
-            if vid_pid:
-                default_vid_pids.add(vid_pid.lower())
-            android_markers = (
-                'android',
-                'adb',
-                'rk356',
-                'rockchip',
-            )
-
-            devices = []
-            in_connected = False
-
-            for line in stdout.split('\n'):
-                if 'Connected:' in line:
-                    in_connected = True
-                elif 'Persisted:' in line:
-                    break
-                elif in_connected:
-                    line_lower = line.lower()
-                    if any(pid in line_lower for pid in default_vid_pids) or any(marker in line_lower for marker in android_markers):
-                        parts = line.strip().split()
-                        if parts and '-' in parts[0]:
-                            devices.append(parts[0])
-
+            devices = parse_usbipd_android_busids(stdout, config.get('usbip_vid_pid'))
             logger.info(f"Found USB/IP devices: {devices}")
             return devices
 

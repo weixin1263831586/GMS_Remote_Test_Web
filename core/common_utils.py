@@ -8,8 +8,11 @@ import logging
 import re
 import subprocess
 import os
+import time
 from typing import Tuple, Optional, Dict, Any
 from urllib.parse import urlparse
+
+from .config import get_ubuntu_user
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +22,11 @@ class CommonUtils:
 
     # 本地主机标识列表
     LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1']
+
+    # Cached local IPs with TTL
+    _cached_local_ips = None
+    _cached_local_ips_time = 0.0
+    _LOCAL_IPS_TTL = 60.0  # seconds
 
     @classmethod
     def get_local_ip(cls) -> Optional[str]:
@@ -36,7 +44,11 @@ class CommonUtils:
 
     @classmethod
     def get_local_ips(cls) -> set:
-        """获取本机所有可识别 IP 地址。"""
+        """获取本机所有可识别 IP 地址（带 60 秒缓存）。"""
+        now = time.time()
+        if cls._cached_local_ips is not None and (now - cls._cached_local_ips_time) < cls._LOCAL_IPS_TTL:
+            return cls._cached_local_ips
+
         local_ips = set(cls.LOCAL_HOSTS)
         local_ip = cls.get_local_ip()
         if local_ip:
@@ -69,6 +81,8 @@ class CommonUtils:
         except Exception as e:
             logger.debug(f"Failed to run hostname -I: {e}")
 
+        cls._cached_local_ips = local_ips
+        cls._cached_local_ips_time = now
         return local_ips
 
     @classmethod
@@ -258,7 +272,8 @@ class CommonUtils:
             替换后的路径
         """
         if '${ubuntu_user}' in path:
-            default_user = default_user or os.environ.get('USER') or 'gms'
+            if default_user is None:
+                default_user = get_ubuntu_user()
             return path.replace('${ubuntu_user}', default_user)
         return path
 

@@ -2,6 +2,7 @@
 Security audit logging for web and CLI operations.
 """
 import json
+import re
 import os
 import threading
 import urllib.parse
@@ -21,8 +22,9 @@ SENSITIVE_KEYWORDS = (
     'apikey',
     'authorization',
     'cookie',
-    'key',
 )
+
+_WORD_BOUNDARY_PATTERN = re.compile(r'(?:' + '|'.join(re.escape(kw) for kw in SENSITIVE_KEYWORDS) + r')', re.IGNORECASE)
 
 
 class SecurityAuditLogger:
@@ -33,10 +35,10 @@ class SecurityAuditLogger:
         self.log_path = log_path or os.path.join(base_dir, 'data', 'security_audit.json')
         self.max_read_lines = max_read_lines
         self._lock = threading.Lock()
+        os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
 
     def sanitize_value(self, key: str, value: Any) -> Any:
-        key_lower = (key or '').lower()
-        if any(keyword in key_lower for keyword in SENSITIVE_KEYWORDS):
+        if _WORD_BOUNDARY_PATTERN.search(key):
             return '***REDACTED***'
         if isinstance(value, dict):
             return self.sanitize_mapping(value)
@@ -90,7 +92,6 @@ class SecurityAuditLogger:
             'timestamp': datetime.now().isoformat(timespec='seconds'),
             **event,
         }
-        os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
         with self._lock:
             with open(self.log_path, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(record, ensure_ascii=False, separators=(',', ':')) + '\n')

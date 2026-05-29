@@ -296,7 +296,7 @@ async def lifespan(app: FastAPI):
                         try:
                             if ws.client_state == WebSocketState.CONNECTED:
                                 await ws.send_json(event)
-                                logger.info(f"Sent USB event to client {client_id}: {event.get('type')}")
+                                logger.debug(f"Sent USB event to client {client_id}: {event.get('type')}")
                         except Exception as e:
                             logger.debug(f"Error sending USB event to client {client_id}: {e}")
                 except queue.Empty:
@@ -373,7 +373,7 @@ from core.device import device_manager
 from core.test_report import test_report_manager
 from core.vnc import vnc_manager, calculate_window_positions
 from core.adb_forward import adb_forward_manager
-from core.usbip import usbip_manager, split_host_port, USBIPD_INSTALL_CMD, USBIPD_INSTALL_GUIDE
+from core.usbip import usbip_manager, split_host_port, USBIPD_INSTALL_CMD, USBIPD_INSTALL_GUIDE, parse_usbipd_android_busids, parse_usbipd_busid_statuses
 from core.common_utils import CommonUtils
 from core.device_utils import DeviceUtils
 from core.report_analyzer import ReportAnalyzer
@@ -771,8 +771,6 @@ def should_audit_request(path: str, source: str, method: str) -> bool:
 def get_audit_operation(path: str, method: str) -> str:
     if path == '/':
         return '打开Web首页'
-    if path.startswith('/api/'):
-        return f"{method} {path}"
     return f"{method} {path}"
 
 
@@ -2196,71 +2194,7 @@ def is_public_origin_request(request: Optional[Request]) -> bool:
     ))
 
 
-DEFAULT_ANDROID_USBIP_VID_PIDS = ('2207:0006',)
 
-
-def parse_usbipd_android_busids(output: str, vid_pid: Optional[str] = None) -> List[str]:
-    """从 usbipd list 输出中提取 Android 设备 BUSID。"""
-    busids: List[str] = []
-    in_connected = False
-    vid_pids = {pid.lower() for pid in DEFAULT_ANDROID_USBIP_VID_PIDS}
-    if vid_pid:
-        vid_pids.add(vid_pid.lower())
-    android_markers = (
-        'android',
-        'adb',
-        'rk356',
-        'rockchip',
-    )
-
-    for line in (output or '').splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith('Connected:'):
-            in_connected = True
-            continue
-        if stripped.startswith('Persisted:'):
-            break
-        if not in_connected:
-            continue
-
-        lowered = stripped.lower()
-        if any(pid in lowered for pid in vid_pids) or any(marker in lowered for marker in android_markers):
-            parts = stripped.split()
-            if parts and '-' in parts[0]:
-                busids.append(parts[0])
-
-    return busids
-
-
-def parse_usbipd_busid_statuses(output: str) -> Dict[str, str]:
-    """Parse usbipd list Connected section into BUSID -> status."""
-    statuses: Dict[str, str] = {}
-    in_connected = False
-    for line in (output or '').splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith('Connected:'):
-            in_connected = True
-            continue
-        if stripped.startswith('Persisted:'):
-            break
-        if not in_connected:
-            continue
-        parts = stripped.split()
-        if parts and '-' in parts[0]:
-            lowered = stripped.lower()
-            if 'not shared' in lowered:
-                statuses[parts[0]] = 'not_shared'
-            elif 'attached' in lowered:
-                statuses[parts[0]] = 'attached'
-            elif 'shared' in lowered:
-                statuses[parts[0]] = 'shared'
-            else:
-                statuses[parts[0]] = 'unknown'
-    return statuses
 
 
 def resolve_public_tunnel_device_host(request: Optional[Request], client_id: str) -> tuple[Optional[str], Optional[str]]:
@@ -3776,8 +3710,8 @@ def build_devices_management_payload(
     client_id = client_manager.get_client_id('127.0.0.1')
     locks = device_lock_manager.get_all_locks()
     devices_info = []
-    ubuntu_host = config.get("ubuntu_host") or get_ubuntu_host()
-    ubuntu_user = config.get("ubuntu_user") or get_ubuntu_user()
+    ubuntu_host = config_manager.get_ubuntu_host(config)
+    ubuntu_user = config_manager.get_ubuntu_user(config)
 
     all_usbip_sources = {**global_state.usbip_devices_source, **usbip_manager.device_sources}
     current_device_set = set(device_ids)
@@ -10611,11 +10545,7 @@ ANDROID_NS = 'http://schemas.android.com/apk/res/android'
 
 def _safe_join(base_dir: str, *parts: str) -> str:
     """Join paths and ensure the result stays under base_dir."""
-    base_abs = os.path.abspath(base_dir)
-    target_abs = os.path.abspath(os.path.join(base_abs, *parts))
-    if os.path.commonpath([base_abs, target_abs]) != base_abs:
-        raise ValueError("非法路径")
-    return target_abs
+    return safe_upload_target_path(base_dir, os.path.join(*parts) if parts else '.', allow_nested=True)
 
 
 def _normalize_apk_filename(filename: Optional[str]) -> str:
@@ -11831,8 +11761,8 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
             global_state.terminal_ssh_sessions[session_id] = {
                 'ssh': ssh,
                 'channel': channel,
-                'host': config.get('ubuntu_host') or get_ubuntu_host(),
-                'user': config.get('ubuntu_user') or get_ubuntu_user(),
+                'host': config_manager.get_ubuntu_host(config),
+                'user': config_manager.get_ubuntu_user(config),
                 'mode': backend_mode,
                 'serial_no': serial_no,
                 'connected_at': time.time(),
@@ -11915,8 +11845,8 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
     """处理终端SSH连接"""
     try:
         config = config_manager.load_config()
-        host = data.get('host', config.get('ubuntu_host') or get_ubuntu_host())
-        user = data.get('user', config.get('ubuntu_user') or get_ubuntu_user())
+        host = data.get('host', config_manager.get_ubuntu_host(config))
+        user = data.get('user', config_manager.get_ubuntu_user(config))
         password = data.get('password', config.get('ubuntu_pswd', ''))
         mode = data.get('mode', 'ssh')  # 'ssh' 或 'adb'
         serial_no = data.get('serial_no', '')

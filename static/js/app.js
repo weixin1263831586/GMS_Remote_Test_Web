@@ -436,21 +436,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🔌 现在初始化WebSocket（需要clientId）
     initWebSocket();
 
-    // ⚙️ 延迟加载非关键配置（避免阻塞关键请求）
+    // ⚙️ 延迟加载非关键数据（避免阻塞关键请求）
     setTimeout(() => {
-        Promise.all([
-            loadConfig(),
-            checkInitialTestStatus()
-        ]).catch(error => {
-            console.warn('[Init] Async load failed:', error);
+        loadConfig().catch(error => {
+            console.warn('[Init] Config load failed, using defaults:', error);
         });
-    }, 2000);  // 2秒后再加载
-
-    // 延迟加载设备和测试套件（避免阻塞关键请求）
-    setTimeout(() => {
         loadDevices();
         loadTestSuites();
-    }, 1000);  // 1秒后再加载
+        checkInitialTestStatus().catch(error => {
+            console.warn('[Init] Test status check failed:', error);
+        });
+    }, 1000);
 
     startStatusPolling();
 
@@ -1246,38 +1242,43 @@ async function loadDevices(forceRefresh = false) {
 
 // 测试套件管理
 let testSuitesCache = [];
-let isRefreshingTestSuites = false;
+let _loadSuitesPromise = null;
 
 async function loadTestSuites(forceRefresh = false) {
-    if (isRefreshingTestSuites) {
-        return testSuitesCache;
+    // 如果有正在进行的请求，等待它完成
+    if (_loadSuitesPromise) {
+        return _loadSuitesPromise;
     }
 
     if (!forceRefresh && testSuitesCache.length > 0) {
         return testSuitesCache;
     }
 
-    isRefreshingTestSuites = true;
+    _loadSuitesPromise = (async () => {
+        try {
+            const response = await apiCall('/api/test/suites');
 
-    try {
-        // 使用 /api/test/suites?base_path=/home/hcq/GMS-Suite 来扫描整个 GMS-Suite 目录
-        const response = await apiCall('/api/test/suites?base_path=/home/hcq/GMS-Suite');
-
-        if (response.success && response.suites) {
-            testSuitesCache = response.suites;
-            renderTestSuitesDropdown();
-            debugLog('[loadTestSuites] 已加载测试套件:', response.count, '个');
-            return testSuitesCache;
-        } else {
-            showToast('加载测试套件失败', 'error');
+            if (response.success && response.suites) {
+                testSuitesCache = response.suites;
+                renderTestSuitesDropdown();
+                if (typeof renderTestSuiteBrowserList === 'function') {
+                    renderTestSuiteBrowserList();
+                }
+                debugLog('[loadTestSuites] 已加载测试套件:', response.count, '个');
+                return testSuitesCache;
+            } else {
+                showToast('加载测试套件失败', 'error');
+            }
+        } catch (error) {
+            console.error('[loadTestSuites] 错误:', error);
+            showToast('加载测试套件失败: ' + error.message, 'error');
+        } finally {
+            _loadSuitesPromise = null;
         }
-    } catch (error) {
-        console.error('[loadTestSuites] 错误:', error);
-        showToast('加载测试套件失败: ' + error.message, 'error');
-    } finally {
-        isRefreshingTestSuites = false;
-    }
-    return testSuitesCache;
+        return testSuitesCache;
+    })();
+
+    return _loadSuitesPromise;
 }
 
 function renderTestSuitesDropdown() {
@@ -1503,7 +1504,7 @@ window.downloadTestSuite = async function downloadTestSuite() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 url: url,
-                save_dir: '/home/hcq/GMS-Suite'
+                save_dir: `/home/${getDefaultUbuntuUser()}/GMS-Suite`
             })
         });
         console.log('[downloadTestSuite] fetch 响应状态:', response.status);
@@ -1634,7 +1635,7 @@ window.extractTestSuite = async function extractTestSuite() {
 
     // 获取最近下载的文件
     try {
-        const response = await fetch('/api/test/suites?base_path=/home/hcq/GMS-Suite');
+        const response = await fetch('/api/test/suites');
         const result = await response.json();
 
         // 查找最新的压缩包文件
@@ -1657,7 +1658,7 @@ window.extractTestSuite = async function extractTestSuite() {
         // 如果没有找到，使用 URL 输入框的值
         if (!archivePath && urlInput && urlInput.value) {
             const filename = urlInput.value.split('/').pop();
-            archivePath = `/home/hcq/GMS-Suite/${filename}`;
+            archivePath = `/home/${getDefaultUbuntuUser()}/GMS-Suite/${filename}`;
         }
 
         if (!archivePath) {
@@ -1683,7 +1684,7 @@ window.extractTestSuite = async function extractTestSuite() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 archive_path: archivePath,
-                extract_dir: '/home/hcq/GMS-Suite'
+                extract_dir: `/home/${getDefaultUbuntuUser()}/GMS-Suite`
             })
         });
 
