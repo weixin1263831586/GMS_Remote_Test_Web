@@ -8,6 +8,8 @@ from typing import Tuple, Optional, Dict, Any
 from contextlib import contextmanager
 import queue
 
+from .config import get_ubuntu_user
+
 logger = logging.getLogger(__name__)
 
 # SFTP 性能优化常量
@@ -87,7 +89,7 @@ class SSHManager:
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
             host = config.get('host') or config.get('ubuntu_host')
-            username = config.get('username') or config.get('ubuntu_user') or os.environ.get('USER') or 'gms'
+            username = config.get('username') or config.get('ubuntu_user') or get_ubuntu_user()
             password = config.get('password') or config.get('ubuntu_pswd', '')
 
             if config.get('use_key_auth', False):
