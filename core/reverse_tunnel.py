@@ -11,6 +11,9 @@ from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
+# 隧道数据流读取缓冲区大小（16KB，平衡内存占用和响应性）
+STREAM_CHUNK_SIZE = 16384
+
 
 @dataclass
 class LocalTunnelStream:
@@ -250,7 +253,7 @@ class ReverseTunnelManager:
                 return
 
             while True:
-                data = await reader.read(16384)
+                data = await reader.read(STREAM_CHUNK_SIZE)
                 if not data:
                     break
                 await agent.send({

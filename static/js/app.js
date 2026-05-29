@@ -434,7 +434,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // 🔌 现在初始化WebSocket（需要clientId）
-    initSocket();
+    initWebSocket();
 
     // ⚙️ 延迟加载非关键配置（避免阻塞关键请求）
     setTimeout(() => {
@@ -788,98 +788,6 @@ function initWebSocket() {
                 initWebSocket();
             }
         }, 3000);
-    });
-}
-
-// ==================== Socket.IO Connection (Flask) ====================
-function initSocket() {
-    // 检查Socket.IO是否可用（FastAPI版本使用WebSocket）
-    if (typeof io === 'undefined') {
-        debugLog('[Socket.IO] Not available, using WebSocket instead (FastAPI)');
-        initWebSocket();
-        return;
-    }
-
-    state.socket = io();
-
-    state.socket.on('connect', () => {
-        debugLog('Connected to server');
-        updateConnectionStatus(true);
-    });
-
-    state.socket.on('disconnect', () => {
-        debugLog('Disconnected from server');
-        updateConnectionStatus(false);
-    });
-
-    state.socket.on('connected', (data) => {
-        debugLog('[Socket.IO] Server confirmed connection, client_id:', data.client_id);
-        // 在日志区域显示连接信息
-        setTimeout(() => {
-            const logOutput = document.getElementById('log-output');
-            if (logOutput) {
-                const entry = document.createElement('div');
-                entry.className = 'log-entry log-success';
-                entry.textContent = `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}] [Socket.IO] 已连接, Client ID: ${data.client_id}`;
-                entry.style.fontWeight = 'bold';
-                entry.style.color = 'green';
-                logOutput.appendChild(entry);
-            }
-        }, 100);
-    });
-
-    state.socket.on('log_update', (data) => {
-        debugLog('[Socket.IO] Received log_update:', data);
-        // 直接添加日志
-        const logOutput = document.getElementById('log-output');
-        if (logOutput) {
-            addLogEntry(data.log, data.type || 'info');
-        } else {
-            console.warn('[Socket.IO] log-output element not found!');
-        }
-    });
-
-    state.socket.on('devices_updated', (devices) => {
-        state.devices = devices;
-        renderDevices();
-    });
-
-    state.socket.on('test_complete', () => {
-        console.log('[WebSocket] test_complete 事件触发');
-        state.testing = false;
-        updateTestToggleButton(false);
-        addLogEntry('测试完成', 'success');
-        showToast('测试完成', 'success');
-        // 刷新设备列表，更新设备锁定状态
-        loadDevices(true);
-        // 弹出右下角 Snackbar 通知
-        if (typeof window.showSnackbar === 'function') {
-            window.showSnackbar('测试任务完成', '测试已结束，请查看测试结果', 'success');
-        }
-    });
-
-    state.socket.on('notification', (data) => {
-        handleRealtimeNotification(data.notification || data);
-    });
-
-    state.socket.on('vpn_status_update', (data) => {
-        updateVpnStatus(data.connected);
-    });
-
-    state.socket.on('upload_progress', (data) => {
-        // Handled in upload handler
-    });
-
-    state.socket.on('terminal_data', (data) => {
-        // Terminal data - handled in terminal.html
-    });
-
-    state.socket.on('terminal_error', (data) => {
-        // Terminal error - handled in terminal.html
-    });
-
-    state.socket.on('terminal_connected', () => {
-        // Terminal connected - handled in terminal.html
     });
 }
 
@@ -4730,7 +4638,7 @@ function updateProgressBar(percentage, message = '', title = '进度') {
 // 上传文件进度
 // ==================== Status Polling ====================
 function startStatusPolling() {
-    // 轮询状态和日志（同时支持Socket.IO和WebSocket）
+    // 轮询状态和日志
     let shownPyudevWarning = false;  // 标记是否已显示过 pyudev 警告
     let pollInterval = 2000;  // 初始轮询间隔：2秒
     const maxPollInterval = 30000;  // 最大轮询间隔：30秒
@@ -4738,9 +4646,8 @@ function startStatusPolling() {
 
     const pollStatus = async () => {
         try {
-            // 检查是否有实时连接（Socket.IO 或 WebSocket）
-            const hasRealtimeConnection = (state.socket && typeof io !== 'undefined') ||
-                                        (state.websocket && state.websocket.readyState === WebSocket.OPEN);
+            // 检查是否有 WebSocket 连接
+            const hasRealtimeConnection = state.websocket && state.websocket.readyState === WebSocket.OPEN;
 
             // 如果没有实时连接，获取日志；否则只获取状态
             const status = await apiCall(hasRealtimeConnection ? '/api/test/status?logs=false' : '/api/test/status');
@@ -8627,7 +8534,6 @@ window.apkStatusPollInFlight = false;
 window.apkNotifiedTaskId = null;
 window.apkOpenFiles = new Map();
 window.apkActiveFilePath = null;
-window.apkCurrentFiles = [];
 
 function stopApkPolling() {
     clearInterval(window.apkPollInterval);
@@ -8643,17 +8549,10 @@ function setApkUploadEmpty(empty) {
 }
 
 function initApkAnalysisPage() {
-    // 直接获取元素，不依赖缓存
-    const uploadZone = document.getElementById('apk-upload-zone');
-    const fileInput = document.getElementById('apk-file-input');
+    const uploadZone = $('apk-upload-zone');
+    const fileInput = $('apk-file-input');
 
     if (!uploadZone || !fileInput) return;
-
-    // 如果事件已绑定，只更新状态
-    if (uploadZone.dataset.eventsBound === 'true') {
-        setApkUploadEmpty(!window.apkCurrentTaskId);
-        return;
-    }
 
     setApkUploadEmpty(!window.apkCurrentTaskId);
     initApkSourceResizer();
@@ -8680,8 +8579,6 @@ function initApkAnalysisPage() {
             handleApkFile(e.target.files[0]);
         }
     });
-
-    uploadZone.dataset.eventsBound = 'true';
 }
 
 function initApkSourceResizer() {
@@ -8720,9 +8617,16 @@ function initApkSourceResizer() {
     document.addEventListener('mouseleave', stopDrag);
 }
 
+// APK/JAR 文件扩展名常量
+const SUPPORTED_APK_EXTENSIONS = ['.apk', '.jar'];
+
+function isSupportedApkFile(filename) {
+    const nameLower = filename.toLowerCase();
+    return SUPPORTED_APK_EXTENSIONS.some(ext => nameLower.endsWith(ext));
+}
+
 async function handleApkFile(file) {
-    const nameLower = file.name.toLowerCase();
-    if (!nameLower.endsWith('.apk') && !nameLower.endsWith('.jar')) {
+    if (!isSupportedApkFile(file.name)) {
         showToast('仅支持 .apk 和 .jar 文件', 'error');
         return;
     }
@@ -9331,12 +9235,6 @@ function resetApkAnalysis() {
     $('apk-progress-fill').style.width = '0%';
     $('apk-analysis-progress-container').style.display = 'none';
     $('apk-analysis-progress-bar').style.width = '0%';
-
-    // 重置上传区域状态，允许重新绑定事件
-    const uploadZone = document.getElementById('apk-upload-zone');
-    if (uploadZone) {
-        uploadZone.dataset.eventsBound = '';
-    }
 
     const sourceTree = $('apk-source-tree');
     if (sourceTree) {
