@@ -997,6 +997,9 @@ CLEANUP_INTERVAL_SECONDS = 3600  # 定期清理间隔（1小时）
 USER_STATE_MAX_AGE_HOURS = 24  # 用户状态最大存活时间
 UPLOAD_PROGRESS_MAX_AGE_SECONDS = 600  # 上传进度过期时间（10分钟）
 USBIP_STATE_MAX_AGE_SECONDS = 86400  # USB/IP状态过期时间（24小时）
+APK_TASK_MAX_AGE_SECONDS = 86400  # APK 分析任务过期时间（24 小时）
+TERMINAL_SESSION_MAX_AGE_SECONDS = 3600  # 终端会话过期时间（1 小时）
+FIRMWARE_UPLOAD_PROGRESS_MAX_ITEMS_PER_CLIENT = 1  # 每客户端最多保存的固件上传进度项数
 
 # ==================== 全局状态管理 ====================
 
@@ -1108,9 +1111,18 @@ class GlobalState:
             expired_usbip = self._cleanup_expired(
                 self.usbip_states, self.usbip_states_lock, USBIP_STATE_MAX_AGE_SECONDS)
 
-            if to_remove or expired_progress or expired_sessions or expired_usbip:
+            expired_apk_tasks = self._cleanup_expired(
+                self.apk_analysis_tasks, self.apk_analysis_tasks_lock, APK_TASK_MAX_AGE_SECONDS)
+
+            with self.firmware_upload_progress_lock:
+                for client_id in list(self.firmware_upload_progress.keys()):
+                    entries = self.firmware_upload_progress[client_id]
+                    if isinstance(entries, list) and len(entries) > FIRMWARE_UPLOAD_PROGRESS_MAX_ITEMS_PER_CLIENT:
+                        self.firmware_upload_progress[client_id] = entries[-FIRMWARE_UPLOAD_PROGRESS_MAX_ITEMS_PER_CLIENT:]
+
+            if to_remove or expired_progress or expired_sessions or expired_usbip or expired_apk_tasks:
                 logger.info(f"Cleanup: {len(to_remove)} user states, {len(expired_progress)} upload progress, "
-                           f"{len(expired_sessions)} SSH sessions, {len(expired_usbip)} USB/IP states")
+                           f"{len(expired_sessions)} SSH sessions, {len(expired_usbip)} USB/IP states, {len(expired_apk_tasks)} APK tasks")
         except Exception as e:
             logger.error(f"Error cleaning up user states: {e}")
 
@@ -1218,6 +1230,12 @@ class GlobalState:
             return None
 
 global_state = GlobalState()
+
+# Config cache for hot-path optimization
+_config_cache: Dict[str, Any] = {}
+_config_cache_timestamp: float = 0
+_config_cache_ttl: int = 5  # 5 second TTL
+_config_cache_lock = threading.Lock()
 
 DEVICE_CACHE_TTL = 3
 DEVICE_SSH_POOLS_MAX = 10  # 最大设备SSH连接池数量
@@ -3612,7 +3630,6 @@ async def check_bootloader_status(req: DeviceActionRequest):
         with SSHConnection() as ssh:
             # 并行检查所有设备的锁定状态
             async def check_single_device(device_id: str) -> Dict:
-                # Check verified boot state (GREEN = locked, ORANGE = unlocked)
                 output, error, code = ssh_manager.execute_command(
                     ssh,
                     f"adb -s {device_id} shell getprop ro.boot.verifiedbootstate"
@@ -4418,28 +4435,27 @@ async def run_test_background(
             os.path.join(os.path.dirname(__file__), 'scripts', 'run_GMS_Test_Auto.sh')
         )
 
-        if os.path.exists(local_script):
-            suites_path = config.get('suites_path') or get_default_suites_path(config)
-            remote_script = os.path.join(suites_path, 'run_GMS_Test_Auto.sh')
+        suites_path = config.get('suites_path') or get_default_suites_path(config)
+        remote_script = os.path.join(suites_path, 'run_GMS_Test_Auto.sh')
 
+        try:
             script_size = os.path.getsize(local_script)
             size_kb = script_size / 1024
 
-            await log_callback(f"📤 上传文件: run_GMS_Test_Auto.sh → {remote_script} ({size_kb:.2f}KB)", 'info')
+            await log_callback(f"📤 上传文件：run_GMS_Test_Auto.sh → {remote_script} ({size_kb:.2f}KB)", "info")
 
-            try:
-                with ssh.open_sftp() as sftp:
-                    sftp.put(local_script, remote_script)
+            with ssh.open_sftp() as sftp:
+                sftp.put(local_script, remote_script)
 
-                # 设置可执行权限
-                stdin, stdout, stderr = ssh.exec_command(f"chmod +x '{remote_script}'")
-                stdout.read()
+            # 设置可执行权限
+            stdin, stdout, stderr = ssh.exec_command(f"chmod +x '{remote_script}'")
+            stdout.read()
 
-                await log_callback(f"✅ 上传完成 ({size_kb:.2f}KB)", 'success')
-            except Exception as e:
-                await log_callback(f"⚠️ 脚本上传失败: {str(e)}", 'warning')
-        else:
-            await log_callback("⚠️ 本地脚本不存在，使用远程脚本", 'warning')
+            await log_callback(f"✅ 上传完成 ({size_kb:.2f}KB)", "success")
+        except FileNotFoundError:
+            await log_callback("⚠️ 本地脚本不存在，使用远程脚本", "warning")
+        except Exception as e:
+            await log_callback(f"⚠️ 脚本上传失败：{str(e)}", "warning")
 
         # 构建测试命令
         test_type = test_params.get('test_type', '')
@@ -5051,7 +5067,6 @@ async def list_suites(base_path: str = None):
             return ssh_connection_failed_response()
 
         try:
-            # Find all *-tradefed executables
             find_cmd = f"find '{base_path}' -maxdepth 5 -type f -executable -name '*-tradefed' 2>/dev/null | sort"
             output, _, _ = ssh_manager.execute_command(ssh, find_cmd, timeout=30)
 
@@ -5153,6 +5168,7 @@ for name in sorted(os.listdir(target), key=lambda n: n.lower()):
             "size": 0 if is_dir else st.st_size,
             "modified": int(st.st_mtime),
             "is_apk": (not is_dir) and name.lower().endswith(".apk"),
+            "is_jar": (not is_dir) and name.lower().endswith(".jar"),
         })
     except OSError:
         continue
@@ -5172,13 +5188,15 @@ if not os.path.isfile(target):
     sys.exit(0)
 
 st = os.stat(target)
+name_lower = target.lower()
 emit({
     "success": True,
     "real_path": target,
     "name": os.path.basename(target),
     "size": st.st_size,
     "modified": int(st.st_mtime),
-    "is_apk": target.lower().endswith(".apk"),
+    "is_apk": name_lower.endswith(".apk"),
+    "is_jar": name_lower.endswith(".jar"),
 })
 """
 
@@ -5310,8 +5328,8 @@ async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest):
         info = _run_suite_file_script(ssh, SUITE_FILE_INFO_SCRIPT, suite_root, remote_path)
         if not info.get('success'):
             return ApiResponse.error(info.get('error', '文件不存在'), status_code=404)
-        if not info.get('is_apk'):
-            return ApiResponse.error("仅支持 APK 文件反编译", status_code=400)
+        if not (info.get("is_apk") or info.get("is_jar")):
+            return ApiResponse.error("仅支持 APK/JAR 文件反编译", status_code=400)
         if int(info.get('size', 0)) > APK_MAX_FILE_SIZE:
             return ApiResponse.error(f"文件过大，最大支持 {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
 
@@ -5485,7 +5503,6 @@ async def list_tradefed_results(
             return ssh_connection_failed_response()
 
         try:
-            # Auto-detect tradefed binary if not provided
             if not tradefed_bin:
                 tradefed_bin = find_tradefed_binary(ssh, suite_path)
                 if not tradefed_bin:
@@ -5510,7 +5527,6 @@ async def list_tradefed_results(
                     status_code=500
                 )
 
-            # Parse results using shared utility
             results = parse_tradefed_list_results(output)
 
             return JSONResponse(content={
@@ -7912,12 +7928,10 @@ async def show_device_screens(req: DeviceActionRequest):
             return ssh_connection_failed_response()
 
         try:
-            # Check VNC service status
             vnc_check_cmd = f"curl -s -o /dev/null -w '%{{http_code}}' http://{ubuntu_host}:6080 --connect-timeout 3"
             vnc_output, _, _ = ssh_manager.execute_command(ssh, vnc_check_cmd, timeout=5)
             vnc_available = vnc_output.strip() == '200'
 
-            # Check scrcpy availability
             scrcpy_path = config.get("scrcpy_path", "")
             if scrcpy_path:
                 # Substitute ubuntu_user in path
@@ -8550,7 +8564,6 @@ async def install_usbipd(request: Request, device_host: Optional[str] = None):
 
             config['device_host'] = tunnel_host or client_id
 
-        # Auto-find password from client_ssh_credentials
         device_password = find_device_host_password(config, config['device_host'])
         if not device_password:
             device_password = config.get('device_pswd', '')
@@ -8558,7 +8571,6 @@ async def install_usbipd(request: Request, device_host: Optional[str] = None):
         if device_password:
             config['device_pswd'] = device_password
 
-        # Connect to Windows host and install
         with DeviceSSHConnection(config) as win_ssh:
             result = usbip_manager.install_usbipd(win_ssh, config)
             return JSONResponse(content=result)
@@ -10633,13 +10645,13 @@ def _safe_join(base_dir: str, *parts: str) -> str:
 
 
 def _normalize_apk_filename(filename: Optional[str]) -> str:
-    """Normalize upload filenames to a safe APK basename."""
+    """Normalize upload filenames to a safe APK/JAR basename."""
     raw_name = (filename or '').replace('\\', '/')
     basename = os.path.basename(raw_name).strip()
     if not basename or basename in ('.', '..'):
         raise ValueError("文件名无效")
-    if not basename.lower().endswith('.apk'):
-        raise ValueError("仅支持 .apk 文件")
+    if not (basename.lower().endswith('.apk') or basename.lower().endswith('.jar')):
+        raise ValueError("仅支持 .apk 和 .jar 文件")
 
     stem, ext = os.path.splitext(basename)
     stem = re.sub(r'[^A-Za-z0-9._ -]+', '_', stem).strip(' ._') or 'app'
@@ -11208,16 +11220,6 @@ async def list_files(req: dict):
             return ssh_connection_failed_response()
 
         try:
-            # Check if path exists
-            check_cmd = f"test -e '{path}' && echo 'exists' || echo 'not_found'"
-            output, _, _ = ssh_manager.execute_command(ssh, check_cmd)
-
-            if 'not_found' in output:
-                ssh_manager.return_connection(ssh)
-                return JSONResponse(content={'success': False, 'error': f'Path not found: {path}'}, status_code=404)
-
-            # List files with details (name, type, size, modified time)
-            # Using ls -la to get detailed information
             list_cmd = f"ls -la '{path}' 2>/dev/null || echo 'ERROR'"
             output, error, code = ssh_manager.execute_command(ssh, list_cmd)
 
@@ -11230,7 +11232,6 @@ async def list_files(req: dict):
                 if line.startswith('total') or not line.strip():
                     continue
 
-                # Parse ls -la output
                 parts = line.split()
                 if len(parts) >= 9:
                     permissions = parts[0]
@@ -11238,7 +11239,6 @@ async def list_files(req: dict):
                     is_dir = permissions.startswith('d')
                     size = parts[4] if not is_dir else '0'
 
-                    # Skip . and ..
                     if name in ['.', '..']:
                         continue
 
@@ -11249,7 +11249,6 @@ async def list_files(req: dict):
                         'permissions': permissions
                     })
 
-            # Sort: directories first, then files, alphabetically
             files.sort(key=lambda x: (x['type'] != 'directory', x['name'].lower()))
 
             ssh_manager.return_connection(ssh)
@@ -11951,7 +11950,6 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
         # 使用client_id作为会话ID（每个WebSocket连接独立）
         session_id = client_id
 
-        # ADB Shell 模式
         if mode == 'adb':
             logger.info(f"[TERMINAL] ADB Shell connection request for device {serial_no}")
             await handle_adb_shell_connect(client_id, websocket, serial_no, config)
