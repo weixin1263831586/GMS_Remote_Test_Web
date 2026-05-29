@@ -274,7 +274,7 @@
                 </a>
                 <a href="#" class="sidebar-item" data-page="ai-assistant" data-page-order="13" onclick="switchPage('ai-assistant', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
-                    <span class="sidebar-icon">🤖</span>
+                    <span class="sidebar-icon">🎓</span>
                     <span class="sidebar-text">GMS助手</span>
                 </a>
             </nav>
@@ -849,19 +849,19 @@
             <!-- 上传区域 -->
             <div style="margin-bottom: 20px;">
                 <div id="apk-upload-zone" class="apk-upload-zone upload-empty">
-                    <input type="file" id="apk-file-input" accept=".apk" style="display: none;" />
+                    <input type="file" id="apk-file-input" accept=".apk,.jar" style="display: none;" />
                     <div class="apk-upload-content">
                         <div>📦</div>
                         <div>
-                            <div style="font-size: 14px; font-weight: 600; white-space: nowrap;">拖拽APK文件到此处</div>
+                            <div style="font-size: 14px; font-weight: 600; white-space: nowrap;">拖拽 APK/JAR 文件到此处</div>
                             <div class="upload-instructions" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-                                支持 .apk 文件格式<br><br>
-                                1. 点击按钮"📤 选择APK文件"上传<br>
-                                2. 直接拖拽 APK 文件上传<br>
+                                支持 .apk 和 .jar 文件格式<br><br>
+                                1. 点击按钮"📤 选择 APK/JAR 文件"上传<br>
+                                2. 直接拖拽 APK/JAR 文件上传<br>
                             </div>
                         </div>
                         <button class="btn-xs" onclick="document.getElementById('apk-file-input').click()" style="font-size: 12px; padding: 10px 20px;">
-                            📤 选择APK文件
+                            📤 选择 APK/JAR 文件
                         </button>
                     </div>
                     <div class="apk-upload-progress" id="apk-upload-progress" style="display: none;">
@@ -1092,7 +1092,7 @@
 
         <!-- GMS助手页面 -->
         <div class="container page-content" id="page-ai-assistant">
-            <div class="section-title">🤖 GMS助手</div>
+            <div class="section-title">🎓 GMS助手</div>
             <iframe id="ai-assistant-frame" src="http://172.16.14.248:5173/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
                     style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>

@@ -2021,7 +2021,7 @@ function createSuiteFileRow(item) {
     });
 
     const icon = document.createElement('span');
-    icon.textContent = item.type === 'directory' ? '📁' : (item.is_apk ? '📦' : '📄');
+    icon.textContent = item.type === 'directory' ? '📁' : (item.is_apk ? '📦' : (item.is_jar ? '🫙' : '📄'));
 
     const main = document.createElement('div');
     main.className = 'suite-file-main';
@@ -2035,7 +2035,7 @@ function createSuiteFileRow(item) {
     if (item.type !== 'directory') {
         const meta = document.createElement('div');
         meta.className = 'suite-file-meta';
-        meta.textContent = `${formatBytes(item.size || 0, true)}${item.is_apk ? ' · APK' : ''}`;
+        meta.textContent = `${formatBytes(item.size || 0, true)}${item.is_apk ? ' · APK' : (item.is_jar ? ' · JAR' : '')}`;
         main.appendChild(meta);
     }
 
@@ -2069,7 +2069,7 @@ function createSuiteFileRow(item) {
 
         row.addEventListener('dblclick', () => loadSuiteBrowserDirectory(item.path || ''));
     } else {
-        if (item.is_apk) {
+        if (item.is_apk || item.is_jar) {
             const analyzeBtn = document.createElement('button');
             analyzeBtn.className = 'btn-xs';
             analyzeBtn.textContent = '反编译';
@@ -2168,14 +2168,14 @@ async function analyzeSuiteApk(path) {
     if (!state.suiteBrowser.selectedSuitePath || !path) return;
 
     try {
-        showToast('正在准备 APK 分析任务...', 'info');
+        showToast('正在准备反编译任务...', 'info');
         const result = await apiCall('/api/test/suites/apk/analyze', 'POST', {
             suite_path: state.suiteBrowser.selectedSuitePath,
             path
         });
         const task = result.data || {};
         if (!task.task_id) {
-            showToast('创建 APK 分析任务失败', 'error');
+            showToast('创建反编译任务失败', 'error');
             return;
         }
 
@@ -2215,7 +2215,7 @@ async function analyzeSuiteApk(path) {
 
         await startApkAnalysis();
     } catch (error) {
-        showToast(`准备 APK 分析失败: ${error.message}`, 'error');
+        showToast(`准备反编译失败: ${error.message}`, 'error');
     }
 }
 
@@ -8721,8 +8721,9 @@ function initApkSourceResizer() {
 }
 
 async function handleApkFile(file) {
-    if (!file.name.toLowerCase().endsWith('.apk')) {
-        showToast('仅支持 .apk 文件', 'error');
+    const nameLower = file.name.toLowerCase();
+    if (!nameLower.endsWith('.apk') && !nameLower.endsWith('.jar')) {
+        showToast('仅支持 .apk 和 .jar 文件', 'error');
         return;
     }
 

@@ -154,7 +154,7 @@ def execute_windows_command(command: str, timeout: int = 30) -> dict:
 async def relay_socket_to_ws(ws, conn_id: str, reader: asyncio.StreamReader):
     try:
         while True:
-            data = await reader.read(65536)
+            data = await reader.read(16384)
             if not data:
                 break
             await send_json(ws, {
@@ -206,7 +206,7 @@ async def run_agent(server_url: str, client_id: str, username: str):
     while True:
         streams = {}
         try:
-            async with websockets.connect(ws_url, max_size=None, ping_interval=20, ping_timeout=20) as ws:
+            async with websockets.connect(ws_url, max_size=None, ping_interval=30, ping_timeout=30) as ws:
                 print("[agent] connected to GMS server", flush=True)
                 await send_json(ws, {
                     "type": "hello",

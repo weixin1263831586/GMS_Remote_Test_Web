@@ -250,7 +250,7 @@ class ReverseTunnelManager:
                 return
 
             while True:
-                data = await reader.read(65536)
+                data = await reader.read(16384)
                 if not data:
                     break
                 await agent.send({

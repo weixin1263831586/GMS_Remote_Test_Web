@@ -2597,7 +2597,7 @@ select option {
 /* ==================== Test Suite Browser ==================== */
 .suite-browser-layout {
     display: grid;
-    grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+    grid-template-columns: minmax(20px, 320px) minmax(0, 1fr);
     gap: 12px;
     height: calc(100vh - 150px);
     min-height: 420px;
