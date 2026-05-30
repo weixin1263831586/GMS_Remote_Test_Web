@@ -556,7 +556,7 @@ def get_effective_local_server(client_id: str, requested_local_server: str = "")
     if requested_local_server:
         return requested_local_server
 
-    dynamic_config = config_manager._load_dynamic_config() or {}
+    dynamic_config = config_manager._load_runtime_config() or {}
     dynamic_local_server = dynamic_config.get('local_server')
     if dynamic_local_server:
         return dynamic_local_server
@@ -1877,10 +1877,8 @@ class USBIPDisconnectRequest(BaseModel):
     device_host: Optional[str] = None
 
 class VPNConnectRequest(BaseModel):
-    """VPN 连接请求（所有字段可选，兼容前端无参数调用）"""
-    host: Optional[str] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
+    """VPN 连接请求"""
+    vpn_name: Optional[str] = None
 
 class FirmwareBurnRequest(BaseModel):
     devices: List[str]
@@ -2441,7 +2439,7 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
         }, status_code=400)
 
     # 加载现有动态配置
-    existing_dynamic = config_manager._load_dynamic_config() or {}
+    existing_dynamic = config_manager._load_runtime_config() or {}
     client_hosts = existing_dynamic.get('client_hosts', {})
     client_hosts[client_ip] = username
 
@@ -2494,12 +2492,12 @@ async def list_users():
     """获取所有在线用户列表"""
     users = []
     now = datetime.now()
+    config = config_manager.load_config()
 
     # 本地地址列表，不显示在用户列表中
     local_addresses = set(CommonUtils.LOCAL_HOSTS) | {'0.0.0.0'}
 
-    # VPN网关地址列表（不显示在用户列表中）
-    vpn_gateway_addresses = {'10.10.10.1'}
+    vpn_gateway_addresses = set(config.get('vpn_gateways', []))
 
     with global_state.user_states_lock:
         # 收集所有用户
@@ -2806,7 +2804,7 @@ async def fetch_website_favicon(
 
     fetcher = IconFetcher(timeout=timeout)
     try:
-        icon_result = await fetcher.fetch_icon_async(url)
+        icon_result = await fetcher.fetch_icon_async(url, write_cache=False)
 
         if icon_result.success:
             logger.info(f"[Favicon] Successfully fetched icon for {url}: {icon_result.icon_url}")
@@ -2894,7 +2892,7 @@ async def batch_fetch_favicons(request: Request):
 
     fetcher = IconFetcher(timeout=timeout)
     try:
-        results = await fetcher.batch_fetch_icons_async(urls)
+        results = await fetcher.batch_fetch_icons_async(urls, write_cache=False)
         successful = sum(1 for r in results if r['success'])
 
         return success_response({
@@ -3227,7 +3225,7 @@ async def ensure_ngrok_public_url(request: Request):
 @app.post("/api/config/update")
 async def update_config(req: dict):
     """更新配置 - 只修改动态配置，禁止修改config.json"""
-    existing_dynamic = config_manager._load_dynamic_config() or {}
+    existing_dynamic = config_manager._load_runtime_config() or {}
 
     # 动态配置字段（保存在 config_dynamic.json）
     # 只允许保存运行时动态配置
@@ -3281,7 +3279,7 @@ def normalize_sidebar_order(raw_order: Any) -> List[str]:
 @app.get("/api/sidebar-order")
 async def get_sidebar_order():
     """获取侧边栏导航顺序。"""
-    existing_dynamic = config_manager._load_dynamic_config() or {}
+    existing_dynamic = config_manager._load_runtime_config() or {}
     order = existing_dynamic.get('sidebar_order', [])
     if not isinstance(order, list):
         order = []
@@ -3292,7 +3290,7 @@ async def get_sidebar_order():
 async def save_sidebar_order(req: dict = Body(default={})):
     """保存侧边栏导航顺序。"""
     order = normalize_sidebar_order(req.get('order'))
-    existing_dynamic = config_manager._load_dynamic_config() or {}
+    existing_dynamic = config_manager._load_runtime_config() or {}
     existing_dynamic['sidebar_order'] = order
 
     if config_manager.save_dynamic_config(existing_dynamic):
@@ -5285,13 +5283,13 @@ class TradefedListResultsRequest(BaseModel):
 class TestSuiteDownloadRequest(BaseModel):
     """Request model for downloading test suite from URL"""
     url: str = Field(..., description="测试套件下载地址")
-    save_dir: Optional[str] = Field(default=None, description="保存目录（默认：/home/hcq/GMS-Suite）")
+    save_dir: Optional[str] = Field(default=None, description="保存目录（默认：~/GMS-Suite）")
 
 
 class TestSuiteExtractRequest(BaseModel):
     """Request model for extracting test suite archive"""
     archive_path: str = Field(..., description="压缩包文件路径")
-    extract_dir: Optional[str] = Field(default=None, description="解压目录（默认：/home/hcq/GMS-Suite）")
+    extract_dir: Optional[str] = Field(default=None, description="解压目录（默认：~/GMS-Suite）")
 
 
 class TestSuiteAddLocalRequest(BaseModel):
@@ -5305,7 +5303,7 @@ async def add_local_test_suite(req: TestSuiteAddLocalRequest):
     """添加本地测试套件路径到配置
 
     Request:
-        path: str - 本地测试套件路径（如：/home/hcq/GMS-Suite/android-cts-verifier-16.1_r2/）
+        path: str - 本地测试套件路径（如：~/GMS-Suite/android-cts-verifier-16.1_r2/）
 
     Response:
         success: bool
@@ -5470,7 +5468,7 @@ async def download_test_suite_from_url(req: TestSuiteDownloadRequest):
 
     Request:
         url: str - 测试套件下载地址
-        save_dir: Optional[str] - 保存目录（默认：/home/hcq/GMS-Suite）
+        save_dir: Optional[str] - 保存目录（默认：~/GMS-Suite）
 
     Response:
         success: bool
@@ -5589,7 +5587,7 @@ async def extract_test_suite_archive(req: TestSuiteExtractRequest):
 
     Request:
         archive_path: str - 压缩包文件路径
-        extract_dir: Optional[str] - 解压目录（默认：/home/hcq/GMS-Suite）
+        extract_dir: Optional[str] - 解压目录（默认：~/GMS-Suite）
 
     Response:
         success: bool
@@ -6586,63 +6584,12 @@ async def analyze_report_file(file_path: str, temp_dir: str = None) -> Optional[
     return await asyncio.to_thread(analyzer.analyze_file, file_path)
 
 async def save_redmine_credentials(username: str, password: str):
-    """加密保存 Redmine 凭证"""
-    try:
-        config_dir = os.path.join(os.path.dirname(__file__), 'configs')
-        os.makedirs(config_dir, exist_ok=True)
-
-        config_path = os.path.join(config_dir, 'redmine_auth.json')
-
-        encryption_key = base64.urlsafe_b64encode(hashlib.sha256(b'gms_remote_test_redmine_2024').digest())
-        cipher_suite = Fernet(encryption_key)
-        encrypted_password = cipher_suite.encrypt(password.encode()).decode()
-
-        with open(config_path, 'w') as f:
-            json.dump({
-                'username': username,
-                'encrypted_password': encrypted_password,
-                'updated_at': datetime.now().isoformat()
-            }, f)
-
-        logger.info(f"[Redmine Auth] 已保存用户 {username} 的认证信息")
-        return True
-
-    except Exception as e:
-        logger.error(f"[Redmine Auth] 保存凭证失败: {e}")
-        return False
+    """加密保存 Redmine 凭证（委托给 config_manager）"""
+    return config_manager.save_redmine_credentials(username, password)
 
 async def load_redmine_credentials():
-    """加载存储的 Redmine 凭证和配置"""
-    try:
-        config_path = os.path.join(os.path.dirname(__file__), 'configs', 'redmine_auth.json')
-
-        if not os.path.exists(config_path):
-            return None
-
-        with open(config_path, 'r') as f:
-            data = json.load(f)
-
-        # 解密密码
-        from cryptography.fernet import Fernet
-        import hashlib
-
-        encryption_key = base64.urlsafe_b64encode(hashlib.sha256(b'gms_remote_test_redmine_2024').digest())
-        cipher_suite = Fernet(encryption_key)
-
-        try:
-            decrypted_password = cipher_suite.decrypt(data['encrypted_password'].encode()).decode()
-            # 只返回凭证信息，域名配置由config_manager统一管理
-            return {
-                'username': data['username'],
-                'password': decrypted_password
-            }
-        except Exception as e:
-            logger.warning(f"[Redmine Auth] 解密失败: {e}")
-            return None
-
-    except Exception as e:
-        logger.error(f"[Redmine Auth] 加载凭证失败: {e}")
-        return None
+    """加载存储的 Redmine 凭证（委托给 config_manager）"""
+    return config_manager.load_redmine_credentials()
 
 @app.post("/api/reports/analyze")
 async def analyze_reports(
@@ -8233,7 +8180,7 @@ async def start_usbip(
 
                 # 持久化USB/IP设备来源到配置文件（修复长时间连接后来源类型丢失的问题）
                 try:
-                    existing_dynamic = config_manager._load_dynamic_config() or {}
+                    existing_dynamic = config_manager._load_runtime_config() or {}
                     usbip_sources = existing_dynamic.get('usbip_devices_source', {})
 
                     # 更新设备来源
@@ -8348,7 +8295,7 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
             # 持久化更新的设备来源到配置文件
             if devices_to_remove:
                 try:
-                    existing_dynamic = config_manager._load_dynamic_config() or {}
+                    existing_dynamic = config_manager._load_runtime_config() or {}
                     usbip_sources = existing_dynamic.get('usbip_devices_source', {})
 
                     # 从配置文件中删除已断开的设备
@@ -8398,7 +8345,7 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
         # 持久化更新的设备来源到配置文件
         if devices_to_remove:
             try:
-                existing_dynamic = config_manager._load_dynamic_config() or {}
+                existing_dynamic = config_manager._load_runtime_config() or {}
                 usbip_sources = existing_dynamic.get('usbip_devices_source', {})
 
                 # 从配置文件中删除已断开的设备
@@ -8960,12 +8907,14 @@ def get_configured_vpn_connection_name(config: Dict[str, Any]) -> str:
     return str(config.get('vpn_connection_name') or os.getenv('GMS_VPN_CONNECTION_NAME', '')).strip()
 
 
-def parse_first_vpn_connection(nmcli_output: str) -> str:
+def parse_vpn_connection_names(nmcli_output: str) -> list:
+    """解析 nmcli 输出，返回所有 VPN 连接名称列表"""
+    names = []
     for line in nmcli_output.splitlines():
         parts = line.split(':')
         if len(parts) >= 2 and 'vpn' in parts[1].lower():
-            return parts[0].replace(r'\:', ':').strip()
-    return ""
+            names.append(parts[0].replace(r'\:', ':').strip())
+    return names
 
 
 async def execute_config_host_command(config: Dict[str, Any], ssh, command: str, timeout: int) -> Tuple[str, str, int]:
@@ -8984,7 +8933,34 @@ async def resolve_vpn_connection_name(config: Dict[str, Any], ssh=None, active_o
     else:
         cmd = "nmcli -t -f NAME,TYPE connection show 2>/dev/null"
     output, _, _ = await execute_config_host_command(config, ssh, cmd, timeout=5)
-    return parse_first_vpn_connection(output)
+    names = parse_vpn_connection_names(output)
+    return names[0] if names else ""
+
+
+@app.get("/api/vpn/connections")
+@handle_api_errors
+async def get_vpn_connections():
+    """获取系统中所有可用的 VPN 连接"""
+    config = config_manager.load_config()
+    ssh = None
+    try:
+        if not is_config_host_local(config):
+            ssh = ssh_manager.get_connection(config)
+        if not is_config_host_local(config) and not ssh:
+            return JSONResponse(content={"success": False, "error": "SSH连接失败"}, status_code=500)
+
+        cmd = "nmcli -t -f NAME,TYPE connection show 2>/dev/null"
+        output, _, _ = await execute_config_host_command(config, ssh, cmd, timeout=5)
+        vpn_names = parse_vpn_connection_names(output)
+
+        if ssh:
+            ssh_manager.return_connection(ssh)
+        return JSONResponse(content={"success": True, "connections": vpn_names})
+    except Exception as e:
+        if ssh:
+            ssh_manager.return_connection(ssh)
+        logger.error(f"Error listing VPN connections: {e}")
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
 @app.get("/api/vpn/status")
@@ -9048,10 +9024,7 @@ async def get_vpn_status():
 async def connect_vpn(
     req: Optional[VPNConnectRequest] = Body(default=None)
 ):
-    """连接VPN（使用nmcli）
-
-    请求体完全可选，兼容前端无参数调用
-    """
+    """连接VPN（使用nmcli），账号密码由 Ubuntu 主机 NetworkManager 管理"""
     try:
         config = config_manager.load_config()
         ssh = None
@@ -9065,19 +9038,19 @@ async def connect_vpn(
             )
 
         try:
-            vpn_name = await resolve_vpn_connection_name(config, ssh, active_only=False)
+            # 优先使用前端指定的 VPN 名称，否则自动发现
+            vpn_name = (req.vpn_name if req else None) or await resolve_vpn_connection_name(config, ssh, active_only=False)
             if not vpn_name:
                 if ssh:
                     ssh_manager.return_connection(ssh)
                 return JSONResponse(
                     content={
                         "success": False,
-                        "error": "未配置 VPN 连接名称，且未发现 NetworkManager VPN 连接。请设置 GMS_VPN_CONNECTION_NAME 或 configs/config.json 的 vpn_connection_name。"
+                        "error": "未发现 VPN 连接。请在 Ubuntu 主机 NetworkManager 中配置 VPN 账号。"
                     },
                     status_code=400
                 )
 
-            # 使用nmcli连接VPN
             vpn_cmd = f"sudo nmcli connection up {shlex.quote(vpn_name)}"
             output, error, code = await execute_config_host_command(
                 config,
@@ -9088,7 +9061,6 @@ async def connect_vpn(
 
             await asyncio.sleep(2)
 
-            # 检查连接结果
             if code == 0:
                 is_connected = True
                 message = 'VPN 连接成功'

@@ -114,7 +114,6 @@ class IconFetcher:
         'digitalocean.com': {'icon': '🌊', 'type': 'emoji'},
     }
 
-    # 图标缓存文件路径
     CACHE_FILE = os.path.join(BASE_DIR, "data", "icon_cache.json")
     LOCAL_ICON_DIR = os.path.join(BASE_DIR, "static", "icons", "favicons")
     LOCAL_ICON_URL_PREFIX = "/static/icons/favicons"
@@ -122,7 +121,7 @@ class IconFetcher:
     CACHE_DURATION = timedelta(days=7)  # 缓存7天
     MAX_CACHE_SIZE = 1000  # 最大缓存条目数
 
-    def __init__(self, timeout: int = 10, use_cache: bool = True):
+    def __init__(self, timeout: int = 10, use_cache: bool = False):
         self.timeout = timeout
         self.use_cache = use_cache
         self.session = None
@@ -230,10 +229,17 @@ class IconFetcher:
         except Exception as e:
             logger.warning(f"删除缓存文件失败: {e}")
 
-    def _cache_result(self, cache_key: str, result: IconResult) -> None:
-        """缓存结果并持久化"""
+    def _cache_result(self, cache_key: str, result: IconResult) -> bool:
+        """缓存结果并持久化（跳过内容相同的重复写入）"""
+        # 检查缓存是否已存在且内容相同
+        if cache_key in self.cache:
+            existing = self.cache[cache_key]
+            if existing.get('icon_url') == result.icon_url and existing.get('source') == result.source:
+                return False
+
         self.cache[cache_key] = result.to_dict()
         self._save_cache({cache_key: self.cache[cache_key]})
+        return True
 
     @classmethod
     def is_remote_url(cls, value: str) -> bool:
@@ -396,7 +402,7 @@ class IconFetcher:
             logger.debug(f"下载图标到本地失败 {icon_url}: {e}")
             return IconResult(success=False, error=str(e), original_icon_url=icon_url)
 
-    async def localize_icon_url(self, icon_url: str) -> IconResult:
+    async def localize_icon_url(self, icon_url: str, write_cache: bool = True) -> IconResult:
         """把任意图标值转换为本地可稳定访问的图标。"""
         if not icon_url or not isinstance(icon_url, str):
             return IconResult(success=False, error="图标URL为空", icon_url=self.DEFAULT_ICON_URL, icon_type='svg')
@@ -423,7 +429,8 @@ class IconFetcher:
         downloaded = await self._download_icon_to_local(icon_url)
         if downloaded.success:
             downloaded.cache_key = cache_key
-            self._cache_result(cache_key, downloaded)
+            if write_cache:
+                self._cache_result(cache_key, downloaded)
             return downloaded
 
         existing_url = self._find_existing_local_icon(icon_url)
@@ -447,14 +454,20 @@ class IconFetcher:
             cache_key=cache_key
         )
 
-    async def _localize_result(self, result: IconResult, cache_key: str = "") -> IconResult:
-        """将抓取结果中的远程图标落盘为本地图标"""
+    async def _localize_result(self, result: IconResult, cache_key: str = "", write_cache: bool = True) -> IconResult:
+        """将抓取结果中的远程图标落盘为本地图标
+
+        Args:
+            result: 图标结果
+            cache_key: 缓存键
+            write_cache: 是否写入缓存文件（默认 True）
+        """
         if not result.success or not self.is_remote_url(result.icon_url):
             if cache_key:
                 result.cache_key = cache_key
             return result
 
-        local_result = await self.localize_icon_url(result.icon_url)
+        local_result = await self.localize_icon_url(result.icon_url, write_cache=write_cache)
         if local_result.success:
             local_result.source = result.source if result.source.startswith('api_') else f"{result.source}_local"
             local_result.cache_key = cache_key
@@ -463,7 +476,7 @@ class IconFetcher:
         local_result.cache_key = cache_key
         return local_result
 
-    async def fetch_icon_async(self, url: str) -> IconResult:
+    async def fetch_icon_async(self, url: str, write_cache: bool = True) -> IconResult:
         """
         异步获取网站图标
 
@@ -497,7 +510,8 @@ class IconFetcher:
                         if localized.success:
                             localized.source = 'cache_local'
                             localized.cache_key = cache_key
-                            self._cache_result(cache_key, localized)
+                            if write_cache:
+                                self._cache_result(cache_key, localized)
                             return localized
 
                         return IconResult(
@@ -518,7 +532,8 @@ class IconFetcher:
                                 if localized.success:
                                     localized.source = 'cache_local'
                                     localized.cache_key = cache_key
-                                    self._cache_result(cache_key, localized)
+                                    if write_cache:
+                                        self._cache_result(cache_key, localized)
                                     return localized
 
                             return IconResult(
@@ -554,31 +569,35 @@ class IconFetcher:
                     cache_key=cache_key
                 )
 
-                self._cache_result(cache_key, result)
+                if write_cache:
+                    self._cache_result(cache_key, result)
                 return result
 
             # 3. 从HTML获取图标
             html_result = await self._fetch_from_html(url)
             if html_result.success:
-                localized = await self._localize_result(html_result, cache_key)
+                localized = await self._localize_result(html_result, cache_key, write_cache=write_cache)
                 if localized.success:
-                    self._cache_result(cache_key, localized)
+                    if write_cache:
+                        self._cache_result(cache_key, localized)
                     return localized
 
             # 4. 从根目录获取图标
             root_result = await self._fetch_from_root(url)
             if root_result.success:
-                localized = await self._localize_result(root_result, cache_key)
+                localized = await self._localize_result(root_result, cache_key, write_cache=write_cache)
                 if localized.success:
-                    self._cache_result(cache_key, localized)
+                    if write_cache:
+                        self._cache_result(cache_key, localized)
                     return localized
 
             # 5. 使用第三方API
             api_result = await self._fetch_from_api(domain)
             if api_result.success:
-                localized = await self._localize_result(api_result, cache_key)
+                localized = await self._localize_result(api_result, cache_key, write_cache=write_cache)
                 if localized.success:
-                    self._cache_result(cache_key, localized)
+                    if write_cache:
+                        self._cache_result(cache_key, localized)
                     return localized
 
             # 都失败了，返回默认图标
@@ -596,9 +615,14 @@ class IconFetcher:
             logger.error(f"获取图标时出错: {e}")
             return IconResult(success=False, error=str(e))
 
-    async def batch_fetch_icons_async(self, urls: List[str]) -> List[Dict[str, Any]]:
-        """批量获取图标"""
-        tasks = [self.fetch_icon_async(url) for url in urls]
+    async def batch_fetch_icons_async(self, urls: List[str], write_cache: bool = True) -> List[Dict[str, Any]]:
+        """批量获取图标
+
+        Args:
+            urls: 网站 URL 列表
+            write_cache: 是否写入缓存文件（默认 True）
+        """
+        tasks = [self.fetch_icon_async(url, write_cache=write_cache) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         formatted_results = []
