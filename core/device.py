@@ -2,6 +2,7 @@
 设备管理 - 核心业务逻辑
 """
 import logging
+import re
 import subprocess
 import time
 from typing import List, Dict, Any
@@ -119,31 +120,41 @@ class DeviceManager:
         try:
             info = {}
 
-            # 定义信息获取命令
-            info_commands = {
-                'serial_no': f"adb -s {device_id} shell getprop ro.serialno",
-                'model': f"adb -s {device_id} shell getprop ro.product.model",
-                'android_version': f"adb -s {device_id} shell getprop ro.build.version.release",
-                'build_type': f"adb -s {device_id} shell getprop ro.build.type",
-                'build_tags': f"adb -s {device_id} shell getprop ro.build.tags",
-                'build_date': f"adb -s {device_id} shell getprop ro.build.date",
-                'sdk_version': f"adb -s {device_id} shell getprop ro.build.version.sdk",
-                'security_patch': f"adb -s {device_id} shell getprop ro.build.version.security_patch",
-                'fingerprint': f"adb -s {device_id} shell getprop ro.build.fingerprint",
+            # 属性名到输出键名的映射
+            prop_map = {
+                'ro.serialno': 'serial_no',
+                'ro.product.model': 'model',
+                'ro.build.version.release': 'android_version',
+                'ro.build.type': 'build_type',
+                'ro.build.tags': 'build_tags',
+                'ro.build.date': 'build_date',
+                'ro.build.version.sdk': 'sdk_version',
+                'ro.build.version.security_patch': 'security_patch',
+                'ro.build.fingerprint': 'fingerprint',
             }
 
-            for key, cmd in info_commands.items():
-                try:
-                    output, _, _ = self.ssh_manager.execute_command(
-                        ssh,
-                        cmd,
-                        timeout=10
-                    )
-                    value = output.strip()
-                    if '\n' in value:
-                        value = value.split('\n')[0].strip()
-                    info[key] = value or "未知"
-                except:
+            # 使用 getprop 不带参数输出所有属性（key=value 格式），按 key 解析更健壮
+            getprop_cmd = f"adb -s {device_id} shell getprop"
+
+            try:
+                output, _, _ = self.ssh_manager.execute_command(
+                    ssh,
+                    getprop_cmd,
+                    timeout=15
+                )
+                # 解析 getprop 输出: [ro.serialno]: [value]
+                for line in output.strip().split('\n'):
+                    m = re.match(r'\[([\w.]+)\]:\s*\[(.*)\]', line)
+                    if m:
+                        prop_name, value = m.group(1), m.group(2)
+                        if prop_name in prop_map:
+                            info[prop_map[prop_name]] = value or "未知"
+                # 补充未获取到的属性
+                for key in prop_map.values():
+                    if key not in info:
+                        info[key] = "未知"
+            except Exception:
+                for key in prop_map.values():
                     info[key] = "未知"
 
             return info

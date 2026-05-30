@@ -2,11 +2,14 @@
 """测试报告数据库模块 - 记录和管理每次测试情况"""
 
 import json
+import logging
 import os
 import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 
 class TestReportDB:
@@ -62,7 +65,7 @@ class TestReportDB:
                 self._cache_dirty = False
                 return data
         except Exception as e:
-            print(f"[ERROR] 加载数据库失败: {e}")
+            logger.error(f"加载数据库失败: {e}")
             data = {'reports': [], 'last_update': None}
             self._cache = data
             self._cache_dirty = False
@@ -80,7 +83,7 @@ class TestReportDB:
             if invalidate_indexes:
                 self._indexes_dirty = True
         except Exception as e:
-            print(f"[ERROR] 保存数据库失败: {e}")
+            logger.error(f"保存数据库失败: {e}")
 
     def _build_indexes(self):
         """构建内存索引"""
@@ -127,12 +130,12 @@ class TestReportDB:
                     try:
                         date = created_at.split('T')[0]  # 提取日期部分
                         self._indexes['created_at'][date].append(timestamp)
-                    except:
+                    except Exception:
                         pass
 
             self._indexes_dirty = False
         except Exception as e:
-            print(f"[ERROR] 构建索引失败: {e}")
+            logger.error(f"构建索引失败: {e}")
             # 即使索引构建失败,也要标记为已尝试,避免重复构建
             self._indexes_dirty = False
 
@@ -183,11 +186,11 @@ class TestReportDB:
                 data['last_update'] = datetime.now().isoformat()
                 self._save_data(data)
 
-                print(f"[ReportDB] 添加报告记录: {report_info['timestamp']} - {report_info['test_type']}")
+                logger.info(f"添加报告记录: {report_info['timestamp']} - {report_info['test_type']}")
                 return True
 
         except Exception as e:
-            print(f"[ERROR] 添加报告失败: {e}")
+            logger.error(f"添加报告失败: {e}")
             return False
 
     def get_reports(
@@ -252,7 +255,7 @@ class TestReportDB:
             return reports[:limit]
 
         except Exception as e:
-            print(f"[ERROR] 获取报告列表失败: {e}")
+            logger.error(f"获取报告列表失败: {e}")
             return []
 
     def get_report_by_timestamp(self, timestamp: str) -> Optional[Dict]:
@@ -273,7 +276,7 @@ class TestReportDB:
             return self._indexes['timestamp'].get(timestamp)
 
         except Exception as e:
-            print(f"[ERROR] 获取报告失败: {e}")
+            logger.error(f"获取报告失败: {e}")
             return None
 
     def update_report_status(self, timestamp: str, status: str, **kwargs) -> bool:
@@ -316,7 +319,7 @@ class TestReportDB:
                 return False
 
         except Exception as e:
-            print(f"[ERROR] 更新报告状态失败: {e}")
+            logger.error(f"更新报告状态失败: {e}")
             return False
 
     def delete_report(self, timestamp: str) -> bool:
@@ -338,13 +341,13 @@ class TestReportDB:
                 if len(data['reports']) < original_count:
                     data['last_update'] = datetime.now().isoformat()
                     self._save_data(data)
-                    print(f"[ReportDB] 删除报告: {timestamp}")
+                    logger.info(f"删除报告: {timestamp}")
                     return True
 
                 return False
 
         except Exception as e:
-            print(f"[ERROR] 删除报告失败: {e}")
+            logger.error(f"删除报告失败: {e}")
             return False
 
     def get_statistics(self) -> Dict:
@@ -375,7 +378,7 @@ class TestReportDB:
                     date_obj = datetime.fromisoformat(date_str)
                     if date_obj > week_ago:
                         recent_count += len(timestamps)
-                except:
+                except (ValueError, TypeError):
                     pass
 
             # 获取last_update需要重新加载数据
@@ -389,7 +392,7 @@ class TestReportDB:
             }
 
         except Exception as e:
-            print(f"[ERROR] 获取统计信息失败: {e}")
+            logger.error(f"获取统计信息失败: {e}")
             return {'total_reports': 0, 'type_counts': {}, 'recent_week': 0}
 
     def scan_and_sync_remote_reports(self, result_dirs: List[str]) -> int:
@@ -453,14 +456,14 @@ class TestReportDB:
                                         'start_time': result['details']['start_time']
                                     })
                             except Exception as e:
-                                print(f"[WARN] 解析 XML 失败: {xml_path}, {e}")
+                                logger.warning(f"解析 XML 失败: {xml_path}, {e}")
 
                         # 添加到数据库
                         if self.add_report(report_info):
                             new_count += 1
 
             except Exception as e:
-                print(f"[ERROR] 扫描目录失败: {result_dir}, {e}")
+                logger.error(f"扫描目录失败: {result_dir}, {e}")
 
         return new_count
 

@@ -106,7 +106,7 @@ class LogStreamer:
         if client_id in self.connections:
             try:
                 await self.connections[client_id].close()
-            except:
+            except Exception:
                 pass
             del self.connections[client_id]
 

@@ -178,7 +178,7 @@ class USBIPManager:
                     }
 
                 # 终止ADB
-                self._execute_ssh(win_ssh, 'taskkill /F /IM adb.exe /T')
+                self.ssh_manager.execute_command(win_ssh, 'taskkill /F /IM adb.exe /T')
 
                 # 查找Android设备
                 busids = self._find_android_devices(win_ssh, config)
@@ -309,30 +309,19 @@ class USBIPManager:
             logger.error(f"Error creating Windows SSH: {e}")
             return None
 
-    def _execute_ssh(self, ssh, command: str, timeout: int = 10, get_pty: bool = False) -> Tuple[str, str, int]:
-        """执行SSH命令"""
-        try:
-            stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout, get_pty=get_pty)
-            stdout_text = stdout.read().decode('utf-8', errors='ignore')
-            stderr_text = stderr.read().decode('utf-8', errors='ignore')
-            exit_code = stdout.channel.recv_exit_status()
-            return stdout_text, stderr_text, exit_code
-        except Exception as e:
-            return '', str(e), -1
-
     def _is_windows_host(self, ssh) -> bool:
         """检查是否为Windows主机"""
         try:
-            stdout, stderr, code = self._execute_ssh(ssh, 'ver 2>&1')
+            stdout, stderr, code = self.ssh_manager.execute_command(ssh, 'ver 2>&1')
             return 'microsoft' in stdout.lower() or 'windows' in stdout.lower()
-        except:
+        except Exception:
             return False
 
     def _find_android_devices(self, ssh, config: Dict[str, Any]) -> List[str]:
         """查找Android设备的BUSID"""
         try:
             # 使用 get_pty=True 获取完整的设备列表（需要交互式会话环境）
-            stdout, stderr, code = self._execute_ssh(
+            stdout, stderr, code = self.ssh_manager.execute_command(
                 ssh,
                 'usbipd list',
                 timeout=15,
@@ -355,7 +344,7 @@ class USBIPManager:
         for busid in busids:
             try:
                 # 检查状态
-                stdout, _, _ = self._execute_ssh(ssh, f'usbipd list | findstr {busid}')
+                stdout, _, _ = self.ssh_manager.execute_command(ssh, f'usbipd list | findstr {busid}')
 
                 if 'Shared' in stdout:
                     logger.info(f"Device {busid} already shared")
@@ -363,11 +352,11 @@ class USBIPManager:
                     continue
                 elif 'Attached' in stdout:
                     # Detach first
-                    self._execute_ssh(ssh, f'usbipd detach --busid {busid}', timeout=15)
+                    self.ssh_manager.execute_command(ssh, f'usbipd detach --busid {busid}', timeout=15)
                     time.sleep(1)
 
                 # Bind
-                self._execute_ssh(ssh, f'usbipd bind --busid {busid}', timeout=15)
+                self.ssh_manager.execute_command(ssh, f'usbipd bind --busid {busid}', timeout=15)
                 time.sleep(2)
                 logger.info(f"Device {busid} bound")
                 bound.append(busid)
@@ -452,7 +441,7 @@ class USBIPManager:
             (是否安装, 版本信息)
         """
         try:
-            stdout, stderr, code = self._execute_ssh(ssh, 'usbipd --version')
+            stdout, stderr, code = self.ssh_manager.execute_command(ssh, 'usbipd --version')
             if code == 0 and stdout.strip():
                 return True, stdout.strip()
             return False, ''
@@ -474,7 +463,7 @@ class USBIPManager:
         try:
             # 检查是否已经是管理员权限
             check_admin_cmd = 'whoami /groups | findstr S-1-16-12288'
-            stdout, stderr, code = self._execute_ssh(ssh, check_admin_cmd)
+            stdout, stderr, code = self.ssh_manager.execute_command(ssh, check_admin_cmd)
 
             if code != 0 or 'S-1-16-12288' not in stdout:
                 return {
@@ -484,7 +473,7 @@ class USBIPManager:
 
             # 执行自动安装命令（添加自动接受参数）
             install_cmd = f'{USBIPD_INSTALL_CMD} --accept-package-agreements --accept-source-agreements'
-            stdout, stderr, code = self._execute_ssh(ssh, install_cmd, timeout=120)
+            stdout, stderr, code = self.ssh_manager.execute_command(ssh, install_cmd, timeout=120)
 
             if code == 0:
                 # 验证安装

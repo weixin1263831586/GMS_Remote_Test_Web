@@ -148,7 +148,7 @@ class SSHManager:
                     logger.debug(f"[SSH] Connection {attempt+1}/{max_attempts} is dead: {e}")
                     try:
                         ssh.close()
-                    except:
+                    except Exception:
                         pass
             except queue.Empty:
                 break
