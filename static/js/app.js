@@ -3741,13 +3741,8 @@ async function connectVpn() {
         return;
     }
 
-    try {
-        await apiCall('/api/vpn/connect', 'POST');
-        updateVpnStatus(true);
-        addLogEntry('VPN 已连接', 'success');
-    } catch (error) {
-        addLogEntry('连接 VPN 失败: ' + error.message, 'error');
-    }
+    // 直接弹出 VPN 选择框让用户选择连接哪个
+    showVpnCredentialModal();
 }
 
 async function checkVpnStatus() {
@@ -3779,6 +3774,81 @@ function updateVpnStatus(connected) {
 
     if (previous === true && connected === false) {
         createLocalNotification('VPN已断开', 'VPN 连接状态变为未连接', 'warning', 'vpn');
+    }
+}
+
+// ==================== VPN Credential Modal ====================
+async function showVpnCredentialModal() {
+    const select = document.getElementById('vpn-credential-name');
+
+    try {
+        const result = await apiCall('/api/vpn/connections', 'GET');
+        select.innerHTML = '';
+        (result.connections || []).forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        select.innerHTML = '<option value="">加载失败</option>';
+    }
+
+    const modal = document.getElementById('vpn-credential-modal');
+    modal.classList.add('show');
+    document.addEventListener('keydown', handleVpnCredentialEsc);
+}
+
+function closeVpnCredentialModal() {
+    const modal = document.getElementById('vpn-credential-modal');
+    modal.classList.remove('show');
+    document.removeEventListener('keydown', handleVpnCredentialEsc);
+}
+
+function handleVpnCredentialEsc(event) {
+    if (event.key === 'Escape') {
+        closeVpnCredentialModal();
+    }
+}
+
+function handleVpnCredentialKeyPress(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        submitVpnCredential();
+    }
+}
+
+async function submitVpnCredential() {
+    const vpnName = document.getElementById('vpn-credential-name').value;
+    if (!vpnName) {
+        showToast('请选择 VPN 连接', 'error');
+        return;
+    }
+
+    const submitBtn = document.querySelector('#vpn-credential-modal .btn-primary');
+    const originalText = submitBtn.textContent;
+    try {
+        submitBtn.textContent = '连接中...';
+        submitBtn.disabled = true;
+
+        const result = await apiCall('/api/vpn/connect', 'POST', {
+            vpn_name: vpnName
+        });
+
+        if (result.connected) {
+            updateVpnStatus(true);
+            addLogEntry(result.message || 'VPN 已连接', 'success');
+            closeVpnCredentialModal();
+        } else {
+            updateVpnStatus(false);
+            addLogEntry(result.message || 'VPN 连接失败', 'error');
+        }
+    } catch (error) {
+        updateVpnStatus(false);
+        addLogEntry('连接 VPN 失败: ' + error.message, 'error');
+    } finally {
+        submitBtn.textContent = originalText;
+        submitBtn.disabled = false;
     }
 }
 
@@ -7423,6 +7493,9 @@ window.checkSshd = checkSshd;
 window.checkRouting = checkRouting;
 window.connectVpn = connectVpn;
 window.checkVpnStatus = checkVpnStatus;
+window.closeVpnCredentialModal = closeVpnCredentialModal;
+window.handleVpnCredentialKeyPress = handleVpnCredentialKeyPress;
+window.submitVpnCredential = submitVpnCredential;
 window.startTest = startTest;
 window.stopTest = stopTest;
 window.selectReportSource = selectReportSource;

@@ -1,6 +1,8 @@
 """
 配置管理器 - 核心业务逻辑
 """
+import base64
+import hashlib
 import json
 import os
 import logging
@@ -39,13 +41,7 @@ class ConfigManager:
         self.base_dir = base_dir
         # 配置文件已移动到 configs/ 目录
         self.config_path = os.path.join(base_dir, '..', 'configs', 'config.json')
-        self.dynamic_config_path = os.path.join(base_dir, '..', 'configs', 'config_dynamic.json')
-        self.client_ssh_credentials_path = os.path.join(
-            base_dir,
-            '..',
-            'configs',
-            'client_ssh_credentials.local.json'
-        )
+        self.runtime_config_path = os.path.join(base_dir, '..', 'configs', 'config_runtime.json')
 
         # 缓存相关
         self._cache: Optional[Dict[str, Any]] = None
@@ -55,8 +51,7 @@ class ConfigManager:
 
         # 文件修改时间追踪
         self._static_mtime: float = 0
-        self._dynamic_mtime: float = 0
-        self._credentials_mtime: float = 0
+        self._runtime_mtime: float = 0
 
     def load_config(self, force_reload: bool = False) -> Dict[str, Any]:
         """
@@ -105,21 +100,15 @@ class ConfigManager:
         # 检查文件是否被修改
         try:
             static_mtime = os.path.getmtime(self.config_path)
-            # 直接使用 try/except 处理文件不存在，避免 TOCTOU 竞争条件
             try:
-                dynamic_mtime = os.path.getmtime(self.dynamic_config_path)
+                runtime_mtime = os.path.getmtime(self.runtime_config_path)
             except FileNotFoundError:
-                dynamic_mtime = 0
-            try:
-                credentials_mtime = os.path.getmtime(self.client_ssh_credentials_path)
-            except FileNotFoundError:
-                credentials_mtime = 0
+                runtime_mtime = 0
 
             # 如果文件修改时间变化，缓存失效
             if (
                 static_mtime != self._static_mtime
-                or dynamic_mtime != self._dynamic_mtime
-                or credentials_mtime != self._credentials_mtime
+                or runtime_mtime != self._runtime_mtime
             ):
                 return False
 
@@ -139,32 +128,23 @@ class ConfigManager:
         # 更新文件修改时间
         try:
             self._static_mtime = os.path.getmtime(self.config_path)
-            # 直接使用 try/except 处理文件不存在，避免 TOCTOU 竞争条件
             try:
-                self._dynamic_mtime = os.path.getmtime(self.dynamic_config_path)
+                self._runtime_mtime = os.path.getmtime(self.runtime_config_path)
             except FileNotFoundError:
-                self._dynamic_mtime = 0
-            try:
-                self._credentials_mtime = os.path.getmtime(self.client_ssh_credentials_path)
-            except FileNotFoundError:
-                self._credentials_mtime = 0
+                self._runtime_mtime = 0
         except Exception as e:
             logger.warning(f"Error updating file mtime: {e}")
 
         # 加载静态配置
         config = self._load_static_config()
 
-        # 加载动态配置并合并
-        dynamic_config = self._load_dynamic_config()
-        if dynamic_config:
+        # 加载运行时配置并合并
+        runtime_config = self._load_runtime_config()
+        if runtime_config:
             ai_config = config.get('ai_models', {})
-            config.update(dynamic_config)
+            config.update(runtime_config)
             if ai_config:
                 config['ai_models'] = ai_config
-
-        local_credentials = self._load_client_ssh_credentials()
-        if local_credentials is not None:
-            config['client_ssh_credentials'] = local_credentials
 
         return config
 
@@ -381,52 +361,28 @@ class ConfigManager:
                 return normalized == 'true'
         return replaced
 
-    def _load_dynamic_config(self) -> Optional[Dict[str, Any]]:
-        """加载动态配置"""
+    def _load_runtime_config(self) -> Optional[Dict[str, Any]]:
+        """加载运行时配置（合并了原 dynamic + credentials）"""
         try:
-            with open(self.dynamic_config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                return config
-
+            with open(self.runtime_config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
         except FileNotFoundError:
             return None
         except Exception as e:
-            logger.error(f"Error loading dynamic config: {e}")
+            logger.error(f"Error loading runtime config: {e}")
             return None
-
-    def _load_client_ssh_credentials(self) -> Optional[list]:
-        """从本地忽略文件加载客户端 SSH 凭据。"""
-        try:
-            with open(self.client_ssh_credentials_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except FileNotFoundError:
-            return None
-        except Exception as e:
-            logger.error(f"Error loading client SSH credentials: {e}")
-            return None
-
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            credentials = data.get('client_ssh_credentials')
-            return credentials if isinstance(credentials, list) else []
-        logger.warning("Invalid client SSH credentials format")
-        return []
 
     def save_client_ssh_credentials(self, credentials: list) -> bool:
-        """保存客户端 SSH 凭据到本地忽略文件，避免写入受跟踪配置。"""
+        """保存客户端 SSH 凭据到运行时配置文件。"""
         try:
             if credentials is None:
                 credentials = []
             if not isinstance(credentials, list):
                 raise ValueError("client_ssh_credentials must be a list")
 
-            os.makedirs(os.path.dirname(self.client_ssh_credentials_path), exist_ok=True)
-            with open(self.client_ssh_credentials_path, 'w', encoding='utf-8') as f:
-                json.dump(credentials, f, indent=4, ensure_ascii=False)
-            logger.info(f"Saved client SSH credentials to {self.client_ssh_credentials_path}")
-            self.invalidate_cache()
-            return True
+            runtime = self._load_runtime_config() or {}
+            runtime['client_ssh_credentials'] = credentials
+            return self._save_runtime_config(runtime, preserve_redmine_auth=False)
         except Exception as e:
             logger.error(f"Error saving client SSH credentials: {e}")
             return False
@@ -452,34 +408,43 @@ class ConfigManager:
 
     def save_dynamic_config(self, dynamic_config: Dict[str, Any]) -> bool:
         """
-        保存动态配置
+        保存运行时配置（包含动态配置和 SSH 凭据）
 
         Args:
-            dynamic_config: 动态配置字典
+            dynamic_config: 运行时配置字典
 
         Returns:
             是否保存成功
         """
         try:
             dynamic_config = dict(dynamic_config or {})
-            credentials_marker = object()
-            credentials = dynamic_config.pop('client_ssh_credentials', credentials_marker)
+            return self._save_runtime_config(dynamic_config)
+        except Exception as e:
+            logger.error(f"Error saving runtime config: {e}")
+            return False
 
-            os.makedirs(os.path.dirname(self.dynamic_config_path), exist_ok=True)
-            with open(self.dynamic_config_path, 'w', encoding='utf-8') as f:
-                json.dump(dynamic_config, f, indent=4, ensure_ascii=False)
-            logger.info(f"Saved dynamic config to {self.dynamic_config_path}")
+    def _save_runtime_config(self, runtime_config: Dict[str, Any], preserve_redmine_auth: bool = True) -> bool:
+        """保存运行时配置到文件
 
-            if credentials is not credentials_marker:
-                if not self.save_client_ssh_credentials(credentials):
-                    return False
+        Args:
+            runtime_config: 完整的运行时配置字典
+            preserve_redmine_auth: 是否自动保留已有的 redmine_auth（调用方已加载时可传 False 避免重复读文件）
+        """
+        try:
+            # 仅在调用方未包含 redmine_auth 且未明确跳过时，从文件读取保留
+            if preserve_redmine_auth and 'redmine_auth' not in runtime_config:
+                existing = self._load_runtime_config()
+                if existing and 'redmine_auth' in existing:
+                    runtime_config['redmine_auth'] = existing['redmine_auth']
 
-            # 保存后使缓存失效
+            os.makedirs(os.path.dirname(self.runtime_config_path), exist_ok=True)
+            with open(self.runtime_config_path, 'w', encoding='utf-8') as f:
+                json.dump(runtime_config, f, indent=4, ensure_ascii=False)
+            logger.info(f"Saved runtime config to {self.runtime_config_path}")
             self.invalidate_cache()
-
             return True
         except Exception as e:
-            logger.error(f"Error saving dynamic config: {e}")
+            logger.error(f"Error writing runtime config: {e}")
             return False
 
     def prepare_client_config(self, updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -492,13 +457,8 @@ class ConfigManager:
         Returns:
             完整的客户端配置字典
         """
-        existing = self._load_dynamic_config() or {}
-        local_credentials = self._load_client_ssh_credentials()
-        existing_credentials = (
-            local_credentials
-            if local_credentials is not None
-            else existing.get('client_ssh_credentials', [])
-        )
+        existing = self._load_runtime_config() or {}
+        existing_credentials = existing.get('client_ssh_credentials', [])
 
         dynamic_config = existing.copy()
         dynamic_config['client_hosts'] = updates.get('client_hosts', existing.get('client_hosts', {}))
@@ -601,6 +561,52 @@ class ConfigManager:
 
         logger.debug(f"[Config] No SSH credential found for {device_host}")
         return None
+
+    def _get_redmine_cipher_suite(self):
+        """获取 Redmine 凭证加密用的 Fernet 实例"""
+        from cryptography.fernet import Fernet
+        encryption_key = base64.urlsafe_b64encode(hashlib.sha256(b'gms_remote_test_redmine_2024').digest())
+        return Fernet(encryption_key)
+
+    def save_redmine_credentials(self, username: str, password: str) -> bool:
+        """加密保存 Redmine 凭证到 config_runtime.json"""
+        try:
+            cipher_suite = self._get_redmine_cipher_suite()
+            encrypted_password = cipher_suite.encrypt(password.encode()).decode()
+
+            runtime = self._load_runtime_config() or {}
+            runtime['redmine_auth'] = {
+                'username': username,
+                'encrypted_password': encrypted_password,
+                'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S')
+            }
+            if self._save_runtime_config(runtime, preserve_redmine_auth=False):
+                logger.info(f"[Redmine Auth] Saved credentials for {username}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"[Redmine Auth] Failed to save credentials: {e}")
+            return False
+
+    def load_redmine_credentials(self) -> Optional[Dict[str, str]]:
+        """从 config_runtime.json 加载并解密 Redmine 凭证"""
+        try:
+            runtime = self._load_runtime_config()
+            if not runtime:
+                return None
+            data = runtime.get('redmine_auth')
+            if not data or 'encrypted_password' not in data:
+                return None
+
+            cipher_suite = self._get_redmine_cipher_suite()
+            decrypted_password = cipher_suite.decrypt(data['encrypted_password'].encode()).decode()
+            return {
+                'username': data['username'],
+                'password': decrypted_password
+            }
+        except Exception as e:
+            logger.warning(f"[Redmine Auth] Failed to load credentials: {e}")
+            return None
 
 
 # 全局配置管理器实例

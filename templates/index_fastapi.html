@@ -12,7 +12,7 @@
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/app.js?v=20260528-25" defer crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260530-04" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -1252,6 +1252,31 @@
         </div>
     </div>
 
+    <!-- VPN Credential Modal -->
+    <div id="vpn-credential-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">🔒 选择 VPN 连接</span>
+                <span class="modal-close" onclick="closeVpnCredentialModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="vpn-credential-form" onsubmit="event.preventDefault(); submitVpnCredential();" autocomplete="off">
+                <div class="modal-form-row">
+                    <label>VPN账号:</label>
+                    <select id="vpn-credential-name" style="flex:1;padding:6px 8px;border-radius:4px;border:1px solid #555;background:#1e1e1e;color:#eee;font-size:13px;"></select>
+                </div>
+                </form>
+                <div class="modal-ssh-info">
+                    <small>VPN 账号在 Ubuntu 主机 NetworkManager 中预先配置。</small>
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeVpnCredentialModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitVpnCredential()">连接</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Username Detection Modal -->
     <div id="username-detect-modal" class="modal">
         <div class="modal-content">
@@ -1435,7 +1460,7 @@
                 <form id="add-host-form" onsubmit="event.preventDefault(); addNewHost();" autocomplete="off">
                 <div class="modal-form-row">
                     <label>主机地址:</label>
-                    <input type="text" id="new-host-input" class="host-input" placeholder="例如: wlq@172.16.14.246" onkeypress="handleAddHostKeyPress(event)" autocomplete="off" />
+                    <input type="text" id="new-host-input" class="host-input" placeholder="例如: user@192.168.1.100" onkeypress="handleAddHostKeyPress(event)" autocomplete="off" />
                 </div>
                 <div class="modal-form-row" style="margin-top: 12px;">
                     <label>VNC密码:</label>
@@ -1465,7 +1490,7 @@
                 <form id="add-local-suite-form" onsubmit="event.preventDefault(); submitAddLocalSuite();" autocomplete="off">
                 <div class="modal-form-row">
                     <label>套件路径:</label>
-                    <input type="text" id="local-suite-path-input" class="host-input" placeholder="/home/hcq/GMS-Suite/android-cts-verifier-16.1_r2/" onkeydown="handleAddLocalSuiteKeydown(event)" autocomplete="off" />
+                    <input type="text" id="local-suite-path-input" class="host-input" placeholder="~/GMS-Suite/android-cts-verifier-16.1_r2/" onkeydown="handleAddLocalSuiteKeydown(event)" autocomplete="off" />
                 </div>
                 </form>
                 <div class="modal-info-text" style="margin-top: 10px;">
