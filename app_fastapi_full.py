@@ -2496,7 +2496,7 @@ async def list_users():
     now = datetime.now()
 
     # 本地地址列表，不显示在用户列表中
-    local_addresses = {'127.0.0.1', 'localhost', '::1', '0.0.0.0'}
+    local_addresses = set(CommonUtils.LOCAL_HOSTS) | {'0.0.0.0'}
 
     # VPN网关地址列表（不显示在用户列表中）
     vpn_gateway_addresses = {'10.10.10.1'}
@@ -6369,7 +6369,7 @@ async def analyze_report_from_url(request: Request):
             # 清理临时文件
             try:
                 shutil.rmtree(temp_dir)
-            except:
+            except Exception:
                 pass
 
             if result:
@@ -6451,7 +6451,7 @@ async def analyze_report_from_url(request: Request):
             # 清理临时文件
             try:
                 shutil.rmtree(temp_dir)
-            except:
+            except Exception:
                 pass
             raise download_error
 
@@ -7063,10 +7063,6 @@ async def delete_report(request: Request, timestamp: str = Query(..., descriptio
 
 # ==================== IP和网络工具函数 ====================
 import ipaddress
-
-def extract_ip_from_host(host_string: str) -> str:
-    """从user@host或host字符串中提取IP地址"""
-    return CommonUtils.extract_ip_from_host(host_string)
 
 def are_same_network(ip1: str, ip2: str, prefix_len: int = 24) -> bool:
     """检查两个IP是否在同一网段"""
@@ -8612,8 +8608,8 @@ async def check_ssh_route(request: Request):
             'error': '无法获取主机IP地址'
         }, status_code=400)
 
-    ubuntu_ip = extract_ip_from_host(ubuntu_host)
-    device_ip = extract_ip_from_host(client_ip)
+    ubuntu_ip = CommonUtils.extract_ip_from_host(ubuntu_host)
+    device_ip = CommonUtils.extract_ip_from_host(client_ip)
 
     same_network = are_same_network(ubuntu_ip, device_ip)
     need_route = not same_network

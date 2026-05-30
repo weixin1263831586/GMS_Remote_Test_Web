@@ -194,8 +194,7 @@ class TestRunner:
             sftp.close()
 
             # 设置可执行权限
-            stdin, stdout, stderr = ssh.exec_command(f"chmod +x '{remote_script}'")
-            stdout.read()
+            self.ssh_manager.execute_command(ssh, f"chmod +x '{remote_script}'")
 
             await log_callback(f"🔐 已设置可执行权限: {remote_script}", 'info')
             await log_callback(f"✅ 上传完成 ({size_kb:.2f}KB)", 'success')

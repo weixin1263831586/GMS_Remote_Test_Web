@@ -314,7 +314,7 @@ class UniversalAIAnalyzer:
                                     if 'root_cause' in test_parse:
                                         content = extracted_content
                                         logger.info(f"[{provider_name}] 成功从推理过程中提取最终 JSON")
-                                except:
+                                except Exception:
                                     logger.warning(f"[{provider_name}] 提取的 JSON 无效，使用原始内容")
 
                 parsed = self._parse_response(content)
@@ -330,7 +330,7 @@ class UniversalAIAnalyzer:
                 try:
                     error_data = response.json()
                     error_msg = error_data.get('error', {}).get('message', f'HTTP {response.status_code}')
-                except:
+                except Exception:
                     error_msg = f'HTTP {response.status_code}: {response.text[:100]}'
                 return {'success': False, 'error': f'{provider_name} API错误: {error_msg}'}
 
@@ -627,7 +627,7 @@ class UniversalAIAnalyzer:
                             if 'root_cause' in test_parsed:
                                 json_str = test_json
                                 logger.info("[AI Parse] 移除了外层的空对象包装")
-                        except:
+                        except Exception:
                             pass
 
                 # 尝试多层次的JSON修复策略

@@ -226,6 +226,7 @@ function throttle(func, limit) {
 const ModalManager = {
     _escListener: null,
     _activeModals: [],
+    _dynamicModals: new Set(),
 
     open(modalId) {
         const modal = document.getElementById(modalId);
@@ -237,10 +238,14 @@ const ModalManager = {
     },
 
     close(modalId) {
+        // 动态弹窗走 unregisterDynamic 路径（会 remove DOM）
+        if (this._dynamicModals.has(modalId)) {
+            this.unregisterDynamic(modalId);
+            return;
+        }
         const modal = document.getElementById(modalId);
         if (modal) {
             modal.classList.remove('show');
-            // 重置 inline display 样式，防止 Esc 关闭时 inline style 优先级高于 CSS 导致弹框残留
             if (modal.style.display === 'flex') {
                 modal.style.display = 'none';
             }
@@ -286,6 +291,7 @@ const ModalManager = {
     registerDynamic(modalElement) {
         document.body.appendChild(modalElement);
         this._addActiveModal(modalElement.id);
+        this._dynamicModals.add(modalElement.id);
         this._ensureEscListener();
         return modalElement;
     },
@@ -296,6 +302,7 @@ const ModalManager = {
         if (modal) {
             modal.remove();
         }
+        this._dynamicModals.delete(modalId);
         this._removeActiveModal(modalId);
     },
 
@@ -3476,6 +3483,7 @@ async function checkSshd() {
 async function checkRouting() {
     // 创建弹框
     const dialog = document.createElement('div');
+    dialog.id = 'route-check-dialog';
     dialog.className = 'route-check-dialog';
     dialog.innerHTML = `
         <div class="route-check-content">
@@ -3503,7 +3511,7 @@ async function checkRouting() {
         </div>
     `;
 
-    document.body.appendChild(dialog);
+    ModalManager.registerDynamic(dialog);
 
     // 获取配置中的默认值
     try {
@@ -3522,14 +3530,14 @@ async function checkRouting() {
     const closeXBtn = dialog.querySelector('.route-check-close');
     const pingResult = document.getElementById('ping-result');
 
-    // X 按钮关闭
-    closeXBtn.addEventListener('click', () => {
-        document.body.removeChild(dialog);
-    });
+    const closeDialog = () => {
+        ModalManager.unregisterDynamic('route-check-dialog');
+    };
 
-    closeDialogBtn.addEventListener('click', () => {
-        document.body.removeChild(dialog);
-    });
+    // X 按钮关闭
+    closeXBtn.addEventListener('click', closeDialog);
+
+    closeDialogBtn.addEventListener('click', closeDialog);
 
     pingTestBtn.addEventListener('click', async () => {
         const testHostIp = document.getElementById('test-host-ip').value.trim();
@@ -6209,13 +6217,14 @@ async function handleRedmineAttachment(url) {
 function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill) {
     // 显示 Redmine 凭证输入对话框
     const modal = document.createElement('div');
+    modal.id = 'redmine-auth-modal';
     modal.className = 'modal show';
     modal.style.cssText = 'z-index: 10000;';
     modal.innerHTML = `
         <div class="modal-content" style="max-width: 400px;">
             <div class="modal-header">
                 <span class="modal-title">🔐 Redmine 认证</span>
-                <span class="modal-close" onclick="this.closest('.modal').remove(); resetReportUploadProgress();">&times;</span>
+                <span class="modal-close" onclick="ModalManager.unregisterDynamic('redmine-auth-modal'); resetReportUploadProgress();">&times;</span>
             </div>
             <div class="modal-body">
                 <p style="margin-bottom: 15px;">请输入 Redmine 账号密码以自动下载附件：</p>
@@ -6231,7 +6240,7 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill)
                 </div>
                 </form>
                 <div class="modal-buttons">
-                    <button class="btn-xs" onclick="this.closest('.modal').remove(); resetReportUploadProgress();">取消</button>
+                    <button class="btn-xs" onclick="ModalManager.unregisterDynamic('redmine-auth-modal'); resetReportUploadProgress();">取消</button>
                     <button class="btn-xs btn-primary" onclick="submitRedmineAuth('${url}')">确定</button>
                 </div>
                 <p style="font-size: 11px; color: var(--text-secondary); margin-top: 15px; text-align: center;">
@@ -6240,7 +6249,7 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill)
             </div>
         </div>
     `;
-    document.body.appendChild(modal);
+    ModalManager.registerDynamic(modal);
 
     // 聚焦到用户名输入框
     setTimeout(() => {
@@ -6270,7 +6279,7 @@ async function submitRedmineAuth(url) {
     }
 
     // 关闭对话框
-    document.querySelector('.modal.show')?.remove();
+    ModalManager.unregisterDynamic('redmine-auth-modal');
 
     // 显示进度
     const uploadZone = $('report-upload-zone');

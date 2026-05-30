@@ -22,6 +22,20 @@ from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
 
+# 预编译常用正则表达式
+_RE_APPLE_ICON = re.compile(
+    r'<link[^>]*rel=["\']apple-touch-icon["\'][^>]*href=["\']([^"\']+)["\'][^>]*>',
+    re.IGNORECASE
+)
+_RE_ICON = re.compile(
+    r'<link[^>]*rel=["\']icon["\'][^>]*href=["\']([^"\']+)["\'][^>]*>',
+    re.IGNORECASE
+)
+_RE_SHORTCUT_ICON = re.compile(
+    r'<link[^>]*rel=["\']shortcut icon["\'][^>]*href=["\']([^"\']+)["\'][^>]*>',
+    re.IGNORECASE
+)
+
 
 @dataclass
 class IconResult:
@@ -617,10 +631,7 @@ class IconFetcher:
                 icon_candidates = []
 
                 # 查找 apple-touch-icon
-                apple_icons = re.findall(
-                    r'<link[^>]*rel=["\']apple-touch-icon["\'][^>]*href=["\']([^"\']+)["\'][^>]*>',
-                    html, re.IGNORECASE
-                )
+                apple_icons = _RE_APPLE_ICON.findall(html)
                 for icon_url in apple_icons:
                     icon_candidates.append({
                         'url': urljoin(url, icon_url),
@@ -629,10 +640,7 @@ class IconFetcher:
                     })
 
                 # 查找 icon
-                icons = re.findall(
-                    r'<link[^>]*rel=["\']icon["\'][^>]*href=["\']([^"\']+)["\'][^>]*>',
-                    html, re.IGNORECASE
-                )
+                icons = _RE_ICON.findall(html)
                 for icon_url in icons:
                     icon_candidates.append({
                         'url': urljoin(url, icon_url),
@@ -641,10 +649,7 @@ class IconFetcher:
                     })
 
                 # 查找 shortcut icon
-                shortcut_icons = re.findall(
-                    r'<link[^>]*rel=["\']shortcut icon["\'][^>]*href=["\']([^"\']+)["\'][^>]*>',
-                    html, re.IGNORECASE
-                )
+                shortcut_icons = _RE_SHORTCUT_ICON.findall(html)
                 for icon_url in shortcut_icons:
                     icon_candidates.append({
                         'url': urljoin(url, icon_url),

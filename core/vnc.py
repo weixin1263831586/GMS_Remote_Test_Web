@@ -10,7 +10,6 @@ VNC管理 - 核心业务逻辑
 import logging
 import os
 import subprocess
-import socket
 import time
 from typing import Dict, Any, List
 
@@ -67,23 +66,9 @@ class VNCManager:
             if not host:
                 return {'success': False, 'error': '未配置主机地址'}
 
-            # 如果host是user@ip格式，提取IP地址
-            host_ip = host
-            if '@' in host:
-                try:
-                    user, host_ip = host.split('@', 1)
-                except ValueError:
-                    pass
-
-            # 检查是否是本地主机
-            local_hosts = ['localhost', '127.0.0.1', '::1']
-            try:
-                local_ip = socket.gethostbyname(socket.gethostname())
-                local_hosts.append(local_ip)
-            except:
-                local_ip = None
-
-            is_local = host_ip in local_hosts
+            # 提取IP部分并检查是否本地
+            host_ip = CommonUtils.extract_ip_from_host(host)
+            is_local = CommonUtils.is_local_host(host_ip)
 
             if is_local:
                 # 本地主机的VNC启动
@@ -131,9 +116,10 @@ class VNCManager:
                     time.sleep(1)
                     x11vnc_running = False
 
+            local_ip = CommonUtils.get_local_ip() or 'localhost'
+
             # 如果已经运行且是免密码模式，返回成功
             if x11vnc_running and websockify_running:
-                local_ip = socket.gethostbyname(socket.gethostname()) or 'localhost'
                 return {
                     'success': True,
                     'message': '✅ VNC服务已在运行(本地)',
@@ -186,7 +172,6 @@ class VNCManager:
             ).returncode == 0
 
             if x11vnc_running and websockify_running:
-                local_ip = socket.gethostbyname(socket.gethostname()) or 'localhost'
                 return {
                     'success': True,
                     'message': '✅ VNC服务已启动(本地)',
@@ -224,9 +209,21 @@ class VNCManager:
 
             # 如果提供了VNC密码，需要创建密码文件；否则使用免密模式
             if vnc_password:
-                # 创建VNC密码文件
-                create_passwd_cmd = f"echo '{vnc_password}' | x11vnc -display :0 -storepasswd ~/.vnc/passwd"
-                self.ssh_manager.execute_command(ssh, create_passwd_cmd, timeout=10)
+                # 创建VNC密码文件（使用SFTP写入避免shell注入）
+                try:
+                    passwd_content = f"{vnc_password}\n{vnc_password}\n"
+                    sftp = ssh.open_sftp()
+                    with sftp.file('/tmp/.vnc_passwd_input', 'w') as f:
+                        f.write(passwd_content)
+                    sftp.close()
+                    create_passwd_cmd = "x11vnc -display :0 -storepasswd $(head -1 /tmp/.vnc_passwd_input) ~/.vnc/passwd && rm -f /tmp/.vnc_passwd_input"
+                    self.ssh_manager.execute_command(ssh, create_passwd_cmd, timeout=10)
+                except Exception as e:
+                    logger.warning(f"[VNC] Failed to create password file via SFTP: {e}")
+                    # Fallback: escape single quotes in password
+                    safe_password = vnc_password.replace("'", "'\\''")
+                    create_passwd_cmd = f"echo '{safe_password}' | x11vnc -display :0 -storepasswd ~/.vnc/passwd"
+                    self.ssh_manager.execute_command(ssh, create_passwd_cmd, timeout=10)
                 time.sleep(0.5)  # 等待文件创建完成
 
             # 检查noVNC安装
@@ -339,15 +336,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             if not host:
                 host = config.get('ubuntu_host', '')
 
-            # 检查是否是本地主机
-            local_hosts = ['localhost', '127.0.0.1', '::1']
-            try:
-                local_ip = socket.gethostbyname(socket.gethostname())
-                local_hosts.append(local_ip)
-            except:
-                pass
-
-            is_local = host in local_hosts
+            is_local = CommonUtils.is_local_host(host)
 
             if is_local:
                 # 停止本地VNC
@@ -394,8 +383,10 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                 ubuntu_user = config.get('ubuntu_user') or get_ubuntu_user()
             else:
                 # 从host中解析user
-                if '@' in host:
-                    ubuntu_user, host = host.split('@', 1)
+                username, _ = CommonUtils.parse_host_address(host)
+                if username:
+                    ubuntu_user = username
+                    host = CommonUtils.extract_ip_from_host(host)
                 else:
                     ubuntu_user = config.get('ubuntu_user') or get_ubuntu_user()
 
@@ -520,7 +511,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                 return {'running': False, 'error': 'SSH连接失败'}
 
             # 检查VNC进程
-            check_cmd = "pgrep -f 'Xvnc' | wc -l"
+            check_cmd = "pgrep -f 'x11vnc' | wc -l"
             stdout, stderr, code = self.ssh_manager.execute_command(ssh, check_cmd)
 
             vnc_count = int(stdout.strip()) if code == 0 else 0
@@ -551,25 +542,8 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
         password: str = None,
         vnc_password: str = None
     ) -> Dict[str, Any]:
-        """
-        启动Ubuntu主机桌面VNC
-
-        Args:
-            host: 主机地址
-            password: SSH密码
-            vnc_password: VNC密码
-
-        Returns:
-            结果字典
-        """
-        try:
-            # 复用现有的start_vnc方法
-            result = self.start_vnc(host, password, vnc_password)
-            return result
-
-        except Exception as e:
-            logger.error(f"Error starting desktop VNC: {e}")
-            return {'success': False, 'error': str(e)}
+        """启动Ubuntu主机桌面VNC（委托给start_vnc）"""
+        return self.start_vnc(host, password, vnc_password)
 
 
 # 全局VNC管理器实例

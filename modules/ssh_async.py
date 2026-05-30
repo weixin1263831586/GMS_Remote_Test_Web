@@ -58,7 +58,7 @@ class SSHAsyncManager:
                     if transport and transport.is_active():
                         logger.debug(f"[SSH] Reusing existing connection to {host}")
                         return self.connections[host]
-                except:
+                except Exception:
                     pass
 
             # 建立新连接

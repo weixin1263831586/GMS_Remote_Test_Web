@@ -8,26 +8,24 @@ import zipfile
 import tarfile
 import logging
 import re
+import subprocess
 import glob
 import io
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
+logger = logging.getLogger(__name__)
+
 # 优先使用lxml,如果不可用则回退到ElementTree
 try:
     from lxml import etree
     USE_LXML = True
-    logger = logging.getLogger(__name__)
     logger.info("使用lxml进行XML解析(高性能模式)")
 except ImportError:
     import xml.etree.ElementTree as ET
     USE_LXML = False
-    logger = logging.getLogger(__name__)
     logger.warning("lxml不可用,使用ElementTree(标准库模式)")
-
-# 配置日志
-logging.basicConfig(level=logging.INFO)
 
 
 def get_opengrok_project_for_android_version(android_version: str, opengrok_config: dict) -> str:
@@ -45,7 +43,6 @@ def get_opengrok_project_for_android_version(android_version: str, opengrok_conf
         return opengrok_config.get('default_project', 'Android16')
 
     # 提取Android版本的主版本号
-    import re
     match = re.match(r'(\d+)', android_version)
     if match:
         major_version = match.group(1)
@@ -373,9 +370,6 @@ class XMLReportParser:
 
 class HostLogParser:
     """HostLog解析器 - 统一处理CTS/VTS/GTS等测试套件的host_log分析"""
-
-    def __init__(self):
-        pass
 
     def parse_log_dir(self, log_dir: str) -> Optional[TestReport]:
         """解析日志目录"""
@@ -904,8 +898,6 @@ class ReportAnalyzer:
         Returns:
             List[Dict]: 搜索结果列表，每个包含 {project, path, line, type, file_type}
         """
-        import subprocess
-
         web_app_dir = Path(__file__).resolve().parents[1]
         codesearch_dir = web_app_dir / 'skills' / 'rk_codesearch'
         codesearch_script = str(codesearch_dir / 'run.py')
