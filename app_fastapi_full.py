@@ -420,6 +420,46 @@ def extract_filename_from_content_disposition(content_disposition: str) -> Optio
         return urllib.parse.unquote(filename) if filename else None
     return None
 
+def extract_redmine_issue_id_from_text(text: str) -> Optional[str]:
+    """Extract a Redmine issue id from URL or dropped HTML/text context."""
+    if not text:
+        return None
+    match = COMPILED_REDMINE_ISSUE_PATTERN.search(text)
+    return match.group(1) if match else None
+
+def strip_redmine_report_prefix(filename: str) -> str:
+    """Remove an existing Redmine-{issue}- prefix before applying the current issue prefix."""
+    match = COMPILED_REPORT_NAME_PATTERN.match(filename or '')
+    return match.group(2) if match else (filename or 'downloaded_file.zip')
+
+async def fetch_redmine_attachment_issue_id(base_url: str, attachment_id: str, headers: Dict[str, str]) -> Optional[str]:
+    """Best-effort lookup of the issue page linked by a Redmine attachment detail page."""
+    detail_url = f"{base_url}/attachments/{attachment_id}"
+    request_headers = dict(headers or {})
+    request_headers.setdefault('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+    request_headers.setdefault('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8')
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(detail_url, headers=request_headers, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True) as response:
+                final_url_issue_id = extract_redmine_issue_id_from_text(str(response.url))
+                if final_url_issue_id:
+                    return final_url_issue_id
+
+                content_type = response.headers.get('Content-Type', '')
+                if response.status != 200 or 'html' not in content_type.lower():
+                    logger.info(f"[Report Analysis] 附件详情页未返回HTML: {detail_url}, status={response.status}, type={content_type}")
+                    return None
+
+                text = await response.text(errors='ignore')
+                link_match = re.search(r'href=["\'][^"\']*/issues/(\d+)[^"\']*["\']', text)
+                if link_match:
+                    return link_match.group(1)
+                return extract_redmine_issue_id_from_text(text)
+    except Exception as e:
+        logger.warning(f"[Report Analysis] 查询附件详情页失败: {detail_url}, error={e}")
+        return None
+
 def extract_report_name_from_upload(files: List[UploadFile]) -> str:
     """
     从上传的文件中提取报告名称
@@ -5820,6 +5860,10 @@ async def analyze_report_from_url(request: Request):
         url = body.get('url', '').strip()
         redmine_username = body.get('redmine_username', '').strip()
         redmine_password = body.get('redmine_password', '').strip()
+        source_issue_id = str(body.get('source_issue_id') or '').strip()
+        source_issue_url = body.get('source_issue_url', '').strip()
+        source_issue_id = source_issue_id or extract_redmine_issue_id_from_text(source_issue_url)
+        source_issue_id = source_issue_id if source_issue_id and source_issue_id.isdigit() else ''
 
         if not url:
             return JSONResponse(
@@ -5844,7 +5888,7 @@ async def analyze_report_from_url(request: Request):
             pass
 
         # Redmine URL 处理
-        original_issue_id = None  # 用户访问的原始问题ID（用于报告命名）
+        original_issue_id = source_issue_id or None  # 用户访问的原始问题ID（用于报告命名）
         attachment_owner_issue_id = None  # 附件实际所属的问题ID
         if is_redmine:
             issue_match = COMPILED_REDMINE_ISSUE_PATTERN.search(url)
@@ -5938,7 +5982,8 @@ async def analyze_report_from_url(request: Request):
                             original_issue_id = cached_issue_id
                             logger.info(f"[Report Analysis] 使用缓存的问题ID作为报告前缀: {original_issue_id}")
                     else:
-                        # 缓存未命中，尝试通过 Redmine API 搜索查询附件所属的问题
+                        # 缓存未命中，尝试从附件详情页解析所属问题。不要使用 issues.json?attachment_id，
+                        # Redmine 会忽略未知过滤参数并返回普通问题列表，容易拿到错误 issue。
                         try:
                             base_url = redmine_config['base_url']
                             stored_creds = await load_redmine_credentials()
@@ -5951,45 +5996,26 @@ async def analyze_report_from_url(request: Request):
                             else:
                                 headers = {}
 
-                            # 使用搜索API查找包含此附件的问题
-                            search_url = f"{base_url}/issues.json?attachment_id={attachment_id}"
-                            logger.info(f"[Report Analysis] 搜索附件所属问题: {search_url}")
-
-                            async with aiohttp.ClientSession() as session:
-                                async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                                    if response.status == 200:
-                                        # 检查响应内容类型
-                                        content_type = response.headers.get('Content-Type', '')
-                                        if 'application/json' not in content_type:
-                                            logger.warning(f"[Report Analysis] 搜索API返回非JSON响应: {content_type}")
-                                        else:
-                                            search_data = await response.json()
-                                            issues = search_data.get('issues', [])
-                                            if issues:
-                                                # 获取第一个相关问题的ID（附件实际所属问题）
-                                                attachment_owner_issue_id = str(issues[0].get('id'))
-                                                logger.info(f"[Report Analysis] 找到附件所属问题: {attachment_owner_issue_id}")
-                                                # 对于直接附件URL，将附件所属问题ID设为原始问题ID
-                                                if not original_issue_id:
-                                                    original_issue_id = attachment_owner_issue_id
-                                                    logger.info(f"[Report Analysis] 直接附件访问，使用所属问题ID作为报告前缀: {original_issue_id}")
-                                                else:
-                                                    # 如果附件来自不同问题，记录日志
-                                                    if attachment_owner_issue_id != original_issue_id:
-                                                        logger.info(f"[Report Analysis] 注意：附件来自问题 {attachment_owner_issue_id}，但用户访问的是问题 {original_issue_id}")
-                                            else:
-                                                logger.warning(f"[Report Analysis] 未找到附件 {attachment_id} 所属的问题")
-                                    else:
-                                        logger.warning(f"[Report Analysis] 搜索失败: HTTP {response.status}")
+                            attachment_owner_issue_id = await fetch_redmine_attachment_issue_id(base_url, attachment_id, headers)
+                            if attachment_owner_issue_id:
+                                logger.info(f"[Report Analysis] 从附件详情页找到所属问题: {attachment_owner_issue_id}")
+                                if not original_issue_id:
+                                    original_issue_id = attachment_owner_issue_id
+                                    logger.info(f"[Report Analysis] 直接附件访问，使用所属问题ID作为报告前缀: {original_issue_id}")
+                                elif attachment_owner_issue_id != original_issue_id:
+                                    logger.info(f"[Report Analysis] 附件来自问题 {attachment_owner_issue_id}，但用户来源问题是 {original_issue_id}")
+                            else:
+                                logger.warning(f"[Report Analysis] 未能从附件详情页确定附件 {attachment_id} 所属问题")
                         except Exception as search_error:
-                            logger.warning(f"[Report Analysis] 搜索附件信息失败: {search_error}")
+                            logger.warning(f"[Report Analysis] 查询附件所属问题失败: {search_error}")
 
-                        # 如果URL还不是下载URL格式，则转换
-                        if '/attachments/download/' not in url:
-                            url = build_redmine_download_url(redmine_config['base_url'], attachment_id)
-                            logger.info(f"[Report Analysis] 转换为 Redmine 下载 URL: {url}")
-                        else:
-                            logger.info(f"[Report Analysis] URL已是下载格式，无需转换: {url}")
+                    # 无论附件 issue ID 是否命中缓存，都必须转换到下载 URL。
+                    # /attachments/{id} 是 HTML 详情页，不是附件内容。
+                    if '/attachments/download/' not in url:
+                        url = build_redmine_download_url(redmine_config['base_url'], attachment_id)
+                        logger.info(f"[Report Analysis] 转换为 Redmine 下载 URL: {url}")
+                    else:
+                        logger.info(f"[Report Analysis] URL已是下载格式，无需转换: {url}")
 
                     # 更新 filename 用于保存
                     filename = 'downloaded_file.zip'
@@ -6080,10 +6106,9 @@ async def analyze_report_from_url(request: Request):
                         if not original_issue_id:
                             original_issue_id = extracted_issue_id
                             logger.info(f"[Report Analysis] 使用文件名中的问题ID作为报告前缀: {original_issue_id}")
-                        # 如果文件名中的ID与当前ID不同，记录警告但优先使用文件名中的ID（保持用户期望的一致性）
+                        # 如果用户/页面已经提供了原始问题ID，不能被附件文件名中的旧 Redmine 前缀覆盖。
                         elif original_issue_id != extracted_issue_id:
-                            logger.info(f"[Report Analysis] 注意：文件名中的问题ID ({extracted_issue_id}) 与当前问题ID ({original_issue_id}) 不同，使用文件名中的ID以保持一致性")
-                            original_issue_id = extracted_issue_id
+                            logger.info(f"[Report Analysis] 文件名中的问题ID ({extracted_issue_id}) 与用户来源问题ID ({original_issue_id}) 不同，保留用户来源问题ID")
 
                     with open(temp_file_path, 'wb') as f:
                         async for chunk in response.content.iter_chunked(8192):
@@ -6122,7 +6147,8 @@ async def analyze_report_from_url(request: Request):
                     # 这样可以确保报告名称与用户访问的问题页面保持一致
                     if original_issue_id:
                         # 添加Redmine前缀：Redmine-{用户访问的问题ID}-{原文件名}
-                        report_name = f"Redmine-{original_issue_id}-{filename}"
+                        report_filename = strip_redmine_report_prefix(filename)
+                        report_name = f"Redmine-{original_issue_id}-{report_filename}"
                         logger.info(f"[Report Analysis] Redmine报告添加前缀: {report_name}")
                         # 如果附件来自不同问题，记录信息
                         if attachment_owner_issue_id and attachment_owner_issue_id != original_issue_id:
