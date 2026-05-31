@@ -11292,7 +11292,11 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
     try:
         if is_config_host_local(config):
             ssh = None
-            channel = create_local_terminal_channel(['adb', '-s', serial_no, 'shell'])
+            channel = create_local_terminal_channel()
+            channel.resize_pty(width=80, height=24)
+            channel.send('\n\n\n')
+            channel.send('clear\n')
+            channel.send(f'adb -s {shlex.quote(serial_no)} shell\n')
             backend_mode = 'local_adb'
         else:
             ssh = ssh_manager.get_connection(config)
@@ -11308,7 +11312,7 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
             channel.resize_pty(width=80, height=24)
             channel.send('\n\n\n')
             channel.send('clear\n')
-            channel.send(f'adb -s {serial_no} shell\n')
+            channel.send(f'adb -s {shlex.quote(serial_no)} shell\n')
             backend_mode = 'adb'
 
         # 保存会话
