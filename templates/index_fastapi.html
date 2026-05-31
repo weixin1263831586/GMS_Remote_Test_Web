@@ -12,7 +12,7 @@
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/app.js?v=20260531-01" defer crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260531-07" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -804,7 +804,6 @@
                         </div>
                         <span id="suite-progress-percent" style="font-size: 12px; color: #4CAF50; min-width: 40px; text-align: right;">0%</span>
                     </div>
-                    <div id="suite-download-log" style="margin-top: 8px; padding: 8px; background: #111; border-radius: 4px; font-size: 11px; color: #aaa; max-height: 100px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace;"></div>
                 </div>
             </div>
 
@@ -896,7 +895,7 @@
                 <!-- 标签页导航 + 搜索框 -->
                 <div class="apk-tab-actions">
                     <div style="display: flex; gap: 4px;">
-                        <button class="filter-btn active" data-apk-tab="manifest" onclick="switchApkTab('manifest')">📋 Manifest</button>
+                        <button class="filter-btn active" data-apk-tab="manifest" onclick="switchApkTab('manifest')">📋 AndroidManifest</button>
                         <button class="filter-btn" data-apk-tab="permissions" onclick="switchApkTab('permissions')">🔐 权限列表</button>
                         <button class="filter-btn" data-apk-tab="source" onclick="switchApkTab('source')">💻 源码浏览</button>
                     </div>
@@ -1542,6 +1541,39 @@
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeAddLocalSuiteModal()">取消</button>
                     <button class="btn-xxs btn-primary" onclick="submitAddLocalSuite()">添加</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 解压测试套件弹框 -->
+    <div id="extract-suite-modal" class="modal" style="display: none;" onkeydown="handleExtractSuiteKeydown(event)">
+        <div class="modal-content" style="max-width: 620px;">
+            <div class="modal-header">
+                <span class="modal-title">📦 解压测试套件</span>
+                <span class="modal-close" onclick="closeExtractSuiteModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="extract-suite-form" onsubmit="event.preventDefault(); submitExtractSuite();" autocomplete="off">
+                    <div class="modal-form-row">
+                        <label>压缩包:</label>
+                        <select id="extract-suite-archive-select" class="host-input" onchange="handleExtractArchiveSelectChange()"></select>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>压缩包路径:</label>
+                        <input type="text" id="extract-suite-archive-path" class="host-input" placeholder="/home/hcq/GMS-Suite/android-cts-verifier-16.1_r3-linux_x86-arm.zip" autocomplete="off" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>文件夹名称:</label>
+                        <input type="text" id="extract-suite-folder-name" class="host-input" placeholder="android-cts-verifier-16.1_r3" autocomplete="off" />
+                    </div>
+                </form>
+                <div class="modal-info-text" style="margin-top: 10px;">
+                    💡 将压缩包解压到 GMS-Suite 下指定文件夹，完成后自动刷新左侧套件列表
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeExtractSuiteModal()">取消</button>
+                    <button id="btn-submit-extract-suite" class="btn-xxs btn-primary" onclick="submitExtractSuite()">开始解压</button>
                 </div>
             </div>
         </div>

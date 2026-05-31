@@ -1,7 +1,32 @@
 {
+    "client_hosts": {
+        "172.16.14.66": "hcq"
+    },
+    "client_ssh_credentials": [
+        {
+            "username": "hcq",
+            "password": "20240120"
+        }
+    ],
     "redmine_auth": {
         "username": "chaoqun.huang@rock-chips.com",
         "encrypted_password": "gAAAAABqGo-ZK2fbFcMhRJgrh65EHM0Gw4ZRaUyM1JhrFaOpRGlThzSuv6F_f0OqSezGxLJ_Gf8X-7vw0ngrkHglH2uobGBUpg==",
         "updated_at": "2026-05-30T15:19:53"
-    }
+    },
+    "sidebar_order": [
+        "test",
+        "desktop",
+        "terminal",
+        "users",
+        "devices",
+        "reports",
+        "report-analysis",
+        "apk-analysis",
+        "test-suites",
+        "api-docs",
+        "architecture",
+        "tools",
+        "security-audit",
+        "ai-assistant"
+    ]
 }

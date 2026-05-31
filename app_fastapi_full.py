@@ -641,6 +641,19 @@ def build_suite_info(full_path: str) -> Optional[Dict[str, str]]:
     }
 
 
+def ensure_tradefed_executable(full_path: str) -> bool:
+    """Ensure extracted tradefed launchers are executable."""
+    if os.access(full_path, os.X_OK):
+        return True
+    try:
+        current_mode = os.stat(full_path).st_mode
+        os.chmod(full_path, current_mode | 0o111)
+        return os.access(full_path, os.X_OK)
+    except Exception as e:
+        logger.warning(f"[TestSuites] Failed to chmod tradefed launcher {full_path}: {e}")
+        return False
+
+
 def list_local_test_suites(base_path: str) -> List[Dict[str, str]]:
     suites = []
     if not os.path.isdir(base_path):
@@ -656,7 +669,7 @@ def list_local_test_suites(base_path: str) -> List[Dict[str, str]]:
             if not file_name.endswith('-tradefed'):
                 continue
             full_path = os.path.join(root, file_name)
-            if not os.access(full_path, os.X_OK):
+            if not ensure_tradefed_executable(full_path):
                 continue
             suite = build_suite_info(full_path)
             if suite:
@@ -1038,6 +1051,10 @@ class GlobalState:
         self.firmware_upload_progress = {}  # {client_id: {'progress': float, 'filename': str, 'uploaded_size': int, 'total_size': int, 'timestamp': float}}
         self.firmware_upload_progress_lock = threading.Lock()  # 上传进度锁
         self.usbip_states = {}  # {client_id: {'connected': bool, 'timestamp': float}}
+        self.suite_download_tasks = {}  # {task_id: {'status': str, 'progress': float, ...}}
+        self.suite_download_tasks_lock = threading.Lock()
+        self.suite_extract_tasks = {}  # {task_id: {'status': str, 'progress': float, ...}}
+        self.suite_extract_tasks_lock = threading.Lock()
         self.usbip_devices_source = {}  # {device_id: {'source': device_host, 'timestamp': float}}
         self.terminal_ssh_sessions = {}  # {session_id: {'ssh': ssh, 'channel': channel, 'websocket': websocket}}
         self.terminal_lock = threading.Lock()  # 终端会话锁
@@ -5072,11 +5089,321 @@ class TestSuiteExtractRequest(BaseModel):
     """Request model for extracting test suite archive"""
     archive_path: str = Field(..., description="压缩包文件路径")
     extract_dir: Optional[str] = Field(default=None, description="解压目录（默认：~/GMS-Suite）")
+    target_dir_name: Optional[str] = Field(default=None, description="解压后的文件夹名称")
 
 
 class TestSuiteAddLocalRequest(BaseModel):
     """Request model for adding local test suite path"""
     path: str = Field(..., description="本地测试套件路径")
+
+
+def sanitize_suite_filename_from_url(url: str) -> str:
+    parsed_url = urllib.parse.urlparse(url)
+    filename = os.path.basename(parsed_url.path) or 'test-suite.zip'
+    return re.sub(r'[^\w\-_.\[\]]', '_', filename)
+
+
+def derive_suite_dir_name_from_archive(archive_path: str) -> str:
+    name = os.path.basename(archive_path or '').strip()
+    for ext in ['.tar.bz2', '.tar.gz', '.tgz', '.zip', '.tar']:
+        if name.endswith(ext):
+            return name[:-len(ext)]
+    return os.path.splitext(name)[0] or 'test-suite'
+
+
+def sanitize_suite_dir_name(name: Optional[str], fallback: str) -> str:
+    raw = (name or fallback or 'test-suite').strip().strip('/\\')
+    safe = re.sub(r'[^A-Za-z0-9._-]+', '_', raw)
+    safe = safe.strip('._-') or 'test-suite'
+    if safe in {'.', '..'}:
+        safe = 'test-suite'
+    return safe
+
+
+def is_complete_archive_file(path: str) -> bool:
+    try:
+        if path.endswith('.zip'):
+            import zipfile
+            return zipfile.is_zipfile(path)
+        if path.endswith(('.tar', '.tar.gz', '.tgz', '.tar.bz2')):
+            import tarfile
+            return tarfile.is_tarfile(path)
+        return os.path.exists(path) and os.path.getsize(path) > 0
+    except Exception:
+        return False
+
+
+def safe_extract_member_path(base_dir: str, member_name: str) -> str:
+    target = os.path.abspath(os.path.join(base_dir, member_name))
+    base = os.path.abspath(base_dir)
+    if not (target == base or target.startswith(base + os.sep)):
+        raise ValueError(f'压缩包包含不安全路径: {member_name}')
+    return target
+
+
+def strip_common_archive_root(names: List[str]) -> Tuple[str, List[Tuple[str, str]]]:
+    files = [name for name in names if name and not name.endswith('/')]
+    top_levels = {name.split('/', 1)[0] for name in files if '/' in name}
+    if len(top_levels) == 1 and all(name.startswith(next(iter(top_levels)) + '/') for name in files):
+        root = next(iter(top_levels))
+        return root, [(name, name[len(root) + 1:]) for name in names if name != root and name != root + '/']
+    return '', [(name, name) for name in names]
+
+
+def _update_suite_task(tasks_dict: dict, lock: threading.Lock, task_id: str, **updates):
+    with lock:
+        task = tasks_dict.get(task_id)
+        if task:
+            task.update(updates)
+            task['updated_at'] = time.time()
+
+
+def update_suite_download_task(task_id: str, **updates):
+    _update_suite_task(global_state.suite_download_tasks, global_state.suite_download_tasks_lock, task_id, **updates)
+
+
+def update_suite_extract_task(task_id: str, **updates):
+    _update_suite_task(global_state.suite_extract_tasks, global_state.suite_extract_tasks_lock, task_id, **updates)
+
+
+_SUITE_TASK_TTL = 3600  # Remove completed/error tasks older than 1 hour
+_last_suite_cleanup = 0.0
+
+
+def _cleanup_old_suite_tasks():
+    global _last_suite_cleanup
+    now = time.time()
+    if now - _last_suite_cleanup < 60:
+        return
+    _last_suite_cleanup = now
+    cutoff = now - _SUITE_TASK_TTL
+    for tasks, lock in (
+        (global_state.suite_download_tasks, global_state.suite_download_tasks_lock),
+        (global_state.suite_extract_tasks, global_state.suite_extract_tasks_lock),
+    ):
+        with lock:
+            stale = [
+                tid for tid, t in tasks.items()
+                if t.get('status') in ('completed', 'error') and t.get('updated_at', 0) < cutoff
+            ]
+            for tid in stale:
+                del tasks[tid]
+
+
+def _parse_curl_size(s: str) -> float:
+    """Parse curl human-readable size like '701M', '8212k', '12.3G' to bytes."""
+    s = s.rstrip(',').lower()
+    if s.endswith('g'):
+        return float(s[:-1]) * 1024 ** 3
+    if s.endswith('m'):
+        return float(s[:-1]) * 1024 ** 2
+    if s.endswith('k'):
+        return float(s[:-1]) * 1024
+    return float(s)
+
+
+async def run_suite_download_task(task_id: str, url: str, archive_path: str):
+    """Download via curl, parsing stderr for progress with size and speed."""
+    part_path = archive_path + '.part'
+    filename = os.path.basename(archive_path)
+
+    # NOTE: Do NOT use --progress-bar (only outputs ### 50% without size/speed).
+    cmd = [
+        'curl', '-L', '-C', '-',
+        '--connect-timeout', '30', '--max-time', '7200',
+        '--retry', '3', '--retry-delay', '5',
+        '-o', part_path, url
+    ]
+
+    update_suite_download_task(task_id, status='downloading', progress=0, message=f'正在下载：{filename}')
+
+    process = None
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        buffer = ''
+        while True:
+            chunk = await process.stderr.read(4096)
+            if not chunk:
+                break
+            buffer += chunk.decode('utf-8', errors='ignore')
+            while '\r' in buffer:
+                line, buffer = buffer.split('\r', 1)
+                line = line.strip()
+                if not line:
+                    continue
+
+                # curl default progress format — field count varies (11-12) but positions are stable:
+                #   [0]=%   [1]=total   ...   [-1]=current_speed
+                #   downloaded = pct * total / 100
+                parts = line.split()
+                if len(parts) >= 6:
+                    try:
+                        pct = float(parts[0])
+                        total = _parse_curl_size(parts[1])
+                        speed = _parse_curl_size(parts[-1])
+                        downloaded = total * pct / 100
+                        progress = pct if pct > 0 else 0
+                        update_suite_download_task(
+                            task_id,
+                            progress=min(progress, 99.0),
+                            downloaded_size=int(downloaded),
+                            total_size=int(total),
+                            speed_bps=int(speed)
+                        )
+                    except (ValueError, ZeroDivisionError):
+                        pass
+
+        await process.wait()
+        if process.returncode != 0:
+            if os.path.exists(part_path):
+                try:
+                    os.remove(part_path)
+                except OSError:
+                    pass
+            update_suite_download_task(task_id, status='error', progress=0, error=f'下载失败（退出码 {process.returncode}）')
+            return
+
+        os.replace(part_path, archive_path)
+        file_size = os.path.getsize(archive_path)
+        update_suite_download_task(
+            task_id,
+            status='completed',
+            progress=100,
+            downloaded_size=file_size,
+            archive_path=archive_path,
+            speed_bps=0,
+            message=f'下载完成：{filename}'
+        )
+    except Exception as e:
+        if process and process.returncode is None:
+            process.kill()
+        update_suite_download_task(task_id, status='error', error=f'下载异常：{str(e)}')
+
+
+def extract_archive_local_with_progress(
+    archive_path: str,
+    extract_dir: str,
+    target_dir_name: str,
+    task_id: Optional[str] = None
+) -> Dict[str, Any]:
+    import tarfile
+    import zipfile
+
+    target_extract_dir = os.path.join(extract_dir, target_dir_name) if target_dir_name else extract_dir
+    if target_dir_name:
+        os.makedirs(target_extract_dir, exist_ok=True)
+
+    files_count = 0
+    _last_pct = -1
+
+    def progress(done: int, total: int):
+        nonlocal _last_pct
+        if not task_id:
+            return
+        pct = int(done / total * 100) if total else 0
+        if pct == _last_pct:
+            return
+        _last_pct = pct
+        update_suite_extract_task(
+            task_id,
+            status='extracting',
+            progress=min(float(pct), 99.0),
+            extracted_count=done,
+            total_count=total
+        )
+
+    def _chmod_tradefed(path: str, name: str):
+        if name.endswith('-tradefed'):
+            ensure_tradefed_executable(path)
+
+    if archive_path.endswith('.zip'):
+        with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+            names = zip_ref.namelist()
+            if target_dir_name:
+                _, mapped_names = strip_common_archive_root(names)
+                total = len([item for item in mapped_names if item[1] and not item[0].endswith('/')])
+                for source_name, relative_name in mapped_names:
+                    if not relative_name:
+                        continue
+                    target_path = safe_extract_member_path(target_extract_dir, relative_name)
+                    if source_name.endswith('/'):
+                        os.makedirs(target_path, exist_ok=True)
+                        continue
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    with zip_ref.open(source_name) as src, open(target_path, 'wb') as dst:
+                        shutil.copyfileobj(src, dst)
+                    _chmod_tradefed(target_path, os.path.basename(target_path))
+                    files_count += 1
+                    progress(files_count, total)
+            else:
+                total = len(names)
+                for member_name in names:
+                    zip_ref.extract(member_name, extract_dir)
+                    files_count += 0 if member_name.endswith('/') else 1
+                    progress(files_count, total)
+    elif archive_path.endswith(('.tar.gz', '.tgz', '.tar', '.tar.bz2')):
+        mode = 'r:gz' if archive_path.endswith(('.tar.gz', '.tgz')) else ('r:bz2' if archive_path.endswith('.tar.bz2') else 'r')
+        with tarfile.open(archive_path, mode) as tar_ref:
+            members = tar_ref.getmembers()
+            if target_dir_name:
+                names = [m.name for m in members]
+                _, mapped_names = strip_common_archive_root(names)
+                name_map = dict(mapped_names)
+                total = len([m for m in members if m.isfile()])
+                for member in members:
+                    relative_name = name_map.get(member.name, member.name)
+                    if not relative_name:
+                        continue
+                    target_path = safe_extract_member_path(target_extract_dir, relative_name)
+                    if member.isdir():
+                        os.makedirs(target_path, exist_ok=True)
+                    elif member.isfile():
+                        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                        src = tar_ref.extractfile(member)
+                        if src:
+                            with src, open(target_path, 'wb') as dst:
+                                shutil.copyfileobj(src, dst)
+                            _chmod_tradefed(target_path, os.path.basename(target_path))
+                            files_count += 1
+                            progress(files_count, total)
+            else:
+                total = len([m for m in members if m.isfile()])
+                for member in members:
+                    safe_extract_member_path(extract_dir, member.name)
+                    tar_ref.extract(member, extract_dir)
+                    if member.isfile():
+                        extracted = os.path.join(extract_dir, member.name)
+                        _chmod_tradefed(extracted, os.path.basename(extracted))
+                        files_count += 1
+                        progress(files_count, total)
+    else:
+        cmd = ['tar', '-xf', archive_path, '-C', target_extract_dir if target_dir_name else extract_dir]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr or result.stdout or 'tar 解压失败')
+
+    extracted_name = target_dir_name or derive_suite_dir_name_from_archive(archive_path)
+    return {
+        'message': f'解压完成：{extracted_name}',
+        'extracted_path': os.path.join(extract_dir, extracted_name),
+        'files_count': files_count,
+        'extract_method': 'local'
+    }
+
+
+async def run_suite_extract_task(task_id: str, archive_path: str, extract_dir: str, target_dir_name: str):
+    try:
+        update_suite_extract_task(task_id, status='extracting', progress=0, message='正在解压...')
+        result = await asyncio.to_thread(extract_archive_local_with_progress, archive_path, extract_dir, target_dir_name, task_id)
+        update_suite_extract_task(task_id, status='completed', progress=100, **result)
+    except Exception as e:
+        logger.error(f"[Suite Extract] 解压失败: {e}")
+        update_suite_extract_task(task_id, status='error', error=f'解压失败：{str(e)}')
 
 
 @app.post("/api/test/suites/add-local")
@@ -5272,60 +5599,63 @@ async def download_test_suite_from_url(req: TestSuiteDownloadRequest):
     # 创建保存目录
     os.makedirs(save_dir, exist_ok=True)
 
-    # 从 URL 解析文件名
-    parsed_url = urllib.parse.urlparse(req.url)
-    filename = os.path.basename(parsed_url.path) or 'test-suite.zip'
-
-    # 清理文件名
-    filename = re.sub(r'[^\w\-_.\[\]]', '_', filename)
+    filename = sanitize_suite_filename_from_url(req.url)
     archive_path = os.path.join(save_dir, filename)
 
     if is_config_host_local(config):
-        # 本地下载
-        import subprocess
+        with global_state.suite_download_tasks_lock:
+            for existing_task in global_state.suite_download_tasks.values():
+                if (
+                    existing_task.get('archive_path') == archive_path
+                    and existing_task.get('status') in {'queued', 'downloading'}
+                ):
+                    return JSONResponse(content={
+                        'success': True,
+                        'message': f'下载任务已存在：{filename}',
+                        'task_id': existing_task.get('task_id'),
+                        'archive_path': archive_path,
+                        'file_size': 0,
+                        'download_method': 'local_async_existing'
+                    })
 
-        # 使用 curl 下载，支持进度显示，添加超时限制（30 分钟）
-        cmd = ['curl', '-L', '--connect-timeout', '30', '--max-time', '1800',
-               '-o', archive_path, req.url]
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-
-            # 设置超时，避免无限等待
-            try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=1900)
-            except asyncio.TimeoutError:
-                process.kill()
-                return JSONResponse(
-                    content={'success': False, 'error': '下载超时（超过 30 分钟）'},
-                    status_code=500
-                )
-
-            if process.returncode != 0:
-                error_msg = stderr.decode('utf-8', errors='ignore')
-                return JSONResponse(
-                    content={'success': False, 'error': f'下载失败：{error_msg}'},
-                    status_code=500
-                )
-        except Exception as e:
+        if is_complete_archive_file(archive_path):
+            file_size = os.path.getsize(archive_path)
+            return JSONResponse(content={
+                'success': True,
+                'message': f'文件已存在：{filename}',
+                'archive_path': archive_path,
+                'file_size': file_size,
+                'download_method': 'local_existing'
+            })
+        if os.path.exists(archive_path):
             return JSONResponse(
-                content={'success': False, 'error': f'下载异常：{str(e)}'},
-                status_code=500
+                content={'success': False, 'error': f'已存在未完成或损坏的压缩包：{archive_path}，请等待当前下载完成或删除后重试'},
+                status_code=409
             )
 
-        # 获取文件大小
-        file_size = os.path.getsize(archive_path)
-
+        task_id = str(uuid.uuid4())
+        with global_state.suite_download_tasks_lock:
+            global_state.suite_download_tasks[task_id] = {
+                'task_id': task_id,
+                'status': 'queued',
+                'progress': 0,
+                'url': req.url,
+                'filename': filename,
+                'archive_path': archive_path,
+                'downloaded_size': 0,
+                'total_size': 0,
+                'message': f'准备下载：{filename}',
+                'created_at': time.time(),
+                'updated_at': time.time(),
+            }
+        asyncio.create_task(run_suite_download_task(task_id, req.url, archive_path))
         return JSONResponse(content={
             'success': True,
-            'message': f'下载完成：{filename}',
+            'message': f'已开始下载：{filename}',
+            'task_id': task_id,
             'archive_path': archive_path,
-            'file_size': file_size,
-            'download_method': 'local'
+            'file_size': 0,
+            'download_method': 'local_async'
         })
 
     else:
@@ -5362,6 +5692,141 @@ async def download_test_suite_from_url(req: TestSuiteDownloadRequest):
             ssh_manager.return_connection(ssh)
 
 
+@app.get("/api/test/suites/download-status/{task_id}")
+async def get_test_suite_download_status(task_id: str):
+    _cleanup_old_suite_tasks()
+    with global_state.suite_download_tasks_lock:
+        task = dict(global_state.suite_download_tasks.get(task_id) or {})
+    if not task:
+        return JSONResponse(
+            content={'success': False, 'error': '下载任务不存在'},
+            status_code=404
+        )
+    return JSONResponse(content={'success': True, 'task': task})
+
+
+@app.get("/api/test/suites/archives")
+async def list_test_suite_archives():
+    config = config_manager.load_config()
+    base_path = get_default_suites_path(config)
+    archive_exts = ('.zip', '.tar.gz', '.tgz', '.tar.bz2', '.tar')
+
+    if is_config_host_local(config):
+        archives = []
+        if os.path.isdir(base_path):
+            for name in sorted(os.listdir(base_path), reverse=True):
+                path = os.path.join(base_path, name)
+                if os.path.isfile(path) and name.endswith(archive_exts):
+                    stat = os.stat(path)
+                    archives.append({
+                        'name': name,
+                        'path': path,
+                        'size': stat.st_size,
+                        'mtime': stat.st_mtime,
+                        'default_dir_name': derive_suite_dir_name_from_archive(path)
+                    })
+        return JSONResponse(content={'success': True, 'archives': archives, 'base_path': base_path})
+
+    ssh = ssh_manager.get_connection(config)
+    if not ssh:
+        return ssh_connection_failed_response()
+    try:
+        find_cmd = (
+            f"find {shlex.quote(base_path)} -maxdepth 1 -type f "
+            "\\( -name '*.zip' -o -name '*.tar.gz' -o -name '*.tgz' -o -name '*.tar.bz2' -o -name '*.tar' \\) "
+            "-printf '%T@\\t%s\\t%f\\t%p\\n' 2>/dev/null | sort -nr"
+        )
+        output, _, _ = ssh_manager.execute_command(ssh, find_cmd, timeout=20)
+        archives = []
+        for line in output.splitlines():
+            parts = line.split('\t', 3)
+            if len(parts) == 4:
+                mtime, size, name, path = parts
+                archives.append({
+                    'name': name,
+                    'path': path,
+                    'size': int(float(size)) if size else 0,
+                    'mtime': float(mtime) if mtime else 0,
+                    'default_dir_name': derive_suite_dir_name_from_archive(path)
+                })
+        return JSONResponse(content={'success': True, 'archives': archives, 'base_path': base_path})
+    finally:
+        ssh_manager.return_connection(ssh)
+
+
+@app.post("/api/test/suites/extract-start")
+@handle_api_errors
+async def start_test_suite_extract(req: TestSuiteExtractRequest):
+    config = config_manager.load_config()
+    if not req.archive_path:
+        return JSONResponse(
+            content={'success': False, 'error': '压缩包路径不能为空'},
+            status_code=400
+        )
+
+    extract_dir = req.extract_dir or get_default_suites_path(config)
+    target_dir_name = sanitize_suite_dir_name(
+        req.target_dir_name,
+        derive_suite_dir_name_from_archive(req.archive_path)
+    )
+
+    if not is_config_host_local(config):
+        return JSONResponse(
+            content={'success': False, 'error': '后台解压暂只支持本地主机模式'},
+            status_code=400
+        )
+
+    if not os.path.exists(req.archive_path):
+        return JSONResponse(
+            content={'success': False, 'error': f'压缩包不存在：{req.archive_path}'},
+            status_code=404
+        )
+    if not is_complete_archive_file(req.archive_path):
+        return JSONResponse(
+            content={'success': False, 'error': f'压缩包不完整或格式不支持：{req.archive_path}'},
+            status_code=400
+        )
+
+    os.makedirs(extract_dir, exist_ok=True)
+    task_id = str(uuid.uuid4())
+    with global_state.suite_extract_tasks_lock:
+        global_state.suite_extract_tasks[task_id] = {
+            'task_id': task_id,
+            'status': 'queued',
+            'progress': 0,
+            'archive_path': req.archive_path,
+            'extract_dir': extract_dir,
+            'target_dir_name': target_dir_name,
+            'extracted_count': 0,
+            'total_count': 0,
+            'message': f'准备解压：{os.path.basename(req.archive_path)}',
+            'created_at': time.time(),
+            'updated_at': time.time(),
+        }
+
+    asyncio.create_task(run_suite_extract_task(task_id, req.archive_path, extract_dir, target_dir_name))
+    return JSONResponse(content={
+        'success': True,
+        'task_id': task_id,
+        'message': '已开始解压',
+        'archive_path': req.archive_path,
+        'target_dir_name': target_dir_name
+    })
+
+
+@app.get("/api/test/suites/extract-status/{task_id}")
+async def get_test_suite_extract_status(task_id: str):
+    _cleanup_old_suite_tasks()
+    with global_state.suite_extract_tasks_lock:
+        task = dict(global_state.suite_extract_tasks.get(task_id) or {})
+    if not task:
+        return JSONResponse(
+            content={'success': False, 'error': '解压任务不存在'},
+            status_code=404
+        )
+    return JSONResponse(content={'success': True, 'task': task})
+
+
 @app.post("/api/test/suites/extract")
 @handle_api_errors
 async def extract_test_suite_archive(req: TestSuiteExtractRequest):
@@ -5385,78 +5850,27 @@ async def extract_test_suite_archive(req: TestSuiteExtractRequest):
             status_code=400
         )
 
-    # 使用默认路径
     extract_dir = req.extract_dir or get_default_suites_path(config)
+    target_dir_name = sanitize_suite_dir_name(
+        req.target_dir_name,
+        derive_suite_dir_name_from_archive(req.archive_path)
+    ) if req.target_dir_name else ''
 
-    # 检查文件是否存在（本地）
     if is_config_host_local(config) and not os.path.exists(req.archive_path):
         return JSONResponse(
             content={'success': False, 'error': f'压缩包不存在：{req.archive_path}'},
             status_code=404
         )
 
-    # 创建解压目录
     os.makedirs(extract_dir, exist_ok=True)
 
     if is_config_host_local(config):
-        # 本地解压
-        import subprocess
-        import tarfile
-        import zipfile
-
         try:
-            # 根据文件类型选择解压方式
-            if req.archive_path.endswith('.zip'):
-                with zipfile.ZipFile(req.archive_path, 'r') as zip_ref:
-                    zip_ref.extractall(extract_dir)
-                    files_count = len(zip_ref.namelist())
-            elif req.archive_path.endswith(('.tar.gz', '.tgz')):
-                with tarfile.open(req.archive_path, 'r:gz') as tar_ref:
-                    tar_ref.extractall(extract_dir)
-                    files_count = len(tar_ref.getnames())
-            elif req.archive_path.endswith('.tar'):
-                with tarfile.open(req.archive_path, 'r') as tar_ref:
-                    tar_ref.extractall(extract_dir)
-                    files_count = len(tar_ref.getnames())
-            elif req.archive_path.endswith('.tar.bz2'):
-                with tarfile.open(req.archive_path, 'r:bz2') as tar_ref:
-                    tar_ref.extractall(extract_dir)
-                    files_count = len(tar_ref.getnames())
-            else:
-                # 尝试使用 tar 命令
-                cmd = ['tar', '-xf', req.archive_path, '-C', extract_dir]
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await process.communicate()
-
-                if process.returncode != 0:
-                    error_msg = stderr.decode('utf-8', errors='ignore')
-                    return JSONResponse(
-                        content={'success': False, 'error': f'解压失败：{error_msg}'},
-                        status_code=500
-                    )
-                files_count = 0  # 未知
-
-            # 获取解压后的目录
-            extracted_name = os.path.splitext(os.path.basename(req.archive_path))[0]
-            # 移除可能的.tar/.gz 等后缀
-            for ext in ['.tar', '.gz', '.bz2', '.zip', '.tgz']:
-                if extracted_name.endswith(ext):
-                    extracted_name = extracted_name[:-len(ext)]
-
-            extracted_path = os.path.join(extract_dir, extracted_name)
-
-            return JSONResponse(content={
-                'success': True,
-                'message': f'解压完成：{extracted_name}',
-                'extracted_path': extracted_path,
-                'files_count': files_count,
-                'extract_method': 'local'
-            })
-
+            result = await asyncio.to_thread(
+                extract_archive_local_with_progress,
+                req.archive_path, extract_dir, target_dir_name
+            )
+            return JSONResponse(content={'success': True, **result})
         except Exception as e:
             return JSONResponse(
                 content={'success': False, 'error': f'解压失败：{str(e)}'},
@@ -5471,7 +5885,10 @@ async def extract_test_suite_archive(req: TestSuiteExtractRequest):
 
         try:
             # 使用 tar 命令解压
-            cmd = f"tar -xf '{req.archive_path}' -C '{req.extract_dir}' 2>&1"
+            remote_extract_dir = os.path.join(extract_dir, target_dir_name) if target_dir_name else extract_dir
+            mkdir_cmd = f"mkdir -p {shlex.quote(remote_extract_dir)}"
+            ssh_manager.execute_command(ssh, mkdir_cmd, timeout=20)
+            cmd = f"tar -xf {shlex.quote(req.archive_path)} -C {shlex.quote(remote_extract_dir)} 2>&1"
             output, exit_code, _ = ssh_manager.execute_command(ssh, cmd, timeout=300)
 
             if exit_code != 0:
@@ -5480,14 +5897,8 @@ async def extract_test_suite_archive(req: TestSuiteExtractRequest):
                     status_code=500
                 )
 
-            # 获取解压后的目录名
-            archive_name = os.path.basename(req.archive_path)
-            extracted_name = os.path.splitext(archive_name)[0]
-            for ext in ['.tar', '.gz', '.bz2', '.zip', '.tgz']:
-                if extracted_name.endswith(ext):
-                    extracted_name = extracted_name[:-len(ext)]
-
-            extracted_path = os.path.join(req.extract_dir, extracted_name)
+            extracted_name = target_dir_name or derive_suite_dir_name_from_archive(req.archive_path)
+            extracted_path = os.path.join(extract_dir, extracted_name)
 
             return JSONResponse(content={
                 'success': True,
