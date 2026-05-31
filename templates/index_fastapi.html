@@ -419,7 +419,7 @@
                     <!-- VPN 控制按钮 -->
                     <div class="vpn-btn-frame">
                         <button class="btn-xxs" onclick="copyDeployCommand()">📦 部署脚本</button>
-                        <button class="btn-xxs" onclick="copyNgrokUrl()">🌐 公网访问地址</button>
+                        <button class="btn-xxs" onclick="showTailscaleInfoModal()">🌐 Tailscale组网</button>
                         <button class="btn-xxs" onclick="checkSshd()">📡 检查SSHD</button>
                         <button class="btn-xxs" onclick="checkRouting()">📡 检查路由</button>
                         <button class="btn-xxs" id="vpn-connect-btn" onclick="connectVpn()">🔌 连接VPN</button>
@@ -1277,6 +1277,49 @@
         </div>
     </div>
 
+    <!-- Tailscale Info Modal -->
+    <div id="tailscale-info-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">🌐 Tailscale 组网</span>
+                <span class="modal-close" onclick="closeTailscaleInfoModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row" style="align-items:center">
+                    <label style="min-width:90px;white-space:nowrap;flex-shrink:0">公网访问地址:</label>
+                    <input type="text" id="tailscale-url-display" readonly placeholder="正在检查..." />
+                    <button class="btn-small" onclick="copyTailscaleAccessUrl()">复制</button>
+                </div>
+                <div class="modal-form-row" style="align-items:center">
+                    <label style="min-width:90px;white-space:nowrap;flex-shrink:0">Ubuntu安装:</label>
+                    <input type="text" readonly value="curl -fsSL https://tailscale.com/install.sh | sh" />
+                    <button class="btn-small" onclick="copyText('curl -fsSL https://tailscale.com/install.sh | sh', {successMsg: '✓ 安装命令已复制'})">复制</button>
+                </div>
+                <div class="modal-form-row" style="align-items:center">
+                    <label style="min-width:90px;white-space:nowrap;flex-shrink:0">Windows程序:</label>
+                    <input type="text" readonly value="https://tailscale.com/download/windows" />
+                    <button class="btn-small" onclick="window.open('https://tailscale.com/download/windows','_blank')">打开</button>
+                </div>
+                <div class="modal-form-row" style="align-items:center">
+                    <label style="min-width:90px;white-space:nowrap;flex-shrink:0">macOS程序:</label>
+                    <input type="text" readonly value="https://tailscale.com/download/mac" />
+                    <button class="btn-small" onclick="window.open('https://tailscale.com/download/mac','_blank')">打开</button>
+                </div>
+                <div class="modal-form-row" style="align-items:center">
+                    <label style="min-width:90px;white-space:nowrap;flex-shrink:0">Android应用:</label>
+                    <input type="text" readonly value="https://tailscale.com/download/android" />
+                    <button class="btn-small" onclick="window.open('https://tailscale.com/download/android','_blank')">打开</button>
+                </div>
+                <div class="modal-info-text">
+                    ℹ️ 点击打开弹框时自动检测并启动 Tailscale。Ubuntu/Windows/macOS/Android 需安装 Tailscale 并登录同一账号。
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeTailscaleInfoModal()">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Username Detection Modal -->
     <div id="username-detect-modal" class="modal">
         <div class="modal-content">
@@ -1300,7 +1343,7 @@
                 </div>
                 </form>
                 <div class="modal-ssh-info">
-                    <small>SSH可达时会验证用户名；通过 ngrok 等外网访问时可留空密码直接保存。</small>
+                    <small>SSH可达时会验证用户名；通过 Tailscale 等远程访问时可留空密码直接保存。</small>
                 </div>
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeUsernameDetectModal()">取消</button>
