@@ -1423,11 +1423,27 @@ async function initTestSuiteBrowserPage() {
     }
 
     clearSuiteBrowserSelection('请选择左侧测试套件');
+    resumeSuiteDownloadIfNeeded();
 }
 
-async function refreshTestSuiteBrowser() {
+async function refreshTestSuiteBrowser(preferredSuiteRoot = '') {
     await loadTestSuites(true);
     renderTestSuiteBrowserList();
+    const normalizedPreferredRoot = (preferredSuiteRoot || '').replace(/\/+$/, '');
+    if (normalizedPreferredRoot) {
+        const preferredSuite = testSuitesCache.find(suite => {
+            const toolsPath = (suite.tools_path || '').replace(/\/+$/, '');
+            const releasePath = (getSuiteReleasePath(suite) || '').replace(/\/+$/, '');
+            return toolsPath === normalizedPreferredRoot
+                || releasePath === normalizedPreferredRoot
+                || toolsPath.startsWith(`${normalizedPreferredRoot}/`);
+        });
+        if (preferredSuite) {
+            await selectTestSuiteForBrowser(preferredSuite.tools_path, '');
+            return;
+        }
+    }
+
     const suitePath = state.suiteBrowser.selectedSuitePath || '';
     if (!suitePath) {
         clearSuiteBrowserSelection('请选择左侧测试套件');
@@ -1445,8 +1461,6 @@ async function refreshTestSuiteBrowser() {
 function filterTestSuiteBrowserList() {
     renderTestSuiteBrowserList();
 }
-
-// ==================== 测试套件下载和解压 ====================
 
 // 暴露到全局作用域
 window.downloadTestSuite = async function downloadTestSuite() {
@@ -1471,19 +1485,18 @@ window.downloadTestSuite = async function downloadTestSuite() {
 
     console.log('[downloadTestSuite] URL:', url);
 
-    // 禁用按钮
     if (downloadBtn) {
         downloadBtn.disabled = true;
         downloadBtn.textContent = '⬇️ 下载中...';
     }
     if (extractBtn) extractBtn.disabled = true;
-
-    // 显示进度
     if (progressDiv) progressDiv.style.display = 'block';
     if (logDiv) {
         logDiv.style.display = 'block';
         logDiv.innerHTML = '';
     }
+
+    let pollingStarted = false;
 
     const log = (msg) => {
         if (logDiv) {
@@ -1494,8 +1507,7 @@ window.downloadTestSuite = async function downloadTestSuite() {
         console.log('[downloadTestSuite] ' + msg);
     };
 
-    log(`开始下载：${url}`);
-    console.log('[downloadTestSuite] 开始 fetch 请求...');
+    console.log('[downloadTestSuite] 开始下载：', url);
 
     try {
         const response = await fetch('/api/test/suites/download-url', {
@@ -1511,7 +1523,14 @@ window.downloadTestSuite = async function downloadTestSuite() {
         const result = await response.json();
         console.log('[downloadTestSuite] 响应结果:', result);
 
-        if (result.success) {
+        if (result.success && result.task_id) {
+            pollingStarted = true;
+            sessionStorage.setItem('active_suite_download', JSON.stringify({
+                task_id: result.task_id,
+                archive_path: result.archive_path || ''
+            }));
+            await pollDownloadProgress(result.task_id);
+        } else if (result.success) {
             log(`✅ 下载完成：${result.archive_path}`);
             log(`📦 文件大小：${(result.file_size / 1024 / 1024).toFixed(2)} MB`);
 
@@ -1521,7 +1540,6 @@ window.downloadTestSuite = async function downloadTestSuite() {
 
             showToast(`下载完成：${result.message}`, 'success');
 
-            // 刷新测试套件列表
             await refreshTestSuiteBrowser();
         } else {
             log(`❌ 下载失败：${result.error}`);
@@ -1534,17 +1552,106 @@ window.downloadTestSuite = async function downloadTestSuite() {
         if (progressStatus) progressStatus.textContent = '❌ 错误';
         showToast(`下载失败：${error.message}`, 'error');
     } finally {
-        console.log('[downloadTestSuite] finally - 恢复按钮');
-        // 恢复按钮
-        if (downloadBtn) {
-            downloadBtn.disabled = false;
-            downloadBtn.textContent = '⬇️ 下载套件';
+        if (!pollingStarted) {
+            if (downloadBtn) {
+                downloadBtn.disabled = false;
+                downloadBtn.textContent = '⬇️ 下载套件';
+            }
+            if (extractBtn) extractBtn.disabled = false;
         }
-        if (extractBtn) extractBtn.disabled = false;
     }
 };
 
-// 页面加载完成后验证函数是否暴露成功
+async function pollTaskProgress({ statusUrl, progressBar, progressPercent, progressStatus, completedLabel, activeLabel }) {
+    let lastPercent = -1;
+    let lastStatus = '';
+    while (true) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const resp = await fetch(statusUrl);
+        const result = await resp.json();
+        if (!result.success) {
+            throw new Error(result.error || '任务状态查询失败');
+        }
+        const task = result.task;
+        const percent = Math.max(0, Math.min(100, Number(task.progress || 0)));
+        if (progressBar && percent !== lastPercent) progressBar.style.width = `${percent}%`;
+        if (progressPercent && percent !== lastPercent) progressPercent.textContent = `${percent.toFixed(1)}%`;
+        const statusText = task.status === 'completed' ? completedLabel : activeLabel;
+        if (progressStatus && statusText !== lastStatus) {
+            progressStatus.textContent = statusText;
+            lastStatus = statusText;
+        }
+        lastPercent = percent;
+        if (task.status === 'completed') return task;
+        if (task.status === 'error') throw new Error(task.error || '任务失败');
+    }
+}
+
+async function pollDownloadProgress(taskId) {
+    const progressDiv = $('suite-download-progress');
+    const progressBar = $('suite-progress-bar');
+    const progressPercent = $('suite-progress-percent');
+    const progressStatus = $('suite-progress-status');
+    const logDiv = $('suite-download-log');
+    const downloadBtn = $('btn-download-suite');
+    const extractBtn = $('btn-extract-suite');
+    const urlInput = $('suite-download-url');
+
+    if (downloadBtn) { downloadBtn.disabled = true; downloadBtn.textContent = '⬇️ 下载中...'; }
+    if (extractBtn) extractBtn.disabled = true;
+    if (progressDiv) progressDiv.style.display = 'block';
+
+    try {
+        const statusUrl = `/api/test/suites/download-status/${encodeURIComponent(taskId)}`;
+        const completedTask = await pollTaskProgress({
+            statusUrl,
+            progressBar, progressPercent, progressStatus,
+            completedLabel: '✅ 下载完成',
+            activeLabel: '下载中...'
+        });
+
+        const sizeMb = ((completedTask.downloaded_size || 0) / 1024 / 1024).toFixed(2);
+        if (logDiv) {
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${time}] ✅ 下载完成：${completedTask.archive_path}\n`;
+            logDiv.innerHTML += `[${time}] 📦 文件大小：${sizeMb} MB\n`;
+        }
+        showToast(`下载完成：${completedTask.message || '下载完成'}`, 'success');
+        if (urlInput) urlInput.dataset.lastArchivePath = completedTask.archive_path || '';
+        await refreshTestSuiteBrowser();
+    } catch (error) {
+        showToast(`下载失败：${error.message}`, 'error');
+        if (progressStatus) progressStatus.textContent = `❌ ${error.message}`;
+    } finally {
+        sessionStorage.removeItem('active_suite_download');
+        if (downloadBtn) { downloadBtn.disabled = false; downloadBtn.textContent = '⬇️ 下载套件'; }
+        if (extractBtn) extractBtn.disabled = false;
+    }
+}
+
+async function resumeSuiteDownloadIfNeeded() {
+    const saved = sessionStorage.getItem('active_suite_download');
+    if (!saved) return;
+    try {
+        const { task_id } = JSON.parse(saved);
+        if (!task_id) return;
+        const resp = await fetch(`/api/test/suites/download-status/${encodeURIComponent(task_id)}`);
+        const result = await resp.json();
+        if (!result.success || !result.task) {
+            sessionStorage.removeItem('active_suite_download');
+            return;
+        }
+        const task = result.task;
+        if (task.status === 'completed' || task.status === 'error') {
+            sessionStorage.removeItem('active_suite_download');
+            return;
+        }
+        // Active download found — resume polling
+        await pollDownloadProgress(task_id);
+    } catch (e) {
+        sessionStorage.removeItem('active_suite_download');
+    }
+}
 document.addEventListener('DOMContentLoaded', () => {
     console.log('[Init] downloadTestSuite exposed:', typeof window.downloadTestSuite === 'function');
     console.log('[Init] extractTestSuite exposed:', typeof window.extractTestSuite === 'function');
@@ -1608,7 +1715,6 @@ window.submitAddLocalSuite = async function submitAddLocalSuite() {
         if (result.success) {
             showToast(`添加成功：${result.message}`, 'success');
             closeAddLocalSuiteModal();
-            // 刷新测试套件列表
             await refreshTestSuiteBrowser();
         } else {
             showToast(`添加失败：${result.error}`, 'error');
@@ -1625,52 +1731,120 @@ window.addLocalTestSuite = async function addLocalTestSuite() {
     showAddLocalSuiteDialog();
 };
 
-// 暴露到全局作用域
+function deriveSuiteFolderNameFromArchivePath(archivePath) {
+    const filename = (archivePath || '').split('/').pop() || '';
+    const extensions = ['.tar.bz2', '.tar.gz', '.tgz', '.zip', '.tar'];
+    for (const ext of extensions) {
+        if (filename.endsWith(ext)) return filename.slice(0, -ext.length);
+    }
+    return filename.replace(/\.[^.]+$/, '') || 'test-suite';
+}
+
 window.extractTestSuite = async function extractTestSuite() {
+    await showExtractSuiteModal();
+};
+
+window.showExtractSuiteModal = async function showExtractSuiteModal() {
     const urlInput = $('suite-download-url');
+    const modal = $('extract-suite-modal');
+    const select = $('extract-suite-archive-select');
+    const pathInput = $('extract-suite-archive-path');
+    const folderInput = $('extract-suite-folder-name');
+    if (!modal || !select || !pathInput || !folderInput) return;
+
+    modal.style.display = '';
+    ModalManager.open('extract-suite-modal');
+    select.innerHTML = '<option value="">正在加载压缩包...</option>';
+
+    try {
+        const response = await fetch('/api/test/suites/archives');
+        const result = await response.json();
+        const archives = result.success ? (result.archives || []) : [];
+        select.innerHTML = '<option value="">手动输入压缩包路径</option>' + archives.map(archive => {
+            const sizeMb = ((archive.size || 0) / 1024 / 1024).toFixed(1);
+            return `<option value="${escapeHtml(archive.path)}" data-folder="${escapeHtml(archive.default_dir_name || '')}">${escapeHtml(archive.name)} (${sizeMb} MB)</option>`;
+        }).join('');
+
+        const lastArchivePath = urlInput?.dataset?.lastArchivePath || '';
+        const defaultPath = lastArchivePath || (archives[0]?.path || '');
+        if (defaultPath) {
+            pathInput.value = defaultPath;
+            const option = Array.from(select.options).find(opt => opt.value === defaultPath);
+            if (option) select.value = defaultPath;
+        } else if (urlInput && urlInput.value) {
+            pathInput.value = `/home/${getDefaultUbuntuUser()}/GMS-Suite/${urlInput.value.split('/').pop()}`;
+        } else {
+            pathInput.value = '';
+        }
+        folderInput.value = deriveSuiteFolderNameFromArchivePath(pathInput.value);
+        folderInput.focus();
+        folderInput.select();
+    } catch (error) {
+        select.innerHTML = '<option value="">手动输入压缩包路径</option>';
+        showToast(`加载压缩包列表失败：${error.message}`, 'warning');
+    }
+};
+
+window.closeExtractSuiteModal = function closeExtractSuiteModal() {
+    ModalManager.close('extract-suite-modal');
+    const modal = $('extract-suite-modal');
+    if (modal) modal.style.display = 'none';
+};
+
+window.handleExtractSuiteKeydown = function handleExtractSuiteKeydown(event) {
+    if (event.key === 'Escape') closeExtractSuiteModal();
+    if (event.key === 'Enter') submitExtractSuite();
+};
+
+window.handleExtractArchiveSelectChange = function handleExtractArchiveSelectChange() {
+    const select = $('extract-suite-archive-select');
+    const pathInput = $('extract-suite-archive-path');
+    const folderInput = $('extract-suite-folder-name');
+    if (!select || !pathInput || !folderInput || !select.value) return;
+    pathInput.value = select.value;
+    folderInput.value = select.selectedOptions[0]?.dataset?.folder || deriveSuiteFolderNameFromArchivePath(select.value);
+};
+
+window.submitExtractSuite = async function submitExtractSuite() {
+    const archiveInput = $('extract-suite-archive-path');
+    const folderInput = $('extract-suite-folder-name');
     const downloadBtn = $('btn-download-suite');
     const extractBtn = $('btn-extract-suite');
+    const submitBtn = $('btn-submit-extract-suite');
     const logDiv = $('suite-download-log');
+    const progressDiv = $('suite-download-progress');
+    const progressBar = $('suite-progress-bar');
+    const progressPercent = $('suite-progress-percent');
+    const progressStatus = $('suite-progress-status');
 
-    // 获取最近下载的文件
     try {
-        const response = await fetch('/api/test/suites');
-        const result = await response.json();
-
-        // 查找最新的压缩包文件
-        const archiveExtensions = ['.zip', '.tar.gz', '.tgz', '.tar.bz2', '.tar'];
-        let archivePath = '';
-
-        if (result.suites && result.suites.length > 0) {
-            // 从套件列表中查找压缩包
-            for (const suite of result.suites) {
-                for (const ext of archiveExtensions) {
-                    if (suite.tools_path.endsWith(ext)) {
-                        archivePath = suite.tools_path;
-                        break;
-                    }
-                }
-                if (archivePath) break;
-            }
-        }
-
-        // 如果没有找到，使用 URL 输入框的值
-        if (!archivePath && urlInput && urlInput.value) {
-            const filename = urlInput.value.split('/').pop();
-            archivePath = `/home/${getDefaultUbuntuUser()}/GMS-Suite/${filename}`;
-        }
+        const archivePath = (archiveInput?.value || '').trim();
+        const folderName = (folderInput?.value || '').trim();
 
         if (!archivePath) {
-            showToast('未找到可解压的压缩包', 'error');
+            showToast('请选择或输入压缩包路径', 'error');
+            return;
+        }
+        if (!folderName) {
+            showToast('请输入解压后的文件夹名称', 'error');
             return;
         }
 
-        // 禁用按钮
         if (extractBtn) {
             extractBtn.disabled = true;
             extractBtn.textContent = '📦 解压中...';
         }
         if (downloadBtn) downloadBtn.disabled = true;
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = '解压中...';
+        }
+
+        closeExtractSuiteModal();
+        if (progressDiv) progressDiv.style.display = 'block';
+        if (progressBar) progressBar.style.width = '0%';
+        if (progressPercent) progressPercent.textContent = '0%';
+        if (progressStatus) progressStatus.textContent = '正在解压...';
 
         if (logDiv) {
             logDiv.style.display = 'block';
@@ -1678,26 +1852,34 @@ window.extractTestSuite = async function extractTestSuite() {
             logDiv.innerHTML += `[${time}] 开始解压：${archivePath}\n`;
         }
 
-        const response2 = await fetch('/api/test/suites/extract', {
+        const response2 = await fetch('/api/test/suites/extract-start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 archive_path: archivePath,
-                extract_dir: `/home/${getDefaultUbuntuUser()}/GMS-Suite`
+                extract_dir: `/home/${getDefaultUbuntuUser()}/GMS-Suite`,
+                target_dir_name: folderName
             })
         });
 
         const result2 = await response2.json();
 
-        if (result2.success) {
+        if (result2.success && result2.task_id) {
+            const statusUrl = `/api/test/suites/extract-status/${encodeURIComponent(result2.task_id)}`;
+            const completedTask = await pollTaskProgress({
+                statusUrl,
+                progressBar, progressPercent, progressStatus,
+                completedLabel: '✅ 解压完成',
+                activeLabel: '正在解压...'
+            });
             if (logDiv) {
                 const time = new Date().toLocaleTimeString();
-                logDiv.innerHTML += `[${time}] ✅ 解压完成：${result2.extracted_path}\n`;
+                logDiv.innerHTML += `[${time}] ✅ 解压完成：${completedTask.extracted_path}\n`;
             }
-            showToast(`解压完成：${result2.message}`, 'success');
+            showToast(`解压完成：${completedTask.message || '解压完成'}`, 'success');
 
-            // 刷新测试套件列表
-            await refreshTestSuiteBrowser();
+            console.log('[submitExtractSuite] refreshing suite browser, extracted_path:', completedTask.extracted_path);
+            await refreshTestSuiteBrowser(completedTask.extracted_path || '');
         } else {
             if (logDiv) {
                 const time = new Date().toLocaleTimeString();
@@ -1712,14 +1894,17 @@ window.extractTestSuite = async function extractTestSuite() {
         }
         showToast(`解压失败：${error.message}`, 'error');
     } finally {
-        // 恢复按钮
         if (extractBtn) {
             extractBtn.disabled = false;
             extractBtn.textContent = '📦 解压套件';
         }
         if (downloadBtn) downloadBtn.disabled = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = '开始解压';
+        }
     }
-}
+};
 
 function clearSuiteBrowserSelection(message) {
     state.suiteBrowser.selectedSuitePath = '';
