@@ -1130,11 +1130,6 @@ async function apiCall(url, method = 'GET', data = null) {
             }
             if (result.device_host) error.deviceHost = result.device_host;
             if (result.install_guide) error.installGuide = result.install_guide;
-            if (result.public_client_required) {
-                error.publicClientRequired = true;
-                error.agentInstallUrl = result.agent_install_url;
-                error.suppressToast = true;
-            }
             throw error;
         }
 
@@ -1152,9 +1147,6 @@ async function apiCall(url, method = 'GET', data = null) {
 function normalizeApiTextError(text) {
     const message = String(text || '').trim();
     const lower = message.toLowerCase();
-    if (lower.includes('ngrok gateway error') || lower.includes('err_ngrok_')) {
-        return '公网隧道临时不可用或请求被中断，请确认服务端未重启、agent 在线后重试';
-    }
     if (lower.startsWith('<!doctype html') || lower.startsWith('<html')) {
         return '服务器返回了 HTML 错误页，请稍后重试或查看服务端日志';
     }
@@ -3127,9 +3119,7 @@ async function setupUsbipForward() {
                 btn.disabled = false;
 
                 // 检查是否需要SSH密码
-                if (result.public_client_required) {
-                    handlePublicClientRequired(result.agent_install_url);
-                } else if (result.need_password && result.device_host) {
+                if (result.need_password && result.device_host) {
                     showDevicePasswordModal(result.device_host);
                     addLogEntry('需要输入SSH密码以连接到 ' + result.device_host, 'warning');
                 } else if (result.error && result.error.includes('SSH连接失败')) {
@@ -3147,9 +3137,7 @@ async function setupUsbipForward() {
             btn.disabled = false;
 
             // 检查是否需要SSH密码
-            if (error.publicClientRequired) {
-                handlePublicClientRequired(error.agentInstallUrl);
-            } else if (error.needPassword && error.deviceHost) {
+            if (error.needPassword && error.deviceHost) {
                 showDevicePasswordModal(error.deviceHost);
                 addLogEntry('需要输入SSH密码以连接到 ' + error.deviceHost, 'warning');
             } else if (error.installGuide) {
@@ -3257,29 +3245,6 @@ function isUsernameManualFallbackError(errorOrMessage) {
         'authentication',
         '认证失败'
     ].some(keyword => message.includes(keyword));
-}
-
-function handlePublicClientRequired(agentInstallUrl) {
-    const installUrl = new URL(agentInstallUrl || '/api/public-client/install.ps1', window.location.origin);
-    installUrl.search = '';
-    const username = state.clientId && state.clientId !== 'unknown'
-        ? state.clientId.split('@').slice(0, -1).join('@')
-        : '';
-    const safeUsername = username.replace(/'/g, "''");
-
-    addLogEntry('⚠️ 公网访问需要先在 Windows 客户端运行 GMS 公网客户端 agent。', 'warning');
-    addLogEntry('以管理员身份运行【PowerShell】执行命令:', 'info', false);
-    addLogEntry('[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12', 'info', false);
-    addLogEntry('$Headers = @{"ngrok-skip-browser-warning" = "true"}', 'info', false);
-    if (username) {
-        addLogEntry(`$Username = '${safeUsername}'`, 'info', false);
-        addLogEntry('$EncodedUsername = [uri]::EscapeDataString($Username)', 'info', false);
-        addLogEntry(`iwr "${installUrl.toString()}?username=$EncodedUsername" -Headers $Headers -OutFile "$env:TEMP\\gms-public-client.ps1"`, 'info', false);
-    } else {
-        addLogEntry(`iwr "${installUrl.toString()}" -Headers $Headers -OutFile "$env:TEMP\\gms-public-client.ps1"`, 'info', false);
-    }
-    addLogEntry('powershell -ExecutionPolicy Bypass -File "$env:TEMP\\gms-public-client.ps1"', 'info', false);
-    showToast('请先运行公网客户端 agent，并保持 PowerShell 窗口打开', 'warning');
 }
 
 function updateUsernameDisplay(clientIp, username) {
@@ -3434,13 +3399,7 @@ async function checkSshd() {
     try {
         const result = await apiCall('/api/ssh/sshd', 'GET');
 
-        if (result.public_client_required) {
-            handlePublicClientRequired(result.agent_install_url);
-            return;
-        }
-
         if (!result.installed && result.install_guide) {
-            // SSHD 未安装，显示安装指南（已包含在 API 响应中）
             showSshdInstallGuide(result.install_guide);
         } else if (result.running) {
             addLogEntry(`SSHD 状态: 运行中`, 'success');
@@ -3450,31 +3409,19 @@ async function checkSshd() {
             addLogEntry(`SSHD 状态: 已安装但未运行`, 'warning');
         }
 
-        // 如果有错误信息，显示警告
         if (result.error) {
             addLogEntry(`⚠️ ${result.error}`, 'warning');
         }
     } catch (error) {
-        if (error.publicClientRequired) {
-            handlePublicClientRequired(error.agentInstallUrl);
-            return;
-        }
         addLogEntry('检查 SSHD 失败: ' + error.message, 'error');
-        // 即使检查失败，也尝试从服务器获取安装指南
         try {
             const result = await apiCall('/api/ssh/sshd', 'GET');
-            if (result.public_client_required) {
-                handlePublicClientRequired(result.agent_install_url);
-            } else if (result.install_guide) {
+            if (result.install_guide) {
                 showSshdInstallGuide(result.install_guide);
             } else {
                 addLogEntry('无法加载安装指南', 'error');
             }
         } catch (guideError) {
-            if (guideError.publicClientRequired) {
-                handlePublicClientRequired(guideError.agentInstallUrl);
-                return;
-            }
             addLogEntry('无法加载安装指南', 'error');
         }
     }
@@ -7509,11 +7456,11 @@ window.closeSshdInstallGuide = closeSshdInstallGuide;
 window.autoInstallUsbipd = autoInstallUsbipd;
 window.resetReportAnalysis = resetReportAnalysis;
 window.openRedmineReplyModal = openRedmineReplyModal;
-window.copyNgrokUrl = copyNgrokUrl;
+window.showTailscaleInfoModal = showTailscaleInfoModal;
 window.copyDeployCommand = copyDeployCommand;
-window.loadNgrokPublicUrl = loadNgrokPublicUrl;
+window.copyTailscaleAccessUrl = copyTailscaleAccessUrl;
 
-// ==================== ngrok 公网地址 ====================
+// ==================== Tailscale 内网地址 ====================
 
 /**
  * 复制部署脚本命令
@@ -7551,106 +7498,49 @@ function copyDeployCommand() {
 }
 
 /**
- * 加载 ngrok 公网地址
+ * 显示 Tailscale 信息弹框，自动检测并启动 Tailscale
+ * 缓存结果 5 分钟，避免每次打开弹框都调用 API
  */
-function loadNgrokPublicUrl() {
-    const label = document.getElementById('ngrok-url-label');
+let _tailscaleCache = { url: null, ts: 0 };
+const TAILSCALE_CACHE_TTL = 5 * 60 * 1000;
 
-    fetch('/api/ngrok/public-url')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.public_url) {
-                window.ngrokPublicUrl = data.public_url;
-                if (label) {
-                    label.textContent = data.public_url;
-                    label.style.color = 'var(--success-color)';
-                }
-            } else {
-                window.ngrokPublicUrl = '';
-                if (label) {
-                    label.textContent = '未运行 ngrok';
-                    label.style.color = 'var(--text-secondary)';
-                }
-            }
-        })
-        .catch(error => {
-            console.error('[ngrok] 加载失败:', error);
-            window.ngrokPublicUrl = '';
-            if (label) {
-                label.textContent = '获取失败';
-                label.style.color = 'var(--danger-color)';
-            }
-        });
-}
+async function showTailscaleInfoModal() {
+    const display = document.getElementById('tailscale-url-display');
+    ModalManager.open('tailscale-info-modal');
 
-/**
- * 复制 ngrok 公网地址
- */
-async function copyNgrokUrl() {
-    const label = document.getElementById('ngrok-url-label');
-
-    if (window.ngrokEnsureInProgress) {
-        showToast('正在准备公网地址...', 'info');
+    if (_tailscaleCache.url && Date.now() - _tailscaleCache.ts < TAILSCALE_CACHE_TTL) {
+        display.value = _tailscaleCache.url;
         return;
     }
 
-    window.ngrokEnsureInProgress = true;
-    let url = '';
-
+    display.value = '正在检查并启动 Tailscale...';
     try {
-        showToast('正在检查 ngrok...', 'info');
-        const response = await fetch('/api/ngrok/ensure-public-url', { method: 'POST' });
+        const response = await fetch('/api/tailscale/ensure', { method: 'POST' });
         const data = await response.json();
 
         if (!data.success || !data.public_url) {
-            const detail = data.detail && data.detail.stderr ? `：${data.detail.stderr.trim()}` : '';
-            throw new Error((data.error || '无法获取公网地址') + detail);
+            throw new Error(data.error || 'Tailscale 不可用');
         }
 
-        url = data.public_url;
-        window.ngrokPublicUrl = url;
-        if (label) {
-            label.textContent = url;
-            label.style.color = 'var(--success-color)';
-        }
-        if (data.started) {
-            showToast('ngrok 已启动，正在复制公网地址...', 'success');
-        }
+        window.tailscaleUrl = data.public_url;
+        _tailscaleCache = { url: data.public_url, ts: Date.now() };
+        display.value = data.public_url;
     } catch (error) {
-        window.ngrokPublicUrl = '';
-        if (label) {
-            label.textContent = '获取失败';
-            label.style.color = 'var(--danger-color)';
-        }
-        showToast(`获取公网地址失败：${error.message}`, 'error');
-        window.ngrokEnsureInProgress = false;
-        return;
+        _tailscaleCache = { url: null, ts: 0 };
+        display.value = '获取失败：' + error.message;
     }
+}
 
-    const clipboardWrite = navigator.clipboard && navigator.clipboard.writeText
-        ? navigator.clipboard.writeText(url)
-        : Promise.reject(new Error('Clipboard API unavailable'));
+function closeTailscaleInfoModal() {
+    ModalManager.close('tailscale-info-modal');
+}
 
-    clipboardWrite.then(() => {
-        showToast('✓ 公网地址已复制：' + url, 'success');
-    }).catch(() => {
-        // 备用复制方案
-        const textArea = document.createElement('textarea');
-        textArea.value = url;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-9999px';
-        document.body.appendChild(textArea);
-        textArea.select();
-        try {
-            document.execCommand('copy');
-            showToast('✓ 公网地址已复制：' + url, 'success');
-        } catch (e) {
-            showToast('复制失败', 'error');
-        }
-        document.body.removeChild(textArea);
-    }).finally(() => {
-        window.ngrokEnsureInProgress = false;
-    });
+function copyTailscaleAccessUrl() {
+    if (window.tailscaleUrl) {
+        copyText(window.tailscaleUrl, { successMsg: '✓ Tailscale 地址已复制' });
+    } else {
+        showToast('暂无可用地址', 'error');
+    }
 }
 
 

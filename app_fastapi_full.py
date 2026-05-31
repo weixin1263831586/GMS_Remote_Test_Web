@@ -244,13 +244,6 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(periodic_cleanup_with_retry())
 
     usb_dispatch_task = None
-    public_tunnel_started = False
-
-    try:
-        await public_client_tunnel.start()
-        public_tunnel_started = True
-    except Exception as e:
-        logger.error(f"Failed to start public client tunnel listeners: {e}")
 
     # 初始化USB监控
     try:
@@ -339,12 +332,6 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
-    if public_tunnel_started:
-        try:
-            await public_client_tunnel.stop()
-        except Exception as e:
-            logger.error(f"Error stopping public client tunnel: {e}")
-
     # 停止USB监控
     try:
         stop_usb_monitor()
@@ -379,7 +366,7 @@ from core.device_utils import DeviceUtils
 from core.report_analyzer import ReportAnalyzer
 from core.security_audit import classify_request_source, security_audit_logger
 from core.test_report_db import test_report_db
-from core.reverse_tunnel import public_client_tunnel
+from modules.ssh_async import ssh_async_manager
 
 # 导入管理模块
 from modules.client_manager import client_manager
@@ -710,7 +697,6 @@ AUDIT_SKIP_PREFIXES = (
     '/api/security-audit/detail',
     '/api/security-audit/export',
     '/api/notifications',
-    '/api/public-client/',
 )
 AUDIT_SKIP_PATHS = {'/favicon.ico'}
 AUDIT_WEB_READONLY_NOISE_PATHS = {
@@ -740,7 +726,6 @@ AUDIT_WEB_READONLY_NOISE_PATHS = {
     '/api/users/current',
     '/api/users/list',
     '/api/vpn/status',
-    '/api/public-client/status',
 }
 AUDIT_WEB_READONLY_NOISE_PREFIXES = (
     '/api/favicon/',
@@ -2178,49 +2163,61 @@ def get_client_source(ip: str) -> Dict[str, str]:
 
 
 def is_public_origin_request(request: Optional[Request]) -> bool:
-    """Return True when the browser is accessing through a public/ngrok host."""
+    """Return True when the browser is accessing through a Tailscale network."""
     if not request:
         return False
     host = (request.headers.get('host') or '').lower()
     forwarded_host = (request.headers.get('x-forwarded-host') or '').lower()
+    # Check Tailscale 100.64.0.0/10 CGNAT range (most common, cheapest)
+    for part in (host, forwarded_host):
+        if part and part.split(':')[0].startswith('100.'):
+            return True
+    # Check for tailscale.com hostname only if 100.x didn't match
+    if 'tailscale.com' in host or 'tailscale.com' in forwarded_host:
+        return True
     origin = (request.headers.get('origin') or '').lower()
-    combined = ' '.join([host, forwarded_host, origin])
-    return any(marker in combined for marker in (
-        'ngrok-free.dev',
-        'ngrok.app',
-        'ngrok.io',
-    ))
+    return 'tailscale.com' in origin
 
 
 
 
 
-def resolve_public_tunnel_device_host(request: Optional[Request], client_id: str) -> tuple[Optional[str], Optional[str]]:
-    """Return (device_host, usbip_attach_host) for public-client agent mode."""
-    if not public_client_tunnel.is_connected() or not is_public_origin_request(request):
+def resolve_tailscale_device_host(request: Optional[Request], client_id: str) -> tuple[Optional[str], Optional[str]]:
+    """Return (device_host, usbip_attach_host) for Tailscale-origin requests.
+
+    When the browser accesses GMS via Tailscale (100.x.x.x), the Windows client's
+    Tailscale IP is extracted from client_id. Both SSH and USB/IP use this IP directly.
+    """
+    if not is_public_origin_request(request):
         return None, None
-    username, _ = parse_client_id(client_id)
-    if not username or username == 'unknown':
-        status = public_client_tunnel.get_status()
-        username = status.get('username') or 'unknown'
-    device_host = public_client_tunnel.get_ssh_device_host(username)
-    if not device_host:
+    username, client_ip = parse_client_id(client_id)
+    if not client_ip or client_ip == 'unknown':
         return None, None
-    return device_host, public_client_tunnel.get_usbip_attach_host()
+    device_host = f"{username}@{client_ip}" if username and username != 'unknown' else client_ip
+    return device_host, client_ip
 
 
-def public_client_required_payload(request: Optional[Request]) -> Dict[str, Any]:
-    base_url = get_request_base_url(request) if request else ''
-    return {
-        'public_client_required': True,
-        'agent_connected': public_client_tunnel.is_connected(),
-        'agent_install_url': f'{base_url}/api/public-client/install.ps1' if base_url else '/api/public-client/install.ps1',
-        'error': '公网访问无法直接回连 Windows 客户端。请先在公网 Windows 上运行 GMS 公网客户端 agent，并保持该 PowerShell 窗口打开。',
-    }
+async def run_windows_command_via_ssh(device_host: str, command: str, timeout: int = 30) -> dict:
+    """Execute a command on a Windows client via direct SSH over Tailscale."""
+    config = config_manager.load_config()
+    password = find_device_host_password(config, device_host) or config.get('device_pswd', '')
+    if not password:
+        return {'returncode': -1, 'stdout': '', 'stderr': f'No SSH credentials for {device_host}'}
+    username, hostname = CommonUtils.parse_host_address(device_host)
+    if not username or not hostname:
+        return {'returncode': -1, 'stdout': '', 'stderr': f'Invalid device_host: {device_host}'}
+    try:
+        exit_code, stdout, stderr = await ssh_async_manager.execute_command_simple(
+            hostname, username, password, command, timeout=timeout
+        )
+        return {'returncode': exit_code, 'stdout': stdout, 'stderr': stderr}
+    except Exception as e:
+        return {'returncode': -1, 'stdout': '', 'stderr': str(e)}
 
 
-async def probe_public_client_usbipd() -> Dict[str, Any]:
-    result = await public_client_tunnel.run_windows_command('usbipd --version', timeout=15)
+async def probe_windows_usbipd(device_host: str) -> Dict[str, Any]:
+    """Check if usbipd is installed on the Windows client via SSH."""
+    result = await run_windows_command_via_ssh(device_host, 'usbipd --version', timeout=15)
     output = (result.get('stdout') or '').strip() or (result.get('stderr') or '').strip()
     return {
         'installed': result.get('returncode', -1) == 0 and bool(output),
@@ -2229,14 +2226,9 @@ async def probe_public_client_usbipd() -> Dict[str, Any]:
     }
 
 
-async def probe_public_client_admin() -> bool:
-    command = 'cmd /c net session >nul 2>&1'
-    result = await public_client_tunnel.run_windows_command(command, timeout=15)
-    return result.get('returncode', -1) == 0
-
 
 def detach_ubuntu_usbip_ports(ssh, remote_host: Optional[str] = '127.0.0.1', detach_all: bool = False) -> List[str]:
-    """Detach Ubuntu usbip ports that point to the public-client tunnel."""
+    """Detach Ubuntu usbip ports that point to a remote USB/IP host."""
     detached: List[str] = []
     stdout, stderr, code = usbip_manager.ssh_manager.execute_command(ssh, 'usbip port', timeout=10)
     if code != 0:
@@ -2269,26 +2261,6 @@ def detach_ubuntu_usbip_ports(ssh, remote_host: Optional[str] = '127.0.0.1', det
         time.sleep(2)
     return detached
 
-
-def wait_for_adb_device_change(ssh, devices_before: set, timeout: int = 45) -> List[str]:
-    """Wait until adb sees devices added after usbip attach."""
-    deadline = time.time() + timeout
-    last_devices = set(devices_before)
-    while time.time() < deadline:
-        stdout, stderr, code = usbip_manager.ssh_manager.execute_command(ssh, 'adb devices', timeout=10)
-        if code == 0:
-            devices_now = set(DeviceUtils.parse_adb_devices(stdout))
-            last_devices = devices_now
-            new_devices = list(devices_now - devices_before)
-            if new_devices:
-                logger.info(f"[USB/IP] ADB devices appeared via USB/IP: {new_devices}")
-                return new_devices
-        else:
-            logger.info(f"[USB/IP] adb devices while waiting returned {code}: {stderr or stdout}")
-        time.sleep(3)
-
-    logger.warning(f"[USB/IP] Timed out waiting for ADB device. before={devices_before}, last={last_devices}")
-    return []
 
 
 def wait_for_adb_serial_ready(ssh, serial_no: str, timeout: int = 30) -> Dict[str, Any]:
@@ -2329,55 +2301,6 @@ def wait_for_adb_serial_ready(ssh, serial_no: str, timeout: int = 30) -> Dict[st
         'devices': (devices_out or devices_err or '').strip(),
     }
 
-
-def attach_public_usbip_on_ubuntu(config: Dict[str, Any], attach_host: str, bound_busids: List[str]) -> Dict[str, Any]:
-    """Run blocking Ubuntu-side USB/IP attach work outside the FastAPI event loop."""
-    ubuntu_ssh = usbip_manager.ssh_manager.get_connection(config)
-    if not ubuntu_ssh:
-        return {'success': False, 'error': '无法连接Ubuntu主机', 'rollback': False}
-
-    try:
-        stdout_before, _, _ = usbip_manager.ssh_manager.execute_command(ubuntu_ssh, 'adb devices', timeout=10)
-        devices_before = set(DeviceUtils.parse_adb_devices(stdout_before))
-        logger.info(f"[USB/IP] Public devices before attach: {devices_before}")
-
-        detach_ubuntu_usbip_ports(ubuntu_ssh, attach_host, detach_all=True)
-        usbip_manager._ensure_vhci_driver(ubuntu_ssh)
-
-        attached = []
-        attach_errors = []
-        for busid in bound_busids:
-            cmd = f'sudo usbip attach -r {attach_host} -b {busid}'
-            logger.info(f"[USB/IP] Public attaching {busid} from {attach_host}")
-            out, err, code = usbip_manager.ssh_manager.execute_command(ubuntu_ssh, cmd, timeout=25)
-            if code == 0:
-                attached.append(busid)
-            else:
-                detail = err or out or f'attach command timed out or returned {code}'
-                attach_errors.append(f'{busid}: {detail}')
-                logger.warning(f"[USB/IP] Public attach returned {code} for {busid}: {detail}")
-
-        device_list = wait_for_adb_device_change(ubuntu_ssh, devices_before, timeout=45)
-        if not device_list:
-            detach_ubuntu_usbip_ports(ubuntu_ssh, attach_host, detach_all=True)
-            detail = '; '.join(attach_errors) if attach_errors else 'ADB 设备未在 45 秒内枚举出来'
-            usbip_manager.ssh_manager.return_connection(ubuntu_ssh)
-            return {'success': False, 'error': f'USB/IP 连接失败: {detail}', 'rollback': True}
-
-        if not attached:
-            attached = bound_busids
-
-        usbip_manager.ssh_manager.return_connection(ubuntu_ssh)
-        return {
-            'success': True,
-            'message': f'✅ 成功连接{len(attached)}个设备: {", ".join(attached)}',
-            'devices': attached,
-            'device_list': device_list,
-        }
-    except Exception as e:
-        ubuntu_ssh.close()
-        logger.exception("Error in public-client Ubuntu attach")
-        return {'success': False, 'error': str(e) or repr(e), 'rollback': True}
 
 
 def is_manual_username_fallback_error(error: Optional[str]) -> bool:
@@ -2943,18 +2866,19 @@ async def get_ai_config(request: Request):
     return JSONResponse(content={'success': True, 'data': hide_sensitive_info(ai_config.copy())})
 
 
-@app.get("/api/ngrok/public-url")
-async def get_ngrok_public_url(request: Request):
-    """获取 ngrok 公网访问地址"""
+@app.get("/api/tailscale/status")
+async def get_tailscale_status():
+    """获取 Tailscale 内网访问地址"""
     try:
-        public_url = await asyncio.to_thread(_get_ngrok_public_url)
+        status = await asyncio.to_thread(_get_tailscale_status)
     except Exception as e:
-        return error_response(f'无法获取 ngrok 信息：{str(e)}', status_code=503)
+        return error_response(f'无法获取 Tailscale 信息：{str(e)}', status_code=503)
 
-    if public_url:
-        return JSONResponse(content={'success': True, 'public_url': public_url})
+    if status.get('ip'):
+        url = _build_tailscale_url(status['ip'])
+        return JSONResponse(content={'success': True, 'public_url': url, 'connected': status.get('connected', False)})
 
-    return error_response('没有找到有效的 ngrok 公网地址', status_code=404)
+    return error_response('Tailscale 未连接或未安装', status_code=404)
 
 
 def get_request_base_url(request: Request) -> str:
@@ -2963,263 +2887,81 @@ def get_request_base_url(request: Request) -> str:
     return f"{scheme}://{host}".rstrip('/')
 
 
-@app.get("/api/public-client/status")
-async def get_public_client_status():
-    """返回公网客户端 agent / 反向隧道状态。"""
-    return JSONResponse(content={'success': True, 'data': public_client_tunnel.get_status()})
-
-
-@app.get("/api/public-client/agent.py")
-async def download_public_client_agent():
-    """下载公网 Windows 客户端 agent。"""
-    agent_path = os.path.join(os.path.dirname(__file__), 'scripts', 'public_client_agent.py')
-    return FileResponse(agent_path, media_type='text/x-python', filename='gms-public-client-agent.py')
-
-
-@app.get("/api/public-client/install.ps1")
-async def download_public_client_installer(request: Request, username: str = Query('', description='Windows SSH username')):
-    """下载一键启动公网客户端 agent 的 PowerShell 脚本。"""
-    base_url = get_request_base_url(request)
-    username_arg = f' --username "{username}"' if username else ''
-    script = f'''$ErrorActionPreference = "Stop"
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Server = "{base_url}"
-$Agent = Join-Path $env:TEMP "gms-public-client-agent.py"
-
-cmd /c net session > $null 2>&1
-if ($LASTEXITCODE -ne 0) {{
-    Write-Host "[GMS] Administrator privileges are required for usbipd bind. Relaunching as administrator ..."
-    Start-Process powershell -Verb RunAs -ArgumentList @(
-        "-ExecutionPolicy", "Bypass",
-        "-File", "`"$PSCommandPath`""
-    )
-    exit
-}}
-
-Get-CimInstance Win32_Process |
-    Where-Object {{ $_.CommandLine -like "*gms-public-client-agent.py*" -and $_.ProcessId -ne $PID }} |
-    ForEach-Object {{
-        Write-Host ("[GMS] Stopping old agent process PID {{0}}" -f $_.ProcessId)
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    }}
-
-Write-Host "[GMS] Downloading public client agent from $Server ..."
-$Headers = @{{"ngrok-skip-browser-warning" = "true"}}
-Invoke-WebRequest "$Server/api/public-client/agent.py" -Headers $Headers -OutFile $Agent
-
-function Get-PythonCommand {{
-    $py = Get-Command py -ErrorAction SilentlyContinue
-    if ($py) {{
-        return [pscustomobject]@{{ Command = "py"; Args = @("-3", "-u") }}
-    }}
-    $python = Get-Command python -ErrorAction SilentlyContinue
-    if ($python -and $python.Source -and $python.Source -notmatch 'WindowsApps') {{
-        return [pscustomobject]@{{ Command = $python.Source; Args = @("-u") }}
-    }}
-    $python3 = Get-Command python3 -ErrorAction SilentlyContinue
-    if ($python3 -and $python3.Source -and $python3.Source -notmatch 'WindowsApps') {{
-        return [pscustomobject]@{{ Command = $python3.Source; Args = @("-u") }}
-    }}
-    return $null
-}}
-
-$PythonCmd = Get-PythonCommand
-if (-not $PythonCmd) {{
-    $winget = Get-Command winget -ErrorAction SilentlyContinue
-    if (-not $winget) {{
-        throw "Python is not installed and winget is unavailable. Install Python 3.12, then rerun this script."
-    }}
-    Write-Host "[GMS] Python not found. Installing Python 3.12 with winget ..."
-    winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements
-    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
-    $PythonCmd = Get-PythonCommand
-}}
-
-if (-not $PythonCmd) {{
-    $Candidates = @(
-        "$env:LocalAppData\\Programs\\Python\\Python312\\python.exe",
-        "$env:ProgramFiles\\Python312\\python.exe",
-        "${{env:ProgramFiles(x86)}}\\Python312\\python.exe"
-    )
-    foreach ($Candidate in $Candidates) {{
-        if (Test-Path $Candidate) {{
-            $PythonCmd = [pscustomobject]@{{ Command = $Candidate; Args = @("-u") }}
-            break
-        }}
-    }}
-}}
-
-if (-not $PythonCmd) {{
-    throw "Python was installed but was not found in PATH. Reopen PowerShell and rerun this script."
-}}
-
-if ($PythonCmd.Command -match 'WindowsApps') {{
-    throw "Detected Windows Store python alias. Please install Python 3.12 from python.org or use py.exe, then rerun this script."
-}}
-
-Write-Host "[GMS] Starting agent. Keep this PowerShell window open."
-Write-Host ("[GMS] Python command: {{0}}" -f $PythonCmd.Command)
-& $PythonCmd.Command @($PythonCmd.Args) $Agent --server $Server{username_arg}
-'''
-    return PlainTextResponse(script, media_type='text/plain; charset=utf-8')
-
-
-@app.websocket("/api/public-client/tunnel")
-async def public_client_tunnel_endpoint(
-    websocket: WebSocket,
-    client_id: str = Query('public-client'),
-    username: str = Query('unknown')
-):
-    """公网 Windows agent 反向 TCP 隧道。"""
-    await public_client_tunnel.handle_agent(websocket, client_id, username)
-
-
-ngrok_start_lock = asyncio.Lock()
-
-
-def _get_ngrok_api_url() -> str:
-    return os.environ.get("GMS_NGROK_API_URL", "http://127.0.0.1:4040").rstrip("/")
-
-
-def _get_ngrok_public_url(timeout: int = 5) -> Optional[str]:
-    """Read active ngrok public URL from the local ngrok API."""
-    ngrok_api_url = _get_ngrok_api_url()
-
-    with urllib.request.urlopen(f"{ngrok_api_url}/api/tunnels", timeout=timeout) as response:
-        data = json.loads(response.read().decode())
-
-    tunnels = data.get("tunnels") or []
-    if not tunnels:
-        return None
-
-    # 优先查找 https 隧道，且指向本地 5001 端口的
-    preferred = []
-    fallback = []
-
-    for tunnel in tunnels:
-        public_url = tunnel.get("public_url") or ""
-        if not public_url:
-            continue
-        config = tunnel.get("config") or {}
-        addr = str(config.get("addr") or "")
-        # 检查是否指向 5001 端口（GMS 服务端口）
-        if addr.endswith(":5001") or ":5001" in addr:
-            preferred.append(public_url)
-        else:
-            fallback.append(public_url)
-
-    # 优先返回 https 地址
-    candidates = preferred or fallback
-    for url in candidates:
-        if url.startswith("https://"):
-            return url
-
-    if candidates:
-        return candidates[0]
-
-    return None
-
-
-def _run_setup_ngrok_script(timeout: int) -> subprocess.CompletedProcess:
-    script_path = os.path.join(os.path.dirname(__file__), "scripts", "setup_ngrok.sh")
-    if not os.path.exists(script_path):
-        raise FileNotFoundError(f"setup_ngrok.sh not found: {script_path}")
-
-    return subprocess.run(
-        ["bash", script_path],
-        cwd=os.path.dirname(__file__),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=os.environ.copy()
-    )
-
-
-def _trim_process_output(text: str, limit: int = 4000) -> str:
-    if not text:
-        return ""
-    return text[-limit:]
-
-
-@app.post("/api/ngrok/ensure-public-url")
-async def ensure_ngrok_public_url(request: Request):
-    """确保 ngrok 正在运行，必要时启动脚本并返回公网访问地址。"""
+def _get_tailscale_status() -> dict:
+    """Get Tailscale IP and connection status via `tailscale ip -4`."""
     try:
-        public_url = await asyncio.to_thread(_get_ngrok_public_url, 3)
-        if public_url:
-            return JSONResponse(content={
-                'success': True,
-                'public_url': public_url,
-                'started': False
-            })
-    except Exception as e:
-        logger.info(f"[ngrok] Local API not ready, will try to start ngrok: {e}")
+        result = subprocess.run(
+            ['tailscale', 'ip', '-4'],
+            capture_output=True, text=True, timeout=3
+        )
+    except FileNotFoundError:
+        return {'ip': None, 'connected': False, 'error': 'tailscale 命令未找到，请先安装 Tailscale'}
+    except subprocess.TimeoutExpired:
+        return {'ip': None, 'connected': False, 'error': 'tailscale status 超时'}
 
-    async with ngrok_start_lock:
-        try:
-            public_url = await asyncio.to_thread(_get_ngrok_public_url, 3)
-            if public_url:
-                return JSONResponse(content={
-                    'success': True,
-                    'public_url': public_url,
-                    'started': False
-                })
-        except Exception:
-            pass
+    if result.returncode == 0:
+        ip = result.stdout.strip()
+        if ip:
+            return {'ip': ip, 'connected': True}
 
-        timeout = int(os.environ.get("GMS_NGROK_START_TIMEOUT", "45"))
-        try:
-            result = await asyncio.to_thread(_run_setup_ngrok_script, timeout)
-        except subprocess.TimeoutExpired as e:
-            return error_response(
-                f'ngrok 启动超时（>{timeout}s）',
-                status_code=504,
-                detail={
-                    'stdout': _trim_process_output(e.stdout if isinstance(e.stdout, str) else ''),
-                    'stderr': _trim_process_output(e.stderr if isinstance(e.stderr, str) else '')
-                }
-            )
-        except Exception as e:
-            return error_response(f'执行 setup_ngrok.sh 失败：{str(e)}', status_code=500)
+    error = (result.stderr or '').strip() or 'tailscale 未连接'
+    return {'ip': None, 'connected': False, 'error': error}
 
-        if result.returncode != 0:
-            return error_response(
-                'setup_ngrok.sh 执行失败',
-                status_code=503,
-                detail={
-                    'returncode': result.returncode,
-                    'stdout': _trim_process_output(result.stdout),
-                    'stderr': _trim_process_output(result.stderr)
-                }
-            )
 
-        try:
-            public_url = await asyncio.to_thread(_get_ngrok_public_url, 5)
-        except Exception as e:
-            return error_response(
-                f'ngrok 已执行启动脚本，但无法读取公网地址：{str(e)}',
-                status_code=503,
-                detail={
-                    'stdout': _trim_process_output(result.stdout),
-                    'stderr': _trim_process_output(result.stderr)
-                }
-            )
+def _build_tailscale_url(ip: str) -> str:
+    """Build Tailscale access URL from IP and GMS port."""
+    port = os.environ.get('GMS_PORT', '5001')
+    return f'http://{ip}:{port}'
 
-        if not public_url:
-            return error_response(
-                'ngrok 已执行启动脚本，但没有找到有效的公网地址',
-                status_code=503,
-                detail={
-                    'stdout': _trim_process_output(result.stdout),
-                    'stderr': _trim_process_output(result.stderr)
-                }
-            )
 
+_tailscale_start_lock = asyncio.Lock()
+
+
+@app.post("/api/tailscale/ensure")
+async def ensure_tailscale_url(request: Request):
+    """检查 Tailscale 连接状态，未连接时尝试启动，返回内网访问地址。"""
+    status = await asyncio.to_thread(_get_tailscale_status)
+
+    if status.get('ip'):
+        url = _build_tailscale_url(status['ip'])
         return JSONResponse(content={
             'success': True,
-            'public_url': public_url,
-            'started': True
+            'public_url': url,
+            'connected': status.get('connected', False)
         })
+
+    # Tailscale 未连接，尝试运行安装脚本（加锁防止并发启动）
+    async with _tailscale_start_lock:
+        # 双重检查：可能上一个请求已经启动成功
+        status = await asyncio.to_thread(_get_tailscale_status)
+        if status.get('ip'):
+            return JSONResponse(content={
+                'success': True,
+                'public_url': _build_tailscale_url(status['ip']),
+                'connected': status.get('connected', False)
+            })
+        try:
+            script_path = os.path.join(os.path.dirname(__file__), "scripts", "setup_tailscale.sh")
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["sudo", "bash", script_path],
+                capture_output=True, text=True, timeout=60,
+                env=os.environ.copy()
+            )
+            if result.returncode == 0:
+                status = await asyncio.to_thread(_get_tailscale_status)
+                if status.get('ip'):
+                    return JSONResponse(content={
+                        'success': True,
+                        'public_url': _build_tailscale_url(status['ip']),
+                        'connected': status.get('connected', False)
+                    })
+            error_detail = (result.stderr or result.stdout or '').strip()[-500:]
+            return error_response(f'Tailscale 启动失败：{error_detail}', status_code=503)
+        except subprocess.TimeoutExpired:
+            return error_response('Tailscale 启动超时', status_code=504)
+        except Exception as e:
+            return error_response(f'Tailscale 启动失败：{str(e)}', status_code=503)
 
 
 @app.post("/api/config/update")
@@ -7609,7 +7351,7 @@ def build_novnc_upstream_url(path: str, query_string: bytes = b"") -> str:
 @app.websocket("/novnc/websockify")
 @app.websocket("/novnc/novnc/websockify")
 async def novnc_websockify_proxy(websocket: WebSocket):
-    """Proxy noVNC websocket through the 5001 origin for HTTPS/ngrok access."""
+    """Proxy noVNC websocket through the 5001 origin for Tailscale/remote access."""
     await websocket.accept()
     upstream_url = f"{NOVNC_UPSTREAM_WS}/websockify"
 
@@ -7986,7 +7728,7 @@ async def get_usbip_status(request: Request, device_host: Optional[str] = None):
         client_id = device_host
     else:
         client_id = get_client_id_from_request(request)
-        tunnel_host, _ = resolve_public_tunnel_device_host(request, client_id)
+        tunnel_host, _ = resolve_tailscale_device_host(request, client_id)
         if tunnel_host:
             client_id = tunnel_host
 
@@ -8034,29 +7776,18 @@ async def start_usbip(
 
         usbip_attach_host = None
         tunnel_host = None
-        public_client_mode = False
 
-        # 获取device_host（优先级：请求参数 > 公网客户端隧道 > 配置文件 > client_id）
+        # 获取device_host（优先级：请求参数 > Tailscale 直连 > 配置文件 > client_id）
         explicit_device_host = request_data.get('device_host')
         if explicit_device_host:
             device_host = explicit_device_host
         else:
-            tunnel_host, tunnel_usbip_host = resolve_public_tunnel_device_host(request, client_id)
+            tunnel_host, tunnel_usbip_host = resolve_tailscale_device_host(request, client_id)
             if tunnel_host:
                 device_host = tunnel_host
                 usbip_attach_host = tunnel_usbip_host
-                public_client_mode = is_public_origin_request(request)
-                logger.info(f"[USB/IP] Public client tunnel mode enabled: {device_host} attach={usbip_attach_host}")
+                logger.info(f"[USB/IP] Tailscale direct mode: {device_host} attach={usbip_attach_host}")
             else:
-                if is_public_origin_request(request):
-                    payload = public_client_required_payload(request)
-                    return ApiResponse.error(
-                        payload['error'],
-                        status_code=428,
-                        public_client_required=True,
-                        agent_install_url=payload['agent_install_url'],
-                        agent_connected=False
-                    )
                 device_host = config.get('usbip_device_host') or config.get('device_host') or client_id
 
         logger.info(f"[USB/IP] Using device_host: {device_host}")
@@ -8064,104 +7795,16 @@ async def start_usbip(
         # 保存原始 Windows 设备主机地址，用于记录设备来源
         windows_device_host = device_host
 
-        if public_client_mode:
-            tunnel_status = public_client_tunnel.get_status()
-            if not tunnel_status.get('connected'):
-                payload = public_client_required_payload(request)
-                return ApiResponse.error(
-                    payload['error'],
-                    status_code=428,
-                    public_client_required=True,
-                    agent_install_url=payload['agent_install_url'],
-                    agent_connected=False
-                )
-            windows_usbipd = await probe_public_client_usbipd()
-            if not windows_usbipd.get('installed'):
-                return JSONResponse(content={
-                    'success': False,
-                    'error': '公网客户端已连接，但 Windows 主机未安装 usbipd',
-                    'install_guide': USBIPD_INSTALL_GUIDE.format(install_cmd=USBIPD_INSTALL_CMD),
-                    'installed': False
-                })
-            if not await probe_public_client_admin():
-                return ApiResponse.error(
-                    '公网客户端 agent 没有管理员权限，无法执行 usbipd bind。请关闭当前 agent 窗口，用管理员 PowerShell 重新运行 GMS 公网客户端命令。',
-                    status_code=403
-                )
-
-            taskkill_result = await public_client_tunnel.run_windows_command('taskkill /F /IM adb.exe /T', timeout=15)
-            if taskkill_result.get('returncode', -1) not in (0, 128, 255):
-                logger.warning(f"[USB/IP] taskkill adb failed: {taskkill_result}")
-
-            list_result = await public_client_tunnel.run_windows_command('usbipd list', timeout=20)
-            if list_result.get('returncode', -1) != 0:
-                return ApiResponse.error(
-                    f"获取 Windows usbipd 设备列表失败: {list_result.get('stderr') or list_result.get('stdout') or 'unknown error'}",
-                    status_code=500
-                )
-
-            vid_pid = config.get('usbip_vid_pid')
-            usbipd_list_output = '\n'.join([
-                list_result.get('stdout') or '',
-                list_result.get('stderr') or '',
-            ]).strip()
-            logger.info(f"[USB/IP] usbipd list output via public agent:\n{usbipd_list_output}")
-            busids = parse_usbipd_android_busids(usbipd_list_output, vid_pid=vid_pid)
-            busid_statuses = parse_usbipd_busid_statuses(usbipd_list_output)
-            if not busids:
-                return ApiResponse.error(
-                    f'未找到Android设备。usbipd list 输出: {usbipd_list_output or "empty"}',
-                    status_code=404
-                )
-
-            bound_busids = []
-            newly_bound = False
-            for busid in busids:
-                if busid_statuses.get(busid) in ('shared', 'attached'):
-                    logger.info(f"[USB/IP] {busid} is already {busid_statuses.get(busid)}, skip bind")
-                    bound_busids.append(busid)
-                    continue
-                bind_result = await public_client_tunnel.run_windows_command(f'usbipd bind --busid {busid}', timeout=30)
-                if bind_result.get('returncode', -1) != 0:
-                    stderr = bind_result.get('stderr') or bind_result.get('stdout') or 'unknown error'
-                    logger.warning(f"[USB/IP] bind failed for {busid}: {stderr}")
-                    # 如果已经共享，继续；否则直接报错
-                    if 'already' not in stderr.lower() and 'shared' not in stderr.lower():
-                        if 'access denied' in stderr.lower() or 'administrator privileges' in stderr.lower():
-                            return ApiResponse.error(
-                                '公网客户端 agent 没有管理员权限，无法执行 usbipd bind。请关闭所有 GMS agent PowerShell 窗口，用管理员 PowerShell 重新运行 GMS 公网客户端命令。',
-                                status_code=403
-                            )
-                        return ApiResponse.error(f'设备绑定失败: {busid} - {stderr}', status_code=500)
-                else:
-                    newly_bound = True
-                bound_busids.append(busid)
-            if newly_bound:
-                await asyncio.sleep(2)
-
-            result = await asyncio.to_thread(
-                attach_public_usbip_on_ubuntu,
-                config,
-                usbip_attach_host or '127.0.0.1',
-                bound_busids
+        # 获取密码（Tailscale 直连和普通 SSH 使用相同流程）
+        device_password = request_data.get('device_password') or find_device_host_password(config, device_host) or config.get('device_pswd', '')
+        if not device_password:
+            return ApiResponse.error(
+                f'未找到 {device_host} 的SSH凭据，请先在登录页面输入SSH密码',
+                status_code=401,
+                need_password=True,
+                device_host=device_host
             )
-            if not result.get('success'):
-                if result.get('rollback'):
-                    logger.info("[USB/IP] Public attach failed; keeping Windows usbipd bindings for faster retry")
-                return ApiResponse.error(result.get('error') or 'USB/IP 连接失败', status_code=500)
-        else:
-            # 获取密码
-            device_password = request_data.get('device_password') or find_device_host_password(config, device_host) or config.get('device_pswd', '')
-
-            if not device_password:
-                return ApiResponse.error(
-                    f'未找到 {device_host} 的SSH凭据，请先在登录页面输入SSH密码',
-                    status_code=401,
-                    need_password=True,
-                    device_host=device_host
-                )
-
-            result = usbip_manager.start_usbip(device_host, device_password, usbip_attach_host=usbip_attach_host)
+        result = usbip_manager.start_usbip(device_host, device_password, usbip_attach_host=usbip_attach_host)
 
         if result.get('success'):
             with global_state.usbip_states_lock:
@@ -8215,16 +7858,16 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
     """
     config = config_manager.load_config()
     client_id = get_client_id_from_request(request)
-    public_client_mode = False
+    tailscale_mode = False
 
     # 使用提供的主机或当前客户端
     if req and req.device_host:
         config['device_host'] = req.device_host
     else:
-        tunnel_host, _ = resolve_public_tunnel_device_host(request, client_id)
+        tunnel_host, _ = resolve_tailscale_device_host(request, client_id)
         if tunnel_host:
             config['device_host'] = tunnel_host
-            public_client_mode = is_public_origin_request(request)
+            tailscale_mode = True
         else:
             config['device_host'] = client_id
 
@@ -8238,19 +7881,12 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
     devices_to_remove: List[str] = []
 
     try:
-        if public_client_mode:
-            if not public_client_tunnel.is_connected():
-                return ApiResponse.error(
-                    '公网客户端未连接，无法断开 USB/IP',
-                    status_code=428,
-                    public_client_required=True,
-                    agent_connected=False,
-                    agent_install_url=f"{get_request_base_url(request)}/api/public-client/install.ps1"
-                )
+        if tailscale_mode:
+            # Tailscale 直连模式：断开 Ubuntu 侧 USB/IP，保留 Windows 绑定
             ubuntu_ssh = usbip_manager.ssh_manager.get_connection(config)
             if ubuntu_ssh:
                 try:
-                    detach_ubuntu_usbip_ports(ubuntu_ssh, '127.0.0.1', detach_all=True)
+                    detach_ubuntu_usbip_ports(ubuntu_ssh, usbip_attach_host or '127.0.0.1', detach_all=True)
                     usbip_manager.ssh_manager.return_connection(ubuntu_ssh)
                 except Exception as e:
                     ubuntu_ssh.close()
@@ -8387,31 +8023,26 @@ async def install_usbipd(request: Request, device_host: Optional[str] = None):
         if device_host:
             config['device_host'] = device_host
         else:
-            tunnel_host, _ = resolve_public_tunnel_device_host(request, client_id)
-            if is_public_origin_request(request):
-                tunnel_status = public_client_tunnel.get_status()
-                if tunnel_status.get('connected'):
-                    windows_usbipd = await probe_public_client_usbipd()
-                    installed = bool(windows_usbipd.get('installed'))
-                    logger.info(
-                        f"[USB/IP Install] public-client agent status: connected={tunnel_status.get('connected')}, "
-                        f"installed={installed}"
-                    )
-                    if installed:
-                        return JSONResponse(content={
-                            'success': True,
-                            'installed': True,
-                            'running': True,
-                            'version': windows_usbipd.get('version') or '',
-                            'message': f"usbipd 已安装{('，版本: ' + windows_usbipd.get('version')) if windows_usbipd.get('version') else ''}"
-                        })
+            tunnel_host, _ = resolve_tailscale_device_host(request, client_id)
+            if tunnel_host:
+                windows_usbipd = await probe_windows_usbipd(tunnel_host)
+                installed = bool(windows_usbipd.get('installed'))
+                logger.info(f"[USB/IP Install] Tailscale SSH check: {tunnel_host}, installed={installed}")
+                if installed:
                     return JSONResponse(content={
-                        'success': False,
-                        'installed': False,
-                        'running': False,
-                        'install_guide': USBIPD_INSTALL_GUIDE.format(install_cmd=USBIPD_INSTALL_CMD),
-                        'error': '公网客户端已连接，但 Windows 主机未安装 usbipd'
+                        'success': True,
+                        'installed': True,
+                        'running': True,
+                        'version': windows_usbipd.get('version') or '',
+                        'message': f"usbipd 已安装{('，版本: ' + windows_usbipd.get('version')) if windows_usbipd.get('version') else ''}"
                     })
+                return JSONResponse(content={
+                    'success': False,
+                    'installed': False,
+                    'running': False,
+                    'install_guide': USBIPD_INSTALL_GUIDE.format(install_cmd=USBIPD_INSTALL_CMD),
+                    'error': 'Windows 主机未安装 usbipd'
+                })
 
             config['device_host'] = tunnel_host or client_id
 
@@ -8452,43 +8083,9 @@ async def check_ssh_sshd(request: Request, device_host: Optional[str] = Query(No
     # 优先使用查询参数中的 device_host，否则使用请求中的客户端ID
     if not device_host:
         client_id = get_client_id_from_request(request)
-        tunnel_host, _ = resolve_public_tunnel_device_host(request, client_id)
-        if is_public_origin_request(request):
-            tunnel_status = public_client_tunnel.get_status()
-            windows_sshd = tunnel_status.get('windows_sshd') or {}
-            if tunnel_status.get('connected') and windows_sshd:
-                installed = bool(windows_sshd.get('installed'))
-                running = bool(windows_sshd.get('running'))
-                logger.info(
-                    f"[SSHD Check] public-client agent status: connected={tunnel_status.get('connected')}, "
-                    f"installed={installed}, running={running}"
-                )
-                return JSONResponse(content={
-                    'success': True,
-                    'installed': installed,
-                    'running': running,
-                    'install_guide': None if installed else SSHD_INSTALL_GUIDE
-                })
-            if tunnel_status.get('connected') and not windows_sshd:
-                logger.warning("[SSHD Check] public-client agent connected but did not report windows_sshd status")
-                return JSONResponse(content={
-                    'success': True,
-                    'installed': None,
-                    'running': None,
-                    'install_guide': None,
-                    'error': '公网客户端已连接，但当前 agent 版本未上报 Windows SSHD 状态。请重新运行最新的安装脚本更新 agent。'
-                })
-
-        if not tunnel_host and is_public_origin_request(request):
-            payload = public_client_required_payload(request)
-            return JSONResponse(content={
-                'success': False,
-                'checkable': False,
-                'installed': None,
-                'running': None,
-                'install_guide': None,
-                **payload,
-            }, status_code=428)
+        tunnel_host, _ = resolve_tailscale_device_host(request, client_id)
+        # Tailscale 直连模式：通过 SSH 检查 Windows SSHD 状态
+        # 直接走下面的正常 SSH 检查路径，device_host 为 Tailscale IP
         device_host = tunnel_host or client_id
 
     # 验证 device_host 格式
