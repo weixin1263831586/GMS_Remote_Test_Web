@@ -2413,32 +2413,19 @@
 
         async function openDeviceShell(serialNo) {
             try {
+                if (!serialNo || serialNo === '-') {
+                    showToast('设备序列号无效，无法打开 Shell', 'error');
+                    return;
+                }
+
                 showToast(`正在打开设备 ${serialNo} 的 Shell...`, 'info');
 
-                const response = await fetch('/api/devices/shell', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        serial_no: serialNo
-                    })
-                });
+                // 保存设备序列号,供终端初始化时使用。sessionStorage 用于页面切换重建时兜底。
+                pendingAdbDevice = serialNo;
+                sessionStorage.setItem('pending_adb_device', serialNo);
 
-                const result = await response.json();
-
-                if (result.success) {
-                    showToast(`已打开设备 ${serialNo} 的 Shell 会话`, 'success');
-                    // 保存设备序列号,供终端初始化时使用
-                    pendingAdbDevice = serialNo;
-                    // 切换到终端页面
-                    const terminalItem = document.querySelector('[data-page="terminal"]');
-                    if (terminalItem) {
-                        terminalItem.click();
-                    }
-                } else {
-                    showToast(`打开 Shell 失败: ${result.message}`, 'error');
-                }
+                // 直接切换页面，避免等待设备预检查导致按钮看起来无响应。
+                switchPage('terminal');
             } catch (error) {
                 console.error('打开 Shell 失败:', error);
                 showToast(`打开 Shell 失败: ${error.message}`, 'error');
@@ -2556,6 +2543,7 @@
                 // 检查是否有待执行的命令（从路由检查弹框来的）
                 const pendingCommand = sessionStorage.getItem('pending_terminal_command');
                 const commandSource = sessionStorage.getItem('command_source');
+                pendingAdbDevice = pendingAdbDevice || sessionStorage.getItem('pending_adb_device');
 
                 if (!terminalInitialized || pendingAdbDevice || pendingCommand) {
                     // ADB模式需要重新初始化,先清理旧连接
@@ -3979,15 +3967,17 @@
                 // 检查是否为ADB shell模式
                 if (pendingAdbDevice) {
                     debugLog('Opening ADB shell for device:', pendingAdbDevice);
+                    const adbDevice = pendingAdbDevice;
                     updateSilentMode(true, 'adb');
                     socket.send(JSON.stringify({
                         type: 'terminal_connect',
                         mode: 'adb',
-                        serial_no: pendingAdbDevice,
+                        serial_no: adbDevice,
                         host: terminalConfig.ssh_host,
                         user: terminalConfig.ssh_user
                     }));
                     pendingAdbDevice = null;
+                    sessionStorage.removeItem('pending_adb_device');
                 } else {
                     // 请求SSH连接
                     socket.send(JSON.stringify({
@@ -4066,6 +4056,7 @@
                                         debugLog('ADB shell prompt detected');
                                         const text = silentMode.buffer.join('');
                                         const lines = text.split('\r\n');
+                                        terminal.clear();
                                         terminal.write(lines.slice(-3).join('\r\n'));
                                         updateSilentMode(false);
                                     }
@@ -4088,7 +4079,7 @@
                             if (terminal) {
                                 terminal.clear();
                                 terminal.writeln('\x1b[32m✅ 已连接到 Ubuntu 主机\x1b[0m');
-                                terminal.writeln('\x1b[90m快捷键: Ctrl+C=复制/中断 Ctrl+L=清屏\x1b[0m\r\n');
+                                terminal.writeln('\x1b[90m快捷键: Ctrl+C=复制/中断 Ctrl+V/右键=粘贴 Ctrl+D=EOF Ctrl+L=清屏\x1b[0m\r\n');
                             }
                         }
                         // ADB模式和路由命令模式:保持静默模式,等待检测到提示符
@@ -4157,6 +4148,7 @@
                 },
                 scrollback: 1000,
                 convertEol: false,  // 不转换行尾，保持原始格式
+                ignoreBracketedPasteMode: true,  // 粘贴时不包裹 \x1b[200~...\x1b[201~
                 termName: 'xterm-256color'  // 设置终端类型，确保正确的转义序列处理
             });
 
@@ -4182,9 +4174,14 @@
                 terminal.open(container);
             }
 
-            // 显示连接消息
-            terminal.writeln('\x1b[33m⏳ 正在连接到 Ubuntu 主机...\x1b[0m');
-            terminal.writeln(`\x1b[90m主机: ${terminalConfig.ssh_user}@${terminalConfig.ssh_host}\x1b[0m\r\n`);
+            // ADB shell 会先缓冲主机登录与 adb 启动输出，等设备提示符出现后一次性显示，避免闪屏。
+            const isAdbLaunch = Boolean(pendingAdbDevice);
+            if (!isAdbLaunch) {
+                terminal.writeln('\x1b[33m⏳ 正在连接到 Ubuntu 主机...\x1b[0m');
+                terminal.writeln(`\x1b[90m主机: ${terminalConfig.ssh_user}@${terminalConfig.ssh_host}\x1b[0m\r\n`);
+            } else {
+                terminal.clear();
+            }
 
             // 设置数据处理器
             terminal.onData((data) => {
@@ -4192,34 +4189,101 @@
                     // 确保正确处理方向键等特殊按键的ANSI转义序列
                     // onData已经正确地将方向键转换为转义序列（如\x1b[A）
                     // 直接发送原始数据，不做任何额外处理
-                    terminalSocket.send(JSON.stringify({
-                        type: 'terminal_input',
-                        input: data
-                    }));
+                    sendTerminalInput(data);
                 }
             });
 
-            // 添加 Ctrl+C 复制支持和方向键处理
-            terminal.attachCustomKeyEventHandler((event) => {
-                // Ctrl+C 复制（有选中文本时）
-                if (event.ctrlKey && event.key === 'c' && terminal.hasSelection()) {
-                    const selection = terminal.getSelection();
-                    // 使用传统方法复制
-                    const textArea = document.createElement('textarea');
-                    textArea.value = selection;
-                    textArea.style.position = 'fixed';
-                    textArea.style.left = '-999999px';
-                    textArea.style.top = '-999999px';
-                    document.body.appendChild(textArea);
-                    textArea.focus();
-                    textArea.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(textArea);
+            function sendTerminalInput(input) {
+                if (!isTerminalConnected || !terminalSocket || terminalSocket.readyState !== WebSocket.OPEN) {
+                    return false;
+                }
+                terminalSocket.send(JSON.stringify({
+                    type: 'terminal_input',
+                    input: input
+                }));
+                return true;
+            }
 
-                    // 立即恢复终端焦点
+            function copyTerminalSelection() {
+                if (!terminal || !terminal.hasSelection()) {
+                    return false;
+                }
+                const selection = terminal.getSelection();
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(selection).catch(() => fallbackCopyText(selection));
+                } else {
+                    fallbackCopyText(selection);
+                }
+                terminal.clearSelection();
+                terminal.focus();
+                debugLog('复制成功:', selection);
+                return true;
+            }
+
+            function fallbackCopyText(text) {
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-999999px';
+                textArea.style.top = '-999999px';
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }
+
+            function pasteTextToTerminal(text) {
+                if (!text) return false;
+                const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                return sendTerminalInput(normalizedText);
+            }
+
+            async function pasteFromClipboard() {
+                try {
+                    if (!navigator.clipboard || !navigator.clipboard.readText) {
+                        debugLog('浏览器不允许直接读取剪贴板');
+                        return false;
+                    }
+                    const text = await navigator.clipboard.readText();
+                    return pasteTextToTerminal(text);
+                } catch (error) {
+                    debugLog('读取剪贴板失败:', error);
+                    return false;
+                } finally {
                     terminal.focus();
-                    debugLog('复制成功:', selection);
-                    return false;  // 阻止默认行为
+                }
+            }
+
+            // 添加完整终端快捷键支持
+            terminal.attachCustomKeyEventHandler((event) => {
+                if (event.type !== 'keydown') {
+                    return true;
+                }
+
+                const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+                const isCtrlOnly = event.ctrlKey && !event.altKey && !event.metaKey;
+
+                // Ctrl+C / Ctrl+Shift+C: 有选区时复制；无选区时发送中断信号。
+                if (isCtrlOnly && key === 'c') {
+                    if (terminal.hasSelection()) {
+                        copyTerminalSelection();
+                    } else {
+                        sendTerminalInput('\x03');
+                    }
+                    return false;
+                }
+
+                // Ctrl+V / Ctrl+Shift+V: 读取系统剪贴板并粘贴纯文本。
+                if (isCtrlOnly && key === 'v') {
+                    pasteFromClipboard();
+                    return false;
+                }
+
+                // 浏览器会抢占 Ctrl+D/Ctrl+L/Ctrl+A/Ctrl+F 等快捷键，这里按终端语义发送控制字符。
+                if (isCtrlOnly && /^[a-z]$/.test(key)) {
+                    sendTerminalInput(String.fromCharCode(key.charCodeAt(0) - 96));
+                    return false;
                 }
 
                 // 确保方向键和其他特殊按键不被浏览器拦截
@@ -4251,6 +4315,24 @@
             if (terminalDiv) {
                 terminalDiv.addEventListener('click', () => {
                     terminal.focus();
+                });
+
+                terminalDiv.addEventListener('paste', (e) => {
+                    const text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+                    if (text) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        pasteTextToTerminal(text);
+                        terminal.focus();
+                    }
+                }, true);
+
+                terminalDiv.addEventListener('contextmenu', (e) => {
+                    if (navigator.clipboard && navigator.clipboard.readText) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        pasteFromClipboard();
+                    }
                 });
             }
 
