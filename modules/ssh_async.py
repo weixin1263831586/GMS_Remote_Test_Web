@@ -7,6 +7,7 @@ import asyncio
 import paramiko
 from typing import Dict, Callable
 import logging
+from core.common_utils import CommonUtils
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,7 @@ class SSHAsyncManager:
                     # 在线程池中读取数据
                     data = await asyncio.to_thread(stream.channel.recv, 65536)
                     if data:
-                        text = data.decode('utf-8', errors='replace')
+                        text = CommonUtils.decode_ssh_output(data)
                         # 按行分割并发送日志
                         for line in text.split('\n'):
                             if line.strip():
@@ -199,8 +200,8 @@ class SSHAsyncManager:
         def _exec():
             stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
             exit_code = stdout.channel.recv_exit_status()
-            stdout_text = stdout.read().decode('utf-8', errors='replace')
-            stderr_text = stderr.read().decode('utf-8', errors='replace')
+            stdout_text = CommonUtils.decode_ssh_output(stdout.read())
+            stderr_text = CommonUtils.decode_ssh_output(stderr.read())
             return exit_code, stdout_text, stderr_text
 
         try:
