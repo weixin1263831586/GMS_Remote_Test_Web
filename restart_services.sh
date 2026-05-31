@@ -18,6 +18,54 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
 fi
 cd "$PROJECT_DIR"
 
+CERT_DIR="${PROJECT_DIR}/.certs"
+CERT_KEY="${CERT_DIR}/gms-local.key"
+CERT_CRT="${CERT_DIR}/gms-local.crt"
+SERVER_HOSTNAME="${GMS_SERVER_HOSTNAME:-172.16.14.233}"
+
+ensure_https_cert() {
+    mkdir -p "${CERT_DIR}"
+
+    if [[ -s "${CERT_KEY}" && -s "${CERT_CRT}" ]]; then
+        return 0
+    fi
+
+    local san_list="DNS:localhost,DNS:127.0.0.1,IP:127.0.0.1,IP:${SERVER_HOSTNAME}"
+    if command -v hostname >/dev/null 2>&1; then
+        local host_ips
+        host_ips="$(hostname -I 2>/dev/null || true)"
+        for ip in ${host_ips}; do
+            [[ -n "${ip}" ]] && san_list="${san_list},IP:${ip}"
+        done
+    fi
+
+    local tmp_conf
+    tmp_conf="$(mktemp)"
+    cat > "${tmp_conf}" <<EOF
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+x509_extensions = v3_req
+
+[dn]
+CN = GMS Remote Test Local
+
+[v3_req]
+subjectAltName = ${san_list}
+keyUsage = keyEncipherment, dataEncipherment, digitalSignature
+extendedKeyUsage = serverAuth
+EOF
+
+    openssl req -x509 -nodes -newkey rsa:2048 \
+        -days 825 \
+        -keyout "${CERT_KEY}" \
+        -out "${CERT_CRT}" \
+        -config "${tmp_conf}" >/dev/null 2>&1
+    rm -f "${tmp_conf}"
+}
+
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}  GMS Auto Test 服务管理${NC}"
 echo -e "${BLUE}========================================${NC}"
@@ -61,9 +109,12 @@ echo ""
 # 4. 启动新服务
 echo -e "${YELLOW}[4/4] 启动新服务...${NC}"
 
+ensure_https_cert
+
 echo -e "  启动 FastAPI (5001)..."
 nohup setsid "${PYTHON_BIN}" -m uvicorn app_fastapi_full:app \
     --host 0.0.0.0 --port 5001 --log-level info --access-log \
+    --ssl-keyfile "${CERT_KEY}" --ssl-certfile "${CERT_CRT}" \
     >> fastapi.log 2>&1 < /dev/null &
 echo $! > fastapi.pid
 sleep 2
@@ -73,7 +124,7 @@ echo -e "${BLUE}  进行健康检查...${NC}"
 sleep 3  # 等待服务完全启动
 
 for port in 5001; do
-    if timeout 5 curl -s -f "http://localhost:${port}/" >/dev/null 2>&1; then
+    if timeout 5 curl -sk -f "https://localhost:${port}/" >/dev/null 2>&1; then
         echo -e "${GREEN}  ✓ ${port} 启动成功${NC}"
     else
         echo -e "${YELLOW}  ⚠ ${port} 健康检查失败（可能仍在启动中）${NC}"
@@ -86,7 +137,8 @@ echo -e "${GREEN}  ✓ 服务管理完成！${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "📋 服务状态："
-echo -e "  FastAPI: ${GREEN}http://localhost:5001${NC} (主服务)"
+echo -e "  FastAPI: ${GREEN}https://localhost:5001${NC} (主服务)"
+echo -e "  局域网: ${GREEN}https://${SERVER_HOSTNAME}:5001${NC}"
 echo ""
 echo -e "📊 查看日志："
 echo -e "  FastAPI: tail -f fastapi.log"

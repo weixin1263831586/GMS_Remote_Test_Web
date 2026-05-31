@@ -20,7 +20,9 @@ const state = {
     isRefreshingDevices: false,
     notifications: [],
     unreadNotifications: 0,
-    browserNotificationsEnabled: localStorage.getItem('gms_browser_notifications') === 'true'
+    browserNotificationsEnabled:
+        (typeof Notification !== 'undefined' && Notification.permission === 'granted') ||
+        localStorage.getItem('gms_browser_notifications') === 'true'
 };
 
 // Debug flag - set to false in production to disable console logs
@@ -618,9 +620,15 @@ function initWebSocket() {
                         updateTestToggleButton(false);
                         addLogEntry('测试完成', 'success');
                         if (data.notification) {
-                            handleRealtimeNotification(data.notification, { toast: false });
+                            handleRealtimeNotification(data.notification, { toast: false, browser: true, forceBrowser: true });
+                        } else {
+                            handleRealtimeNotification({
+                                title: '测试完成',
+                                message: '测试已完成',
+                                level: 'success',
+                                category: 'test'
+                            }, { toast: false, browser: true, forceBrowser: true });
                         }
-                        showToast('测试完成', 'success');
                         break;
 
                     case 'devices_updated':
@@ -1538,19 +1546,25 @@ window.downloadTestSuite = async function downloadTestSuite() {
             if (progressPercent) progressPercent.textContent = '100%';
             if (progressStatus) progressStatus.textContent = '✅ 下载完成';
 
-            showToast(`下载完成：${result.message}`, 'success');
+            notifyOperationResult(
+                '测试套件下载完成',
+                result.message || '下载完成',
+                'success',
+                'suite-download',
+                { archive_path: result.archive_path }
+            );
 
             await refreshTestSuiteBrowser();
         } else {
             log(`❌ 下载失败：${result.error}`);
             if (progressStatus) progressStatus.textContent = '❌ 下载失败';
-            showToast(`下载失败：${result.error}`, 'error');
+            notifyOperationResult('测试套件下载失败', result.error, 'error', 'suite-download');
         }
     } catch (error) {
         console.error('[downloadTestSuite] 异常:', error);
         log(`❌ 错误：${error.message}`);
         if (progressStatus) progressStatus.textContent = '❌ 错误';
-        showToast(`下载失败：${error.message}`, 'error');
+        notifyOperationResult('测试套件下载失败', error.message, 'error', 'suite-download');
     } finally {
         if (!pollingStarted) {
             if (downloadBtn) {
@@ -1616,11 +1630,23 @@ async function pollDownloadProgress(taskId) {
             logDiv.innerHTML += `[${time}] ✅ 下载完成：${completedTask.archive_path}\n`;
             logDiv.innerHTML += `[${time}] 📦 文件大小：${sizeMb} MB\n`;
         }
-        showToast(`下载完成：${completedTask.message || '下载完成'}`, 'success');
+        notifyOperationResult(
+            '测试套件下载完成',
+            completedTask.message || '下载完成',
+            'success',
+            'suite-download',
+            { task_id: taskId, archive_path: completedTask.archive_path }
+        );
         if (urlInput) urlInput.dataset.lastArchivePath = completedTask.archive_path || '';
         await refreshTestSuiteBrowser();
     } catch (error) {
-        showToast(`下载失败：${error.message}`, 'error');
+        notifyOperationResult(
+            '测试套件下载失败',
+            error.message,
+            'error',
+            'suite-download',
+            { task_id: taskId }
+        );
         if (progressStatus) progressStatus.textContent = `❌ ${error.message}`;
     } finally {
         sessionStorage.removeItem('active_suite_download');
@@ -1876,7 +1902,13 @@ window.submitExtractSuite = async function submitExtractSuite() {
                 const time = new Date().toLocaleTimeString();
                 logDiv.innerHTML += `[${time}] ✅ 解压完成：${completedTask.extracted_path}\n`;
             }
-            showToast(`解压完成：${completedTask.message || '解压完成'}`, 'success');
+            notifyOperationResult(
+                '测试套件解压完成',
+                completedTask.message || '解压完成',
+                'success',
+                'suite-extract',
+                { task_id: result2.task_id, extracted_path: completedTask.extracted_path }
+            );
 
             console.log('[submitExtractSuite] refreshing suite browser, extracted_path:', completedTask.extracted_path);
             await refreshTestSuiteBrowser(completedTask.extracted_path || '');
@@ -1885,14 +1917,26 @@ window.submitExtractSuite = async function submitExtractSuite() {
                 const time = new Date().toLocaleTimeString();
                 logDiv.innerHTML += `[${time}] ❌ 解压失败：${result2.error}\n`;
             }
-            showToast(`解压失败：${result2.error}`, 'error');
+            notifyOperationResult(
+                '测试套件解压失败',
+                result2.error,
+                'error',
+                'suite-extract',
+                { archive_path: archivePath }
+            );
         }
     } catch (error) {
         if (logDiv) {
             const time = new Date().toLocaleTimeString();
             logDiv.innerHTML += `[${time}] ❌ 错误：${error.message}\n`;
         }
-        showToast(`解压失败：${error.message}`, 'error');
+        notifyOperationResult(
+            '测试套件解压失败',
+            error.message,
+            'error',
+            'suite-extract',
+            { archive_path: archivePath }
+        );
     } finally {
         if (extractBtn) {
             extractBtn.disabled = false;
@@ -2914,14 +2958,14 @@ async function submitFirmwareBurn() {
 
         const result = uploadResult;
         if (result.success) {
-            showToast('固件烧写任务已启动', 'success');
+            notifyOperationResult('固件烧写已启动', '烧写任务已开始', 'info', 'firmware-burn');
             addLogEntry(`固件烧写任务已启动，设备: ${devices.join(', ')}`, 'success');
         } else {
-            showToast(`烧写失败: ${result.error}`, 'error');
+            notifyOperationResult('固件烧写失败', result.error, 'error', 'firmware-burn');
             addLogEntry(`固件烧写失败: ${result.error}`, 'error');
         }
     } catch (error) {
-        showToast(`烧写失败: ${error.message}`, 'error');
+        notifyOperationResult('固件烧写失败', error.message, 'error', 'firmware-burn');
         addLogEntry(`固件烧写异常: ${error.message}`, 'error');
     }
 }
@@ -3079,7 +3123,10 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
 
         if (result.success) {
             addLogEntry(`${operationName}完成`, 'success');
-            showToast(`${operationName}完成`, 'success');
+            notifyOperationResult(`${operationName}完成`, `${operationName}已完成`, 'success', 'burn-operation', {
+                operation: operationName,
+                endpoint
+            });
 
             // 显示详细结果
             if (result.results && result.results.length > 0) {
@@ -3093,11 +3140,17 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
             }
         } else {
             addLogEntry(`${operationName}失败: ${result.error || '未知错误'}`, 'error');
-            showToast(`${operationName}失败: ${result.error || '未知错误'}`, 'error');
+            notifyOperationResult(`${operationName}失败`, result.error || '未知错误', 'error', 'burn-operation', {
+                operation: operationName,
+                endpoint
+            });
         }
     } catch (error) {
         addLogEntry(`${operationName}失败: ${error.message}`, 'error');
-        showToast(`${operationName}失败: ${error.message}`, 'error');
+        notifyOperationResult(`${operationName}失败`, error.message, 'error', 'burn-operation', {
+            operation: operationName,
+            endpoint
+        });
     }
 }
 
@@ -4461,6 +4514,10 @@ async function startTest() {
     }
 
     try {
+        if ('Notification' in window && Notification.permission === 'default' && !state.browserNotificationsEnabled) {
+            void requestBrowserNotificationPermission();
+        }
+
         // 清空日志输出并重置计数
         const logOutput = $('log-output');
         if (logOutput) {
@@ -5188,15 +5245,14 @@ function mergeNotification(notification) {
     return normalized;
 }
 
-function shouldShowBrowserNotification() {
-    return state.browserNotificationsEnabled &&
-        'Notification' in window &&
+function shouldShowBrowserNotification(force = false) {
+    return 'Notification' in window &&
         Notification.permission === 'granted' &&
-        document.visibilityState !== 'visible';
+        (force || document.visibilityState !== 'visible');
 }
 
-function showBrowserNotification(notification) {
-    if (!shouldShowBrowserNotification()) return;
+function showBrowserNotification(notification, force = false) {
+    if (!shouldShowBrowserNotification(force)) return;
     try {
         const browserNotification = new Notification(notification.title, {
             body: notification.message || '',
@@ -5220,8 +5276,15 @@ function handleRealtimeNotification(notification, options = {}) {
         showToast(`${item.title}${item.message ? ': ' + item.message : ''}`, item.level);
     }
     if (options.browser !== false) {
-        showBrowserNotification(item);
+        showBrowserNotification(item, options.forceBrowser === true);
     }
+}
+
+function notifyOperationResult(title, message, level = 'info', category = 'system', data = {}) {
+    handleRealtimeNotification(
+        { title, message, level, category, data },
+        { toast: false, browser: true, forceBrowser: true }
+    );
 }
 
 async function loadNotifications() {
@@ -5720,48 +5783,10 @@ async function retryReportWithSuite(timestamp, testType, suitePath) {
 async function downloadReport(timestamp) {
     try {
         debugLog('[downloadReport] Starting download for timestamp:', timestamp);
-        showToast('正在下载测试报告文件夹...', 'info');
-
-        // 获取文件列表
-        const listUrl = `/api/reports/download?report_timestamp=${timestamp}`;
-        debugLog('[downloadReport] Fetching file list from:', listUrl);
-        const listResponse = await fetch(listUrl);
-
-        if (!listResponse.ok) {
-            let errorMsg = `HTTP ${listResponse.status}`;
-            try {
-                const errorData = await listResponse.json();
-                errorMsg = errorData.error || errorMsg;
-            } catch (e) {
-                // 如果无法解析 JSON，使用默认错误消息
-            }
-            console.error('Download failed:', listResponse.status, errorMsg);
-            showToast('下载失败：' + errorMsg, 'error');
-            return;
-        }
-
-        const listData = await listResponse.json();
-        debugLog('[downloadReport] File list data:', listData);
-
-        if (!listData.success || !listData.files || listData.files.length === 0) {
-            showToast('下载失败：' + (listData.error || '没有找到文件'), 'error');
-            return;
-        }
-
-        debugLog('[downloadReport] Found', listData.files.length, 'files');
-
-        // 检查浏览器是否支持文件系统访问 API（需要 HTTPS 或 localhost 环境）
-        if ('showDirectoryPicker' in window) {
-            debugLog('[downloadReport] Using File System Access API');
-            await downloadReportWithFileSystemAPI(timestamp, listData.files);
-        } else {
-            debugLog('[downloadReport] File System Access API not supported, falling back to ZIP');
-            // 回退到 ZIP 下载
-            await downloadReportAsZip(timestamp);
-        }
+        await downloadReportAsZip(timestamp);
     } catch (error) {
         console.error('Download report error:', error);
-        showToast('下载失败：' + error.message, 'error');
+        notifyOperationResult('报告下载失败', error.message, 'error', 'report-download', { timestamp });
     }
 }
 
@@ -5826,7 +5851,13 @@ async function downloadReportWithFileSystemAPI(timestamp, files) {
             }
         }
 
-        showToast(`报告下载成功：${successCount}个文件成功，${failCount}个失败`, successCount > 0 ? 'success' : 'error');
+        notifyOperationResult(
+            '报告下载完成',
+            `成功 ${successCount} 个文件，失败 ${failCount} 个`,
+            successCount > 0 ? 'success' : 'error',
+            'report-download',
+            { timestamp, success_count: successCount, fail_count: failCount }
+        );
     } catch (error) {
         console.error('File System Access API error:', error);
         // 如果用户取消或 API 失败，回退到 ZIP 下载
@@ -5849,7 +5880,7 @@ async function downloadReportAsZip(timestamp) {
                 // 如果无法解析 JSON，使用默认错误消息
             }
             console.error('Download failed:', response.status, errorMsg);
-            showToast('下载失败：' + errorMsg, 'error');
+            notifyOperationResult('报告下载失败', errorMsg, 'error', 'report-download', { timestamp });
             return;
         }
 
@@ -5861,7 +5892,7 @@ async function downloadReportAsZip(timestamp) {
             // 如果返回的是 JSON 而不是文件，说明有错误
             const errorData = await response.json();
             console.error('Server returned error:', errorData);
-            showToast('下载失败：' + (errorData.error || '服务器错误'), 'error');
+            notifyOperationResult('报告下载失败', errorData.error || '服务器错误', 'error', 'report-download', { timestamp });
             return;
         }
 
@@ -5882,17 +5913,17 @@ async function downloadReportAsZip(timestamp) {
         debugLog('Blob size:', blob.size, 'bytes');
 
         if (blob.size === 0) {
-            showToast('下载失败：文件为空', 'error');
+            notifyOperationResult('报告下载失败', '文件为空', 'error', 'report-download', { timestamp });
             return;
         }
 
         const url = window.URL.createObjectURL(blob);
         triggerDownload(url, filename, true);
 
-        showToast('报告 ZIP 下载成功', 'success');
+        notifyOperationResult('报告下载完成', `ZIP 下载成功：${filename}`, 'success', 'report-download', { timestamp, filename });
     } catch (error) {
         console.error('Download report as ZIP error:', error);
-        showToast('ZIP 下载失败：' + error.message, 'error');
+        notifyOperationResult('报告下载失败', error.message, 'error', 'report-download', { timestamp });
     }
 }
 
@@ -5929,16 +5960,23 @@ async function analyzeReport(timestamp) {
             const data = await resp.json();
 
             if (!data.success) {
-                showToast('分析失败: ' + (data.error || '未知错误'), 'error');
+                notifyOperationResult('报告分析失败', data.error || '未知错误', 'error', 'report-analysis', { timestamp });
                 return;
             }
 
             // 使用与手动上传相同的显示函数，保持布局一致
             displayReportAnalysis(data.data);
+            notifyOperationResult(
+                '报告分析完成',
+                data.data?.report_name || data.data?.test_result?.test_name || '报告分析完成',
+                'success',
+                'report-analysis',
+                { timestamp }
+            );
         }, 300);
     } catch (e) {
         console.error('[Reports] Error analyzing report:', e);
-        showToast('分析失败: ' + e.message, 'error');
+        notifyOperationResult('报告分析失败', e.message, 'error', 'report-analysis', { timestamp });
     }
 }
 
@@ -6363,7 +6401,13 @@ async function handleRedmineAttachment(url, context = {}) {
                     if (progress) progress.style.opacity = '0';
                     if (content) content.style.opacity = '1';
                     displayReportAnalysis(result.data);
-                    showToast(`✅ 成功分析: ${result.filename || '附件'}`, 'success');
+                    notifyOperationResult(
+                        '报告分析完成',
+                        result.filename || '附件分析完成',
+                        'success',
+                        'report-analysis',
+                        { source: 'url', filename: result.filename || '' }
+                    );
                 }, 300);
             } else {
                 currentRedmineRequest = null;  // 重置请求控制器
@@ -6371,7 +6415,9 @@ async function handleRedmineAttachment(url, context = {}) {
                 if (result.requires_auth) {
                     showRedmineAuthDialog(url, uploadZone, content, progress, progressFill, context);
                 } else {
-                    showToast('❌ 分析失败: ' + (result.error || '未知错误'), 'error');
+                    notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
+                        source: 'url'
+                    });
                     setTimeout(() => {
                         if (progress) progress.style.opacity = '0';
                         if (content) content.style.opacity = '1';
@@ -6411,11 +6457,19 @@ async function handleRedmineAttachment(url, context = {}) {
                 if (progress) progress.style.opacity = '0';
                 if (content) content.style.opacity = '1';
                 displayReportAnalysis(result.data);
-                showToast(`✅ 成功分析: ${result.filename || '附件'}`, 'success');
+                notifyOperationResult(
+                    '报告分析完成',
+                    result.filename || '附件分析完成',
+                    'success',
+                    'report-analysis',
+                    { source: 'url', filename: result.filename || '' }
+                );
             }, 300);
         } else {
             currentRedmineRequest = null;  // 重置请求控制器
-            showToast('❌ 分析失败: ' + (result.error || '未知错误'), 'error');
+            notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
+                source: 'url'
+            });
             setTimeout(() => {
                 if (progress) progress.style.opacity = '0';
                 if (content) content.style.opacity = '1';
@@ -6428,7 +6482,7 @@ async function handleRedmineAttachment(url, context = {}) {
             return;
         }
         console.error('URL attachment analysis error:', error);
-        showToast('❌ 分析失败: ' + error.message, 'error');
+        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { source: 'url' });
         if (progress) progress.style.opacity = '0';
         if (content) content.style.opacity = '1';
     }
@@ -6540,10 +6594,18 @@ async function submitRedmineAuth(url) {
                 if (progress) progress.style.opacity = '0';
                 if (content) content.style.opacity = '1';
                 displayReportAnalysis(result.data);
-                showToast(`✅ 成功分析: ${result.filename || '附件'}`, 'success');
+                notifyOperationResult(
+                    '报告分析完成',
+                    result.filename || '附件分析完成',
+                    'success',
+                    'report-analysis',
+                    { source: 'redmine', filename: result.filename || '' }
+                );
             }, 300);
         } else {
-            showToast('❌ 分析失败: ' + (result.error || '未知错误'), 'error');
+            notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
+                source: 'redmine'
+            });
             setTimeout(() => {
                 if (progress) progress.style.opacity = '0';
                 if (content) content.style.opacity = '1';
@@ -6551,7 +6613,7 @@ async function submitRedmineAuth(url) {
         }
     } catch (error) {
         console.error('Redmine auth error:', error);
-        showToast('❌ 分析失败: ' + error.message, 'error');
+        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { source: 'redmine' });
         if (progress) progress.style.opacity = '0';
         if (content) content.style.opacity = '1';
     }
@@ -6584,9 +6646,18 @@ async function handleReportFile(file) {
                 if (progress) progress.style.opacity = '0';
                 if (content) content.style.opacity = '1';
                 displayReportAnalysis(result.data);
+                notifyOperationResult(
+                    '报告分析完成',
+                    `成功分析 ${fileCount} 个文件`,
+                    'success',
+                    'report-analysis',
+                    { file_count: fileCount }
+                );
             }, 300);
         } else {
-            showToast('分析失败: ' + (result.error || '未知错误'), 'error');
+            notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
+                file_count: fileCount
+            });
             setTimeout(() => {
                 if (progress) progress.style.opacity = '0';
                 if (content) content.style.opacity = '1';
@@ -6594,7 +6665,7 @@ async function handleReportFile(file) {
         }
     } catch (error) {
         console.error('Report analysis error:', error);
-        showToast('分析失败: ' + error.message, 'error');
+        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { file_count: fileCount });
         if (progress) progress.style.opacity = '0';
         if (content) content.style.opacity = '1';
     }
@@ -6677,10 +6748,18 @@ async function handleReportFolder(files) {
                 if (progress) progress.style.opacity = '0';
                 if (content) content.style.opacity = '1';
                 displayReportAnalysis(result.data);
-                showToast(`成功分析 ${fileCount} 个文件`, 'success');
+                notifyOperationResult(
+                    '报告分析完成',
+                    `成功分析 ${fileCount} 个文件`,
+                    'success',
+                    'report-analysis',
+                    { file_count: fileCount }
+                );
             }, 300);
         } else {
-            showToast('分析失败: ' + (result.error || '未知错误'), 'error');
+            notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
+                file_count: fileCount
+            });
             if (result.message) {
                 console.error('Analysis error details:', result.message);
             }
@@ -6691,7 +6770,7 @@ async function handleReportFolder(files) {
         }
     } catch (error) {
         console.error('Report folder analysis error:', error);
-        showToast('分析失败: ' + error.message, 'error');
+        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { file_count: fileCount });
         if (progress) progress.style.opacity = '0';
         if (content) content.style.opacity = '1';
     }
@@ -8880,6 +8959,10 @@ async function startApkAnalysis() {
         return;
     }
 
+    if ('Notification' in window && Notification.permission === 'default' && !state.browserNotificationsEnabled) {
+        void requestBrowserNotificationPermission();
+    }
+
     const btn = $('apk-btn-analyze');
     if (btn) {
         btn.disabled = true;
@@ -8955,12 +9038,15 @@ async function pollApkStatus() {
             $('apk-analysis-result').style.display = 'block';
 
             loadApkManifest();
-            showToast('APK 分析完成', 'success');
             if (window.apkNotifiedTaskId !== window.apkCurrentTaskId) {
                 window.apkNotifiedTaskId = window.apkCurrentTaskId;
-                createLocalNotification('APK分析完成', status.filename || '反编译完成，可查看结果', 'success', 'apk', {
-                    task_id: window.apkCurrentTaskId
-                });
+                notifyOperationResult(
+                    'APK反编译已完成',
+                    status.filename || '反编译完成，可查看结果',
+                    'success',
+                    'apk',
+                    { task_id: window.apkCurrentTaskId }
+                );
             }
         } else if (status.status === 'error') {
             stopApkPolling();
@@ -8968,9 +9054,15 @@ async function pollApkStatus() {
             showToast(`分析失败: ${status.error}`, 'error');
             if (window.apkNotifiedTaskId !== window.apkCurrentTaskId) {
                 window.apkNotifiedTaskId = window.apkCurrentTaskId;
-                createLocalNotification('APK分析失败', status.error || '反编译失败', 'error', 'apk', {
-                    task_id: window.apkCurrentTaskId
-                });
+                notifyOperationResult(
+                    'APK分析失败',
+                    status.error || '反编译失败',
+                    'error',
+                    'apk',
+                    {
+                        task_id: window.apkCurrentTaskId
+                    }
+                );
             }
         }
     } catch (e) {

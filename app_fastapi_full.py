@@ -4441,8 +4441,8 @@ async def run_test_background(
 
         notification = store_notification(
             client_id,
-            '测试任务已结束',
-            '测试执行已结束，请查看日志和报告确认结果。',
+            '测试任务已完成',
+            '测试执行已完成，请查看日志和报告确认结果。',
             'info',
             'test',
             {'devices': locked_devices}
