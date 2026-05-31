@@ -5955,7 +5955,8 @@ function initReportAnalysis() {
         const url = e.dataTransfer.getData('URL') || e.dataTransfer.getData('text/uri-list');
         if (url) {
             debugLog('[Report Analysis] Detected URL drop:', url);
-            await handleRedmineAttachment(url);
+            const dropContext = extractRedmineDropContext(e.dataTransfer, url);
+            await handleRedmineAttachment(url, dropContext);
             return;
         }
 
@@ -6059,7 +6060,22 @@ function initReportAnalysis() {
 // 用于取消正在进行的请求
 let currentRedmineRequest = null;
 
-async function handleRedmineAttachment(url) {
+function extractRedmineDropContext(dataTransfer, url) {
+    const candidates = [
+        url,
+        dataTransfer?.getData('text/plain') || '',
+        dataTransfer?.getData('text/html') || '',
+        dataTransfer?.getData('text/uri-list') || ''
+    ];
+    const issueMatch = candidates.join('\n').match(/\/issues\/(\d+)/);
+    if (!issueMatch) return {};
+    return {
+        source_issue_id: issueMatch[1],
+        source_issue_url: candidates.find(value => value.includes(`/issues/${issueMatch[1]}`)) || ''
+    };
+}
+
+async function handleRedmineAttachment(url, context = {}) {
     const uploadZone = $('report-upload-zone');
     const content = uploadZone?.querySelector('.report-upload-content');
     const progress = $('report-upload-progress');
@@ -6143,6 +6159,8 @@ async function handleRedmineAttachment(url) {
                 },
                 body: JSON.stringify({
                     url: url,
+                    source_issue_id: context.source_issue_id || '',
+                    source_issue_url: context.source_issue_url || '',
                     use_redmine_auth: true  // 使用存储的 Redmine 凭证
                 }),
                 signal: controller.signal
@@ -6166,7 +6184,7 @@ async function handleRedmineAttachment(url) {
                 currentRedmineRequest = null;  // 重置请求控制器
                 // 如果需要凭证，显示凭证输入框
                 if (result.requires_auth) {
-                    showRedmineAuthDialog(url, uploadZone, content, progress, progressFill);
+                    showRedmineAuthDialog(url, uploadZone, content, progress, progressFill, context);
                 } else {
                     showToast('❌ 分析失败: ' + (result.error || '未知错误'), 'error');
                     setTimeout(() => {
@@ -6231,7 +6249,8 @@ async function handleRedmineAttachment(url) {
     }
 }
 
-function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill) {
+function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill, context = {}) {
+    window._pendingRedmineDropContext = context || {};
     // 显示 Redmine 凭证输入对话框
     const modal = document.createElement('div');
     modal.id = 'redmine-auth-modal';
@@ -6318,6 +6337,8 @@ async function submitRedmineAuth(url) {
             },
             body: JSON.stringify({
                 url: url,
+                source_issue_id: window._pendingRedmineDropContext?.source_issue_id || '',
+                source_issue_url: window._pendingRedmineDropContext?.source_issue_url || '',
                 redmine_username: username,
                 redmine_password: password
             })
