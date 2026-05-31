@@ -33,6 +33,24 @@ class ClientManager:
         """保存客户端信息"""
         return config_manager.save_dynamic_config(config)
 
+    def _ssh_whoami(self, client_ip: str, username: str, password: str) -> str:
+        """Connect via SSH, run whoami, return username. Raises on failure."""
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            ssh.connect(
+                client_ip,
+                username=username,
+                password=password,
+                timeout=self.SSH_TIMEOUT,
+                banner_timeout=self.SSH_TIMEOUT,
+                auth_timeout=self.SSH_AUTH_TIMEOUT
+            )
+            raw = ssh.exec_command('whoami')[1].read()
+            return CommonUtils.decode_ssh_output(raw).strip().split('\\')[-1]
+        finally:
+            ssh.close()
+
     def get_client_ip(self, headers: Dict[str, str], remote_addr: str) -> str:
         """获取客户端IP地址"""
         client_ip = (
@@ -58,19 +76,7 @@ class ClientManager:
         # 手动SSH凭据
         if username and password:
             try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(
-                    client_ip,
-                    username=username,
-                    password=password,
-                    timeout=self.SSH_TIMEOUT,
-                    banner_timeout=self.SSH_TIMEOUT,
-                    auth_timeout=self.SSH_AUTH_TIMEOUT
-                )
-                stdout = ssh.exec_command('whoami')[1]
-                detected_username = stdout.read().decode().strip().split('\\')[-1]
-                ssh.close()
+                detected_username = self._ssh_whoami(client_ip, username, password)
 
                 # 保存凭据
                 self.client_hosts[client_ip] = detected_username
@@ -105,19 +111,7 @@ class ClientManager:
         # 尝试已保存的SSH凭据
         for cred in self.ssh_credentials:
             try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(
-                    client_ip,
-                    username=cred['username'],
-                    password=cred['password'],
-                    timeout=self.SSH_TIMEOUT,
-                    banner_timeout=self.SSH_TIMEOUT,
-                    auth_timeout=self.SSH_AUTH_TIMEOUT
-                )
-                stdout = ssh.exec_command('whoami')[1]
-                detected_username = stdout.read().decode().strip().split('\\')[-1]
-                ssh.close()
+                detected_username = self._ssh_whoami(client_ip, cred['username'], cred['password'])
 
                 self.client_hosts[client_ip] = detected_username
 
@@ -140,19 +134,7 @@ class ClientManager:
                 # 尝试用已保存的凭据连接并执行 whoami
                 for cred in self.ssh_credentials:
                     try:
-                        ssh = paramiko.SSHClient()
-                        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                        ssh.connect(
-                            client_ip,
-                            username=cred['username'],
-                            password=cred['password'],
-                            timeout=self.SSH_TIMEOUT,
-                            banner_timeout=self.SSH_TIMEOUT,
-                            auth_timeout=self.SSH_AUTH_TIMEOUT
-                        )
-                        stdout = ssh.exec_command('whoami')[1]
-                        real_username = stdout.read().decode().strip()
-                        ssh.close()
+                        real_username = self._ssh_whoami(client_ip, cred['username'], cred['password'])
                         return True, real_username, None
                     except Exception:
                         continue

@@ -63,7 +63,6 @@ class SSHManager:
     - 超时控制
     """
 
-
     def __init__(self, pool_size: int = 5):
         """
         初始化SSH管理器
@@ -191,8 +190,8 @@ class SSHManager:
         try:
             stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout, get_pty=get_pty)
 
-            stdout_text = stdout.read().decode('utf-8', errors='ignore')
-            stderr_text = stderr.read().decode('utf-8', errors='ignore')
+            stdout_text = CommonUtils.decode_ssh_output(stdout.read())
+            stderr_text = CommonUtils.decode_ssh_output(stderr.read())
             exit_code = stdout.channel.recv_exit_status()
 
             return stdout_text, stderr_text, exit_code

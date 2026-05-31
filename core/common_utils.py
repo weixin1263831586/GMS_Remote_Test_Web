@@ -20,6 +20,16 @@ logger = logging.getLogger(__name__)
 class CommonUtils:
     """通用工具类"""
 
+    @staticmethod
+    def decode_ssh_output(data: bytes) -> str:
+        """Decode SSH output, trying UTF-8 first then GBK for Windows hosts."""
+        for encoding in ('utf-8', 'gbk', 'latin-1'):
+            try:
+                return data.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return data.decode('utf-8', errors='replace')
+
     # 本地主机标识列表
     LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1']
 
