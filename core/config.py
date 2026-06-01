@@ -372,6 +372,10 @@ class ConfigManager:
             logger.error(f"Error loading runtime config: {e}")
             return None
 
+    def get_runtime_config(self) -> Dict[str, Any]:
+        """Public read-only access to the runtime configuration."""
+        return self._load_runtime_config() or {}
+
     def save_client_ssh_credentials(self, credentials: list) -> bool:
         """保存客户端 SSH 凭据到运行时配置文件。"""
         try:

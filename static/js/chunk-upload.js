@@ -1,5 +1,13 @@
 // ==================== 分块上传优化 ====================
 
+const CHUNK_UPLOAD_DEBUG = false;
+
+function chunkDebugLog(...args) {
+    if (CHUNK_UPLOAD_DEBUG) {
+        console.log(...args);
+    }
+}
+
 /**
  * 分块上传大文件
  * @param {File} file - 要上传的文件
@@ -27,33 +35,15 @@ async function uploadFileInChunks(file, url, options = {}) {
             return v.toString(16);
         });
 
-    const formatBytes = getFormatBytes();
-    console.log(`[ChunkUpload] Starting: ${file.name} (${formatBytes(fileSize)})`);
-    console.log(`[ChunkUpload] Chunk size: ${formatBytes(chunkSize)}, Total chunks: ${totalChunks}`);
-    console.log(`[ChunkUpload] Concurrent uploads: ${concurrent}`);
+    const formatBytes = window.formatBytes;
+    chunkDebugLog(`[ChunkUpload] Starting: ${file.name} (${formatBytes(fileSize)})`);
+    chunkDebugLog(`[ChunkUpload] Chunk size: ${formatBytes(chunkSize)}, Total chunks: ${totalChunks}`);
+    chunkDebugLog(`[ChunkUpload] Concurrent uploads: ${concurrent}`);
 
     // 已上传的块
     let uploadedChunks = new Set();
     let failedChunks = [];
     let completionResult = null;
-
-    // 如果支持断点续传，检查已上传的块（可选，会稍微减慢初始速度）
-    if (resume && false) { // 暂时禁用断点检查以提高速度
-        try {
-            const checkResponse = await fetch(`${url}?check_chunks=1&upload_id=${uploadId}`, {
-                method: 'POST'
-            });
-            if (checkResponse.ok) {
-                const uploadedData = await checkResponse.json();
-                if (uploadedData.uploaded_chunks) {
-                    uploadedChunks = new Set(uploadedData.uploaded_chunks);
-                    console.log(`[ChunkUpload] Resuming: ${uploadedChunks.size} chunks already uploaded`);
-                }
-            }
-        } catch (e) {
-            console.log('[ChunkUpload] Could not check resume status, starting fresh');
-        }
-    }
 
     // 上传单个块
     async function uploadChunk(chunkIndex, retry = 0) {
@@ -141,12 +131,9 @@ async function uploadFileInChunks(file, url, options = {}) {
     try {
         const chunks = Array.from({length: totalChunks}, (_, i) => i);
 
-        // 过滤已上传的块（断点续传）
-        const chunksToUpload = resume ?
-            chunks.filter(i => !uploadedChunks.has(i)) :
-            chunks;
+        const chunksToUpload = chunks;
 
-        console.log(`[ChunkUpload] Chunks to upload: ${chunksToUpload.length}/${totalChunks}`);
+        chunkDebugLog(`[ChunkUpload] Chunks to upload: ${chunksToUpload.length}/${totalChunks}`);
 
         // 分批并发上传
         for (let i = 0; i < chunksToUpload.length; i += concurrent) {
@@ -154,7 +141,7 @@ async function uploadFileInChunks(file, url, options = {}) {
             await Promise.all(batch.map(index => uploadChunk(index)));
         }
 
-        console.log(`[ChunkUpload] Completed: ${uploadedChunks.size}/${totalChunks} chunks`);
+        chunkDebugLog(`[ChunkUpload] Completed: ${uploadedChunks.size}/${totalChunks} chunks`);
 
         if (completionResult) {
             return completionResult;
@@ -180,27 +167,6 @@ async function uploadFileInChunks(file, url, options = {}) {
 }
 
 /**
- * 本地格式化字节大小函数 (fallback)
- */
-function formatBytesLocal(bytes, decimals = 2) {
-    if (bytes === 0) return '0 Bytes';
-    if (!bytes && bytes !== 0) return bytes + ' bytes';
-
-    const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-}
-
-/**
- * 获取格式化字节函数 (优先使用全局，否则使用本地)
- */
-function getFormatBytes() {
-    return window.formatBytes || formatBytesLocal;
-}
-
-/**
  * 使用分块上传替换原有的上传函数
  */
 async function uploadFileWithProgress(file, url, options = {}) {
@@ -215,12 +181,12 @@ async function uploadFileWithProgress(file, url, options = {}) {
 
     // 小文件（< 100MB）使用普通上传
     if (!useChunkUpload || file.size < 100 * 1024 * 1024) {
-        console.log('[Upload] Using regular upload for small file');
+        chunkDebugLog('[Upload] Using regular upload for small file');
         return uploadFileRegular(file, url, { onProgress, onStart, onComplete, onError });
     }
 
     // 大文件使用分块上传
-    console.log('[Upload] Using chunked upload for large file');
+    chunkDebugLog('[Upload] Using chunked upload for large file');
 
     if (onStart) onStart();
 

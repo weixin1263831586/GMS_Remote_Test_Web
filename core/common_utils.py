@@ -16,6 +16,14 @@ from .config import get_ubuntu_user
 
 logger = logging.getLogger(__name__)
 
+# Pre-compiled regex for stripping ANSI escape sequences (CSI, OSC, and other VT100 codes)
+_ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]|\x1b\].*?\x07|\x1b\[.*?[a-zA-Z]')
+
+
+def strip_ansi_codes(text: str) -> str:
+    """Remove ANSI escape sequences from text (CSI, OSC, and other VT100 codes)."""
+    return _ANSI_ESCAPE_PATTERN.sub('', text)
+
 
 class CommonUtils:
     """通用工具类"""

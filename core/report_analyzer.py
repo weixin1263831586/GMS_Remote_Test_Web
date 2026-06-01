@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
+from .archive_utils import ARCHIVE_EXTENSIONS
+
 logger = logging.getLogger(__name__)
 
 # 优先使用lxml,如果不可用则回退到ElementTree
@@ -741,7 +743,7 @@ class ReportFileHandler:
         try:
             if archive_path.endswith('.zip'):
                 self._extract_zip(archive_path)
-            elif archive_path.endswith(('.tar.gz', '.tgz')):
+            elif archive_path.endswith(('.tar.gz', '.tgz', '.tar.bz2', '.tar')):
                 self._extract_tar(archive_path)
             else:
                 logger.warning(f"不支持的压缩格式: {archive_path}")
@@ -758,7 +760,7 @@ class ReportFileHandler:
 
     def _extract_tar(self, tar_path: str):
         """解压TAR文件"""
-        with tarfile.open(tar_path, 'r:gz') as tf:
+        with tarfile.open(tar_path, 'r:*') as tf:
             tf.extractall(self.temp_dir)
 
     def find_xml_file(self) -> Optional[str]:
@@ -794,7 +796,7 @@ class ReportAnalyzer:
 
         lower_path = file_path.lower()
 
-        if lower_path.endswith(('.zip', '.tar.gz', '.tgz', '.tar')):
+        if lower_path.endswith(ARCHIVE_EXTENSIONS):
             report = self._analyze_archive(file_path)
         elif lower_path.endswith('.xml'):
             report = self.parser.parse_file(file_path)

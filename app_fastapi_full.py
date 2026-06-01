@@ -41,15 +41,11 @@ import urllib.request
 import urllib.parse
 import urllib.error
 from datetime import datetime, timedelta
-from cryptography.fernet import Fernet
 from urllib.parse import urlparse
-import hashlib
-import base64
 import mimetypes
 from typing import Dict, Any, List, Optional, Union, Tuple
 from contextlib import asynccontextmanager
 from collections import deque
-from enum import Enum
 import asyncio
 import aiohttp
 import tempfile
@@ -62,41 +58,77 @@ from starlette.websockets import WebSocketState
 
 # 导入API文档列表
 from core.api_docs_list import API_DOCS_LIST
-
-# ==================== 枚举定义 ====================
-
-class VerifiedBootState(str, Enum):
-    """设备启动验证状态"""
-    LOCKED = 'green'
-    UNLOCKED_ORANGE = 'orange'
-    UNLOCKED_YELLOW = 'yellow'
-
-    @property
-    def is_locked(self) -> bool:
-        """返回是否已锁定"""
-        return self == self.LOCKED
-
-    @property
-    def display_text(self) -> str:
-        """返回显示文本"""
-        return {
-            'green': '已锁定 (GREEN)',
-            'orange': '未锁定 (ORANGE)',
-            'yellow': '未锁定 (YELLOW)',
-        }[self.value]
-
-class LogLevel(str, Enum):
-    """日志级别"""
-    INFO = 'info'
-    WARNING = 'warning'
-    ERROR = 'error'
-    SUCCESS = 'success'
-
-class AnalysisMode(str, Enum):
-    """报告分析模式"""
-    UPLOAD = "upload"
-    SAVED = "saved"
-    AI = "ai"
+from core.api_response import ApiResponse, error_response, success_response
+from core.archive_utils import (
+    derive_suite_dir_name_from_archive,
+    is_complete_archive_file,
+    safe_extract_member_path,
+    sanitize_suite_dir_name,
+    sanitize_suite_filename_from_url,
+    strip_common_archive_root,
+)
+from core.enums import AnalysisMode, LogLevel, VerifiedBootState
+from core.redmine_utils import (
+    COMPILED_REDMINE_ATTACHMENT_PATTERN,
+    COMPILED_REDMINE_ISSUE_PATTERN,
+    COMPILED_REPORT_NAME_PATTERN,
+    REDMINE_ISSUE_PATTERN,
+    build_redmine_download_url,
+    create_basic_auth_header,
+    extract_filename_from_content_disposition,
+    extract_redmine_issue_id_from_text,
+    fetch_redmine_attachment_issue_id,
+    strip_redmine_report_prefix,
+)
+from core.security_audit_utils import (
+    AUDIT_PAGE_VIEW_SKIP_PAGES,
+    can_audit_path,
+    get_audit_operation,
+    should_audit_request,
+    summarize_audit_request,
+    summarize_audit_response,
+)
+from core.schemas import (
+    ADBForwardStartRequest,
+    ClientInfoRequest,
+    DeviceActionRequest,
+    DeviceLockRequest,
+    DeviceShellRequest,
+    NotificationCreateRequest,
+    NotificationReadRequest,
+    SNBurnRequest,
+    SecurityPageViewRequest,
+    SuiteApkAnalyzeRequest,
+    TestParseArgsRequest,
+    TestParseArgsResponse,
+    TestStartRequest,
+    TestSuiteAddLocalRequest,
+    TestSuiteDownloadRequest,
+    TestSuiteExtractRequest,
+    TradefedListResultsRequest,
+    USBIPDisconnectRequest,
+    USBIPStartRequest,
+    VNCStartRequest,
+    VPNConnectRequest,
+    WifiConnectRequest,
+)
+from core.test_suite_utils import (
+    TRADEFED_BINARY_LIST,
+    build_suite_info,
+    detect_test_type_from_dir_path,
+    detect_test_type_from_suite_path,
+    ensure_tradefed_executable,
+    get_default_suites_path,
+    get_effective_local_server,
+    is_config_host_local,
+    list_local_test_suites,
+)
+from core.upload_utils import (
+    extract_report_name_from_upload,
+    merge_files_to_path,
+    safe_upload_target_path,
+    save_upload_to_path,
+)
 
 # ==================== 常量定义 ====================
 
@@ -112,110 +144,8 @@ GSI_PROGRESS_POLL_INTERVAL = 0.5  # 服务器端进度更新间隔（秒）
 DEFAULT_FAVICON_TIMEOUT = 10  # 默认超时时间（秒）
 MAX_BATCH_SIZE = 20  # 批量请求最大数量
 
-# ==================== 统一响应格式 ====================
-
-def success_response(data: Any = None, message: str = "Success") -> JSONResponse:
-    """成功响应"""
-    content = {'success': True, 'message': message}
-    if data is not None:
-        content['data'] = data
-    return JSONResponse(content=content)
-
-def error_response(error: str, status_code: int = 500, detail: Any = None) -> JSONResponse:
-    """错误响应"""
-    content = {'success': False, 'error': error}
-    if detail is not None:
-        content['detail'] = detail
-    return JSONResponse(content=content, status_code=status_code)
-
-def validation_error_response(errors: List[str]) -> JSONResponse:
-    """验证错误响应"""
-    return error_response(
-        error="Validation failed",
-        status_code=422,
-        detail={"errors": errors}
-    )
 GSI_PROGRESS_INCREMENT = 5  # 每次增加的百分比
 GSI_PROGRESS_MAX = 95  # 最大进度百分比（等待完成前）
-
-# TRADEFED二进制文件映射
-TRADEFED_BINARY_MAP = {
-    'cts': 'cts-tradefed',
-    'gsi': 'cts-tradefed',
-    'gts': 'gts-tradefed',
-    'sts': 'sts-tradefed',
-    'vts': 'vts-tradefed',
-    'xts': 'xts-tradefed'
-}
-
-# 特殊测试类型（不在主映射中）
-SPECIAL_TEST_TYPES = {
-    'cts-v-host-tradefed': 'cts-v',
-    'apts-tradefed': 'apts',
-    'gts-root-tradefed': 'gts-root',
-}
-
-# 预计算反向映射，避免每次调用函数时重复创建
-TRADEFED_BINARY_REVERSE_MAP = {v: k for k, v in TRADEFED_BINARY_MAP.items()}
-
-# 预编译正则表达式，避免重复编译
-SUITE_TYPE_PATTERN = re.compile(r'/android-([a-z]+)')
-
-# 预计算tradefed文件列表，避免在循环中重复计算
-TRADEFED_BINARY_LIST = list(set(TRADEFED_BINARY_MAP.values()))
-
-# 测试类型检测优先级（VTS优先于CTS，避免误匹配）
-TEST_TYPE_DETECTION_PRIORITY = ['vts', 'gts', 'sts', 'cts']
-
-def get_test_type_from_binary(binary_name: str) -> str:
-    """从二进制文件名获取测试类型"""
-    if result := SPECIAL_TEST_TYPES.get(binary_name):
-        return result
-    if result := TRADEFED_BINARY_REVERSE_MAP.get(binary_name):
-        return result
-    return binary_name.replace('-tradefed', '')
-
-def detect_test_type_from_suite_path(suite_path: str) -> Optional[str]:
-    """从测试套件路径检测测试类型
-
-    Args:
-        suite_path: 测试套件路径，如 /path/to/android-gts/tools
-
-    Returns:
-        检测到的测试类型（小写），如 'gts'，如果无法检测则返回 None
-    """
-    if not suite_path:
-        return None
-
-    suite_match = SUITE_TYPE_PATTERN.search(suite_path.lower())
-    if suite_match:
-        detected_type = suite_match.group(1)
-        # 验证是否为已知的测试类型
-        if detected_type in TRADEFED_BINARY_MAP or detected_type in SPECIAL_TEST_TYPES:
-            return detected_type
-    return None
-
-def detect_test_type_from_dir_path(dir_path: str) -> Optional[str]:
-    """从目录路径检测测试类型（用于重试目录）
-
-    Args:
-        dir_path: 目录路径，如 /path/to/20240101_120000/android-vts-results
-
-    Returns:
-        检测到的测试类型（小写），如 'vts'，如果无法检测则返回 None
-    """
-    if not dir_path:
-        return None
-
-    dir_lower = dir_path.lower()
-    # 按优先级检测（VTS优先于CTS，避免误匹配）
-    for test_type in TEST_TYPE_DETECTION_PRIORITY:
-        if test_type in dir_lower:
-            # 特殊处理：CTS不能匹配到GTS
-            if test_type == 'cts' and 'gts' in dir_lower:
-                continue
-            return test_type
-    return None
 
 # ==================== Lifespan 事件处理 ====================
 
@@ -285,13 +215,14 @@ async def lifespan(app: FastAPI):
                     with global_state.websocket_connections_lock:
                         clients = list(global_state.websocket_connections.items())
 
-                    for client_id, ws in clients:
+                    async def _send_to(client_id, ws):
                         try:
                             if ws.client_state == WebSocketState.CONNECTED:
                                 await ws.send_json(event)
-                                logger.debug(f"Sent USB event to client {client_id}: {event.get('type')}")
-                        except Exception as e:
-                            logger.debug(f"Error sending USB event to client {client_id}: {e}")
+                        except Exception:
+                            pass
+
+                    await asyncio.gather(*[_send_to(cid, ws) for cid, ws in clients])
                 except queue.Empty:
                     await asyncio.sleep(0.2)
                 except asyncio.CancelledError:
@@ -346,7 +277,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
 import uvicorn
 
 # 添加项目根目录到Python路径
@@ -360,7 +290,7 @@ from core.device import device_manager
 from core.test_report import test_report_manager
 from core.vnc import vnc_manager, calculate_window_positions
 from core.adb_forward import adb_forward_manager
-from core.usbip import usbip_manager, split_host_port, USBIPD_INSTALL_CMD, USBIPD_INSTALL_GUIDE, parse_usbipd_android_busids, parse_usbipd_busid_statuses
+from core.usbip import usbip_manager, split_host_port, USBIPD_INSTALL_CMD, USBIPD_INSTALL_GUIDE
 from core.common_utils import CommonUtils
 from core.device_utils import DeviceUtils
 from core.report_analyzer import ReportAnalyzer
@@ -377,24 +307,6 @@ from modules.icon_fetcher import IconFetcher
 # 导入USB监控模块
 from core.usb_monitor import init_usb_monitor, start_usb_monitor, stop_usb_monitor
 
-# Redmine URL 模式常量
-REDMINE_ISSUE_PATTERN = r'/issues/(\d+)'
-REDMINE_ATTACHMENT_PATTERN = r'/attachments/(?:download/)?(\d+)'
-
-# 预编译正则表达式以提高性能
-COMPILED_REDMINE_ISSUE_PATTERN = re.compile(REDMINE_ISSUE_PATTERN)
-COMPILED_REDMINE_ATTACHMENT_PATTERN = re.compile(REDMINE_ATTACHMENT_PATTERN)
-COMPILED_REPORT_NAME_PATTERN = re.compile(r'Redmine-(\d+)-(.+)')
-
-def create_basic_auth_header(username: str, password: str) -> Dict[str, str]:
-    """创建 Basic Authentication 头"""
-    credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
-    return {'Authorization': f'Basic {credentials}'}
-
-def build_redmine_download_url(base_url: str, attachment_id: str) -> str:
-    """构建 Redmine 附件下载 URL"""
-    return f"{base_url}/attachments/download/{attachment_id}/"
-
 async def prepare_redmine_headers() -> Dict[str, str]:
     """
     准备带有认证的 Redmine API 请求头
@@ -408,145 +320,6 @@ async def prepare_redmine_headers() -> Dict[str, str]:
         password = stored_creds.get('password')
         return create_basic_auth_header(username, password)
     return {}
-
-def extract_filename_from_content_disposition(content_disposition: str) -> Optional[str]:
-    """从 Content-Disposition header 中提取文件名"""
-    if not content_disposition:
-        return None
-    # 匹配 filename*=UTF-8''xxx 或 filename="xxx" 或 filename=xxx
-    filename_match = re.search(r"filename\*=UTF-8''([^\;]+)|filename=\"([^\"]+)\"|filename=([^\s;]+)", content_disposition)
-    if filename_match:
-        filename = filename_match.group(1) or filename_match.group(2) or filename_match.group(3)
-        return urllib.parse.unquote(filename) if filename else None
-    return None
-
-def extract_redmine_issue_id_from_text(text: str) -> Optional[str]:
-    """Extract a Redmine issue id from URL or dropped HTML/text context."""
-    if not text:
-        return None
-    match = COMPILED_REDMINE_ISSUE_PATTERN.search(text)
-    return match.group(1) if match else None
-
-def strip_redmine_report_prefix(filename: str) -> str:
-    """Remove an existing Redmine-{issue}- prefix before applying the current issue prefix."""
-    match = COMPILED_REPORT_NAME_PATTERN.match(filename or '')
-    return match.group(2) if match else (filename or 'downloaded_file.zip')
-
-async def fetch_redmine_attachment_issue_id(base_url: str, attachment_id: str, headers: Dict[str, str]) -> Optional[str]:
-    """Best-effort lookup of the issue page linked by a Redmine attachment detail page."""
-    detail_url = f"{base_url}/attachments/{attachment_id}"
-    request_headers = dict(headers or {})
-    request_headers.setdefault('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-    request_headers.setdefault('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8')
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(detail_url, headers=request_headers, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True) as response:
-                final_url_issue_id = extract_redmine_issue_id_from_text(str(response.url))
-                if final_url_issue_id:
-                    return final_url_issue_id
-
-                content_type = response.headers.get('Content-Type', '')
-                if response.status != 200 or 'html' not in content_type.lower():
-                    logger.info(f"[Report Analysis] 附件详情页未返回HTML: {detail_url}, status={response.status}, type={content_type}")
-                    return None
-
-                text = await response.text(errors='ignore')
-                link_match = re.search(r'href=["\'][^"\']*/issues/(\d+)[^"\']*["\']', text)
-                if link_match:
-                    return link_match.group(1)
-                return extract_redmine_issue_id_from_text(text)
-    except Exception as e:
-        logger.warning(f"[Report Analysis] 查询附件详情页失败: {detail_url}, error={e}")
-        return None
-
-def extract_report_name_from_upload(files: List[UploadFile]) -> str:
-    """
-    从上传的文件中提取报告名称
-
-    Args:
-        files: 上传的文件列表
-
-    Returns:
-        报告名称字符串
-    """
-    if not files or not files[0].filename:
-        return 'Unknown Report'
-
-    if len(files) == 1:
-        return files[0].filename
-
-    # 多文件上传 - 使用文件夹名称
-    first_file = files[0].filename
-    folder_name = os.path.dirname(first_file) or os.path.basename(first_file)
-    return folder_name
-
-
-def normalize_upload_relative_path(filename: Optional[str], allow_nested: bool = True) -> str:
-    """Normalize browser-provided upload names and keep them relative."""
-    raw_name = (filename or '').replace('\\', '/').strip()
-    if not raw_name:
-        raise ValueError("文件名无效")
-
-    normalized = os.path.normpath(raw_name).replace('\\', '/')
-    if normalized in ('.', '..') or normalized.startswith('../') or os.path.isabs(normalized):
-        raise ValueError("非法文件路径")
-
-    if not allow_nested:
-        normalized = os.path.basename(normalized)
-
-    if not normalized or normalized in ('.', '..'):
-        raise ValueError("文件名无效")
-    return normalized
-
-
-def safe_upload_target_path(base_dir: str, filename: Optional[str], allow_nested: bool = True) -> str:
-    """Build a safe destination path for an uploaded file."""
-    relative_path = normalize_upload_relative_path(filename, allow_nested=allow_nested)
-    base_abs = os.path.abspath(base_dir)
-    target_abs = os.path.abspath(os.path.join(base_abs, relative_path))
-    if os.path.commonpath([base_abs, target_abs]) != base_abs:
-        raise ValueError("非法文件路径")
-    return target_abs
-
-
-def copy_fileobj_to_path(source, destination: str, max_size: Optional[int] = None, chunk_size: int = 1024 * 1024) -> int:
-    """Copy a file-like object to disk in chunks and return bytes written."""
-    bytes_written = 0
-    os.makedirs(os.path.dirname(destination), exist_ok=True)
-    with open(destination, 'wb') as target:
-        while True:
-            chunk = source.read(chunk_size)
-            if not chunk:
-                break
-            bytes_written += len(chunk)
-            if max_size is not None and bytes_written > max_size:
-                raise ValueError(f"文件过大，最大支持 {max_size // (1024 * 1024)}MB")
-            target.write(chunk)
-    return bytes_written
-
-
-async def save_upload_to_path(upload_file: UploadFile, destination: str, max_size: Optional[int] = None) -> int:
-    """Persist an UploadFile without loading the whole file into memory."""
-    await upload_file.seek(0)
-    return await asyncio.to_thread(copy_fileobj_to_path, upload_file.file, destination, max_size)
-
-
-def merge_files_to_path(source_paths: List[str], destination: str, chunk_size: int = 1024 * 1024) -> int:
-    """Merge files into destination using bounded memory."""
-    bytes_written = 0
-    os.makedirs(os.path.dirname(destination), exist_ok=True)
-    with open(destination, 'wb') as outfile:
-        for source_path in source_paths:
-            with open(source_path, 'rb') as infile:
-                while True:
-                    chunk = infile.read(chunk_size)
-                    if not chunk:
-                        break
-                    outfile.write(chunk)
-                    bytes_written += len(chunk)
-    return bytes_written
-
 
 # 日志配置
 logging.basicConfig(
@@ -566,117 +339,6 @@ PROXY_HEADERS_ENABLED = os.getenv(
     'true' if GMS_ENV == 'production' else 'false'
 ).strip().lower() == 'true'
 FORWARDED_ALLOW_IPS = os.getenv('GMS_FORWARDED_ALLOW_IPS', '127.0.0.1')
-
-
-def get_default_suites_path(config: Dict[str, Any]) -> str:
-    """Get default suites path from config or environment"""
-    ubuntu_user = config_manager.get_ubuntu_user(config)
-    return config.get('suites_path', f"/home/{ubuntu_user}/GMS-Suite")
-
-
-def is_config_host_local(config: Dict[str, Any]) -> bool:
-    return CommonUtils.is_local_host(config_manager.get_ubuntu_host(config))
-
-
-def get_effective_local_server(client_id: str, requested_local_server: str = "") -> str:
-    """Resolve the callback host for the current client."""
-    if requested_local_server:
-        return requested_local_server
-
-    dynamic_config = config_manager._load_runtime_config() or {}
-    dynamic_local_server = dynamic_config.get('local_server')
-    if dynamic_local_server:
-        return dynamic_local_server
-
-    return client_id
-
-
-def build_suite_info(full_path: str) -> Optional[Dict[str, str]]:
-    """Build suite info from tradefed binary path.
-
-    For cts-v, the tools_path should be the android-cts-verifier directory,
-    not the deep nested android-cts-v-host/tools path.
-    """
-    full_path = full_path.strip()
-    if not full_path:
-        return None
-
-    parts = full_path.split('/')
-    tradefed_name = parts[-1]
-    test_type = get_test_type_from_binary(tradefed_name)
-
-    tools_dir = '/'.join(parts[:-1])
-
-    # 特殊处理 cts-v：找到 android-cts-verifier 目录作为 tools_path
-    if test_type == 'cts-v':
-        # 从后向前查找 android-cts-verifier 目录
-        for i, part in enumerate(parts):
-            if part == 'android-cts-verifier':
-                tools_dir = '/'.join(parts[:i+1])
-                break
-
-    version_dir = next(
-        (
-            p for p in parts
-            if p.startswith('android-')
-            and (
-                test_type in p
-                or (test_type == 'gsi' and 'cts' in p)
-                or (test_type == 'gts-root' and 'gts' in p)
-            )
-        ),
-        ""
-    )
-    if test_type == 'gsi' and version_dir:
-        test_type = 'cts'
-    if test_type == 'gts-root' and version_dir:
-        test_type = 'gts'
-
-    return {
-        'test_type': test_type,
-        'version': version_dir,
-        'tools_path': tools_dir,
-        'full_path': full_path,
-        'binary': tradefed_name
-    }
-
-
-def ensure_tradefed_executable(full_path: str) -> bool:
-    """Ensure extracted tradefed launchers are executable."""
-    if os.access(full_path, os.X_OK):
-        return True
-    try:
-        current_mode = os.stat(full_path).st_mode
-        os.chmod(full_path, current_mode | 0o111)
-        return os.access(full_path, os.X_OK)
-    except Exception as e:
-        logger.warning(f"[TestSuites] Failed to chmod tradefed launcher {full_path}: {e}")
-        return False
-
-
-def list_local_test_suites(base_path: str) -> List[Dict[str, str]]:
-    suites = []
-    if not os.path.isdir(base_path):
-        logger.info(f"[TestSuites] Local base path not found: {base_path}")
-        return suites
-
-    max_depth = 8  # 增加深度以支持 verifier 等嵌套较深的套件
-    base_depth = base_path.rstrip(os.sep).count(os.sep)
-    for root, dirs, files in os.walk(base_path):
-        if root.rstrip(os.sep).count(os.sep) - base_depth >= max_depth:
-            dirs[:] = []
-        for file_name in files:
-            if not file_name.endswith('-tradefed'):
-                continue
-            full_path = os.path.join(root, file_name)
-            if not ensure_tradefed_executable(full_path):
-                continue
-            suite = build_suite_info(full_path)
-            if suite:
-                suites.append(suite)
-
-    suites.sort(key=lambda item: (item['test_type'], item['version'], item['full_path']))
-    return suites
 
 
 def _parse_csv_env(env_name: str, default: str) -> List[str]:
@@ -740,196 +402,6 @@ from starlette.middleware.gzip import GZipMiddleware
 
 # 添加GZip压缩中间件（最小500字节启动压缩，提升传输效率）
 app.add_middleware(GZipMiddleware, minimum_size=500)
-
-
-AUDIT_SKIP_PREFIXES = (
-    '/static/',
-    '/novnc/',
-    '/api/security-audit/page-view',
-    '/api/security-audit/logs',
-    '/api/security-audit/detail',
-    '/api/security-audit/export',
-    '/api/notifications',
-)
-AUDIT_SKIP_PATHS = {'/favicon.ico'}
-AUDIT_WEB_READONLY_NOISE_PATHS = {
-    '/',
-    '/templates/architecture.html',
-    '/api/config/ai',
-    '/api/config/opengrok',
-    '/api/config/read',
-    '/api/config/redmine',
-    '/api/desktop/vnc/status',
-    '/api/devices/list',
-    '/api/devices/management',
-    '/api/devices/user-locked',
-    '/api/reports/list',
-    '/api/ssh/sshd',
-    '/api/system/docs',
-    '/api/system/health',
-    '/api/system/help',
-    '/api/system/skills',
-    '/api/test/logs/get',
-    '/api/test/logs/list',
-    '/api/test/status',
-    '/api/test/suites',
-    '/api/test/suites/files',
-    '/api/tools/load',
-    '/api/usbip/status',
-    '/api/users/current',
-    '/api/users/list',
-    '/api/vpn/status',
-}
-AUDIT_WEB_READONLY_NOISE_PREFIXES = (
-    '/api/favicon/',
-)
-AUDIT_PAGE_VIEW_SKIP_PAGES = {'security-audit'}
-
-
-def can_audit_path(path: str) -> bool:
-    if path in AUDIT_SKIP_PATHS:
-        return False
-    return not any(path.startswith(prefix) for prefix in AUDIT_SKIP_PREFIXES)
-
-
-def should_audit_request(path: str, source: str, method: str) -> bool:
-    if not can_audit_path(path):
-        return False
-
-    method_upper = method.upper()
-    if source == 'web' and method_upper in {'GET', 'HEAD'}:
-        if path in AUDIT_WEB_READONLY_NOISE_PATHS:
-            return False
-        if any(path.startswith(prefix) for prefix in AUDIT_WEB_READONLY_NOISE_PREFIXES):
-            return False
-
-    return True
-
-
-def get_audit_operation(path: str, method: str) -> str:
-    if path == '/':
-        return '打开Web首页'
-    return f"{method} {path}"
-
-
-MAX_AUDIT_REQUEST_BODY_BYTES = 64 * 1024
-MAX_AUDIT_RESPONSE_BODY_BYTES = 128 * 1024
-
-
-def _safe_int(value: Optional[str], default: int = 0) -> int:
-    try:
-        return int(value or default)
-    except (TypeError, ValueError):
-        return default
-
-
-async def summarize_audit_request(request: Request, should_audit: bool) -> Dict[str, Any]:
-    """Build a safe request summary without recording file contents or secrets."""
-    if not should_audit:
-        return {}
-
-    content_type = (request.headers.get('content-type') or '').lower()
-    content_length = _safe_int(request.headers.get('content-length'))
-    summary = {
-        'content_type': content_type.split(';')[0] if content_type else '',
-        'content_length': content_length,
-        'query': security_audit_logger.sanitize_mapping(dict(request.query_params)),
-    }
-
-    if request.method.upper() not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
-        return summary
-
-    if content_length > MAX_AUDIT_REQUEST_BODY_BYTES:
-        if 'multipart/form-data' in content_type:
-            summary['body'] = {
-                'body_type': 'multipart',
-                'captured': False,
-                'reason': '文件上传内容不记录',
-            }
-        else:
-            summary['body'] = {
-                'captured': False,
-                'reason': f'请求体超过 {MAX_AUDIT_REQUEST_BODY_BYTES} 字节',
-            }
-        return summary
-
-    if 'application/json' not in content_type and 'application/x-www-form-urlencoded' not in content_type:
-        if 'multipart/form-data' in content_type:
-            summary['body'] = {
-                'body_type': 'multipart',
-                'captured': False,
-                'reason': '文件上传内容不记录',
-            }
-        return summary
-
-    body = await request.body()
-    body_sent = False
-
-    async def replay_body():
-        nonlocal body_sent
-        if body_sent:
-            return {'type': 'http.request', 'body': b'', 'more_body': False}
-        body_sent = True
-        return {'type': 'http.request', 'body': body, 'more_body': False}
-
-    request._receive = replay_body
-
-    if 'application/json' in content_type:
-        summary['body'] = security_audit_logger.summarize_json_body(body)
-    else:
-        summary['body'] = security_audit_logger.summarize_form_body(body)
-    return summary
-
-
-async def summarize_audit_response(response) -> Tuple[Any, Dict[str, Any]]:
-    """Capture small JSON responses for audit detail and rebuild the response."""
-    if response is None:
-        return response, {}
-
-    content_type = (response.headers.get('content-type') or '').lower()
-    content_encoding = (response.headers.get('content-encoding') or '').lower()
-    content_length = _safe_int(response.headers.get('content-length'))
-
-    summary = {
-        'content_type': content_type.split(';')[0] if content_type else '',
-        'content_length': content_length,
-    }
-
-    if 'application/json' not in content_type or content_encoding:
-        return response, summary
-    if content_length > MAX_AUDIT_RESPONSE_BODY_BYTES:
-        summary.update({'captured': False, 'reason': '响应体过大'})
-        return response, summary
-    if not hasattr(response, 'body_iterator'):
-        return response, summary
-
-    body_parts = []
-    async for chunk in response.body_iterator:
-        if isinstance(chunk, str):
-            chunk = chunk.encode('utf-8')
-        body_parts.append(chunk)
-
-    body = b''.join(body_parts)
-    summary['content_length'] = len(body)
-    try:
-        parsed = json.loads(body.decode('utf-8'))
-        if isinstance(parsed, dict):
-            summary['body'] = security_audit_logger.sanitize_mapping(parsed)
-        else:
-            summary['body'] = security_audit_logger.sanitize_value('response', parsed)
-    except Exception as e:
-        summary['parse_error'] = str(e)
-        summary['preview'] = body[:300].decode('utf-8', errors='replace')
-
-    headers = dict(response.headers)
-    headers.pop('content-length', None)
-    rebuilt = Response(
-        content=body,
-        status_code=response.status_code,
-        headers=headers,
-        media_type=response.media_type
-    )
-    return rebuilt, summary
 
 
 @app.middleware("http")
@@ -1276,7 +748,7 @@ DEVICE_SSH_POOLS_MAX = 10  # 最大设备SSH连接池数量
 # ==================== 通用工具函数 ====================
 
 # Pre-compiled regex patterns for efficiency
-_ANSI_ESCAPE_PATTERN = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+_ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]|\x1b\].*?\x07|\x1b\[.*?[a-zA-Z]')
 _IP_PATTERN = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
 _PING_RTT_PATTERN = re.compile(r'rtt min/avg/max/mdev = [\d.]+/([\d.]+)/[\d.]+/[\d.]+ ms')
 _PING_AVG_PATTERN = re.compile(r'avg[=\s]+([\d.]+)', re.IGNORECASE)
@@ -1484,7 +956,7 @@ async def broadcast_device_change(devices: List[str], disconnected: List[str] = 
         notification_title = 'USB设备已连接'
         notification_message = '连接：' + ', '.join(connected)
 
-    for client_id, ws in clients:
+    async def _send_device_change(client_id, ws):
         try:
             if ws.client_state == WebSocketState.CONNECTED:
                 client_message = dict(message)
@@ -1504,6 +976,8 @@ async def broadcast_device_change(devices: List[str], disconnected: List[str] = 
                 await ws.send_json(client_message)
         except Exception as e:
             logger.debug(f"Failed to broadcast to {client_id}: {e}")
+
+    await asyncio.gather(*[_send_device_change(cid, ws) for cid, ws in clients])
 
 async def notify_device_change(devices_to_remove: List[str], context: str = "USB/IP Stop"):
     """通知设备变化到 WebSocket 客户端
@@ -1536,43 +1010,6 @@ def format_device_list_info(devices: List[str]) -> str:
         格式化后的字符串，如 " (device1, device2)" 或空字符串
     """
     return f" ({', '.join(devices)})" if devices else ""
-
-# ==================== 统一响应格式工具类 ====================
-
-class ApiResponse:
-
-    @staticmethod
-    def success(data=None, message="操作成功"):
-        """成功响应"""
-        response = {'success': True}
-        if data is not None:
-            response['data'] = data
-        if message:
-            response['message'] = message
-        return JSONResponse(
-            content=response,
-            headers={"Content-Type": "application/json; charset=utf-8"}
-        )
-
-    @staticmethod
-    def error(error_message, status_code=500, **extra_fields):
-        response = {'success': False, 'error': error_message}
-        response.update(extra_fields)
-        return JSONResponse(
-            content=response,
-            status_code=status_code,
-            headers={"Content-Type": "application/json; charset=utf-8"}
-        )
-
-    @staticmethod
-    def device_results(results, operation_name):
-        """设备批量操作结果"""
-        success_count = sum(1 for r in results if r.get('success', False))
-        fail_count = len(results) - success_count
-        return ApiResponse.success({
-            'results': results,
-            'summary': {'total': len(results), 'success': success_count, 'failed': fail_count}
-        }, f"{operation_name}完成: 成功 {success_count} 台, 失败 {fail_count} 台")
 
 # ==================== 工具函数 ====================
 
@@ -1823,14 +1260,14 @@ async def broadcast_device_lock_update(device_ids: list = None):
                 })
 
         # 广播到所有连接的客户端
-        for client_id, ws in global_state.websocket_connections.items():
+        lock_msg = {'type': 'device_lock_update', 'devices': device_updates}
+        async def _send_lock_update(cid, ws):
             try:
-                await ws.send_json({
-                    'type': 'device_lock_update',
-                    'devices': device_updates
-                })
-            except Exception as e:
-                logger.warning(f"[Broadcast Device Lock] 发送到客户端 {client_id} 失败: {e}")
+                await ws.send_json(lock_msg)
+            except Exception:
+                pass
+
+        await asyncio.gather(*[_send_lock_update(cid, ws) for cid, ws in global_state.websocket_connections.items()])
 
     except Exception as e:
         logger.error(f"[Broadcast Device Lock] 广播设备锁定更新失败: {e}")
@@ -1863,106 +1300,6 @@ def update_user_state_field(client_id: str, updates: dict):
             logger.info(f"[State] Updated {client_id}: {list(updates.keys())} = {updates}")
         else:
             logger.warning(f"[State] Client {client_id} not found in user_states")
-
-# ==================== Pydantic数据模型 ====================
-
-class ClientInfoRequest(BaseModel):
-    """客户端信息请求"""
-    username: Optional[str] = None
-    password: Optional[str] = None
-    ip: Optional[str] = None
-
-class DeviceLockRequest(BaseModel):
-    """设备锁定请求（支持单设备和批量操作）"""
-    device_id: Optional[str] = None  # 单设备ID（旧格式）
-    devices: Optional[List[str]] = None  # 设备ID列表（新格式，支持批量）
-    action: str = 'lock'  # lock, unlock
-
-class TestStartRequest(BaseModel):
-    """测试启动请求"""
-    test_type: str = ""  # 改为空字符串，后面会自动检测
-    test_module: str = ""
-    test_case: str = ""
-    retry_dir: str = ""
-    test_suite: str = ""
-    local_server: str = ""
-    devices: List[str] = []
-    client_id: str = "test_client"
-
-class DeviceActionRequest(BaseModel):
-    """设备操作请求"""
-    devices: List[str] = Field(..., description="设备ID列表")
-
-class WifiConnectRequest(DeviceActionRequest):
-    """WiFi连接请求"""
-    ssid: str = "AndroidWifi"
-    password: str = "1234567890"
-
-class VNCStartRequest(BaseModel):
-    """VNC启动请求"""
-    host: Optional[str] = None
-    password: Optional[str] = None
-    vnc_password: Optional[str] = None
-
-class ADBForwardStartRequest(BaseModel):
-    """ADB转发启动请求"""
-    device_host: str
-    device_password: Optional[str] = Field(default="", description="设备主机SSH密码")
-
-class USBIPStartRequest(BaseModel):
-    """USB/IP启动请求"""
-    device_host: Optional[str] = None
-    device_password: Optional[str] = Field(default="", description="设备主机SSH密码")
-
-class USBIPDisconnectRequest(BaseModel):
-    """USB/IP断开请求"""
-    device_host: Optional[str] = None
-
-class VPNConnectRequest(BaseModel):
-    """VPN 连接请求"""
-    vpn_name: Optional[str] = None
-
-class FirmwareBurnRequest(BaseModel):
-    devices: List[str]
-    system_img: str
-    vendor_img: Optional[str] = ""
-    misc_img: Optional[str] = ""
-
-class GSIBurnRequest(BaseModel):
-    devices: List[str]
-    system_img: str
-    vendor_img: Optional[str] = ""
-    script_path: Optional[str] = ""
-
-class SNBurnRequest(BaseModel):
-    devices: List[str]
-    sn_code: str
-
-class ScreenStartRequest(BaseModel):
-    """屏幕录制启动请求"""
-    device_id: str
-    duration: int = 60
-
-
-class NotificationCreateRequest(BaseModel):
-    """前端主动创建通知请求"""
-    title: str = Field(..., max_length=120)
-    message: str = Field(default="", max_length=600)
-    level: str = Field(default="info", max_length=20)
-    category: str = Field(default="system", max_length=50)
-    data: Optional[Dict[str, Any]] = None
-
-
-class NotificationReadRequest(BaseModel):
-    """通知已读请求；ids 为空时表示全部标记已读。"""
-    ids: Optional[List[str]] = None
-
-
-class SecurityPageViewRequest(BaseModel):
-    """前端页面访问审计请求"""
-    page: str = Field(..., max_length=80)
-    title: Optional[str] = Field(default="", max_length=160)
-    hash: Optional[str] = Field(default="", max_length=160)
 
 # ==================== 基础端点 ====================
 
@@ -2419,7 +1756,7 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
         }, status_code=400)
 
     # 加载现有动态配置
-    existing_dynamic = config_manager._load_runtime_config() or {}
+    existing_dynamic = config_manager.get_runtime_config()
     client_hosts = existing_dynamic.get('client_hosts', {})
     client_hosts[client_ip] = username
 
@@ -2924,7 +2261,7 @@ async def get_ai_config(request: Request):
 
 
 @app.get("/api/tailscale/status")
-async def get_tailscale_status():
+async def get_tailscale_status(request: Request):
     """获取 Tailscale 内网访问地址"""
     try:
         status = await asyncio.to_thread(_get_tailscale_status)
@@ -2932,7 +2269,7 @@ async def get_tailscale_status():
         return error_response(f'无法获取 Tailscale 信息：{str(e)}', status_code=503)
 
     if status.get('ip'):
-        url = _build_tailscale_url(status['ip'])
+        url = _build_tailscale_url(status['ip'], request)
         return JSONResponse(content={'success': True, 'public_url': url, 'connected': status.get('connected', False)})
 
     return error_response('Tailscale 未连接或未安装', status_code=404)
@@ -2965,10 +2302,20 @@ def _get_tailscale_status() -> dict:
     return {'ip': None, 'connected': False, 'error': error}
 
 
-def _build_tailscale_url(ip: str) -> str:
+def _build_tailscale_url(ip: str, request: Optional[Request] = None) -> str:
     """Build Tailscale access URL from IP and GMS port."""
     port = os.environ.get('GMS_PORT', '5001')
-    return f'http://{ip}:{port}'
+    scheme = (
+        os.environ.get('GMS_TAILSCALE_SCHEME')
+        or os.environ.get('GMS_PUBLIC_SCHEME')
+        or (request.headers.get('x-forwarded-proto') if request else None)
+        or (request.url.scheme if request else None)
+        or 'http'
+    )
+    scheme = str(scheme).split(',', 1)[0].strip().lower()
+    if scheme not in {'http', 'https'}:
+        scheme = 'http'
+    return f'{scheme}://{ip}:{port}'
 
 
 _tailscale_start_lock = asyncio.Lock()
@@ -2980,7 +2327,7 @@ async def ensure_tailscale_url(request: Request):
     status = await asyncio.to_thread(_get_tailscale_status)
 
     if status.get('ip'):
-        url = _build_tailscale_url(status['ip'])
+        url = _build_tailscale_url(status['ip'], request)
         return JSONResponse(content={
             'success': True,
             'public_url': url,
@@ -2994,7 +2341,7 @@ async def ensure_tailscale_url(request: Request):
         if status.get('ip'):
             return JSONResponse(content={
                 'success': True,
-                'public_url': _build_tailscale_url(status['ip']),
+                'public_url': _build_tailscale_url(status['ip'], request),
                 'connected': status.get('connected', False)
             })
         try:
@@ -3010,7 +2357,7 @@ async def ensure_tailscale_url(request: Request):
                 if status.get('ip'):
                     return JSONResponse(content={
                         'success': True,
-                        'public_url': _build_tailscale_url(status['ip']),
+                        'public_url': _build_tailscale_url(status['ip'], request),
                         'connected': status.get('connected', False)
                     })
             error_detail = (result.stderr or result.stdout or '').strip()[-500:]
@@ -3024,7 +2371,7 @@ async def ensure_tailscale_url(request: Request):
 @app.post("/api/config/update")
 async def update_config(req: dict):
     """更新配置 - 只修改动态配置，禁止修改config.json"""
-    existing_dynamic = config_manager._load_runtime_config() or {}
+    existing_dynamic = config_manager.get_runtime_config()
 
     # 动态配置字段（保存在 config_dynamic.json）
     # 只允许保存运行时动态配置
@@ -3078,7 +2425,7 @@ def normalize_sidebar_order(raw_order: Any) -> List[str]:
 @app.get("/api/sidebar-order")
 async def get_sidebar_order():
     """获取侧边栏导航顺序。"""
-    existing_dynamic = config_manager._load_runtime_config() or {}
+    existing_dynamic = config_manager.get_runtime_config()
     order = existing_dynamic.get('sidebar_order', [])
     if not isinstance(order, list):
         order = []
@@ -3089,7 +2436,7 @@ async def get_sidebar_order():
 async def save_sidebar_order(req: dict = Body(default={})):
     """保存侧边栏导航顺序。"""
     order = normalize_sidebar_order(req.get('order'))
-    existing_dynamic = config_manager._load_runtime_config() or {}
+    existing_dynamic = config_manager.get_runtime_config()
     existing_dynamic['sidebar_order'] = order
 
     if config_manager.save_dynamic_config(existing_dynamic):
@@ -3710,10 +3057,6 @@ async def connect_wifi(req: WifiConnectRequest):
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
 
-class DeviceShellRequest(BaseModel):
-    """设备Shell请求"""
-    serial_no: str = Field(..., description="设备序列号")
-
 @app.post("/api/devices/shell")
 async def open_device_shell(req: DeviceShellRequest, request: Request):
     """打开设备ADB Shell - 为终端页面准备设备连接"""
@@ -3793,22 +3136,6 @@ async def opengrok_search(
 
 
 # ==================== 测试管理 ====================
-
-class TestParseArgsRequest(BaseModel):
-    """测试参数解析请求 - 用于智能识别命令行参数"""
-    params: List[str] = Field(default_factory=list, description="命令行参数列表")
-
-class TestParseArgsResponse(BaseModel):
-    """测试参数解析响应"""
-    success: bool = True
-    device: str = ""
-    test_type: str = ""
-    test_module: str = ""
-    test_case: str = ""
-    test_suite: str = ""
-    retry_dir: str = ""
-    warnings: List[str] = []
-    help_text: str = ""
 
 @app.post("/api/test/parse-args")
 async def parse_test_args(
@@ -5013,11 +4340,6 @@ async def download_suite_file(
     )
 
 
-class SuiteApkAnalyzeRequest(BaseModel):
-    suite_path: str
-    path: str
-
-
 @app.post("/api/test/suites/apk/analyze")
 @handle_api_errors
 async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest):
@@ -5071,83 +4393,6 @@ async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest):
             except Exception:
                 pass
         ssh_manager.return_connection(ssh)
-
-
-class TradefedListResultsRequest(BaseModel):
-    """Request model for tradefed list results"""
-    suite_path: str
-    tradefed_bin: Optional[str] = None
-
-
-class TestSuiteDownloadRequest(BaseModel):
-    """Request model for downloading test suite from URL"""
-    url: str = Field(..., description="测试套件下载地址")
-    save_dir: Optional[str] = Field(default=None, description="保存目录（默认：~/GMS-Suite）")
-
-
-class TestSuiteExtractRequest(BaseModel):
-    """Request model for extracting test suite archive"""
-    archive_path: str = Field(..., description="压缩包文件路径")
-    extract_dir: Optional[str] = Field(default=None, description="解压目录（默认：~/GMS-Suite）")
-    target_dir_name: Optional[str] = Field(default=None, description="解压后的文件夹名称")
-
-
-class TestSuiteAddLocalRequest(BaseModel):
-    """Request model for adding local test suite path"""
-    path: str = Field(..., description="本地测试套件路径")
-
-
-def sanitize_suite_filename_from_url(url: str) -> str:
-    parsed_url = urllib.parse.urlparse(url)
-    filename = os.path.basename(parsed_url.path) or 'test-suite.zip'
-    return re.sub(r'[^\w\-_.\[\]]', '_', filename)
-
-
-def derive_suite_dir_name_from_archive(archive_path: str) -> str:
-    name = os.path.basename(archive_path or '').strip()
-    for ext in ['.tar.bz2', '.tar.gz', '.tgz', '.zip', '.tar']:
-        if name.endswith(ext):
-            return name[:-len(ext)]
-    return os.path.splitext(name)[0] or 'test-suite'
-
-
-def sanitize_suite_dir_name(name: Optional[str], fallback: str) -> str:
-    raw = (name or fallback or 'test-suite').strip().strip('/\\')
-    safe = re.sub(r'[^A-Za-z0-9._-]+', '_', raw)
-    safe = safe.strip('._-') or 'test-suite'
-    if safe in {'.', '..'}:
-        safe = 'test-suite'
-    return safe
-
-
-def is_complete_archive_file(path: str) -> bool:
-    try:
-        if path.endswith('.zip'):
-            import zipfile
-            return zipfile.is_zipfile(path)
-        if path.endswith(('.tar', '.tar.gz', '.tgz', '.tar.bz2')):
-            import tarfile
-            return tarfile.is_tarfile(path)
-        return os.path.exists(path) and os.path.getsize(path) > 0
-    except Exception:
-        return False
-
-
-def safe_extract_member_path(base_dir: str, member_name: str) -> str:
-    target = os.path.abspath(os.path.join(base_dir, member_name))
-    base = os.path.abspath(base_dir)
-    if not (target == base or target.startswith(base + os.sep)):
-        raise ValueError(f'压缩包包含不安全路径: {member_name}')
-    return target
-
-
-def strip_common_archive_root(names: List[str]) -> Tuple[str, List[Tuple[str, str]]]:
-    files = [name for name in names if name and not name.endswith('/')]
-    top_levels = {name.split('/', 1)[0] for name in files if '/' in name}
-    if len(top_levels) == 1 and all(name.startswith(next(iter(top_levels)) + '/') for name in files):
-        root = next(iter(top_levels))
-        return root, [(name, name[len(root) + 1:]) for name in names if name != root and name != root + '/']
-    return '', [(name, name) for name in names]
 
 
 def _update_suite_task(tasks_dict: dict, lock: threading.Lock, task_id: str, **updates):
@@ -5937,12 +5182,13 @@ async def get_status(
                 while True:
                     event = app.state.usb_event_queue.get_nowait()
                     # 向所有连接的WebSocket客户端发送设备变化通知
-                    for client_id, ws in list(global_state.websocket_connections.items()):
+                    async def _send_usb_event(cid, ws):
                         try:
                             await ws.send_json(event)
-                            logger.info(f"Sent USB event to client {client_id}: {event.get('type')}")
-                        except Exception as e:
-                            logger.error(f"Error sending USB event to client {client_id}: {e}")
+                        except Exception:
+                            pass
+
+                    await asyncio.gather(*[_send_usb_event(cid, ws) for cid, ws in list(global_state.websocket_connections.items())])
             except queue.Empty:
                 pass  # 队列为空，正常情况
 
@@ -8260,7 +7506,7 @@ async def start_usbip(
 
                 # 持久化USB/IP设备来源到配置文件（修复长时间连接后来源类型丢失的问题）
                 try:
-                    existing_dynamic = config_manager._load_runtime_config() or {}
+                    existing_dynamic = config_manager.get_runtime_config()
                     usbip_sources = existing_dynamic.get('usbip_devices_source', {})
 
                     # 更新设备来源
@@ -8368,7 +7614,7 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
             # 持久化更新的设备来源到配置文件
             if devices_to_remove:
                 try:
-                    existing_dynamic = config_manager._load_runtime_config() or {}
+                    existing_dynamic = config_manager.get_runtime_config()
                     usbip_sources = existing_dynamic.get('usbip_devices_source', {})
 
                     # 从配置文件中删除已断开的设备
@@ -8418,7 +7664,7 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
         # 持久化更新的设备来源到配置文件
         if devices_to_remove:
             try:
-                existing_dynamic = config_manager._load_runtime_config() or {}
+                existing_dynamic = config_manager.get_runtime_config()
                 usbip_sources = existing_dynamic.get('usbip_devices_source', {})
 
                 # 从配置文件中删除已断开的设备
@@ -9389,30 +8635,55 @@ async def upload_file_chunk(
         speed = saved_size / elapsed / (1024 * 1024) if elapsed > 0 else 0
         logger.info(f"[ChunkUpload] Saved chunk {chunk_index} ({saved_size} bytes) in {elapsed:.2f}s ({speed:.2f} MB/s)")
 
-        # 记录已上传的块
+        # 记录已上传的块。合并依赖完整分块集合，不能只在断点续传模式读取旧记录。
         chunks_file = os.path.join(session_dir, 'uploaded_chunks.json')
         uploaded_chunks = set()
 
-        if resume and os.path.exists(chunks_file):
-            with open(chunks_file, 'r') as f:
-                uploaded_chunks = set(json.load(f))
-            logger.info(f"[ChunkUpload] Resuming with {len(uploaded_chunks)} chunks already uploaded")
+        if os.path.exists(chunks_file):
+            try:
+                with open(chunks_file, 'r') as f:
+                    uploaded_chunks = set(json.load(f))
+                if resume:
+                    logger.info(f"[ChunkUpload] Resuming with {len(uploaded_chunks)} chunks already uploaded")
+            except (OSError, json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"[ChunkUpload] Ignoring invalid chunk state for {upload_id}: {e}")
+                uploaded_chunks = set()
 
         uploaded_chunks.add(chunk_index)
+        uploaded_chunks.update(
+            idx
+            for idx in range(total_chunks)
+            if os.path.exists(os.path.join(session_dir, f"chunk_{idx:05d}"))
+        )
 
         with open(chunks_file, 'w') as f:
             json.dump(list(uploaded_chunks), f)
 
-        # 检查是否所有块都已上传
-        if len(uploaded_chunks) == total_chunks:
+        chunk_paths = [
+            os.path.join(session_dir, f"chunk_{i:05d}")
+            for i in range(total_chunks)
+        ]
+
+        # 检查是否所有块都已上传。并发请求可能同时更新状态文件，文件存在性是最终准入条件。
+        if len(uploaded_chunks) == total_chunks and all(os.path.exists(path) for path in chunk_paths):
+            merge_lock_path = os.path.join(session_dir, '.merge.lock')
+            try:
+                merge_lock_fd = os.open(merge_lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(merge_lock_fd)
+            except FileExistsError:
+                return JSONResponse(content={
+                    'success': True,
+                    'chunk_index': chunk_index,
+                    'chunks_uploaded': len(uploaded_chunks),
+                    'total_chunks': total_chunks,
+                    'merging': True,
+                    'progress': 100
+                })
+
             merge_start = time.time()
             logger.info(f"[ChunkUpload] All chunks received for {upload_id}, merging...")
 
             merged_file = safe_upload_target_path(session_dir, file_name, allow_nested=False)
-            chunk_paths = [
-                os.path.join(session_dir, f"chunk_{i:05d}")
-                for i in range(total_chunks)
-            ]
             merge_files_to_path(chunk_paths, merged_file)
 
             merge_time = time.time() - merge_start
@@ -9452,6 +8723,10 @@ async def upload_file_chunk(
                     })
                 except Exception as e:
                     ssh_manager.return_connection(ssh)
+                    try:
+                        os.remove(merge_lock_path)
+                    except OSError:
+                        pass
                     logger.error(f"Error uploading merged file: {e}")
                     return JSONResponse(content={
                         'success': False,
@@ -9460,6 +8735,10 @@ async def upload_file_chunk(
                         'total_chunks': total_chunks
                     }, status_code=500)
             else:
+                try:
+                    os.remove(merge_lock_path)
+                except OSError:
+                    pass
                 return JSONResponse(content={
                     'success': False,
                     'error': 'SSH connection failed',
@@ -9478,6 +8757,11 @@ async def upload_file_chunk(
         })
 
     except Exception as e:
+        if 'merge_lock_path' in locals():
+            try:
+                os.remove(merge_lock_path)
+            except OSError:
+                pass
         logger.error(f"Error uploading chunk {chunk_index}: {e}")
         return JSONResponse(content={
             'success': False,

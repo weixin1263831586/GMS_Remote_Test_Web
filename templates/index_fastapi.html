@@ -8,11 +8,21 @@
     <link rel="stylesheet" href="/static/css/style.css?v=20260526-01">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
-    <script src="/static/js/chunk-upload.js?v=20260525-01"></script>
+    <script src="/static/js/chunk-upload.js?v=20260601-01"></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260411"></script>
+    <!-- 加载共享工具函数 - 必须在app.js之前加载 -->
+    <script src="/static/js/app-utils.js?v=20260601-01"></script>
+    <!-- 加载全局状态 - 必须在通知中心和app.js之前加载 -->
+    <script src="/static/js/app-state.js?v=20260601-01"></script>
+    <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
+    <script src="/static/js/app-modal.js?v=20260601-01"></script>
+    <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
+    <script src="/static/js/app-api.js?v=20260601-01"></script>
+    <!-- 加载通知中心 - 必须在app.js之前加载 -->
+    <script src="/static/js/app-notifications.js?v=20260601-01"></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/app.js?v=20260531-12" defer crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260601-01" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -59,7 +69,6 @@
                 savedOrder = localStorage.getItem('gms_sidebar_order');
                 if (savedOrder) {
                     savedOrder = JSON.parse(savedOrder);
-                    console.log('[Sidebar] Loaded order from localStorage:', savedOrder);
                 }
             } catch (e) {
                 console.error('[Sidebar] Failed to parse saved order:', e);
@@ -4271,6 +4280,8 @@
                 return sendTerminalInput(normalizedText);
             }
 
+            let suppressPasteEventUntil = 0;
+
             async function pasteFromClipboard() {
                 try {
                     if (!navigator.clipboard || !navigator.clipboard.readText) {
@@ -4306,8 +4317,9 @@
                     return false;
                 }
 
-                // Ctrl+V / Ctrl+Shift+V: 读取系统剪贴板并粘贴纯文本。
+                // Ctrl+V / Ctrl+Shift+V: 主动读取剪贴板；随后短暂抑制浏览器 paste 事件，避免同一内容发送两次。
                 if (isCtrlOnly && key === 'v') {
+                    suppressPasteEventUntil = Date.now() + 500;
                     pasteFromClipboard();
                     return false;
                 }
@@ -4350,6 +4362,11 @@
                 });
 
                 terminalDiv.addEventListener('paste', (e) => {
+                    if (Date.now() < suppressPasteEventUntil) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
                     const text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
                     if (text) {
                         e.preventDefault();
@@ -4634,7 +4651,6 @@
             if (!savedOrder || !Array.isArray(savedOrder) || savedOrder.length === 0) return;
 
             if (savedOrder[0] === 'ai-assistant') {
-                console.log('[Sidebar] GMS assistant is first, using default order');
                 return;
             }
 
