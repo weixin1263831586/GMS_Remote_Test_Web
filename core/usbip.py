@@ -8,6 +8,7 @@ USB/IP - 核心业务逻辑
 """
 
 import logging
+import re
 import time
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -41,8 +42,16 @@ DEFAULT_ANDROID_USBIP_VID_PIDS = ('2207:0006',)
 ANDROID_USBIP_MARKERS = ('android', 'adb', 'rk356', 'rockchip')
 
 
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences (VT100 control codes) from Windows PTY output."""
+    from .common_utils import strip_ansi_codes
+    return strip_ansi_codes(text or '')
+
+
 def _iter_connected_lines(output: str):
     """Yield stripped lines from the 'Connected:' section of usbipd list output."""
+    # Strip ANSI escape sequences from PTY output (Windows Terminal VT codes)
+    output = _strip_ansi(output)
     in_connected = False
     for line in (output or '').splitlines():
         stripped = line.strip()
@@ -395,12 +404,16 @@ class USBIPManager:
             for busid in busids:
                 cmd = f'sudo usbip attach -r {device_ip} -b {busid}'
                 logger.info(f"Attaching {busid} from {device_ip}...")
-                self.ssh_manager.execute_command(ssh, cmd, timeout=10)
+                attach_out, attach_err, attach_code = self.ssh_manager.execute_command(ssh, cmd, timeout=15)
+                if attach_code != 0:
+                    logger.warning(f"Attach {busid} failed (code={attach_code}): {attach_err or attach_out}")
+                else:
+                    logger.info(f"Attach {busid} succeeded")
                 time.sleep(2)
                 attached.append(busid)
 
-            # 等待设备稳定
-            time.sleep(3)
+            # 等待设备稳定（Tailscale 等远程网络需要更长等待时间）
+            time.sleep(5)
             self.ssh_manager.execute_command(ssh, 'sudo udevadm trigger')
             self.ssh_manager.execute_command(ssh, 'sudo udevadm settle')
 

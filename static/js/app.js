@@ -1,33 +1,3 @@
-// 全局状态
-const state = {
-    connected: false,
-    testing: false,
-    devices: [],
-    selectedDevices: new Set(),
-    socket: null,
-    sshConnected: false,
-    vpnConnected: null,
-    adbForwardRunning: false,
-    usbipConnected: false,
-    config: null,
-    fileBrowser: { currentPath: '', selectedFile: null, targetInputId: null, mode: null },
-    suiteBrowser: { selectedSuitePath: '', currentPath: '', highlightPath: '' },
-    // 性能优化
-    domCache: {},
-    lastLogCount: 0,
-    pendingDeviceRefresh: null,
-    deviceRefreshPromise: null,
-    isRefreshingDevices: false,
-    notifications: [],
-    unreadNotifications: 0,
-    browserNotificationsEnabled:
-        (typeof Notification !== 'undefined' && Notification.permission === 'granted') ||
-        localStorage.getItem('gms_browser_notifications') === 'true'
-};
-
-// Debug flag - set to false in production to disable console logs
-const DEBUG = false;
-
 // OpenGrok配置 - 从后端API获取（异步加载，不阻塞启动）
 // Redmine配置缓存（减少重复API调用）
 let cachedRedmineConfig = null;
@@ -135,68 +105,6 @@ async function getRedmineConfig() {
     return cachedRedmineConfig;
 }
 
-// 性能优化工具 - DOM element caching with null-check and stale detection
-function $(id) {
-    const cached = state.domCache[id];
-    if (cached) {
-        // Verify element is still in the DOM (handles page switches that remove elements)
-        if (cached.isConnected) return cached;
-        // Remove stale cache entry
-        delete state.domCache[id];
-    }
-    const el = document.getElementById(id);
-    if (el) state.domCache[id] = el;
-    return el;
-}
-
-// Clear DOM cache (call when switching pages to avoid stale references)
-function clearDomCache() {
-    state.domCache = {};
-}
-
-// Debug logger wrapper (only logs when DEBUG is true)
-function debugLog(...args) {
-    if (DEBUG) {
-        console.log(...args);
-    }
-}
-
-// Modal error display utility
-function showModalError(modal, message) {
-    modal.querySelector('.modal-title').textContent = '❌ 分析失败';
-    modal.querySelector('.modal-body').textContent = message;
-    modal.querySelector('.modal-body').style.cssText = 'color: var(--danger-color); padding: 20px; text-align: center;';
-}
-
-// Modal factory utility
-function createAnalysisModal(type, title, loadingMessage) {
-    const modalId = `${type}-modal-${Date.now()}`;
-    const modal = document.createElement('div');
-    modal.id = modalId;
-    modal.className = 'modal';
-    modal.style.cssText = 'z-index: 10000;';
-
-    modal.innerHTML = `
-        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
-            <div class="modal-header">
-                <span class="modal-title">${title}</span>
-                <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div style="text-align: center; padding: 40px;">
-                    <div style="font-size: 48px; margin-bottom: 20px;">🔍</div>
-                    <div style="color: var(--text-secondary); margin-bottom: 12px;">${loadingMessage}</div>
-                </div>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(modal);
-    ModalManager.open(modalId);
-
-    return { modal, modalId };
-}
-
 // OpenGrok URL builder utility
 function buildOpenGrokUrl(path, line = null) {
     if (!OPENGROK_CONFIG.isValid) return '';
@@ -204,143 +112,6 @@ function buildOpenGrokUrl(path, line = null) {
     const url = `${OPENGROK_CONFIG._baseUrl}/xref/${OPENGROK_CONFIG._defaultProject}/${path}`;
     return line ? `${url}#${line}` : url;
 }
-
-function debounce(func, wait) {
-    let timer = null;
-    return function(...args) {
-        clearTimeout(timer);
-        timer = setTimeout(() => func.apply(this, args), wait);
-    };
-}
-
-function throttle(func, limit) {
-    let inThrottle;
-    return function(...args) {
-        if (!inThrottle) {
-            func.apply(this, args);
-            inThrottle = true;
-            setTimeout(() => inThrottle = false, limit);
-        }
-    };
-}
-
-// 模态框管理器
-const ModalManager = {
-    _escListener: null,
-    _activeModals: [],
-    _dynamicModals: new Set(),
-
-    open(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.add('show');
-            this._addActiveModal(modalId);
-            this._ensureEscListener();
-        }
-    },
-
-    close(modalId) {
-        // 动态弹窗走 unregisterDynamic 路径（会 remove DOM）
-        if (this._dynamicModals.has(modalId)) {
-            this.unregisterDynamic(modalId);
-            return;
-        }
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.remove('show');
-            if (modal.style.display === 'flex') {
-                modal.style.display = 'none';
-            }
-            this._removeActiveModal(modalId);
-            this._cleanupEscListener();
-        }
-    },
-
-    closeAll() {
-        document.querySelectorAll('.modal.show').forEach(m => {
-            m.classList.remove('show');
-            if (m.style.display === 'flex') {
-                m.style.display = 'none';
-            }
-            this._removeActiveModal(m.id);
-        });
-        this._cleanupEscListener();
-    },
-
-    toggle(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.toggle('show');
-            if (modal.classList.contains('show')) {
-                this._addActiveModal(modalId);
-                this._ensureEscListener();
-            } else {
-                if (modal.style.display === 'flex') {
-                    modal.style.display = 'none';
-                }
-                this._removeActiveModal(modalId);
-                this._cleanupEscListener();
-            }
-        }
-    },
-
-    isOpen(modalId) {
-        const modal = document.getElementById(modalId);
-        return modal ? modal.classList.contains('show') : false;
-    },
-
-    // Register a dynamically created modal
-    registerDynamic(modalElement) {
-        document.body.appendChild(modalElement);
-        this._addActiveModal(modalElement.id);
-        this._dynamicModals.add(modalElement.id);
-        this._ensureEscListener();
-        return modalElement;
-    },
-
-    // Unregister and remove a dynamically created modal
-    unregisterDynamic(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.remove();
-        }
-        this._dynamicModals.delete(modalId);
-        this._removeActiveModal(modalId);
-    },
-
-    _addActiveModal(modalId) {
-        if (!this._activeModals.includes(modalId)) {
-            this._activeModals.push(modalId);
-        }
-    },
-
-    _removeActiveModal(modalId) {
-        this._activeModals = this._activeModals.filter(id => id !== modalId);
-        if (this._activeModals.length === 0) {
-            this._cleanupEscListener();
-        }
-    },
-
-    _ensureEscListener() {
-        if (!this._escListener) {
-            this._escListener = (event) => {
-                if (event.key === 'Escape' && this._activeModals.length > 0) {
-                    // 关闭最上层（最后打开）的弹框
-                    const topModalId = this._activeModals[this._activeModals.length - 1];
-                    this.close(topModalId);
-                }
-            };
-            document.addEventListener('keydown', this._escListener);
-        }
-    },
-
-    _cleanupEscListener() {
-        if (this._escListener && this._activeModals.length === 0) {
-            document.removeEventListener('keydown', this._escListener);
-            this._escListener = null;
-        }
-    }
-};
 
 // 设备操作管理器
 const DeviceOperation = {
@@ -591,10 +362,8 @@ function initWebSocket() {
             addLogEntry('WebSocket连接已断开', 'warning');
             // 5秒后重连
             setTimeout(() => {
-                if (typeof io === 'undefined') {
-                    debugLog('[WebSocket] Attempting to reconnect...');
-                    initWebSocket();
-                }
+                debugLog('[WebSocket] Attempting to reconnect...');
+                initWebSocket();
             }, 5000);
         };
 
@@ -795,9 +564,7 @@ function initWebSocket() {
         console.error('[WebSocket] Failed to get client ID:', error);
         // 3秒后重试
         setTimeout(() => {
-            if (typeof io === 'undefined') {
-                initWebSocket();
-            }
+            initWebSocket();
         }, 3000);
     });
 }
@@ -1035,161 +802,6 @@ function initDragDrop() {
             dropZoneFilename.style.display = 'block';
             addLogEntry(`已选择文件: ${files[0].name}`, 'info');
         }
-    });
-}
-
-// ==================== API Calls ====================
-// Helper function to create FormData for API calls
-// Analysis mode constants (matching backend Enum)
-const AnalysisMode = {
-    UPLOAD: 'upload',
-    SAVED: 'saved',
-    AI: 'ai'
-};
-
-// Helper function to create FormData for API calls
-function createFormData(mode, params = {}, files = {}) {
-    const formData = new FormData();
-    formData.append('mode', mode);
-
-    // Add regular parameters
-    for (const [key, value] of Object.entries(params)) {
-        if (value !== undefined && value !== null) {
-            formData.append(key, value);
-        }
-    }
-
-    // Add files
-    for (const [key, file] of Object.entries(files)) {
-        if (file instanceof File) {
-            formData.append(key, file);
-        }
-    }
-
-    return formData;
-}
-
-async function apiCall(url, method = 'GET', data = null) {
-    try {
-        const headers = {
-            'Content-Type': 'application/json',
-            ...getClientIdentityHeaders()
-        };
-
-        const options = {
-            method,
-            headers
-        };
-
-        // Only add body for POST/PUT/PATCH/DELETE methods (not GET/HEAD)
-        if (data && !['GET', 'HEAD'].includes(method.toUpperCase())) {
-            options.body = JSON.stringify(data);
-        }
-
-        const response = await fetch(url, options);
-        const contentType = response.headers.get('content-type') || '';
-        let result = null;
-
-        if (contentType.includes('application/json')) {
-            try {
-                result = await response.json();
-            } catch (jsonError) {
-                result = { success: response.ok, error: '响应 JSON 解析失败' };
-            }
-        } else {
-            const text = await response.text();
-            result = text ? { success: response.ok, message: normalizeApiTextError(text) } : { success: response.ok };
-        }
-
-        if (!result || typeof result !== 'object') {
-            result = { success: response.ok };
-        }
-
-        // 如果API返回了client_id，更新state.clientId
-        if (result.client_id) {
-            const oldClientId = state.clientId;
-            state.clientId = result.client_id;
-
-            // 检查是否是unknown用户
-            if (result.client_id.startsWith('unknown@')) {
-                debugLog(`[apiCall] Detected unknown client: ${result.client_id}`);
-
-                // 只在第一次检测到unknown时显示弹框（避免重复弹窗）
-                if (!state.usernameDetectShown) {
-                    state.usernameDetectShown = true;
-                    debugLog('[apiCall] Showing username detect modal for:', result.ip);
-
-                    // 延迟显示弹框，确保页面已加载完成
-                    setTimeout(() => {
-                        showUsernameDetectModal(result.ip);
-                    }, 500);
-                }
-            } else if (oldClientId !== result.client_id) {
-                debugLog(`[apiCall] Updated state.clientId: ${oldClientId} → ${result.client_id}`);
-            }
-        }
-
-        if (!response.ok) {
-            const error = new Error(result.error || result.message || 'Request failed');
-            // Attach additional fields from error response
-            if (result.need_password) {
-                error.needPassword = true;
-                error.suppressToast = true; // Don't show toast for password prompt
-            }
-            if (result.device_host) error.deviceHost = result.device_host;
-            if (result.install_guide) error.installGuide = result.install_guide;
-            throw error;
-        }
-
-        return result;
-    } catch (error) {
-        debugLog('API Error:', error);
-        // Only show toast if not suppressed (e.g., for password prompt)
-        if (!error.suppressToast) {
-            showToast(error.message, 'error');
-        }
-        throw error;
-    }
-}
-
-function normalizeApiTextError(text) {
-    const message = String(text || '').trim();
-    const lower = message.toLowerCase();
-    if (lower.startsWith('<!doctype html') || lower.startsWith('<html')) {
-        return '服务器返回了 HTML 错误页，请稍后重试或查看服务端日志';
-    }
-    return message;
-}
-
-function safeHeaderPercentEncode(value) {
-    const text = String(value ?? '');
-    try {
-        return encodeURIComponent(text);
-    } catch (error) {
-        // Drop invalid surrogate code units before encoding; header values must stay ASCII.
-        return encodeURIComponent(text.replace(/[\uD800-\uDFFF]/g, ''));
-    }
-}
-
-function getClientIdentityHeaders() {
-    if (!state.clientId || state.clientId === 'unknown') {
-        return {};
-    }
-
-    const separatorIndex = state.clientId.lastIndexOf('@');
-    const username = separatorIndex >= 0
-        ? state.clientId.slice(0, separatorIndex)
-        : state.clientId;
-
-    return {
-        'X-Client-Username': safeHeaderPercentEncode(username),
-        'X-Client-Username-Encoding': 'percent'
-    };
-}
-
-function applyClientIdentityHeadersToXhr(xhr) {
-    Object.entries(getClientIdentityHeaders()).forEach(([key, value]) => {
-        xhr.setRequestHeader(key, value);
     });
 }
 
@@ -1481,8 +1093,8 @@ window.downloadTestSuite = async function downloadTestSuite() {
     const progressStatus = $('suite-progress-status');
     const logDiv = $('suite-download-log');
 
-    console.log('[downloadTestSuite] urlInput:', urlInput);
-    console.log('[downloadTestSuite] downloadBtn:', downloadBtn);
+    debugLog('[downloadTestSuite] urlInput:', urlInput);
+    debugLog('[downloadTestSuite] downloadBtn:', downloadBtn);
 
     if (!urlInput || !urlInput.value) {
         showToast('请输入下载地址', 'error');
@@ -1491,7 +1103,7 @@ window.downloadTestSuite = async function downloadTestSuite() {
 
     const url = urlInput.value.trim();
 
-    console.log('[downloadTestSuite] URL:', url);
+    debugLog('[downloadTestSuite] URL:', url);
 
     if (downloadBtn) {
         downloadBtn.disabled = true;
@@ -1512,24 +1124,17 @@ window.downloadTestSuite = async function downloadTestSuite() {
             logDiv.innerHTML += `[${time}] ${msg}\n`;
             logDiv.scrollTop = logDiv.scrollHeight;
         }
-        console.log('[downloadTestSuite] ' + msg);
+        debugLog('[downloadTestSuite] ' + msg);
     };
 
-    console.log('[downloadTestSuite] 开始下载：', url);
+    debugLog('[downloadTestSuite] 开始下载：', url);
 
     try {
-        const response = await fetch('/api/test/suites/download-url', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                url: url,
-                save_dir: `/home/${getDefaultUbuntuUser()}/GMS-Suite`
-            })
+        const result = await apiCall('/api/test/suites/download-url', 'POST', {
+            url: url,
+            save_dir: `/home/${getDefaultUbuntuUser()}/GMS-Suite`
         });
-        console.log('[downloadTestSuite] fetch 响应状态:', response.status);
-
-        const result = await response.json();
-        console.log('[downloadTestSuite] 响应结果:', result);
+        debugLog('[downloadTestSuite] 响应结果:', result);
 
         if (result.success && result.task_id) {
             pollingStarted = true;
@@ -1678,12 +1283,6 @@ async function resumeSuiteDownloadIfNeeded() {
         sessionStorage.removeItem('active_suite_download');
     }
 }
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('[Init] downloadTestSuite exposed:', typeof window.downloadTestSuite === 'function');
-    console.log('[Init] extractTestSuite exposed:', typeof window.extractTestSuite === 'function');
-    console.log('[Init] addLocalTestSuite exposed:', typeof window.addLocalTestSuite === 'function');
-    console.log('[Init] showAddLocalSuiteDialog exposed:', typeof window.showAddLocalSuiteDialog === 'function');
-});
 
 // 显示添加本地测试套件路径弹框
 window.showAddLocalSuiteDialog = function showAddLocalSuiteDialog() {
@@ -1726,17 +1325,11 @@ window.submitAddLocalSuite = async function submitAddLocalSuite() {
     }
 
     const localPath = pathInput.value.trim();
-    console.log('[submitAddLocalSuite] 本地路径:', localPath);
+    debugLog('[submitAddLocalSuite] 本地路径:', localPath);
 
     try {
-        const response = await fetch('/api/test/suites/add-local', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: localPath })
-        });
-
-        const result = await response.json();
-        console.log('[submitAddLocalSuite] 响应结果:', result);
+        const result = await apiCall('/api/test/suites/add-local', 'POST', { path: localPath });
+        debugLog('[submitAddLocalSuite] 响应结果:', result);
 
         if (result.success) {
             showToast(`添加成功：${result.message}`, 'success');
@@ -1749,12 +1342,6 @@ window.submitAddLocalSuite = async function submitAddLocalSuite() {
         console.error('[submitAddLocalSuite] 异常:', error);
         showToast(`添加失败：${error.message}`, 'error');
     }
-};
-
-// 暴露到全局作用域 - 添加本地测试套件路径（保留向后兼容）
-window.addLocalTestSuite = async function addLocalTestSuite() {
-    // 已废弃，改用弹框方式
-    showAddLocalSuiteDialog();
 };
 
 function deriveSuiteFolderNameFromArchivePath(archivePath) {
@@ -1910,7 +1497,7 @@ window.submitExtractSuite = async function submitExtractSuite() {
                 { task_id: result2.task_id, extracted_path: completedTask.extracted_path }
             );
 
-            console.log('[submitExtractSuite] refreshing suite browser, extracted_path:', completedTask.extracted_path);
+            debugLog('[submitExtractSuite] refreshing suite browser, extracted_path:', completedTask.extracted_path);
             await refreshTestSuiteBrowser(completedTask.extracted_path || '');
         } else {
             if (logDiv) {
@@ -4141,26 +3728,6 @@ async function handleUploadFile() {
     }
 }
 
-function formatBytes(bytes, hideIfZero = false) {
-    /**
-     * 格式化字节大小为人类可读格式
-     * @param {number|string} bytes - 字节数
-     * @param {boolean} hideIfZero - 如果为true，0值返回空字符串
-     * @returns {string} 格式化后的大小字符串
-     */
-    if (hideIfZero && (!bytes || bytes === '0')) return '';
-    const numBytes = parseInt(bytes) || 0;
-    if (numBytes === 0) return '0 B';
-
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(numBytes) / Math.log(k));
-    return parseFloat((numBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-// 导出到全局，供其他模块使用
-window.formatBytes = formatBytes;
-
 // ==================== Firmware Upload State Management ====================
 
 /**
@@ -4619,33 +4186,6 @@ async function cleanTest() {
         addLogEntry('测试日志已清除', 'info');
     } catch (error) {
         addLogEntry('清除日志失败: ' + error.message, 'error');
-    }
-}
-
-// ==================== 工具函数 ====================
-
-/**
- * 触发文件下载
- * @param {string} url - 下载URL
- * @param {string} filename - 下载的文件名
- * @param {boolean} isBlobUrl - 是否为Blob URL（需要清理）
- */
-function triggerDownload(url, filename, isBlobUrl = false) {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-
-    if (isBlobUrl) {
-        // Blob URL 需要延迟清理和释放
-        setTimeout(() => {
-            document.body.removeChild(link);
-            window.URL.revokeObjectURL(url);
-        }, 100);
-    } else {
-        document.body.removeChild(link);
     }
 }
 
@@ -5130,10 +4670,10 @@ function showToast(message, type = 'info') {
 
 // 暴露到全局作用域，确保模板中的函数可以调用
 window.showSnackbar = function showSnackbar(title, message, level = 'info', duration = 5000) {
-    console.log('[showSnackbar] 被调用:', { title, message, level });
+    debugLog('[showSnackbar] 被调用:', { title, message, level });
 
     const container = document.getElementById('snackbar-container');
-    console.log('[showSnackbar] container:', container);
+    debugLog('[showSnackbar] container:', container);
 
     if (!container) {
         console.error('[Snackbar] Container not found! 无法显示通知');
@@ -5158,9 +4698,9 @@ window.showSnackbar = function showSnackbar(title, message, level = 'info', dura
         <button class="snackbar-close" onclick="this.parentElement.remove()">×</button>
     `;
 
-    console.log('[showSnackbar] 创建 snackbar 元素:', snackbar);
+    debugLog('[showSnackbar] 创建 snackbar 元素:', snackbar);
     container.appendChild(snackbar);
-    console.log('[showSnackbar] 已添加到容器');
+    debugLog('[showSnackbar] 已添加到容器');
 
     // 自动关闭
     setTimeout(() => {
@@ -5169,229 +4709,12 @@ window.showSnackbar = function showSnackbar(title, message, level = 'info', dura
             setTimeout(() => {
                 if (snackbar.parentElement) {
                     snackbar.remove();
-                    console.log('[showSnackbar] 已移除 snackbar');
+                    debugLog('[showSnackbar] 已移除 snackbar');
                 }
             }, 300);
         }
     }, duration);
 };
-
-// ==================== Notification Center ====================
-function normalizeNotification(notification) {
-    const now = new Date().toISOString();
-    return {
-        id: notification?.id || `local-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        timestamp: notification?.timestamp || now,
-        title: notification?.title || '通知',
-        message: notification?.message || '',
-        level: ['success', 'warning', 'error', 'info'].includes(notification?.level) ? notification.level : 'info',
-        category: notification?.category || 'system',
-        read: Boolean(notification?.read),
-        data: notification?.data || {}
-    };
-}
-
-function formatNotificationTime(timestamp) {
-    if (!timestamp) return '';
-    const date = new Date(timestamp);
-    if (Number.isNaN(date.getTime())) return timestamp;
-    return date.toLocaleString('zh-CN', { hour12: false });
-}
-
-function updateNotificationBadge() {
-    const badge = $('notification-badge');
-    if (!badge) return;
-    const count = state.unreadNotifications || 0;
-    badge.textContent = count > 99 ? '99+' : String(count);
-    badge.style.display = count > 0 ? 'inline-block' : 'none';
-}
-
-function renderNotificationList() {
-    const list = $('notification-list');
-    if (!list) return;
-
-    if (!state.notifications.length) {
-        list.innerHTML = '<div class="notification-empty">暂无通知</div>';
-        updateNotificationBadge();
-        return;
-    }
-
-    list.innerHTML = state.notifications.map(item => `
-        <div class="notification-item ${escapeHtml(item.level)} ${item.read ? '' : 'unread'}"
-             data-notification-id="${escapeHtml(item.id)}"
-             onclick="markNotificationRead('${escapeHtml(item.id)}')">
-            <div class="notification-level-dot"></div>
-            <div>
-                <div class="notification-title">${escapeHtml(item.title)}</div>
-                <div class="notification-message">${escapeHtml(item.message || '')}</div>
-                <div class="notification-time">${escapeHtml(formatNotificationTime(item.timestamp))}</div>
-            </div>
-        </div>
-    `).join('');
-    updateNotificationBadge();
-}
-
-function mergeNotification(notification) {
-    const normalized = normalizeNotification(notification);
-    const existingIndex = state.notifications.findIndex(item => item.id === normalized.id);
-    if (existingIndex >= 0) {
-        state.notifications[existingIndex] = normalized;
-    } else {
-        state.notifications.unshift(normalized);
-        state.notifications = state.notifications.slice(0, 200);
-    }
-    state.unreadNotifications = state.notifications.filter(item => !item.read).length;
-    renderNotificationList();
-    return normalized;
-}
-
-function shouldShowBrowserNotification(force = false) {
-    return 'Notification' in window &&
-        Notification.permission === 'granted' &&
-        (force || document.visibilityState !== 'visible');
-}
-
-function showBrowserNotification(notification, force = false) {
-    if (!shouldShowBrowserNotification(force)) return;
-    try {
-        const browserNotification = new Notification(notification.title, {
-            body: notification.message || '',
-            tag: notification.id,
-            silent: false
-        });
-        browserNotification.onclick = () => {
-            window.focus();
-            closeNotificationPanel();
-            toggleNotificationPanel();
-        };
-    } catch (error) {
-        debugLog('[Notification] Browser notification failed:', error);
-    }
-}
-
-function handleRealtimeNotification(notification, options = {}) {
-    if (!notification) return;
-    const item = mergeNotification(notification);
-    if (options.toast !== false) {
-        showToast(`${item.title}${item.message ? ': ' + item.message : ''}`, item.level);
-    }
-    if (options.browser !== false) {
-        showBrowserNotification(item, options.forceBrowser === true);
-    }
-}
-
-function notifyOperationResult(title, message, level = 'info', category = 'system', data = {}) {
-    handleRealtimeNotification(
-        { title, message, level, category, data },
-        { toast: false, browser: true, forceBrowser: true }
-    );
-}
-
-async function loadNotifications() {
-    try {
-        const result = await apiCall('/api/notifications?limit=100', 'GET');
-        const payload = result.data || {};
-        state.notifications = (payload.records || []).map(normalizeNotification);
-        state.unreadNotifications = payload.unread_count ?? state.notifications.filter(item => !item.read).length;
-        renderNotificationList();
-    } catch (error) {
-        debugLog('[Notification] Load failed:', error);
-    }
-}
-
-function toggleNotificationPanel() {
-    const panel = $('notification-panel');
-    if (!panel) return;
-    const isShowing = panel.classList.contains('show');
-    panel.classList.toggle('show');
-    if (!isShowing) {
-        loadNotifications();
-        // 添加 Esc 键关闭监听
-        const escHandler = (e) => {
-            if (e.key === 'Escape') {
-                closeNotificationPanel();
-                document.removeEventListener('keydown', escHandler);
-            }
-        };
-        document.addEventListener('keydown', escHandler);
-    }
-}
-
-function closeNotificationPanel() {
-    const panel = $('notification-panel');
-    if (panel) panel.classList.remove('show');
-}
-
-async function requestBrowserNotificationPermission() {
-    if (!('Notification' in window)) {
-        showToast('当前浏览器不支持系统通知', 'warning');
-        return;
-    }
-    if (!window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-        showToast('浏览器通知需要 HTTPS 或 localhost', 'warning');
-        return;
-    }
-
-    const permission = Notification.permission === 'default'
-        ? await Notification.requestPermission()
-        : Notification.permission;
-
-    if (permission === 'granted') {
-        state.browserNotificationsEnabled = true;
-        localStorage.setItem('gms_browser_notifications', 'true');
-        showToast('浏览器通知已开启', 'success');
-    } else {
-        state.browserNotificationsEnabled = false;
-        localStorage.setItem('gms_browser_notifications', 'false');
-        showToast('浏览器通知未授权', 'warning');
-    }
-}
-
-async function markNotificationRead(id) {
-    const item = state.notifications.find(notification => notification.id === id);
-    if (item && !item.read) {
-        item.read = true;
-        state.unreadNotifications = Math.max(0, state.unreadNotifications - 1);
-        renderNotificationList();
-    }
-    try {
-        await apiCall('/api/notifications/mark-read', 'POST', { ids: [id] });
-    } catch (error) {
-        debugLog('[Notification] Mark read failed:', error);
-    }
-}
-
-async function markAllNotificationsRead() {
-    state.notifications.forEach(item => { item.read = true; });
-    state.unreadNotifications = 0;
-    renderNotificationList();
-    try {
-        await apiCall('/api/notifications/mark-read', 'POST', {});
-    } catch (error) {
-        debugLog('[Notification] Mark all read failed:', error);
-    }
-}
-
-async function clearNotifications() {
-    state.notifications = [];
-    state.unreadNotifications = 0;
-    renderNotificationList();
-    try {
-        await apiCall('/api/notifications/clear', 'POST', {});
-    } catch (error) {
-        debugLog('[Notification] Clear failed:', error);
-    }
-}
-
-async function createLocalNotification(title, message = '', level = 'info', category = 'system', data = {}) {
-    try {
-        const result = await apiCall('/api/notifications', 'POST', { title, message, level, category, data });
-        const notification = result.data?.notification;
-        handleRealtimeNotification(notification || { title, message, level, category, data });
-    } catch (error) {
-        handleRealtimeNotification({ title, message, level, category, data });
-    }
-}
 
 // Close modal when clicking outside - optimized with mapping to avoid repeated DOM lookups
 const _modalCloseHandlers = {
@@ -6922,7 +6245,7 @@ function displayReportAnalysis(data) {
                     <div style="padding-right: 240px;">
                         <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">报错信息: </div>
                         <div class="failure-reason" id="failure-reason-${idx}" style="font-size: 11px; font-family: 'Courier New', monospace; white-space: pre-wrap; word-wrap: break-word;">${formattedStackTrace}</div>
-                        <div class="failure-reason-raw" id="failure-reason-raw-${idx}" style="display: none;">${reasonText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                        <div class="failure-reason-raw" id="failure-reason-raw-${idx}" style="display: none;">${escapeHtml(reasonText)}</div>
                     </div>
                 </div>
             `;
@@ -7696,21 +7019,6 @@ function copyAIAnalysis(modalId) {
     }).catch(() => {
         showToast('复制失败', 'error');
     });
-}
-
-// HTML实体映射（模块级常量，避免重复创建）
-const HTML_ENTITIES = Object.freeze({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;'
-});
-
-// Escape HTML to prevent XSS (efficient regex-based implementation)
-function escapeHtml(text) {
-    if (text === null || text === undefined) return '';
-    return String(text).replace(/[&<>"']/g, char => HTML_ENTITIES[char]);
 }
 
 // ==================== 全局函数暴露 ====================
@@ -9814,12 +9122,6 @@ window.loadSecurityAudit = loadSecurityAudit;
 window.showSecurityAuditDetail = showSecurityAuditDetail;
 window.closeSecurityAuditDetailModal = closeSecurityAuditDetailModal;
 window.exportSecurityAudit = exportSecurityAudit;
-window.toggleNotificationPanel = toggleNotificationPanel;
-window.closeNotificationPanel = closeNotificationPanel;
-window.requestBrowserNotificationPermission = requestBrowserNotificationPermission;
-window.markNotificationRead = markNotificationRead;
-window.markAllNotificationsRead = markAllNotificationsRead;
-window.clearNotifications = clearNotifications;
 
 // ==================== APK 文件搜索功能 ====================
 
