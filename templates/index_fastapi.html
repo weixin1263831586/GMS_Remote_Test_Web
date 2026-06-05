@@ -27,17 +27,35 @@
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
     function loadXTermScripts() {
-        if (window.xtermLoaded) return;
-        window.xtermLoaded = true;
+        if (window.xtermLoadPromise) return window.xtermLoadPromise;
+        if (window.xtermLoaded && typeof Terminal !== 'undefined' && typeof FitAddon !== 'undefined') {
+            return Promise.resolve();
+        }
 
-        const script1 = document.createElement('script');
-        script1.src = '/static/vendor/xterm/xterm.min.js';
-        script1.onload = function() {
-            const script2 = document.createElement('script');
-            script2.src = '/static/vendor/xterm/xterm-addon-fit.min.js';
-            document.head.appendChild(script2);
-        };
-        document.head.appendChild(script1);
+        window.xtermLoadPromise = new Promise((resolve, reject) => {
+            const script1 = document.createElement('script');
+            script1.src = '/static/vendor/xterm/xterm.min.js';
+            script1.onload = function() {
+                const script2 = document.createElement('script');
+                script2.src = '/static/vendor/xterm/xterm-addon-fit.min.js';
+                script2.onload = function() {
+                    window.xtermLoaded = true;
+                    resolve();
+                };
+                script2.onerror = function(error) {
+                    window.xtermLoadPromise = null;
+                    reject(error);
+                };
+                document.head.appendChild(script2);
+            };
+            script1.onerror = function(error) {
+                window.xtermLoadPromise = null;
+                reject(error);
+            };
+            document.head.appendChild(script1);
+        });
+
+        return window.xtermLoadPromise;
     }
 
     // 标记：xterm.js 尚未加载
@@ -776,9 +794,6 @@
                 <div id="report-failures" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; display: none;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <div style="font-size: 12px; font-weight: 600;">❌ 失败用例</div>
-                        <div id="report-failure-actions" style="display: flex; gap: 6px;">
-                            <!-- 动态生成按钮 -->
-                        </div>
                     </div>
                     <div id="report-failure-list" style="max-height: 580px; overflow-y: auto;">
                         <!-- 动态生成 -->
@@ -1975,17 +1990,13 @@
 
         // 显示添加主机弹框
         function showAddHostModal() {
-            const modal = document.getElementById('add-host-modal');
-            modal.style.display = 'flex';
-            modal.classList.add('show');
             document.getElementById('new-host-input').value = '';
-            document.getElementById('new-host-input').focus();
+            document.getElementById('new-host-vnc-password').value = '';
             ModalManager.open('add-host-modal');
+            document.getElementById('new-host-input').focus();
         }
 
         function closeAddHostModal() {
-            document.getElementById('add-host-modal').style.display = 'none';
-            document.getElementById('add-host-modal').classList.remove('show');
             document.getElementById('new-host-vnc-password').value = '';  // 清空VNC密码
             ModalManager.close('add-host-modal');
         }
@@ -2078,18 +2089,13 @@
         // 显示主机密码弹框
         function showHostPasswordModal() {
             if (!pendingHostConnection) return;
-            const modal = document.getElementById('host-password-modal');
-            modal.style.display = 'flex';
-            modal.classList.add('show');
             document.getElementById('host-password-host').textContent = pendingHostConnection.name;
             document.getElementById('host-password-input').value = '';
-            document.getElementById('host-password-input').focus();
             ModalManager.open('host-password-modal');
+            document.getElementById('host-password-input').focus();
         }
 
         function closeHostPasswordModal() {
-            document.getElementById('host-password-modal').style.display = 'none';
-            document.getElementById('host-password-modal').classList.remove('show');
             pendingHostConnection = null;
             ModalManager.close('host-password-modal');
         }
@@ -2479,6 +2485,7 @@
         let terminal = null;
         let terminalSocket = null;
         let isTerminalConnected = false;
+        let terminalDomEventController = null;
         let pageInitialized = false; // 防止重复初始化
         let vncChecked = false; // 防止重复检查VNC
 
@@ -3573,10 +3580,7 @@
             document.getElementById('tool-url').value = '';
             // Emoji选择器现在默认显示，不需要隐藏逻辑
 
-            // 显示模态框
-            const modal = document.getElementById('tool-modal');
-            modal.style.display = 'flex';
-            modal.classList.add('show');
+            ModalManager.open('tool-modal');
         }
 
         function addNewToolToCategory(category) {
@@ -3590,10 +3594,7 @@
             document.getElementById('tool-url').value = '';
             // Emoji选择器现在默认显示，不需要隐藏逻辑
 
-            // 显示模态框
-            const modal = document.getElementById('tool-modal');
-            modal.style.display = 'flex';
-            modal.classList.add('show');
+            ModalManager.open('tool-modal');
         }
 
         function editTool(category, index) {
@@ -3610,10 +3611,7 @@
             document.getElementById('tool-url').value = tool.url || '';
             // Emoji选择器现在默认显示，不需要隐藏逻辑
 
-            // 显示模态框
-            const modal = document.getElementById('tool-modal');
-            modal.style.display = 'flex';
-            modal.classList.add('show');
+            ModalManager.open('tool-modal');
         }
 
         function deleteTool(category, index) {
@@ -3697,23 +3695,17 @@
         }
 
         function closeToolModal() {
-            const modal = document.getElementById('tool-modal');
-            modal.style.display = 'none';
-            modal.classList.remove('show');
+            ModalManager.close('tool-modal');
         }
 
         function showAddCategoryModal() {
             document.getElementById('category-name').value = '';
             document.getElementById('category-icon').value = '📁';
-            const modal = document.getElementById('category-modal');
-            modal.style.display = 'flex';
-            modal.classList.add('show');
+            ModalManager.open('category-modal');
         }
 
         function closeCategoryModal() {
-            const modal = document.getElementById('category-modal');
-            modal.style.display = 'none';
-            modal.classList.remove('show');
+            ModalManager.close('category-modal');
         }
 
         function saveCategory() {
@@ -4149,30 +4141,32 @@
             debugLog('Initializing terminal...');
 
             // 动态加载 xterm.js（如果还没加载）
-            if (typeof Terminal === 'undefined') {
-                loadXTermScripts();
-                // 等待脚本加载完成后重新调用 initTerminal
-                setTimeout(() => initTerminal(), 500);
+            if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined') {
+                loadXTermScripts()
+                    .then(() => initTerminal())
+                    .catch((error) => {
+                        console.error('xterm scripts load failed:', error);
+                        document.getElementById('terminal').innerHTML = `
+                            <div style="color:white;padding:40px;text-align:center;">
+                                <div style="font-size:48px;margin-bottom:20px;">❌</div>
+                                <div style="font-size:18px;margin-bottom:10px;">xterm.js 库加载失败</div>
+                                <div style="color:#aaa;font-size:14px;margin-bottom:20px;">
+                                    可能原因：<br>
+                                    1. 网络连接问题<br>
+                                    2. 静态资源加载失败<br>
+                                    3. 防火墙阻止
+                                </div>
+                                <button onclick="location.reload()" style="padding:10px 20px;font-size:14px;cursor:pointer;background:#4CAF50;color:white;border:none;border-radius:4px;">
+                                    🔄 刷新页面重试
+                                </button>
+                            </div>
+                        `;
+                    });
                 return;
             }
 
-            if (typeof Terminal === 'undefined') {
-                console.error('Terminal is not defined!');
-                document.getElementById('terminal').innerHTML = `
-                    <div style="color:white;padding:40px;text-align:center;">
-                        <div style="font-size:48px;margin-bottom:20px;">❌</div>
-                        <div style="font-size:18px;margin-bottom:10px;">xterm.js 库加载失败</div>
-                        <div style="color:#aaa;font-size:14px;margin-bottom:20px;">
-                            可能原因：<br>
-                            1. 网络连接问题<br>
-                            2. CDN 访问受限<br>
-                            3. 防火墙阻止
-                        </div>
-                        <button onclick="location.reload()" style="padding:10px 20px;font-size:14px;cursor:pointer;background:#4CAF50;color:white;border:none;border-radius:4px;">
-                            🔄 刷新页面重试
-                        </button>
-                    </div>
-                `;
+            if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined') {
+                console.error('Terminal or FitAddon is not defined!');
                 return;
             }
 
@@ -4234,8 +4228,14 @@
                 }
             });
 
-            function sendTerminalInput(input) {
+            let lastPasteText = '';
+            let lastPasteSentAt = 0;
+
+            function sendTerminalInput(input, source = 'keyboard') {
                 if (!isTerminalConnected || !terminalSocket || terminalSocket.readyState !== WebSocket.OPEN) {
+                    return false;
+                }
+                if (source !== 'paste' && input && input === lastPasteText && Date.now() - lastPasteSentAt < 700) {
                     return false;
                 }
                 terminalSocket.send(JSON.stringify({
@@ -4277,7 +4277,9 @@
             function pasteTextToTerminal(text) {
                 if (!text) return false;
                 const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-                return sendTerminalInput(normalizedText);
+                lastPasteText = normalizedText;
+                lastPasteSentAt = Date.now();
+                return sendTerminalInput(normalizedText, 'paste');
             }
 
             let suppressPasteEventUntil = 0;
@@ -4357,9 +4359,16 @@
             // 点击聚焦
             const terminalDiv = document.getElementById('terminal');
             if (terminalDiv) {
+                if (terminalDomEventController) {
+                    terminalDomEventController.abort();
+                }
+                terminalDomEventController = new AbortController();
+                const terminalDomListenerOptions = { signal: terminalDomEventController.signal };
+                const terminalDomCaptureOptions = { signal: terminalDomEventController.signal, capture: true };
+
                 terminalDiv.addEventListener('click', () => {
                     terminal.focus();
-                });
+                }, terminalDomListenerOptions);
 
                 terminalDiv.addEventListener('paste', (e) => {
                     if (Date.now() < suppressPasteEventUntil) {
@@ -4374,7 +4383,7 @@
                         pasteTextToTerminal(text);
                         terminal.focus();
                     }
-                }, true);
+                }, terminalDomCaptureOptions);
 
                 terminalDiv.addEventListener('contextmenu', (e) => {
                     if (navigator.clipboard && navigator.clipboard.readText) {
@@ -4382,7 +4391,7 @@
                         e.stopPropagation();
                         pasteFromClipboard();
                     }
-                });
+                }, terminalDomListenerOptions);
             }
 
             // 添加拖拽文件推送功能
@@ -4825,7 +4834,7 @@
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📦 步骤1: 下载Skills包 (可在编译服务器205/206执行)</div>
                         <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
-                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl -s -OJ "{{ request.url.scheme }}://{{ request.url.netloc }}/api/system/skills"</code>
+                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl {% if request.url.scheme == 'https' %}-k {% endif %}-s -OJ "{{ request.url.scheme }}://{{ request.url.netloc }}/api/system/skills"</code>
                             <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
                         </div>
                     </div>
@@ -5055,6 +5064,31 @@
                 </div>
             </div>
         </div>
+    </div>
+    <!-- 报错诊断工作台弹框 -->
+    <div id="report-diagnosis-modal" class="modal">
+        <div class="modal-content" style="width: min(96vw, 1480px); max-width: 1480px; height: min(90vh, 920px); display: flex; flex-direction: column; overflow: hidden;">
+            <div class="modal-header" style="position: sticky; top: 0; z-index: 1; background: var(--bg-color);">
+                <span class="modal-title">🤖 报错诊断</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <button type="button" class="btn-xxs btn-primary" onclick="rerunReportDiagnosis()">重新诊断</button>
+                    <button type="button" class="btn-xxs" onclick="copyReportDiagnosis()">📋 复制结果</button>
+                    <button type="button" class="btn-xxs" onclick="minimizeReportDiagnosisWorkbench()">缩小</button>
+                    <span class="modal-close" onclick="closeReportDiagnosisWorkbench()">&times;</span>
+                </div>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; padding-bottom: 24px; min-height: 0; flex: 1;">
+                <div id="report-diagnostic-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-bottom: 12px;">
+                    <div class="suite-empty" style="margin: 0;">点击失败用例上的“🤖 报错诊断”开始诊断</div>
+                </div>
+                <div id="report-diagnostic-result" style="display: grid; gap: 12px;"></div>
+            </div>
+        </div>
+    </div>
+    <div id="report-diagnosis-minimized" style="display: none; position: fixed; right: 18px; bottom: 18px; z-index: 10001; align-items: center; gap: 10px; max-width: min(520px, calc(100vw - 36px)); padding: 10px 12px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.32);">
+        <button type="button" class="btn-xs btn-primary" onclick="restoreReportDiagnosisWorkbench()">🤖 报错诊断</button>
+        <div id="report-diagnosis-minimized-title" style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></div>
+        <button type="button" class="btn-xxs" onclick="closeReportDiagnosisWorkbench()">关闭</button>
     </div>
 </div> <!-- End of main-container -->
 

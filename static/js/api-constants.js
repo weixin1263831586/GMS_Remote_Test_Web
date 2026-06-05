@@ -698,6 +698,7 @@ const API_DETAILS_MAP = {
     '/api/opengrok/search': {
         title: 'OpenGrok搜索',
         description: '在源码中搜索代码',
+        method: 'POST',
         params: [
             { name: 'query', type: 'string', required: true, desc: '搜索关键词' },
             { name: 'full', type: 'boolean', required: false, desc: '是否全文搜索' }

@@ -9,6 +9,7 @@ USB/IP - 核心业务逻辑
 
 import logging
 import re
+import shlex
 import time
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -36,6 +37,89 @@ def split_host_port(hostname: str, default_port: int = 22) -> Tuple[str, int]:
         if port_text.isdigit():
             return host, int(port_text)
     return hostname, default_port
+
+
+def is_windows_host(ssh) -> bool:
+    """检查 SSH 主机是否为 Windows。"""
+    try:
+        _, stdout, _ = ssh.exec_command('ver 2>&1', timeout=3)
+        output = stdout.read().decode('utf-8', errors='ignore').lower()
+        return 'microsoft' in output or 'windows' in output
+    except Exception:
+        return False
+
+
+def find_device_host_password(config, device_host) -> Optional[str]:
+    """从 client_ssh_credentials 中查找对应 device_host 的密码。"""
+    return config_manager.find_device_host_password(device_host, config)
+
+
+def detach_ubuntu_usbip_ports(ssh, remote_host: Optional[str] = '127.0.0.1', detach_all: bool = False) -> List[str]:
+    """Detach Ubuntu usbip ports that point to a remote USB/IP host."""
+    detached: List[str] = []
+    stdout, stderr, code = usbip_manager.ssh_manager.execute_command(ssh, 'usbip port', timeout=10)
+    if code != 0:
+        logger.info(f"[USB/IP] usbip port returned {code}: {stderr or stdout}")
+        return detached
+
+    current_port: Optional[str] = None
+    current_block: List[str] = []
+    for line in (stdout or '').splitlines() + ['Port 999999:']:
+        port_match = re.match(r'\s*Port\s+(\d+):', line)
+        if port_match:
+            block_text = '\n'.join(current_block)
+            if current_port and (detach_all or (remote_host and remote_host in block_text)):
+                detach_out, detach_err, detach_code = usbip_manager.ssh_manager.execute_command(
+                    ssh, f'sudo usbip detach -p {current_port}', timeout=15
+                )
+                logger.info(
+                    f"[USB/IP] Detached stale Ubuntu usbip port {current_port}: "
+                    f"code={detach_code} out={detach_out} err={detach_err}"
+                )
+                detached.append(current_port)
+            current_port = port_match.group(1)
+            current_block = [line]
+        elif current_port:
+            current_block.append(line)
+
+    if detached:
+        time.sleep(2)
+    return detached
+
+
+def wait_for_adb_serial_ready(ssh, serial_no: str, timeout: int = 30) -> Dict[str, Any]:
+    """Wait until a specific ADB serial is in device state and shell responds."""
+    quoted_serial = shlex.quote(serial_no)
+    deadline = time.time() + timeout
+    last_output = ''
+    last_error = ''
+
+    usbip_manager.ssh_manager.execute_command(ssh, 'adb start-server', timeout=10)
+    while time.time() < deadline:
+        state_out, state_err, state_code = usbip_manager.ssh_manager.execute_command(
+            ssh, f'adb -s {quoted_serial} get-state', timeout=8
+        )
+        state_text = (state_out or state_err or '').strip()
+        last_output = state_out or ''
+        last_error = state_err or ''
+
+        if state_code == 0 and state_text == 'device':
+            shell_out, shell_err, shell_code = usbip_manager.ssh_manager.execute_command(
+                ssh, f"adb -s {quoted_serial} shell echo ready", timeout=10
+            )
+            last_output = shell_out or ''
+            last_error = shell_err or ''
+            if shell_code == 0 and 'ready' in shell_out:
+                return {'ready': True}
+
+        time.sleep(2)
+
+    devices_out, devices_err, _ = usbip_manager.ssh_manager.execute_command(ssh, 'adb devices', timeout=8)
+    return {
+        'ready': False,
+        'state': (last_output or last_error or '').strip(),
+        'devices': (devices_out or devices_err or '').strip(),
+    }
 
 # Shared USB/IP parsing constants
 DEFAULT_ANDROID_USBIP_VID_PIDS = ('2207:0006',)

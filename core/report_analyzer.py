@@ -82,6 +82,10 @@ class TestReport:
     failures: List[TestFailure]
 
 
+# Reusable XML parser — avoids re-creating etree.XMLParser on every call
+_LXML_PARSER = etree.XMLParser(remove_blank_text=True, huge_tree=True) if USE_LXML else None
+
+
 class XMLReportParser:
     """XML报告解析器 - 统一处理test_result.xml解析"""
 
@@ -92,11 +96,9 @@ class XMLReportParser:
         """解析XML文件"""
         try:
             if USE_LXML:
-                # 使用lxml解析,支持更大的文件和更快的速度
-                tree = etree.parse(xml_path, etree.XMLParser(remove_blank_text=True, huge_tree=True))
+                tree = etree.parse(xml_path, _LXML_PARSER)
                 root = tree.getroot()
             else:
-                # 回退到ElementTree
                 tree = ET.parse(xml_path)
                 root = tree.getroot()
 
@@ -109,7 +111,7 @@ class XMLReportParser:
         """从文件流解析XML，避免为压缩包先解压落盘。"""
         try:
             if USE_LXML:
-                tree = etree.parse(xml_stream, etree.XMLParser(remove_blank_text=True, huge_tree=True))
+                tree = etree.parse(xml_stream, _LXML_PARSER)
                 root = tree.getroot()
             else:
                 tree = ET.parse(xml_stream)
@@ -124,7 +126,7 @@ class XMLReportParser:
         """解析XML内容字符串"""
         try:
             if USE_LXML:
-                root = etree.fromstring(xml_content.encode('utf-8'), etree.XMLParser(remove_blank_text=True, huge_tree=True))
+                root = etree.fromstring(xml_content.encode('utf-8'), _LXML_PARSER)
             else:
                 root = ET.fromstring(xml_content)
 
@@ -170,70 +172,58 @@ class XMLReportParser:
             failures=failures
         )
 
+    @staticmethod
+    def _first_attr(element, *names: str) -> str:
+        """Return the first non-empty attribute value from *names*, or ''."""
+        for name in names:
+            val = element.get(name)
+            if val:
+                return val
+        return ''
+
     def _get_test_type(self, root) -> str:
         """获取测试类型"""
-        # 从Result属性获取（优先检查suite_name）
-        for attr in ['suite_name', 'suite', 'test_type', 'testType', 'type', 'Type']:
-            if root.get(attr):
-                return root.get(attr)
-
-        # 从Build节点获取
+        val = self._first_attr(root, 'suite_name', 'suite', 'test_type', 'testType', 'type', 'Type')
+        if val:
+            return val
         build = root.find('.//Build')
         if build is not None:
-            return build.get('test_type', build.get('testType', 'GTS'))
-
+            return self._first_attr(build, 'test_type', 'testType') or 'GTS'
         return 'GTS'
 
     def _get_device_info(self, root) -> str:
         """获取设备信息"""
-        # 优先从Result节点获取
-        device = root.get('devices', '')
-        if device:
-            return device
-
-        # 从Build节点获取
+        val = self._first_attr(root, 'devices')
+        if val:
+            return val
         build = root.find('.//Build')
         if build is not None:
-            device = build.get('device_serial', build.get('serial', ''))
-            if device:
-                return device
-
+            return self._first_attr(build, 'device_serial', 'serial')
         return '未知设备'
 
     def _get_suite_version(self, root) -> str:
         """获取测试套件版本（suite_version，如 16.1_r2）"""
-        # 优先从Result根节点获取suite_version
-        for attr in ['suite_version', 'version']:
-            if root.get(attr):
-                return root.get(attr)
-
-        # 从Build节点获取
+        val = self._first_attr(root, 'suite_version', 'version')
+        if val:
+            return val
         build = root.find('.//Build')
         if build is not None:
-            return build.get('suite_version', build.get('version', ''))
-
+            return self._first_attr(build, 'suite_version', 'version')
         return ''
 
     def _get_android_version(self, root) -> str:
         """获取Android版本（build_version_release）"""
-        # 优先从Result根节点获取build_version_release
-        for attr in ['build_version_release', 'android_version', 'AndroidVersion']:
-            if root.get(attr):
-                return root.get(attr)
-
-        # 从Build节点获取build_version_release
+        val = self._first_attr(root, 'build_version_release', 'android_version', 'AndroidVersion')
+        if val:
+            return val
         build = root.find('.//Build')
         if build is not None:
-            return build.get('build_version_release', '')
-
+            return self._first_attr(build, 'build_version_release')
         return ''
 
     def _get_start_time(self, root) -> str:
         """获取开始时间"""
-        for attr in ['start_display', 'end_display', 'start_time', 'StartTime']:
-            if root.get(attr):
-                return root.get(attr)
-        return '未知时间'
+        return self._first_attr(root, 'start_display', 'end_display', 'start_time', 'StartTime') or '未知时间'
 
     def _get_summary(self, root) -> Tuple[int, int, int]:
         """获取摘要统计信息"""
@@ -397,13 +387,38 @@ class HostLogParser:
             logger.error(f"HostLog内容解析失败: {e}")
             return None
 
+    # Known host-log filename prefixes ordered by priority (lower = higher priority).
+    _HOST_LOG_PREFIXES = (
+        'host_log_',
+        'invoc_complete_host_log_',
+        'end_host_log_',
+        'host_log',
+    )
+
+    @classmethod
+    def _is_host_log_filename(cls, filename: str) -> bool:
+        """Check whether a filename matches any known host-log convention."""
+        lower = filename.lower()
+        return lower.endswith('.txt') and any(lower.startswith(p) for p in cls._HOST_LOG_PREFIXES)
+
     def _find_host_log(self, log_dir: str) -> Optional[str]:
         """查找host_log文件"""
+        candidates = []
         for root, dirs, files in os.walk(log_dir):
             for file in files:
-                if file.startswith('host_log_') and file.endswith('.txt'):
-                    return os.path.join(root, file)
-        return None
+                if self._is_host_log_filename(file):
+                    candidates.append(os.path.join(root, file))
+        if not candidates:
+            return None
+
+        def priority(path: str) -> tuple:
+            name = os.path.basename(path).lower()
+            for idx, prefix in enumerate(self._HOST_LOG_PREFIXES):
+                if name.startswith(prefix):
+                    return (idx, name)
+            return (len(self._HOST_LOG_PREFIXES), name)
+
+        return sorted(candidates, key=priority)[0]
 
     def _parse_log_content(self, log_content: str, log_dir: str) -> Optional[TestReport]:
         """解析日志内容"""
@@ -477,6 +492,10 @@ class HostLogParser:
 
         # 查找设备名称
         match = re.search(r'on device\s+[\'"]?([A-Za-z0-9_]+)', log_content)
+        if match:
+            return match.group(1)
+
+        match = re.search(r'\b([A-Za-z0-9_]+)\s+running\s+\d+\s+modules?:', log_content)
         if match:
             return match.group(1)
 
@@ -819,8 +838,7 @@ class ReportAnalyzer:
 
     @classmethod
     def _is_host_log_member(cls, member_name: str) -> bool:
-        basename = cls._archive_basename(member_name)
-        return basename.startswith('host_log_') and basename.endswith('.txt')
+        return HostLogParser._is_host_log_filename(cls._archive_basename(member_name))
 
     def _parse_host_log_stream(self, stream, member_name: str) -> Optional[TestReport]:
         with io.TextIOWrapper(stream, encoding='utf-8', errors='ignore') as text_stream:

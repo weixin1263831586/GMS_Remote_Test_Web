@@ -4,9 +4,14 @@
 # Version: 2026.04.05-100000
 # ==============================================================================
 
+# GMS Web App Configuration Directory
+# Can be overridden by environment variable
+GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-${HOME}/GMS_Remote_Test/web_app}"
+
 # Default configuration
-# Use environment variable GMS_REMOTE_TEST_SERVER or default to localhost:5001
+# Use environment variable GMS_REMOTE_TEST_SERVER or default to localhost:${GMS_PORT:-5001}
 # If running on the server machine itself, use localhost to avoid firewall issues
+GMS_PORT="${GMS_PORT:-5001}"
 if [ -n "${GMS_REMOTE_TEST_SERVER:-}" ]; then
     SERVER_URL="$GMS_REMOTE_TEST_SERVER"
 else
@@ -26,14 +31,18 @@ else
     export DETECTED_LOCAL_IP="$LOCAL_IP"
 
     # Check if server host is in environment or use detected IP
-    SERVER_HOST="${UBUNTU_HOST:-$DETECTED_LOCAL_IP}"
-    SERVER_URL="http://${SERVER_HOST}:5001"
+    CONFIG_SERVER_HOST=""
+    for config_file in "${GMS_WEB_APP_DIR}/configs/config.json" "${HOME}/GMS_Remote_Test/web_app/configs/config.json"; do
+        if [ -f "$config_file" ]; then
+            CONFIG_SERVER_HOST=$(grep -o '"ubuntu_host": *"[^"]*"' "$config_file" 2>/dev/null | cut -d'"' -f4 | head -n 1)
+            [ -n "$CONFIG_SERVER_HOST" ] && break
+        fi
+    done
+
+    SERVER_HOST="${UBUNTU_HOST:-${CONFIG_SERVER_HOST:-$DETECTED_LOCAL_IP}}"
+    SERVER_URL="https://${SERVER_HOST}:${GMS_PORT}"
 fi
 API_BASE="${SERVER_URL}/api"
-
-# GMS Web App Configuration Directory
-# Can be overridden by environment variable
-GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-${HOME}/GMS_Remote_Test/web_app}"
 
 # Default SSH user - use environment variable or current system user
 DEFAULT_SSH_USER="${UBUNTU_USER:-$(whoami)}"
@@ -51,6 +60,21 @@ CURL_TIMEOUT=30  # 30 seconds for slow API endpoints (e.g., test results)
 CURL_BURN_TIMEOUT="${GMS_CURL_BURN_TIMEOUT:-1800}"  # firmware transfer + burn can take much longer
 CURL_EXIT_CANNOT_CONNECT=7
 CURL_EXIT_OPERATION_TIMEOUT=28
+CURL_EXIT_SSL_CERT=60
+
+# Local deployments commonly use a self-signed HTTPS certificate. Keep curl
+# usable by default, while allowing callers to provide a real CA bundle.
+CURL_TLS_ARGS=()
+CURL_TLS_EVAL_ARGS=""
+if [[ "$SERVER_URL" == https://* ]]; then
+    if [ -n "${GMS_CURL_CA_CERT:-}" ]; then
+        CURL_TLS_ARGS=(--cacert "$GMS_CURL_CA_CERT")
+        CURL_TLS_EVAL_ARGS="--cacert \"${GMS_CURL_CA_CERT//\"/\\\"}\""
+    elif [ "${GMS_CURL_INSECURE:-1}" != "0" ]; then
+        CURL_TLS_ARGS=(-k)
+        CURL_TLS_EVAL_ARGS="-k"
+    fi
+fi
 
 # Print functions
 error() {
@@ -69,12 +93,20 @@ info() {
     echo -e "${BLUE}ℹ $1${NC}"
 }
 
+_server_host_from_url() {
+    # Extract host from URL: strip scheme, then path, then port — single pass
+    local url="${1#*://}"  # strip scheme
+    echo "${url%%[:/]*}"    # strip first : or / and everything after
+}
+
 # Show connection error message to stderr
 show_connection_error() {
+    local server_host
+    server_host=$(_server_host_from_url "$SERVER_URL")
     error "无法连接到服务器 $SERVER_URL"
     error "请检查:"
     error "  1. 服务器是否运行 (systemctl status gms-web-app)"
-    error "  2. 网络连通性 (ping $(echo "$SERVER_URL" | sed 's|http://||' | sed 's|/.*||'))"
+    error "  2. 网络连通性 (ping $server_host)"
     error "  3. 防火墙设置 (sudo ufw status)"
     error "  4. 服务器日志 (tail -f $GMS_WEB_APP_DIR/fastapi.log)"
 }
@@ -90,14 +122,14 @@ api_call() {
 
     if [ -n "$curl_extra" ]; then
         # File upload or custom curl args mode
-        response=$(eval "curl -w \"\\nHTTP_STATUS:%{http_code}\" --max-time $CURL_TIMEOUT -X \"\${method}\" \"\${API_BASE}\${endpoint}\" $curl_extra" 2>/dev/null)
+        response=$(eval "curl $CURL_TLS_EVAL_ARGS -w \"\\nHTTP_STATUS:%{http_code}\" --max-time $CURL_TIMEOUT -X \"\${method}\" \"\${API_BASE}\${endpoint}\" $curl_extra" 2>/dev/null)
     elif [ -n "$data" ] || [ "$method" = "POST" ]; then
-        response=$(curl -s -X "${method}" "${API_BASE}${endpoint}" \
+        response=$(curl "${CURL_TLS_ARGS[@]}" -s -X "${method}" "${API_BASE}${endpoint}" \
             -H "Content-Type: application/json" \
             -d "${data}" \
             --max-time $CURL_TIMEOUT 2>/dev/null)
     else
-        response=$(curl -s "${API_BASE}${endpoint}" --max-time $CURL_TIMEOUT 2>/dev/null)
+        response=$(curl "${CURL_TLS_ARGS[@]}" -s "${API_BASE}${endpoint}" --max-time $CURL_TIMEOUT 2>/dev/null)
     fi
 
     local curl_exit_code=$?
@@ -107,6 +139,9 @@ api_call() {
     else
         if [ $curl_exit_code -eq $CURL_EXIT_CANNOT_CONNECT ] || [ $curl_exit_code -eq $CURL_EXIT_OPERATION_TIMEOUT ]; then
             show_connection_error
+        elif [ $curl_exit_code -eq $CURL_EXIT_SSL_CERT ]; then
+            error "HTTPS证书校验失败: $SERVER_URL" >&2
+            error "本地自签名证书可执行: export GMS_CURL_INSECURE=1；或配置: export GMS_CURL_CA_CERT=/path/to/ca.crt" >&2
         else
             error "Failed to get response from server (curl exit code: $curl_exit_code)" >&2
         fi
@@ -144,7 +179,7 @@ check_jq() {
 
 # Internal: check if current machine is the test host (has local adb access)
 _is_test_host() {
-    local server_host=$(echo "$SERVER_URL" | sed 's|http://||' | sed 's|/.*||' | sed 's|:.*||')
+    local server_host=$(_server_host_from_url "$SERVER_URL")
     local local_ips=$(hostname -I 2>/dev/null)
     echo "$local_ips" | grep -q "$server_host" || [ "$server_host" = "localhost" ] || [ "$server_host" = "127.0.0.1" ]
 }
@@ -152,7 +187,7 @@ _is_test_host() {
 # Internal: resolve SSH host/user/port for test host
 # Outputs: "host user port" (space-separated)
 _resolve_ssh_host() {
-    local host=$(echo "$SERVER_URL" | sed 's|http://||' | sed 's|/.*||' | sed 's|:.*||')
+    local host=$(_server_host_from_url "$SERVER_URL")
     local user="$DEFAULT_SSH_USER"
     local port="22"
     local config_files=(
@@ -170,7 +205,7 @@ _resolve_ssh_host() {
         fi
     done
 
-    if [ "$host" = "$(echo "$SERVER_URL" | sed 's|http://||' | sed 's|/.*||' | sed 's|:.*||')" ] && command -v jq &> /dev/null; then
+    if [ "$host" = "$(_server_host_from_url "$SERVER_URL")" ] && command -v jq &> /dev/null; then
         local api_config=$(api_call "/config/read" 2>/dev/null)
         if [ -n "$api_config" ]; then
             local api_host=$(echo "$api_config" | jq -r '.ubuntu_host // empty' 2>/dev/null)
@@ -201,7 +236,7 @@ _post_firmware_burn_path() {
     local device_list
     device_list=$(echo "$devices" | tr ' ' ',')
 
-    curl -sS -w "\nHTTP_STATUS:%{http_code}" \
+    curl "${CURL_TLS_ARGS[@]}" -sS -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
         -X POST "${API_BASE}/burn/firmware" \
         -F "firmware_path=${remote_path}" \
@@ -218,7 +253,7 @@ _post_firmware_burn_upload() {
     device_list=$(echo "$devices" | tr ' ' ',')
     device_query=$(_urlencode "$device_list")
 
-    curl -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
+    curl "${CURL_TLS_ARGS[@]}" -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
         -X POST "${API_BASE}/burn/firmware?devices=${device_query}" \
         -F "firmware_file=@${firmware_path}" \
@@ -935,17 +970,107 @@ gms-rt-opengrok-search() {
 # Report Commands
 # ==============================================================================
 
+_print_report_candidates() {
+    local reports_json="$1"
+    echo "$reports_json" | jq -r '
+        .reports[:10][]? |
+        [
+            (.timestamp // "N/A"),
+            (.test_type // "N/A"),
+            (.test_module // .module // "N/A"),
+            (.device // ((.devices // []) | join(",")) // "N/A"),
+            (.result_dir // "N/A")
+        ] | @tsv' |
+        while IFS=$'\t' read -r timestamp type module device result_dir; do
+            printf "  %-28s %-8s %-28s %-18s %s\n" "$timestamp" "$type" "$module" "$device" "$result_dir" >&2
+        done
+}
+
+_resolve_report_timestamp() {
+    local report_query="$1"
+    local normalized_query="${report_query%.zip}"
+    local reports_json
+    reports_json=$(api_call "/reports/list") || return 1
+
+    local match_count
+    local resolved
+
+    # Single jq invocation: try exact match, then fuzzy match, then single-report fallback
+    # Returns: <match_count>|<timestamp>  (count>1 means ambiguous, 0 means not found)
+    local result
+    result=$(echo "$reports_json" | jq -r \
+        --arg q "$report_query" \
+        --arg nq "$normalized_query" \
+        --arg fq "$(echo "$normalized_query" | tr '[:upper:]' '[:lower:]')" '
+        # Stage 1: exact timestamp match
+        (.reports // []) as $rs |
+        ($rs | map(select(
+            (.timestamp // "") == $q or (.timestamp // "") == $nq or ((.timestamp // "") + ".zip") == $q
+        ))) as $exact |
+        if ($exact | length) == 1 then
+            "1|\($exact[0].timestamp)"
+        elif ($exact | length) > 1 then
+            "\($exact | length)|"
+        else
+            # Stage 2: fuzzy text match
+            ($rs | map(select(
+                ([
+                    (.timestamp // ""), (.test_module // ""), (.module // ""),
+                    (.report_name // ""), (.test_type // ""),
+                    (.result_dir // ""), (.suite_path // "")
+                ] | join(" ") | ascii_downcase) as $text |
+                $text | contains($fq)
+            ))) as $fuzzy |
+            if ($fuzzy | length) == 1 then
+                "1|\($fuzzy[0].timestamp)"
+            elif ($fuzzy | length) > 1 then
+                "\($fuzzy | length)|"
+            elif ($rs | length) == 1 then
+                "1|\($rs[0].timestamp)"
+            else
+                "0|"
+            end
+        end
+    ')
+
+    match_count="${result%%|*}"
+    resolved="${result#*|}"
+
+    if [ "$match_count" -eq 1 ] && [ -n "$resolved" ]; then
+        echo "$resolved"
+        return 0
+    fi
+
+    if [ "$match_count" -gt 1 ]; then
+        error "报告关键字 '$report_query' 匹配到多条报告，请改用具体 TIMESTAMP。" >&2
+    else
+        error "报告不存在: $report_query" >&2
+    fi
+    echo "可用报告:" >&2
+    _print_report_candidates "$reports_json"
+    return 1
+}
+
 # Analyze report
 gms-rt-reports-analyze() {
-    local report_timestamp="$1"
-    [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-analyze <report_timestamp>"; return 1; }
+    local report_query="$1"
+    [ -z "$report_query" ] && { error "Report required. Usage: gms-rt-reports-analyze <local_report.zip|test_result.xml|report_timestamp|keyword>"; return 1; }
     check_jq
-    echo "🔍 Analyzing report: $report_timestamp..."
 
-    # Use unified API with POST and mode parameter
-    local response=$(curl -s -X POST "${API_BASE}/reports/analyze" \
-        -F "mode=saved" \
-        -F "report_timestamp=${report_timestamp}")
+    local response
+    if [ -f "$report_query" ]; then
+        echo "🔍 Analyzing uploaded report file: $report_query..."
+        response=$(curl "${CURL_TLS_ARGS[@]}" -s -X POST "${API_BASE}/reports/analyze" \
+            -F "mode=upload" \
+            -F "file=@${report_query}")
+    else
+        local report_timestamp
+        report_timestamp=$(_resolve_report_timestamp "$report_query") || return 1
+        echo "🔍 Analyzing saved report: $report_timestamp..."
+        response=$(curl "${CURL_TLS_ARGS[@]}" -s -X POST "${API_BASE}/reports/analyze" \
+            -F "mode=saved" \
+            -F "report_timestamp=${report_timestamp}")
+    fi
 
     # Check if request was successful
     local success=$(echo "$response" | jq -r '.success // false')
@@ -1015,6 +1140,9 @@ gms-rt-reports-analyze() {
             echo "$reason" | sed 's/^/   /'
             echo ""
         done
+    elif [ "$total" -eq 0 ]; then
+        echo "⚠ No test case records found in this report."
+        echo ""
     else
         echo "✅ No failures! All tests passed."
         echo ""
@@ -1030,7 +1158,7 @@ gms-rt-reports-delete() {
     check_jq
     echo "🗑️  Deleting report: $report_timestamp..."
     # Use curl directly for DELETE with query parameter
-    local response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X DELETE "${API_BASE}/reports/delete?timestamp=${report_timestamp}")
+    local response=$(curl "${CURL_TLS_ARGS[@]}" -s -w "\nHTTP_STATUS:%{http_code}" -X DELETE "${API_BASE}/reports/delete?timestamp=${report_timestamp}")
     local body=$(echo "$response" | grep -v "HTTP_STATUS:")
     echo "$body" | jq '.'
 }
@@ -1222,7 +1350,7 @@ gms-rt-system-skills() {
     echo "📁 Downloading skills directory as ZIP..."
     echo "URL: ${API_BASE}/system/skills?skill_name=${skill_name}"
     echo "Saving to: ${skill_name}-skills.zip"
-    curl -o "${skill_name}-skills.zip" "${API_BASE}/system/skills?skill_name=${skill_name}"
+    curl "${CURL_TLS_ARGS[@]}" -o "${skill_name}-skills.zip" "${API_BASE}/system/skills?skill_name=${skill_name}"
     if [ $? -eq 0 ]; then
         success "Skills ZIP downloaded successfully"
         ls -lh "${skill_name}-skills.zip"
@@ -1293,7 +1421,7 @@ gms-rt-terminal-open() {
                 echo "💡 Troubleshooting:"
                 echo "   1. Check if the API server is running: systemctl status gms-web-app"
                 echo "   2. Verify server URL: echo \$GMS_REMOTE_TEST_SERVER"
-                echo "   3. Test connection: curl -s ${API_BASE}/terminal/open"
+                echo "   3. Test connection: curl ${CURL_TLS_EVAL_ARGS} -s ${API_BASE}/terminal/open"
                 return 1
             fi
 
@@ -1407,7 +1535,7 @@ gms-rt-test-clean() {
 # Stream test logs
 gms-rt-test-logs-stream() {
     echo "📡 Streaming test logs (Ctrl+C to stop)..."
-    curl -N "${API_BASE}/test/logs/stream"
+    curl "${CURL_TLS_ARGS[@]}" -N "${API_BASE}/test/logs/stream"
 }
 
 # Start a test - delegates to /api/test/parse-args for intelligent parameter parsing
@@ -1642,7 +1770,7 @@ gms-rt-test-suites-result() {
         echo "⏱️  Query time: ${elapsed}s"
         echo ""
         # Output raw format (same as tradefed list results) - fast processing
-        echo "$response" | jq -r '.raw_output' | grep -E 'Session|^[ ]*[0-9]' | grep -v '^04-' | grep -v '^D/' | grep -v 'DeviceManager'
+        echo "$response" | jq -r '.raw_output' | grep -E 'Session|^[ ]*[0-9]' | grep -v -E '^04-|^D/|DeviceManager'
     else
         local msg=$(extract_api_error "$response")
         error "Failed to list test results: $msg"

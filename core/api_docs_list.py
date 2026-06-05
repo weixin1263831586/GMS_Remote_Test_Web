@@ -558,12 +558,13 @@ API_DOCS_LIST = [
 
     # ==================== 源码搜索 ====================
     {
-        "method": "GET",
+        "method": "POST",
         "path": "/api/opengrok/search",
         "description": "在源码中搜索代码",
         "params": [
             {"name": "query", "type": "string", "required": True, "desc": "搜索关键词"},
-            {"name": "full", "type": "boolean", "required": False, "desc": "是否全文搜索"}
+            {"name": "full", "type": "boolean", "required": False, "desc": "是否全文搜索"},
+            {"name": "limit", "type": "integer", "required": False, "desc": "最大结果数，范围 1-100，默认 30"}
         ],
         "category": "file",
         "skill": "gms-rt-opengrok-search"

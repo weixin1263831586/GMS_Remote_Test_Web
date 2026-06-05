@@ -38,10 +38,14 @@ const ModalManager = {
     _escListener: null,
     _activeModals: [],
     _dynamicModals: new Set(),
+    _closeHandlers: new Map(),
 
     open(modalId) {
         const modal = document.getElementById(modalId);
         if (modal) {
+            if (modal.classList.contains('modal')) {
+                modal.style.display = 'flex';
+            }
             modal.classList.add('show');
             this._addActiveModal(modalId);
             this._ensureEscListener();
@@ -56,10 +60,11 @@ const ModalManager = {
         const modal = document.getElementById(modalId);
         if (modal) {
             modal.classList.remove('show');
-            if (modal.style.display === 'flex') {
+            if (modal.classList.contains('modal')) {
                 modal.style.display = 'none';
             }
             this._removeActiveModal(modalId);
+            this._emitClose(modalId);
             this._cleanupEscListener();
         }
     },
@@ -67,10 +72,9 @@ const ModalManager = {
     closeAll() {
         document.querySelectorAll('.modal.show').forEach(m => {
             m.classList.remove('show');
-            if (m.style.display === 'flex') {
-                m.style.display = 'none';
-            }
+            m.style.display = 'none';
             this._removeActiveModal(m.id);
+            this._emitClose(m.id);
         });
         this._cleanupEscListener();
     },
@@ -83,10 +87,11 @@ const ModalManager = {
                 this._addActiveModal(modalId);
                 this._ensureEscListener();
             } else {
-                if (modal.style.display === 'flex') {
+                if (modal.classList.contains('modal')) {
                     modal.style.display = 'none';
                 }
                 this._removeActiveModal(modalId);
+                this._emitClose(modalId);
                 this._cleanupEscListener();
             }
         }
@@ -99,6 +104,10 @@ const ModalManager = {
 
     registerDynamic(modalElement) {
         document.body.appendChild(modalElement);
+        if (modalElement.classList.contains('modal')) {
+            modalElement.style.display = 'flex';
+        }
+        modalElement.classList.add('show');
         this._addActiveModal(modalElement.id);
         this._dynamicModals.add(modalElement.id);
         this._ensureEscListener();
@@ -112,6 +121,13 @@ const ModalManager = {
         }
         this._dynamicModals.delete(modalId);
         this._removeActiveModal(modalId);
+        this._emitClose(modalId);
+    },
+
+    onClose(modalId, handler) {
+        if (typeof handler === 'function') {
+            this._closeHandlers.set(modalId, handler);
+        }
     },
 
     _addActiveModal(modalId) {
@@ -146,6 +162,14 @@ const ModalManager = {
         if (this._escListener && this._activeModals.length === 0) {
             document.removeEventListener('keydown', this._escListener);
             this._escListener = null;
+        }
+    },
+
+    _emitClose(modalId) {
+        const handler = this._closeHandlers.get(modalId);
+        if (handler) {
+            this._closeHandlers.delete(modalId);
+            handler();
         }
     }
 };
