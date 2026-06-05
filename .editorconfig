@@ -1,0 +1,41 @@
+# EditorConfig - 统一编码格式规范
+# https://editorconfig.org
+
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 120
+
+[*.{py,pyi}]
+# Python: 遵循 PEP 8，4空格缩进
+indent_size = 4
+
+[*.{js,jsx,ts,tsx}]
+# JavaScript/TypeScript: 4空格缩进
+indent_size = 4
+
+[*.{html,htm,css,scss,less}]
+# HTML/CSS: 4空格缩进
+indent_size = 4
+
+[*.{json,yaml,yml,toml}]
+# 配置文件: 2空格缩进
+indent_size = 2
+
+[*.md]
+# Markdown: 保持原样，不修剪尾随空格
+trim_trailing_whitespace = false
+
+[Makefile]
+# Makefile: 必须用 tab
+indent_style = tab
+
+[*.sh]
+# Shell: 4空格缩进
+indent_size = 4

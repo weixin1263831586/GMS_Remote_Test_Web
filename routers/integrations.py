@@ -1,0 +1,1024 @@
+"""Integrations router - SSH, VPN, Redmine, ADB forward, and USB/IP APIs."""
+
+import asyncio
+import ipaddress
+import logging
+import re
+import subprocess
+from typing import Optional
+
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse
+
+from core.clients import get_client_id_from_request, get_client_ip
+from core.clients import resolve_tailscale_device_host
+from core.common_utils import CommonUtils
+from core.config import config_manager
+from core.devices import DeviceSSHConnection
+from core.error_handling import handle_api_errors
+from core.network import (
+    _extract_network,
+    _generate_route_commands,
+    _parse_ping_output,
+    _validate_ip_address,
+    are_same_network,
+)
+from core.ssh import SSHD_INSTALL_GUIDE, ssh_manager
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+@router.get("/api/ssh/sshd")
+@handle_api_errors
+async def check_ssh_sshd(request: Request, device_host: Optional[str] = Query(None, description="设备主机地址 (user@ip 格式，如 user@192.168.1.100)")):
+    """检查SSH服务状态（如未安装则返回安装指南）
+
+    通过SSH连接到Windows客户端检查SSHD服务状态。
+    支持查询参数 device_host 来检查指定主机的状态。
+    注意：device_host 必须是 user@ip 格式，例如 user@192.168.1.100
+    """
+    def exec_ssh_cmd(ssh, cmd):
+        """执行SSH命令并返回输出"""
+        stdin, stdout, stderr = ssh.exec_command(cmd, timeout=10)
+        return stdout.read().decode('utf-8', errors='ignore').strip()
+
+    config = config_manager.load_config()
+    # 优先使用查询参数中的 device_host，否则使用请求中的客户端ID
+    if not device_host:
+        client_id = get_client_id_from_request(request)
+        tunnel_host, _ = resolve_tailscale_device_host(request, client_id)
+        # Tailscale 直连模式：通过 SSH 检查 Windows SSHD 状态
+        # 直接走下面的正常 SSH 检查路径，device_host 为 Tailscale IP
+        device_host = tunnel_host or client_id
+
+    # 验证 device_host 格式
+    if device_host and '@' not in device_host:
+        return JSONResponse(content={
+            'success': False,
+            'error': f'设备主机格式错误："{device_host}"。正确格式应为 user@ip，例如 user@192.168.1.100',
+            'installed': False,
+            'running': False
+        }, status_code=400)
+
+    config['device_host'] = device_host
+    config['device_pswd'] = config_manager.find_device_host_password(config, device_host) or config.get('device_pswd', '')
+
+    try:
+        with DeviceSSHConnection(config) as ssh:
+            # 检查是否已安装（先找文件，再查服务）
+            installed = bool(exec_ssh_cmd(ssh, "where sshd.exe 2>nul"))
+            if not installed:
+                installed = bool(exec_ssh_cmd(ssh, "sc query sshd 2>nul | findstr /C:\"RUNNING\" /C:\"STOPPED\""))
+
+            # 检查是否运行中
+            running = bool(exec_ssh_cmd(ssh, "sc query sshd | findstr /C:\"RUNNING\" 2>nul"))
+
+            logger.info(f"[SSHD Check] {device_host}: installed={installed}, running={running}")
+
+            return JSONResponse(content={
+                'success': True,
+                'installed': installed,
+                'running': running,
+                'install_guide': SSHD_INSTALL_GUIDE if not installed else None
+            })
+    except Exception as _http_exc:
+        # HTTPException and generic exceptions both land here
+        import traceback
+        logger.warning(f"[SSHD Check] Cannot connect to {device_host}: {traceback.format_exc()}")
+        return JSONResponse(content={
+            "success": True,
+            "installed": False,
+            "running": False,
+            "install_guide": SSHD_INSTALL_GUIDE,
+            "error": "无法连接到SSH服务，请检查网络连接和Windows客户端状态"
+        })
+
+
+@router.get("/api/ssh/route")
+@handle_api_errors
+async def check_ssh_route(request: Request):
+    """检查网络路由 - 检查测试主机和设备主机是否在同一网段"""
+    config = config_manager.load_config()
+
+    ubuntu_host = config.get("ubuntu_host", "")
+    client_ip = get_client_ip(request)
+
+    if not ubuntu_host or client_ip == 'unknown':
+        return JSONResponse(content={
+            'success': False,
+            'error': '无法获取主机IP地址'
+        }, status_code=400)
+
+    ubuntu_ip = CommonUtils.extract_ip_from_host(ubuntu_host)
+    device_ip = CommonUtils.extract_ip_from_host(client_ip)
+
+    same_network = are_same_network(ubuntu_ip, device_ip)
+    need_route = not same_network
+
+    # 先测试实际连通性
+    connectivity_ok = False
+    latency = None
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ['ping', '-c', '1', '-W', '2', ubuntu_ip],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            connectivity_ok = True
+            # 提取延迟时间
+            match = re.search(r'time=([\d.]+)', result.stdout)
+            if match:
+                latency = f"{match.group(1)}ms"
+    except Exception as e:
+        logger.warning(f"Ping test failed: {e}")
+
+    # 只有网段不同且实际不通时才提示添加路由
+    if need_route and not connectivity_ok:
+        try:
+            ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
+            device_network_obj = ipaddress.IPv4Network(f"{device_ip}/24", strict=False)
+            ubuntu_network = str(ubuntu_network_obj.network_address)
+            device_network = str(device_network_obj.network_address)
+        except (ipaddress.AddressValueError, ValueError):
+            ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
+            device_network = '.'.join(device_ip.split('.')[:3]) + '.0'
+
+        route_commands = {
+            'windows': [
+                f"route add {ubuntu_network} mask 255.255.255.0 {device_ip}",
+                f"route add {device_network} mask 255.255.255.0 {ubuntu_ip}",
+                "# 检查路由表: route print",
+                f"# 删除路由表: route delete {ubuntu_network}",
+                f"# 删除路由表: route delete {device_network}"
+            ],
+            'linux': [
+                f"sudo ip route add {ubuntu_network}/24 via {device_ip}",
+                f"sudo ip route add {device_network}/24 via {ubuntu_ip}",
+                "# 检查路由表: ip route show",
+                f"# 删除路由表: sudo ip route del {ubuntu_network}/24",
+                f"# 删除路由表: sudo ip route del {device_network}/24"
+            ]
+        }
+
+        return JSONResponse(content={
+            'success': True,
+            'same_network': False,
+            'need_route': True,
+            'connectivity_ok': False,
+            'message': f'⚠️ 网段不同且无法连通: {ubuntu_ip} (网段: {ubuntu_network}/24) ↔ {device_ip} (网段: {device_network}/24)',
+            'ubuntu_ip': ubuntu_ip,
+            'device_ip': device_ip,
+            'ubuntu_network': ubuntu_network,
+            'device_network': device_network,
+            'route_commands': route_commands,
+            'warning': '测试主机和设备主机不在同一网段且无法连通，建议添加路由表'
+        })
+    elif need_route and connectivity_ok:
+        # 网段不同但已连通，路由已配置
+        try:
+            ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
+            ubuntu_network = str(ubuntu_network_obj.network_address)
+        except (ipaddress.AddressValueError, ValueError):
+            ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
+
+        return JSONResponse(content={
+            'success': True,
+            'same_network': False,
+            'need_route': False,
+            'connectivity_ok': True,
+            'latency': latency,
+            'message': f'✅ 网段不同但已连通: {ubuntu_ip} (延迟: {latency}) ↔ {device_ip}',
+            'ubuntu_ip': ubuntu_ip,
+            'device_ip': device_ip,
+            'network': ubuntu_network,
+            'note': '网段不同但路由已配置，网络通信正常'
+        })
+    else:
+        # 同网段
+        try:
+            ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
+            ubuntu_network = str(ubuntu_network_obj.network_address)
+        except (ipaddress.AddressValueError, ValueError):
+            ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
+
+        return JSONResponse(content={
+            'success': True,
+            'same_network': True,
+            'need_route': False,
+            'connectivity_ok': connectivity_ok,
+            'latency': latency,
+            'message': f'✅ 网段相同: {ubuntu_ip} ↔ {device_ip}' + (f' (延迟: {latency})' if latency else ''),
+            'ubuntu_ip': ubuntu_ip,
+            'device_ip': device_ip,
+            'network': ubuntu_network
+        })
+
+
+@router.post("/api/ssh/ping")
+async def ping_route_test(request: Request):
+    """测试测试主机和客户端的网络连通性"""
+    import subprocess
+    try:
+        # 获取请求数据
+        data = await request.json()
+        test_host_ip = data.get('test_host_ip', '').strip()
+        client_ip = data.get('client_ip', '').strip()
+
+        # 验证IP格式
+        if not _validate_ip_address(test_host_ip) or not _validate_ip_address(client_ip):
+            return JSONResponse(
+                content={'success': False, 'error': 'IP地址格式不正确'},
+                status_code=400
+            )
+
+        # 检查是否在同一网段
+        test_network = _extract_network(test_host_ip)
+        client_network = _extract_network(client_ip)
+        same_network = (test_network == client_network)
+
+        # 尝试真正的ping测试（从测试主机ping客户端）
+        reachable = False
+        latency = None
+
+        if same_network:
+            # 同一网段，理论上可达
+            reachable = True
+            latency = '<1ms (同一网段)'
+        else:
+            # 不同网段，需要从测试主机执行ping来验证连通性
+            try:
+                config = config_manager.load_config()
+                ssh = ssh_manager.get_connection(config)
+                if ssh:
+                    # 从测试主机ping客户端IP
+                    ping_cmd = f"ping -c 3 -W 2 {client_ip}"
+                    stdin, stdout, stderr = ssh.exec_command(ping_cmd, timeout=10)
+
+                    # 读取ping输出（限制大小防止内存溢出）
+                    ping_output = stdout.read(8192).decode('utf-8', errors='ignore')   # 8KB sufficient for ping
+                    stderr.read(2048).decode('utf-8', errors='ignore')   # 2KB sufficient for errors
+                    exit_status = stdout.channel.recv_exit_status()
+
+                    ssh_manager.return_connection(ssh)
+
+                    # 解析ping结果
+                    reachable, latency = _parse_ping_output(ping_output, exit_status)
+
+                    logger.info(f"Ping test from {test_host_ip} to {client_ip}: reachable={reachable}, latency={latency}")
+
+            except Exception as e:
+                logger.warning(f"Ping test failed: {e}")
+                reachable = False
+                latency = 'N/A'
+
+        # 准备路由命令（检查测试主机是否需要添加路由到客户端网段）
+        route_commands = None
+        test_client_different = (test_network != client_network)
+
+        if test_client_different:
+            # 测试主机和客户端不在同一网段，需要添加路由
+            route_commands = _generate_route_commands(test_network, client_network, test_host_ip)
+
+        return JSONResponse(content={
+            'success': True,
+            'reachable': reachable,
+            'latency': latency,
+            'same_network': same_network,
+            'test_host_ip': test_host_ip,
+            'client_ip': client_ip,
+            'test_network': test_network,
+            'client_network': client_network,
+            'test_client_different': test_client_different,
+            'route_commands': route_commands
+        })
+
+    except Exception as e:
+        logger.error(f"Error in ping route test: {e}")
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+import asyncio
+import logging
+import shlex
+from typing import Optional
+
+from fastapi import APIRouter, Body
+from fastapi.responses import JSONResponse
+
+from core.config import config_manager
+from core.error_handling import handle_api_errors
+from core.network import (
+    check_local_vpn_connected,
+    execute_config_host_command,
+    get_primary_vpn_target,
+    parse_vpn_connection_names,
+    resolve_vpn_connection_name,
+)
+from core.schemas import VPNConnectRequest
+from core.ssh import ssh_manager
+from core.test_suite_utils import is_config_host_local
+
+logger = logging.getLogger(__name__)
+
+
+
+@router.get("/api/vpn/connections")
+@handle_api_errors
+async def get_vpn_connections():
+    """获取系统中所有可用的 VPN 连接"""
+    config = config_manager.load_config()
+    ssh = None
+    try:
+        if not is_config_host_local(config):
+            ssh = ssh_manager.get_connection(config)
+        if not is_config_host_local(config) and not ssh:
+            return JSONResponse(content={"success": False, "error": "SSH连接失败"}, status_code=500)
+
+        cmd = "nmcli -t -f NAME,TYPE connection show 2>/dev/null"
+        output, _, _ = await execute_config_host_command(config, ssh, cmd, timeout=5)
+        vpn_names = parse_vpn_connection_names(output)
+
+        if ssh:
+            ssh_manager.return_connection(ssh)
+        return JSONResponse(content={"success": True, "connections": vpn_names})
+    except Exception as e:
+        if ssh:
+            ssh_manager.return_connection(ssh)
+        logger.error(f"Error listing VPN connections: {e}")
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/api/vpn/status")
+@handle_api_errors
+async def get_vpn_status():
+    """获取VPN连接状态（多次ping提高可靠性）"""
+    config = config_manager.load_config()
+    vpn_target = get_primary_vpn_target(config)
+
+    if is_config_host_local(config):
+        connected = await asyncio.to_thread(check_local_vpn_connected, vpn_target)
+        return JSONResponse(content={
+            "success": True,
+            "connected": connected,
+            "source": "local"
+        })
+
+    ssh = ssh_manager.get_connection(config)
+    if not ssh:
+        return JSONResponse(
+            content={"success": False, "error": "SSH连接失败"},
+            status_code=500
+        )
+
+    max_attempts = 2
+    for attempt in range(max_attempts):
+        output, error, code = ssh_manager.execute_command(
+            ssh,
+            f"ping -c 1 -W 1 {vpn_target} 2>&1",  # 减少-W timeout从2到1
+            timeout=3  # 减少timeout从5到3
+        )
+
+        # 检查ping结果（成功则立即返回）
+        if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
+            ssh_manager.return_connection(ssh)
+            logger.info(f"[VPN Status] {vpn_target}: connected (attempt {attempt + 1})")
+            return JSONResponse(content={"success": True, "connected": True})
+
+    # 所有尝试都失败，尝试通过nmcli检查VPN连接状态
+    try:
+        nmcli_output, _, _ = ssh_manager.execute_command(
+            ssh,
+            "nmcli -t -f NAME,TYPE,STATE connection show --active 2>&1",
+            timeout=3  # 减少timeout从5到3
+        )
+
+        # 检查是否有VPN类型的活跃连接
+        if 'vpn' in nmcli_output.lower() or 'tun' in nmcli_output.lower() or 'tap' in nmcli_output.lower():
+            ssh_manager.return_connection(ssh)
+            logger.info(f"[VPN Status] VPN detected via nmcli: {nmcli_output.strip()}")
+            return JSONResponse(content={"success": True, "connected": True})
+    except Exception as e:
+        logger.warning(f"[VPN Status] nmcli check failed: {e}")
+
+    # 所有尝试都失败
+    ssh_manager.return_connection(ssh)
+    logger.info(f"[VPN Status] {vpn_target}: disconnected (0/{max_attempts} successful)")
+    return JSONResponse(content={"success": True, "connected": False})
+
+
+@router.post("/api/vpn/connect")
+async def connect_vpn(
+    req: Optional[VPNConnectRequest] = Body(default=None)
+):
+    """连接VPN（使用nmcli），账号密码由 Ubuntu 主机 NetworkManager 管理"""
+    try:
+        config = config_manager.load_config()
+        ssh = None
+        if not is_config_host_local(config):
+            ssh = ssh_manager.get_connection(config)
+
+        if not is_config_host_local(config) and not ssh:
+            return JSONResponse(
+                content={"success": False, "error": "SSH连接失败"},
+                status_code=500
+            )
+
+        try:
+            # 优先使用前端指定的 VPN 名称，否则自动发现
+            vpn_name = (req.vpn_name if req else None) or await resolve_vpn_connection_name(config, ssh, active_only=False)
+            if not vpn_name:
+                if ssh:
+                    ssh_manager.return_connection(ssh)
+                return JSONResponse(
+                    content={
+                        "success": False,
+                        "error": "未发现 VPN 连接。请在 Ubuntu 主机 NetworkManager 中配置 VPN 账号。"
+                    },
+                    status_code=400
+                )
+
+            vpn_cmd = f"sudo nmcli connection up {shlex.quote(vpn_name)}"
+            output, error, code = await execute_config_host_command(
+                config,
+                ssh,
+                vpn_cmd,
+                20
+            )
+
+            await asyncio.sleep(2)
+
+            if code == 0:
+                is_connected = True
+                message = 'VPN 连接成功'
+            elif 'already active' in (error or ''):
+                is_connected = True
+                message = 'VPN 已连接'
+            elif 'unknown connection' in (error or ''):
+                if ssh:
+                    ssh_manager.return_connection(ssh)
+                return JSONResponse(
+                    content={
+                        "success": False,
+                        "error": f"VPN 连接 {vpn_name} 不存在，请先在 NetworkManager 中配置"
+                    },
+                    status_code=404
+                )
+            else:
+                is_connected = False
+                message = f'VPN 连接失败: {error or output}'
+
+            if ssh:
+                ssh_manager.return_connection(ssh)
+            return JSONResponse(content={
+                "success": is_connected,
+                "connected": is_connected,
+                "message": message,
+                "vpn_connection_name": vpn_name,
+                "output": (output[:500] if output else '')
+            })
+        except Exception:
+            if ssh:
+                ssh_manager.return_connection(ssh)
+            raise
+
+    except Exception as e:
+        logger.error(f"Error connecting VPN: {e}")
+        return JSONResponse(
+            content={"success": False, "error": str(e)},
+            status_code=500
+        )
+
+
+@router.post("/api/vpn/disconnect")
+async def disconnect_vpn():
+    """断开VPN（使用nmcli）"""
+    try:
+        config = config_manager.load_config()
+        ssh = None
+        if not is_config_host_local(config):
+            ssh = ssh_manager.get_connection(config)
+
+        if not is_config_host_local(config) and not ssh:
+            return JSONResponse(
+                content={"success": False, "error": "SSH连接失败"},
+                status_code=500
+            )
+
+        try:
+            vpn_name = await resolve_vpn_connection_name(config, ssh, active_only=True)
+            if not vpn_name:
+                if ssh:
+                    ssh_manager.return_connection(ssh)
+                return JSONResponse(
+                    content={"success": True, "message": "未发现正在连接的 VPN"},
+                    status_code=200
+                )
+
+            # 使用nmcli断开VPN
+            disconnect_cmd = f"sudo nmcli connection down {shlex.quote(vpn_name)}"
+            output, error, code = await execute_config_host_command(
+                config,
+                ssh,
+                disconnect_cmd,
+                10
+            )
+
+            if ssh:
+                ssh_manager.return_connection(ssh)
+            return JSONResponse(content={
+                "success": code == 0,
+                "message": "VPN 已断开" if code == 0 else f"VPN 断开失败: {error or output}",
+                "vpn_connection_name": vpn_name
+            })
+        except Exception:
+            if ssh:
+                ssh_manager.return_connection(ssh)
+            raise
+
+    except Exception as e:
+        logger.error(f"Error disconnecting VPN: {e}")
+        return JSONResponse(
+            content={"success": False, "error": str(e)},
+            status_code=500
+        )
+import logging
+from typing import Dict
+
+import aiohttp
+from fastapi import APIRouter, Request
+
+from core.api_response import error_response, success_response
+from core.config import config_manager
+from core.redmine_utils import create_basic_auth_header
+
+logger = logging.getLogger(__name__)
+
+
+
+async def load_redmine_credentials():
+    """加载存储的 Redmine 凭证（委托给 config_manager）"""
+    return config_manager.load_redmine_credentials()
+
+
+@router.post("/api/redmine/reply")
+async def redmine_reply(request: Request):
+    """
+    向 Redmine Issue 发送回复
+
+    参数：
+        issue_id: Redmine Issue ID
+        reply_text: 回复内容
+
+    返回：
+        success: 是否成功
+        message: 成功消息
+        error: 错误信息（如果失败）
+    """
+    try:
+        body = await request.json()
+        issue_id = body.get('issue_id', '').strip()
+        reply_text = body.get('reply_text', '').strip()
+
+        if not issue_id:
+            return error_response('缺少 issue_id 参数', status_code=400)
+
+        if not reply_text:
+            return error_response('缺少 reply_text 参数', status_code=400)
+
+        logger.info(f"[Redmine Reply] 准备发送回复到 Issue #{issue_id}")
+
+        stored_creds = await load_redmine_credentials()
+        if not stored_creds:
+            return error_response('未配置 Redmine 凭证', status_code=401)
+
+        try:
+            redmine_config = config_manager.get_redmine_config()
+            base_url = redmine_config['base_url']
+        except ValueError as e:
+            return error_response(str(e), status_code=404)
+
+        api_url = f"{base_url}/issues/{issue_id}.json"
+        username = stored_creds.get('username')
+        password = stored_creds.get('password')
+
+        payload = {'issue': {'notes': reply_text}}
+        headers = create_basic_auth_header(username, password)
+        headers['Content-Type'] = 'application/json'
+        headers['User-Agent'] = 'GMS Remote Test/1.0'
+
+        async with aiohttp.ClientSession() as session:
+            async with session.put(api_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status in (200, 204):
+                    logger.info(f"[Redmine Reply] 回复已成功发送到 Issue #{issue_id}")
+                    return success_response({
+                        'issue_url': f"{base_url}/issues/{issue_id}"
+                    }, message=f'回复已发送到 Redmine Issue #{issue_id}')
+                else:
+                    error_body = await response.text()
+                    logger.error(f"[Redmine Reply] 发送失败：HTTP {response.status} - {error_body}")
+                    return error_response(f'Redmine API 返回错误：HTTP {response.status}', status_code=500)
+
+    except Exception as e:
+        logger.error(f"[Redmine Reply] 发送回复失败：{e}")
+        return error_response(f'发送失败：{str(e)}', status_code=500)
+import logging
+
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
+
+from core.adb_forward import adb_forward_manager
+from core.api_response import error_response, success_response
+from core.config import config_manager
+from core.error_handling import handle_api_errors
+from core.schemas import ADBForwardStartRequest
+
+logger = logging.getLogger(__name__)
+@router.post("/api/adb-forward/start")
+async def start_adb_forward(req: ADBForwardStartRequest):
+    """启动ADB转发"""
+    try:
+        result = adb_forward_manager.start_forward(req.device_host, req.device_password)
+        if result.get('success'):
+            return JSONResponse(content=result)
+        else:
+            raise HTTPException(status_code=500, detail=result.get('error', 'ADB转发启动失败'))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting ADB forward: {e}")
+        raise HTTPException(
+                status_code=500,
+                detail=f"{str(e)}. 请检查配置和参数是否正确。"
+            )
+
+
+@router.post("/api/adb-forward/stop")
+async def stop_adb_forward():
+    """停止ADB转发"""
+    try:
+        client_id = 'test_client'
+        result = adb_forward_manager.stop_forward(client_id)
+        if result.get('success'):
+            return JSONResponse(content=result)
+        else:
+            raise HTTPException(status_code=500, detail=result.get('error', 'ADB转发停止失败'))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error stopping ADB forward: {e}")
+        raise HTTPException(
+                status_code=500,
+                detail=f"{str(e)}. 请检查配置和参数是否正确。"
+            )
+import time
+import asyncio
+import logging
+from typing import Dict, Any, List, Optional
+
+from fastapi import APIRouter, HTTPException, Query, Request, Body
+from fastapi.responses import JSONResponse, PlainTextResponse
+
+from core.config import config_manager
+from core.ssh import ssh_manager
+from core.usbip import usbip_manager, split_host_port, USBIPD_INSTALL_CMD, USBIPD_INSTALL_GUIDE
+from core.usbip import (
+    is_windows_host,
+    detach_ubuntu_usbip_ports,
+    wait_for_adb_serial_ready,
+    find_device_host_password,
+)
+from core.clients import (
+    get_client_id_from_request,
+    parse_client_id,
+    resolve_tailscale_device_host,
+    probe_windows_usbipd,
+)
+from core.devices import (
+    DeviceSSHConnection,
+    broadcast_device_change,
+    notify_device_change,
+    format_device_list_info,
+)
+from core.error_handling import handle_api_errors
+from core.schemas import USBIPStartRequest, USBIPDisconnectRequest
+from core.state import global_state
+
+logger = logging.getLogger(__name__)
+
+
+
+def _generate_help_or_continue(help_flag: bool, method: str, path: str):
+    if not help_flag:
+        return None
+    try:
+        from routers.system import generate_per_api_help_text
+        help_text = generate_per_api_help_text(method, path)
+    except ImportError:
+        return None
+    if help_text:
+        return PlainTextResponse(
+            content=help_text,
+            headers={"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=300"},
+        )
+    return None
+
+
+# ==================== USB/IP Status ====================
+
+@router.get("/api/usbip/status")
+@handle_api_errors
+async def get_usbip_status(request: Request, device_host: Optional[str] = None):
+    """Get USB/IP status (supports specifying host)."""
+    if device_host:
+        client_id = device_host
+    else:
+        client_id = get_client_id_from_request(request)
+        tunnel_host, _ = resolve_tailscale_device_host(request, client_id)
+        if tunnel_host:
+            client_id = tunnel_host
+
+    with global_state.usbip_states_lock:
+        state_info = global_state.usbip_states.get(client_id, {"connected": False, "timestamp": 0})
+        connected = state_info["connected"]
+
+    if not connected:
+        with global_state.usbip_devices_source_lock:
+            has_devices_from_host = any(
+                device_info.get("source") == client_id
+                for device_info in global_state.usbip_devices_source.values()
+            )
+            if has_devices_from_host:
+                connected = True
+
+    logger.info(f"[USB/IP Status] client_id={client_id}, connected={connected}, device_count={len(global_state.usbip_devices_source)}")
+    return JSONResponse(content={"connected": connected})
+
+
+# ==================== USB/IP Connect ====================
+
+@router.post("/api/usbip/connect")
+async def start_usbip(
+    req: Optional[USBIPStartRequest] = Body(default=None),
+    request: Request = None,
+    help: bool = Query(False),
+):
+    resp = _generate_help_or_continue(help, "POST", "/api/usbip/connect")
+    if resp:
+        return resp
+
+    try:
+        from core.api_response import ApiResponse
+
+        config = config_manager.load_config()
+        client_id = get_client_id_from_request(request)
+
+        request_data = req.model_dump() if req else {}
+
+        usbip_attach_host = None
+        tunnel_host = None
+
+        explicit_device_host = request_data.get("device_host")
+        if explicit_device_host:
+            device_host = explicit_device_host
+        else:
+            tunnel_host, tunnel_usbip_host = resolve_tailscale_device_host(request, client_id)
+            if tunnel_host:
+                device_host = tunnel_host
+                usbip_attach_host = tunnel_usbip_host
+                logger.info(f"[USB/IP] Tailscale direct mode: {device_host} attach={usbip_attach_host}")
+            else:
+                device_host = config.get("usbip_device_host") or config.get("device_host") or client_id
+
+        logger.info(f"[USB/IP] Using device_host: {device_host}")
+
+        windows_device_host = device_host
+
+        device_password = request_data.get("device_password") or find_device_host_password(config, device_host) or config.get("device_pswd", "")
+        if not device_password:
+            return ApiResponse.error(
+                f"SSH credentials for {device_host} not found, please enter SSH password on login page",
+                status_code=401,
+                need_password=True,
+                device_host=device_host,
+            )
+
+        result = usbip_manager.start_usbip(device_host, device_password, usbip_attach_host=usbip_attach_host)
+
+        if result.get("success"):
+            with global_state.usbip_states_lock:
+                global_state.usbip_states[device_host] = {"connected": True, "timestamp": time.time()}
+            logger.info(f"[USB/IP Start] Set connected=True for device_host={device_host}")
+
+            device_list = result.get("device_list", [])
+            if device_list:
+                with global_state.usbip_devices_source_lock:
+                    for device_id in device_list:
+                        global_state.usbip_devices_source[device_id] = {
+                            "source": windows_device_host,
+                            "timestamp": time.time(),
+                        }
+                logger.info(f"[USB/IP Start] Recorded device source: {windows_device_host} for devices: {device_list}")
+
+                # Persist USB/IP device sources to config
+                try:
+                    existing_dynamic = config_manager.get_runtime_config()
+                    usbip_sources = existing_dynamic.get("usbip_devices_source", {})
+                    for device_id in device_list:
+                        usbip_sources[device_id] = {"source": windows_device_host, "timestamp": time.time()}
+                    existing_dynamic["usbip_devices_source"] = usbip_sources
+                    if config_manager.save_dynamic_config(existing_dynamic):
+                        logger.info(f"[USB/IP Start] Persisted device sources for {len(device_list)} devices")
+                except Exception as e:
+                    logger.warning(f"[USB/IP Start] Failed to persist device sources: {e}")
+
+        return JSONResponse(content=result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting USB/IP: {e}")
+        from core.api_response import ApiResponse
+        return ApiResponse.error(str(e), status_code=500)
+
+
+# ==================== USB/IP Disconnect ====================
+
+@router.post("/api/usbip/disconnect")
+async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = Body(default=None)):
+    """Stop USB/IP forwarding (supports specifying host)."""
+    config = config_manager.load_config()
+    client_id = get_client_id_from_request(request)
+    tailscale_mode = False
+
+    if req and req.device_host:
+        config["device_host"] = req.device_host
+    else:
+        tunnel_host, tunnel_usbip_host = resolve_tailscale_device_host(request, client_id)
+        if tunnel_host:
+            config["device_host"] = tunnel_host
+            config["usbip_attach_host"] = tunnel_usbip_host
+            tailscale_mode = True
+        else:
+            config["device_host"] = client_id
+
+    device_password = find_device_host_password(config, config["device_host"])
+    if not device_password:
+        device_password = config.get("device_pswd", "")
+    if device_password:
+        config["device_pswd"] = device_password
+
+    devices_to_remove: List[str] = []
+    usbip_attach_host = config.get("usbip_attach_host")
+
+    try:
+        if tailscale_mode:
+            ubuntu_ssh = usbip_manager.ssh_manager.get_connection(config)
+            if ubuntu_ssh:
+                try:
+                    detach_ubuntu_usbip_ports(ubuntu_ssh, usbip_attach_host or "127.0.0.1", detach_all=True)
+                    usbip_manager.ssh_manager.return_connection(ubuntu_ssh)
+                except Exception as e:
+                    ubuntu_ssh.close()
+                    logger.warning(f"[USB/IP Stop] detach Ubuntu usbip ports failed: {e}")
+            logger.info("[USB/IP Stop] Public mode keeps Windows usbipd bindings; only Ubuntu attach is detached")
+            await asyncio.sleep(1)
+            with global_state.usbip_devices_source_lock:
+                devices_to_remove = [
+                    device_id for device_id, device_info in global_state.usbip_devices_source.items()
+                    if device_info.get("source") == config["device_host"]
+                ]
+                for device_id in devices_to_remove:
+                    del global_state.usbip_devices_source[device_id]
+                    logger.info(f"[USB/IP Stop] Removed device source: {device_id} from {config['device_host']}")
+        else:
+            with DeviceSSHConnection(config) as win_ssh:
+                ssh_manager.execute_command(win_ssh, "usbipd unbind --all", timeout=10)
+                await asyncio.sleep(2)
+
+            with global_state.usbip_devices_source_lock:
+                devices_to_remove = [
+                    device_id for device_id, device_info in global_state.usbip_devices_source.items()
+                    if device_info.get("source") == config["device_host"]
+                ]
+                for device_id in devices_to_remove:
+                    del global_state.usbip_devices_source[device_id]
+
+            for device_id in devices_to_remove:
+                if device_id in usbip_manager.device_sources:
+                    del usbip_manager.device_sources[device_id]
+
+            if devices_to_remove:
+                try:
+                    existing_dynamic = config_manager.get_runtime_config()
+                    usbip_sources = existing_dynamic.get("usbip_devices_source", {})
+                    for device_id in devices_to_remove:
+                        if device_id in usbip_sources:
+                            del usbip_sources[device_id]
+                    existing_dynamic["usbip_devices_source"] = usbip_sources
+                    if config_manager.save_dynamic_config(existing_dynamic):
+                        logger.info(f"[USB/IP Stop] Persisted device source removal for {len(devices_to_remove)} devices")
+                except Exception as e:
+                    logger.warning(f"[USB/IP Stop] Failed to persist device source removal: {e}")
+
+        with global_state.usbip_states_lock:
+            global_state.usbip_states[config["device_host"]] = {"connected": False, "timestamp": time.time()}
+
+        disconnected_devices_info = format_device_list_info(devices_to_remove)
+        logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices{disconnected_devices_info}")
+
+        await notify_device_change(devices_to_remove, "USB/IP Stop")
+
+        return JSONResponse(content={"success": True, "message": f"Local devices disconnected{disconnected_devices_info}"})
+
+    except HTTPException:
+        # Cannot connect to Windows, just clear connection state and device source records
+        with global_state.usbip_devices_source_lock:
+            devices_to_remove = [
+                device_id for device_id, device_info in global_state.usbip_devices_source.items()
+                if device_info.get("source") == config["device_host"]
+            ]
+            for device_id in devices_to_remove:
+                del global_state.usbip_devices_source[device_id]
+
+        for device_id in devices_to_remove:
+            if device_id in usbip_manager.device_sources:
+                del usbip_manager.device_sources[device_id]
+
+        if devices_to_remove:
+            try:
+                existing_dynamic = config_manager.get_runtime_config()
+                usbip_sources = existing_dynamic.get("usbip_devices_source", {})
+                for device_id in devices_to_remove:
+                    if device_id in usbip_sources:
+                        del usbip_sources[device_id]
+                existing_dynamic["usbip_devices_source"] = usbip_sources
+                if config_manager.save_dynamic_config(existing_dynamic):
+                    logger.info(f"[USB/IP Stop] Persisted device source removal for {len(devices_to_remove)} devices")
+            except Exception as e:
+                logger.warning(f"[USB/IP Stop] Failed to persist device source removal: {e}")
+
+        with global_state.usbip_states_lock:
+            global_state.usbip_states[config["device_host"]] = {"connected": False, "timestamp": time.time()}
+
+        disconnected_devices_info = format_device_list_info(devices_to_remove)
+        logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices{disconnected_devices_info}")
+
+        await notify_device_change(devices_to_remove, "USB/IP Stop")
+
+        return JSONResponse(content={"success": True, "message": f"Local devices disconnected{disconnected_devices_info}"})
+
+
+# ==================== USB/IP Install ====================
+
+@router.post("/api/usbip/install")
+async def install_usbipd(request: Request, device_host: Optional[str] = None):
+    """Install usbipd to Windows host."""
+    try:
+        config = config_manager.load_config()
+        client_id = get_client_id_from_request(request)
+
+        if device_host:
+            config["device_host"] = device_host
+        else:
+            tunnel_host, _ = resolve_tailscale_device_host(request, client_id)
+            if tunnel_host:
+                windows_usbipd = await probe_windows_usbipd(tunnel_host)
+                installed = bool(windows_usbipd.get("installed"))
+                logger.info(f"[USB/IP Install] Tailscale SSH check: {tunnel_host}, installed={installed}")
+                if installed:
+                    return JSONResponse(content={
+                        "success": True,
+                        "installed": True,
+                        "running": True,
+                        "version": windows_usbipd.get("version") or "",
+                        "message": f"usbipd installed{(', version: ' + windows_usbipd.get('version')) if windows_usbipd.get('version') else ''}",
+                    })
+                return JSONResponse(content={
+                    "success": False,
+                    "installed": False,
+                    "running": False,
+                    "install_guide": USBIPD_INSTALL_GUIDE.format(install_cmd=USBIPD_INSTALL_CMD),
+                    "error": "Windows host does not have usbipd installed",
+                })
+
+            config["device_host"] = tunnel_host or client_id
+
+        device_password = find_device_host_password(config, config["device_host"])
+        if not device_password:
+            device_password = config.get("device_pswd", "")
+        if device_password:
+            config["device_pswd"] = device_password
+
+        with DeviceSSHConnection(config) as win_ssh:
+            result = usbip_manager.install_usbipd(win_ssh, config)
+            return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"Error installing usbipd: {e}")
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)

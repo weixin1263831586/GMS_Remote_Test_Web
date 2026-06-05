@@ -59,8 +59,63 @@ const OPENGROK_CONFIG = {
 let apiDocsCache = null;
 let apiDocsCacheTime = 0;
 let allApiDocs = []; // 所有API文档数据（已排序）
+let currentCategoryFilter = 'all';
+let currentMethodFilter = 'all';
 const API_DOCS_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存（生产环境）
 const FIRMWARE_UPLOAD_TIMEOUT = 10 * 60 * 1000; // 10分钟上传超时
+const apiDetailsCache = new Map();
+
+// API表格列宽配置 (与HTML模板保持一致: 25%, 18%, 17%, 40%)
+const API_TABLE_COLUMNS = {
+    INTERFACE: 25,
+    DESCRIPTION: 20,
+    SKILL: 20,
+    USAGE: 35
+};
+
+const HTTP_METHODS = {
+    GET: 'GET',
+    POST: 'POST',
+    WEBSOCKET: 'WebSocket'
+};
+
+const CURL_SPECIAL_PARAMS = ['force_refresh', 'log_type', 'report_timestamp'];
+const VIEWPORT_HEIGHT_OFFSET = 150;
+
+const PARAM_TYPES = {
+    STRING: 'string',
+    NUMBER: 'number',
+    ARRAY: 'array',
+    BOOLEAN: 'boolean',
+    FILE: 'file',
+    OBJECT: 'object'
+};
+
+const CURL_PLACEHOLDERS = Object.freeze({
+    [PARAM_TYPES.STRING]: 'VALUE',
+    [PARAM_TYPES.NUMBER]: 123,
+    [PARAM_TYPES.ARRAY]: ['Serial'],
+    [PARAM_TYPES.BOOLEAN]: true,
+    [PARAM_TYPES.FILE]: '/path/to/file.img',
+    [PARAM_TYPES.OBJECT]: {}
+});
+
+const PATH_PATTERNS = [];
+
+const DEFAULT_API_DETAILS = Object.freeze({
+    title: 'API接口',
+    description: '执行API操作',
+    params: Object.freeze([]),
+    response: '{ "success": true }',
+    usage: '使用该接口完成相关操作'
+});
+
+// Module-level constants for server info (never change during page lifetime)
+const BASE_URL = window.location.origin;
+const WS_BASE_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+
+const BADGE_SIZES = { xs: '9px', sm: '10px', md: '11px', lg: '12px' };
+const BADGE_PADDINGS = { xs: '1px 4px', sm: '2px 6px', md: '3px 8px', lg: '4px 10px' };
 
 // ==================== 轮询间隔配置 ====================
 // GSI 固件烧写进度轮询间隔（毫秒）
@@ -1288,7 +1343,7 @@ async function resumeSuiteDownloadIfNeeded() {
 window.showAddLocalSuiteDialog = function showAddLocalSuiteDialog() {
     const modal = $('add-local-suite-modal');
     if (modal) {
-        modal.style.display = 'flex';
+        ModalManager.open('add-local-suite-modal');
         const input = $('local-suite-path-input');
         if (input) {
             input.value = '';
@@ -1299,10 +1354,7 @@ window.showAddLocalSuiteDialog = function showAddLocalSuiteDialog() {
 
 // 关闭弹框
 window.closeAddLocalSuiteModal = function closeAddLocalSuiteModal() {
-    const modal = $('add-local-suite-modal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
+    ModalManager.close('add-local-suite-modal');
 };
 
 // 处理 Esc 键关闭弹框
@@ -1888,7 +1940,7 @@ function downloadSuiteFile(path, filename = '') {
     link.remove();
 }
 
-async function analyzeSuiteApk(path) {
+async function analyzeSuiteApk(path, options = {}) {
     if (!state.suiteBrowser.selectedSuitePath || !path) return;
 
     try {
@@ -1910,6 +1962,10 @@ async function analyzeSuiteApk(path) {
 
         window.apkCurrentTaskId = task.task_id;
         setApkUploadEmpty(false);
+        window.apkPendingOpenTarget = options.openSourcePath ? {
+            filePath: options.openSourcePath,
+            line: Number(options.openSourceLine || 0) || null
+        } : null;
 
         const fileSizeMB = task.size ? (task.size / (1024 * 1024)).toFixed(1) : '-';
         $('apk-analysis-status').style.display = 'block';
@@ -2977,26 +3033,12 @@ async function setupUsbipForward() {
 function showDevicePasswordModal(deviceHost) {
     document.getElementById('device-host-display').value = deviceHost;
     document.getElementById('device-pswd').value = '';
-    const modal = document.getElementById('device-password-modal');
-    modal.classList.add('show');
+    ModalManager.open('device-password-modal');
     document.getElementById('device-pswd').focus();
-
-    // Add ESC key listener to close modal
-    document.addEventListener('keydown', handleDevicePasswordEsc);
 }
 
 function closeDevicePasswordModal() {
-    const modal = document.getElementById('device-password-modal');
-    modal.classList.remove('show');
-
-    // Remove ESC key listener
-    document.removeEventListener('keydown', handleDevicePasswordEsc);
-}
-
-function handleDevicePasswordEsc(event) {
-    if (event.key === 'Escape') {
-        closeDevicePasswordModal();
-    }
+    ModalManager.close('device-password-modal');
 }
 
 // ==================== Username Detection Modal ====================
@@ -3004,24 +3046,12 @@ function showUsernameDetectModal(clientIp) {
     document.getElementById('username-detect-ip').value = clientIp;
     document.getElementById('username-detect-username').value = '';
     document.getElementById('username-detect-password').value = '';
-    const modal = document.getElementById('username-detect-modal');
-    modal.classList.add('show');
+    ModalManager.open('username-detect-modal');
     document.getElementById('username-detect-username').focus();
-
-    // Add ESC key listener
-    document.addEventListener('keydown', handleUsernameDetectEsc);
 }
 
 function closeUsernameDetectModal() {
-    const modal = document.getElementById('username-detect-modal');
-    modal.classList.remove('show');
-    document.removeEventListener('keydown', handleUsernameDetectEsc);
-}
-
-function handleUsernameDetectEsc(event) {
-    if (event.key === 'Escape') {
-        closeUsernameDetectModal();
-    }
+    ModalManager.close('username-detect-modal');
 }
 
 function handleUsernameDetectKeyPress(event) {
@@ -3567,20 +3597,11 @@ async function showVpnCredentialModal() {
     }
 
     const modal = document.getElementById('vpn-credential-modal');
-    modal.classList.add('show');
-    document.addEventListener('keydown', handleVpnCredentialEsc);
+    ModalManager.open('vpn-credential-modal');
 }
 
 function closeVpnCredentialModal() {
-    const modal = document.getElementById('vpn-credential-modal');
-    modal.classList.remove('show');
-    document.removeEventListener('keydown', handleVpnCredentialEsc);
-}
-
-function handleVpnCredentialEsc(event) {
-    if (event.key === 'Escape') {
-        closeVpnCredentialModal();
-    }
+    ModalManager.close('vpn-credential-modal');
 }
 
 function handleVpnCredentialKeyPress(event) {
@@ -4615,11 +4636,12 @@ function showConfirmDialog(title, message, onConfirm, onCancel) {
         titleEl.textContent = title;
         messageEl.textContent = message;
 
-        // 显示模态框
-        ModalManager.open('confirm-modal');
+        let settled = false;
 
         // 确定按钮事件
         const handleOk = () => {
+            if (settled) return;
+            settled = true;
             ModalManager.close('confirm-modal');
             cleanup();
             resolve(true);
@@ -4628,6 +4650,8 @@ function showConfirmDialog(title, message, onConfirm, onCancel) {
 
         // 取消按钮事件
         const handleCancel = () => {
+            if (settled) return;
+            settled = true;
             ModalManager.close('confirm-modal');
             cleanup();
             resolve(false);
@@ -4643,6 +4667,16 @@ function showConfirmDialog(title, message, onConfirm, onCancel) {
         // 绑定事件
         okBtn.addEventListener('click', handleOk);
         cancelBtn.addEventListener('click', handleCancel);
+        ModalManager.onClose('confirm-modal', () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve(false);
+            if (onCancel) onCancel();
+        });
+
+        // 显示模态框
+        ModalManager.open('confirm-modal');
     });
 }
 
@@ -5401,10 +5435,6 @@ function showSshdInstallGuide(guide) {
 }
 
 function closeSshdInstallGuide() {
-    const modal = document.getElementById('sshd-install-guide-modal');
-    if (modal) {
-        modal.classList.remove('show');
-    }
     ModalManager.close('sshd-install-guide-modal');
 }
 
@@ -5420,7 +5450,7 @@ function selectReportSource() {
     const modal = document.createElement('div');
     modal.id = 'report-source-modal';
     modal.className = 'modal';
-    modal.style.cssText = 'display: block; z-index: 10000;';
+    modal.style.cssText = 'z-index: 10000;';
     modal.innerHTML = `
         <div class="modal-content" style="max-width: 400px;">
             <div class="modal-header">
@@ -6104,6 +6134,7 @@ function displayReportAnalysis(data) {
 
     // 保存当前报告名称到全局变量，供失败用例卡片使用（使用一次性状态）
     window.currentReportName = data.report_name || '';
+    window.currentReportAnalysisData = data;
     if (DEBUG) debugLog('[displayReportAnalysis] Current report name:', window.currentReportName);
 
     const resultDiv = $('report-analysis-result');
@@ -6197,10 +6228,6 @@ function displayReportAnalysis(data) {
     if (failuresDiv && failureList && data.failures && data.failures.length > 0) {
         failuresDiv.style.display = 'block';
 
-        // 清空标题行按钮区域（改为在每个用例显示）
-        const actionsDiv = $('report-failure-actions');
-        if (actionsDiv) actionsDiv.innerHTML = '';
-
         const failuresHTML = data.failures.map((failure, idx) => {
             // 解析失败信息
             const reasonText = failure.reason || '无失败原因';
@@ -6232,7 +6259,7 @@ function displayReportAnalysis(data) {
                 <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 12px; margin-bottom: 12px; position: relative;">
                     <!-- 右上角按钮 -->
                     <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
-                        <button onclick="aiAnalyzeFailureReport('${testCaseName}', \`${reasonText.substring(0, 500).replace(/`/g, '\\`')}\`)" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);">🤖 报错分析</button>
+                        <button onclick="openReportDiagnosisModal(${idx})" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #00bcd4 0%, #3f51b5 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500;">🤖 报错诊断</button>
                         ${issueIdFromReport ? `<button onclick="openRedmineReplyModal('${moduleName}', '${testCaseName}', '${idx}', '${issueIdFromReport}')" data-reason="${encodeURIComponent(reasonText)}" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(245, 87, 108, 0.3);">📝 Redmine回复</button>` : ''}
                     </div>
 
@@ -6254,8 +6281,476 @@ function displayReportAnalysis(data) {
         failureList.innerHTML = failuresHTML;
     } else if (failuresDiv) {
         failuresDiv.style.display = 'none';
-        const actionsDiv = $('report-failure-actions');
-        if (actionsDiv) actionsDiv.innerHTML = '';
+    }
+}
+
+function getReportFailureByIndex(failureIndex) {
+    const report = window.currentReportAnalysisData;
+    if (!report || !Array.isArray(report.failures)) return null;
+    return report.failures[failureIndex] || null;
+}
+
+function getReportDiagnosisKey(failureIndex = 0) {
+    const report = window.currentReportAnalysisData || {};
+    const failure = getReportFailureByIndex(failureIndex) || {};
+    return [
+        report.report_name || '',
+        failureIndex,
+        failure.name || failure.test_name || '',
+        failure.module || ''
+    ].join('|');
+}
+
+function openReportDiagnosisModal(failureIndex = 0) {
+    const modal = $('report-diagnosis-modal');
+    if (!modal) {
+        showToast('诊断弹框未加载', 'error');
+        return;
+    }
+    const minimized = $('report-diagnosis-minimized');
+    if (minimized) minimized.style.display = 'none';
+    modal.dataset.failureIndex = String(failureIndex);
+    ModalManager.open('report-diagnosis-modal');
+
+    const diagnosisKey = getReportDiagnosisKey(failureIndex);
+    const diag = window.reportDiagnosis || {};
+    if (diag.key === diagnosisKey && diag.data) {
+        return;
+    }
+    window.reportDiagnosis = window.reportDiagnosis || {};
+    window.reportDiagnosis.key = diagnosisKey;
+    runReportDiagnosis(failureIndex);
+}
+
+function closeReportDiagnosisWorkbench() {
+    ModalManager.close('report-diagnosis-modal');
+    const minimized = $('report-diagnosis-minimized');
+    if (minimized) minimized.style.display = 'none';
+}
+
+function minimizeReportDiagnosisWorkbench() {
+    const modal = $('report-diagnosis-modal');
+    if (!modal) return;
+    ModalManager.close('report-diagnosis-modal');
+    const minimized = $('report-diagnosis-minimized');
+    const title = $('report-diagnosis-minimized-title');
+    if (title) {
+        const data = (window.reportDiagnosis || {}).data || {};
+        title.textContent = data.test_name || data.report_name || '诊断工作台';
+    }
+    if (minimized) minimized.style.display = 'flex';
+}
+
+function restoreReportDiagnosisWorkbench() {
+    const minimized = $('report-diagnosis-minimized');
+    if (minimized) minimized.style.display = 'none';
+    ModalManager.open('report-diagnosis-modal');
+}
+
+function rerunReportDiagnosis() {
+    const modal = $('report-diagnosis-modal');
+    const currentIndex = Number(
+        modal?.dataset?.failureIndex ||
+        (window.reportDiagnosis || {}).failureIndex ||
+        0
+    ) || 0;
+    window.reportDiagnosis = {
+        ...(window.reportDiagnosis || {}),
+        key: null,
+        data: null,
+    };
+    runReportDiagnosis(currentIndex);
+}
+
+function renderReportDiagnosisLoading(failure, classNames, errorMessage) {
+    const diagnosticSummary = $('report-diagnostic-summary');
+    const diagnosticResult = $('report-diagnostic-result');
+    if (diagnosticSummary) {
+        diagnosticSummary.innerHTML = `
+            <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; font-size: 12px;">
+                <div style="color: var(--text-secondary); margin-bottom: 4px;">正在诊断</div>
+                <div style="font-weight: 600; word-break: break-all;">${escapeHtml(failure.name || failure.test_name || '未知用例')}</div>
+            </div>
+            <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; font-size: 12px;">
+                <div style="color: var(--text-secondary); margin-bottom: 4px;">提取类名</div>
+                <div style="font-weight: 600; word-break: break-all;">${classNames.length ? escapeHtml(classNames.join(', ')) : '无'}</div>
+            </div>
+            <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; font-size: 12px;">
+                <div style="color: var(--text-secondary); margin-bottom: 4px;">堆栈摘要</div>
+                <div style="font-weight: 600; word-break: break-all;">${escapeHtml((errorMessage || '').slice(0, 120) || '无')}</div>
+            </div>
+        `;
+    }
+    if (diagnosticResult) {
+        diagnosticResult.innerHTML = `
+            <div style="padding: 16px; background: var(--darker-bg); border-radius: 6px; color: var(--text-secondary); font-size: 12px;">
+                正在提取堆栈、定位套件构件、搜索源码、检索知识库并调用 AI...
+            </div>
+        `;
+    }
+}
+
+async function runReportDiagnosis(failureIndex = 0) {
+    const report = window.currentReportAnalysisData;
+    if (!report) {
+        showToast('请先加载一份报告', 'warning');
+        return;
+    }
+
+    const failure = getReportFailureByIndex(failureIndex);
+    if (!failure) {
+        showToast('当前报告没有可诊断的失败用例', 'warning');
+        return;
+    }
+
+    const testName = failure.name || failure.test_name || report.report_name || '未知用例';
+    const errorMessage = failure.reason || failure.stack_trace || '';
+    const moduleName = failure.module || '';
+    const classNames = extractClassNames(testName, errorMessage);
+    renderReportDiagnosisLoading(failure, classNames, errorMessage);
+
+    try {
+        const result = await apiCall('/api/reports/diagnose', 'POST', {
+            test_name: testName,
+            error_message: errorMessage,
+            stack_trace: errorMessage,
+            module: moduleName,
+            class_names: classNames,
+            report_name: report.report_name || '',
+            failure_index: failureIndex,
+            test_type: report.details?.test_type || '',
+            suite_version: report.details?.suite_version || '',
+            source_path: failure.source_path || failure.file_path || report.source_path || ''
+        });
+        if (!result.success) {
+            throw new Error(result.error || result.message || '诊断失败');
+        }
+        renderReportDiagnosis(result.data || {});
+        notifyOperationResult('报告诊断完成', `${testName} 诊断已完成`, 'success', 'report-diagnosis', {
+            report_name: report.report_name || '',
+            failure_index: failureIndex
+        });
+    } catch (error) {
+        debugLog('[Report Diagnosis] Error:', error);
+        const diagnosticResult = $('report-diagnostic-result');
+        if (diagnosticResult) {
+            diagnosticResult.innerHTML = `<div style="padding: 16px; background: rgba(244,67,54,0.1); border-radius: 6px; color: var(--danger-color); font-size: 12px;">诊断失败: ${escapeHtml(error.message)}</div>`;
+        }
+        notifyOperationResult('报告诊断失败', error.message, 'error', 'report-diagnosis');
+    }
+}
+
+function renderReportDiagnosis(data) {
+    const diagnosticSummary = $('report-diagnostic-summary');
+    const diagnosticResult = $('report-diagnostic-result');
+    if (!diagnosticResult) return;
+
+    const failureLocation = data.failure_location || {};
+    const aiResult = data.ai_result || {};
+    const kbResults = data.knowledge_base_results || [];
+    const sourceResults = data.source_search_results || [];
+    const patchDraft = data.patch_draft || '';
+    const stackTrace = data.stack_trace || '';
+    const keywords = data.keywords || [];
+    const suiteTarget = data.suite_target || {};
+    const suiteArtifact = suiteTarget.artifact || null;
+    const artifactCandidates = suiteTarget.artifact_candidates || [];
+    const sourceGuess = suiteTarget.source_guess || {};
+    const sourcePath = data.source_path || sourceGuess.source_path || '';
+    const currentFailureIndex = Number(data.failure_index || 0) || 0;
+
+    window.reportDiagnosis = {
+        data,
+        target: suiteTarget,
+        failureIndex: currentFailureIndex,
+        key: (window.reportDiagnosis || {}).key,
+        text: [
+            `报告: ${data.report_name || ''}`,
+            `用例: ${data.test_name || ''}`,
+            `模块: ${data.module || ''}`,
+            `测试类型: ${suiteTarget.test_type || data.test_type || ''}`,
+            `套件版本: ${suiteTarget.suite_version || data.suite_version || ''}`,
+            `套件: ${suiteTarget.suite_name || suiteTarget.suite_path || ''}`,
+            `构件: ${suiteArtifact ? suiteArtifact.path : ''}`,
+            `源码路径: ${sourcePath}`,
+            `失败位置: ${failureLocation.file_name ? `${failureLocation.file_name}.${failureLocation.file_type}:${failureLocation.line_number}` : '未提取到'}`,
+            `根因: ${aiResult.root_cause || data.summary || ''}`,
+            `分析: ${aiResult.analysis || ''}`,
+            `建议: ${(aiResult.suggestions || []).join('\n')}`,
+            `补丁草案:\n${patchDraft}`,
+            `堆栈:\n${stackTrace || '无'}`
+        ].join('\n\n')
+    };
+
+    if (diagnosticSummary) {
+        const keywordChips = keywords.slice(0, 6).map(item => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:var(--bg-color);border:1px solid var(--border-color);font-size:11px;line-height:1.3;white-space:nowrap;">${escapeHtml(item)}</span>`).join('');
+        diagnosticSummary.innerHTML = `
+            <div style="grid-column: 1 / -1; padding: 12px 14px; background: linear-gradient(135deg, rgba(0,188,212,0.12), rgba(63,81,181,0.12)); border: 1px solid var(--border-color); border-radius: 8px; display: grid; gap: 8px;">
+                <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between;">
+                    <div style="font-size: 12px; font-weight: 700;">${escapeHtml(data.test_name || data.report_name || '诊断工作台')}</div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <span style="padding:4px 8px; border-radius:999px; background: rgba(0,0,0,0.18); font-size:11px;">${escapeHtml(aiResult.ai_model || (aiResult.ai_enabled === false ? '规则分析' : '未知'))}</span>
+                        <span style="padding:4px 8px; border-radius:999px; background: rgba(0,0,0,0.18); font-size:11px;">${escapeHtml(suiteTarget.test_type || data.test_type || '未知类型')}</span>
+                        <span style="padding:4px 8px; border-radius:999px; background: rgba(0,0,0,0.18); font-size:11px;">${escapeHtml(suiteTarget.suite_version || data.suite_version || '未知版本')}</span>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px;">
+                    <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; border: 1px solid var(--border-color); font-size: 12px;">
+                        <div style="color: var(--text-secondary); margin-bottom: 4px;">失败位置</div>
+                        <div style="font-weight: 600; word-break: break-all;">${failureLocation.file_name ? `${escapeHtml(failureLocation.file_name)}.${escapeHtml(failureLocation.file_type)}:${escapeHtml(failureLocation.line_number)}` : '未提取到'}</div>
+                    </div>
+                    <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; border: 1px solid var(--border-color); font-size: 12px;">
+                        <div style="color: var(--text-secondary); margin-bottom: 4px;">源码路径</div>
+                        <div style="font-weight: 600; word-break: break-all;">${escapeHtml(sourcePath || '未推断')}</div>
+                    </div>
+                    <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; border: 1px solid var(--border-color); font-size: 12px;">
+                        <div style="color: var(--text-secondary); margin-bottom: 4px;">构件置信度</div>
+                        <div style="font-weight: 600;">${escapeHtml(String(suiteTarget.artifact_confidence || 0))}</div>
+                    </div>
+                    <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; border: 1px solid var(--border-color); font-size: 12px;">
+                        <div style="color: var(--text-secondary); margin-bottom: 4px;">诊断关键词</div>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;">${keywordChips || '<span style="color:var(--text-secondary);">无</span>'}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    const sourceCards = sourceResults.length > 0
+        ? sourceResults.map(item => `
+            <div style="padding: 10px; background: var(--bg-color); border-radius: 6px; border: 1px solid var(--border-color); min-width: 0;">
+                <div style="display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 4px;">
+                    <div style="font-size: 12px; font-weight: 600; word-break: break-all;">${escapeHtml(item.type || 'source')}</div>
+                    ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" style="font-size: 11px; color: var(--primary-color); text-decoration: none;">查看源码</a>` : ''}
+                </div>
+                <div style="font-size: 11px; color: var(--text-secondary); word-break: break-all;">${escapeHtml(item.path || item.display_path || '')}</div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">行 ${escapeHtml(String(item.line || 'N/A'))}</div>
+            </div>
+        `).join('')
+        : '<div style="padding: 12px; color: var(--text-secondary); font-size: 12px;">未检索到 OpenGrok 源码结果</div>';
+
+    const kbCards = kbResults.length > 0
+        ? kbResults.map(item => `
+            <div style="padding: 10px; background: var(--bg-color); border-radius: 6px; border: 1px solid var(--border-color); min-width: 0;">
+                <div style="font-size: 12px; font-weight: 600; word-break: break-all;">#${escapeHtml(String(item.id || ''))} ${escapeHtml(item.subject || '')}</div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin: 4px 0;">${escapeHtml(item.status_name || '')} | ${escapeHtml(item.updated_on || '')}</div>
+                <div style="font-size: 11px; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml((item.solution_summary || item.description || '').slice(0, 220))}</div>
+            </div>
+        `).join('')
+        : '<div style="padding: 12px; color: var(--text-secondary); font-size: 12px;">未命中知识库</div>';
+
+    diagnosticResult.innerHTML = `
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0;">
+            <div style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0;">
+                <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px;">
+                    <div style="font-size: 12px; font-weight: 600;">套件源码定位</div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        ${suiteArtifact ? `<button class="btn-xxs btn-primary" onclick="openReportDiagnosisSourcePreview()">反编译并打开源码预览</button>` : ''}
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px;">
+                    <div style="padding: 10px; background: var(--bg-color); border-radius: 6px;">
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">测试套件</div>
+                        <div style="font-size: 12px; font-weight: 600; word-break: break-all;">${escapeHtml(suiteTarget.suite_name || suiteTarget.suite_path || '未定位')}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; word-break: break-all;">${escapeHtml(suiteTarget.suite_root || '')}</div>
+                    </div>
+                    <div style="padding: 10px; background: var(--bg-color); border-radius: 6px;">
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">APK/JAR 构件</div>
+                        <div style="font-size: 12px; font-weight: 600; word-break: break-all;">${escapeHtml(suiteArtifact ? suiteArtifact.path : '未定位到构件')}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">置信度 ${escapeHtml(String(suiteTarget.artifact_confidence || 0))}</div>
+                    </div>
+                    <div style="padding: 10px; background: var(--bg-color); border-radius: 6px;">
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">源码路径猜测</div>
+                        <div style="font-size: 12px; font-weight: 600; word-break: break-all;">${escapeHtml(sourceGuess.source_path || '未推断')}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">行 ${escapeHtml(String(failureLocation.line_number || sourceGuess.line_number || 'N/A'))}</div>
+                    </div>
+                </div>
+                ${artifactCandidates.length > 0 ? `
+                    <div style="margin-top: 10px; display: grid; gap: 6px;">
+                        <div style="font-size: 11px; color: var(--text-secondary);">候选构件</div>
+                        ${artifactCandidates.slice(0, 5).map((item, idx) => `
+                            <button class="btn-xxs" onclick="openReportDiagnosisArtifactCandidate(${idx})" style="text-align: left; white-space: normal; line-height: 1.5; padding: 6px 8px; border-radius: 4px;">
+                                ${escapeHtml(item.path || item.name || '未知构件')} · ${escapeHtml(String(item.score || 0))}
+                            </button>
+                        `).join('')}
+                    </div>
+                ` : ''}
+                ${suiteTarget.match_notes?.length ? `<div style="margin-top: 10px; font-size: 11px; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(suiteTarget.match_notes.join('\n'))}</div>` : ''}
+            </div>
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0;">
+                <section style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0; max-height: 360px; overflow: auto;">
+                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">详细分析</div>
+                    <div style="font-size: 12px; line-height: 1.7; white-space: pre-wrap; margin-bottom: 12px;"><strong>根因：</strong>${escapeHtml(aiResult.root_cause || data.summary || '待分析')}</div>
+                    <div style="font-size: 12px; line-height: 1.7; white-space: pre-wrap;">${escapeHtml(aiResult.analysis || '无')}</div>
+                </section>
+                <section style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0; max-height: 360px; overflow: auto;">
+                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">解决建议</div>
+                    <div style="display: grid; gap: 8px;">
+                        ${(aiResult.suggestions || []).length > 0 ? aiResult.suggestions.map(s => `<div style="font-size: 12px; line-height: 1.6; padding: 8px; background: var(--bg-color); border-radius: 4px;">${escapeHtml(s)}</div>`).join('') : '<div style="font-size: 12px; color: var(--text-secondary);">无</div>'}
+                    </div>
+                </section>
+                <section style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0; max-height: 360px; overflow: auto;">
+                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">补丁草案</div>
+                    <pre style="margin: 0; padding: 10px; white-space: pre-wrap; word-break: break-word; font-size: 11px; background: var(--bg-color); border-radius: 6px; overflow-x: auto;">${escapeHtml(patchDraft || '无')}</pre>
+                </section>
+            </div>
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0;">
+                <div style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0; max-height: 300px; overflow: auto;">
+                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">OpenGrok 源码搜索</div>
+                    <div style="display: grid; gap: 8px;">${sourceCards}</div>
+                </div>
+                <div style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0; max-height: 300px; overflow: auto;">
+                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">GMS 认证知识库</div>
+                    <div style="display: grid; gap: 8px;">${kbCards}</div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function copyReportDiagnosis() {
+    const text = (window.reportDiagnosis || {}).text || '';
+    if (!text) {
+        showToast('暂无可复制的诊断结果', 'warning');
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast('诊断结果已复制', 'success');
+    } catch (error) {
+        showToast('复制失败', 'error');
+    }
+}
+
+function getCurrentReportDiagnosisTarget() {
+    return (window.reportDiagnosis || {}).target || null;
+}
+
+function buildReportDiagnosisSourcePath(target) {
+    const guess = target?.source_guess || {};
+    return guess.source_path || '';
+}
+
+function getReportDiagnosisSourceLocation() {
+    const data = (window.reportDiagnosis || {}).data || {};
+    const target = getCurrentReportDiagnosisTarget();
+    const sourcePath = buildReportDiagnosisSourcePath(target);
+    const lineNumber = Number(
+        data?.failure_location?.line_number ||
+        target?.source_guess?.line_number ||
+        0
+    ) || null;
+    return { sourcePath, lineNumber };
+}
+
+function _requireDiagnosisArtifact(msg) {
+    const target = getCurrentReportDiagnosisTarget();
+    if (!target || !target.artifact) {
+        showToast(msg || '未找到可反编译的构件', 'warning');
+        return null;
+    }
+    return target;
+}
+
+async function openReportDiagnosisSourcePreview() {
+    if (!_requireDiagnosisArtifact()) return;
+    const { sourcePath, lineNumber } = getReportDiagnosisSourceLocation();
+    await openReportDiagnosisApkAnalysis({ sourcePath, lineNumber });
+}
+
+async function openReportDiagnosisArtifactCandidate(index = 0) {
+    const target = getCurrentReportDiagnosisTarget();
+    const candidate = target?.artifact_candidates?.[index];
+    if (!target || !candidate) {
+        showToast('候选构件不存在', 'warning');
+        return;
+    }
+    window.reportDiagnosis.target = {
+        ...target,
+        artifact: candidate,
+        artifact_confidence: candidate.score || 0
+    };
+    const { sourcePath, lineNumber } = getReportDiagnosisSourceLocation();
+    await openReportDiagnosisApkAnalysis({ sourcePath, lineNumber });
+}
+
+async function openReportDiagnosisSuiteBrowser() {
+    const target = getCurrentReportDiagnosisTarget();
+    if (!target || !target.suite_path || !target.artifact) {
+        showToast('未找到可打开的套件构件', 'warning');
+        return;
+    }
+    const artifactPath = target.artifact.path || '';
+    const directoryPath = getParentSuitePath(artifactPath);
+    if (typeof switchPage === 'function') {
+        switchPage('test-suites', null);
+    }
+    await initTestSuiteBrowserPage();
+    setSuiteBrowserHighlightedPath(artifactPath);
+    await selectTestSuiteForBrowser(target.suite_path, directoryPath || '', { preserveHighlight: true });
+}
+
+async function openReportDiagnosisSourceFile() {
+    const target = getCurrentReportDiagnosisTarget();
+    if (!target) {
+        showToast('未推断出源码路径', 'warning');
+        return;
+    }
+    const { sourcePath, lineNumber } = getReportDiagnosisSourceLocation();
+    if (!sourcePath) {
+        showToast('未推断出源码路径', 'warning');
+        return;
+    }
+    await openReportDiagnosisApkAnalysis({ sourcePath, lineNumber });
+}
+
+async function openReportDiagnosisApkAnalysis(options = {}) {
+    const target = _requireDiagnosisArtifact();
+    if (!target) return;
+
+    const data = (window.reportDiagnosis || {}).data || {};
+    const sourcePath = options.sourcePath || buildReportDiagnosisSourcePath(target);
+    const lineNumber = Number(options.lineNumber || data?.failure_location?.line_number || target?.source_guess?.line_number || 0) || null;
+    state.suiteBrowser.selectedSuitePath = target.suite_path || state.suiteBrowser.selectedSuitePath;
+    window.apkPendingOpenTarget = sourcePath ? { filePath: sourcePath, line: lineNumber } : null;
+    await analyzeSuiteApk(target.artifact.path, {
+        openSourcePath: sourcePath,
+        openSourceLine: lineNumber,
+        diagnosisTarget: target
+    });
+}
+
+async function enhanceReportDiagnosisWithSource(filePath, sourceCode) {
+    const diag = window.reportDiagnosis || {};
+    const data = diag.data || {};
+    if (!data.test_name || !sourceCode || diag.enhanceInFlight) return;
+
+    window.reportDiagnosis.enhanceInFlight = true;
+    try {
+        const result = await apiCall('/api/reports/diagnose', 'POST', {
+            test_name: data.test_name || '',
+            error_message: data.error_message || '',
+            stack_trace: data.stack_trace || data.error_message || '',
+            module: data.module || '',
+            class_names: data.class_names || [],
+            report_name: data.report_name || '',
+            failure_index: data.failure_index || 0,
+            test_type: data.suite_target?.test_type || '',
+            suite_version: data.suite_target?.suite_version || '',
+            source_path: filePath,
+            source_code: sourceCode
+        });
+        if (result.success && result.data) {
+            renderReportDiagnosis({
+                ...result.data,
+                suite_target: result.data.suite_target || data.suite_target
+            });
+            showToast('已结合反编译源码刷新 AI 诊断', 'success');
+        }
+    } catch (error) {
+        debugLog('[Report Diagnosis] Source enhanced diagnosis failed:', error);
+    } finally {
+        window.reportDiagnosis.enhanceInFlight = false;
     }
 }
 
@@ -7048,6 +7543,17 @@ window.showSshdInstallGuide = showSshdInstallGuide;
 window.closeSshdInstallGuide = closeSshdInstallGuide;
 window.autoInstallUsbipd = autoInstallUsbipd;
 window.resetReportAnalysis = resetReportAnalysis;
+window.openReportDiagnosisModal = openReportDiagnosisModal;
+window.closeReportDiagnosisWorkbench = closeReportDiagnosisWorkbench;
+window.minimizeReportDiagnosisWorkbench = minimizeReportDiagnosisWorkbench;
+window.restoreReportDiagnosisWorkbench = restoreReportDiagnosisWorkbench;
+window.rerunReportDiagnosis = rerunReportDiagnosis;
+window.copyReportDiagnosis = copyReportDiagnosis;
+window.openReportDiagnosisSourcePreview = openReportDiagnosisSourcePreview;
+window.openReportDiagnosisSuiteBrowser = openReportDiagnosisSuiteBrowser;
+window.openReportDiagnosisArtifactCandidate = openReportDiagnosisArtifactCandidate;
+window.openReportDiagnosisSourceFile = openReportDiagnosisSourceFile;
+window.openReportDiagnosisApkAnalysis = openReportDiagnosisApkAnalysis;
 window.openRedmineReplyModal = openRedmineReplyModal;
 window.showTailscaleInfoModal = showTailscaleInfoModal;
 window.copyDeployCommand = copyDeployCommand;
@@ -7064,7 +7570,8 @@ function copyDeployCommand() {
     const port = window.location.port || (protocol === 'https:' ? '443' : '80');
 
     // 构建 curl 命令（直接执行安装）
-    const deployCommand = `curl -s ${protocol}//${host}:${port}/api/system/install-sh | bash`;
+    const tlsOption = protocol === 'https:' ? '-k ' : '';
+    const deployCommand = `curl ${tlsOption}-s ${protocol}//${host}:${port}/api/system/install-sh | bash`;
 
     const clipboardWrite = navigator.clipboard && navigator.clipboard.writeText
         ? navigator.clipboard.writeText(deployCommand)
@@ -7259,10 +7766,6 @@ function resetReportAnalysis() {
     debugLog('[resetReportAnalysis] Report analysis reset complete');
 }
 
-// 当前筛选状态
-let currentCategoryFilter = 'all';
-let currentMethodFilter = 'all';
-
 /**
  * 按分类筛选
  */
@@ -7446,83 +7949,7 @@ function updateApiStats(apis) {
     if (skillsCountEl) skillsCountEl.textContent = skillsCount;
 }
 
-// ==================== 常量定义 ====================
-// API表格列宽配置 (与HTML模板保持一致: 25%, 18%, 17%, 40%)
-const API_TABLE_COLUMNS = {
-    INTERFACE: 25,    // 百分比 - API接口
-    DESCRIPTION: 20,  // 百分比 - 接口说明
-    SKILL: 20,        // 百分比 - skill使用
-    USAGE: 35         // 百分比 - 使用方法
-};
-
-// HTTP方法类型
-const HTTP_METHODS = {
-    GET: 'GET',
-    POST: 'POST',
-    WEBSOCKET: 'WebSocket'
-};
-
-// CURL特殊参数
-const CURL_SPECIAL_PARAMS = ['force_refresh', 'log_type', 'report_timestamp'];
-
-// 视口高度偏移量（用于表格高度计算）
-const VIEWPORT_HEIGHT_OFFSET = 150; // 像素
-
 // ==================== API Documentation Constants ====================
-
-/**
- * Parameter type constants for type safety
- */
-const PARAM_TYPES = {
-    STRING: 'string',
-    NUMBER: 'number',
-    ARRAY: 'array',
-    BOOLEAN: 'boolean',
-    FILE: 'file',
-    OBJECT: 'object'
-};
-
-/**
- * Curl placeholder values for different parameter types (immutable)
- */
-const CURL_PLACEHOLDERS = Object.freeze({
-    [PARAM_TYPES.STRING]: 'VALUE',
-    [PARAM_TYPES.NUMBER]: 123,
-    [PARAM_TYPES.ARRAY]: ['Serial'],
-    [PARAM_TYPES.BOOLEAN]: true,
-    [PARAM_TYPES.FILE]: '/path/to/file.img',
-    [PARAM_TYPES.OBJECT]: {}
-});
-
-/**
- * Path parameter normalization patterns
- */
-const PATH_PATTERNS = [
-    // No more path patterns needed with unified API
-];
-
-/**
- * API details cache to avoid repeated lookups
- */
-const apiDetailsCache = new Map();
-
-/**
- * Default API details for unknown endpoints
- */
-const DEFAULT_API_DETAILS = Object.freeze({
-    title: 'API接口',
-    description: '执行API操作',
-    params: Object.freeze([]),
-    response: '{ "success": true }',
-    usage: '使用该接口完成相关操作'
-});
-
-/**
- * Badge size and padding constants
- */
-const BADGE_SIZES = { xs: '9px', sm: '10px', md: '11px', lg: '12px' };
-const BADGE_PADDINGS = { xs: '1px 4px', sm: '2px 6px', md: '3px 8px', lg: '4px 10px' };
-
 /**
  * Badge HTML generation utility
  */
@@ -7588,10 +8015,6 @@ function getApiDetails(apiPath) {
     apiDetailsCache.set(apiPath, details);
     return details;
 }
-
-// Module-level constants for server info (never change during page lifetime)
-const BASE_URL = window.location.origin;
-const WS_BASE_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
 
 /**
  * Generate curl command for an API endpoint
@@ -7966,7 +8389,7 @@ async function downloadSkillsZip() {
         triggerDownload(url, 'gms-remote-test-skills.zip', true);
     } catch (e) {
         console.error('[downloadSkillsZip] Error:', e);
-        alert('下载失败：' + e.message);
+        showToast('下载失败：' + e.message, 'error');
     }
 }
 
@@ -8098,6 +8521,7 @@ window.apkCurrentTaskId = null;
 window.apkPollInterval = null;
 window.apkStatusPollInFlight = false;
 window.apkNotifiedTaskId = null;
+window.apkPendingOpenTarget = null;
 window.apkOpenFiles = new Map();
 window.apkActiveFilePath = null;
 
@@ -8346,6 +8770,15 @@ async function pollApkStatus() {
             $('apk-analysis-result').style.display = 'block';
 
             loadApkManifest();
+            if (window.apkPendingOpenTarget?.filePath) {
+                const target = window.apkPendingOpenTarget;
+                window.apkPendingOpenTarget = null;
+                setTimeout(() => {
+                    viewApkFileAt(target.filePath, target.line || null)
+                        .then(file => enhanceReportDiagnosisWithSource(target.filePath, file?.content || ''))
+                        .catch(() => {});
+                }, 200);
+            }
             if (window.apkNotifiedTaskId !== window.apkCurrentTaskId) {
                 window.apkNotifiedTaskId = window.apkCurrentTaskId;
                 notifyOperationResult(
@@ -8358,6 +8791,7 @@ async function pollApkStatus() {
             }
         } else if (status.status === 'error') {
             stopApkPolling();
+            window.apkPendingOpenTarget = null;
 
             showToast(`分析失败: ${status.error}`, 'error');
             if (window.apkNotifiedTaskId !== window.apkCurrentTaskId) {
@@ -8702,7 +9136,7 @@ async function viewApkFileAt(filePath, targetLine = null) {
     const existingFile = window.apkOpenFiles.get(filePath);
     if (existingFile && (existingFile.contentHtml || existingFile.error)) {
         activateApkFileTab(filePath, targetLine);
-        return;
+        return existingFile;
     }
 
     window.apkOpenFiles.set(filePath, { loading: true });
@@ -8714,6 +9148,7 @@ async function viewApkFileAt(filePath, targetLine = null) {
         if (data.success) {
             window.apkOpenFiles.set(filePath, {
                 loading: false,
+                content: data.data.content,
                 contentHtml: renderApkCodeContent(data.data.content, filePath)
             });
         } else {
@@ -8730,6 +9165,7 @@ async function viewApkFileAt(filePath, targetLine = null) {
     }
 
     activateApkFileTab(filePath, targetLine);
+    return window.apkOpenFiles.get(filePath);
 }
 
 function bindApkCodeNavigation(contentEl) {
@@ -8759,7 +9195,11 @@ function scrollApkCodeToLine(line) {
 }
 
 function closeApkFileViewer() {
-    window.apkOpenFiles.clear();
+    if (!window.apkOpenFiles || typeof window.apkOpenFiles.clear !== 'function') {
+        window.apkOpenFiles = new Map();
+    } else {
+        window.apkOpenFiles.clear();
+    }
     window.apkActiveFilePath = null;
     const contentEl = $('apk-file-content');
     const pathEl = $('apk-file-path');
@@ -8804,6 +9244,7 @@ function resetApkAnalysis() {
     stopApkPolling();
     window.apkCurrentTaskId = null;
     window.apkNotifiedTaskId = null;
+    window.apkPendingOpenTarget = null;
     resetApkFileIndex();
 
     setApkUploadEmpty(true);
@@ -9020,24 +9461,11 @@ function ensureSecurityAuditDetailModal() {
     modal.addEventListener('click', (event) => {
         if (event.target === modal) closeSecurityAuditDetailModal();
     });
-    // 支持 Esc 键关闭
-    modal.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') closeSecurityAuditDetailModal();
-    });
     return modal;
 }
 
 function closeSecurityAuditDetailModal() {
-    const modal = $('security-audit-detail-modal');
-    if (modal) {
-        modal.classList.remove('show');
-        modal.style.display = '';
-    }
-    // 移除全局 Esc 监听器
-    if (window._securityAuditEscHandler) {
-        document.removeEventListener('keydown', window._securityAuditEscHandler);
-        window._securityAuditEscHandler = null;
-    }
+    ModalManager.close('security-audit-detail-modal');
 }
 
 function renderRelatedAuditLogs(relatedLogs) {
@@ -9064,20 +9492,8 @@ async function showSecurityAuditDetail(auditId) {
     if (!auditId) return;
     const modal = ensureSecurityAuditDetailModal();
     const body = $('security-audit-detail-body');
-    modal.style.display = '';
-    modal.classList.add('show');
+    ModalManager.open('security-audit-detail-modal');
     body.innerHTML = '加载中...';
-
-    // 添加全局 Esc 监听器
-    if (window._securityAuditEscHandler) {
-        document.removeEventListener('keydown', window._securityAuditEscHandler);
-    }
-    window._securityAuditEscHandler = (event) => {
-        if (event.key === 'Escape') {
-            closeSecurityAuditDetailModal();
-        }
-    };
-    document.addEventListener('keydown', window._securityAuditEscHandler);
 
     try {
         const result = await apiCall(`/api/security-audit/detail/${encodeURIComponent(auditId)}`);

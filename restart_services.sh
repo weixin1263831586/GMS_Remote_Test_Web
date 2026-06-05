@@ -21,6 +21,7 @@ cd "$PROJECT_DIR"
 CERT_DIR="${PROJECT_DIR}/.certs"
 CERT_KEY="${CERT_DIR}/gms-local.key"
 CERT_CRT="${CERT_DIR}/gms-local.crt"
+PORT="${GMS_PORT:-5001}"
 SERVER_HOSTNAME="${GMS_SERVER_HOSTNAME:-172.16.14.233}"
 
 ensure_https_cert() {
@@ -95,7 +96,7 @@ echo ""
 
 # 3. 停止旧服务
 echo -e "${YELLOW}[3/4] 停止旧服务...${NC}"
-for port in 5001; do
+for port in "${PORT}"; do
     if lsof -i :"$port" >/dev/null 2>&1; then
         fuser -k "$port/tcp" 2>/dev/null || true
         sleep 1
@@ -111,9 +112,9 @@ echo -e "${YELLOW}[4/4] 启动新服务...${NC}"
 
 ensure_https_cert
 
-echo -e "  启动 FastAPI (5001)..."
-nohup setsid "${PYTHON_BIN}" -m uvicorn app_fastapi_full:app \
-    --host 0.0.0.0 --port 5001 --log-level info --access-log \
+echo -e "  启动 FastAPI (${PORT})..."
+nohup setsid "${PYTHON_BIN}" -m uvicorn app:app \
+    --host 0.0.0.0 --port "${PORT}" --log-level info --access-log \
     --ssl-keyfile "${CERT_KEY}" --ssl-certfile "${CERT_CRT}" \
     >> fastapi.log 2>&1 < /dev/null &
 echo $! > fastapi.pid
@@ -123,7 +124,7 @@ sleep 2
 echo -e "${BLUE}  进行健康检查...${NC}"
 sleep 3  # 等待服务完全启动
 
-for port in 5001; do
+for port in "${PORT}"; do
     if timeout 5 curl -sk -f "https://localhost:${port}/" >/dev/null 2>&1; then
         echo -e "${GREEN}  ✓ ${port} 启动成功${NC}"
     else
@@ -137,12 +138,12 @@ echo -e "${GREEN}  ✓ 服务管理完成！${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "📋 服务状态："
-echo -e "  FastAPI: ${GREEN}https://localhost:5001${NC} (主服务)"
-echo -e "  局域网: ${GREEN}https://${SERVER_HOSTNAME}:5001${NC}"
+echo -e "  FastAPI: ${GREEN}https://localhost:${PORT}${NC} (主服务)"
+echo -e "  局域网: ${GREEN}https://${SERVER_HOSTNAME}:${PORT}${NC}"
 echo ""
 echo -e "📊 查看日志："
 echo -e "  FastAPI: tail -f fastapi.log"
 echo ""
 echo -e "🔍 检查端口："
-echo -e "  lsof -i :5001"
+echo -e "  lsof -i :${PORT}"
 echo ""

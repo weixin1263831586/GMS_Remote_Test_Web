@@ -127,3 +127,26 @@ class TestSuiteExtractRequest(BaseModel):
 
 class TestSuiteAddLocalRequest(BaseModel):
     path: str = Field(..., description="本地测试套件路径")
+
+
+class _DiagnosisBaseRequest(BaseModel):
+    """Shared fields for diagnosis-related endpoints."""
+    test_type: str = ""
+    suite_version: str = ""
+    module: str = ""
+    class_names: List[str] = Field(default_factory=list)
+
+
+class SuiteDiagnosisTargetRequest(_DiagnosisBaseRequest):
+    test_name: str = ""
+    suite_path: str = ""
+
+
+class ReportDiagnosisRequest(_DiagnosisBaseRequest):
+    test_name: str
+    error_message: str = ""
+    stack_trace: str = ""
+    report_name: str = ""
+    failure_index: int = 0
+    source_path: str = ""
+    source_code: str = ""

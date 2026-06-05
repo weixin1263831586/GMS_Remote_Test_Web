@@ -848,6 +848,7 @@ body {
     align-items: center;
     gap: 6px;
     min-height: 30px;
+    min-width: 0;
 }
 
 .form-row label {
@@ -866,6 +867,7 @@ body {
 
 .entry-field {
     flex: 1;
+    min-width: 0;
     padding: 6px 4px;
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
@@ -995,6 +997,7 @@ select option {
 
 .combo-box {
     flex: 1;
+    min-width: 0;
     padding: 5px 8px;
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
@@ -1095,6 +1098,8 @@ select option {
     align-items: center;
     justify-content: center;
     line-height: 1.4;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .btn-xxs {

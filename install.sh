@@ -324,7 +324,7 @@ Environment=UBUNTU_USER=${RUN_USER}
 Environment=UBUNTU_HOST=${HOST_IP}
 Environment=GMS_LOCAL_SERVER=${RUN_USER}@${HOST_IP}
 Environment=GMS_PRIVATE_KEY_PATH=${SSH_KEY_PATH}
-ExecStart=${INSTALL_DIR}/.venv/bin/python -m uvicorn app_fastapi_full:app --host 0.0.0.0 --port ${PORT} --log-level info --access-log
+ExecStart=${INSTALL_DIR}/.venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port ${PORT} --log-level info --access-log
 Restart=on-failure
 RestartSec=3
 

@@ -1,6 +1,7 @@
 // Notification center and browser notification integration.
 
 const VALID_LEVELS = ['success', 'warning', 'error', 'info'];
+let notificationPanelEscHandler = null;
 
 function normalizeNotification(notification) {
     const now = new Date().toISOString();
@@ -103,6 +104,20 @@ function handleRealtimeNotification(notification, options = {}) {
     if (options.browser !== false) {
         showBrowserNotification(item, options.forceBrowser === true);
     }
+    // Sync to backend so it survives panel reloads
+    if (!options.skipSync) {
+        try {
+            apiCall('/api/notifications', 'POST', {
+                title: item.title,
+                message: item.message,
+                level: item.level,
+                category: item.category,
+                data: { ...item.data, _synced_id: item.id, _synced_read: item.read }
+            });
+        } catch (error) {
+            debugLog('[Notification] Sync to backend failed:', error);
+        }
+    }
 }
 
 function notifyOperationResult(title, message, level = 'info', category = 'system', data = {}) {
@@ -116,8 +131,24 @@ async function loadNotifications() {
     try {
         const result = await apiCall('/api/notifications?limit=100', 'GET');
         const payload = result.data || {};
-        state.notifications = (payload.records || []).map(normalizeNotification);
-        state.unreadNotifications = payload.unread_count ?? state.notifications.filter(item => !item.read).length;
+        const serverRecords = (payload.records || []).map(normalizeNotification);
+
+        // Merge: keep local-only notifications that the server doesn't have
+        const serverIds = new Set(serverRecords.map(r => r.id));
+        const localOnly = state.notifications.filter(item => !serverIds.has(item.id));
+        const mergedMap = new Map();
+
+        // Add server records first (authoritative)
+        for (const record of serverRecords) {
+            mergedMap.set(record.id, record);
+        }
+        // Add local-only records that server doesn't have
+        for (const record of localOnly) {
+            mergedMap.set(record.id, record);
+        }
+
+        state.notifications = Array.from(mergedMap.values());
+        state.unreadNotifications = state.notifications.filter(item => !item.read).length;
         renderNotificationList();
     } catch (error) {
         debugLog('[Notification] Load failed:', error);
@@ -131,19 +162,27 @@ function toggleNotificationPanel() {
     panel.classList.toggle('show');
     if (!isShowing) {
         loadNotifications();
-        const escHandler = (e) => {
+        if (notificationPanelEscHandler) {
+            document.removeEventListener('keydown', notificationPanelEscHandler);
+        }
+        notificationPanelEscHandler = (e) => {
             if (e.key === 'Escape') {
                 closeNotificationPanel();
-                document.removeEventListener('keydown', escHandler);
             }
         };
-        document.addEventListener('keydown', escHandler);
+        document.addEventListener('keydown', notificationPanelEscHandler);
+    } else {
+        closeNotificationPanel();
     }
 }
 
 function closeNotificationPanel() {
     const panel = $('notification-panel');
     if (panel) panel.classList.remove('show');
+    if (notificationPanelEscHandler) {
+        document.removeEventListener('keydown', notificationPanelEscHandler);
+        notificationPanelEscHandler = null;
+    }
 }
 
 async function requestBrowserNotificationPermission() {
@@ -211,7 +250,8 @@ async function createLocalNotification(title, message = '', level = 'info', cate
     try {
         const result = await apiCall('/api/notifications', 'POST', { title, message, level, category, data });
         const notification = result.data?.notification;
-        handleRealtimeNotification(notification || { title, message, level, category, data });
+        // skipSync: already POSTed to backend above
+        handleRealtimeNotification(notification || { title, message, level, category, data }, { skipSync: true });
     } catch (error) {
         handleRealtimeNotification({ title, message, level, category, data });
     }

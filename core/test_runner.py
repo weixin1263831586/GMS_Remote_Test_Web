@@ -20,6 +20,8 @@ import paramiko
 from .ssh import ssh_manager
 from .config import config_manager, get_ubuntu_user
 from .common_utils import CommonUtils
+from .settings import PROJECT_ROOT
+from .state import global_state
 
 logger = logging.getLogger(__name__)
 
@@ -134,15 +136,11 @@ class TestRunner:
             await log_callback(f"🚀 执行命令 (进程组: {process_group_id})", 'info')
 
             # 执行测试命令（后台任务）
-            asyncio.create_task(
-                self._execute_test_async(
-                    ssh,
-                    command,
-                    client_id,
-                    log_callback,
-                    test_params.get('test_type', 'cts')
-                )
+            task = asyncio.create_task(
+                self._execute_test_async(ssh, command, client_id, log_callback, test_params.get('test_type', 'cts'))
             )
+            global_state.background_tasks.add(task)
+            task.add_done_callback(global_state.background_tasks.discard)
 
             return True
 
@@ -169,8 +167,7 @@ class TestRunner:
         try:
             # 检查本地脚本
             local_script = os.path.realpath(os.path.join(
-                os.path.dirname(__file__),
-                '..',
+                PROJECT_ROOT,
                 'scripts',
                 'run_GMS_Test_Auto.sh')
             )
