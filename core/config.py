@@ -138,7 +138,8 @@ class ConfigManager:
         # 加载静态配置
         config = self._load_static_config()
 
-        # 加载运行时配置并合并
+        # 加载运行时配置并合并。config_runtime.json 保存部署身份和用户操作数据，
+        # 需要覆盖随源码携带的静态默认值。
         runtime_config = self._load_runtime_config()
         if runtime_config:
             ai_config = config.get('ai_models', {})
@@ -362,15 +363,22 @@ class ConfigManager:
         return replaced
 
     def _load_runtime_config(self) -> Optional[Dict[str, Any]]:
-        """加载运行时配置（合并了原 dynamic + credentials）"""
+        """加载运行时配置。
+
+        config_runtime.json 保存安装脚本写入的部署身份和用户操作产生的数据，
+        覆盖随源码携带的静态默认值（config.json）。
+        """
         try:
             with open(self.runtime_config_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+            logger.warning(f"Runtime config {self.runtime_config_path} is not a dict: {type(data).__name__}")
         except FileNotFoundError:
-            return None
+            pass
         except Exception as e:
-            logger.error(f"Error loading runtime config: {e}")
-            return None
+            logger.error(f"Error loading runtime config {self.runtime_config_path}: {e}")
+        return None
 
     def get_runtime_config(self) -> Dict[str, Any]:
         """Public read-only access to the runtime configuration."""
@@ -386,7 +394,7 @@ class ConfigManager:
 
             runtime = self._load_runtime_config() or {}
             runtime['client_ssh_credentials'] = credentials
-            return self._save_runtime_config(runtime, preserve_redmine_auth=False)
+            return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
         except Exception as e:
             logger.error(f"Error saving client SSH credentials: {e}")
             return False
@@ -410,24 +418,24 @@ class ConfigManager:
             logger.error(f"Error saving config: {e}")
             return False
 
-    def save_dynamic_config(self, dynamic_config: Dict[str, Any]) -> bool:
+    def save_runtime_config(self, runtime_config: Dict[str, Any]) -> bool:
         """
-        保存运行时配置（包含动态配置和 SSH 凭据）
+        保存运行时配置到 config_runtime.json（包含部署身份和 SSH 凭据）
 
         Args:
-            dynamic_config: 运行时配置字典
+            runtime_config: 运行时配置字典
 
         Returns:
             是否保存成功
         """
         try:
-            dynamic_config = dict(dynamic_config or {})
-            return self._save_runtime_config(dynamic_config)
+            runtime_config = dict(runtime_config or {})
+            return self._write_runtime_config_file(runtime_config)
         except Exception as e:
             logger.error(f"Error saving runtime config: {e}")
             return False
 
-    def _save_runtime_config(self, runtime_config: Dict[str, Any], preserve_redmine_auth: bool = True) -> bool:
+    def _write_runtime_config_file(self, runtime_config: Dict[str, Any], preserve_redmine_auth: bool = True) -> bool:
         """保存运行时配置到文件
 
         Args:
@@ -464,20 +472,20 @@ class ConfigManager:
         existing = self._load_runtime_config() or {}
         existing_credentials = existing.get('client_ssh_credentials', [])
 
-        dynamic_config = existing.copy()
-        dynamic_config['client_hosts'] = updates.get('client_hosts', existing.get('client_hosts', {}))
-        dynamic_config['client_ssh_credentials'] = updates.get(
+        runtime_config = existing.copy()
+        runtime_config['client_hosts'] = updates.get('client_hosts', existing.get('client_hosts', {}))
+        runtime_config['client_ssh_credentials'] = updates.get(
             'client_ssh_credentials',
             existing_credentials
         )
 
         # 只有在明确提供local_server时才保存（避免空值覆盖）
         if 'local_server' in updates and updates['local_server']:
-            dynamic_config['local_server'] = updates['local_server']
+            runtime_config['local_server'] = updates['local_server']
         elif 'local_server' in existing:
-            dynamic_config['local_server'] = existing['local_server']
+            runtime_config['local_server'] = existing['local_server']
 
-        return dynamic_config
+        return runtime_config
 
     def get_device_hosts(self, config: Dict[str, Any] = None) -> list:
         """
@@ -584,7 +592,7 @@ class ConfigManager:
                 'encrypted_password': encrypted_password,
                 'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S')
             }
-            if self._save_runtime_config(runtime, preserve_redmine_auth=False):
+            if self._write_runtime_config_file(runtime, preserve_redmine_auth=False):
                 logger.info(f"[Redmine Auth] Saved credentials for {username}")
                 return True
             return False

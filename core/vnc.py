@@ -9,9 +9,10 @@ VNC管理 - 核心业务逻辑
 
 import logging
 import os
+import shutil
 import subprocess
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from .ssh import ssh_manager
 from .config import config_manager, get_ubuntu_user
@@ -43,7 +44,8 @@ class VNCManager:
         self,
         host: str = None,
         password: str = None,
-        vnc_password: str = None
+        vnc_password: str = None,
+        force_restart: bool = False
     ) -> Dict[str, Any]:
         """
         启动VNC服务
@@ -52,6 +54,7 @@ class VNCManager:
             host: 主机地址（如果不提供则使用配置）
             password: SSH密码
             vnc_password: VNC密码
+            force_restart: 强制重启VNC进程（杀死旧的x11vnc/websockify）
 
         Returns:
             结果字典
@@ -72,7 +75,7 @@ class VNCManager:
 
             if is_local:
                 # 本地主机的VNC启动
-                return self._start_local_vnc()
+                return self._start_local_vnc(force_restart=force_restart)
 
             # 远程主机的VNC启动
             return self._start_remote_vnc(host, password, vnc_password, config)
@@ -81,82 +84,104 @@ class VNCManager:
             logger.error(f"Error starting VNC: {e}")
             return {'success': False, 'error': str(e)}
 
-    def _start_local_vnc(self) -> Dict[str, Any]:
-        """启动本地VNC服务"""
+    def _start_local_vnc(self, force_restart: bool = False) -> Dict[str, Any]:
+        """启动本地VNC服务
+
+        Args:
+            force_restart: 强制杀死旧进程并重启（清理僵尸连接）
+        """
         try:
-            logger.info("[VNC] Starting local VNC services...")
+            logger.info(f"[VNC] Starting local VNC services (force_restart={force_restart})...")
+            novnc_web_dir = self._find_local_novnc_web_dir()
+            if not novnc_web_dir:
+                return {
+                    'success': False,
+                    'error': 'noVNC未安装',
+                    'instructions': 'sudo apt-get install -y x11vnc novnc websockify'
+                }
+            if not shutil.which('x11vnc'):
+                return {
+                    'success': False,
+                    'error': 'x11vnc未安装',
+                    'instructions': 'sudo apt-get install -y x11vnc'
+                }
+            if not self._has_local_websockify():
+                return {
+                    'success': False,
+                    'error': 'websockify未安装',
+                    'instructions': 'sudo apt-get install -y websockify'
+                }
 
-            # 检查x11vnc是否运行
-            x11vnc_running = subprocess.run(
-                ['pgrep', '-f', 'x11vnc.*:0'],
-                capture_output=True,
-                text=True
-            ).returncode == 0
+            local_ip = CommonUtils.get_local_ip() or 'localhost'
 
-            # 检查websockify是否运行
-            websockify_running = subprocess.run(
-                ['pgrep', '-f', 'websockify.*6080'],
-                capture_output=True,
-                text=True
-            ).returncode == 0
-
-            # 如果x11vnc正在运行，检查是否使用了密码模式
-            if x11vnc_running:
-                # 检查是否有使用-rfbauth（密码模式）的x11vnc进程
-                check_password_mode = subprocess.run(
-                    ['pgrep', '-f', 'x11vnc.*-rfbauth'],
+            # 强制重启模式：杀死所有旧进程，清理环境
+            if force_restart:
+                logger.info("[VNC] Force restart: killing old x11vnc and websockify processes...")
+                subprocess.run(['pkill', '-9', '-f', 'x11vnc'], capture_output=True)
+                subprocess.run(['pkill', '-9', '-f', 'websockify.*6080'], capture_output=True)
+                time.sleep(1)
+                logger.info("[VNC] Old processes killed")
+            else:
+                # 检查x11vnc是否运行
+                x11vnc_running = subprocess.run(
+                    ['pgrep', '-f', 'x11vnc.*:0'],
                     capture_output=True,
                     text=True
                 ).returncode == 0
 
-                if check_password_mode:
-                    # 如果使用密码模式，需要重启为免密码模式
-                    logger.info("[VNC] Found x11vnc running with password, restarting without password...")
-                    subprocess.run(['pkill', '-f', 'x11vnc.*:0'])
-                    time.sleep(1)
-                    x11vnc_running = False
+                # 检查websockify是否运行
+                websockify_running = subprocess.run(
+                    ['pgrep', '-f', 'websockify.*6080'],
+                    capture_output=True,
+                    text=True
+                ).returncode == 0
 
-            local_ip = CommonUtils.get_local_ip() or 'localhost'
+                # 如果x11vnc正在运行，检查是否使用了密码模式
+                if x11vnc_running:
+                    check_password_mode = subprocess.run(
+                        ['pgrep', '-f', 'x11vnc.*-rfbauth'],
+                        capture_output=True,
+                        text=True
+                    ).returncode == 0
 
-            # 如果已经运行且是免密码模式，返回成功
-            if x11vnc_running and websockify_running:
-                return {
-                    'success': True,
-                    'message': '✅ VNC服务已在运行(本地)',
-                    'x11vnc_running': True,
-                    'websockify_running': True,
-                    'vnc_port': 5900,
-                    'web_port': 6080,
-                    'url': f"http://{local_ip}:6080/vnc.html?autoconnect=true",
-                    'local': True
-                }
+                    if check_password_mode:
+                        logger.info("[VNC] Found x11vnc running with password, restarting without password...")
+                        subprocess.run(['pkill', '-f', 'x11vnc.*:0'])
+                        time.sleep(1)
+                        x11vnc_running = False
+
+                # 如果已经运行且是免密码模式，返回成功
+                if x11vnc_running and websockify_running:
+                    return {
+                        'success': True,
+                        'message': '✅ VNC服务已在运行(本地)',
+                        'x11vnc_running': True,
+                        'websockify_running': True,
+                        'vnc_port': 5900,
+                        'web_port': 6080,
+                        'url': f"http://{local_ip}:6080/vnc.html?autoconnect=true",
+                        'local': True
+                    }
 
             # 启动x11vnc
-            if not x11vnc_running:
-                x11vnc_cmd = [
-                    'x11vnc',
-                    '-display', ':0',
-                    '-forever',
-                    '-shared',
-                    '-rfbport', '5900',
-                    '-nopw',
-                    '-bg'
-                ]
-                subprocess.Popen(x11vnc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                logger.info("[VNC] Started x11vnc")
-                time.sleep(0.5)
+            x11vnc_cmd = [
+                'x11vnc',
+                '-display', ':0',
+                '-forever',
+                '-shared',
+                '-rfbport', '5900',
+                '-nopw',
+                '-bg'
+            ]
+            subprocess.Popen(x11vnc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            logger.info("[VNC] Started x11vnc")
+            time.sleep(0.5)
 
             # 启动websockify
-            if not websockify_running:
-                websockify_cmd = [
-                    'python3', '-m', 'websockify',
-                    '--web=/opt/noVNC',
-                    '6080',
-                    'localhost:5900'
-                ]
-                subprocess.Popen(websockify_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                logger.info("[VNC] Started websockify")
-                time.sleep(0.5)
+            websockify_cmd = self._build_local_websockify_cmd(novnc_web_dir)
+            subprocess.Popen(websockify_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            logger.info("[VNC] Started websockify")
+            time.sleep(0.5)
 
             # 验证服务是否运行
             x11vnc_running = subprocess.run(
@@ -191,6 +216,48 @@ class VNCManager:
         except Exception as e:
             logger.error(f"Error starting local VNC: {e}")
             return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def _find_local_novnc_web_dir() -> str:
+        """Return the local noVNC web root installed by source or apt packages."""
+        for path in ('/opt/noVNC', '/usr/share/novnc'):
+            if os.path.isdir(path) and os.path.exists(os.path.join(path, 'vnc.html')):
+                return path
+        return ''
+
+    # Cached at class level: websockify availability doesn't change at runtime
+    _websockify_available: Optional[bool] = None
+    _websockify_standalone: Optional[str] = None
+
+    @classmethod
+    def _detect_websockify(cls) -> bool:
+        """Detect websockify availability (standalone binary or python module)."""
+        standalone = shutil.which('websockify')
+        if standalone:
+            cls._websockify_standalone = standalone
+            return True
+        result = subprocess.run(
+            ['python3', '-m', 'websockify', '--help'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        return result.returncode == 0
+
+    @classmethod
+    def _has_local_websockify(cls) -> bool:
+        """Check if websockify is available. Result is cached after first check."""
+        if cls._websockify_available is None:
+            cls._websockify_available = cls._detect_websockify()
+        return cls._websockify_available
+
+    @classmethod
+    def _build_local_websockify_cmd(cls, novnc_web_dir: str) -> List[str]:
+        """Build websockify command, using cached standalone path when available."""
+        base = [cls._websockify_standalone or 'python3']
+        if not cls._websockify_standalone:
+            base.extend(['-m', 'websockify'])
+        base.extend([f'--web={novnc_web_dir}', '6080', 'localhost:5900'])
+        return base
 
     def _start_remote_vnc(
         self,

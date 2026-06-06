@@ -58,16 +58,17 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
     default_host = f"{config_manager.get_ubuntu_user(config)}@{config_manager.get_ubuntu_host(config) or 'localhost'}"
 
     if req is None:
-        # 如果没有提供请求体，使用配置文件的默认值
         host = default_host
         password = config.get('ubuntu_pswd', '')
         vnc_password = ''
+        force_restart = False
     else:
         host = req.host or default_host
         password = req.password or (config.get('ubuntu_pswd', '') if host == default_host else '')
         vnc_password = req.vnc_password or ''
+        force_restart = req.force_restart
 
-    result = vnc_manager.start_vnc(host, password, vnc_password)
+    result = vnc_manager.start_vnc(host, password, vnc_password, force_restart=force_restart)
     return JSONResponse(content=result)
 
 
@@ -86,6 +87,7 @@ async def stop_desktop_vnc():
 
 # ==================== noVNC WebSocket Proxy ====================
 
+@router.websocket("/websockify")
 @router.websocket("/novnc/websockify")
 @router.websocket("/novnc/novnc/websockify")
 async def novnc_websockify_proxy(websocket: WebSocket):
@@ -195,9 +197,17 @@ async def validate_desktop_host(req: dict = Body(...)):
                 'timeout': 10
             }
             ssh = ssh_manager.create_connection(config)
+
+            # 如果密码认证失败，尝试密钥认证
+            if not ssh:
+                logger.info(f"[Desktop] Password auth failed for {user}@{ip}, trying key authentication")
+                config['use_key_auth'] = True
+                config.pop('password', None)  # Remove password for key auth
+                ssh = ssh_manager.create_connection(config)
+
             if not ssh:
                 return JSONResponse(
-                    content={'success': False, 'error': 'SSH连接失败', 'needs_password': True},
+                    content={'success': False, 'error': 'SSH连接失败，请检查用户名、密码或SSH密钥配置', 'needs_password': True},
                     status_code=401
                 )
 

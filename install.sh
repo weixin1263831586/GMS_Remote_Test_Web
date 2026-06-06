@@ -7,7 +7,15 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+PIPE_INSTALL_BASE_URL="${GMS_INSTALL_BASE_URL:-}"
+if [[ -n "${SCRIPT_SOURCE}" && -f "${SCRIPT_SOURCE}" ]]; then
+    PROJECT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
+elif [[ -n "${PIPE_INSTALL_BASE_URL}" ]]; then
+    PROJECT_DIR=""
+else
+    PROJECT_DIR="$(pwd)"
+fi
 ACTION="install"
 
 INSTALL_DIR="${GMS_INSTALL_DIR:-/opt/gms-remote-test/web_app}"
@@ -15,6 +23,9 @@ SERVICE_NAME="${GMS_SERVICE_NAME:-gms-web-app}"
 PORT="${GMS_PORT:-5001}"
 RUN_USER="${GMS_RUN_USER:-${SUDO_USER:-$(id -un)}}"
 HOST_IP="${GMS_HOST_IP:-}"
+CERT_DIR="${GMS_CERT_DIR:-${INSTALL_DIR}/.certs}"
+CERT_KEY="${GMS_CERT_KEY:-${CERT_DIR}/gms-local.key}"
+CERT_CRT="${GMS_CERT_CRT:-${CERT_DIR}/gms-local.crt}"
 
 DIST_DIR="${GMS_DIST_DIR:-${PROJECT_DIR}/dist}"
 PACKAGE_NAME="${GMS_PACKAGE_NAME:-gms-web-app}"
@@ -24,11 +35,19 @@ RUN_GROUP=""
 RUN_HOME=""
 SSH_KEY_PATH=""
 SUDOERS_FILE=""
+PIPE_INSTALL_TMP=""
 
 info() { echo -e "${BLUE}$*${NC}"; }
 ok() { echo -e "${GREEN}$*${NC}"; }
 warn() { echo -e "${YELLOW}$*${NC}"; }
 fail() { echo -e "${RED}ERROR:${NC} $*" >&2; exit 1; }
+
+cleanup() {
+    if [[ -n "${PIPE_INSTALL_TMP}" && -d "${PIPE_INSTALL_TMP}" ]]; then
+        rm -rf "${PIPE_INSTALL_TMP}"
+    fi
+}
+trap cleanup EXIT
 
 usage() {
     cat <<EOF
@@ -108,9 +127,40 @@ parse_args() {
     refresh_user_paths
 }
 
+prepare_pipe_install_source() {
+    if [[ -n "${PROJECT_DIR}" && -f "${PROJECT_DIR}/app.py" && -f "${PROJECT_DIR}/requirements.txt" ]]; then
+        return
+    fi
+
+    [[ -n "${PIPE_INSTALL_BASE_URL}" ]] || fail "未找到本地项目目录；请用 curl .../api/system/install-sh | bash，或在项目目录执行 ./install.sh"
+    command -v curl >/dev/null 2>&1 || fail "远程安装需要 curl，但当前系统未安装 curl"
+    command -v tar >/dev/null 2>&1 || fail "远程安装需要 tar，但当前系统未安装 tar"
+
+    PIPE_INSTALL_TMP="$(mktemp -d)"
+    local archive="${PIPE_INSTALL_TMP}/gms-web-app.tar.gz"
+    info "正在下载安装包: ${PIPE_INSTALL_BASE_URL}/api/system/install-package"
+    curl -kfsSL "${PIPE_INSTALL_BASE_URL}/api/system/install-package" -o "${archive}" \
+        || fail "下载安装包失败，请确认服务可访问: ${PIPE_INSTALL_BASE_URL}"
+    tar -xzf "${archive}" -C "${PIPE_INSTALL_TMP}"
+    PROJECT_DIR="$(find "${PIPE_INSTALL_TMP}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+    [[ -n "${PROJECT_DIR}" && -f "${PROJECT_DIR}/app.py" && -f "${PROJECT_DIR}/requirements.txt" ]] \
+        || fail "安装包内容不完整"
+    DIST_DIR="${GMS_DIST_DIR:-${PROJECT_DIR}/dist}"
+}
+
+install_source_host() {
+    [[ -n "${PIPE_INSTALL_BASE_URL}" ]] || return 0
+    printf '%s\n' "${PIPE_INSTALL_BASE_URL}" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://\[?([^]/:]+)\]?.*#\1#'
+}
+
 detect_host_ip() {
-    local ip
+    local ip source_host
     if command -v ip >/dev/null 2>&1; then
+        source_host="$(install_source_host)"
+        if [[ -n "${source_host}" && "${source_host}" != "${PIPE_INSTALL_BASE_URL}" ]]; then
+            ip="$(ip route get "${source_host}" 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+            [[ -n "${ip}" && "${ip}" != 127.* ]] && { printf '%s\n' "${ip}"; return; }
+        fi
         ip="$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
         [[ -n "${ip}" ]] && { printf '%s\n' "${ip}"; return; }
     fi
@@ -119,6 +169,17 @@ detect_host_ip() {
         [[ -n "${ip}" ]] && { printf '%s\n' "${ip}"; return; }
     fi
     printf '127.0.0.1\n'
+}
+
+ensure_sudo() {
+    if sudo -n true 2>/dev/null; then
+        return
+    fi
+    if [[ -r /dev/tty ]]; then
+        sudo -v </dev/tty
+    else
+        sudo -v
+    fi
 }
 
 package_web_app() {
@@ -143,7 +204,7 @@ package_web_app() {
         --exclude='*.log' \
         --exclude='*.log.backup.*' \
         --exclude='local.diff' \
-        --exclude='configs/config_dynamic.json' \
+        --exclude='configs/config_runtime.json' \
         --exclude='configs/client_ssh_credentials.local.json' \
         --exclude='configs/redmine_auth.json' \
         --exclude='data/*.json' \
@@ -162,13 +223,20 @@ EOF
 
 install_system_packages() {
     if command -v apt-get >/dev/null 2>&1; then
-        sudo apt-get update
+        sudo apt-get update || fail "apt-get update 失败。请先检查目标机器 DNS/网络/apt 源，例如: resolvectl status、ping cn.archive.ubuntu.com"
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            python3 python3-venv python3-pip rsync curl lsof psmisc \
-            openssh-client openssh-server sudo iproute2
-        for optional_pkg in usbip adb fastboot android-tools-adb android-tools-fastboot; do
+            python3 python3-venv python3-pip rsync curl lsof psmisc openssl \
+            openssh-client openssh-server sudo iproute2 x11vnc novnc websockify \
+            libudev1 \
+            || fail "系统依赖安装失败。当前日志显示多为 DNS 解析失败，请先修复目标机器外网 DNS 或 apt 源后重试"
+        for optional_pkg in usbip adb fastboot android-tools-adb android-tools-fastboot default-jre; do
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${optional_pkg}" >/dev/null 2>&1 || true
         done
+        # 安装 Tailscale（官方脚本，不在 apt 官方源中）
+        if ! command -v tailscale >/dev/null 2>&1; then
+            info "正在安装 Tailscale..."
+            curl -fsSL https://tailscale.com/install.sh | sudo sh >/dev/null 2>&1 || warn "Tailscale 安装失败（不影响主程序运行）"
+        fi
     else
         warn "未检测到 apt-get，跳过系统依赖安装；请确认 python3/venv/rsync/curl/ssh 已安装"
     fi
@@ -181,6 +249,7 @@ copy_project() {
             --exclude '.git/' \
             --exclude '.agents/' \
             --exclude '.codex/' \
+            --exclude '.venv/' \
             --exclude '__pycache__/' \
             --exclude '*.pyc' \
             --exclude '*.pyo' \
@@ -190,6 +259,7 @@ copy_project() {
             --exclude '*.log.backup.*' \
             --exclude 'local.diff' \
             --exclude 'dist/' \
+            --exclude 'configs/config_runtime.json' \
             --exclude 'configs/client_ssh_credentials.local.json' \
             --exclude 'configs/redmine_auth.json' \
             "${PROJECT_DIR}/" "${INSTALL_DIR}/"
@@ -201,6 +271,62 @@ setup_python_env() {
     sudo -H -u "${RUN_USER}" python3 -m venv "${INSTALL_DIR}/.venv"
     sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel
     sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" -m pip install -r "${INSTALL_DIR}/requirements.txt"
+    sudo -H -u "${RUN_USER}" bash -c "cd '${INSTALL_DIR}' && '${INSTALL_DIR}/.venv/bin/python' - <<'PY'
+import importlib
+
+for module in ('jinja2', 'uvicorn', 'fastapi', 'app'):
+    importlib.import_module(module)
+PY"
+}
+
+setup_https_cert() {
+    sudo -H -u "${RUN_USER}" mkdir -p "${CERT_DIR}"
+
+    if [[ -s "${CERT_KEY}" && -s "${CERT_CRT}" ]]; then
+        sudo chown "${RUN_USER}:${RUN_GROUP}" "${CERT_KEY}" "${CERT_CRT}"
+        sudo chmod 600 "${CERT_KEY}"
+        sudo chmod 644 "${CERT_CRT}"
+        return
+    fi
+
+    command -v openssl >/dev/null 2>&1 || fail "未检测到 openssl，无法生成 HTTPS 证书"
+
+    local san_list="DNS:localhost,DNS:127.0.0.1,IP:127.0.0.1,IP:${HOST_IP}"
+    if command -v hostname >/dev/null 2>&1; then
+        local host_ips
+        host_ips="$(hostname -I 2>/dev/null || true)"
+        for ip in ${host_ips}; do
+            [[ -n "${ip}" ]] && san_list="${san_list},IP:${ip}"
+        done
+    fi
+
+    local tmp_conf
+    tmp_conf="$(mktemp)"
+    cat > "${tmp_conf}" <<EOF
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+x509_extensions = v3_req
+
+[dn]
+CN = GMS Remote Test Local
+
+[v3_req]
+subjectAltName = ${san_list}
+keyUsage = keyEncipherment, dataEncipherment, digitalSignature
+extendedKeyUsage = serverAuth
+EOF
+
+    sudo -H -u "${RUN_USER}" openssl req -x509 -nodes -newkey rsa:2048 \
+        -days 825 \
+        -keyout "${CERT_KEY}" \
+        -out "${CERT_CRT}" \
+        -config "${tmp_conf}" >/dev/null 2>&1
+    rm -f "${tmp_conf}"
+    sudo chmod 600 "${CERT_KEY}"
+    sudo chmod 644 "${CERT_CRT}"
 }
 
 setup_local_ssh_key() {
@@ -231,7 +357,7 @@ setup_local_ssh_key() {
 }
 
 write_runtime_config() {
-    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}/configs/config_dynamic.json" "${RUN_USER}" "${HOST_IP}" "${RUN_HOME}" "${SSH_KEY_PATH}" "${PORT}" <<'PY'
+    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}/configs/config_runtime.json" "${RUN_USER}" "${HOST_IP}" "${RUN_HOME}" "${SSH_KEY_PATH}" "${PORT}" <<'PY'
 import json
 import os
 import sys
@@ -291,7 +417,7 @@ configure_sudoers() {
     tmp="$(mktemp)"
     cat > "${tmp}" <<EOF
 # Allow ${RUN_USER} to run the runtime commands used by GMS Web App without storing a sudo password.
-Cmnd_Alias GMS_WEB_APP_CMDS = /usr/sbin/usbip *, /usr/bin/usbip *, /sbin/modprobe *, /usr/sbin/modprobe *, /usr/bin/udevadm *, /sbin/udevadm *, /sbin/ip *, /usr/sbin/ip *, /usr/bin/ip *, /usr/bin/nmcli *
+Cmnd_Alias GMS_WEB_APP_CMDS = /usr/sbin/usbip *, /usr/bin/usbip *, /sbin/modprobe *, /usr/sbin/modprobe *, /usr/bin/udevadm *, /sbin/udevadm *, /sbin/ip *, /usr/sbin/ip *, /usr/bin/ip *, /usr/bin/nmcli *, /usr/bin/systemctl start tailscaled, /usr/bin/systemctl enable tailscaled, /usr/bin/systemctl restart tailscaled, /usr/sbin/tailscale up, /usr/sbin/tailscale down, /usr/bin/tailscale up, /usr/bin/tailscale down
 ${RUN_USER} ALL=(root) NOPASSWD: GMS_WEB_APP_CMDS
 EOF
     sudo visudo -cf "${tmp}" >/dev/null
@@ -324,7 +450,7 @@ Environment=UBUNTU_USER=${RUN_USER}
 Environment=UBUNTU_HOST=${HOST_IP}
 Environment=GMS_LOCAL_SERVER=${RUN_USER}@${HOST_IP}
 Environment=GMS_PRIVATE_KEY_PATH=${SSH_KEY_PATH}
-ExecStart=${INSTALL_DIR}/.venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port ${PORT} --log-level info --access-log
+ExecStart=${INSTALL_DIR}/.venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port ${PORT} --log-level info --access-log --ssl-keyfile ${CERT_KEY} --ssl-certfile ${CERT_CRT}
 Restart=on-failure
 RestartSec=3
 
@@ -334,7 +460,8 @@ EOF
     sudo install -o root -g root -m 0644 "${tmp}" "${service_file}"
     rm -f "${tmp}"
     sudo systemctl daemon-reload
-    sudo systemctl enable --now "${SERVICE_NAME}"
+    sudo systemctl enable "${SERVICE_NAME}" >/dev/null
+    sudo systemctl restart "${SERVICE_NAME}"
 }
 
 install_web_app() {
@@ -349,10 +476,11 @@ install_web_app() {
     echo "端口:     ${PORT}"
     echo ""
 
-    sudo -v
+    ensure_sudo
     install_system_packages
     copy_project
     setup_python_env
+    setup_https_cert
     setup_local_ssh_key
     write_runtime_config
     setup_suite_dir
@@ -360,13 +488,14 @@ install_web_app() {
     install_systemd_service
 
     ok "安装完成"
-    echo "访问地址: http://${HOST_IP}:${PORT}"
-    echo "本机访问: http://localhost:${PORT}"
+    echo "访问地址: https://${HOST_IP}:${PORT}"
+    echo "本机访问: https://localhost:${PORT}"
     echo "查看日志: sudo journalctl -u ${SERVICE_NAME} -f"
 }
 
 main() {
     parse_args "$@"
+    prepare_pipe_install_source
     case "${ACTION}" in
         install) install_web_app ;;
         package) package_web_app ;;

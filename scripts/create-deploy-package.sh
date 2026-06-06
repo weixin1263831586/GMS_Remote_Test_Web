@@ -62,7 +62,7 @@ tar -czf "${ARCHIVE}" \
     --exclude='*.log.backup.*' \
     --exclude='local.diff' \
     --exclude='configs/config.json' \
-    --exclude='configs/config_dynamic.json' \
+    --exclude='configs/config_runtime.json' \
     --exclude='configs/client_ssh_credentials.local.json' \
     --exclude='configs/redmine_auth.json' \
     --exclude='data/*.json' \
@@ -176,7 +176,7 @@ if command -v apt-get >/dev/null 2>&1; then
         python3 python3-venv python3-pip python3-dev \
         rsync curl lsof psmisc \
         openssh-client openssh-server sudo iproute2 net-tools \
-        build-essential libssl-dev libffi-dev \
+        build-essential libssl-dev libffi-dev x11vnc novnc websockify \
         2>/dev/null || true
     # 可选依赖（USB/IP、ADB 等）
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
@@ -255,7 +255,7 @@ ok "SSH 密钥配置完成"
 
 # 6. 写入运行时配置
 info "[6/8] 写入运行时配置..."
-sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}/configs/config_dynamic.json" "${RUN_USER}" "${HOST_IP}" "${RUN_HOME}" "${SSH_KEY_PATH}" "${PORT}" <<'PY'
+sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}/configs/config_runtime.json" "${RUN_USER}" "${HOST_IP}" "${RUN_HOME}" "${SSH_KEY_PATH}" "${PORT}" <<'PY'
 import json
 import os
 import sys
@@ -361,7 +361,7 @@ echo "  重启：sudo systemctl restart ${SERVICE_NAME}"
 echo "  日志：sudo journalctl -u ${SERVICE_NAME} -f"
 echo ""
 echo "首次使用:"
-echo "  1. 编辑配置文件：${INSTALL_DIR}/configs/config_dynamic.json"
+echo "  1. 编辑配置文件：${INSTALL_DIR}/configs/config_runtime.json"
 echo "  2. 启动服务：sudo systemctl start ${SERVICE_NAME}"
 echo "  3. 访问 Web 界面：http://localhost:${PORT}"
 echo ""

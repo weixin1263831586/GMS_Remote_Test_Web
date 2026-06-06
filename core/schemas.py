@@ -41,6 +41,7 @@ class VNCStartRequest(BaseModel):
     host: Optional[str] = None
     password: Optional[str] = None
     vnc_password: Optional[str] = None
+    force_restart: bool = False
 
 
 class ADBForwardStartRequest(BaseModel):

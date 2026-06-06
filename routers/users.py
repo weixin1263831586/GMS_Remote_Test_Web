@@ -91,15 +91,15 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
         return error_response("用户名不能为空或unknown", 400)
 
     # 加载现有动态配置
-    existing_dynamic = config_manager.get_runtime_config()
-    client_hosts = existing_dynamic.get('client_hosts', {})
+    existing_runtime = config_manager.get_runtime_config()
+    client_hosts = existing_runtime.get('client_hosts', {})
     client_hosts[client_ip] = username
 
     # 只保存客户端相关配置
-    dynamic_config = config_manager.prepare_client_config({'client_hosts': client_hosts})
+    runtime_config = config_manager.prepare_client_config({'client_hosts': client_hosts})
 
     # 保存到配置文件
-    if config_manager.save_dynamic_config(dynamic_config):
+    if config_manager.save_runtime_config(runtime_config):
         # 更新内存中的映射
         client_manager.client_hosts = client_hosts
 

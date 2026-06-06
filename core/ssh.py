@@ -74,6 +74,31 @@ class SSHManager:
         self.pool: queue.Queue = queue.Queue(maxsize=pool_size)
         self._lock = None  # 用于简单的锁（如需）
 
+    def _load_ssh_key(self, key_path: str) -> Optional[paramiko.PKey]:
+        """
+        加载SSH私钥，尝试多种密钥类型
+
+        Args:
+            key_path: 密钥文件路径
+
+        Returns:
+            加载的密钥对象，失败返回 None
+        """
+        key_path = os.path.expanduser(key_path)
+        key_error = None
+
+        for key_class in [paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.DSSKey]:
+            try:
+                key = key_class.from_private_key_file(key_path)
+                logger.info(f"[SSH] Loaded {key_class.__name__} from {key_path}")
+                return key
+            except Exception as e:
+                key_error = e
+                continue
+
+        logger.error(f"[SSH] Failed to load SSH key from {key_path}: {key_error}")
+        return None
+
     def create_connection(self, config: dict) -> Optional[paramiko.SSHClient]:
         """
         创建SSH连接
@@ -88,13 +113,14 @@ class SSHManager:
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-            host = config.get('host') or config.get('ubuntu_host')
+            host = config.get('host') or config.get('hostname') or config.get('ubuntu_host')
             username = config.get('username') or config.get('ubuntu_user') or get_ubuntu_user()
             password = config.get('password') or config.get('ubuntu_pswd', '')
 
             if config.get('use_key_auth', False):
-                key_path = os.path.expanduser(config.get('private_key_path', '~/.ssh/id_rsa'))
-                key = paramiko.RSAKey.from_private_key_file(key_path)
+                key = self._load_ssh_key(config.get('private_key_path', '~/.ssh/id_rsa'))
+                if not key:
+                    return None
                 ssh.connect(
                     host,
                     username=username,

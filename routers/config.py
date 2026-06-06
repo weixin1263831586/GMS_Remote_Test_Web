@@ -163,7 +163,7 @@ async def ensure_tailscale_url(request: Request):
             'connected': status.get('connected', False)
         })
 
-    # Tailscale 未连接，尝试运行安装脚本（加锁防止并发启动）
+    # Tailscale 未连接，尝试自动启动（需要 sudoers 免密配置）
     async with _tailscale_start_lock:
         # 双重检查：可能上一个请求已经启动成功
         status = await asyncio.to_thread(_get_tailscale_status)
@@ -174,58 +174,68 @@ async def ensure_tailscale_url(request: Request):
                 'connected': status.get('connected', False)
             })
         try:
-            script_path = os.path.join(PROJECT_ROOT, 'scripts', 'setup_tailscale.sh')
-            result = await asyncio.to_thread(
+            # 先检查 tailscaled 服务是否运行，未运行则启动
+            svc_check = await asyncio.to_thread(
                 subprocess.run,
-                ["sudo", "bash", script_path],
-                capture_output=True, text=True, timeout=60,
-                env=os.environ.copy()
+                ["systemctl", "is-active", "--quiet", "tailscaled"],
+                capture_output=True, text=True, timeout=5
             )
-            if result.returncode == 0:
-                status = await asyncio.to_thread(_get_tailscale_status)
-                if status.get('ip'):
-                    return JSONResponse(content={
-                        'success': True,
-                        'public_url': _build_tailscale_url(status['ip'], request),
-                        'connected': status.get('connected', False)
-                    })
-            error_detail = (result.stderr or result.stdout or '').strip()[-500:]
-            return error_response(f'Tailscale 启动失败：{error_detail}', status_code=503)
-        except subprocess.TimeoutExpired:
-            return error_response('Tailscale 启动超时', status_code=504)
+            if svc_check.returncode != 0:
+                # 尝试启动 tailscaled（需要 sudoers 免密）
+                await asyncio.to_thread(
+                    subprocess.run,
+                    ["sudo", "systemctl", "enable", "--now", "tailscaled"],
+                    capture_output=True, text=True, timeout=15
+                )
+                await asyncio.sleep(2)
+
+            # 尝试获取 IP（可能已经 authenticated）
+            status = await asyncio.to_thread(_get_tailscale_status)
+            if status.get('ip'):
+                return JSONResponse(content={
+                    'success': True,
+                    'public_url': _build_tailscale_url(status['ip'], request),
+                    'connected': status.get('connected', False)
+                })
+
+            # 未 authenticated，需要用户手动登录
+            return error_response(
+                'Tailscale 已安装但未连接。请在终端执行 sudo tailscale up 完成账号授权，'
+                '或确认 sudoers 已配置 Tailscale 免密命令。',
+                status_code=503
+            )
         except Exception as e:
             return error_response(f'Tailscale 启动失败：{str(e)}', status_code=503)
 
 
 @router.post("/api/config/update")
 async def update_config(req: dict):
-    """更新配置 - 只修改动态配置，禁止修改config.json"""
-    existing_dynamic = config_manager.get_runtime_config()
+    """更新配置 - 只修改运行时配置，禁止修改config.json"""
+    existing_runtime = config_manager.get_runtime_config()
 
-    # 动态配置字段（保存在 config_dynamic.json）
-    # 只允许保存运行时动态配置
+    # 运行时配置字段（保存在 config_runtime.json）
     # 注意：client_ip 和 client_username 是运行时状态，不应保存到配置文件
-    dynamic_keys = {
+    runtime_keys = {
         'client_hosts', 'client_ssh_credentials', 'local_server', 'sidebar_order'
     }
 
     # 检查是否有不允许修改的字段
-    invalid_fields = set(req.keys()) - dynamic_keys
+    invalid_fields = set(req.keys()) - runtime_keys
     if invalid_fields:
         raise HTTPException(
             status_code=400,
-            detail=f"不允许修改以下字段: {', '.join(invalid_fields)}. 可修改的字段: {', '.join(dynamic_keys)}"
+            detail=f"不允许修改以下字段: {', '.join(invalid_fields)}. 可修改的字段: {', '.join(runtime_keys)}"
         )
 
     # 合并现有配置和请求配置（单次遍历）
-    dynamic_updates = {
-        k: req.get(k, existing_dynamic.get(k))
-        for k in dynamic_keys
-        if k in existing_dynamic or k in req
+    runtime_updates = {
+        k: req.get(k, existing_runtime.get(k))
+        for k in runtime_keys
+        if k in existing_runtime or k in req
     }
 
-    # 只保存客户端相关的动态配置
-    if config_manager.save_dynamic_config(dynamic_updates):
+    # 保存运行时配置
+    if config_manager.save_runtime_config(runtime_updates):
         return success_response()
     else:
         raise HTTPException(status_code=500, detail="保存配置失败")
@@ -234,8 +244,8 @@ async def update_config(req: dict):
 @router.get("/api/sidebar-order")
 async def get_sidebar_order():
     """获取侧边栏导航顺序。"""
-    existing_dynamic = config_manager.get_runtime_config()
-    order = existing_dynamic.get('sidebar_order', [])
+    existing_runtime = config_manager.get_runtime_config()
+    order = existing_runtime.get('sidebar_order', [])
     if not isinstance(order, list):
         order = []
     return success_response({'order': order})
@@ -245,9 +255,9 @@ async def get_sidebar_order():
 async def save_sidebar_order(req: dict = Body(default={})):
     """保存侧边栏导航顺序。"""
     order = normalize_sidebar_order(req.get('order'))
-    existing_dynamic = config_manager.get_runtime_config()
-    existing_dynamic['sidebar_order'] = order
+    existing_runtime = config_manager.get_runtime_config()
+    existing_runtime['sidebar_order'] = order
 
-    if config_manager.save_dynamic_config(existing_dynamic):
+    if config_manager.save_runtime_config(existing_runtime):
         return success_response({'order': order})
     raise HTTPException(status_code=500, detail="保存侧边栏排序失败")

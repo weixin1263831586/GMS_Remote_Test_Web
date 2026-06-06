@@ -84,7 +84,8 @@ class USBMonitor:
                 logger.info("[USBMonitor] 提示: 安装pyudev可获得更好的性能: pip install pyudev")
             except Exception as e:
                 self._pyudev_available = False
-                logger.warning(f"[USBMonitor] ✗ pyudev初始化失败: {e}，将使用轮询模式")
+                logger.warning(f"[USBMonitor] ✗ pyudev初始化失败: {type(e).__name__}: {e}，将使用轮询模式")
+                logger.warning("[USBMonitor] 提示: 确认系统已安装 libudev1 (apt install libudev1)")
 
     @property
     def is_running(self) -> bool:

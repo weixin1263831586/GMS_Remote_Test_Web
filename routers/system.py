@@ -5,11 +5,14 @@ import json
 import logging
 import os
 import re
+import tarfile
+import tempfile
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
+from starlette.background import BackgroundTask
 
 from core.api_docs_list import API_DOCS_LIST
 from core.config import config_manager
@@ -48,11 +51,9 @@ async def root(request: Request):
     config = config_manager.load_config()
 
     response = _templates.TemplateResponse(
-        "index_fastapi.html",
-        {
-            "request": request,
-            "config": config
-        }
+        request=request,
+        name="index_fastapi.html",
+        context={"config": config},
     )
     # HTML页面不缓存（确保用户获取最新版本）
     response.headers["Cache-Control"] = "no-cache"
@@ -162,8 +163,16 @@ async def download_install_sh(request: Request):
                 status_code=404
             )
 
-        with open(install_sh_path, 'rb') as f:
+        with open(install_sh_path, 'r', encoding='utf-8') as f:
             content = f.read()
+
+        base_url = str(request.base_url).rstrip('/')
+        lines = content.splitlines(keepends=True)
+        injected = f'export GMS_INSTALL_BASE_URL="{base_url}"\n'
+        if lines and lines[0].startswith('#!'):
+            content = ''.join([lines[0], injected, *lines[1:]])
+        else:
+            content = injected + content
 
         return Response(
             content=content,
@@ -175,6 +184,80 @@ async def download_install_sh(request: Request):
 
     except Exception as e:
         logger.exception(f"[INSTALL_SH_DOWNLOAD] 下载失败：{e}")
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
+
+
+@router.get("/api/system/install-package")
+async def download_install_package(request: Request):
+    """下载当前 Web App 安装包，用于 curl | bash 远程部署。"""
+    tmp = None
+    try:
+        logger.info("[INSTALL_PACKAGE_DOWNLOAD] 请求下载安装包")
+        tmp = tempfile.NamedTemporaryFile(prefix='gms-web-app-', suffix='.tar.gz', delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+
+        root_name = 'gms-web-app'
+        exclude_dirs = {
+            '.git', '.agents', '.codex', '__pycache__', '.pytest_cache',
+            '.certs', '.venv', 'dist', 'logs', 'data/apk_uploads',
+        }
+        exclude_files = {
+            'local.diff',
+            'fastapi.pid',
+            'configs/config_runtime.json',
+            'configs/client_ssh_credentials.local.json',
+            'configs/redmine_auth.json',
+        }
+
+        def should_exclude(rel_path: str) -> bool:
+            rel_path = rel_path.strip('/')
+            if not rel_path:
+                return False
+            parts = rel_path.split('/')
+            if any(part in exclude_dirs for part in parts):
+                return True
+            if rel_path in exclude_files:
+                return True
+            name = parts[-1]
+            if name.endswith(('.pyc', '.pyo', '.log')) or '.log.backup.' in name:
+                return True
+            if rel_path.startswith('data/') and name.endswith('.json'):
+                return True
+            return False
+
+        with tarfile.open(tmp_path, 'w:gz') as tar:
+            for dirpath, dirnames, filenames in os.walk(PROJECT_ROOT):
+                rel_dir = os.path.relpath(dirpath, PROJECT_ROOT)
+                rel_dir = '' if rel_dir == '.' else rel_dir
+                dirnames[:] = [
+                    d for d in dirnames
+                    if not should_exclude(os.path.join(rel_dir, d))
+                ]
+                for filename in filenames:
+                    rel_path = os.path.join(rel_dir, filename) if rel_dir else filename
+                    if should_exclude(rel_path):
+                        continue
+                    full_path = os.path.join(dirpath, filename)
+                    tar.add(full_path, arcname=os.path.join(root_name, rel_path), recursive=False)
+
+        return FileResponse(
+            tmp_path,
+            media_type="application/gzip",
+            filename="gms-web-app.tar.gz",
+            background=BackgroundTask(lambda path: os.path.exists(path) and os.unlink(path), tmp_path),
+        )
+
+    except Exception as e:
+        logger.exception(f"[INSTALL_PACKAGE_DOWNLOAD] 下载失败：{e}")
+        if tmp is not None and os.path.exists(tmp.name):
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
         return JSONResponse(
             content={'success': False, 'error': str(e)},
             status_code=500

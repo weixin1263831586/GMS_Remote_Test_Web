@@ -83,10 +83,10 @@ def get_effective_local_server(client_id: str, requested_local_server: str = "")
     if requested_local_server:
         return requested_local_server
 
-    dynamic_config = config_manager.get_runtime_config()
-    dynamic_local_server = dynamic_config.get('local_server')
-    if dynamic_local_server:
-        return dynamic_local_server
+    runtime_config = config_manager.get_runtime_config()
+    runtime_local_server = runtime_config.get('local_server')
+    if runtime_local_server:
+        return runtime_local_server
 
     return client_id
 
