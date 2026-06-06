@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20260526-01">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260605-dx2">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260601-01"></script>
@@ -22,7 +22,7 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/app-notifications.js?v=20260601-01"></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/app.js?v=20260601-01" defer crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260606-fix" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -137,7 +137,6 @@
         /* 弹框居中样式 */
         #add-host-modal.modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
         #add-local-suite-modal.modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
-        #host-password-modal.modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
         #page-architecture .architecture-container { background: rgba(15,23,42,0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1rem; height: 92vh; overflow: hidden; }
         #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 0.5rem; }
     </style>
@@ -1529,12 +1528,16 @@
                     <input type="text" id="new-host-input" class="host-input" placeholder="例如: user@192.168.1.100" onkeypress="handleAddHostKeyPress(event)" autocomplete="off" />
                 </div>
                 <div class="modal-form-row" style="margin-top: 12px;">
+                    <label>SSH密码:</label>
+                    <input type="password" id="new-host-ssh-password" class="host-input" placeholder="SSH 登录密码（可选，本地主机无需填写）" autocomplete="new-password" />
+                </div>
+                <div class="modal-form-row" style="margin-top: 12px;">
                     <label>VNC密码:</label>
                     <input type="password" id="new-host-vnc-password" class="host-input" placeholder="请输入该主机的VNC密码（将自动保存）" autocomplete="new-password" />
                 </div>
                 </form>
                 <div class="modal-info-text" style="margin-top: 10px;">
-                    💡 添加新主机需要输入VNC密码，系统将自动保存<br>
+                    💡 远程主机需要 SSH 密码用于连接，VNC 密码将自动保存<br>
                     🔑 下次连接该主机时无需再次输入密码
                 </div>
                 <div class="modal-buttons">
@@ -1598,35 +1601,6 @@
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeExtractSuiteModal()">取消</button>
                     <button id="btn-submit-extract-suite" class="btn-xxs btn-primary" onclick="submitExtractSuite()">开始解压</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 主机密码输入弹框 -->
-    <div id="host-password-modal" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 400px;">
-            <div class="modal-header">
-                <span class="modal-title">🔑 输入SSH密码</span>
-                <span class="modal-close" onclick="closeHostPasswordModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div class="modal-info-text" style="margin-bottom: 15px;">
-                    请输入 <span id="host-password-host" style="font-family: monospace; font-weight: 600;"></span> 的SSH密码
-                </div>
-                <form id="host-password-form" onsubmit="event.preventDefault(); submitHostPassword();" autocomplete="off">
-                <input type="text" name="username" style="display:none" autocomplete="username" />
-                <div class="modal-form-row">
-                    <label>SSH密码:</label>
-                    <input type="password" id="host-password-input" placeholder="请输入SSH密码" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg);" onkeypress="handleHostPasswordKeyPress(event)" autocomplete="current-password" />
-                </div>
-                </form>
-                <div class="modal-info-text" style="margin-top: 10px;">
-                    💡 密码将被加密保存供下次使用
-                </div>
-                <div class="modal-buttons">
-                    <button class="btn-xxs" onclick="closeHostPasswordModal()">取消</button>
-                    <button class="btn-xxs btn-primary" onclick="submitHostPassword()">连接</button>
                 </div>
             </div>
         </div>
@@ -1860,6 +1834,13 @@
                 const defaultHostObj = desktopHosts.splice(defaultIndex, 1)[0];
                 desktopHosts.unshift(defaultHostObj);
             }
+            const normalizedDefaultHost = desktopHosts.find(h => h.id === 'default');
+            if (normalizedDefaultHost) {
+                normalizedDefaultHost.name = defaultHost;
+                normalizedDefaultHost.connection = defaultHost;
+                normalizedDefaultHost.password = '';
+                normalizedDefaultHost.vnc_password = '';
+            }
 
             // 加载上次选择的主机
             const savedHostId = localStorage.getItem('gms_current_host');
@@ -1878,6 +1859,21 @@
             updateHostSelector();
             saveHostsToStorage();
             setTimeout(() => loadVNCConnection(), 0);
+        }
+
+        // 首次初始化或确保 VNC 已加载（桌面页面切换时调用）
+        function ensureDesktopInitialized() {
+            if (!window.desktopHostsInitialized) {
+                initDesktopHosts();
+                window.desktopHostsInitialized = true;
+                debugLog('[Desktop] Hosts initialized');
+            } else {
+                const vncFrame = document.getElementById('vnc-frame');
+                if (vncFrame && (!vncFrame.src || vncFrame.src === 'about:blank' || vncFrame.src.includes('about:blank'))) {
+                    debugLog('[Desktop] VNC frame not loaded, loading now');
+                    setTimeout(() => loadVNCConnection(), 100);
+                }
+            }
         }
 
         // 更新主机选择器
@@ -2008,8 +2004,10 @@
         // 添加新主机
         async function addNewHost() {
             const input = document.getElementById('new-host-input');
+            const sshPasswordInput = document.getElementById('new-host-ssh-password');
             const vncPasswordInput = document.getElementById('new-host-vnc-password');
             const hostString = input.value.trim();
+            const sshPassword = sshPasswordInput.value.trim();
             const vncPassword = vncPasswordInput.value.trim();
 
             if (!hostString) {
@@ -2043,8 +2041,8 @@
                 connection: hostString,
                 user: user,
                 ip: ip,
-                password: '',
-                vnc_password: vncPassword  // 保存VNC密码
+                password: sshPassword,
+                vnc_password: vncPassword
             };
 
             // 尝试连接验证
@@ -2062,21 +2060,21 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        host: pendingHostConnection.connection
+                        host: pendingHostConnection.connection,
+                        password: pendingHostConnection.password || ''
                     })
                 });
                 const result = await response.json();
 
                 if (result.success) {
-                    // 需要密码
-                    if (result.needs_password) {
-                        closeAddHostModal();
-                        showHostPasswordModal();
-                        return;
-                    }
                     // 连接成功
-                    pendingHostConnection.password = result.password || '';
+                    pendingHostConnection.password = result.password || pendingHostConnection.password;
                     finishAddHost();
+                } else if (result.needs_password && !pendingHostConnection.password) {
+                    // 需要密码但用户未填写，提示并聚焦 SSH 密码输入框
+                    showToast('请填写 SSH 密码后重试', 'warning');
+                    const sshInput = document.getElementById('new-host-ssh-password');
+                    if (sshInput) { sshInput.focus(); sshInput.style.borderColor = 'var(--warning-color)'; }
                 } else {
                     showToast(`验证失败: ${result.error}`, 'error');
                 }
@@ -2086,57 +2084,6 @@
             }
         }
 
-        // 显示主机密码弹框
-        function showHostPasswordModal() {
-            if (!pendingHostConnection) return;
-            document.getElementById('host-password-host').textContent = pendingHostConnection.name;
-            document.getElementById('host-password-input').value = '';
-            ModalManager.open('host-password-modal');
-            document.getElementById('host-password-input').focus();
-        }
-
-        function closeHostPasswordModal() {
-            pendingHostConnection = null;
-            ModalManager.close('host-password-modal');
-        }
-
-        function handleHostPasswordKeyPress(e) {
-            if (e.key === 'Enter') submitHostPassword();
-        }
-
-        // 提交主机密码
-        async function submitHostPassword() {
-            const password = document.getElementById('host-password-input').value;
-            if (!password) {
-                showToast('请输入密码', 'error');
-                return;
-            }
-
-            if (!pendingHostConnection) return;
-
-            try {
-                const response = await fetch('/api/desktop/validate-host', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        host: pendingHostConnection.connection,
-                        password: password
-                    })
-                });
-                const result = await response.json();
-
-                if (result.success) {
-                    pendingHostConnection.password = password;
-                    closeHostPasswordModal();
-                    finishAddHost();
-                } else {
-                    showToast(`验证失败: ${result.error}`, 'error');
-                }
-            } catch (e) {
-                console.error('[Host] Password validation error:', e);
-                showToast('密码验证失败', 'error');
-            }
-        }
 
         // 完成添加主机
         async function finishAddHost() {
@@ -2679,12 +2626,7 @@
 
             // 如果切换到桌面页面，初始化主机列表（仅首次）
             if (pageName === 'desktop') {
-                if (!window.desktopHostsInitialized) {
-                    initDesktopHosts();
-                    window.desktopHostsInitialized = true;
-                    // 默认主机的VNC已在HTML中直接加载，无需调用API
-                    debugLog('[Desktop] Default host ready');
-                }
+                ensureDesktopInitialized();
             }
 
             // 如果切换到常用网址页面，加载网址列表
@@ -4581,23 +4523,7 @@
                 loadApiDocs();
             }
             if (targetPage === 'desktop') {
-                // 初始化主机列表（仅首次）
-                if (!window.desktopHostsInitialized) {
-                    initDesktopHosts();
-                    window.desktopHostsInitialized = true;
-                    debugLog('[Desktop] Hosts initialized');
-
-                    // 检查是否需要切换VNC连接
-                    const defaultHost = '{{ config.ubuntu_user }}@{{ config.ubuntu_host }}';
-                    if (currentHost && currentHost.connection !== defaultHost) {
-                        // 当前主机不是默认主机，需要切换VNC连接
-                        debugLog('[Desktop] Switching to saved host:', currentHost.name);
-                        // 延迟执行，确保DOM已加载
-                        setTimeout(() => {
-                            loadVNCConnection();
-                        }, 100);
-                    }
-                }
+                ensureDesktopInitialized();
             }
 
             // 更新页面标题
@@ -5067,21 +4993,21 @@
     </div>
     <!-- 报错诊断工作台弹框 -->
     <div id="report-diagnosis-modal" class="modal">
-        <div class="modal-content" style="width: min(96vw, 1480px); max-width: 1480px; height: min(90vh, 920px); display: flex; flex-direction: column; overflow: hidden;">
-            <div class="modal-header" style="position: sticky; top: 0; z-index: 1; background: var(--bg-color);">
+        <div class="modal-content report-diagnosis-shell">
+            <div class="modal-header report-diagnosis-header">
                 <span class="modal-title">🤖 报错诊断</span>
-                <div style="display: flex; align-items: center; gap: 8px;">
+                <div class="report-diagnosis-actions">
                     <button type="button" class="btn-xxs btn-primary" onclick="rerunReportDiagnosis()">重新诊断</button>
                     <button type="button" class="btn-xxs" onclick="copyReportDiagnosis()">📋 复制结果</button>
                     <button type="button" class="btn-xxs" onclick="minimizeReportDiagnosisWorkbench()">缩小</button>
                     <span class="modal-close" onclick="closeReportDiagnosisWorkbench()">&times;</span>
                 </div>
             </div>
-            <div class="modal-body" style="overflow-y: auto; padding-bottom: 24px; min-height: 0; flex: 1;">
-                <div id="report-diagnostic-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-bottom: 12px;">
+            <div class="modal-body report-diagnosis-body">
+                <div id="report-diagnostic-summary" class="report-diagnosis-summary">
                     <div class="suite-empty" style="margin: 0;">点击失败用例上的“🤖 报错诊断”开始诊断</div>
                 </div>
-                <div id="report-diagnostic-result" style="display: grid; gap: 12px;"></div>
+                <div id="report-diagnostic-result" class="report-diagnosis-result"></div>
             </div>
         </div>
     </div>

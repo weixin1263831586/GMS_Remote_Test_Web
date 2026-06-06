@@ -100,6 +100,15 @@ async def lifespan(app: FastAPI):
 
         from core.devices import device_manager
 
+        # Track previous device list for calculating connected/disconnected
+        # Initialize with current devices to avoid false positives on startup
+        try:
+            previous_devices = set(device_manager.get_connected_devices())
+            logger.info(f"[USB Monitor] Initialized with devices: {previous_devices}")
+        except Exception as e:
+            logger.error(f"[USB Monitor] Failed to get initial devices: {e}")
+            previous_devices = set()
+
         def get_devices():
             try:
                 return device_manager.get_connected_devices()
@@ -108,11 +117,23 @@ async def lifespan(app: FastAPI):
                 return []
 
         def on_usb_devices_changed(devices):
+            nonlocal previous_devices
+            current_devices = set(devices)
+
+            # Calculate connected and disconnected devices
+            connected = list(current_devices - previous_devices)
+            disconnected = list(previous_devices - current_devices)
+
+            # Update previous devices for next change
+            previous_devices = current_devices
+
             with global_state.device_cache_lock:
                 global_state.device_cache = {'devices': [], 'timestamp': 0}
             app.state.usb_event_queue.put({
                 'type': 'devices_changed',
                 'devices': devices,
+                'connected': connected,
+                'disconnected': disconnected,
                 'timestamp': datetime.now().isoformat()
             })
 

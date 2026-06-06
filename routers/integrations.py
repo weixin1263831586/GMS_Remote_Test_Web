@@ -7,7 +7,7 @@ import re
 import subprocess
 from typing import Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from core.clients import get_client_id_from_request, get_client_ip
@@ -63,7 +63,17 @@ async def check_ssh_sshd(request: Request, device_host: Optional[str] = Query(No
         }, status_code=400)
 
     config['device_host'] = device_host
-    config['device_pswd'] = config_manager.find_device_host_password(config, device_host) or config.get('device_pswd', '')
+    found_pwd = config_manager.find_device_host_password(device_host, config)
+    config['device_pswd'] = found_pwd or config.get('device_pswd', '')
+
+    # 提前检查：如果没密码则明确提示，而非让连接失败后报通用错误
+    if not config.get('device_pswd'):
+        return JSONResponse(content={
+            'success': False,
+            'installed': False,
+            'running': False,
+            'error': f'未找到 {device_host} 的 SSH 密码，请先在客户端管理中添加该主机的凭据'
+        })
 
     try:
         with DeviceSSHConnection(config) as ssh:
@@ -83,16 +93,17 @@ async def check_ssh_sshd(request: Request, device_host: Optional[str] = Query(No
                 'running': running,
                 'install_guide': SSHD_INSTALL_GUIDE if not installed else None
             })
-    except Exception as _http_exc:
-        # HTTPException and generic exceptions both land here
+    except HTTPException:
+        raise
+    except Exception as _exc:
         import traceback
         logger.warning(f"[SSHD Check] Cannot connect to {device_host}: {traceback.format_exc()}")
         return JSONResponse(content={
-            "success": True,
+            "success": False,
             "installed": False,
             "running": False,
             "install_guide": SSHD_INSTALL_GUIDE,
-            "error": "无法连接到SSH服务，请检查网络连接和Windows客户端状态"
+            "error": f"无法通过 SSH 连接到 {device_host}，请检查网络连接和目标主机状态"
         })
 
 
@@ -799,7 +810,7 @@ async def start_usbip(
 
         windows_device_host = device_host
 
-        device_password = request_data.get("device_password") or find_device_host_password(config, device_host) or config.get("device_pswd", "")
+        device_password = request_data.get("device_password") or find_device_host_password(device_host, config) or config.get("device_pswd", "")
         if not device_password:
             return ApiResponse.error(
                 f"SSH credentials for {device_host} not found, please enter SSH password on login page",
@@ -827,12 +838,12 @@ async def start_usbip(
 
                 # Persist USB/IP device sources to config
                 try:
-                    existing_dynamic = config_manager.get_runtime_config()
-                    usbip_sources = existing_dynamic.get("usbip_devices_source", {})
+                    existing_runtime = config_manager.get_runtime_config()
+                    usbip_sources = existing_runtime.get("usbip_devices_source", {})
                     for device_id in device_list:
                         usbip_sources[device_id] = {"source": windows_device_host, "timestamp": time.time()}
-                    existing_dynamic["usbip_devices_source"] = usbip_sources
-                    if config_manager.save_dynamic_config(existing_dynamic):
+                    existing_runtime["usbip_devices_source"] = usbip_sources
+                    if config_manager.save_runtime_config(existing_runtime):
                         logger.info(f"[USB/IP Start] Persisted device sources for {len(device_list)} devices")
                 except Exception as e:
                     logger.warning(f"[USB/IP Start] Failed to persist device sources: {e}")
@@ -845,6 +856,23 @@ async def start_usbip(
         logger.error(f"Error starting USB/IP: {e}")
         from core.api_response import ApiResponse
         return ApiResponse.error(str(e), status_code=500)
+
+
+def _persist_device_source_removal(devices_to_remove: list):
+    """Remove device IDs from runtime config's usbip_devices_source and save."""
+    if not devices_to_remove:
+        return
+    try:
+        existing_runtime = config_manager.get_runtime_config()
+        usbip_sources = existing_runtime.get("usbip_devices_source", {})
+        for device_id in devices_to_remove:
+            if device_id in usbip_sources:
+                del usbip_sources[device_id]
+        existing_runtime["usbip_devices_source"] = usbip_sources
+        if config_manager.save_runtime_config(existing_runtime):
+            logger.info(f"[USB/IP Stop] Persisted device source removal for {len(devices_to_remove)} devices")
+    except Exception as e:
+        logger.warning(f"[USB/IP Stop] Failed to persist device source removal: {e}")
 
 
 # ==================== USB/IP Disconnect ====================
@@ -867,7 +895,7 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
         else:
             config["device_host"] = client_id
 
-    device_password = find_device_host_password(config, config["device_host"])
+    device_password = find_device_host_password(config["device_host"], config)
     if not device_password:
         device_password = config.get("device_pswd", "")
     if device_password:
@@ -913,18 +941,7 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
                 if device_id in usbip_manager.device_sources:
                     del usbip_manager.device_sources[device_id]
 
-            if devices_to_remove:
-                try:
-                    existing_dynamic = config_manager.get_runtime_config()
-                    usbip_sources = existing_dynamic.get("usbip_devices_source", {})
-                    for device_id in devices_to_remove:
-                        if device_id in usbip_sources:
-                            del usbip_sources[device_id]
-                    existing_dynamic["usbip_devices_source"] = usbip_sources
-                    if config_manager.save_dynamic_config(existing_dynamic):
-                        logger.info(f"[USB/IP Stop] Persisted device source removal for {len(devices_to_remove)} devices")
-                except Exception as e:
-                    logger.warning(f"[USB/IP Stop] Failed to persist device source removal: {e}")
+            _persist_device_source_removal(devices_to_remove)
 
         with global_state.usbip_states_lock:
             global_state.usbip_states[config["device_host"]] = {"connected": False, "timestamp": time.time()}
@@ -950,18 +967,7 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
             if device_id in usbip_manager.device_sources:
                 del usbip_manager.device_sources[device_id]
 
-        if devices_to_remove:
-            try:
-                existing_dynamic = config_manager.get_runtime_config()
-                usbip_sources = existing_dynamic.get("usbip_devices_source", {})
-                for device_id in devices_to_remove:
-                    if device_id in usbip_sources:
-                        del usbip_sources[device_id]
-                existing_dynamic["usbip_devices_source"] = usbip_sources
-                if config_manager.save_dynamic_config(existing_dynamic):
-                    logger.info(f"[USB/IP Stop] Persisted device source removal for {len(devices_to_remove)} devices")
-            except Exception as e:
-                logger.warning(f"[USB/IP Stop] Failed to persist device source removal: {e}")
+        _persist_device_source_removal(devices_to_remove)
 
         with global_state.usbip_states_lock:
             global_state.usbip_states[config["device_host"]] = {"connected": False, "timestamp": time.time()}
@@ -1009,7 +1015,7 @@ async def install_usbipd(request: Request, device_host: Optional[str] = None):
 
             config["device_host"] = tunnel_host or client_id
 
-        device_password = find_device_host_password(config, config["device_host"])
+        device_password = find_device_host_password(config["device_host"], config)
         if not device_password:
             device_password = config.get("device_pswd", "")
         if device_password:

@@ -514,6 +514,7 @@ function initWebSocket() {
 
                     case 'devices_changed':
                         // USB 设备插拔事件，自动刷新设备列表
+                        console.log('[WebSocket] devices_changed received:', data);
                         debugLog('[WebSocket] devices_changed:', data.devices);
                         if (data.notification) {
                             handleRealtimeNotification(data.notification, { toast: false });
@@ -781,12 +782,12 @@ function autoSelectTestSuite(testType) {
     } else {
         addLogEntry(`未找到 ${testType} 类型的测试套件`, 'warning');
         // 清空测试套件选择
-        $('test-suite').value = '';
+        document.getElementById('test-suite').value = '';
     }
 }
 
 function onDeviceHostConfirm() {
-    const deviceHost = $('device-host').value.trim();
+    const deviceHost = document.getElementById('device-host').value.trim();
     addLogEntry(`设备主机地址暂不支持动态更新: ${deviceHost}`, 'warning');
     showToast('设备主机地址需要直接编辑config.json文件', 'warning');
     // 注意：device_host不是动态配置字段，无法通过API更新
@@ -794,7 +795,7 @@ function onDeviceHostConfirm() {
 }
 
 function onLocalServerConfirm() {
-    const localServer = $('local-server').value.trim();
+    const localServer = document.getElementById('local-server').value.trim();
     addLogEntry(`本地主机地址已更新: ${localServer}`, 'info');
     showToast('本地主机地址已更新', 'success');
     // Save to backend
@@ -2056,22 +2057,30 @@ const debouncedRefreshDevices = debounce(() => loadDevices(false), 500);
 const debouncedRefreshUsers = debounce(() => loadUsers(false), 500);
 
 function renderDevices() {
-    const leftContainer = $('device-list-left');
-    const rightContainer = $('device-list-right');
-    const deviceCanvas = $('device-canvas');
+    console.log('[renderDevices] Called, state.devices:', state.devices);
+    const leftContainer = document.getElementById('device-list-left');
+    const rightContainer = document.getElementById('device-list-right');
+    const deviceCanvas = document.getElementById('device-canvas');
+
+    console.log('[renderDevices] Containers:', { leftContainer: !!leftContainer, rightContainer: !!rightContainer, deviceCanvas: !!deviceCanvas });
 
     // Early return if containers not ready
-    if (!leftContainer || !rightContainer || !deviceCanvas) return;
+    if (!leftContainer || !rightContainer || !deviceCanvas) {
+        console.warn('[renderDevices] Early return: containers not ready');
+        return;
+    }
 
     if (state.devices.length === 0) {
-        // 隐藏两个列，显示居中的空消息
-        leftContainer.style.display = 'none';
+        // 清空两个列的内容，并在左侧显示空消息
+        leftContainer.innerHTML = '<div class="empty-message">点击刷新按钮获取设备列表...</div>';
+        rightContainer.innerHTML = '';
+        // 显示空状态样式
+        leftContainer.style.display = '';
         rightContainer.style.display = 'none';
-        deviceCanvas.innerHTML = '<div class="empty-message">点击刷新按钮获取设备列表...</div>';
         deviceCanvas.style.display = 'flex';
         deviceCanvas.style.justifyContent = 'center';
         deviceCanvas.style.alignItems = 'center';
-        deviceCanvas.style.minHeight = '150px'; // 确保无设备时有默认高度
+        deviceCanvas.style.minHeight = '150px';
         return;
     }
 
@@ -2797,9 +2806,13 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
     }
 }
 
-async function initAndStartVnc() {
+async function initAndStartVnc(forceRestart = false) {
     try {
-        const result = await apiCall('/api/desktop/vnc/start', 'POST');
+        const logMsg = forceRestart
+            ? '🔄 正在重启VNC环境（杀死旧进程并重新启动）...'
+            : '🔄 正在启动VNC环境...';
+        addLogEntry(logMsg, 'info');
+        const result = await apiCall('/api/desktop/vnc/start', 'POST', { force_restart: forceRestart });
         addLogEntry(result.message || 'VNC 服务已就绪', 'info');
         return result;
     } catch (error) {
@@ -4487,8 +4500,9 @@ function startStatusPolling() {
                 if (running && mode === 'polling' && !pyudev_available) {
                     shownPyudevWarning = true;
                     const message = '💡 提示：安装 pyudev 可获得更好的USB监控性能（实时响应，低CPU占用）\n' +
-                                   '安装命令：pip install pyudev\n' +
-                                   '当前使用轮询模式（2秒检查间隔）';
+                                   '安装方式：重新运行一键安装脚本即可自动安装\n' +
+                                   '或手动执行：cd /opt/gms-remote-test/web_app && .venv/bin/pip install pyudev\n' +
+                                   '安装后需重启服务：sudo systemctl restart gms-web-app';
                     addLogEntry(message, 'warning');
 
                     // 也可以在页面显示一次提示
@@ -6367,24 +6381,31 @@ function renderReportDiagnosisLoading(failure, classNames, errorMessage) {
     const diagnosticResult = $('report-diagnostic-result');
     if (diagnosticSummary) {
         diagnosticSummary.innerHTML = `
-            <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; font-size: 12px;">
-                <div style="color: var(--text-secondary); margin-bottom: 4px;">正在诊断</div>
-                <div style="font-weight: 600; word-break: break-all;">${escapeHtml(failure.name || failure.test_name || '未知用例')}</div>
-            </div>
-            <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; font-size: 12px;">
-                <div style="color: var(--text-secondary); margin-bottom: 4px;">提取类名</div>
-                <div style="font-weight: 600; word-break: break-all;">${classNames.length ? escapeHtml(classNames.join(', ')) : '无'}</div>
-            </div>
-            <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; font-size: 12px;">
-                <div style="color: var(--text-secondary); margin-bottom: 4px;">堆栈摘要</div>
-                <div style="font-weight: 600; word-break: break-all;">${escapeHtml((errorMessage || '').slice(0, 120) || '无')}</div>
+            <div class="dx-hero">
+                <div class="dx-title-row">
+                    <div class="dx-title-main">${escapeHtml(failure.name || failure.test_name || '未知用例')}</div>
+                    <span class="dx-status-pill">诊断中</span>
+                </div>
+                <div class="dx-meta-grid">
+                    <div class="dx-metric">
+                        <span class="dx-metric-label">提取类名</span>
+                        <span class="dx-metric-value">${classNames.length ? escapeHtml(classNames.join(', ')) : '无'}</span>
+                    </div>
+                    <div class="dx-metric">
+                        <span class="dx-metric-label">堆栈摘要</span>
+                        <span class="dx-metric-value">${escapeHtml((errorMessage || '').slice(0, 160) || '无')}</span>
+                    </div>
+                </div>
             </div>
         `;
     }
     if (diagnosticResult) {
         diagnosticResult.innerHTML = `
-            <div style="padding: 16px; background: var(--darker-bg); border-radius: 6px; color: var(--text-secondary); font-size: 12px;">
-                正在提取堆栈、定位套件构件、搜索源码、检索知识库并调用 AI...
+            <div class="dx-loading-grid">
+                <div class="dx-loading-card"><span>1</span>提取失败堆栈</div>
+                <div class="dx-loading-card"><span>2</span>定位套件构件</div>
+                <div class="dx-loading-card"><span>3</span>OpenGrok 源码搜索</div>
+                <div class="dx-loading-card"><span>4</span>AI 诊断和建议</div>
             </div>
         `;
     }
@@ -6434,10 +6455,32 @@ async function runReportDiagnosis(failureIndex = 0) {
         debugLog('[Report Diagnosis] Error:', error);
         const diagnosticResult = $('report-diagnostic-result');
         if (diagnosticResult) {
-            diagnosticResult.innerHTML = `<div style="padding: 16px; background: rgba(244,67,54,0.1); border-radius: 6px; color: var(--danger-color); font-size: 12px;">诊断失败: ${escapeHtml(error.message)}</div>`;
+            diagnosticResult.innerHTML = `<div class="dx-error">诊断失败: ${escapeHtml(error.message)}</div>`;
         }
         notifyOperationResult('报告诊断失败', error.message, 'error', 'report-diagnosis');
     }
+}
+
+function switchReportDiagnosisPanel(panelName) {
+    document.querySelectorAll('[data-dx-tab]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.dxTab === panelName);
+    });
+    document.querySelectorAll('[data-dx-panel]').forEach(panel => {
+        panel.classList.toggle('active', panel.dataset.dxPanel === panelName);
+    });
+}
+
+function renderDxMetric(label, value) {
+    return `
+        <div class="dx-metric">
+            <span class="dx-metric-label">${escapeHtml(label)}</span>
+            <span class="dx-metric-value">${escapeHtml(value || '无')}</span>
+        </div>
+    `;
+}
+
+function renderDxEmpty(text) {
+    return `<div class="dx-empty">${escapeHtml(text)}</div>`;
 }
 
 function renderReportDiagnosis(data) {
@@ -6458,6 +6501,11 @@ function renderReportDiagnosis(data) {
     const sourceGuess = suiteTarget.source_guess || {};
     const sourcePath = data.source_path || sourceGuess.source_path || '';
     const currentFailureIndex = Number(data.failure_index || 0) || 0;
+    const failureLine = failureLocation.line_number || sourceGuess.line_number || '';
+    const failureFile = failureLocation.file_name
+        ? `${failureLocation.file_name}.${failureLocation.file_type || ''}:${failureLine || 'N/A'}`
+        : '未提取到';
+    const suggestions = aiResult.suggestions || [];
 
     window.reportDiagnosis = {
         data,
@@ -6483,33 +6531,24 @@ function renderReportDiagnosis(data) {
     };
 
     if (diagnosticSummary) {
-        const keywordChips = keywords.slice(0, 6).map(item => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:var(--bg-color);border:1px solid var(--border-color);font-size:11px;line-height:1.3;white-space:nowrap;">${escapeHtml(item)}</span>`).join('');
+        const keywordChips = keywords.slice(0, 8).map(item => `<span class="dx-chip">${escapeHtml(item)}</span>`).join('');
         diagnosticSummary.innerHTML = `
-            <div style="grid-column: 1 / -1; padding: 12px 14px; background: linear-gradient(135deg, rgba(0,188,212,0.12), rgba(63,81,181,0.12)); border: 1px solid var(--border-color); border-radius: 8px; display: grid; gap: 8px;">
-                <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between;">
-                    <div style="font-size: 12px; font-weight: 700;">${escapeHtml(data.test_name || data.report_name || '诊断工作台')}</div>
-                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                        <span style="padding:4px 8px; border-radius:999px; background: rgba(0,0,0,0.18); font-size:11px;">${escapeHtml(aiResult.ai_model || (aiResult.ai_enabled === false ? '规则分析' : '未知'))}</span>
-                        <span style="padding:4px 8px; border-radius:999px; background: rgba(0,0,0,0.18); font-size:11px;">${escapeHtml(suiteTarget.test_type || data.test_type || '未知类型')}</span>
-                        <span style="padding:4px 8px; border-radius:999px; background: rgba(0,0,0,0.18); font-size:11px;">${escapeHtml(suiteTarget.suite_version || data.suite_version || '未知版本')}</span>
+            <div class="dx-hero">
+                <div class="dx-title-row">
+                    <div class="dx-title-main">${escapeHtml(data.test_name || data.report_name || '诊断工作台')}</div>
+                    <div class="dx-pill-row">
+                        <span class="dx-status-pill">${escapeHtml(aiResult.ai_model || (aiResult.ai_enabled === false ? '规则分析' : 'AI'))}</span>
+                        <span class="dx-status-pill">${escapeHtml(suiteTarget.test_type || data.test_type || '未知类型')}</span>
+                        <span class="dx-status-pill">${escapeHtml(suiteTarget.suite_version || data.suite_version || '未知版本')}</span>
                     </div>
                 </div>
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px;">
-                    <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; border: 1px solid var(--border-color); font-size: 12px;">
-                        <div style="color: var(--text-secondary); margin-bottom: 4px;">失败位置</div>
-                        <div style="font-weight: 600; word-break: break-all;">${failureLocation.file_name ? `${escapeHtml(failureLocation.file_name)}.${escapeHtml(failureLocation.file_type)}:${escapeHtml(failureLocation.line_number)}` : '未提取到'}</div>
-                    </div>
-                    <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; border: 1px solid var(--border-color); font-size: 12px;">
-                        <div style="color: var(--text-secondary); margin-bottom: 4px;">源码路径</div>
-                        <div style="font-weight: 600; word-break: break-all;">${escapeHtml(sourcePath || '未推断')}</div>
-                    </div>
-                    <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; border: 1px solid var(--border-color); font-size: 12px;">
-                        <div style="color: var(--text-secondary); margin-bottom: 4px;">构件置信度</div>
-                        <div style="font-weight: 600;">${escapeHtml(String(suiteTarget.artifact_confidence || 0))}</div>
-                    </div>
-                    <div style="padding: 10px 12px; background: var(--darker-bg); border-radius: 6px; border: 1px solid var(--border-color); font-size: 12px;">
-                        <div style="color: var(--text-secondary); margin-bottom: 4px;">诊断关键词</div>
-                        <div style="display:flex; gap:6px; flex-wrap:wrap;">${keywordChips || '<span style="color:var(--text-secondary);">无</span>'}</div>
+                <div class="dx-meta-grid">
+                    ${renderDxMetric('失败位置', failureFile)}
+                    ${renderDxMetric('源码路径', sourcePath || '未推断')}
+                    ${renderDxMetric('构件置信度', String(suiteTarget.artifact_confidence || 0))}
+                    <div class="dx-metric">
+                        <span class="dx-metric-label">诊断关键词</span>
+                        <span class="dx-chip-row">${keywordChips || '<span class="dx-muted">无</span>'}</span>
                     </div>
                 </div>
             </div>
@@ -6518,92 +6557,129 @@ function renderReportDiagnosis(data) {
 
     const sourceCards = sourceResults.length > 0
         ? sourceResults.map(item => `
-            <div style="padding: 10px; background: var(--bg-color); border-radius: 6px; border: 1px solid var(--border-color); min-width: 0;">
-                <div style="display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 4px;">
-                    <div style="font-size: 12px; font-weight: 600; word-break: break-all;">${escapeHtml(item.type || 'source')}</div>
-                    ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" style="font-size: 11px; color: var(--primary-color); text-decoration: none;">查看源码</a>` : ''}
+            <div class="dx-list-item">
+                <div class="dx-list-head">
+                    <div class="dx-list-title">${escapeHtml(item.type || 'source')}</div>
+                    ${item.url ? `<a class="dx-link" href="${escapeHtml(item.url)}" target="_blank">查看源码</a>` : ''}
                 </div>
-                <div style="font-size: 11px; color: var(--text-secondary); word-break: break-all;">${escapeHtml(item.path || item.display_path || '')}</div>
-                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">行 ${escapeHtml(String(item.line || 'N/A'))}</div>
+                <div class="dx-list-path">${escapeHtml(item.path || item.display_path || '')}</div>
+                <div class="dx-list-meta">行 ${escapeHtml(String(item.line || 'N/A'))}</div>
             </div>
         `).join('')
-        : '<div style="padding: 12px; color: var(--text-secondary); font-size: 12px;">未检索到 OpenGrok 源码结果</div>';
+        : renderDxEmpty('未检索到 OpenGrok 源码结果');
 
     const kbCards = kbResults.length > 0
         ? kbResults.map(item => `
-            <div style="padding: 10px; background: var(--bg-color); border-radius: 6px; border: 1px solid var(--border-color); min-width: 0;">
-                <div style="font-size: 12px; font-weight: 600; word-break: break-all;">#${escapeHtml(String(item.id || ''))} ${escapeHtml(item.subject || '')}</div>
-                <div style="font-size: 11px; color: var(--text-secondary); margin: 4px 0;">${escapeHtml(item.status_name || '')} | ${escapeHtml(item.updated_on || '')}</div>
-                <div style="font-size: 11px; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml((item.solution_summary || item.description || '').slice(0, 220))}</div>
+            <div class="dx-list-item">
+                <div class="dx-list-title">#${escapeHtml(String(item.id || ''))} ${escapeHtml(item.subject || '')}</div>
+                <div class="dx-list-meta">${escapeHtml(item.status_name || '')} | ${escapeHtml(item.updated_on || '')}</div>
+                <div class="dx-list-text">${escapeHtml((item.solution_summary || item.description || '').slice(0, 260))}</div>
             </div>
         `).join('')
-        : '<div style="padding: 12px; color: var(--text-secondary); font-size: 12px;">未命中知识库</div>';
+        : renderDxEmpty('未命中知识库');
+
+    const candidateCards = artifactCandidates.length > 0
+        ? artifactCandidates.slice(0, 5).map((item, idx) => `
+            <button class="dx-candidate" onclick="openReportDiagnosisArtifactCandidate(${idx})">
+                <span>${escapeHtml(item.path || item.name || '未知构件')}</span>
+                <b>${escapeHtml(String(item.score || 0))}</b>
+            </button>
+        `).join('')
+        : renderDxEmpty('暂无候选构件');
+
+    const suggestionCards = suggestions.length > 0
+        ? suggestions.map((s, idx) => `
+            <div class="dx-suggestion">
+                <span>${idx + 1}</span>
+                <div>${escapeHtml(s)}</div>
+            </div>
+        `).join('')
+        : renderDxEmpty('暂无解决建议');
 
     diagnosticResult.innerHTML = `
-        <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0;">
-            <div style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0;">
-                <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px;">
-                    <div style="font-size: 12px; font-weight: 600;">套件源码定位</div>
-                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                        ${suiteArtifact ? `<button class="btn-xxs btn-primary" onclick="openReportDiagnosisSourcePreview()">反编译并打开源码预览</button>` : ''}
+        <div class="dx-workflow">
+            <section class="dx-workflow-step dx-workflow-step-analysis">
+                <div class="dx-step-label">
+                    <span>1</span>
+                    <div>
+                        <b>详细分析</b>
+                        <em>先看根因，再看失败上下文</em>
                     </div>
                 </div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px;">
-                    <div style="padding: 10px; background: var(--bg-color); border-radius: 6px;">
-                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">测试套件</div>
-                        <div style="font-size: 12px; font-weight: 600; word-break: break-all;">${escapeHtml(suiteTarget.suite_name || suiteTarget.suite_path || '未定位')}</div>
-                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; word-break: break-all;">${escapeHtml(suiteTarget.suite_root || '')}</div>
+                <div class="dx-two-col">
+                    <div class="dx-section dx-section-large">
+                        <div class="dx-section-title">根因判断</div>
+                        <div class="dx-root-cause">
+                            <span>Root cause</span>
+                            <div>${escapeHtml(aiResult.root_cause || data.summary || '待分析')}</div>
+                        </div>
+                        <div class="dx-preline">${escapeHtml(aiResult.analysis || '无')}</div>
                     </div>
-                    <div style="padding: 10px; background: var(--bg-color); border-radius: 6px;">
-                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">APK/JAR 构件</div>
-                        <div style="font-size: 12px; font-weight: 600; word-break: break-all;">${escapeHtml(suiteArtifact ? suiteArtifact.path : '未定位到构件')}</div>
-                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">置信度 ${escapeHtml(String(suiteTarget.artifact_confidence || 0))}</div>
-                    </div>
-                    <div style="padding: 10px; background: var(--bg-color); border-radius: 6px;">
-                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">源码路径猜测</div>
-                        <div style="font-size: 12px; font-weight: 600; word-break: break-all;">${escapeHtml(sourceGuess.source_path || '未推断')}</div>
-                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">行 ${escapeHtml(String(failureLocation.line_number || sourceGuess.line_number || 'N/A'))}</div>
+                    <div class="dx-section dx-context-section">
+                        <div class="dx-section-title">失败上下文</div>
+                        <div class="dx-stack">${escapeHtml(stackTrace || data.error_message || '无')}</div>
                     </div>
                 </div>
-                ${artifactCandidates.length > 0 ? `
-                    <div style="margin-top: 10px; display: grid; gap: 6px;">
-                        <div style="font-size: 11px; color: var(--text-secondary);">候选构件</div>
-                        ${artifactCandidates.slice(0, 5).map((item, idx) => `
-                            <button class="btn-xxs" onclick="openReportDiagnosisArtifactCandidate(${idx})" style="text-align: left; white-space: normal; line-height: 1.5; padding: 6px 8px; border-radius: 4px;">
-                                ${escapeHtml(item.path || item.name || '未知构件')} · ${escapeHtml(String(item.score || 0))}
-                            </button>
-                        `).join('')}
+            </section>
+
+            <section class="dx-workflow-step dx-workflow-step-source">
+                <div class="dx-step-label">
+                    <span>2</span>
+                    <div>
+                        <b>OpenGrok 源码或测试套件反编译</b>
+                        <em>把定位依据、候选构件和源码搜索放在一起</em>
                     </div>
-                ` : ''}
-                ${suiteTarget.match_notes?.length ? `<div style="margin-top: 10px; font-size: 11px; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(suiteTarget.match_notes.join('\n'))}</div>` : ''}
-            </div>
-            <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0;">
-                <section style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0; max-height: 360px; overflow: auto;">
-                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">详细分析</div>
-                    <div style="font-size: 12px; line-height: 1.7; white-space: pre-wrap; margin-bottom: 12px;"><strong>根因：</strong>${escapeHtml(aiResult.root_cause || data.summary || '待分析')}</div>
-                    <div style="font-size: 12px; line-height: 1.7; white-space: pre-wrap;">${escapeHtml(aiResult.analysis || '无')}</div>
-                </section>
-                <section style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0; max-height: 360px; overflow: auto;">
-                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">解决建议</div>
-                    <div style="display: grid; gap: 8px;">
-                        ${(aiResult.suggestions || []).length > 0 ? aiResult.suggestions.map(s => `<div style="font-size: 12px; line-height: 1.6; padding: 8px; background: var(--bg-color); border-radius: 4px;">${escapeHtml(s)}</div>`).join('') : '<div style="font-size: 12px; color: var(--text-secondary);">无</div>'}
+                </div>
+                <div class="dx-source-layout">
+                    <div class="dx-section dx-section-large">
+                        <div class="dx-section-head">
+                            <div class="dx-section-title">套件源码定位</div>
+                            ${suiteArtifact ? `<button class="btn-xxs btn-primary" onclick="openReportDiagnosisSourcePreview()">反编译并预览源码</button>` : ''}
+                        </div>
+                        <div class="dx-meta-grid">
+                            ${renderDxMetric('测试套件', suiteTarget.suite_name || suiteTarget.suite_path || '未定位')}
+                            ${renderDxMetric('套件根目录', suiteTarget.suite_root || '无')}
+                            ${renderDxMetric('APK/JAR 构件', suiteArtifact ? suiteArtifact.path : '未定位到构件')}
+                            ${renderDxMetric('源码路径猜测', sourceGuess.source_path || sourcePath || '未推断')}
+                            ${renderDxMetric('失败行号', String(failureLine || 'N/A'))}
+                            ${renderDxMetric('构件置信度', String(suiteTarget.artifact_confidence || 0))}
+                        </div>
+                        ${suiteTarget.match_notes?.length ? `<div class="dx-notes">${escapeHtml(suiteTarget.match_notes.join('\n'))}</div>` : ''}
                     </div>
-                </section>
-                <section style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0; max-height: 360px; overflow: auto;">
-                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">补丁草案</div>
-                    <pre style="margin: 0; padding: 10px; white-space: pre-wrap; word-break: break-word; font-size: 11px; background: var(--bg-color); border-radius: 6px; overflow-x: auto;">${escapeHtml(patchDraft || '无')}</pre>
-                </section>
-            </div>
-            <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0;">
-                <div style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0; max-height: 300px; overflow: auto;">
-                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">OpenGrok 源码搜索</div>
-                    <div style="display: grid; gap: 8px;">${sourceCards}</div>
+                    <div class="dx-section">
+                        <div class="dx-section-title">候选构件</div>
+                        <div class="dx-list">${candidateCards}</div>
+                    </div>
+                    <div class="dx-section">
+                        <div class="dx-section-title">OpenGrok 源码搜索 <span>${sourceResults.length} 结果</span></div>
+                        <div class="dx-list">${sourceCards}</div>
+                    </div>
                 </div>
-                <div style="padding: 14px; background: var(--darker-bg); border-radius: 6px; min-width: 0; max-height: 300px; overflow: auto;">
-                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">GMS 认证知识库</div>
-                    <div style="display: grid; gap: 8px;">${kbCards}</div>
+            </section>
+
+            <section class="dx-workflow-step dx-workflow-step-solution">
+                <div class="dx-step-label">
+                    <span>3</span>
+                    <div>
+                        <b>解决建议</b>
+                        <em>建议、补丁草案和知识库证据集中收口</em>
+                    </div>
                 </div>
-            </div>
+                <div class="dx-solution-layout">
+                    <div class="dx-section dx-section-large">
+                        <div class="dx-section-title">建议动作</div>
+                        <div class="dx-list">${suggestionCards}</div>
+                    </div>
+                    <div class="dx-section">
+                        <div class="dx-section-title">补丁草案</div>
+                        <pre class="dx-code">${escapeHtml(patchDraft || '无')}</pre>
+                    </div>
+                    <div class="dx-section">
+                        <div class="dx-section-title">GMS 认证知识库</div>
+                        <div class="dx-list">${kbCards}</div>
+                    </div>
+                </div>
+            </section>
         </div>
     `;
 }
@@ -7613,7 +7689,7 @@ async function showTailscaleInfoModal() {
         return;
     }
 
-    display.value = '正在检查并启动 Tailscale...';
+    display.value = '正在检查 Tailscale...';
     try {
         const response = await fetch('/api/tailscale/ensure', { method: 'POST' });
         const data = await response.json();
@@ -7627,7 +7703,8 @@ async function showTailscaleInfoModal() {
         display.value = data.public_url;
     } catch (error) {
         _tailscaleCache = { url: null, ts: 0 };
-        display.value = '获取失败：' + error.message;
+        display.value = '未连接';
+        showToast('Tailscale 未连接，请在终端执行 sudo tailscale up 授权登录', 'warning');
     }
 }
 

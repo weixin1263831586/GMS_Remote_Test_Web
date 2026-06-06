@@ -31,7 +31,7 @@ class ClientManager:
 
     def save_client_info(self, config: Dict[str, Any]) -> bool:
         """保存客户端信息"""
-        return config_manager.save_dynamic_config(config)
+        return config_manager.save_runtime_config(config)
 
     def _ssh_whoami(self, client_ip: str, username: str, password: str) -> str:
         """Connect via SSH, run whoami, return username. Raises on failure."""
@@ -85,11 +85,11 @@ class ClientManager:
                     self.ssh_credentials.insert(0, {'username': username, 'password': password})
 
                 # 只保存客户端相关配置
-                dynamic_config = {
+                runtime_config = {
                     'client_hosts': self.client_hosts,
                     'client_ssh_credentials': self.ssh_credentials
                 }
-                self.save_client_info(dynamic_config)
+                self.save_client_info(runtime_config)
 
                 return True, detected_username, None
             except Exception as e:
@@ -116,11 +116,11 @@ class ClientManager:
                 self.client_hosts[client_ip] = detected_username
 
                 # 只保存客户端相关配置
-                dynamic_config = {
+                runtime_config = {
                     'client_hosts': self.client_hosts,
                     'client_ssh_credentials': self.ssh_credentials
                 }
-                self.save_client_info(dynamic_config)
+                self.save_client_info(runtime_config)
 
                 return True, detected_username, None
             except Exception:
