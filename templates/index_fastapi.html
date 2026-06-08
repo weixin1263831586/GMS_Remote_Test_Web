@@ -2590,12 +2590,9 @@
                 loadDevicesManagement();
             }
 
-            // 如果切换到报告管理页面，加载报告列表（仅首次）
+            // 如果切换到报告管理页面，刷新报告列表
             if (pageName === 'reports') {
-                if (!window.reportsInitialized) {
-                    loadTestReports();
-                    window.reportsInitialized = true;
-                }
+                loadTestReports(typeof currentUserFilter !== 'undefined' ? currentUserFilter : false);
             }
 
             // 如果切换到系统接口页面，加载API文档
@@ -4511,10 +4508,7 @@
                 loadDevicesManagement();
             }
             if (targetPage === 'reports') {
-                if (!window.reportsInitialized) {
-                    loadTestReports();
-                    window.reportsInitialized = true;
-                }
+                loadTestReports(typeof currentUserFilter !== 'undefined' ? currentUserFilter : false);
             }
             if (targetPage === 'test-suites') {
                 initTestSuiteBrowserPage();
@@ -4642,6 +4636,50 @@
             }
         }
 
+        function isExternalDrop(dataTransfer) {
+            if (!dataTransfer || !dataTransfer.types) return false;
+            return Array.from(dataTransfer.types).some(type =>
+                type === 'Files' ||
+                type === 'text/uri-list' ||
+                type === 'URL' ||
+                type === 'text/html'
+            );
+        }
+
+        function isSidebarUploadTarget(item) {
+            return item && ['report-analysis', 'apk-analysis'].includes(item.dataset.page);
+        }
+
+        async function handleSidebarUploadDrop(targetItem, dataTransfer) {
+            const page = targetItem?.dataset.page;
+            if (!page) return false;
+
+            if (page === 'report-analysis') {
+                switchPage('report-analysis');
+                if (typeof window.handleReportDataTransfer === 'function') {
+                    await window.handleReportDataTransfer(dataTransfer);
+                    return true;
+                }
+                return false;
+            }
+
+            if (page === 'apk-analysis') {
+                const file = dataTransfer?.files?.[0];
+                if (!file) return false;
+
+                switchPage('apk-analysis');
+                if (typeof window.initApkAnalysisPage === 'function') {
+                    window.initApkAnalysisPage();
+                }
+                if (typeof window.handleApkFile === 'function') {
+                    await window.handleApkFile(file);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         function initSidebarDragDrop() {
             const nav = document.getElementById('sidebar-nav');
             if (!nav) return;
@@ -4671,10 +4709,21 @@
             });
 
             nav.addEventListener('dragover', function(e) {
+                const item = e.target.closest('.sidebar-item');
+                if (isExternalDrop(e.dataTransfer) && isSidebarUploadTarget(item)) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+
+                    nav.querySelectorAll('.sidebar-item').forEach(el => {
+                        el.classList.remove('drag-over');
+                    });
+                    item.classList.add('drag-over');
+                    return;
+                }
+
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
 
-                const item = e.target.closest('.sidebar-item');
                 if (!item || item === draggedItem) return;
 
                 nav.querySelectorAll('.sidebar-item').forEach(el => {
@@ -4694,6 +4743,12 @@
                 e.preventDefault();
 
                 const targetItem = e.target.closest('.sidebar-item');
+                if (isExternalDrop(e.dataTransfer) && isSidebarUploadTarget(targetItem)) {
+                    targetItem.classList.remove('drag-over');
+                    handleSidebarUploadDrop(targetItem, e.dataTransfer);
+                    return;
+                }
+
                 if (!targetItem || !draggedItem || targetItem === draggedItem) return;
 
                 const nav = document.getElementById('sidebar-nav');

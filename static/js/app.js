@@ -649,6 +649,24 @@ function initEventListeners() {
 }
 
 // ==================== Input Change Handlers ====================
+/**
+ * 测试模块/用例 与 测试报告 互斥处理
+ * @param {'module_case' | 'retry'} mode - 'module_case' 表示填入了模块/用例，清空报告；'retry' 表示填入了报告，清空模块/用例
+ */
+function enforceFieldExclusion(mode) {
+    if (mode === 'module_case') {
+        // 填入模块/用例时，清空测试报告
+        const retryInput = $('retry-result');
+        if (retryInput) retryInput.value = '';
+    } else if (mode === 'retry') {
+        // 填入测试报告时，清空模块和用例
+        const moduleInput = $('test-module');
+        const caseInput = $('test-case');
+        if (moduleInput) moduleInput.value = '';
+        if (caseInput) caseInput.value = '';
+    }
+}
+
 function onInputChange() {
     // Handle mutual exclusivity between test module, test case, and retry report
     const testModule = $('test-module').value.trim();
@@ -657,12 +675,11 @@ function onInputChange() {
 
     // If typing in retry-result, clear module and case
     if (document.activeElement.id === 'retry-result' && retryResult) {
-        $('test-module').value = '';
-        $('test-case').value = '';
+        enforceFieldExclusion('retry');
     }
     // If typing in module or case, clear retry-result
     else if ((document.activeElement.id === 'test-module' || document.activeElement.id === 'test-case') && (testModule || testCase)) {
-        $('retry-result').value = '';
+        enforceFieldExclusion('module_case');
     }
 }
 
@@ -5014,6 +5031,9 @@ async function retryReport(timestamp, testType) {
                 console.error('[Retry] 未找到 retry-result 元素');
             }
 
+            // 互斥：填入报告时清空模块和用例
+            enforceFieldExclusion('retry');
+
             // 设置测试类型
             const testTypeSelect = document.getElementById('test-type');
             if (testTypeSelect) {
@@ -5088,6 +5108,9 @@ async function retryReportWithSuite(timestamp, testType, suitePath) {
             } else {
                 console.error('[Retry] 未找到 retry-result 元素');
             }
+
+            // 互斥：填入报告时清空模块和用例
+            enforceFieldExclusion('retry');
 
             // 设置测试类型
             const testTypeSelect = document.getElementById('test-type');
@@ -5516,6 +5539,100 @@ function selectReportFolder() {
     document.getElementById('report-folder-input').click();
 }
 
+async function handleReportDataTransfer(dataTransfer) {
+    if (!dataTransfer) return;
+
+    // 检查是否有 URL（从网页拖拽，如 Redmine 附件）
+    const url = dataTransfer.getData('URL') || dataTransfer.getData('text/uri-list');
+    if (url) {
+        debugLog('[Report Analysis] Detected URL drop:', url);
+        const dropContext = extractRedmineDropContext(dataTransfer, url);
+        await handleRedmineAttachment(url, dropContext);
+        return;
+    }
+
+    const items = dataTransfer.items;
+
+    // 如果有 items，尝试使用 DataTransferItem API（支持文件夹）
+    if (items && items.length > 0) {
+        const files = [];
+
+        // 递归读取文件夹中的所有文件
+        const readFileEntries = async (entries) => {
+            for (const entry of entries) {
+                if (entry.isFile) {
+                    await new Promise((resolve) => {
+                        entry.file((file) => {
+                            // 保留相对路径
+                            Object.defineProperty(file, 'webkitRelativePath', {
+                                value: (entry.fullPath || '').replace(/^\//, ''),
+                                writable: false
+                            });
+                            files.push(file);
+                            resolve();
+                        });
+                    });
+                } else if (entry.isDirectory) {
+                    const reader = entry.createReader();
+                    // readEntries 可能需要多次调用才能读取所有条目
+                    let allEntries = [];
+                    const readBatch = async () => {
+                        const batch = await new Promise((resolve) => {
+                            reader.readEntries(resolve);
+                        });
+                        if (batch.length > 0) {
+                            allEntries = allEntries.concat(batch);
+                            await readBatch(); // 继续读取下一批
+                        }
+                    };
+                    await readBatch();
+                    await readFileEntries(allEntries);
+                }
+            }
+        };
+
+        // 处理所有 items
+        const itemEntries = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.kind === 'file') {
+                const entry = item.webkitGetAsEntry?.();
+                if (entry) {
+                    itemEntries.push(entry);
+                }
+            }
+        }
+
+        if (itemEntries.length > 0) {
+            await readFileEntries(itemEntries);
+
+            if (files.length === 0) {
+                showToast('未找到可上传的文件', 'warning');
+                return;
+            }
+
+            if (files.length === 1 && !files[0].webkitRelativePath.includes('/')) {
+                // 单文件
+                handleReportFile(files[0]);
+            } else {
+                // 文件夹或多文件
+                handleReportFolder(files);
+            }
+            return;
+        }
+    }
+
+    // 回退到使用 files 属性（单文件或旧浏览器）
+    const files = dataTransfer.files;
+    if (files.length > 0) {
+        if (files.length === 1) {
+            handleReportFile(files[0]);
+        } else {
+            handleReportFolder(files);
+        }
+    }
+}
+
 function initReportAnalysis() {
     const uploadZone = $('report-upload-zone');
     const fileInput = $('report-file-input');
@@ -5540,96 +5657,7 @@ function initReportAnalysis() {
     uploadZone.addEventListener('drop', async (e) => {
         e.preventDefault();
         uploadZone.classList.remove('drag-over');
-
-        // 检查是否有 URL（从网页拖拽，如 Redmine 附件）
-        const url = e.dataTransfer.getData('URL') || e.dataTransfer.getData('text/uri-list');
-        if (url) {
-            debugLog('[Report Analysis] Detected URL drop:', url);
-            const dropContext = extractRedmineDropContext(e.dataTransfer, url);
-            await handleRedmineAttachment(url, dropContext);
-            return;
-        }
-
-        const items = e.dataTransfer.items;
-
-        // 如果有 items，尝试使用 DataTransferItem API（支持文件夹）
-        if (items && items.length > 0) {
-            const files = [];
-
-            // 递归读取文件夹中的所有文件
-            const readFileEntries = async (entries) => {
-                for (const entry of entries) {
-                    if (entry.isFile) {
-                        await new Promise((resolve) => {
-                            entry.file((file) => {
-                                // 保留相对路径
-                                Object.defineProperty(file, 'webkitRelativePath', {
-                                    value: (entry.fullPath || '').replace(/^\//, ''),
-                                    writable: false
-                                });
-                                files.push(file);
-                                resolve();
-                            });
-                        });
-                    } else if (entry.isDirectory) {
-                        const reader = entry.createReader();
-                        // readEntries 可能需要多次调用才能读取所有条目
-                        let allEntries = [];
-                        const readBatch = async () => {
-                            const batch = await new Promise((resolve) => {
-                                reader.readEntries(resolve);
-                            });
-                            if (batch.length > 0) {
-                                allEntries = allEntries.concat(batch);
-                                await readBatch(); // 继续读取下一批
-                            }
-                        };
-                        await readBatch();
-                        await readFileEntries(allEntries);
-                    }
-                }
-            };
-
-            // 处理所有 items
-            const itemEntries = [];
-            for (let i = 0; i < items.length; i++) {
-                const item = items[i];
-                if (item.kind === 'file') {
-                    const entry = item.webkitGetAsEntry();
-                    if (entry) {
-                        itemEntries.push(entry);
-                    }
-                }
-            }
-
-            if (itemEntries.length > 0) {
-                await readFileEntries(itemEntries);
-
-                if (files.length === 0) {
-                    showToast('未找到可上传的文件', 'warning');
-                    return;
-                }
-
-                if (files.length === 1 && !files[0].webkitRelativePath.includes('/')) {
-                    // 单文件
-                    handleReportFile(files[0]);
-                } else {
-                    // 文件夹或多文件
-                    handleReportFolder(files);
-                }
-                return;
-            }
-        }
-
-        // 回退到使用 files 属性（单文件或旧浏览器）
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            if (files.length === 1) {
-                handleReportFile(files[0]);
-            } else {
-                handleReportFolder(files);
-            }
-        }
+        await handleReportDataTransfer(e.dataTransfer);
     });
 
     // 文件选择事件
@@ -5987,6 +6015,7 @@ async function submitRedmineAuth(url) {
 }
 
 async function handleReportFile(file) {
+    const fileName = file?.name || '测试报告';
     const uploadZone = $('report-upload-zone');
     const content = uploadZone?.querySelector('.report-upload-content');
     const progress = $('report-upload-progress');
@@ -6015,15 +6044,15 @@ async function handleReportFile(file) {
                 displayReportAnalysis(result.data);
                 notifyOperationResult(
                     '报告分析完成',
-                    `成功分析 ${fileCount} 个文件`,
+                    `成功分析 ${fileName}`,
                     'success',
                     'report-analysis',
-                    { file_count: fileCount }
+                    { filename: fileName }
                 );
             }, 300);
         } else {
             notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
-                file_count: fileCount
+                filename: fileName
             });
             setTimeout(() => {
                 if (progress) progress.style.opacity = '0';
@@ -6032,7 +6061,7 @@ async function handleReportFile(file) {
         }
     } catch (error) {
         console.error('Report analysis error:', error);
-        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { file_count: fileCount });
+        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { filename: fileName });
         if (progress) progress.style.opacity = '0';
         if (content) content.style.opacity = '1';
     }
@@ -6269,12 +6298,20 @@ function displayReportAnalysis(data) {
             const redmineIssueMatch = reportName.match(/^Redmine-(\d+)-/);
             const issueIdFromReport = redmineIssueMatch ? redmineIssueMatch[1] : '';
 
+            // 获取测试类型
+            const testType = (data.details && data.details.test_type) || '';
+            // 对用于 onclick 的参数进行转义，防止单引号破坏字符串
+            const escTestType = testType.replace(/'/g, "\\'");
+            const escModuleName = moduleName.replace(/'/g, "\\'");
+            const escTestCaseName = testCaseName.replace(/'/g, "\\'");
+
             return `
                 <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 12px; margin-bottom: 12px; position: relative;">
                     <!-- 右上角按钮 -->
                     <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
+                        <button onclick="goToTestCase('${escTestType}', '${escModuleName}', '${escTestCaseName}')" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(56, 249, 215, 0.3);">🧪 单测用例</button>
                         <button onclick="openReportDiagnosisModal(${idx})" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #00bcd4 0%, #3f51b5 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500;">🤖 报错诊断</button>
-                        ${issueIdFromReport ? `<button onclick="openRedmineReplyModal('${moduleName}', '${testCaseName}', '${idx}', '${issueIdFromReport}')" data-reason="${encodeURIComponent(reasonText)}" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(245, 87, 108, 0.3);">📝 Redmine回复</button>` : ''}
+                        ${issueIdFromReport ? `<button onclick="openRedmineReplyModal('${escModuleName}', '${escTestCaseName}', '${idx}', '${issueIdFromReport}')" data-reason="${encodeURIComponent(reasonText)}" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(245, 87, 108, 0.3);">📝 Redmine回复</button>` : ''}
                     </div>
 
                     <div style="margin-bottom: 8px; padding-right: 240px;">
@@ -7614,6 +7651,7 @@ window.deleteReport = deleteReport;
 window.downloadReport = downloadReport;
 window.retryReportWithSuite = retryReportWithSuite;
 window.analyzeReport = analyzeReport;
+window.handleReportDataTransfer = handleReportDataTransfer;
 window.loadTestReports = loadTestReports;
 window.showSshdInstallGuide = showSshdInstallGuide;
 window.closeSshdInstallGuide = closeSshdInstallGuide;
@@ -7720,6 +7758,54 @@ function copyTailscaleAccessUrl() {
     }
 }
 
+
+// 跳转到测试界面，自动填入测试类型、测试模块、测试用例，并匹配测试套件
+function goToTestCase(testType, moduleName, testCaseName) {
+    try {
+        // 切换到测试界面
+        switchPage('test');
+
+        // 等待页面切换完成后填充数据
+        setTimeout(() => {
+            debugLog(`[goToTestCase] 填充数据: testType=${testType}, module=${moduleName}, testCase=${testCaseName}`);
+
+            // 设置测试类型
+            const testTypeSelect = document.getElementById('test-type');
+            if (testTypeSelect && testType) {
+                testTypeSelect.value = testType;
+                debugLog(`[goToTestCase] 已设置测试类型: ${testType}`);
+            }
+
+            // 填入测试模块
+            const testModuleInput = document.getElementById('test-module');
+            if (testModuleInput && moduleName && moduleName !== '未知模块') {
+                testModuleInput.value = moduleName;
+                debugLog(`[goToTestCase] 已设置测试模块: ${moduleName}`);
+            }
+
+            // 填入测试用例
+            const testCaseInput = document.getElementById('test-case');
+            if (testCaseInput && testCaseName && testCaseName !== '未知用例') {
+                testCaseInput.value = testCaseName;
+                debugLog(`[goToTestCase] 已设置测试用例: ${testCaseName}`);
+            }
+
+            // 互斥：填入模块/用例时清空测试报告
+            enforceFieldExclusion('module_case');
+
+            // 根据测试类型自动选择测试套件
+            if (testType && typeof autoSelectTestSuite === 'function') {
+                autoSelectTestSuite(testType);
+                debugLog(`[goToTestCase] 已自动匹配测试套件: ${testType}`);
+            }
+
+            showToast(`已跳转到测试界面，请选择设备后开始测试`, 'success');
+        }, 200);
+    } catch (error) {
+        console.error('[goToTestCase] Error:', error);
+        showToast('跳转失败: ' + error.message, 'error');
+    }
+}
 
 // Redmine 回复对话框
 function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFromReport) {
@@ -8623,6 +8709,9 @@ function initApkAnalysisPage() {
 
     setApkUploadEmpty(!window.apkCurrentTaskId);
     initApkSourceResizer();
+
+    if (uploadZone.dataset.initialized === 'true') return;
+    uploadZone.dataset.initialized = 'true';
 
     // 绑定拖拽事件
     uploadZone.addEventListener('dragover', (e) => {
