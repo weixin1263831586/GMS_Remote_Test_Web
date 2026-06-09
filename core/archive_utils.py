@@ -8,7 +8,7 @@ import zipfile
 from typing import List, Optional, Tuple
 
 
-ARCHIVE_EXTENSIONS = ('.zip', '.tar.gz', '.tgz', '.tar.bz2', '.tar')
+ARCHIVE_EXTENSIONS = ('.zip', '.tar.gz', '.tgz', '.tar.bz2', '.tar', '.rar')
 
 _SANITIZE_FILENAME_RE = re.compile(r'[^\w\-_.\[\]]')
 _SANITIZE_DIRNAME_RE = re.compile(r'[^A-Za-z0-9._-]+')

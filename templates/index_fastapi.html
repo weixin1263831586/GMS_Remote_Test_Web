@@ -22,7 +22,7 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/app-notifications.js?v=20260601-01"></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/app.js?v=20260606-fix" defer crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260609-report-reset" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -71,7 +71,7 @@
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'tools', 'ai-assistant'].includes(hashPage)) {
+            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'tools', 'gms-assistant', 'agent'].includes(hashPage)) {
                 targetPage = hashPage;
             } else {
                 targetPage = savedPage;
@@ -298,10 +298,15 @@
                     <span class="sidebar-icon">🛡️</span>
                     <span class="sidebar-text">安全审计</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="ai-assistant" data-page-order="13" onclick="switchPage('ai-assistant', event)">
+                <a href="#" class="sidebar-item" data-page="gms-assistant" data-page-order="13" onclick="switchPage('gms-assistant', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🎓</span>
                     <span class="sidebar-text">GMS助手</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="agent" data-page-order="14" onclick="switchPage('agent', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">💬</span>
+                    <span class="sidebar-text">对话Agent</span>
                 </a>
             </nav>
 
@@ -557,13 +562,13 @@
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">用户标识</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">IP地址</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 120px;">来源</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">状态</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">连接时间</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">最后活跃</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary);">占用设备</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">用户标识</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">IP地址</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 120px;">来源</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">状态</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">连接时间</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">最后活跃</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">占用设备</th>
                         </tr>
                     </thead>
                     <tbody id="users-table-body">
@@ -665,36 +670,39 @@
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('serial_no')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('serial_no')">
                                 设备序列号 <span id="sort-serial_no">↕</span>
                             </th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('model')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('model')">
                                 设备型号 <span id="sort-model">↕</span>
                             </th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('android_version')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 130px;" onclick="sortDevices('soc_model')">
+                                SOC <span id="sort-soc_model">↕</span>
+                            </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('android_version')">
                                 Android版本 <span id="sort-android_version">↕</span>
                             </th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('battery_level')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('battery_level')">
                                 电池电量 <span id="sort-battery_level">↕</span>
                             </th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('status')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('status')">
                                 状态 <span id="sort-status">↕</span>
                             </th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('source_type')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('source_type')">
                                 来源类型 <span id="sort-source_type">↕</span>
                             </th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('source_host')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('source_host')">
                                 来源主机 <span id="sort-source_host">↕</span>
                             </th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('locked_by')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('locked_by')">
                                 占用用户 <span id="sort-locked_by">↕</span>
                             </th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">操作</th>
                         </tr>
                     </thead>
                     <tbody id="devices-table-body">
                         <tr>
-                            <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            <td colspan="10" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
                             </td>
                         </tr>
@@ -718,20 +726,21 @@
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead style="position: sticky; top: 0; z-index: 10;">
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">客户端</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">类型</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 200px;">时间戳</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">通过</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">失败</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">总计</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 100px;">通过率</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">客户端</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">类型</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 110px;">测试套件</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">时间戳</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">通过</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">失败</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">总计</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">通过率</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">操作</th>
 
                         </tr>
                     </thead>
                     <tbody id="reports-table-body">
                         <tr>
-                            <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
                             </td>
                         </tr>
@@ -747,14 +756,14 @@
             <!-- 拖拽上传区域 -->
             <div style="margin-bottom: 10px;">
                 <div id="report-upload-zone" class="report-upload-zone">
-                    <input type="file" id="report-file-input" accept=".xml,.zip,.tar,.tar.gz" style="display: none;" />
+                    <input type="file" id="report-file-input" accept=".xml,.zip,.rar,.tar,.tar.gz" style="display: none;" />
                     <input type="file" id="report-folder-input" webkitdirectory directory style="display: none;" />
                     <div class="report-upload-content">
                         <div>📁</div>
                         <div>
                             <div style="font-size: 16px; font-weight: 600; white-space: nowrap;">拖拽测试报告到此处</div>
                             <div class="upload-instructions" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-                                支持 .zip、.xml、.tar.gz 等文件格式<br><br>
+                                支持 .zip、.rar、.xml、.tar.gz 等文件格式<br><br>
                                 1. 点击按钮"📤 上传报告"选择测试报告<br>
                                 2. 直接拖拽测试报告上传<br>
                                 3. 直接拖拽 Redmine 附件上传
@@ -1113,11 +1122,45 @@
         </div>
 
         <!-- GMS助手页面 -->
-        <div class="container page-content" id="page-ai-assistant">
+        <div class="container page-content" id="page-gms-assistant">
             <div class="section-title">🎓 GMS助手</div>
-            <iframe id="ai-assistant-frame" src="http://172.16.14.248:5173/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
+            <iframe id="gms-assistant-frame" src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
                     style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
+        </div>
+
+        <!-- 对话Agent页面 -->
+        <div class="container page-content" id="page-agent">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                <div class="section-title" style="margin: 0;">💬 对话Agent</div>
+                <div style="display: flex; align-items: center; gap: 6px; padding-top: 2px;">
+                    <button class="btn-xs" onclick="newAgentSession()" style="padding: 2px 6px; font-size: 10px; min-height: 22px;">新会话</button>
+                    <button class="btn-xs" onclick="cancelAgentSession()" style="padding: 2px 6px; font-size: 10px; min-height: 22px;">取消Agent</button>
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 10px; height: calc(100vh - 80px);">
+                <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+                    <div id="agent-chat-messages" style="flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: rgba(0, 0, 0, 0.08);">
+                        <div class="agent-chat-empty">输入测试需求，例如：跑 CtsWifiTestCases，找一台空闲设备，失败 retry 2 次，还失败就报告分析</div>
+                    </div>
+                    <div style="border-top: 1px solid var(--border-color); padding: 10px; display: flex; gap: 8px; align-items: flex-end; background: var(--darker-bg);">
+                        <textarea id="agent-input" class="entry-field" rows="4" placeholder="告诉 Agent 你要执行的测试、设备选择、retry 策略或分析动作&#10;Shift+Enter 换行，Enter 发送" style="resize: vertical; min-height: 82px; max-height: 220px; flex: 1;"></textarea>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <button class="btn-primary" onclick="sendAgentMessage(false)" style="padding: 6px 16px; white-space: nowrap; min-width: 64px;">发送</button>
+                            <button class="btn-primary" onclick="sendAgentMessage(true)" style="padding: 6px 16px; background: var(--success-color); white-space: nowrap; min-width: 64px;">执行</button>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+                    <div style="padding: 10px 12px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                        <div style="font-size: 13px; font-weight: 600;">执行步骤</div>
+                        <span id="agent-status" style="font-size: 11px; color: var(--text-secondary);">idle</span>
+                    </div>
+                    <div id="agent-steps" style="flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                        <div class="suite-empty">等待任务</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- 添加分类弹框 -->
@@ -2187,26 +2230,26 @@
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
-                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
                             ${user.client_id}
                         </td>
-                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
                             ${user.ip}
                         </td>
-                        <td style="padding: 10px; text-align: center; font-size: 11px; color: ${sourceColor}; font-weight: 600;">
+                        <td style="padding: 4px 6px; text-align: center; font-size: 12px; color: ${sourceColor}; font-weight: 600;">
                             ${sourceLabel}
                         </td>
-                        <td style="padding: 10px; text-align: center;">
-                            <span style="color: ${statusColor}; font-weight: 600; font-size: 11px;">●</span>
-                            <span style="margin-left: 6px; font-size: 11px;">${statusText}</span>
+                        <td style="padding: 4px 6px; text-align: center;">
+                            <span style="color: ${statusColor}; font-weight: 600; font-size: 12px;">●</span>
+                            <span style="margin-left: 6px; font-size: 12px;">${statusText}</span>
                         </td>
-                        <td style="padding: 10px; text-align: center; font-size: 11px;">
+                        <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
                             ${createdAt}
                         </td>
-                        <td style="padding: 10px; text-align: center; font-size: 11px;">
+                        <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
                             ${lastSeen}
                         </td>
-                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
                             ${devices}
                         </td>
                     </tr>
@@ -2333,7 +2376,7 @@
             if (devices.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                        <td colspan="10" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                             暂无设备
                         </td>
                     </tr>
@@ -2344,12 +2387,12 @@
             // 渲染设备列表
             tbody.innerHTML = devices.map(device => {
                 const sourceTypeBadge = device.source_type === 'local'
-                    ? '<span style="background: rgba(76, 175, 80, 0.2); color: var(--success-color); padding: 4px 8px; border-radius: 3px; font-size: 11px; font-weight: 600;">测试主机</span>'
-                    : '<span style="background: rgba(255, 152, 0, 0.2); color: var(--warning-color); padding: 4px 8px; border-radius: 3px; font-size: 11px; font-weight: 600;">USB/IP</span>';
+                    ? '<span style="background: rgba(76, 175, 80, 0.2); color: var(--success-color); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: 600;">测试主机</span>'
+                    : '<span style="background: rgba(255, 152, 0, 0.2); color: var(--warning-color); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: 600;">USB/IP</span>';
 
                 const statusBadge = device.status === 'online'
-                    ? '<span style="color: var(--success-color); font-weight: 600; font-size: 11px;">● 在线</span>'
-                    : '<span style="color: var(--text-secondary); font-weight: 600; font-size: 11px;">○ 离线</span>';
+                    ? '<span style="color: var(--success-color); font-weight: 600; font-size: 12px;">● 在线</span>'
+                    : '<span style="color: var(--text-secondary); font-weight: 600; font-size: 12px;">○ 离线</span>';
 
                 // 电池电量显示
                 let batteryDisplay = '-';
@@ -2364,38 +2407,46 @@
                         } else if (level < 50) {
                             batteryColor = 'var(--warning-color)';
                         }
-                        batteryDisplay = `<span style="color: ${batteryColor}; font-weight: 600; font-size: 11px;">${batteryIcon} ${level}%</span>`;
+                        batteryDisplay = `<span style="color: ${batteryColor}; font-weight: 600; font-size: 12px;">${batteryIcon} ${level}%</span>`;
                     }
                 }
 
+                // SOC 标签显示
+                const socDisplay = device.soc_model
+                    ? `<span style="background: rgba(33, 150, 243, 0.15); color: #42a5f5; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600; font-family: monospace;">${device.soc_model}</span>`
+                    : '-';
+
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
-                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
                             ${device.serial_no || '-'}
                         </td>
-                        <td style="padding: 10px; text-align: center; font-size: 11px;">
+                        <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
                             ${device.model || '-'}
                         </td>
-                        <td style="padding: 10px; text-align: center; font-size: 11px;">
+                        <td style="padding: 4px 6px; text-align: center;">
+                            ${socDisplay}
+                        </td>
+                        <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
                             ${device.android_version || '-'}
                         </td>
-                        <td style="padding: 10px; text-align: center;">
+                        <td style="padding: 4px 6px; text-align: center;">
                             ${batteryDisplay}
                         </td>
-                        <td style="padding: 10px; text-align: center;">
+                        <td style="padding: 4px 6px; text-align: center;">
                             ${statusBadge}
                         </td>
-                        <td style="padding: 10px; text-align: center;">
+                        <td style="padding: 4px 6px; text-align: center;">
                             ${sourceTypeBadge}
                         </td>
-                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
                             ${device.source_host || '-'}
                         </td>
-                        <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 11px;">
+                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
                             ${device.locked_by || '-'}
                         </td>
-                        <td style="padding: 10px; text-align: center;">
-                            <button class="btn-xxs" onclick="openDeviceShell('${device.serial_no}')" style="background: var(--primary-color); font-size: 12px; padding: 8px 12px;">🐧 adb shell</button>
+                        <td style="padding: 4px 6px; text-align: center;">
+                            <button class="btn-xxs" onclick="openDeviceShell('${device.serial_no}')" style="background: var(--primary-color); font-size: 12px; padding: 4px 10px;">🐧 adb shell</button>
                         </td>
                     </tr>
                 `;
@@ -2497,7 +2548,8 @@
             document.getElementById('page-api-docs').classList.remove('active');
             document.getElementById('page-architecture').classList.remove('active');
             document.getElementById('page-tools').classList.remove('active');
-            document.getElementById('page-ai-assistant').classList.remove('active');
+            document.getElementById('page-gms-assistant').classList.remove('active');
+            document.getElementById('page-agent').classList.remove('active');
 
             // 显示目标页面
             document.getElementById(`page-${pageName}`).classList.add('active');
@@ -2525,7 +2577,8 @@
                 'architecture': '系统架构 - GMS远程测试',
                 'tools': '常用网址 - GMS远程测试',
                 'security-audit': '安全审计 - GMS 远程测试',
-                'ai-assistant': 'GMS助手 - GMS 远程测试'
+                'gms-assistant': 'GMS助手 - GMS 远程测试',
+                'agent': '对话Agent - GMS 远程测试'
             };
             document.title = titles[pageName] || 'GMS远程测试';
             if (typeof recordSecurityPageView === 'function') {
@@ -2631,11 +2684,10 @@
                 loadToolsList();
             }
 
-            // 如果切换到 GMS助手页面，刷新 iframe
-            if (pageName === 'ai-assistant') {
-                const iframe = document.getElementById('ai-assistant-frame');
-                if (iframe && iframe.src) {
-                    // 保持当前 URL，无需刷新
+            // 如果切换到对话Agent页面，初始化本地 Agent
+            if (pageName === 'agent') {
+                if (typeof initAgentPage === 'function') {
+                    initAgentPage();
                 }
             }
         }
@@ -4535,14 +4587,18 @@
                 'architecture': '系统架构 - GMS 远程测试',
                 'tools': '常用网址 - GMS 远程测试',
                 'security-audit': '安全审计 - GMS 远程测试',
-                'ai-assistant': 'GMS助手 - GMS 远程测试'
+                'gms-assistant': 'GMS助手 - GMS 远程测试',
+                'agent': '对话Agent - GMS 远程测试'
             };
             document.title = titles[targetPage] || 'GMS远程测试';
             if (typeof recordSecurityPageView === 'function') {
                 recordSecurityPageView(targetPage);
             }
             if (targetPage === 'tools') loadToolsList();
-            if (targetPage === 'ai-assistant') {
+            if (targetPage === 'agent') {
+                if (typeof initAgentPage === 'function') {
+                    initAgentPage();
+                }
             }
 
             // 加载保存的导航栏排序
@@ -4579,7 +4635,7 @@
             const savedOrder = window.__savedSidebarOrder;
             if (!savedOrder || !Array.isArray(savedOrder) || savedOrder.length === 0) return;
 
-            if (savedOrder[0] === 'ai-assistant') {
+            if (savedOrder[0] === 'gms-assistant') {
                 return;
             }
 

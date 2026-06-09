@@ -24,6 +24,45 @@ def cached_xml_analysis(xml_path: str, mtime: float) -> Dict:
 
 _FINAL_LOG_PATTERNS = [re.compile(r'process final logs:\s*(/[^\s]+)')]
 _RESULT_DIR_RE = re.compile(r'RESULT DIRECTORY\s*:\s*(/[^\s]+)')
+_RESULT_PATH_RE = re.compile(r'(/[^\s]+/results/\d{4}\.\d{2}\.\d{2}_\d{2}\.\d{2}\.\d{2}(?:\.\d+_\d+)?)(?:/[^\s]*)?')
+_RESULT_TIMESTAMP_RE = re.compile(r'^\d{4}\.\d{2}\.\d{2}_\d{2}\.\d{2}\.\d{2}(?:\.\d+_\d+)?$')
+
+
+def _normalize_path(path: str) -> str:
+    return os.path.normpath(path.strip().strip('"').strip("'"))
+
+
+def _extract_result_dir_from_text(text: str) -> Optional[str]:
+    for match in _RESULT_PATH_RE.finditer(text or ''):
+        candidate = _normalize_path(match.group(1))
+        if os.path.isdir(candidate):
+            return candidate
+    return None
+
+
+def _extract_result_dir_from_host_log(path: str) -> Optional[str]:
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            return _extract_result_dir_from_text(f.read())
+    except Exception as e:
+        logger.debug(f"[ReportDB] 读取 host log 失败: {path}, {e}")
+    return None
+
+
+def _extract_result_dir_from_inv_dir(path: str) -> Optional[str]:
+    if not path or not os.path.isdir(path):
+        return None
+    try:
+        for name in os.listdir(path):
+            if name.startswith('end_host_log_') and name.endswith('.txt'):
+                result_dir = _extract_result_dir_from_host_log(os.path.join(path, name))
+                if result_dir:
+                    return result_dir
+    except Exception as e:
+        logger.debug(f"[ReportDB] 扫描 inv 日志目录失败: {path}, {e}")
+    return None
 
 
 def _extract_result_dir_from_logs(user_logs: List[str]) -> Optional[str]:
@@ -39,16 +78,28 @@ def _extract_result_dir_from_logs(user_logs: List[str]) -> Optional[str]:
         if 'RESULT DIRECTORY' in log_str:
             match = _RESULT_DIR_RE.search(log_str)
             if match:
-                result_dir = match.group(1).strip()
+                result_dir = _normalize_path(match.group(1))
                 if os.path.isdir(result_dir):
                     logger.info(f"[ReportDB] 找到 RESULT DIRECTORY: {result_dir}")
                     return result_dir
+        result_dir = _extract_result_dir_from_text(log_str)
+        if result_dir:
+            logger.info(f"[ReportDB] 从日志内容找到结果目录: {result_dir}")
+            return result_dir
         # Fallback: process final logs (VTS)
         for pattern in _FINAL_LOG_PATTERNS:
             match = pattern.search(log_str)
             if match:
-                path = match.group(1).strip()
+                path = _normalize_path(match.group(1))
+                result_dir = _extract_result_dir_from_host_log(path)
+                if result_dir:
+                    logger.info(f"[ReportDB] 从 final host log 找到结果目录: {result_dir}")
+                    return result_dir
                 candidate_dir = path if os.path.isdir(path) else os.path.dirname(path)
+                result_dir = _extract_result_dir_from_inv_dir(candidate_dir)
+                if result_dir:
+                    logger.info(f"[ReportDB] 从 inv 日志目录找到结果目录: {result_dir}")
+                    return result_dir
                 if candidate_dir and os.path.isdir(candidate_dir):
                     logger.info(f"[ReportDB] 从 final logs 推导报告目录: {candidate_dir}")
                     return candidate_dir
@@ -84,6 +135,50 @@ def _build_report_timestamp(result_dir: str) -> str:
     return datetime.now().strftime('%Y.%m.%d_%H.%M.%S')
 
 
+def _suite_root_from_test_suite(test_suite: str) -> Optional[str]:
+    if not test_suite:
+        return None
+    path = test_suite.rstrip('/')
+    if os.path.basename(path) == 'tools':
+        return os.path.dirname(path)
+    return path
+
+
+def _result_dir_from_logs_dir(result_dir: str, test_suite: str) -> Optional[str]:
+    """Map suite logs/<timestamp>/... or temp inv_* dirs back to suite results/<timestamp>."""
+    normalized = os.path.normpath(result_dir)
+    result_from_inv = _extract_result_dir_from_inv_dir(normalized)
+    if result_from_inv:
+        return result_from_inv
+    parts = normalized.split(os.sep)
+    if 'logs' in parts:
+        logs_index = parts.index('logs')
+        if len(parts) > logs_index + 1:
+            timestamp = parts[logs_index + 1]
+            if _RESULT_TIMESTAMP_RE.match(timestamp):
+                suite_root = _suite_root_from_test_suite(test_suite)
+                if suite_root:
+                    candidate = os.path.join(suite_root, 'results', timestamp)
+                    if os.path.isdir(candidate):
+                        return candidate
+    return None
+
+
+def _normalize_result_dir(result_dir: str, test_params: Dict[str, Any]) -> str:
+    """Prefer the real Tradefed results/<timestamp> directory over temp/log inv_* dirs."""
+    if not result_dir:
+        return result_dir
+    basename = os.path.basename(result_dir.rstrip('/'))
+    if _RESULT_TIMESTAMP_RE.match(basename) and os.path.exists(os.path.join(result_dir, 'test_result.xml')):
+        return result_dir
+
+    mapped = _result_dir_from_logs_dir(result_dir, test_params.get('test_suite', ''))
+    if mapped and os.path.isdir(mapped):
+        logger.info(f"[ReportDB] 将日志目录映射为结果目录: {result_dir} -> {mapped}")
+        return mapped
+    return result_dir
+
+
 # ==================== 报告数据库保存 ====================
 
 def save_test_report_to_db(
@@ -114,6 +209,8 @@ def save_test_report_to_db(
         if not result_dir or not os.path.exists(result_dir):
             logger.warning(f"[ReportDB] 未找到 RESULT DIRECTORY 或目录不存在: {result_dir}")
             return None
+
+        result_dir = _normalize_result_dir(result_dir, test_params)
 
         # 提取时间戳
         timestamp = _build_report_timestamp(result_dir)

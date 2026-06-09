@@ -441,6 +441,76 @@ async def _load_redmine_credentials():
     return config_manager.load_redmine_credentials()
 
 
+def _looks_like_redmine_url(url: str) -> bool:
+    """Detect Redmine-looking paths for validation before generic URL handling."""
+    return bool(
+        COMPILED_REDMINE_ISSUE_PATTERN.search(url or "")
+        or COMPILED_REDMINE_ATTACHMENT_PATTERN.search(url or "")
+    )
+
+
+def _redmine_base_url_for(redmine_config: Optional[Dict[str, Any]], configured_match: bool) -> str:
+    """Return the configured public Redmine base URL only for approved hosts."""
+    if configured_match and redmine_config and redmine_config.get("base_url"):
+        return redmine_config["base_url"].rstrip("/")
+    return ""
+
+
+def _redmine_public_url_hint(url: str, redmine_config: Optional[Dict[str, Any]]) -> str:
+    """Build the public Redmine URL that corresponds to a rejected Redmine-like URL."""
+    base_url = (redmine_config or {}).get("base_url") or "https://redmine.rock-chips.com"
+    parsed = urlparse(url)
+    if parsed.path:
+        return f"{base_url.rstrip('/')}{parsed.path}"
+    return base_url
+
+
+def _detected_report_extension(file_path: str, content_type: str = "") -> str:
+    """Infer report container extension from content headers or magic bytes."""
+    content_type = (content_type or "").lower()
+    if "zip" in content_type:
+        return ".zip"
+    if "rar" in content_type:
+        return ".rar"
+    if "xml" in content_type:
+        return ".xml"
+
+    try:
+        with open(file_path, "rb") as f:
+            head = f.read(16)
+    except Exception:
+        return ""
+
+    if head.startswith(b"PK\x03\x04") or head.startswith(b"PK\x05\x06") or head.startswith(b"PK\x07\x08"):
+        return ".zip"
+    if head.startswith(b"Rar!\x1a\x07"):
+        return ".rar"
+    if head.lstrip().startswith(b"<?xml") or head.lstrip().startswith(b"<"):
+        return ".xml"
+    if head.startswith(b"\x1f\x8b"):
+        return ".gz"
+    return ""
+
+
+def _rename_downloaded_report_if_needed(file_path: str, filename: str, content_type: str = "") -> tuple[str, str]:
+    """Ensure downloaded reports have an extension the analyzer can route on."""
+    current_ext = os.path.splitext(filename or "")[1].lower()
+    detected_ext = _detected_report_extension(file_path, content_type)
+    if not detected_ext or current_ext == detected_ext:
+        return file_path, filename
+
+    if current_ext and current_ext not in {".zip", ".rar", ".xml", ".gz"}:
+        return file_path, filename
+
+    base_name = os.path.splitext(filename or "downloaded_report")[0] or "downloaded_report"
+    new_filename = f"{base_name}{detected_ext}"
+    new_path = safe_upload_target_path(os.path.dirname(file_path), new_filename, allow_nested=False)
+    if os.path.abspath(new_path) != os.path.abspath(file_path):
+        os.replace(file_path, new_path)
+        logger.info(f"[Report Analysis] Detected downloaded file type: {filename} -> {new_filename}")
+    return new_path, new_filename
+
+
 # ==================== List Reports ====================
 
 @router.get("/api/reports/list")
@@ -595,12 +665,26 @@ async def analyze_report_from_url(request: Request):
         filename = os.path.basename(parsed_url.path) or "downloaded_file.zip"
 
         redmine_config = None
-        is_redmine = False
+        configured_redmine_match = False
         try:
             redmine_config = config_manager.get_redmine_config()
-            is_redmine = redmine_config["domain"] in url.lower()
+            configured_domain = (redmine_config.get("domain") or "").lower()
+            configured_base_host = urlparse(redmine_config.get("base_url", "")).netloc.lower()
+            current_host = parsed_url.netloc.lower()
+            configured_redmine_match = (
+                bool(configured_domain and configured_domain in url.lower())
+                or bool(configured_base_host and configured_base_host == current_host)
+            )
         except ValueError:
             pass
+
+        redmine_like_url = _looks_like_redmine_url(url)
+        if redmine_like_url and not configured_redmine_match:
+            public_url = _redmine_public_url_hint(url, redmine_config)
+            return error_response(f"请使用公网 Redmine 地址：{public_url}", 400)
+
+        is_redmine = configured_redmine_match
+        redmine_base_url = _redmine_base_url_for(redmine_config, configured_redmine_match) if is_redmine else ""
 
         original_issue_id = source_issue_id or None
         attachment_owner_issue_id = None
@@ -613,10 +697,9 @@ async def analyze_report_from_url(request: Request):
                 logger.info(f"[Report Analysis] Redmine issue page detected: {issue_id}")
 
                 try:
-                    if redmine_config:
-                        base_url = redmine_config["base_url"]
-                    else:
-                        return error_response("Redmine config unavailable", 404)
+                    base_url = redmine_base_url
+                    if not base_url:
+                        return error_response("Redmine base URL unavailable", 404)
 
                     stored_creds = await _load_redmine_credentials()
                     if stored_creds:
@@ -665,7 +748,9 @@ async def analyze_report_from_url(request: Request):
                             original_issue_id = cached_issue_id
                     else:
                         try:
-                            base_url = redmine_config["base_url"]
+                            base_url = redmine_base_url
+                            if not base_url:
+                                raise ValueError("Redmine base URL unavailable")
                             stored_creds = await _load_redmine_credentials()
                             headers = {}
                             if stored_creds:
@@ -678,14 +763,16 @@ async def analyze_report_from_url(request: Request):
                             logger.warning(f"[Report Analysis] Query attachment owner failed: {search_error}")
 
                     if "/attachments/download/" not in url:
-                        url = build_redmine_download_url(redmine_config["base_url"], attachment_id)
+                        if not redmine_base_url:
+                            return error_response("Redmine base URL unavailable", 404)
+                        url = build_redmine_download_url(redmine_base_url, attachment_id)
                         logger.info(f"[Report Analysis] Converted to download URL: {url}")
 
-                    filename = "downloaded_file.zip"
+                    filename = f"attachment_{attachment_id}"
 
         logger.info(f"[Report Analysis] Downloading: {filename}")
         temp_dir = tempfile.mkdtemp(prefix="redmine_download_")
-        temp_file_path = os.path.join(temp_dir, filename)
+        temp_file_path = ""
 
         try:
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -715,6 +802,8 @@ async def analyze_report_from_url(request: Request):
 
                     downloaded_size = 0
                     real_filename = extract_filename_from_content_disposition(response.headers.get("Content-Disposition", "")) or filename
+                    content_type = response.headers.get("Content-Type", "")
+                    temp_file_path = safe_upload_target_path(temp_dir, real_filename, allow_nested=False)
 
                     redmine_prefix_match = COMPILED_REPORT_NAME_PATTERN.match(real_filename)
                     if redmine_prefix_match:
@@ -728,7 +817,7 @@ async def analyze_report_from_url(request: Request):
                             downloaded_size += len(chunk)
 
                     logger.info(f"[Report Analysis] Download complete: {downloaded_size} bytes")
-                    filename = real_filename
+                    temp_file_path, filename = _rename_downloaded_report_if_needed(temp_file_path, real_filename, content_type)
 
             logger.info(f"[Report Analysis] Analyzing: {temp_file_path}")
             result = await _analyze_report_file(temp_file_path, temp_dir)
@@ -830,9 +919,27 @@ async def extract_redmine_attachment(request: Request):
 
         try:
             redmine_config = config_manager.get_redmine_config()
-            base_url = redmine_config["base_url"]
-        except ValueError as e:
-            return error_response(str(e), 404)
+        except ValueError:
+            redmine_config = None
+
+        parsed_issue_url = urlparse(issue_url)
+        configured_match = False
+        if redmine_config:
+            configured_domain = (redmine_config.get("domain") or "").lower()
+            configured_base_host = urlparse(redmine_config.get("base_url", "")).netloc.lower()
+            current_host = parsed_issue_url.netloc.lower()
+            configured_match = (
+                bool(configured_domain and configured_domain in issue_url.lower())
+                or bool(configured_base_host and configured_base_host == current_host)
+            )
+
+        if not configured_match:
+            public_url = _redmine_public_url_hint(issue_url, redmine_config)
+            return error_response(f"请使用公网 Redmine 地址：{public_url}", 400)
+
+        base_url = _redmine_base_url_for(redmine_config, configured_match)
+        if not base_url:
+            return error_response("Redmine base URL unavailable", 404)
 
         api_url = f"{base_url}/issues/{issue_id}.json?include=attachments"
         username = stored_creds.get("username")

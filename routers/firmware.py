@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 UPLOAD_PROGRESS_EXPIRATION = 10
+_FASTBOOT_OKAY_RE = re.compile(r"\s+OKAY\s+\[\s*[\d.]+s\]$")
 
 
 
@@ -578,7 +579,7 @@ async def burn_gsi(request: Request):
                                         line.startswith("< waiting for")):
                                         continue
                                     # 保留操作名，去掉尾部的 OKAY [x.xxxs]
-                                    cleaned = re.sub(r"\s+OKAY\s+\[\s*[\d.]+s\]$", "", line)
+                                    cleaned = _FASTBOOT_OKAY_RE.sub("", line)
                                     await safe_websocket_send(client_id, {"type": "log_update", "log": cleaned, "log_type": "info"})
                             except Exception:
                                 pass

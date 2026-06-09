@@ -368,7 +368,8 @@ def _build_management_props_command(device_ids: List[str]) -> str:
             "getprop ro.serialno && "
             "getprop ro.product.model && "
             "getprop ro.build.version.release && "
-            'dumpsys battery | grep level | cut -d: -f2 | tr -d " "'
+            'dumpsys battery | grep "^  level:" | cut -d: -f2 | tr -d " " && '
+            "getprop ro.soc.model"
         )
         commands.append(
             f"adb -s {shlex.quote(device_id)} shell {shlex.quote(device_shell)}"
@@ -390,6 +391,7 @@ def _parse_management_device_props(props_output: str) -> Dict[str, Dict[str, str
                 "model": "",
                 "android_version": "",
                 "battery_level": "",
+                "soc_model": "",
             }
         elif current_device and line:
             if not device_data[current_device]["serial_no"]:
@@ -400,6 +402,8 @@ def _parse_management_device_props(props_output: str) -> Dict[str, Dict[str, str
                 device_data[current_device]["android_version"] = line
             elif not device_data[current_device]["battery_level"]:
                 device_data[current_device]["battery_level"] = line
+            elif not device_data[current_device]["soc_model"]:
+                device_data[current_device]["soc_model"] = line
 
     return device_data
 
@@ -452,6 +456,7 @@ def _build_devices_management_payload(
                 "model": props.get("model", ""),
                 "android_version": props.get("android_version", ""),
                 "battery_level": props.get("battery_level", ""),
+                "soc_model": props.get("soc_model", ""),
                 "source_type": source_type,
                 "source_host": source_host,
                 "status": "online",

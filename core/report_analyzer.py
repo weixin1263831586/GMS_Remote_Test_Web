@@ -9,6 +9,7 @@ import tarfile
 import logging
 import re
 import subprocess
+import shutil
 import glob
 import io
 from pathlib import Path
@@ -764,6 +765,8 @@ class ReportFileHandler:
                 self._extract_zip(archive_path)
             elif archive_path.endswith(('.tar.gz', '.tgz', '.tar.bz2', '.tar')):
                 self._extract_tar(archive_path)
+            elif archive_path.endswith('.rar'):
+                self._extract_7z(archive_path)
             else:
                 logger.warning(f"不支持的压缩格式: {archive_path}")
                 return False
@@ -781,6 +784,25 @@ class ReportFileHandler:
         """解压TAR文件"""
         with tarfile.open(tar_path, 'r:*') as tf:
             tf.extractall(self.temp_dir)
+
+    def _extract_7z(self, archive_path: str):
+        """使用系统 7z 解压 RAR/7z 等格式。"""
+        if archive_path.lower().endswith('.rar') and shutil.which('rar'):
+            subprocess.run(
+                ['rar', 'x', '-y', archive_path, self.temp_dir + os.sep],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            return
+        if not shutil.which('7z'):
+            raise RuntimeError('7z command not found, cannot extract RAR archive')
+        subprocess.run(
+            ['7z', 'x', '-y', f'-o{self.temp_dir}', archive_path],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
 
     def find_xml_file(self) -> Optional[str]:
         """查找test_result.xml文件"""
@@ -853,6 +875,8 @@ class ReportAnalyzer:
         try:
             if lower_path.endswith('.zip'):
                 return self._analyze_zip_archive(archive_path)
+            if lower_path.endswith('.rar'):
+                return self._analyze_7z_archive(archive_path)
             return self._analyze_tar_archive(archive_path)
         except Exception as e:
             logger.error(f"压缩包分析失败: {e}")
@@ -871,6 +895,89 @@ class ReportAnalyzer:
             if host_log_info:
                 with zf.open(host_log_info) as stream:
                     return self._parse_host_log_stream(stream, host_log_info.filename)
+
+        return None
+
+    def _list_7z_members(self, archive_path: str) -> List[str]:
+        if archive_path.lower().endswith('.rar') and shutil.which('rar'):
+            return self._list_rar_members(archive_path)
+        if not shutil.which('7z'):
+            raise RuntimeError('7z command not found, cannot read RAR archive')
+        result = subprocess.run(
+            ['7z', 'l', '-slt', archive_path],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors='replace',
+            timeout=60,
+        )
+        members = []
+        current_path = ''
+        current_is_file = False
+        for line in result.stdout.splitlines() + ['']:
+            if line.startswith('Path = '):
+                if current_path and current_is_file:
+                    members.append(current_path)
+                current_path = line.split(' = ', 1)[1].strip()
+                current_is_file = False
+            elif line == 'Folder = -':
+                current_is_file = True
+            elif line == 'Folder = +':
+                current_is_file = False
+            elif not line and current_path:
+                if current_is_file:
+                    members.append(current_path)
+                current_path = ''
+                current_is_file = False
+        return members
+
+    def _open_7z_member_bytes(self, archive_path: str, member_name: str) -> io.BytesIO:
+        if archive_path.lower().endswith('.rar') and shutil.which('rar'):
+            return self._open_rar_member_bytes(archive_path, member_name)
+        result = subprocess.run(
+            ['7z', 'x', '-so', archive_path, member_name],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+        return io.BytesIO(result.stdout)
+
+    def _list_rar_members(self, archive_path: str) -> List[str]:
+        result = subprocess.run(
+            ['rar', 'lb', archive_path],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors='replace',
+            timeout=60,
+        )
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def _open_rar_member_bytes(self, archive_path: str, member_name: str) -> io.BytesIO:
+        result = subprocess.run(
+            ['rar', 'p', archive_path, member_name],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+        return io.BytesIO(result.stdout)
+
+    def _analyze_7z_archive(self, archive_path: str) -> Optional[TestReport]:
+        members = self._list_7z_members(archive_path)
+
+        xml_member = next((member for member in members if self._is_test_result_member(member)), None)
+        if xml_member:
+            with self._open_7z_member_bytes(archive_path, xml_member) as stream:
+                return self.parser.parse_stream(stream)
+
+        host_log_member = next((member for member in members if self._is_host_log_member(member)), None)
+        if host_log_member:
+            with self._open_7z_member_bytes(archive_path, host_log_member) as stream:
+                return self._parse_host_log_stream(stream, host_log_member)
 
         return None
 
