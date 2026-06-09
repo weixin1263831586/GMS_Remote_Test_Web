@@ -1048,6 +1048,44 @@ function getSuiteRootFromToolsPath(toolsPath) {
     return toolsPath.endsWith('/tools') ? toolsPath.slice(0, -'/tools'.length) : toolsPath;
 }
 
+function normalizeReportTestType(testType) {
+    return String(testType || '').trim().toLowerCase().replace(/_/g, '-');
+}
+
+function findSuitePathForReport(testType, suitePath = '') {
+    const normalizedSuitePath = String(suitePath || '').trim();
+    if (normalizedSuitePath) {
+        return normalizedSuitePath;
+    }
+
+    const normalizedType = normalizeReportTestType(testType);
+    if (!normalizedType || !Array.isArray(testSuitesCache) || testSuitesCache.length === 0) {
+        return '';
+    }
+
+    const exact = testSuitesCache.find(suite => normalizeReportTestType(suite.test_type) === normalizedType);
+    if (exact) return exact.tools_path || '';
+
+    const pathMatch = testSuitesCache.find(suite => {
+        const path = String(suite.tools_path || '').toLowerCase();
+        return path.includes(`/android-${normalizedType}-`) || path.includes(`/android-${normalizedType}/`);
+    });
+    return pathMatch?.tools_path || '';
+}
+
+function getReportSuiteVersion(report) {
+    if (report?.suite_version) {
+        return report.suite_version;
+    }
+    const suitePath = String(report?.suite_path || '');
+    const match = suitePath.match(/android-[^/]*?-(\d+(?:\.\d+)?_r\d+)(?:\/|$)/i);
+    if (match) {
+        return match[1];
+    }
+    const versionMatch = suitePath.match(/(\d+(?:\.\d+)?_r\d+)/i);
+    return versionMatch ? versionMatch[1] : '-';
+}
+
 function getSuiteReleasePath(suite) {
     const toolsPath = suite?.tools_path || '';
     const version = suite?.version || '';
@@ -4867,7 +4905,7 @@ async function loadTestReports(userOnly = false) {
         if (tbody) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                    <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                         加载失败
                     </td>
                 </tr>
@@ -4898,7 +4936,7 @@ function displayTestReports(reports) {
 
         tbody.innerHTML = `
             <tr>
-                <td colspan="8" style="padding: 60px 40px; text-align: center; color: var(--text-secondary);">
+                <td colspan="9" style="padding: 60px 40px; text-align: center; color: var(--text-secondary);">
                     暂无测试报告
                 </td>
             </tr>
@@ -4932,6 +4970,7 @@ function displayTestReports(reports) {
         const failCount = report.fail !== undefined ? report.fail : '-';
         const totalCount = report.total !== undefined ? report.total : '-';
         const passRate = report.total > 0 ? ((report.pass / report.total) * 100).toFixed(1) + '%' : '-';
+        const suiteVersion = getReportSuiteVersion(report);
 
         const passRateStyle = report.total > 0 ? (report.pass / report.total >= 0.9 ? 'color: var(--success-color);' : 'color: var(--warning-color);') : '';
 
@@ -4944,18 +4983,21 @@ function displayTestReports(reports) {
         tr.dataset.suitePath = report.suite_path || '';
 
         tr.innerHTML = `
-            <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">${displayClient}</td>
-            <td style="padding: 12px; text-align: center; font-weight: 700; font-size: 12px; color: ${typeColor};">${testType}</td>
-            <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px;">${report.timestamp}</td>
-            <td style="padding: 12px; text-align: center; color: var(--success-color); font-weight: 600; font-size: 12px;">${passCount}</td>
-            <td style="padding: 12px; text-align: center; color: var(--danger-color); font-weight: 600; font-size: 12px;">${failCount}</td>
-            <td style="padding: 12px; text-align: center; font-weight: 600; font-size: 12px;">${totalCount}</td>
-            <td style="padding: 12px; text-align: center; font-weight: 600; font-size: 12px; ${passRateStyle}">${passRate}</td>
-            <td style="padding: 12px; text-align: center;">
-                <button class="btn-xxs" data-action="analyze" style="margin: 2px;">📈 分析报告</button>
-                <button class="btn-xxs" data-action="retry" style="background: var(--primary-color); margin: 2px;">🔄 retry报告</button>
-                <button class="btn-xxs" data-action="download" style="background: var(--success-color); margin: 2px;">⬇️ 下载报告</button>
-                <button class="btn-xxs" data-action="delete" style="background: var(--danger-color); margin: 2px;">🗑️ 删除报告</button>
+            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${displayClient}</td>
+            <td style="padding: 4px 6px; text-align: center; font-weight: 700; font-size: 13px; color: ${typeColor};">${testType}</td>
+            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px; color: var(--text-primary);">${escapeHtml(suiteVersion)}</td>
+            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${report.timestamp}</td>
+            <td style="padding: 4px 6px; text-align: center; color: var(--success-color); font-weight: 600; font-size: 13px;">${passCount}</td>
+            <td style="padding: 4px 6px; text-align: center; color: var(--danger-color); font-weight: 600; font-size: 13px;">${failCount}</td>
+            <td style="padding: 4px 6px; text-align: center; font-weight: 600; font-size: 13px;">${totalCount}</td>
+            <td style="padding: 4px 6px; text-align: center; font-weight: 600; font-size: 13px; ${passRateStyle}">${passRate}</td>
+            <td style="padding: 4px 6px; text-align: center;">
+                <button class="btn-xxs" data-action="analyze" style="margin: 2px; font-size: 12px;">📈 分析</button>
+                <button class="btn-xxs" data-action="retry" style="background: var(--primary-color); margin: 2px; font-size: 12px;">🔄 retry</button>
+                <button class="btn-xxs" data-action="download" style="background: var(--success-color); margin: 2px; font-size: 12px;">⬇️ 下载</button>
+                <button class="btn-xxs" data-action="delete" style="background: var(--danger-color); margin: 2px; font-size: 12px;">🗑️ 删除</button>
+                <button class="btn-xxs" data-action="results" style="background: var(--info-color); margin: 2px; font-size: 12px;">results</button>
+                <button class="btn-xxs" data-action="logs" style="background: var(--warning-color); margin: 2px; font-size: 12px;">logs</button>
             </td>
         `;
 
@@ -4995,10 +5037,37 @@ function handleReportAction(event) {
         case 'download':
             downloadReport(timestamp);
             break;
+        case 'results':
+            openReportSuiteDirectory(timestamp, suitePath, testType, 'results');
+            break;
+        case 'logs':
+            openReportSuiteDirectory(timestamp, suitePath, testType, 'logs');
+            break;
         case 'delete':
             deleteReport(timestamp);
             break;
     }
+}
+
+async function openReportSuiteDirectory(timestamp, suitePath, testType, kind) {
+    if (!timestamp || !['results', 'logs'].includes(kind)) {
+        showToast('报告目录参数无效', 'error');
+        return;
+    }
+
+    if (!testSuitesCache.length) {
+        await loadTestSuites();
+    }
+
+    const resolvedSuitePath = findSuitePathForReport(testType, suitePath);
+    if (!resolvedSuitePath) {
+        showToast('未找到该报告对应的测试套件路径', 'warning');
+        return;
+    }
+
+    const targetPath = `${kind}/${timestamp}`;
+    switchPage('test-suites', null);
+    await selectTestSuiteForBrowser(resolvedSuitePath, targetPath);
 }
 
 async function deleteReport(timestamp) {
@@ -5517,7 +5586,7 @@ function selectReportSource() {
                         📄 上传文件
                     </button>
                     <div style="font-size: 10px; color: var(--text-secondary); text-align: center;">
-                        支持 .xml, .zip, .tar.gz
+                        支持 .xml, .zip, .rar, .tar.gz
                     </div>
                     <button class="btn-md" onclick="selectReportFolder()" style="width: 100%; justify-content: center;">
                         📁 上传文件夹
@@ -5675,16 +5744,18 @@ function initReportAnalysis() {
     });
 
     // 文件选择事件
-    fileInput.addEventListener('change', (e) => {
+    fileInput.addEventListener('change', async (e) => {
         if (e.target.files.length > 0) {
-            handleReportFile(e.target.files[0]);
+            await handleReportFile(e.target.files[0]);
+            e.target.value = '';
         }
     });
 
     // 文件夹选择事件
-    folderInput.addEventListener('change', (e) => {
+    folderInput.addEventListener('change', async (e) => {
         if (e.target.files.length > 0) {
-            handleReportFolder(e.target.files);
+            await handleReportFolder(e.target.files);
+            e.target.value = '';
         }
     });
 }
@@ -5729,18 +5800,35 @@ async function handleRedmineAttachment(url, context = {}) {
     try {
         // 首先获取 Redmine 配置（带缓存，减少API调用）
         let redmineDomain;
+        let redmineBaseUrl;
 
         try {
             const redmineConfig = await getRedmineConfig();
             redmineDomain = redmineConfig.domain;
+            redmineBaseUrl = redmineConfig.base_url || `https://${redmineDomain}`;
         } catch (configError) {
             console.error('[Redmine] 配置获取失败:', configError);
             showToast('❌ Redmine 配置错误，请联系管理员', 'error');
             return; // 终止处理
         }
 
-        // 检测是否为 Redmine URL
-        if (url.includes(redmineDomain)) {
+        const redminePathUrl = /\/(?:issues|attachments)(?:\/|$)/.test(url);
+        const isConfiguredRedmineUrl = url.includes(redmineDomain);
+        if (redminePathUrl && !isConfiguredRedmineUrl) {
+            const publicUrl = url.replace(/^https?:\/\/[^/]+/, redmineBaseUrl.replace(/\/$/, ''));
+            notifyOperationResult('报告分析失败', `请使用公网 Redmine 地址：${publicUrl}`, 'warning', 'report-analysis', {
+                source: 'url'
+            });
+            setTimeout(() => {
+                if (progress) progress.style.opacity = '0';
+                if (content) content.style.opacity = '1';
+            }, 1000);
+            return;
+        }
+
+        // 检测是否为配置中的公网 Redmine URL
+        const isRedmineUrl = isConfiguredRedmineUrl;
+        if (isRedmineUrl) {
             const issueMatch = url.match(/\/issues\/(\d+)/);
             if (issueMatch) {
                 // 是问题页面，尝试获取第一个附件
@@ -6186,6 +6274,32 @@ async function handleReportFolder(files) {
     }
 }
 
+function ensureReportAnalysisResultStructure() {
+    const resultDiv = $('report-analysis-result');
+    if (!resultDiv) return null;
+
+    if (!$('report-summary') || !$('report-details') || !$('report-failures') || !$('report-failure-list')) {
+        resultDiv.innerHTML = `
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div style="font-size: 16px; font-weight: 600;">📊 分析结果</div>
+                    <button class="btn-xs" onclick="resetReportAnalysis()">清除</button>
+                </div>
+                <div id="report-summary" style="display: grid; grid-template-columns: 160px 160px 160px 160px 160px 160px 160px 1fr; gap: 8px; margin-bottom: 20px;"></div>
+                <div id="report-details" style="font-size: 12px; color: var(--text-primary);"></div>
+            </div>
+            <div id="report-failures" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div style="font-size: 12px; font-weight: 600;">❌ 失败用例</div>
+                </div>
+                <div id="report-failure-list" style="max-height: 580px; overflow-y: auto;"></div>
+            </div>
+        `;
+    }
+
+    return resultDiv;
+}
+
 function displayReportAnalysis(data) {
     if (DEBUG) debugLog('[displayReportAnalysis] Called with data:', data);
 
@@ -6194,7 +6308,7 @@ function displayReportAnalysis(data) {
     window.currentReportAnalysisData = data;
     if (DEBUG) debugLog('[displayReportAnalysis] Current report name:', window.currentReportName);
 
-    const resultDiv = $('report-analysis-result');
+    const resultDiv = ensureReportAnalysisResultStructure();
     const uploadZone = $('report-upload-zone');
     const summaryDiv = $('report-summary');
     const detailsDiv = $('report-details');
@@ -6323,9 +6437,9 @@ function displayReportAnalysis(data) {
                 <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 12px; margin-bottom: 12px; position: relative;">
                     <!-- 右上角按钮 -->
                     <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
+                        ${issueIdFromReport ? `<button onclick="openRedmineReplyModal('${escModuleName}', '${escTestCaseName}', '${idx}', '${issueIdFromReport}')" data-reason="${encodeURIComponent(reasonText)}" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(245, 87, 108, 0.3);">📝 Redmine回复</button>` : ''}
                         <button onclick="goToTestCase('${reportTestType}', '${escModuleName}', '${escTestCaseName}')" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(56, 249, 215, 0.3);">🧪 单测用例</button>
                         <button onclick="openReportDiagnosisModal(${idx})" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #00bcd4 0%, #3f51b5 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500;">🤖 报错诊断</button>
-                        ${issueIdFromReport ? `<button onclick="openRedmineReplyModal('${escModuleName}', '${escTestCaseName}', '${idx}', '${issueIdFromReport}')" data-reason="${encodeURIComponent(reasonText)}" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(245, 87, 108, 0.3);">📝 Redmine回复</button>` : ''}
                     </div>
 
                     <div style="margin-bottom: 8px; padding-right: 240px;">
@@ -7643,6 +7757,498 @@ function copyAIAnalysis(modalId) {
     });
 }
 
+// ==================== 对话Agent ====================
+let agentSessionId = localStorage.getItem('gms_agent_session_id') || '';
+let agentPollTimer = null;
+let agentInitialized = false;
+let agentInputHistory = JSON.parse(localStorage.getItem('gms_agent_input_history') || '[]');
+let agentHistoryIndex = -1;  // -1 = not browsing history
+const agentHandledAutoOpenMessageIds = new Set();
+
+function getAgentStatusLabel(status) {
+    const labels = {
+        idle: '空闲',
+        planning: '待确认',
+        running: '测试中',
+        monitoring: '监控中',
+        analyzing: '分析中',
+        done: '完成',
+        error: '异常',
+        cancelled: '已取消'
+    };
+    return labels[status] || status || '空闲';
+}
+
+function getCurrentPageName() {
+    const active = document.querySelector('.page-content.active');
+    return active?.id?.replace(/^page-/, '') || '';
+}
+
+function formatAgentTime(value) {
+    if (!value) return '';
+    const raw = String(value);
+    const match = raw.match(/T(\d{2}:\d{2}:\d{2})/);
+    return match ? match[1] : raw.replace('T', ' ');
+}
+
+function getAgentMessageTone(message) {
+    const content = message?.content || '';
+    if (message?.kind === 'plan' || /生成执行计划|需要确认|确认后开始/.test(content)) return 'plan';
+    if (/失败|异常|没有可用|不能执行|error/i.test(content)) return 'error';
+    if (/完成|已启动|已取消|成功/.test(content)) return 'success';
+    return '';
+}
+
+function renderAgentPlanContent(content) {
+    const lines = String(content || '').split('\n').map(line => line.trim()).filter(Boolean);
+    const intro = [];
+    const fields = [];
+    const notes = [];
+
+    lines.forEach(line => {
+        const item = line.replace(/^- /, '');
+        const idx = item.indexOf(':');
+        if (line.startsWith('- ') && idx > 0) {
+            fields.push([item.slice(0, idx).trim(), item.slice(idx + 1).trim()]);
+        } else if (/输入|当前没有|不能执行/.test(line)) {
+            notes.push(line);
+        } else {
+            intro.push(line);
+        }
+    });
+
+    const introHtml = intro.length ? `<div style="margin-bottom: 10px;">${escapeHtml(intro.join('\n'))}</div>` : '';
+    const gridHtml = fields.length ? `
+        <div class="agent-plan-grid">
+            ${fields.map(([key, value]) => `
+                <div class="agent-plan-key">${escapeHtml(key)}</div>
+                <div class="agent-plan-value">${escapeHtml(value || '-')}</div>
+            `).join('')}
+        </div>
+    ` : '';
+    const noteHtml = notes.length ? `<div class="agent-plan-note">${escapeHtml(notes.join('\n'))}</div>` : '';
+    return introHtml + gridHtml + noteHtml;
+}
+
+function renderAgentMessages(session) {
+    const container = $('agent-chat-messages');
+    if (!container) return;
+
+    const messages = session?.messages || [];
+    if (!messages.length) {
+        container.innerHTML = '<div class="agent-chat-empty">输入测试需求，例如：跑 CtsWifiTestCases，找一台空闲设备，失败 retry 2 次，还失败就报告分析</div>';
+        return;
+    }
+
+    container.innerHTML = messages.map(message => {
+        const isUser = message.role === 'user';
+        const data = message.data || {};
+        const plan = data.plan || null;
+        const kind = message.kind || 'text';
+        const reportTimestamp = data.report_timestamp || '';
+        const apkTaskId = data.analysis?.apk_source_analysis?.task_id || '';
+        const targetPage = data.page || '';
+        const quickActions = data.quick_actions || [];
+        const tone = getAgentMessageTone(message);
+        const roleLabel = isUser ? '你' : 'Agent';
+        const isPlanLike = kind === 'plan' || plan;
+        let actions = '';
+
+        // Plan confirmation buttons
+        if (plan && session.status === 'planning') {
+            actions += `
+                <div class="agent-actions">
+                    <button class="btn-xs" onclick="confirmAgentPlan()">执行计划</button>
+                    <button class="btn-xs" onclick="sendAgentMessage(false, '重新规划')">重新规划</button>
+                </div>
+            `;
+        }
+
+        // Report analysis buttons
+        if (reportTimestamp) {
+            actions += `
+                <div class="agent-actions">
+                    <button class="btn-xs" onclick="openAgentReportAnalysis('${escapeJsAttr(reportTimestamp)}')">打开报告分析</button>
+                    <button class="btn-xs" onclick="switchPage('reports', null)">报告管理</button>
+                    ${apkTaskId ? `<button class="btn-xs" onclick="openAgentApkAnalysis('${escapeJsAttr(apkTaskId)}')">打开APK分析</button>` : ''}
+                </div>
+            `;
+        }
+
+        // Quick actions from response generator
+        if (quickActions.length > 0) {
+            const actionBtns = quickActions.map(a => {
+                if (a.page) {
+                    return `<button class="btn-xs" onclick="switchPage('${escapeJsAttr(a.page)}', null)">${escapeHtml(a.label)}</button>`;
+                } else if (a.action) {
+                    return `<button class="btn-xs" onclick="sendAgentAction('${escapeJsAttr(a.action)}', '${escapeJsAttr(JSON.stringify(a.params || {}))}', '${escapeJsAttr(a.label || a.action)}')">${escapeHtml(a.label)}</button>`;
+                }
+                return '';
+            }).filter(Boolean).join('');
+            if (actionBtns) {
+                actions += `<div class="agent-actions">${actionBtns}</div>`;
+            }
+        }
+
+        // Page navigation button (fallback when no other actions)
+        if (!data.auto_open && !reportTimestamp && !quickActions.length && targetPage && targetPage !== 'agent') {
+            actions += `
+                <div class="agent-actions">
+                    <button class="btn-xs" onclick="switchPage('${escapeJsAttr(targetPage)}', null)">打开页面</button>
+                </div>
+            `;
+        }
+
+        const escapedContent = escapeHtml(message.content || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        const contentHtml = isPlanLike ? renderAgentPlanContent(message.content || '') : escapedContent;
+        const toneClass = tone ? ` ${tone}` : '';
+        const bodyClass = isPlanLike ? 'agent-message-body plan-body' : 'agent-message-body';
+
+        return `
+            <div class="agent-message-row ${isUser ? 'user' : 'assistant'}">
+                <div class="agent-message ${isUser ? 'user' : 'assistant'}${toneClass}">
+                    <div class="agent-message-header">
+                        <span class="agent-role">${roleLabel}</span>
+                        <span class="agent-time">${escapeHtml(formatAgentTime(message.created_at))}</span>
+                    </div>
+                    <div class="${bodyClass}">${contentHtml}${actions}</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    container.scrollTop = container.scrollHeight;
+
+    const lastAutoOpen = [...messages].reverse().find(message =>
+        message.role !== 'user'
+        && message.data?.auto_open
+        && message.data?.page
+        && !agentHandledAutoOpenMessageIds.has(message.id)
+    );
+    if (lastAutoOpen) {
+        agentHandledAutoOpenMessageIds.add(lastAutoOpen.id);
+        if (lastAutoOpen.data.page !== getCurrentPageName()) {
+            setTimeout(() => switchPage(lastAutoOpen.data.page, null), 0);
+        }
+    }
+}
+
+function renderAgentSteps(session) {
+    const stepsEl = $('agent-steps');
+    const statusEl = $('agent-status');
+    if (statusEl) statusEl.textContent = getAgentStatusLabel(session?.status);
+    if (!stepsEl) return;
+
+    const steps = session?.steps || [];
+    if (!steps.length) {
+        stepsEl.innerHTML = '<div class="suite-empty">等待任务</div>';
+        return;
+    }
+
+    const colorByStatus = {
+        done: 'var(--success-color)',
+        running: 'var(--primary-color)',
+        warning: 'var(--warning-color)',
+        error: 'var(--danger-color)'
+    };
+    const iconByStatus = {
+        done: '✓',
+        running: '…',
+        warning: '!',
+        error: '×'
+    };
+
+    stepsEl.innerHTML = steps.map(step => {
+        const color = colorByStatus[step.status] || 'var(--text-secondary)';
+        const icon = iconByStatus[step.status] || '•';
+        return `
+            <div style="border: 1px solid var(--border-color); border-radius: 6px; padding: 9px; background: var(--darker-bg);">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
+                    <span style="width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: ${color}; color: #fff; font-size: 11px; flex-shrink: 0;">${icon}</span>
+                    <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">${escapeHtml(step.title || '')}</span>
+                </div>
+                <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.45; overflow-wrap: anywhere;">${escapeHtml(step.detail || '')}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderAgentSession(session) {
+    if (!session) return;
+    agentSessionId = session.session_id || agentSessionId;
+    if (agentSessionId) {
+        localStorage.setItem('gms_agent_session_id', agentSessionId);
+    }
+    renderAgentMessages(session);
+    renderAgentSteps(session);
+
+    if (['running', 'monitoring'].includes(session.status)) {
+        startAgentPolling();
+    } else if (agentPollTimer) {
+        stopAgentPolling();
+    }
+}
+
+async function fetchAgentSession() {
+    if (!agentSessionId) return;
+    try {
+        const response = await fetch(`/api/agent/sessions/${encodeURIComponent(agentSessionId)}`);
+        if (!response.ok) {
+            newAgentSession();
+            return;
+        }
+        const result = await response.json();
+        if (result.data?.expired) {
+            newAgentSession();
+            return;
+        }
+        if (result.success && result.data?.session) {
+            renderAgentSession(result.data.session);
+        }
+    } catch (error) {
+        debugLog('[Agent] session fetch failed:', error);
+    }
+}
+
+function startAgentPolling() {
+    if (agentPollTimer) return;
+    agentPollTimer = setInterval(fetchAgentSession, 3000);
+}
+
+function stopAgentPolling() {
+    if (agentPollTimer) {
+        clearInterval(agentPollTimer);
+        agentPollTimer = null;
+    }
+}
+
+async function sendAgentMessage(execute = false, overrideMessage = '') {
+    const input = $('agent-input');
+    const message = (overrideMessage || input?.value || '').trim();
+    if (!message && !execute) {
+        showToast('请输入 Agent 指令', 'warning');
+        return;
+    }
+
+    if (input && !overrideMessage) {
+        // Save to history before clearing
+        if (message && message !== agentInputHistory[0]) {
+            agentInputHistory.unshift(message);
+            if (agentInputHistory.length > 50) agentInputHistory.length = 50;
+            localStorage.setItem('gms_agent_input_history', JSON.stringify(agentInputHistory));
+        }
+        input.value = '';
+        agentHistoryIndex = -1;
+        // Reset height
+        input.style.height = 'auto';
+        input.style.height = '100px';
+    }
+
+    try {
+        // Show typing indicator
+        const container = $('agent-chat-messages');
+        const typingEl = document.createElement('div');
+        typingEl.id = 'agent-typing';
+        typingEl.className = 'agent-typing';
+        typingEl.textContent = '思考中...';
+        if (container) { container.appendChild(typingEl); container.scrollTop = container.scrollHeight; }
+
+        const response = await fetch('/api/agent/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: agentSessionId || null,
+                message: message || '确认执行',
+                execute
+            })
+        });
+        if (!response.ok) {
+            let errorText = `HTTP ${response.status}`;
+            try {
+                const errorResult = await response.json();
+                errorText = errorResult.error || errorResult.message || errorText;
+            } catch (_) {
+                // Keep the HTTP status when the server did not return JSON.
+            }
+            throw new Error(errorText);
+        }
+        const result = await response.json();
+
+        // Remove typing indicator
+        const indicator = document.getElementById('agent-typing');
+        if (indicator) indicator.remove();
+
+        if (!result.success) {
+            showToast(result.error || 'Agent 请求失败', 'error');
+            return;
+        }
+        renderAgentSession(result.data.session);
+    } catch (error) {
+        const indicator = document.getElementById('agent-typing');
+        if (indicator) indicator.remove();
+        showToast(`Agent 请求失败: ${error.message}`, 'error');
+    }
+}
+
+async function sendAgentAction(action, paramsJson = '{}', label = '') {
+    let params = {};
+    try {
+        params = JSON.parse(paramsJson || '{}');
+    } catch (error) {
+        showToast(`Agent 参数解析失败: ${error.message}`, 'error');
+        return;
+    }
+
+    const display = label || action;
+    try {
+        const container = $('agent-chat-messages');
+        const typingEl = document.createElement('div');
+        typingEl.id = 'agent-typing';
+        typingEl.className = 'agent-typing';
+        typingEl.textContent = '执行中...';
+        if (container) { container.appendChild(typingEl); container.scrollTop = container.scrollHeight; }
+
+        const response = await fetch('/api/agent/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: agentSessionId || null,
+                message: display,
+                action,
+                params,
+                execute: false
+            })
+        });
+        const indicator = document.getElementById('agent-typing');
+        if (indicator) indicator.remove();
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
+        if (!result.success) {
+            showToast(result.error || 'Agent 操作失败', 'error');
+            return;
+        }
+        renderAgentSession(result.data.session);
+    } catch (error) {
+        const indicator = document.getElementById('agent-typing');
+        if (indicator) indicator.remove();
+        showToast(`Agent 操作失败: ${error.message}`, 'error');
+    }
+}
+
+function confirmAgentPlan() {
+    sendAgentMessage(true, '确认执行');
+}
+
+function newAgentSession() {
+    agentSessionId = '';
+    localStorage.removeItem('gms_agent_session_id');
+    stopAgentPolling();
+    renderAgentSession({ status: 'idle', messages: [], steps: [] });
+}
+
+async function cancelAgentSession() {
+    if (!agentSessionId) {
+        newAgentSession();
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/agent/sessions/${encodeURIComponent(agentSessionId)}/cancel`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+        if (result.success && result.data?.session) {
+            renderAgentSession(result.data.session);
+        } else {
+            showToast(result.error || '取消失败', 'error');
+        }
+    } catch (error) {
+        showToast(`取消失败: ${error.message}`, 'error');
+    }
+}
+
+function openAgentReportAnalysis(timestamp) {
+    switchPage('report-analysis', null);
+    if (typeof analyzeReport === 'function' && timestamp) {
+        analyzeReport(timestamp);
+    }
+}
+
+function openAgentApkAnalysis(taskId) {
+    if (!taskId) return;
+    switchPage('apk-analysis', null);
+    if (typeof initApkAnalysisPage === 'function') {
+        initApkAnalysisPage();
+    }
+    if (typeof stopApkPolling === 'function') {
+        stopApkPolling();
+    }
+    window.apkCurrentTaskId = taskId;
+    window.apkNotifiedTaskId = taskId;
+    setApkUploadEmpty(false);
+    if ($('apk-analysis-status')) $('apk-analysis-status').style.display = 'block';
+    if ($('apk-analysis-result')) $('apk-analysis-result').style.display = 'block';
+    if ($('apk-analysis-state')) $('apk-analysis-state').textContent = '正在加载 Agent 反编译任务...';
+    pollApkStatus();
+}
+
+function initAgentPage() {
+    if (!agentInitialized) {
+        agentInitialized = true;
+        const input = $('agent-input');
+        if (input) {
+            // Track current draft when user starts browsing history
+            let agentDraftInput = '';
+
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    sendAgentMessage(false);
+                } else if (event.key === 'ArrowUp') {
+                    // Only navigate history when cursor is at the start or input is empty
+                    if (agentInputHistory.length === 0) return;
+                    // Save draft on first history navigation
+                    if (agentHistoryIndex === -1) {
+                        agentDraftInput = input.value;
+                        agentHistoryIndex = 0;
+                    } else if (agentHistoryIndex < agentInputHistory.length - 1) {
+                        agentHistoryIndex++;
+                    }
+                    event.preventDefault();
+                    input.value = agentInputHistory[agentHistoryIndex];
+                    // Move cursor to end
+                    setTimeout(() => { input.selectionStart = input.selectionEnd = input.value.length; }, 0);
+                } else if (event.key === 'ArrowDown') {
+                    if (agentHistoryIndex === -1) return;
+                    event.preventDefault();
+                    if (agentHistoryIndex > 0) {
+                        agentHistoryIndex--;
+                        input.value = agentInputHistory[agentHistoryIndex];
+                    } else {
+                        // Restore draft
+                        agentHistoryIndex = -1;
+                        input.value = agentDraftInput;
+                    }
+                    setTimeout(() => { input.selectionStart = input.selectionEnd = input.value.length; }, 0);
+                }
+            });
+
+            // Auto-resize textarea based on content
+            input.addEventListener('input', () => {
+                // Reset history browsing on manual input
+                agentHistoryIndex = -1;
+                input.style.height = 'auto';
+                input.style.height = Math.max(100, Math.min(input.scrollHeight, 300)) + 'px';
+            });
+        }
+    }
+
+    if (agentSessionId) {
+        fetchAgentSession();
+    } else {
+        renderAgentSession({ status: 'idle', messages: [], steps: [] });
+    }
+}
+
 // ==================== 全局函数暴露 ====================
 // 将 HTML onclick 需要的函数暴露到 window 对象
 window.refreshDevices = refreshDevices;
@@ -7683,6 +8289,14 @@ window.openReportDiagnosisArtifactCandidate = openReportDiagnosisArtifactCandida
 window.openReportDiagnosisSourceFile = openReportDiagnosisSourceFile;
 window.openReportDiagnosisApkAnalysis = openReportDiagnosisApkAnalysis;
 window.openRedmineReplyModal = openRedmineReplyModal;
+window.initAgentPage = initAgentPage;
+window.sendAgentMessage = sendAgentMessage;
+window.sendAgentAction = sendAgentAction;
+window.confirmAgentPlan = confirmAgentPlan;
+window.newAgentSession = newAgentSession;
+window.cancelAgentSession = cancelAgentSession;
+window.openAgentReportAnalysis = openAgentReportAnalysis;
+window.openAgentApkAnalysis = openAgentApkAnalysis;
 window.showTailscaleInfoModal = showTailscaleInfoModal;
 window.copyDeployCommand = copyDeployCommand;
 window.copyTailscaleAccessUrl = copyTailscaleAccessUrl;
@@ -7919,18 +8533,18 @@ async function confirmAndSendRedmineReply(modalId) {
 }
 
 function resetReportAnalysis() {
-    const resultDiv = $('report-analysis-result');
+    const resultDiv = ensureReportAnalysisResultStructure();
     const uploadZone = $('report-upload-zone');
     const summaryDiv = $('report-summary');
     const detailsDiv = $('report-details');
     const failuresDiv = $('report-failures');
     const failureList = $('report-failure-list');
 
-    // Clear all analysis results
-    if (resultDiv) resultDiv.innerHTML = '';
+    // Clear all analysis results without deleting the result container structure.
+    if (resultDiv) resultDiv.style.display = 'none';
     if (summaryDiv) summaryDiv.innerHTML = '';
     if (detailsDiv) detailsDiv.innerHTML = '';
-    if (failuresDiv) failuresDiv.innerHTML = '';
+    if (failuresDiv) failuresDiv.style.display = 'none';
     if (failureList) failureList.innerHTML = '';
 
     // Reset upload zone to empty state

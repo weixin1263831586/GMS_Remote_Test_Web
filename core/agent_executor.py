@@ -1,0 +1,747 @@
+"""
+Agent Action Executor — 统一执行层。
+
+调用现有 router 函数，返回标准化的 ToolResult。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+import json
+import logging
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+from core.agent_tools import AgentTool, registry
+from core.config import config_manager
+from core.devices import device_manager, get_or_create_user_state
+from core.state import global_state
+from modules.device_lock_manager import device_lock_manager
+
+logger = logging.getLogger(__name__)
+
+_TOOL_PAGES = {
+    "devices": "devices",
+    "test": "test",
+    "reports": "reports",
+    "report": "reports",
+    "desktop": "desktop",
+    "terminal": "terminal",
+    "vpn": "api-docs",
+    "usbip": "devices",
+    "ssh": "api-docs",
+    "burn": "devices",
+    "config": "api-docs",
+    "system": "api-docs",
+    "apk": "apk-analysis",
+    "assets": "tools",
+}
+
+_UNSUPPORTED_DIRECT_TOOLS = {
+    "apk_upload",
+    "terminal_push",
+    "test_logs_stream",
+    "system_websocket_{client_id}",
+    "burn_firmware",
+    "burn_gsi",
+}
+
+
+# ==================== Result ====================
+
+@dataclass
+class ToolResult:
+    """工具执行结果。"""
+    success: bool
+    tool_name: str
+    data: Any = None
+    formatted_text: str = ""
+    quick_actions: List[Dict[str, Any]] = field(default_factory=list)
+    page: str = ""
+    kind: str = "text"  # text / table / status / file / code
+    entities: Dict[str, List[str]] = field(default_factory=dict)
+    error: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "success": self.success,
+            "tool_name": self.tool_name,
+            "data": self.data,
+            "formatted_text": self.formatted_text,
+            "quick_actions": self.quick_actions,
+            "page": self.page,
+            "kind": self.kind,
+            "entities": self.entities,
+            "error": self.error,
+        }
+
+
+# ==================== Executor ====================
+
+class ActionExecutor:
+    """统一执行层，按工具名调用对应的查询/操作函数。"""
+
+    def __init__(self) -> None:
+        self._handlers = {
+            # Query handlers (readonly)
+            "devices_list": self._query_devices,
+            "devices_management": self._query_devices_management,
+            "devices_user_locked": self._query_locked_devices,
+            "devices_info": self._query_device_info,
+            "test_suites": self._query_suites,
+            "test_status": self._query_test_status,
+            "reports_list": self._query_reports,
+            "users_list": self._query_users,
+            "system_health": self._query_health,
+            "config_read": self._query_config,
+            "vpn_status": self._query_vpn_status,
+            "desktop_vnc_status": self._query_vnc_status,
+            "terminal_open": self._query_terminal,
+            "usbip_status": self._query_usbip_status,
+            "apk_tasks": self._query_apk_tasks,
+            "ssh_sshd": self._query_ssh_status,
+            "agent_capabilities": self._query_capabilities,
+            "devices_wifi": self._connect_wifi,
+        }
+
+    async def execute(
+        self,
+        session: Dict[str, Any],
+        request: Any,
+        tool_name: str,
+        params: Dict[str, Any],
+    ) -> ToolResult:
+        """执行工具调用。"""
+        tool = registry.get(tool_name)
+        if not tool:
+            return ToolResult(
+                success=False, tool_name=tool_name,
+                error=f"未知工具: {tool_name}",
+            )
+
+        handler = self._handlers.get(tool_name)
+        if handler:
+            try:
+                return await handler(session, request, params)
+            except Exception as e:
+                logger.error("[Agent] executor error for %s: %s", tool_name, e, exc_info=True)
+                return ToolResult(
+                    success=False, tool_name=tool_name,
+                    error=str(e), formatted_text=f"执行失败: {e}",
+                )
+
+        # 对于没有专用 handler 的工具，尝试调用 router 函数
+        if tool.executor_ref:
+            try:
+                return await self._call_router_function(tool, session, request, params)
+            except Exception as e:
+                logger.error("[Agent] router call error for %s: %s", tool_name, e, exc_info=True)
+                return ToolResult(
+                    success=False, tool_name=tool_name,
+                    error=str(e), formatted_text=f"调用失败: {e}",
+                )
+
+        return ToolResult(
+            success=False, tool_name=tool_name,
+            error=f"工具 {tool_name} 暂未实现执行逻辑",
+            formatted_text=f"抱歉，工具「{tool.display_name}」暂未实现。请在对应页面操作。",
+        )
+
+    # ==================== Query Handlers ====================
+
+    async def _query_devices(self, session, request, params) -> ToolResult:
+        """查询设备列表。"""
+        from core.test_suite_utils import is_config_host_local
+        config = config_manager.load_config()
+
+        device_ids = await asyncio.to_thread(device_manager.get_connected_devices, True)
+        details = []
+        for did in device_ids:
+            lock = device_lock_manager.get_lock_status(did)
+            details.append({
+                "device_id": did,
+                "locked": bool(lock),
+                "locked_by": lock.get("locked_by", "") if lock else "",
+            })
+
+        locked = [d for d in details if d["locked"]]
+        unlocked = [d for d in details if not d["locked"]]
+        lines = [f"{'🔒 ' + d['locked_by'] if d['locked'] else '✅ 空闲'} {d['device_id']}" for d in details[:12]]
+        text = (
+            f"当前 {len(details)} 台设备，空闲 {len(unlocked)} 台，占用 {len(locked)} 台。\n"
+            + "\n".join(f"- {l}" for l in lines)
+        )
+
+        return ToolResult(
+            success=True, tool_name="devices_list", data={"devices": details},
+            formatted_text=text, kind="table", page="devices",
+            entities={"devices": [d["device_id"] for d in unlocked[:8]]},
+            quick_actions=[
+                {"label": "查看设备管理", "page": "devices"},
+                {"label": "查看第一台详情", "action": "devices_info", "params": {"devices": [unlocked[0]["device_id"]]} if unlocked else {}},
+            ],
+        )
+
+    async def _connect_wifi(self, session, request, params) -> ToolResult:
+        """连接设备到 WiFi。未指定设备时默认选择一台空闲设备。"""
+        from core.schemas import WifiConnectRequest
+        from routers.devices import connect_wifi
+
+        devices = list(params.get("devices") or [])
+        if not devices:
+            connected = await asyncio.to_thread(device_manager.get_connected_devices, True)
+            devices = [
+                device_id
+                for device_id in connected
+                if not device_lock_manager.get_lock_status(device_id)
+            ][:1]
+
+        if not devices:
+            return ToolResult(
+                success=False,
+                tool_name="devices_wifi",
+                error="没有可用未占用设备",
+                formatted_text="当前没有可用未占用设备，无法连接 WiFi。",
+                page="devices",
+            )
+
+        req = WifiConnectRequest(
+            devices=devices,
+            ssid=params.get("ssid") or "AndroidWifi",
+            password=params.get("password") or "1234567890",
+        )
+        response = await connect_wifi(req)
+        payload = _json_body(response)
+        summary = payload.get("summary") or {}
+        success_count = summary.get("success", 0)
+        total = summary.get("total", len(devices))
+        text = f"WiFi 连接完成：成功 {success_count}/{total}，设备：{', '.join(devices)}"
+        return ToolResult(
+            success=payload.get("success", True),
+            tool_name="devices_wifi",
+            data=payload,
+            formatted_text=text,
+            page="devices",
+            entities={"devices": devices},
+            error=payload.get("error", ""),
+        )
+
+    async def _query_devices_management(self, session, request, params) -> ToolResult:
+        """查询设备管理信息（详细版）。"""
+        result = await self._query_devices(session, request, params)
+        result.tool_name = "devices_management"
+        return result
+
+    async def _query_locked_devices(self, session, request, params) -> ToolResult:
+        """查询锁定设备。"""
+        locks = device_lock_manager.get_all_locks()
+        lines = [f"- {did}: {info.get('locked_by', 'unknown')}" for did, info in locks.items()]
+        text = f"当前锁定设备 {len(locks)} 台。\n" + ("\n".join(lines) if lines else "- 无锁定设备")
+        return ToolResult(
+            success=True, tool_name="devices_user_locked",
+            data={"locks": locks}, formatted_text=text, kind="table", page="devices",
+        )
+
+    async def _query_device_info(self, session, request, params) -> ToolResult:
+        """查询设备详细信息。"""
+        devices = params.get("devices", [])
+        if not devices:
+            return ToolResult(success=False, tool_name="devices_info", error="未指定设备")
+
+        # 通过 router 调用
+        tool = registry.get("devices_info")
+        if tool and tool.executor_ref:
+            return await self._call_router_function(tool, session, request, {
+                "devices": devices,
+            })
+
+        return ToolResult(
+            success=True, tool_name="devices_info",
+            data={"devices": devices},
+            formatted_text=f"设备 {', '.join(devices)} — 详细信息请查看设备管理页面",
+            page="devices",
+        )
+
+    async def _query_suites(self, session, request, params) -> ToolResult:
+        """查询测试套件。"""
+        from core.test_suite_utils import get_default_suites_path
+        from routers.tests import _get_available_test_suites
+
+        config = config_manager.load_config()
+        base_path = config.get("suites_path") or get_default_suites_path(config)
+        suites = await asyncio.to_thread(_get_available_test_suites, config, base_path)
+
+        counts = {}
+        for s in suites:
+            key = str(s.get("test_type", "unknown")).upper()
+            counts[key] = counts.get(key, 0) + 1
+        count_line = "，".join(f"{k}: {v}" for k, v in sorted(counts.items()))
+        lines = [
+            f"- {s.get('test_type', '').upper()} {s.get('version') or s.get('binary') or '-'} → {s.get('tools_path', '-')}"
+            for s in suites[:10]
+        ]
+        text = f"发现 {len(suites)} 个测试套件。按类型：{count_line}\n" + "\n".join(lines)
+
+        return ToolResult(
+            success=True, tool_name="test_suites",
+            data={"suites": suites[:20], "count": len(suites)},
+            formatted_text=text, kind="table", page="test-suites",
+            entities={"suites": [s.get("tools_path", "") for s in suites[:8]]},
+            quick_actions=[
+                {"label": "打开测试套件页", "page": "test-suites"},
+            ],
+        )
+
+    async def _query_test_status(self, session, request, params) -> ToolResult:
+        """查询测试运行状态。"""
+        client_id = session.get("client_id", "")
+        user_state = get_or_create_user_state(client_id)
+        running = user_state.get("running", False)
+        devices = user_state.get("devices", [])
+        logs = user_state.get("logs", [])
+        tail = [str(item)[-120:] for item in list(logs)[-5:]]
+
+        text = (
+            f"测试状态：{'🔴 运行中' if running else '⚪ 未运行'}\n"
+            f"占用设备：{', '.join(devices) or '无'}\n"
+            f"日志条数：{len(logs)}\n"
+            + (f"\n最近日志：\n" + "\n".join(f"- {l}" for l in tail) if tail else "")
+        )
+        return ToolResult(
+            success=True, tool_name="test_status",
+            data={"running": running, "devices": devices, "log_count": len(logs)},
+            formatted_text=text, kind="status", page="test",
+            quick_actions=[
+                {"label": "查看测试界面", "page": "test"},
+                {"label": "停止测试", "action": "test_stop"} if running else None,
+            ],
+        )
+
+    async def _query_reports(self, session, request, params) -> ToolResult:
+        """查询测试报告。"""
+        from core.test_report_db import test_report_db
+
+        reports = test_report_db.get_reports(limit=10)
+        stats = test_report_db.get_statistics()
+        lines = [
+            f"- {r.get('timestamp', '-')} | {r.get('test_type', '?')} | pass {r.get('pass', 0)} fail {r.get('fail', 0)} total {r.get('total', 0)}"
+            for r in reports
+        ]
+        text = (
+            f"报告共 {stats.get('total_reports', len(reports))} 份，最近7天 {stats.get('recent_week', 0)} 份。\n"
+            + "\n".join(lines) if lines else "暂无报告"
+        )
+        return ToolResult(
+            success=True, tool_name="reports_list",
+            data={"reports": reports, "stats": stats},
+            formatted_text=text, kind="table", page="reports",
+            entities={"reports": [r.get("timestamp", "") for r in reports[:8]]},
+            quick_actions=[
+                {"label": "打开报告管理", "page": "reports"},
+                {"label": "打开报告分析", "page": "report-analysis"},
+            ],
+        )
+
+    async def _query_users(self, session, request, params) -> ToolResult:
+        """查询在线用户。"""
+        from routers.users import list_users
+
+        response = await list_users()
+        payload = _json_body(response)
+        users = payload.get("users", [])
+        lines = [
+            f"- {u.get('username')}@{u.get('ip')} | {'测试中' if u.get('running') else '空闲'} | 设备: {', '.join(u.get('devices') or []) or '-'}"
+            for u in users[:10]
+        ]
+        text = f"在线用户 {payload.get('total', len(users))} 个。\n" + "\n".join(lines)
+        return ToolResult(
+            success=True, tool_name="users_list",
+            data={"users": users, "total": payload.get("total", len(users))},
+            formatted_text=text, kind="table", page="users",
+            entities={"users": [u.get("username", "") for u in users[:8]]},
+        )
+
+    async def _query_health(self, session, request, params) -> ToolResult:
+        """查询系统健康。"""
+        from routers.system import health_check
+
+        response = await health_check()
+        payload = _json_body(response)
+        modules = payload.get("modules", {})
+        text = (
+            f"系统状态：{payload.get('status', 'unknown')}\n"
+            f"服务：{payload.get('service', '-')}\n"
+            f"WebSocket 连接：{payload.get('websocket_connections', 0)}\n"
+            f"模块：{', '.join(f'{k}={v}' for k, v in modules.items())}"
+        )
+        return ToolResult(
+            success=True, tool_name="system_health",
+            data=payload, formatted_text=text, kind="status", page="security-audit",
+        )
+
+    async def _query_config(self, session, request, params) -> ToolResult:
+        """查询配置摘要。"""
+        config = config_manager.load_config()
+        safe = {
+            "ubuntu_host": config.get("ubuntu_host"),
+            "ubuntu_user": config.get("ubuntu_user"),
+            "local_server": config.get("local_server"),
+            "suites_path": config.get("suites_path"),
+            "ai_enabled": bool((config.get("ai_models") or {}).get("enabled")),
+            "opengrok": bool((config.get("opengrok") or {}).get("base_url")),
+        }
+        lines = [f"- {k}: {v}" for k, v in safe.items()]
+        return ToolResult(
+            success=True, tool_name="config_read",
+            data=safe, formatted_text="当前关键配置：\n" + "\n".join(lines),
+            kind="table", page="api-docs",
+        )
+
+    async def _query_vpn_status(self, session, request, params) -> ToolResult:
+        """查询 VPN 状态。"""
+        try:
+            from routers.integrations import get_vpn_status
+            response = await get_vpn_status()
+            payload = _json_body(response)
+            text = f"VPN 状态：{payload.get('status', 'unknown')}"
+            return ToolResult(
+                success=True, tool_name="vpn_status",
+                data=payload, formatted_text=text, kind="status",
+                quick_actions=[
+                    {"label": "连接 VPN", "action": "vpn_connect"},
+                    {"label": "断开 VPN", "action": "vpn_disconnect"},
+                ],
+            )
+        except Exception as e:
+            return ToolResult(success=False, tool_name="vpn_status", error=str(e), formatted_text=f"VPN 状态查询失败: {e}")
+
+    async def _query_vnc_status(self, session, request, params) -> ToolResult:
+        """查询 VNC 状态。"""
+        try:
+            from routers.desktop import get_desktop_vnc_status
+            response = await get_desktop_vnc_status()
+            payload = _json_body(response)
+            text = f"VNC 状态：{payload.get('status', 'unknown')}"
+            return ToolResult(
+                success=True, tool_name="desktop_vnc_status",
+                data=payload, formatted_text=text, kind="status", page="desktop",
+                quick_actions=[
+                    {"label": "打开桌面", "page": "desktop"},
+                ],
+            )
+        except Exception as e:
+            return ToolResult(success=False, tool_name="desktop_vnc_status", error=str(e), formatted_text=f"VNC 状态查询失败: {e}")
+
+    async def _query_terminal(self, session, request, params) -> ToolResult:
+        """查询终端连接信息。"""
+        try:
+            from routers.terminal import get_ssh_terminal_info
+            response = await get_ssh_terminal_info()
+            payload = _json_body(response)
+            text = f"终端连接：{payload.get('connection_command', 'ssh ' + payload.get('host', ''))}"
+            return ToolResult(
+                success=True, tool_name="terminal_open",
+                data=payload, formatted_text=text, kind="status", page="terminal",
+                quick_actions=[{"label": "打开终端", "page": "terminal"}],
+            )
+        except Exception as e:
+            return ToolResult(success=False, tool_name="terminal_open", error=str(e), formatted_text=f"终端查询失败: {e}")
+
+    async def _query_usbip_status(self, session, request, params) -> ToolResult:
+        """查询 USB/IP 状态。"""
+        try:
+            from routers.integrations import get_usbip_status
+            response = await get_usbip_status()
+            payload = _json_body(response)
+            return ToolResult(
+                success=True, tool_name="usbip_status",
+                data=payload, formatted_text=f"USB/IP 状态：{payload.get('status', 'unknown')}",
+                kind="status",
+            )
+        except Exception as e:
+            return ToolResult(success=False, tool_name="usbip_status", error=str(e), formatted_text=f"USB/IP 状态查询失败: {e}")
+
+    async def _query_apk_tasks(self, session, request, params) -> ToolResult:
+        """查询 APK 反编译任务。"""
+        try:
+            from routers.apk import list_apk_tasks
+            response = await list_apk_tasks()
+            payload = _json_body(response)
+            tasks = (payload.get("data") or {}).get("tasks", [])
+            lines = [f"- {t.get('filename') or t.get('task_id')} | {t.get('status')} | {t.get('progress', 0)}%" for t in tasks[:8]]
+            text = f"APK 任务 {len(tasks)} 个。\n" + ("\n".join(lines) if lines else "- 无任务")
+            return ToolResult(
+                success=True, tool_name="apk_tasks",
+                data={"tasks": tasks}, formatted_text=text, kind="table", page="apk-analysis",
+                entities={"tasks": [t.get("task_id", "") for t in tasks[:8]]},
+            )
+        except Exception as e:
+            return ToolResult(success=False, tool_name="apk_tasks", error=str(e), formatted_text=f"APK 任务查询失败: {e}")
+
+    async def _query_ssh_status(self, session, request, params) -> ToolResult:
+        """查询 SSH 服务状态。"""
+        return ToolResult(
+            success=True, tool_name="ssh_sshd",
+            formatted_text="请使用「系统接口」页面查看 SSH 服务状态",
+            page="api-docs",
+        )
+
+    async def _query_capabilities(self, session, request, params) -> ToolResult:
+        """返回 Agent 能力描述。"""
+        categories = registry.get_all_categories()
+        lines = []
+        for cat, tools in categories.items():
+            tool_names = [t.display_name for t in tools[:5]]
+            lines.append(f"**{cat}**: {', '.join(tool_names)}")
+        text = (
+            "我是 GMS 远程测试助手，可以帮您：\n\n"
+            "1. **查询**：设备、套件、报告、APK任务、用户、配置、VPN、USB/IP、系统健康\n"
+            "2. **执行**：启动/停止测试、重启设备、烧写固件、VPN 连接/断开\n"
+            "3. **分析**：报告诊断、APK 反编译、失败根因分析\n"
+            "4. **导航**：打开任意页面\n\n"
+            "直接用中文告诉我要做什么！"
+        )
+        return ToolResult(
+            success=True, tool_name="agent_capabilities",
+            formatted_text=text, kind="text", page="agent",
+            data={"categories": {cat: [t.name for t in tools] for cat, tools in categories.items()}},
+        )
+
+    # ==================== Router Function Caller ====================
+
+    async def _call_router_function(
+        self, tool: AgentTool, session: Any, request: Any, params: Dict[str, Any]
+    ) -> ToolResult:
+        """通过 executor_ref 调用 router 函数。"""
+        if tool.name in _UNSUPPORTED_DIRECT_TOOLS:
+            page = _TOOL_PAGES.get(tool.category, "api-docs")
+            return ToolResult(
+                success=False,
+                tool_name=tool.name,
+                formatted_text=f"「{tool.display_name}」需要在对应页面补充文件或交互参数，请打开页面操作。",
+                page=page,
+                quick_actions=[{"label": "打开页面", "page": page}],
+                error="该工具不支持 Agent 直接执行",
+            )
+
+        ref = tool.executor_ref
+        if ":" not in ref:
+            return ToolResult(success=False, tool_name=tool.name, error=f"Invalid executor_ref: {ref}")
+
+        module_path, func_name = ref.rsplit(":", 1)
+        try:
+            import importlib
+            module = importlib.import_module(module_path)
+            func = getattr(module, func_name)
+        except (ImportError, AttributeError) as e:
+            return ToolResult(success=False, tool_name=tool.name, error=f"Cannot resolve {ref}: {e}")
+
+        try:
+            call_kwargs = self._build_call_kwargs(func, tool, request, params)
+            if asyncio.iscoroutinefunction(func):
+                response = await func(**call_kwargs)
+            else:
+                response = func(**call_kwargs)
+
+            # 解析 JSONResponse
+            payload = _json_body(response) if hasattr(response, "body") else {"success": True, "data": response}
+            formatted = _format_payload(tool, payload)
+            return ToolResult(
+                success=payload.get("success", True),
+                tool_name=tool.name,
+                data=payload.get("data", payload),
+                formatted_text=formatted,
+                page=_TOOL_PAGES.get(tool.category, ""),
+                error=payload.get("error", ""),
+            )
+        except Exception as e:
+            logger.error("[Agent] router call %s failed: %s", ref, e, exc_info=True)
+            return ToolResult(
+                success=False,
+                tool_name=tool.name,
+                error=str(e),
+                formatted_text=f"调用「{tool.display_name}」失败：{e}",
+                page=_TOOL_PAGES.get(tool.category, ""),
+            )
+
+    def _build_call_kwargs(self, func: Any, tool: AgentTool, request: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+        from routers.agent import AgentRequestShim
+        from core.schemas import (
+            ADBForwardStartRequest,
+            ClientInfoRequest,
+            DeviceActionRequest,
+            DeviceLockRequest,
+            DeviceShellRequest,
+            ReportDiagnosisRequest,
+            SNBurnRequest,
+            SuiteApkAnalyzeRequest,
+            TestParseArgsRequest,
+            TestStartRequest,
+            TradefedListResultsRequest,
+            USBIPDisconnectRequest,
+            USBIPStartRequest,
+            VNCStartRequest,
+            VPNConnectRequest,
+            WifiConnectRequest,
+        )
+
+        model_by_tool = {
+            "users_detect": ClientInfoRequest,
+            "users_set_username": ClientInfoRequest,
+            "devices_bootloader_lock": DeviceLockRequest,
+            "devices_bootloader_unlock": DeviceLockRequest,
+            "devices_bootloader_status": DeviceActionRequest,
+            "devices_info": DeviceActionRequest,
+            "devices_reboot": DeviceActionRequest,
+            "devices_remount": DeviceActionRequest,
+            "devices_wifi": WifiConnectRequest,
+            "devices_shell": DeviceShellRequest,
+            "devices_scrcpy": DeviceActionRequest,
+            "test_start": TestStartRequest,
+            "test_parse_args": TestParseArgsRequest,
+            "test_suites_result": TradefedListResultsRequest,
+            "reports_diagnose": ReportDiagnosisRequest,
+            "suites_apk_analyze": SuiteApkAnalyzeRequest,
+            "desktop_vnc_start": VNCStartRequest,
+            "desktop_validate": VNCStartRequest,
+            "vpn_connect": VPNConnectRequest,
+            "adb_forward_start": ADBForwardStartRequest,
+            "usbip_connect": USBIPStartRequest,
+            "usbip_disconnect": USBIPDisconnectRequest,
+            "burn_serial": SNBurnRequest,
+        }
+
+        query_params = self._query_params_for_tool(tool, params)
+        shim = AgentRequestShim(request, query_params=query_params) if request else None
+        sig = inspect.signature(func)
+        kwargs: Dict[str, Any] = {}
+
+        for name in sig.parameters:
+            if name == "request":
+                kwargs[name] = shim
+            elif name in ("req", "body"):
+                model = model_by_tool.get(tool.name)
+                if model:
+                    kwargs[name] = model(**self._body_params_for_tool(tool, params))
+                else:
+                    kwargs[name] = self._body_params_for_tool(tool, params)
+            elif name in params:
+                kwargs[name] = params[name]
+            elif name in query_params:
+                kwargs[name] = query_params[name]
+
+        return kwargs
+
+    @staticmethod
+    def _body_params_for_tool(tool: AgentTool, params: Dict[str, Any]) -> Dict[str, Any]:
+        body = dict(params or {})
+        if tool.name == "devices_shell" and "serial_no" not in body:
+            devices = body.get("devices") or []
+            if devices:
+                body["serial_no"] = devices[0]
+        if tool.name == "burn_serial" and "sn_code" not in body:
+            body["sn_code"] = body.get("serial") or body.get("sn") or ""
+        if tool.name == "desktop_validate" and "host" not in body:
+            body["host"] = body.get("ubuntu_host") or body.get("device_host")
+        return body
+
+    @staticmethod
+    def _query_params_for_tool(tool: AgentTool, params: Dict[str, Any]) -> Dict[str, Any]:
+        query = dict(params or {})
+        if tool.name == "reports_delete" and "timestamp" not in query:
+            query["timestamp"] = query.get("report_timestamp", "")
+        if tool.name == "reports_download" and "report_timestamp" not in query:
+            query["report_timestamp"] = query.get("timestamp", "")
+        return {k: v for k, v in query.items() if v is not None}
+
+
+# ==================== Helpers ====================
+
+def _json_body(response) -> Dict[str, Any]:
+    """从 JSONResponse 提取 body。"""
+    try:
+        if hasattr(response, "body"):
+            return json.loads(response.body.decode("utf-8"))
+    except Exception:
+        pass
+    return {"success": False, "error": "Invalid response"}
+
+
+def _format_payload(tool: AgentTool, payload: Dict[str, Any]) -> str:
+    if payload.get("error"):
+        return str(payload.get("error"))
+    if tool.name == "devices_info":
+        return _format_device_info_payload(payload)
+    if payload.get("message"):
+        return str(payload.get("message"))
+    if "connected" in payload:
+        return f"{tool.display_name}：{'已连接/正常' if payload.get('connected') else '未连接'}"
+    data = payload.get("data", payload)
+    if isinstance(data, dict):
+        if "results" in data or "results" in payload:
+            results = data.get("results") or payload.get("results") or []
+            total = len(results) if isinstance(results, list) else 0
+            ok = sum(1 for item in results if isinstance(item, dict) and item.get("success")) if isinstance(results, list) else 0
+            return f"{tool.display_name}完成：成功 {ok}/{total}"
+        if "reports" in data or "reports" in payload:
+            reports = data.get("reports") or payload.get("reports") or []
+            return f"查询到 {len(reports)} 份报告。"
+        if "devices" in data or "devices" in payload:
+            devices = data.get("devices") or payload.get("devices") or []
+            return f"查询到 {len(devices)} 台设备。"
+    return f"{tool.display_name}已完成。"
+
+
+def _format_device_info_payload(payload: Dict[str, Any]) -> str:
+    data = payload.get("data") or payload
+    results = data.get("results") if isinstance(data, dict) else None
+    if not isinstance(results, list) or not results:
+        return payload.get("message") or "未返回设备详情。"
+
+    preferred_fields = [
+        "Model",
+        "Android Version",
+        "API Level",
+        "SDK Version",
+        "Serial Number",
+        "Boot State",
+        "Security Patch",
+        "Build Type",
+        "Build Tags",
+        "Build Date",
+        "Mali Version",
+        "Total Memory",
+        "Free Memory",
+        "DATA Partition",
+        "Timezone",
+        "Language",
+        "Fingerprint",
+    ]
+
+    sections = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        device_id = item.get("device") or item.get("device_id") or item.get("serial_no") or "Unknown"
+        props = item.get("properties") or {}
+        lines = [f"设备 {device_id} 详情："]
+        for field in preferred_fields:
+            value = props.get(field)
+            if value not in (None, ""):
+                lines.append(f"- {field}: {value}")
+        extra_fields = [
+            (key, value)
+            for key, value in props.items()
+            if key not in preferred_fields and value not in (None, "")
+        ]
+        for key, value in extra_fields[:8]:
+            lines.append(f"- {key}: {value}")
+        sections.append("\n".join(lines))
+
+    return "\n\n".join(sections) if sections else "未返回设备详情。"
+
+
+# ==================== Global Instance ====================
+
+executor = ActionExecutor()

@@ -9,7 +9,9 @@ import tarfile
 import tempfile
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlparse
 
+import aiohttp
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.background import BackgroundTask
@@ -32,6 +34,7 @@ from starlette.websockets import WebSocketState
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+GMS_ASSISTANT_UPSTREAM = os.getenv("GMS_ASSISTANT_URL", "http://172.16.14.248:5173").rstrip("/")
 
 # Template factory (initialized from app.py)
 _templates = None
@@ -58,6 +61,137 @@ async def root(request: Request):
     # HTML页面不缓存（确保用户获取最新版本）
     response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+def _rewrite_gms_assistant_content(text: str, request: Request, proxy_base: str = "") -> str:
+    """Rewrite upstream absolute URLs to this HTTPS origin."""
+    upstream_https = re.sub(r"^http://", "https://", GMS_ASSISTANT_UPSTREAM)
+    base = proxy_base.rstrip("/")
+    replacements = {
+        GMS_ASSISTANT_UPSTREAM: base,
+        upstream_https: base,
+        GMS_ASSISTANT_UPSTREAM.replace("/", "\\/"): base.replace("/", "\\/"),
+        upstream_https.replace("/", "\\/"): base.replace("/", "\\/"),
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    root_prefixes = ("/assets/", "/api/")
+    for prefix in root_prefixes:
+        text = text.replace(f'"{prefix}', f'"{base}{prefix}')
+        text = text.replace(f"'{prefix}", f"'{base}{prefix}")
+        text = text.replace(f"`{prefix}", f"`{base}{prefix}")
+    return text
+
+
+async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str = ""):
+    """Same-origin HTTPS proxy for the external HTTP GMS assistant."""
+    upstream_url = f"{GMS_ASSISTANT_UPSTREAM}/{path}"
+    if request.url.query:
+        upstream_url = f"{upstream_url}?{request.url.query}"
+
+    excluded_headers = {
+        "connection",
+        "content-encoding",
+        "content-length",
+        "content-security-policy",
+        "date",
+        "etag",
+        "expires",
+        "host",
+        "keep-alive",
+        "last-modified",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "server",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    }
+    request_headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in excluded_headers
+    }
+    request_headers["Host"] = urlparse(GMS_ASSISTANT_UPSTREAM).netloc
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.request(
+                request.method,
+                upstream_url,
+                headers=request_headers,
+                data=await request.body(),
+                allow_redirects=False,
+            ) as upstream_response:
+                body = await upstream_response.read()
+                content_type = upstream_response.headers.get("content-type", "")
+                response_headers = {
+                    key: value
+                    for key, value in upstream_response.headers.items()
+                    if key.lower() not in excluded_headers
+                }
+
+                if upstream_response.status in {301, 302, 303, 307, 308}:
+                    location = response_headers.get("Location") or response_headers.get("location")
+                    if location:
+                        response_headers["Location"] = location.replace(GMS_ASSISTANT_UPSTREAM, "/gms-assistant")
+
+                if any(marker in content_type for marker in ("text/", "javascript", "json")):
+                    try:
+                        text = body.decode(upstream_response.charset or "utf-8", errors="replace")
+                        body = _rewrite_gms_assistant_content(text, request, proxy_base=proxy_base).encode("utf-8")
+                        response_headers.pop("Content-Length", None)
+                        response_headers.pop("content-length", None)
+                    except Exception:
+                        logger.debug("[GMS_ASSISTANT_PROXY] 跳过内容重写: %s", upstream_url, exc_info=True)
+
+                return Response(
+                    content=body,
+                    status_code=upstream_response.status,
+                    media_type=content_type.split(";")[0] if content_type else None,
+                    headers=response_headers,
+                )
+    except Exception as e:
+        logger.error("[GMS_ASSISTANT_PROXY] 代理失败 %s: %s", upstream_url, e, exc_info=True)
+        return JSONResponse(
+            content={"success": False, "error": f"GMS助手代理失败: {e}"},
+            status_code=502,
+        )
+
+
+@router.api_route(
+    "/gms-assistant/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+)
+async def proxy_gms_assistant(path: str, request: Request):
+    return await _proxy_gms_assistant_path(path, request, proxy_base="/gms-assistant")
+
+
+@router.api_route(
+    "/public/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+)
+async def proxy_gms_assistant_public(path: str, request: Request):
+    return await _proxy_gms_assistant_path(f"public/{path}", request)
+
+
+@router.api_route(
+    "/assets/{path:path}",
+    methods=["GET"],
+)
+async def proxy_gms_assistant_assets(path: str, request: Request):
+    return await _proxy_gms_assistant_path(f"assets/{path}", request)
+
+
+@router.api_route(
+    "/api/public/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+)
+async def proxy_gms_assistant_public_api(path: str, request: Request):
+    return await _proxy_gms_assistant_path(f"api/public/{path}", request)
 
 
 # ==================== Health Check ====================

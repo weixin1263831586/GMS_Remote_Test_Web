@@ -1,6 +1,7 @@
 """GMS Remote Test - API 路由注册"""
 
 from . import (
+    agent,
     apk,
     assets,
     audit,
@@ -18,6 +19,7 @@ from . import (
 )
 
 ALL_ROUTERS = [
+    agent.router,
     notifications.router,
     audit.router,
     assets.router,
