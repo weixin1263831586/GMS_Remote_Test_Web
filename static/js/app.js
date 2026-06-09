@@ -650,6 +650,23 @@ function initEventListeners() {
 
 // ==================== Input Change Handlers ====================
 /**
+ * 转义字符串用于双引号 HTML 属性里的单引号 JS 字符串上下文
+ */
+function escapeJsAttr(str) {
+    return String(str ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029')
+        .replace(/'/g, "\\'")
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+/**
  * 测试模块/用例 与 测试报告 互斥处理
  * @param {'module_case' | 'retry'} mode - 'module_case' 表示填入了模块/用例，清空报告；'retry' 表示填入了报告，清空模块/用例
  */
@@ -5576,16 +5593,13 @@ async function handleReportDataTransfer(dataTransfer) {
                     const reader = entry.createReader();
                     // readEntries 可能需要多次调用才能读取所有条目
                     let allEntries = [];
-                    const readBatch = async () => {
+                    while (true) {
                         const batch = await new Promise((resolve) => {
                             reader.readEntries(resolve);
                         });
-                        if (batch.length > 0) {
-                            allEntries = allEntries.concat(batch);
-                            await readBatch(); // 继续读取下一批
-                        }
-                    };
-                    await readBatch();
+                        if (batch.length === 0) break;
+                        allEntries.push(...batch);
+                    }
                     await readFileEntries(allEntries);
                 }
             }
@@ -6271,6 +6285,9 @@ function displayReportAnalysis(data) {
     if (failuresDiv && failureList && data.failures && data.failures.length > 0) {
         failuresDiv.style.display = 'block';
 
+        // 测试类型在循环外提取（每份报告固定不变）
+        const reportTestType = escapeJsAttr((data.details && data.details.test_type) || '');
+
         const failuresHTML = data.failures.map((failure, idx) => {
             // 解析失败信息
             const reasonText = failure.reason || '无失败原因';
@@ -6298,18 +6315,15 @@ function displayReportAnalysis(data) {
             const redmineIssueMatch = reportName.match(/^Redmine-(\d+)-/);
             const issueIdFromReport = redmineIssueMatch ? redmineIssueMatch[1] : '';
 
-            // 获取测试类型
-            const testType = (data.details && data.details.test_type) || '';
-            // 对用于 onclick 的参数进行转义，防止单引号破坏字符串
-            const escTestType = testType.replace(/'/g, "\\'");
-            const escModuleName = moduleName.replace(/'/g, "\\'");
-            const escTestCaseName = testCaseName.replace(/'/g, "\\'");
+            // 转义用于 onclick 属性的参数
+            const escModuleName = escapeJsAttr(moduleName);
+            const escTestCaseName = escapeJsAttr(testCaseName);
 
             return `
                 <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 12px; margin-bottom: 12px; position: relative;">
                     <!-- 右上角按钮 -->
                     <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
-                        <button onclick="goToTestCase('${escTestType}', '${escModuleName}', '${escTestCaseName}')" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(56, 249, 215, 0.3);">🧪 单测用例</button>
+                        <button onclick="goToTestCase('${reportTestType}', '${escModuleName}', '${escTestCaseName}')" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(56, 249, 215, 0.3);">🧪 单测用例</button>
                         <button onclick="openReportDiagnosisModal(${idx})" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #00bcd4 0%, #3f51b5 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500;">🤖 报错诊断</button>
                         ${issueIdFromReport ? `<button onclick="openRedmineReplyModal('${escModuleName}', '${escTestCaseName}', '${idx}', '${issueIdFromReport}')" data-reason="${encodeURIComponent(reasonText)}" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(245, 87, 108, 0.3);">📝 Redmine回复</button>` : ''}
                     </div>

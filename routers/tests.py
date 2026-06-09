@@ -30,6 +30,7 @@ from core.devices import (
     ssh_connection_failed_response,
 )
 from core.error_handling import handle_api_errors
+from core.api_help import generate_help_or_continue
 from core.test_suite_utils import (
     TRADEFED_BINARY_LIST,
     build_suite_info,
@@ -90,29 +91,6 @@ router = APIRouter()
 
 # --- Upload progress constants ---
 UPLOAD_PROGRESS_EXPIRATION = 10
-
-# --- ANSI stripping ---
-def _strip_ansi_codes(text: str) -> str:
-    import re as _re
-    _ANSI_RE = _re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b[^[\]()]|\x1b\[[0-9;]*m')
-    return _ANSI_RE.sub('', text)
-
-
-def _generate_help_or_continue(help_flag: bool, method: str, path: str):
-    if not help_flag:
-        return None
-    try:
-        from routers.system import generate_per_api_help_text
-        help_text = generate_per_api_help_text(method, path)
-    except ImportError:
-        return None
-    if help_text:
-        return PlainTextResponse(
-            content=help_text,
-            headers={"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=300"},
-        )
-    return None
-
 
 # ==================== Parse Args ====================
 
@@ -222,7 +200,7 @@ async def start_test(
     help: bool = Query(False),
     req: TestStartRequest = Body(None),
 ):
-    resp = _generate_help_or_continue(help, "POST", "/api/test/start")
+    resp = generate_help_or_continue(help, "POST", "/api/test/start")
     if resp:
         return resp
 
@@ -598,7 +576,7 @@ async def stop_test(
     h: Optional[str] = Query(None),
     help: bool = Query(False),
 ):
-    resp = _generate_help_or_continue(help, "POST", "/api/test/stop")
+    resp = generate_help_or_continue(help, "POST", "/api/test/stop")
     if resp:
         return resp
 
@@ -1714,7 +1692,7 @@ async def list_tradefed_results(
     """Execute tradefed list results and return test results."""
     from core.tradefed import find_tradefed_binary, execute_tradefed_command, parse_tradefed_list_results
 
-    resp = _generate_help_or_continue(help, "POST", "/api/test/suites/result")
+    resp = generate_help_or_continue(help, "POST", "/api/test/suites/result")
     if resp:
         return resp
 
@@ -1949,7 +1927,7 @@ async def get_status(
     help: bool = Query(False),
 ):
     """Get test status."""
-    resp = _generate_help_or_continue(help, "GET", "/api/test/status")
+    resp = generate_help_or_continue(help, "GET", "/api/test/status")
     if resp:
         return resp
 

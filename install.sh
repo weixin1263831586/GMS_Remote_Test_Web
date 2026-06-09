@@ -357,22 +357,22 @@ setup_local_ssh_key() {
 }
 
 write_runtime_config() {
-    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}/configs/config_runtime.json" "${RUN_USER}" "${HOST_IP}" "${RUN_HOME}" "${SSH_KEY_PATH}" "${PORT}" <<'PY'
+    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}/configs/config_runtime.json" "${INSTALL_DIR}/configs/config.json" "${RUN_USER}" "${HOST_IP}" "${RUN_HOME}" "${SSH_KEY_PATH}" "${PORT}" <<'PY'
 import json
 import os
 import sys
 
-path, user, host_ip, home, key_path, port = sys.argv[1:7]
-os.makedirs(os.path.dirname(path), exist_ok=True)
+runtime_path, static_path, user, host_ip, home, key_path, port = sys.argv[1:8]
+os.makedirs(os.path.dirname(runtime_path), exist_ok=True)
 
 try:
-    with open(path, 'r', encoding='utf-8') as f:
-        config = json.load(f)
+    with open(runtime_path, 'r', encoding='utf-8') as f:
+        runtime_config = json.load(f)
 except Exception:
-    config = {}
+    runtime_config = {}
 
 gms_suite = os.path.join(home, 'GMS-Suite')
-config.update({
+deployment_config = {
     'ubuntu_user': user,
     'ubuntu_host': host_ip,
     'local_server': f'{user}@{host_ip}',
@@ -385,15 +385,51 @@ config.update({
     'scrcpy_path': os.path.join(home, 'Software', 'scrcpy-linux-x86_64-v3.3.4', 'scrcpy'),
     'install_host_ip': host_ip,
     'install_port': int(port),
-})
+}
 
-client_hosts = config.setdefault('client_hosts', {})
+runtime_config.update(deployment_config)
+
+client_hosts = runtime_config.setdefault('client_hosts', {})
 if isinstance(client_hosts, dict):
     client_hosts.setdefault(host_ip, user)
 
-with open(path, 'w', encoding='utf-8') as f:
-    json.dump(config, f, ensure_ascii=False, indent=4)
+with open(runtime_path, 'w', encoding='utf-8') as f:
+    json.dump(runtime_config, f, ensure_ascii=False, indent=4)
     f.write('\n')
+
+# The packaged config.json may contain the source machine identity. Keep the
+# installed static defaults aligned with the deployment host so templates and
+# fallback paths never expose the package builder's user/host.
+try:
+    with open(static_path, 'r', encoding='utf-8') as f:
+        static_config = json.load(f)
+except Exception:
+    static_config = {}
+
+static_config.update(deployment_config)
+
+with open(static_path, 'w', encoding='utf-8') as f:
+    json.dump(static_config, f, ensure_ascii=False, indent=4)
+    f.write('\n')
+PY
+}
+
+verify_runtime_config() {
+    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}/configs/config_runtime.json" "${RUN_USER}" "${HOST_IP}" <<'PY'
+import json
+import sys
+
+path, expected_user, expected_host = sys.argv[1:4]
+with open(path, 'r', encoding='utf-8') as f:
+    config = json.load(f)
+
+actual_user = config.get('ubuntu_user')
+actual_host = config.get('ubuntu_host')
+if actual_user != expected_user or actual_host != expected_host:
+    raise SystemExit(
+        f"runtime config mismatch: expected {expected_user}@{expected_host}, "
+        f"got {actual_user}@{actual_host}"
+    )
 PY
 }
 
@@ -483,6 +519,7 @@ install_web_app() {
     setup_https_cert
     setup_local_ssh_key
     write_runtime_config
+    verify_runtime_config
     setup_suite_dir
     configure_sudoers
     install_systemd_service
