@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query, Request, Body
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse
 
 from core.config import config_manager
 from core.ssh import ssh_manager
@@ -27,6 +27,7 @@ from core.devices import (
     ssh_connection_failed_response,
 )
 from core.error_handling import handle_api_errors
+from core.api_help import generate_help_or_continue
 from core.device_utils import DeviceUtils
 from core.schemas import DeviceActionRequest, DeviceLockRequest, DeviceShellRequest, WifiConnectRequest
 from core.enums import VerifiedBootState
@@ -45,24 +46,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _generate_help_or_continue(help_flag: bool, method: str, path: str):
-    """Generate per-API help text if requested. Returns help response or None."""
-    if not help_flag:
-        return None
-    try:
-        from routers.system import generate_per_api_help_text
-        help_text = generate_per_api_help_text(method, path)
-    except ImportError:
-        return None
-    if help_text:
-        return PlainTextResponse(
-            content=help_text,
-            headers={
-                "Content-Type": "text/plain; charset=utf-8",
-                "Cache-Control": "public, max-age=300",
-            },
-        )
-    return None
 
 
 @router.get("/api/devices/list")
@@ -73,7 +56,7 @@ async def get_connected_devices(
     force_refresh: bool = Query(False),
 ):
     """Get all connected device list (same as adb devices)."""
-    resp = _generate_help_or_continue(help, "GET", "/api/devices/list")
+    resp = generate_help_or_continue(help, "GET", "/api/devices/list")
     if resp:
         return resp
 
@@ -237,7 +220,7 @@ async def lock_bootloader(
     req: DeviceLockRequest = Body(None),
 ):
     """Lock device Bootloader."""
-    resp = _generate_help_or_continue(help, "POST", "/api/devices/bootloader-lock")
+    resp = generate_help_or_continue(help, "POST", "/api/devices/bootloader-lock")
     if resp:
         return resp
 
@@ -255,7 +238,7 @@ async def unlock_bootloader(
     req: DeviceLockRequest = Body(None),
 ):
     """Unlock device Bootloader."""
-    resp = _generate_help_or_continue(help, "POST", "/api/devices/bootloader-unlock")
+    resp = generate_help_or_continue(help, "POST", "/api/devices/bootloader-unlock")
     if resp:
         return resp
 

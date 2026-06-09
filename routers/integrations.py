@@ -16,6 +16,7 @@ from core.common_utils import CommonUtils
 from core.config import config_manager
 from core.devices import DeviceSSHConnection
 from core.error_handling import handle_api_errors
+from core.api_help import generate_help_or_continue
 from core.network import (
     _extract_network,
     _generate_route_commands,
@@ -693,7 +694,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, Body
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse
 
 from core.config import config_manager
 from core.ssh import ssh_manager
@@ -723,21 +724,6 @@ from core.state import global_state
 logger = logging.getLogger(__name__)
 
 
-
-def _generate_help_or_continue(help_flag: bool, method: str, path: str):
-    if not help_flag:
-        return None
-    try:
-        from routers.system import generate_per_api_help_text
-        help_text = generate_per_api_help_text(method, path)
-    except ImportError:
-        return None
-    if help_text:
-        return PlainTextResponse(
-            content=help_text,
-            headers={"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=300"},
-        )
-    return None
 
 
 # ==================== USB/IP Status ====================
@@ -779,7 +765,7 @@ async def start_usbip(
     request: Request = None,
     help: bool = Query(False),
 ):
-    resp = _generate_help_or_continue(help, "POST", "/api/usbip/connect")
+    resp = generate_help_or_continue(help, "POST", "/api/usbip/connect")
     if resp:
         return resp
 

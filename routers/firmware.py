@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse
 
 from core.api_response import success_response, error_response
 from core.config import config_manager
@@ -26,6 +26,7 @@ from core.devices import (
     safe_websocket_send,
 )
 from core.error_handling import handle_api_errors
+from core.api_help import generate_help_or_continue
 from core.state import global_state
 from core.settings import GSI_PROGRESS_POLL_INTERVAL, GSI_PROGRESS_INCREMENT, GSI_PROGRESS_MAX, PROJECT_ROOT
 from core.test_suite_utils import get_default_suites_path
@@ -42,21 +43,6 @@ router = APIRouter()
 
 UPLOAD_PROGRESS_EXPIRATION = 10
 
-
-def _generate_help_or_continue(help_flag: bool, method: str, path: str):
-    if not help_flag:
-        return None
-    try:
-        from routers.system import generate_per_api_help_text
-        help_text = generate_per_api_help_text(method, path)
-    except ImportError:
-        return None
-    if help_text:
-        return PlainTextResponse(
-            content=help_text,
-            headers={"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=300"},
-        )
-    return None
 
 
 # ==================== Upload Progress ====================
@@ -212,7 +198,7 @@ async def _upload_firmware_to_test_host(ssh, client_id: str, source, remote_path
 @router.post("/api/burn/firmware")
 async def burn_firmware(request: Request, h: Optional[str] = Query(None), help: bool = Query(False)):
     """Firmware burning - supports file upload."""
-    resp = _generate_help_or_continue(help, "POST", "/api/burn/firmware")
+    resp = generate_help_or_continue(help, "POST", "/api/burn/firmware")
     if resp:
         return resp
 
@@ -583,8 +569,17 @@ async def burn_gsi(request: Request):
                             try:
                                 for line in clean_chunk.split("\n"):
                                     line = line.strip()
-                                    if line:
-                                        await safe_websocket_send(client_id, {"type": "log_update", "log": line, "log_type": "info"})
+                                    if not line:
+                                        continue
+                                    # 过滤 fastboot 冗余输出
+                                    if (line.startswith("OKAY") or
+                                        line.startswith("Writing '") or
+                                        line.startswith("Finished.") or
+                                        line.startswith("< waiting for")):
+                                        continue
+                                    # 保留操作名，去掉尾部的 OKAY [x.xxxs]
+                                    cleaned = re.sub(r"\s+OKAY\s+\[\s*[\d.]+s\]$", "", line)
+                                    await safe_websocket_send(client_id, {"type": "log_update", "log": cleaned, "log_type": "info"})
                             except Exception:
                                 pass
                     else:
