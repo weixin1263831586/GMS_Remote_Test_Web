@@ -71,7 +71,7 @@
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'tools', 'gms-assistant', 'agent'].includes(hashPage)) {
+            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant', 'agent'].includes(hashPage)) {
                 targetPage = hashPage;
             } else {
                 targetPage = savedPage;
@@ -288,22 +288,27 @@
                     <span class="sidebar-icon">🏗️</span>
                     <span class="sidebar-text">系统架构</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="tools" data-page-order="11" onclick="switchPage('tools', event)">
+                <a href="#" class="sidebar-item" data-page="websites" data-page-order="11" onclick="switchPage('websites', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🌐</span>
                     <span class="sidebar-text">常用网址</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="security-audit" data-page-order="12" onclick="switchPage('security-audit', event)">
+                <a href="#" class="sidebar-item" data-page="tools" data-page-order="12" onclick="switchPage('tools', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">🧰</span>
+                    <span class="sidebar-text">常用工具</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="security-audit" data-page-order="13" onclick="switchPage('security-audit', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🛡️</span>
                     <span class="sidebar-text">安全审计</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="gms-assistant" data-page-order="13" onclick="switchPage('gms-assistant', event)">
+                <a href="#" class="sidebar-item" data-page="gms-assistant" data-page-order="14" onclick="switchPage('gms-assistant', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🎓</span>
                     <span class="sidebar-text">GMS助手</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="agent" data-page-order="14" onclick="switchPage('agent', event)">
+                <a href="#" class="sidebar-item" data-page="agent" data-page-order="15" onclick="switchPage('agent', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">💬</span>
                     <span class="sidebar-text">对话Agent</span>
@@ -1096,7 +1101,7 @@
         </div>
 
         <!-- 常用网址页面 -->
-        <div class="container page-content" id="page-tools">
+        <div class="container page-content" id="page-websites">
             <div class="section-title">🌐 常用网址</div>
 
             <!-- 工具页面外框容器 - 固定高度支持滚动 -->
@@ -1112,6 +1117,28 @@
                 <!-- 底部添加分类按钮 - 固定在容器底部 -->
                 <div style="padding-top: 8px; border-top: 1px solid var(--border-color); margin-top: 8px;">
                     <button onclick="showAddCategoryModal()" style="width: 100%; padding: 8px 8px; background: var(--success-color); color: white; border: none; border-radius: 5px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px;"
+                                onmouseover="this.style.opacity='0.85';"
+                                onmouseout="this.style.opacity='1';">
+                        添加分类
+                    </button>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- 常用工具页面 -->
+        <div class="container page-content" id="page-tools">
+            <div class="section-title">🧰 常用工具</div>
+
+            <div class="tools-container" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; overflow: hidden; max-height: calc(100vh - 80px);">
+
+                <div id="ut-scroll-container" style="flex: 1; overflow-y: auto; padding: 0; min-height: 0;">
+                    <div id="ut-grid" style="padding: 4px 8px 8px 8px;">
+                    </div>
+                </div>
+
+                <div style="padding-top: 8px; border-top: 1px solid var(--border-color); margin-top: 8px;">
+                    <button onclick="ut_showAddCategoryModal()" style="width: 100%; padding: 8px 8px; background: var(--success-color); color: white; border: none; border-radius: 5px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px;"
                                 onmouseover="this.style.opacity='0.85';"
                                 onmouseout="this.style.opacity='1';">
                         添加分类
@@ -1241,6 +1268,76 @@
         </div>
 
         <!-- 导入工具弹框 -->
+
+        <!-- 常用工具 - 添加分类弹框 -->
+        <div id="ut-category-modal" class="modal" style="display: none;">
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <span class="modal-title">添加工具分类</span>
+                    <span class="modal-close" onclick="ut_closeCategoryModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-form-row">
+                        <label>分类名称:</label>
+                        <input type="text" id="ut-category-name" placeholder="例如：Gerrit工具" maxlength="20" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>选择图标:</label>
+                        <input type="text" id="ut-category-icon" placeholder="例如：📦" maxlength="2" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                    </div>
+                    <div class="modal-info-text">
+                        💡 提示：图标可以是1-2个Emoji字符
+                    </div>
+                    <div class="modal-buttons">
+                        <button class="btn-xxs" onclick="ut_closeCategoryModal()">取消</button>
+                        <button class="btn-xxs btn-primary" onclick="ut_saveCategory()">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 常用工具 - 添加/编辑工具弹框 -->
+        <div id="ut-tool-modal" class="modal" style="display: none;">
+            <div class="modal-content" style="max-width: 450px; max-height: 80vh; overflow-y: auto;">
+                <div class="modal-header">
+                    <span class="modal-title" id="ut-tool-modal-title">添加工具</span>
+                    <span class="modal-close" onclick="ut_closeToolModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-form-row">
+                        <label>分类:</label>
+                        <select id="ut-tool-category" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;">
+                        </select>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>工具名称:</label>
+                        <input type="text" id="ut-tool-title" placeholder="例如：Gerrit Patch工具" maxlength="30" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>图标 (Emoji):</label>
+                        <input type="text" id="ut-tool-icon" placeholder="例如：📦" maxlength="4" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>说明:</label>
+                        <textarea id="ut-tool-desc" placeholder="工具的功能说明，鼠标悬停时显示" rows="3" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px; resize: vertical;"></textarea>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>文件路径 (tools/目录下):</label>
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <input type="text" id="ut-tool-filepath" placeholder="例如：gerrit_patch_export_and_apply_tool.sh" style="flex: 1; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                            <button class="btn-xxs" onclick="ut_browseFiles()" style="white-space: nowrap; padding: 6px 10px; flex-shrink: 0;">浏览</button>
+                        </div>
+                    </div>
+                    <div class="modal-info-text">
+                        💡 提示：文件需放在服务器 tools/ 目录下
+                    </div>
+                    <div class="modal-buttons">
+                        <button class="btn-xxs" onclick="ut_closeToolModal()">取消</button>
+                        <button class="btn-xxs btn-primary" onclick="ut_saveTool()">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- 系统架构页面 -->
         <div class="container page-content" id="page-architecture">
@@ -2535,21 +2632,7 @@
             }
 
             // 隐藏所有页面
-            document.getElementById('page-test').classList.remove('active');
-            document.getElementById('page-desktop').classList.remove('active');
-            document.getElementById('page-terminal').classList.remove('active');
-            document.getElementById('page-users').classList.remove('active');
-            document.getElementById('page-security-audit').classList.remove('active');
-            document.getElementById('page-devices').classList.remove('active');
-            document.getElementById('page-reports').classList.remove('active');
-            document.getElementById('page-report-analysis').classList.remove('active');
-            document.getElementById('page-test-suites').classList.remove('active');
-            document.getElementById('page-apk-analysis').classList.remove('active');
-            document.getElementById('page-api-docs').classList.remove('active');
-            document.getElementById('page-architecture').classList.remove('active');
-            document.getElementById('page-tools').classList.remove('active');
-            document.getElementById('page-gms-assistant').classList.remove('active');
-            document.getElementById('page-agent').classList.remove('active');
+            document.querySelectorAll('.page-content.active').forEach(el => el.classList.remove('active'));
 
             // 显示目标页面
             document.getElementById(`page-${pageName}`).classList.add('active');
@@ -2575,7 +2658,8 @@
                 'test-suites': '测试套件 - GMS远程测试',
                 'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS远程测试',
-                'tools': '常用网址 - GMS远程测试',
+                'websites': '常用网址 - GMS远程测试',
+                'tools': '常用工具 - GMS远程测试',
                 'security-audit': '安全审计 - GMS 远程测试',
                 'gms-assistant': 'GMS助手 - GMS 远程测试',
                 'agent': '对话Agent - GMS 远程测试'
@@ -2680,8 +2764,13 @@
             }
 
             // 如果切换到常用网址页面，加载网址列表
-            if (pageName === 'tools') {
+            if (pageName === 'websites') {
                 loadToolsList();
+            }
+
+            // 如果切换到常用工具页面，加载工具列表
+            if (pageName === 'tools') {
+                ut_loadToolsList();
             }
 
             // 如果切换到对话Agent页面，初始化本地 Agent
@@ -3099,7 +3188,7 @@
 
             syncInProgress = true;
             try {
-                const response = await fetch('/api/tools/save', {
+                const response = await fetch('/api/websites/save', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -3124,7 +3213,7 @@
 
         async function loadToolsFromServer() {
             try {
-                const response = await fetch('/api/tools/load');
+                const response = await fetch('/api/websites/load');
                 const result = await response.json();
 
                 if (result.success && result.tools) {
@@ -3815,7 +3904,7 @@
         // ==================== 工具页面专用 Esc 键处理 ====================
         document.addEventListener('keydown', function(e) {
             // 只处理工具页面的 Esc 键
-            if (e.key !== 'Escape' || currentPage !== 'tools') return;
+            if (e.key !== 'Escape' || currentPage !== 'websites') return;
 
             // 检查是否有打开的工具相关模态框
             const toolModal = document.getElementById('tool-modal');
@@ -3835,6 +3924,490 @@
                 return;
             }
         });
+
+        // ==================== 常用工具 (Utility Tools) ====================
+        const UT_STORAGE_KEY = 'gms_utility_tools_categories';
+        const UT_CATEGORY_META_KEY = 'gms_utility_tools_category_meta';
+        const UT_DEFAULT_CATEGORIES = {
+            'Gerrit工具': { icon: '📦', color: '#34a853' },
+            '设备工具': { icon: '📱', color: '#4285f4' },
+            '烧写工具': { icon: '🔥', color: '#ea4335' },
+            '其他工具': { icon: '🔧', color: '#8e8e93' },
+        };
+        let ut_categorizedTools = {};
+        let ut_categoryMeta = {};
+        let ut_editingCategory = null;
+        let ut_editingTool = null;
+
+        function ut_getCategoryInfo(category) {
+            return ut_categoryMeta[category] || UT_DEFAULT_CATEGORIES[category] || { icon: '📁', color: '#8e8e93' };
+        }
+
+        function ut_loadToolsList() {
+            try {
+                ut_categoryMeta = JSON.parse(localStorage.getItem(UT_CATEGORY_META_KEY) || '{}') || {};
+            } catch (e) {
+                console.error('加载常用工具分类信息失败:', e);
+                ut_categoryMeta = {};
+            }
+
+            const stored = localStorage.getItem(UT_STORAGE_KEY);
+            if (stored) {
+                try {
+                    ut_categorizedTools = JSON.parse(stored);
+                    ut_renderToolsGrid();
+                    return;
+                } catch (e) { console.error('加载常用工具数据失败:', e); }
+            }
+            // 默认数据
+            ut_categorizedTools = {
+                'Gerrit工具': [
+                    {
+                        icon: '📦',
+                        title: 'Gerrit Patch导出与导入',
+                        description: '从Gerrit导出patch并应用到本地Android源码，支持批量导出Change的patch文件到指定目录，也支持将patch应用到本地代码',
+                        file_path: 'gerrit_patch_export_and_apply_tool.sh'
+                    }
+                ],
+                '设备工具': [
+                    {
+                        icon: '📱',
+                        title: 'scrcpy 屏幕投影',
+                        description: 'Android设备屏幕投影工具，支持无线连接、录屏、文件推送等功能',
+                        file_path: 'scrcpy-linux-x86_64-v3.3.4.tar.gz'
+                    }
+                ],
+                '烧写工具': [
+                    {
+                        icon: '🔥',
+                        title: 'upgrade_tool',
+                        description: 'Rockchip固件烧写工具，用于将固件镜像烧写到设备eMMC/NVMe存储',
+                        file_path: 'upgrade_tool'
+                    },
+                    {
+                        icon: '💾',
+                        title: 'misc.img',
+                        description: 'Android misc分区镜像文件，用于设备启动模式切换（bootloader/recovery）',
+                        file_path: 'misc.img'
+                    }
+                ]
+            };
+            ut_saveCategories();
+            ut_renderToolsGrid();
+        }
+
+        function ut_saveCategories() {
+            localStorage.setItem(UT_STORAGE_KEY, JSON.stringify(ut_categorizedTools));
+            localStorage.setItem(UT_CATEGORY_META_KEY, JSON.stringify(ut_categoryMeta));
+        }
+
+        function ut_renderToolsGrid() {
+            const grid = document.getElementById('ut-grid');
+            if (!grid) return;
+            ut_renderAllCategories(grid);
+        }
+
+        function ut_renderAllCategories(grid) {
+            grid.innerHTML = '';
+            const categories = Object.keys(ut_categorizedTools);
+            if (categories.length === 0) {
+                grid.innerHTML = `
+                    <div style="text-align: center; padding: 60px 20px; color: var(--text-muted);">
+                        <div style="font-size: 64px; margin-bottom: 20px;">🧰</div>
+                        <div style="font-size: 16px; margin-bottom: 8px;">还没有工具</div>
+                        <div style="font-size: 13px;">点击下方按钮添加分类和工具</div>
+                    </div>`;
+                return;
+            }
+
+            categories.forEach((category) => {
+                const tools = ut_categorizedTools[category];
+                const catInfo = ut_getCategoryInfo(category);
+                const section = document.createElement('div');
+                section.className = 'category-section';
+                section.style.marginBottom = '4px';
+
+                const header = document.createElement('div');
+                header.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color);';
+
+                const titleWrap = document.createElement('div');
+                titleWrap.style.cssText = 'display: flex; align-items: center;';
+
+                const icon = document.createElement('span');
+                icon.style.cssText = 'font-size: 16px; margin-right: 6px;';
+                icon.textContent = catInfo.icon || '📁';
+                titleWrap.appendChild(icon);
+
+                const title = document.createElement('span');
+                title.style.cssText = 'font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;';
+                title.textContent = category;
+                title.addEventListener('click', () => ut_editCategory(category));
+                titleWrap.appendChild(title);
+
+                const count = document.createElement('span');
+                count.style.cssText = 'margin-left: 10px; padding: 2px 8px; background: var(--light-bg); border-radius: 10px; font-size: 11px; color: var(--text-muted);';
+                count.textContent = String(tools.length);
+                titleWrap.appendChild(count);
+
+                const actions = document.createElement('div');
+                actions.style.cssText = 'display: flex; gap: 6px;';
+
+                const addBtn = document.createElement('button');
+                addBtn.textContent = '添加工具';
+                addBtn.style.cssText = `padding: 6px 16px; background: ${catInfo.color}; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;`;
+                addBtn.addEventListener('mouseenter', () => { addBtn.style.opacity = '0.85'; });
+                addBtn.addEventListener('mouseleave', () => { addBtn.style.opacity = '1'; });
+                addBtn.addEventListener('click', () => ut_addNewToolToCategory(category));
+                actions.appendChild(addBtn);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.textContent = '🗑️';
+                deleteBtn.title = '删除分类';
+                deleteBtn.style.cssText = 'padding: 6px 12px; background: var(--danger-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;';
+                deleteBtn.addEventListener('mouseenter', () => { deleteBtn.style.opacity = '0.85'; });
+                deleteBtn.addEventListener('mouseleave', () => { deleteBtn.style.opacity = '1'; });
+                deleteBtn.addEventListener('click', () => ut_deleteCategory(category));
+                actions.appendChild(deleteBtn);
+
+                header.appendChild(titleWrap);
+                header.appendChild(actions);
+                section.appendChild(header);
+
+                const cards = document.createElement('div');
+                cards.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px;';
+                tools.forEach((tool, index) => {
+                    cards.appendChild(ut_createToolCard(tool, category, index, catInfo.color));
+                });
+                section.appendChild(cards);
+                grid.appendChild(section);
+            });
+        }
+
+        function ut_createToolCard(tool, category, index, cardColor) {
+            const card = document.createElement('div');
+            card.title = tool.description || '';
+            card.style.cssText = `background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: default; min-width: 120px;`;
+            card.addEventListener('mouseenter', () => {
+                card.style.transform = 'translateY(-2px)';
+                card.style.boxShadow = 'var(--shadow-md)';
+                card.style.borderColor = cardColor;
+            });
+            card.addEventListener('mouseleave', () => {
+                card.style.transform = 'translateY(0)';
+                card.style.boxShadow = 'none';
+                card.style.borderColor = 'var(--border-color)';
+            });
+
+            const icon = document.createElement('div');
+            icon.style.cssText = 'width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--light-bg); border-radius: 6px; font-size: 24px;';
+            icon.textContent = tool.icon || '🔧';
+            card.appendChild(icon);
+
+            const textWrap = document.createElement('div');
+            textWrap.style.cssText = 'text-align: center; width: 100%;';
+            const title = document.createElement('div');
+            title.style.cssText = 'font-size: 12px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;';
+            title.textContent = tool.title || '';
+            textWrap.appendChild(title);
+            if (tool.description) {
+                const desc = document.createElement('div');
+                desc.style.cssText = 'font-size: 10px; color: var(--text-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;';
+                desc.textContent = tool.description;
+                textWrap.appendChild(desc);
+            }
+            card.appendChild(textWrap);
+
+            const actions = document.createElement('div');
+            actions.style.cssText = 'display: flex; gap: 3px; width: 100%;';
+
+            const downloadBtn = document.createElement('button');
+            downloadBtn.textContent = '⬇️ 下载';
+            downloadBtn.title = '下载文件';
+            downloadBtn.style.cssText = 'flex: 2; padding: 3px 4px; background: var(--success-color); color: white; border: none; border-radius: 3px; font-size: 11px; cursor: pointer; transition: all 0.2s; line-height: 1;';
+            downloadBtn.addEventListener('mouseenter', () => { downloadBtn.style.opacity = '0.8'; });
+            downloadBtn.addEventListener('mouseleave', () => { downloadBtn.style.opacity = '1'; });
+            downloadBtn.addEventListener('click', () => ut_downloadTool(tool.file_path, tool.title));
+            actions.appendChild(downloadBtn);
+
+            const editBtn = document.createElement('button');
+            editBtn.textContent = '✏️';
+            editBtn.style.cssText = 'flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
+            editBtn.addEventListener('mouseenter', () => {
+                editBtn.style.background = 'var(--primary-color)';
+                editBtn.style.color = 'white';
+                editBtn.style.borderColor = 'var(--primary-color)';
+            });
+            editBtn.addEventListener('mouseleave', () => {
+                editBtn.style.background = 'transparent';
+                editBtn.style.color = 'var(--text-secondary)';
+                editBtn.style.borderColor = 'var(--border-color)';
+            });
+            editBtn.addEventListener('click', () => ut_editTool(category, index));
+            actions.appendChild(editBtn);
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.textContent = '🗑️';
+            deleteBtn.style.cssText = 'flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
+            deleteBtn.addEventListener('mouseenter', () => {
+                deleteBtn.style.background = 'var(--danger-color)';
+                deleteBtn.style.color = 'white';
+                deleteBtn.style.borderColor = 'var(--danger-color)';
+            });
+            deleteBtn.addEventListener('mouseleave', () => {
+                deleteBtn.style.background = 'transparent';
+                deleteBtn.style.color = 'var(--text-muted)';
+                deleteBtn.style.borderColor = 'var(--border-color)';
+            });
+            deleteBtn.addEventListener('click', () => ut_deleteTool(category, index));
+            actions.appendChild(deleteBtn);
+
+            card.appendChild(actions);
+            return card;
+        }
+
+        function ut_downloadTool(filePath, title) {
+            if (!filePath) {
+                showToast('该工具未配置下载文件', 'warning');
+                return;
+            }
+            const encodedPath = String(filePath).split('/').map(encodeURIComponent).join('/');
+            window.open(`/api/tools/download/${encodedPath}`, '_blank');
+            showToast(`正在下载: ${title}`, 'info');
+        }
+
+        // --- Tool CRUD ---
+        function ut_addNewToolToCategory(category) {
+            ut_editingTool = null;
+            ut_updateCategorySelect();
+            document.getElementById('ut-tool-modal-title').textContent = '添加工具到 ' + category;
+            document.getElementById('ut-tool-category').value = category;
+            document.getElementById('ut-tool-title').value = '';
+            document.getElementById('ut-tool-icon').value = '';
+            document.getElementById('ut-tool-desc').value = '';
+            document.getElementById('ut-tool-filepath').value = '';
+            ModalManager.open('ut-tool-modal');
+        }
+
+        function ut_editTool(category, index) {
+            const tool = ut_categorizedTools[category][index];
+            ut_editingTool = { category, index };
+            ut_updateCategorySelect();
+            document.getElementById('ut-tool-modal-title').textContent = '✏️ 编辑工具';
+            document.getElementById('ut-tool-category').value = category;
+            document.getElementById('ut-tool-title').value = tool.title || '';
+            document.getElementById('ut-tool-icon').value = tool.icon || '';
+            document.getElementById('ut-tool-desc').value = tool.description || '';
+            document.getElementById('ut-tool-filepath').value = tool.file_path || '';
+            ModalManager.open('ut-tool-modal');
+        }
+
+        function ut_saveTool() {
+            const category = document.getElementById('ut-tool-category').value.trim();
+            const title = document.getElementById('ut-tool-title').value.trim();
+            const icon = document.getElementById('ut-tool-icon').value.trim() || '🔧';
+            const description = document.getElementById('ut-tool-desc').value.trim();
+            const filePath = document.getElementById('ut-tool-filepath').value.trim();
+
+            if (!category) { showToast('请选择分类', 'warning'); return; }
+            if (!title) { showToast('请输入工具名称', 'warning'); return; }
+
+            if (!ut_categorizedTools[category]) {
+                ut_categorizedTools[category] = [];
+            }
+
+            const toolData = { icon, title, description, file_path: filePath };
+
+            if (ut_editingTool) {
+                // 编辑模式
+                const oldCat = ut_editingTool.category;
+                const oldIdx = ut_editingTool.index;
+                if (oldCat === category) {
+                    ut_categorizedTools[category][oldIdx] = toolData;
+                } else {
+                    ut_categorizedTools[oldCat].splice(oldIdx, 1);
+                    if (ut_categorizedTools[oldCat].length === 0) delete ut_categorizedTools[oldCat];
+                    ut_categorizedTools[category].push(toolData);
+                }
+            } else {
+                ut_categorizedTools[category].push(toolData);
+            }
+
+            ut_saveCategories();
+            ut_renderToolsGrid();
+            ut_closeToolModal();
+            showToast(ut_editingTool ? '工具已更新' : '工具已添加', 'success');
+        }
+
+        function ut_deleteTool(category, index) {
+            const tool = ut_categorizedTools[category][index];
+            showConfirmDialog('确认删除', `确定要删除工具"${tool.title}"吗？`).then(confirmed => {
+                if (confirmed) {
+                    ut_categorizedTools[category].splice(index, 1);
+                    if (ut_categorizedTools[category].length === 0) delete ut_categorizedTools[category];
+                    ut_saveCategories();
+                    ut_renderToolsGrid();
+                    showToast(`工具"${tool.title}"已删除`, 'success');
+                }
+            });
+        }
+
+        function ut_closeToolModal() {
+            ModalManager.close('ut-tool-modal');
+            ut_editingTool = null;
+        }
+
+        // --- Category CRUD ---
+        function ut_showAddCategoryModal() {
+            ut_editingCategory = null;
+            document.getElementById('ut-category-name').value = '';
+            document.getElementById('ut-category-icon').value = '';
+            ModalManager.open('ut-category-modal');
+        }
+
+        function ut_closeCategoryModal() {
+            ModalManager.close('ut-category-modal');
+            ut_editingCategory = null;
+        }
+
+        function ut_saveCategory() {
+            const name = document.getElementById('ut-category-name').value.trim();
+            const icon = document.getElementById('ut-category-icon').value.trim() || '📁';
+
+            if (!name) { showToast('请输入分类名称', 'warning'); return; }
+            if (ut_categorizedTools[name] && !ut_editingCategory) {
+                showToast('分类已存在', 'warning'); return;
+            }
+
+            if (ut_editingCategory && ut_editingCategory !== name) {
+                // 重命名
+                ut_categorizedTools[name] = ut_categorizedTools[ut_editingCategory];
+                ut_categoryMeta[name] = ut_categoryMeta[ut_editingCategory] || UT_DEFAULT_CATEGORIES[ut_editingCategory] || {};
+                delete ut_categorizedTools[ut_editingCategory];
+                delete ut_categoryMeta[ut_editingCategory];
+            }
+            if (!ut_categorizedTools[name]) {
+                ut_categorizedTools[name] = [];
+            }
+            ut_categoryMeta[name] = {
+                ...(ut_categoryMeta[name] || UT_DEFAULT_CATEGORIES[name] || {}),
+                icon,
+            };
+
+            ut_saveCategories();
+            ut_renderToolsGrid();
+            ut_closeCategoryModal();
+            showToast(`分类"${name}"已保存`, 'success');
+        }
+
+        function ut_editCategory(oldName) {
+            ut_editingCategory = oldName;
+            document.getElementById('ut-category-name').value = oldName;
+            const catInfo = ut_getCategoryInfo(oldName);
+            document.getElementById('ut-category-icon').value = catInfo.icon;
+            ModalManager.open('ut-category-modal');
+        }
+
+        function ut_deleteCategory(categoryName) {
+            const tools = ut_categorizedTools[categoryName] || [];
+            let message = `确定要删除分类"${categoryName}"吗？`;
+            if (tools.length > 0) {
+                message += ` 该分类下有 ${tools.length} 个工具，删除后这些工具也会被删除。`;
+            }
+            showConfirmDialog('确认删除', message).then(confirmed => {
+                if (confirmed) {
+                    delete ut_categorizedTools[categoryName];
+                    delete ut_categoryMeta[categoryName];
+                    ut_saveCategories();
+                    ut_renderToolsGrid();
+                    showToast(`分类"${categoryName}"已删除`, 'success');
+                }
+            });
+        }
+
+        function ut_updateCategorySelect() {
+            const select = document.getElementById('ut-tool-category');
+            if (!select) return;
+            select.innerHTML = '';
+            const empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = '-- 选择分类 --';
+            select.appendChild(empty);
+            Object.keys(ut_categorizedTools).forEach(cat => {
+                const option = document.createElement('option');
+                option.value = cat;
+                option.textContent = cat;
+                select.appendChild(option);
+            });
+        }
+
+        // --- Utility Tool File Browser (reuses #file-browser-modal) ---
+        async function ut_browseFiles() {
+            state.fileBrowser.mode = 'utility-tool';
+            state.fileBrowser.targetInputId = 'ut-tool-filepath';
+            state.fileBrowser.selectedFile = null;
+            state.fileBrowser.currentPath = '';
+            document.getElementById('file-browser-title').textContent = '选择工具文件 (tools/)';
+            ModalManager.open('file-browser-modal');
+            await ut_loadToolDir('');
+        }
+
+        async function ut_loadToolDir(subpath) {
+            try {
+                const r = await fetch('/api/tools/browse', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: subpath })
+                });
+                const data = await r.json();
+                if (!data.success) { showToast('加载失败: ' + (data.error || ''), 'error'); return; }
+                state.fileBrowser.currentPath = data.path || '';
+                // 复用 app.js 中的 renderFileList 来渲染文件列表
+                const pathDisplay = document.getElementById('file-browser-current-path');
+                pathDisplay.textContent = 'tools/' + (data.path || '');
+                const listContainer = document.getElementById('file-browser-list');
+                if (data.files.length === 0) {
+                    listContainer.innerHTML = '<div class="file-browser-item" style="cursor: default; color: var(--text-muted);">空目录</div>';
+                    return;
+                }
+                listContainer.innerHTML = '';
+                data.files.forEach(file => {
+                    const item = document.createElement('div');
+                    item.className = 'file-browser-item';
+                    item.addEventListener('click', (event) => selectFileForSelection(file.name, file.type, event));
+                    item.addEventListener('dblclick', () => ut_openToolFileOrDir(file.name, file.type));
+
+                    const icon = document.createElement('span');
+                    icon.className = 'file-browser-icon';
+                    icon.textContent = file.type === 'directory' ? '📁' : '📄';
+                    item.appendChild(icon);
+
+                    const name = document.createElement('span');
+                    name.className = 'file-browser-name';
+                    name.textContent = file.name;
+                    item.appendChild(name);
+
+                    if (file.type === 'file') {
+                        const size = document.createElement('span');
+                        size.style.cssText = 'color: var(--text-muted); font-size: 11px;';
+                        size.textContent = formatBytes(file.size, true);
+                        item.appendChild(size);
+                    }
+                    listContainer.appendChild(item);
+                });
+            } catch (e) {
+                showToast('加载失败: ' + e.message, 'error');
+            }
+        }
+
+        function ut_openToolFileOrDir(name, type) {
+            if (type === 'directory') {
+                const current = state.fileBrowser.currentPath;
+                const newPath = current ? current + '/' + name : name;
+                ut_loadToolDir(newPath);
+            } else {
+                selectFileForSelection(name, type);
+            }
+        }
 
         // ==================== 方向键导航支持 ====================
         document.addEventListener('keydown', function(e) {
@@ -4585,7 +5158,8 @@
                 'test-suites': '测试套件 - GMS远程测试',
                 'api-docs': '系统接口 - GMS远程测试',
                 'architecture': '系统架构 - GMS 远程测试',
-                'tools': '常用网址 - GMS 远程测试',
+                'websites': '常用网址 - GMS 远程测试',
+                'tools': '常用工具 - GMS 远程测试',
                 'security-audit': '安全审计 - GMS 远程测试',
                 'gms-assistant': 'GMS助手 - GMS 远程测试',
                 'agent': '对话Agent - GMS 远程测试'
@@ -4594,7 +5168,8 @@
             if (typeof recordSecurityPageView === 'function') {
                 recordSecurityPageView(targetPage);
             }
-            if (targetPage === 'tools') loadToolsList();
+            if (targetPage === 'websites') loadToolsList();
+            if (targetPage === 'tools') ut_loadToolsList();
             if (targetPage === 'agent') {
                 if (typeof initAgentPage === 'function') {
                     initAgentPage();

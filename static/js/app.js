@@ -3968,23 +3968,36 @@ function renderFileList(files) {
         return;
     }
 
-    listContainer.innerHTML = files.map(file => {
-        const icon = file.type === 'directory' ? '📁' : '📄';
-        const sizeInfo = file.type === 'file' ? formatBytes(file.size, true) : '';
+    listContainer.innerHTML = '';
+    files.forEach(file => {
+        const item = document.createElement('div');
+        item.className = 'file-browser-item';
+        item.addEventListener('click', (event) => selectFileForSelection(file.name, file.type, event));
+        item.addEventListener('dblclick', () => openFileOrDirectory(file.name, file.type));
 
-        return `
-            <div class="file-browser-item"
-                 onclick="selectFileForSelection('${file.name}', '${file.type}')"
-                 ondblclick="openFileOrDirectory('${file.name}', '${file.type}')">
-                <span class="file-browser-icon">${icon}</span>
-                <span class="file-browser-name">${file.name}</span>
-                ${sizeInfo ? `<span style="color: var(--text-muted); font-size: 11px;">${sizeInfo}</span>` : ''}
-            </div>
-        `;
-    }).join('');
+        const icon = document.createElement('span');
+        icon.className = 'file-browser-icon';
+        icon.textContent = file.type === 'directory' ? '📁' : '📄';
+        item.appendChild(icon);
+
+        const name = document.createElement('span');
+        name.className = 'file-browser-name';
+        name.textContent = file.name;
+        item.appendChild(name);
+
+        const sizeInfo = file.type === 'file' ? formatBytes(file.size, true) : '';
+        if (sizeInfo) {
+            const size = document.createElement('span');
+            size.style.cssText = 'color: var(--text-muted); font-size: 11px;';
+            size.textContent = sizeInfo;
+            item.appendChild(size);
+        }
+
+        listContainer.appendChild(item);
+    });
 }
 
-function selectFileForSelection(name, type) {
+function selectFileForSelection(name, type, sourceEvent) {
     // Select file/directory (highlight it)
     state.fileBrowser.selectedFile = { name, type };
 
@@ -3993,23 +4006,32 @@ function selectFileForSelection(name, type) {
         item.classList.remove('selected');
     });
 
-    event.currentTarget.classList.add('selected');
+    const eventSource = sourceEvent || window.event;
+    if (eventSource && eventSource.currentTarget) {
+        eventSource.currentTarget.classList.add('selected');
+    }
 }
 
 function openFileOrDirectory(name, type) {
     if (type === 'directory') {
-        // Navigate into directory
-        const newPath = state.fileBrowser.currentPath === '/'
-            ? `/${name}`
-            : `${state.fileBrowser.currentPath}/${name}`;
-        loadFileDirectory(newPath);
+        if (state.fileBrowser.mode === 'utility-tool') {
+            const current = state.fileBrowser.currentPath;
+            const newPath = current ? current + '/' + name : name;
+            ut_loadToolDir(newPath);
+        } else {
+            // Navigate into directory
+            const newPath = state.fileBrowser.currentPath === '/'
+                ? `/${name}`
+                : `${state.fileBrowser.currentPath}/${name}`;
+            loadFileDirectory(newPath);
+        }
     } else {
         // For files, just select them
         selectFileForSelection(name, type);
     }
 }
 
-function selectFile(name, type) {
+function selectFile(name, type, sourceEvent) {
     if (type === 'directory') {
         // Navigate into directory
         const newPath = state.fileBrowser.currentPath === '/'
@@ -4025,7 +4047,10 @@ function selectFile(name, type) {
             item.classList.remove('selected');
         });
 
-        event.currentTarget.classList.add('selected');
+        const eventSource = sourceEvent || window.event;
+        if (eventSource && eventSource.currentTarget) {
+            eventSource.currentTarget.classList.add('selected');
+        }
     }
 }
 
@@ -4111,6 +4136,19 @@ function confirmFileSelection() {
             addLogEntry(`已选择固件文件: ${fullPath}`, 'info');
         }
         closeFileBrowserModal();
+    } else if (state.fileBrowser.mode === 'utility-tool') {
+        // Utility tool file selection - store relative path under tools/
+        if (isDirectory) {
+            showToast('请选择一个文件，而非文件夹', 'warning');
+            return;
+        }
+        fullPath = state.fileBrowser.currentPath
+            ? state.fileBrowser.currentPath + '/' + selectedItem.name
+            : selectedItem.name;
+        if (targetInput) {
+            targetInput.value = fullPath;
+        }
+        closeFileBrowserModal();
     } else {
         // Default behavior
         fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
@@ -4125,6 +4163,17 @@ function confirmFileSelection() {
 // Navigate to parent directory
 function navigateToParent() {
     const currentPath = state.fileBrowser.currentPath;
+
+    if (state.fileBrowser.mode === 'utility-tool') {
+        if (!currentPath || !currentPath.includes('/')) {
+            showToast('已到达 tools/ 根目录', 'info');
+            return;
+        }
+        const parentPath = currentPath.substring(0, currentPath.lastIndexOf('/'));
+        ut_loadToolDir(parentPath);
+        return;
+    }
+
     if (currentPath === '/' || !currentPath.includes('/')) {
         showToast('已到达根目录', 'info');
         return;  // Already at root
@@ -4136,6 +4185,11 @@ function navigateToParent() {
 
 // Navigate to root directory
 function navigateToRoot() {
+    if (state.fileBrowser.mode === 'utility-tool') {
+        ut_loadToolDir('');
+        return;
+    }
+
     const defaultUser = getDefaultUbuntuUser();
     const rootPath = `/home/${defaultUser}/GMS-Suite`;
 
@@ -4147,6 +4201,10 @@ function navigateToRoot() {
 // Refresh current directory
 function refreshCurrentDirectory() {
     const currentPath = state.fileBrowser.currentPath;
+    if (state.fileBrowser.mode === 'utility-tool') {
+        ut_loadToolDir(currentPath || '');
+        return;
+    }
     if (currentPath) {
         loadFileDirectory(currentPath);
         addLogEntry(`刷新目录: ${currentPath}`, 'info');

@@ -40,7 +40,7 @@ AUDIT_WEB_READONLY_NOISE_PATHS = {
     '/api/test/status',
     '/api/test/suites',
     '/api/test/suites/files',
-    '/api/tools/load',
+    '/api/websites/load',
     '/api/usbip/status',
     '/api/users/current',
     '/api/users/list',

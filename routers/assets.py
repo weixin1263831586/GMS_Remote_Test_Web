@@ -393,7 +393,7 @@ def save_tools_data(tools_data):
         return False
 
 
-@router.post("/api/tools/save")
+@router.post("/api/websites/save")
 @handle_api_errors
 async def save_user_tools(request: Request):
     """保存用户的工具数据"""
@@ -430,7 +430,7 @@ async def save_user_tools(request: Request):
         return error_response(str(e), status_code=500)
 
 
-@router.get("/api/tools/load")
+@router.get("/api/websites/load")
 @handle_api_errors
 async def load_user_tools(request: Request):
     """加载用户的工具数据"""
@@ -461,7 +461,7 @@ async def load_user_tools(request: Request):
         return error_response(str(e), status_code=500)
 
 
-@router.post("/api/tools/sync")
+@router.post("/api/websites/sync")
 @handle_api_errors
 async def sync_user_tools(request: Request):
     """同步用户的工具数据（智能合并本地和服务器数据）"""
@@ -546,3 +546,114 @@ async def sync_user_tools(request: Request):
     except Exception as e:
         logger.error(f"[ToolsData] Error in sync_user_tools: {e}")
         return error_response(str(e), status_code=500)
+
+
+# ==================== 常用工具 (Utility Tools) ====================
+
+from pathlib import Path
+
+UTILITY_TOOLS_DIR = Path(__file__).resolve().parent.parent / "tools"
+UTILITY_TOOL_MANIFEST = {
+    "gerrit_patch_export_and_apply_tool.sh",
+    "scrcpy-linux-x86_64-v3.3.4.tar.gz",
+    "upgrade_tool",
+    "misc.img",
+}
+
+
+def _resolve_allowed_utility_tool(file_path: str) -> Path:
+    normalized = str(Path(file_path or ""))
+    if normalized not in UTILITY_TOOL_MANIFEST:
+        raise HTTPException(status_code=403, detail="Tool is not available for download")
+
+    full_path = (UTILITY_TOOLS_DIR / normalized).resolve()
+    try:
+        full_path.relative_to(UTILITY_TOOLS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not full_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return full_path
+
+
+@router.get("/api/tools/list")
+@handle_api_errors
+async def list_utility_tools():
+    """列出可下载的常用工具文件"""
+    try:
+        if not UTILITY_TOOLS_DIR.exists():
+            return JSONResponse(content={'success': True, 'files': []})
+
+        files = []
+        for rel_path in sorted(UTILITY_TOOL_MANIFEST):
+            try:
+                entry = _resolve_allowed_utility_tool(rel_path)
+                st = entry.stat()
+            except HTTPException:
+                continue
+            files.append({
+                'name': rel_path,
+                'size': st.st_size,
+                'modified': st.st_mtime,
+            })
+        return JSONResponse(content={'success': True, 'files': files})
+    except Exception as e:
+        logger.error(f"[UtilityTools] Error listing tools: {e}")
+        return error_response(str(e), status_code=500)
+
+
+@router.post("/api/tools/browse")
+@handle_api_errors
+async def browse_utility_tools(req: dict):
+    """浏览可下载工具清单，返回与 /api/files/list 相同格式以便复用文件浏览器弹框"""
+    try:
+        subpath = req.get('path', '').strip('/')
+        if '..' in Path(subpath).parts:
+            return JSONResponse(content={'success': False, 'error': '非法路径'}, status_code=400)
+
+        files = []
+        directories = set()
+        for rel_path in sorted(UTILITY_TOOL_MANIFEST):
+            rel = Path(rel_path)
+            if subpath:
+                try:
+                    remaining = rel.relative_to(subpath)
+                except ValueError:
+                    continue
+            else:
+                remaining = rel
+
+            if len(remaining.parts) > 1:
+                directories.add(remaining.parts[0])
+                continue
+
+            try:
+                entry = _resolve_allowed_utility_tool(rel_path)
+                files.append({'name': remaining.name, 'type': 'file', 'size': entry.stat().st_size})
+            except HTTPException:
+                continue
+
+        files.extend({'name': name, 'type': 'directory', 'size': 0} for name in sorted(directories))
+        files.sort(key=lambda item: (item['type'] != 'directory', item['name'].lower()))
+
+        return JSONResponse(content={
+            'success': True,
+            'path': subpath,
+            'files': files,
+        })
+    except Exception as e:
+        logger.error(f"[UtilityTools] Error browsing tools: {e}")
+        return error_response(str(e), status_code=500)
+
+
+@router.get("/api/tools/download/{file_path:path}")
+@handle_api_errors
+async def download_utility_tool(file_path: str):
+    """下载 tools/ 目录下的指定文件"""
+    full_path = _resolve_allowed_utility_tool(file_path)
+    return FileResponse(
+        path=str(full_path),
+        filename=full_path.name,
+        media_type="application/octet-stream",
+    )
