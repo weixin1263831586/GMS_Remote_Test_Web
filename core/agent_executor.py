@@ -34,7 +34,27 @@ _TOOL_PAGES = {
     "config": "api-docs",
     "system": "api-docs",
     "apk": "apk-analysis",
-    "assets": "tools",
+    "assets": "websites",
+}
+
+_CATEGORY_LABELS = {
+    "device": "设备",
+    "test": "测试/套件",
+    "report": "报告/诊断",
+    "apk": "APK/源码",
+    "desktop": "桌面",
+    "terminal": "终端",
+    "users": "用户",
+    "config": "配置",
+    "system": "系统",
+    "ssh": "SSH",
+    "vpn": "VPN",
+    "usbip": "USB/IP",
+    "file": "文件/搜索",
+    "burn": "烧写",
+    "audit": "审计",
+    "assets": "网址/工具",
+    "agent": "Agent",
 }
 
 _UNSUPPORTED_DIRECT_TOOLS = {
@@ -204,22 +224,38 @@ class ActionExecutor:
 
     async def _query_devices(self, session, request, params) -> ToolResult:
         """查询设备列表。"""
-        device_ids = await asyncio.to_thread(device_manager.get_connected_devices, True)
-        details = []
-        for did in device_ids:
-            lock = device_lock_manager.get_lock_status(did)
-            details.append({
-                "device_id": did,
-                "locked": bool(lock),
-                "locked_by": lock.get("locked_by", "") if lock else "",
-            })
+        query = str(params.get("query") or "").strip().lower()
+        details = await self._load_device_summaries()
+        if query == "available":
+            details = [d for d in details if not d.get("locked")]
+        elif query == "locked":
+            details = [d for d in details if d.get("locked")]
+        elif query:
+            details = [
+                d for d in details
+                if query in " ".join(str(d.get(k, "")).lower() for k in (
+                    "device_id", "serial_no", "model", "soc_model", "android_version", "source_host"
+                ))
+            ]
 
         locked = [d for d in details if d["locked"]]
         unlocked = [d for d in details if not d["locked"]]
-        lines = [f"{'🔒 ' + d['locked_by'] if d['locked'] else '✅ 空闲'} {d['device_id']}" for d in details[:12]]
+        lines = []
+        for d in details[:12]:
+            state = f"🔒 {d.get('locked_by') or '占用'}" if d.get("locked") else "✅ 空闲"
+            desc = " | ".join(
+                part for part in [
+                    d.get("model") or "",
+                    d.get("soc_model") or "",
+                    f"Android {d.get('android_version')}" if d.get("android_version") else "",
+                    d.get("source_type") or "",
+                ] if part
+            )
+            lines.append(f"{state} {d.get('device_id')}" + (f" | {desc}" if desc else ""))
+        prefix = f"匹配「{query}」的设备" if query and query not in {"available", "locked"} else "当前设备"
         text = (
-            f"当前 {len(details)} 台设备，空闲 {len(unlocked)} 台，占用 {len(locked)} 台。\n"
-            + "\n".join(f"- {l}" for l in lines)
+            f"{prefix} {len(details)} 台，空闲 {len(unlocked)} 台，占用 {len(locked)} 台。\n"
+            + ("\n".join(f"- {l}" for l in lines) if lines else "- 未找到匹配设备")
         )
 
         return ToolResult(
@@ -231,6 +267,45 @@ class ActionExecutor:
                 {"label": "查看第一台详情", "action": "devices_info", "params": {"devices": [unlocked[0]["device_id"]]} if unlocked else {}},
             ],
         )
+
+    async def _load_device_summaries(self) -> List[Dict[str, Any]]:
+        """Load device summaries, preferring management payload when available."""
+        try:
+            from routers.devices import _build_devices_management_payload, _build_management_props_command, _parse_management_device_props
+            from core.ssh import ssh_manager
+
+            config = config_manager.load_config()
+            device_ids = await asyncio.to_thread(device_manager.get_connected_devices, True)
+            device_data: Dict[str, Dict[str, str]] = {}
+            ssh = ssh_manager.get_connection(config)
+            if ssh and device_ids:
+                try:
+                    command = _build_management_props_command(device_ids)
+                    output, _, _ = ssh_manager.execute_command(ssh, command, timeout=15)
+                    device_data = _parse_management_device_props(output)
+                finally:
+                    ssh_manager.return_connection(ssh)
+            payload = _build_devices_management_payload(device_ids, device_data, config)
+            items = payload.get("devices") or []
+            if items:
+                for item in items:
+                    item["locked"] = bool(item.get("locked_by"))
+                return items
+        except Exception as e:
+            logger.info("[Agent] device management summary fallback: %s", e)
+
+        device_ids = await asyncio.to_thread(device_manager.get_connected_devices, True)
+        details = []
+        for did in device_ids:
+            lock = device_lock_manager.get_lock_status(did)
+            details.append({
+                "device_id": did,
+                "serial_no": did,
+                "status": "online",
+                "locked": bool(lock),
+                "locked_by": lock.get("locked_by", "") if lock else "",
+            })
+        return details
 
     async def _connect_wifi(self, session, request, params) -> ToolResult:
         """连接设备到 WiFi。未指定设备时默认选择一台空闲设备。"""
@@ -541,20 +616,29 @@ class ActionExecutor:
         categories = registry.get_all_categories()
         lines = []
         for cat, tools in categories.items():
-            tool_names = [t.display_name for t in tools[:5]]
-            lines.append(f"**{cat}**: {', '.join(tool_names)}")
+            tool_names = [t.display_name for t in tools[:4]]
+            lines.append(f"- {_CATEGORY_LABELS.get(cat, cat)}: {', '.join(tool_names)}")
         text = (
-            "我是 GMS 远程测试助手，可以帮您：\n\n"
-            "1. **查询**：设备、套件、报告、APK任务、用户、配置、VPN、USB/IP、系统健康\n"
-            "2. **执行**：启动/停止测试、重启设备、烧写固件、VPN 连接/断开\n"
-            "3. **分析**：报告诊断、APK 反编译、失败根因分析\n"
-            "4. **导航**：打开任意页面\n\n"
-            "直接用中文告诉我要做什么！"
+            "我是 GMS 远程测试平台的对话 Agent，可以帮你查询状态、生成测试计划、执行受控操作、分析失败和打开页面。\n\n"
+            "常用能力：\n"
+            "- 设备：查设备/型号/空闲占用，查看详情，WiFi、重启、remount、投屏。\n"
+            "- 测试：查套件和状态，按模块/用例启动测试，失败 retry，后台监控结果。\n"
+            "- 报告：列最近报告、下载/删除报告、分析失败、生成诊断线索。\n"
+            "- APK/源码：查看反编译任务，上传 APK/JAR 需到页面，支持套件 APK 源码分析。\n"
+            "- 运维：终端、桌面、VPN、USB/IP、SSH、配置、系统健康、安全审计。\n\n"
+            "已注册工具概览：\n" + "\n".join(lines[:12]) + "\n\n"
+            "有风险或会改变状态的操作会先给计划，确认后再执行。"
         )
         return ToolResult(
             success=True, tool_name="agent_capabilities",
             formatted_text=text, kind="text", page="agent",
             data={"categories": {cat: [t.name for t in tools] for cat, tools in categories.items()}},
+            quick_actions=[
+                {"label": "查看设备", "action": "devices_list", "params": {}},
+                {"label": "测试套件", "action": "test_suites", "params": {}},
+                {"label": "最近报告", "action": "reports_list", "params": {}},
+                {"label": "打开测试界面", "page": "test"},
+            ],
         )
 
     # ==================== Router Function Caller ====================
