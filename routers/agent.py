@@ -11,10 +11,20 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from core.api_response import error_response, success_response
+from core.agent_context import _parse_chinese_number, record_user_message, update_context
+from core.agent_executor import executor, _json_body
+from core.agent_intent import (
+    _extract_device_ids,
+    _extract_module_and_case,
+    _extract_retry_count,
+    _extract_test_type,
+    _is_run_test_request,
+)
+from core.agent_response import generate as gen_response, generate_capability_overview, generate_clarification
+from core.agent_tools import registry
 from core.clients import get_client_id_from_request
 from core.config import config_manager
 from core.devices import device_manager, get_or_create_user_state
@@ -184,69 +194,6 @@ def _append_message(session: Dict[str, Any], role: str, content: str, kind: str 
     return msg
 
 
-def _parse_int_cn(text: str, default: int = 1) -> int:
-    cn_map = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5}
-    for word, value in cn_map.items():
-        if word in text:
-            return value
-    match = re.search(r"(\d+)", text)
-    return int(match.group(1)) if match else default
-
-
-def _extract_test_type(text: str) -> str:
-    upper = text.upper()
-    for test_type in ["GTS-ROOT", "CTS", "GTS", "STS", "VTS", "APTS", "GSI"]:
-        if test_type in upper:
-            return test_type
-    return ""
-
-
-def _extract_module_and_case(text: str) -> tuple[str, str]:
-    module = ""
-    case = ""
-
-    hash_match = re.search(r"([A-Za-z0-9_.-]+)#([A-Za-z0-9_.$-]+)", text)
-    if hash_match:
-        module = hash_match.group(1)
-        case = hash_match.group(2)
-
-    if not module:
-        module_match = re.search(
-            r"(?:模块|module|跑|执行|测试)\s*(?:测试)?\s*[:：]?\s*([A-Za-z0-9_.-]*(?:TestCases|Tests|Test|Cases|_test)[A-Za-z0-9_.-]*)",
-            text,
-            re.IGNORECASE,
-        )
-        if module_match:
-            module = module_match.group(1)
-
-    if not module:
-        fallback = re.search(
-            r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]*(?:TestCases|Tests|Test|Cases|_test)[A-Za-z0-9_.-]*)(?![A-Za-z0-9_.-])",
-            text,
-            re.IGNORECASE,
-        )
-        if fallback:
-            module = fallback.group(1)
-
-    if not case:
-        case_match = re.search(r"(?:\bcase\b|用例)\s*[:：]?\s*([A-Za-z0-9_.$-]+)", text, re.IGNORECASE)
-        if case_match:
-            case = case_match.group(1)
-
-    return module, case
-
-
-def _extract_retry_count(text: str) -> int:
-    if not re.search(r"retry|重试|失败.*继续|再跑", text, re.IGNORECASE):
-        return 0
-    match = re.search(r"(?:retry|重试|继续)\s*(\d+)\s*(?:次)?", text, re.IGNORECASE)
-    if not match:
-        match = re.search(r"(\d+)\s*次.*(?:retry|重试|继续)", text, re.IGNORECASE)
-    if match:
-        return max(0, min(MAX_AGENT_RETRIES, int(match.group(1))))
-    return 1
-
-
 def _extract_device_count(text: str) -> int:
     if re.search(r"全部|所有|all", text, re.IGNORECASE):
         return 0
@@ -254,22 +201,8 @@ def _extract_device_count(text: str) -> int:
     if match:
         return max(1, min(8, int(match.group(1))))
     if re.search(r"(一|两|二|三|四|五)\s*台", text):
-        return _parse_int_cn(text, 1)
+        return _parse_chinese_number(text)
     return 1
-
-
-def _extract_device_ids(text: str) -> List[str]:
-    ids = []
-    for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9_.:-]{5,}\b", text):
-        upper = token.upper()
-        if re.fullmatch(r"RK\d+", token, re.IGNORECASE):
-            continue
-        if upper in {"TESTCASES", "ANDROID", "REPORT", "RETRY"}:
-            continue
-        if any(marker in token for marker in ("Test", "Cases")):
-            continue
-        ids.append(token)
-    return list(dict.fromkeys(ids))[:8]
 
 
 def _parse_user_intent(message: str) -> Dict[str, Any]:
@@ -293,252 +226,6 @@ def _parse_user_intent(message: str) -> Dict[str, Any]:
         "apk_source_analysis": bool(re.search(r"apk|反编译|源码|source", lowered)),
         "connect_wifi": bool(re.search(r"wifi|wi-fi|无线网络|连接网络", lowered)),
     }
-
-
-def _is_run_test_request(text: str) -> bool:
-    """Return True only for requests that clearly start/retry a test run."""
-    lowered = text.lower()
-    if re.search(r"\b(run|start|retry)\b|启动|开始|执行|重试|再跑|跑测试|跑\s*[a-z0-9_.-]*_test", lowered):
-        return True
-    if re.search(r"(^|[，,。;\s])跑\s*[A-Za-z0-9_.-]*(?:TestCases|Tests|Test|Cases|_test)", text, re.IGNORECASE):
-        return True
-    if re.search(r"帮我跑|帮忙跑|给我跑", text):
-        return True
-    return False
-
-
-def _detect_webapp_intent(text: str) -> str:
-    """Detect the user's Web_app query intent from natural language.
-
-    Strategy: first try strict patterns (topic + query verb), then fall back
-    to short-topic detection where the topic word alone implies a query
-    (e.g. "测试套件" or "设备" with no other qualifying words).
-    """
-    lowered = text.lower().strip()
-    query_words = r"多少|几个|有哪些|列表|列出|查看|查询|显示|状态|统计|最近|当前|有吗|情况"
-
-    # --- Capabilities / help ---
-    if re.search(r"你能做什么|能干什么|功能|帮助|怎么用|使用方法|全功能|web_app", lowered):
-        return "capabilities"
-
-    # --- Navigation ---
-    if re.search(r"打开|跳转|进入", lowered) and not re.search(query_words, lowered):
-        return "navigate"
-
-    # --- Test status / health (exact patterns, no fallback needed) ---
-    if re.search(r"测试状态|运行状态|正在跑|是否.*运行|status", lowered):
-        return "test_status"
-    if re.search(r"系统健康|健康检查|服务状态|health", lowered):
-        return "health"
-
-    # --- Topic + query-verb (strict) ---
-    if re.search(r"测试套件|suite", lowered) and re.search(query_words, lowered):
-        return "suites"
-    if re.search(r"设备|adb|device", lowered) and re.search(query_words + r"|空闲|可用|占用", lowered):
-        return "devices"
-    if re.search(r"报告|report", lowered) and re.search(query_words, lowered):
-        return "reports"
-    if re.search(r"apk|反编译|jadx", lowered) and re.search(query_words + r"|任务", lowered):
-        return "apk_tasks"
-    if re.search(r"用户|在线|user", lowered) and re.search(query_words, lowered):
-        return "users"
-    if re.search(r"配置|主机|local_server|opengrok|ai配置|config", lowered) and re.search(query_words, lowered):
-        return "config"
-
-    # --- Short-topic fallback: bare topic word = implicit query ---
-    # Only activate for short messages (≤16 chars) that aren't run_test requests.
-    # This catches follow-ups like "测试套件", "设备", "报告" after a capabilities listing.
-    if len(text) <= 16 and not _is_run_test_request(text):
-        if re.search(r"^测试套件|^[有几个]*套件|^suites?$", lowered):
-            return "suites"
-        if re.search(r"^设备|^[有几空闲可用占用]*设备?|^devices?$|^adb$", lowered):
-            return "devices"
-        if re.search(r"^报告|^[有几个]*报告|^reports?$", lowered):
-            return "reports"
-        if re.search(r"^apk|^反编译|^jadx", lowered):
-            return "apk_tasks"
-        if re.search(r"^用户|^[在线]*用户|^users?$", lowered):
-            return "users"
-        if re.search(r"^配置|^config$", lowered):
-            return "config"
-
-    # --- Navigation with page name ---
-    if re.search(r"打开|跳转|进入", lowered):
-        return "navigate"
-
-    return ""
-
-
-def _format_table_lines(items: List[str], max_items: int = 8) -> str:
-    return "\n".join(f"- {item}" for item in items[:max_items]) if items else "- 无"
-
-
-def _suite_summary_text(suites: List[Dict[str, Any]]) -> str:
-    counts: Dict[str, int] = {}
-    for suite in suites:
-        key = str(suite.get("test_type") or "unknown").upper()
-        counts[key] = counts.get(key, 0) + 1
-    count_line = "，".join(f"{key}: {value}" for key, value in sorted(counts.items())) or "无"
-    recent = [
-        f"{suite.get('test_type', '').upper()} {suite.get('version') or suite.get('binary') or '-'} -> {suite.get('tools_path')}"
-        for suite in suites[:8]
-    ]
-    return f"当前发现 {len(suites)} 个测试套件。\n按类型统计：{count_line}\n\n前 {min(len(suites), 8)} 个：\n{_format_table_lines(recent)}"
-
-
-def _device_summary_text(selected_devices: List[str], device_details: List[Dict[str, Any]]) -> str:
-    locked = [item for item in device_details if item.get("locked")]
-    unlocked = [item for item in device_details if not item.get("locked")]
-    lines = [
-        f"{item.get('device_id')} {'已占用: ' + item.get('locked_by', '') if item.get('locked') else '空闲'}"
-        for item in device_details[:12]
-    ]
-    return (
-        f"当前发现 {len(device_details)} 台 ADB 设备，空闲 {len(unlocked)} 台，占用 {len(locked)} 台。\n"
-        f"Agent 默认可选择：{', '.join(selected_devices) or '无'}\n\n设备列表：\n{_format_table_lines(lines, 12)}"
-    )
-
-
-def _reports_summary_text(reports: List[Dict[str, Any]]) -> str:
-    stats = test_report_db.get_statistics()
-    lines = [
-        f"{r.get('timestamp')} | {r.get('test_type', 'UNKNOWN')} | pass {r.get('pass', 0)} fail {r.get('fail', 0)} total {r.get('total', 0)} | {r.get('client_id', '')}"
-        for r in reports[:8]
-    ]
-    return (
-        f"当前记录报告 {stats.get('total_reports', len(reports))} 份，最近 7 天 {stats.get('recent_week', 0)} 份。\n"
-        f"按类型统计：{stats.get('type_counts', {})}\n\n最近报告：\n{_format_table_lines(lines)}"
-    )
-
-
-async def _handle_webapp_query(session: Dict[str, Any], request: Request, intent: str, text: str) -> bool:
-    """Handle non-mutating Web_app queries. Returns True if handled."""
-    if not intent:
-        return False
-
-    _append_step(session, "识别意图", "done", intent)
-
-    if intent == "suites":
-        suites = await asyncio.to_thread(_list_suites)
-        _append_message(session, "assistant", _suite_summary_text(suites), data={"page": "test-suites", "suites": suites[:20], "count": len(suites)})
-        return True
-
-    if intent == "devices":
-        selected, details = await asyncio.to_thread(_select_devices, {"device_count": 1})
-        _append_message(session, "assistant", _device_summary_text(selected, details), data={"page": "devices", "devices": details})
-        return True
-
-    if intent == "reports":
-        reports = test_report_db.get_reports(limit=8)
-        _append_message(session, "assistant", _reports_summary_text(reports), data={"page": "reports", "reports": reports})
-        return True
-
-    if intent == "apk_tasks":
-        from routers.apk import list_apk_tasks
-        payload = _json_response_body(await list_apk_tasks())
-        tasks = (payload.get("data") or {}).get("tasks", [])
-        lines = [f"{t.get('filename') or t.get('task_id')} | {t.get('status')} | {t.get('progress', 0)}%" for t in tasks[:8]]
-        _append_message(session, "assistant", f"当前 APK/反编译任务 {len(tasks)} 个。\n{_format_table_lines(lines)}", data={"page": "apk-analysis", "apk_tasks": tasks})
-        return True
-
-    if intent == "users":
-        from routers.users import list_users
-        payload = _json_response_body(await list_users())
-        users = payload.get("users", [])
-        lines = [f"{u.get('username')}@{u.get('ip')} | {'测试中' if u.get('running') else '空闲'} | 设备: {', '.join(u.get('devices') or []) or '-'}" for u in users[:10]]
-        _append_message(session, "assistant", f"当前在线用户 {payload.get('total', len(users))} 个。\n{_format_table_lines(lines, 10)}", data={"page": "users", "users": users})
-        return True
-
-    if intent == "test_status":
-        client_id = session.get("client_id") or get_client_id_from_request(request)
-        user_state = get_or_create_user_state(client_id)
-        logs = user_state.get("logs", [])
-        tail_logs = [str(item)[-240:] for item in list(logs)[-5:]]
-        text = (
-            f"当前用户测试状态：{'运行中' if user_state.get('running') else '未运行'}\n"
-            f"占用设备：{', '.join(user_state.get('devices') or []) or '无'}\n"
-            f"日志条数：{len(logs)}\n\n最近日志：\n{_format_table_lines(tail_logs, 5)}"
-        )
-        _append_message(session, "assistant", text, data={"page": "test", "running": user_state.get("running", False)})
-        return True
-
-    if intent == "health":
-        from routers.system import health_check
-        payload = _json_response_body(await health_check())
-        modules = payload.get("modules", {})
-        text = (
-            f"系统状态：{payload.get('status')}\n"
-            f"服务：{payload.get('service')}\n"
-            f"WebSocket连接：{payload.get('websocket_connections')}\n"
-            f"模块：{', '.join(f'{k}={v}' for k, v in modules.items())}"
-        )
-        _append_message(session, "assistant", text, data={"page": "security-audit", "health": payload})
-        return True
-
-    if intent == "config":
-        config = config_manager.load_config()
-        safe = {
-            "ubuntu_host": config.get("ubuntu_host"),
-            "ubuntu_user": config.get("ubuntu_user"),
-            "local_server": config.get("local_server"),
-            "suites_path": config.get("suites_path"),
-            "ai_enabled": bool((config.get("ai_models") or {}).get("enabled")),
-            "opengrok": bool((config.get("opengrok") or {}).get("base_url")),
-        }
-        lines = [f"{key}: {value}" for key, value in safe.items()]
-        _append_message(session, "assistant", "当前关键配置：\n" + _format_table_lines(lines), data={"page": "api-docs", "config": safe})
-        return True
-
-    if intent == "navigate":
-        page = _resolve_page_from_text(text)
-        if page:
-            name, desc = WEBAPP_PAGES[page]
-            _append_message(session, "assistant", f"可以打开「{name}」页面：{desc}", data={"page": page})
-        else:
-            pages = [f"{name}({page})" for page, (name, _) in WEBAPP_PAGES.items()]
-            _append_message(session, "assistant", "没有识别到要打开的页面。支持页面：\n" + _format_table_lines(pages, 20))
-        return True
-
-    if intent == "capabilities":
-        _append_message(session, "assistant", _agent_capabilities_text(), data={"page": "agent"})
-        return True
-
-    return False
-
-
-def _resolve_page_from_text(text: str) -> str:
-    aliases = {
-        "测试界面": "test", "跑测试": "test", "测试日志": "test",
-        "主机桌面": "desktop", "桌面": "desktop", "vnc": "desktop",
-        "终端": "terminal", "主机终端": "terminal",
-        "用户": "users", "用户管理": "users",
-        "设备": "devices", "设备管理": "devices", "adb": "devices",
-        "报告管理": "reports", "报告列表": "reports",
-        "报告分析": "report-analysis", "诊断": "report-analysis",
-        "apk": "apk-analysis", "apk分析": "apk-analysis", "反编译": "apk-analysis",
-        "测试套件": "test-suites", "套件": "test-suites",
-        "接口": "api-docs", "api": "api-docs",
-        "架构": "architecture",
-        "常用网址": "tools", "网址": "tools",
-        "审计": "security-audit", "安全审计": "security-audit",
-        "gms助手": "gms-assistant",
-        "agent": "agent", "对话agent": "agent",
-    }
-    lowered = text.lower()
-    for key, page in aliases.items():
-        if key.lower() in lowered:
-            return page
-    return ""
-
-
-def _agent_capabilities_text() -> str:
-    page_lines = [f"{name}: {desc}" for _, (name, desc) in WEBAPP_PAGES.items()]
-    return (
-        "我现在按 Web_app 功能分两类处理：\n"
-        "1. 查询类直接回答：设备、测试套件、报告、APK任务、用户、测试状态、系统健康、配置摘要。\n"
-        "2. 执行类先生成计划，确认后执行：启动测试、失败 retry、报告诊断、APK/源码分析。\n\n"
-        "页面能力：\n" + _format_table_lines(page_lines, 30)
-    )
 
 
 def _select_devices(intent: Dict[str, Any]) -> tuple[List[str], List[Dict[str, Any]]]:
@@ -665,28 +352,6 @@ def _summarize_plan(plan: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _json_response_body(response: Any) -> Dict[str, Any]:
-    if isinstance(response, dict):
-        return response
-    if hasattr(response, "model_dump"):
-        return response.model_dump()
-    if response is None:
-        return {"success": False, "error": "Empty response"}
-    try:
-        body = getattr(response, "body", None)
-        if body is None and hasattr(response, "render"):
-            body = response.render(getattr(response, "content", None))
-        if isinstance(body, memoryview):
-            body = body.tobytes()
-        if isinstance(body, bytes):
-            body = body.decode("utf-8")
-        if isinstance(body, str) and body.strip():
-            return json.loads(body)
-    except Exception as e:
-        logger.warning("[Agent] Failed to parse JSON response from %s: %s", type(response).__name__, e)
-    return {"success": False, "error": f"Invalid JSON response: {type(response).__name__}"}
-
-
 def _latest_report_for_client(client_id: str, exclude_timestamp: Optional[str] = None) -> Optional[Dict[str, Any]]:
     reports = test_report_db.get_reports(limit=20, user_only=client_id)
     if not reports:
@@ -767,7 +432,7 @@ async def _diagnose_report_failure(session: Dict[str, Any], report: Dict[str, An
     _append_step(session, "失败诊断", "running", req.test_name)
     try:
         response = await diagnose_report_failure(req)
-        payload = _json_response_body(response)
+        payload = _json_body(response)
         if not payload.get("success"):
             _append_step(session, "失败诊断失败", "warning", payload.get("error") or "诊断失败", payload)
             return None
@@ -814,7 +479,7 @@ async def _wait_for_apk_analysis(task_id: str, timeout_seconds: int = 180) -> Op
     deadline = time.time() + timeout_seconds
     last_status = None
     while time.time() < deadline:
-        payload = _json_response_body(await get_apk_status(task_id))
+        payload = _json_body(await get_apk_status(task_id))
         data = payload.get("data") or {}
         last_status = data
         if data.get("status") == "completed":
@@ -832,7 +497,7 @@ async def _read_apk_source_snippet(task_id: str, diagnosis: Dict[str, Any], fail
     symbols = _extract_symbols_for_apk_lookup(diagnosis, failure)
     definition = None
     for symbol in symbols:
-        payload = _json_response_body(await find_apk_symbol_definition(task_id, symbol=symbol))
+        payload = _json_body(await find_apk_symbol_definition(task_id, symbol=symbol))
         if payload.get("success"):
             definition = (payload.get("data") or {}).get("definition")
             if definition:
@@ -845,7 +510,7 @@ async def _read_apk_source_snippet(task_id: str, diagnosis: Dict[str, Any], fail
     if not path:
         return None
 
-    payload = _json_response_body(await get_apk_source(task_id, path=path, view=True))
+    payload = _json_body(await get_apk_source(task_id, path=path, view=True))
     if not payload.get("success"):
         return {"definition": definition, "path": path, "error": payload.get("error") or "源码读取失败"}
 
@@ -876,7 +541,7 @@ async def _run_apk_source_analysis(session: Dict[str, Any], plan: Dict[str, Any]
     _append_step(session, "APK/源码分析", "running", f"导入构件 {artifact_path}")
     try:
         req = SuiteApkAnalyzeRequest(suite_path=suite_path, path=artifact_path)
-        create_payload = _json_response_body(await create_suite_apk_analysis_task(req))
+        create_payload = _json_body(await create_suite_apk_analysis_task(req))
         if not create_payload.get("success"):
             _append_step(session, "APK/源码分析失败", "warning", create_payload.get("error") or "构件导入失败", create_payload)
             return None
@@ -887,7 +552,7 @@ async def _run_apk_source_analysis(session: Dict[str, Any], plan: Dict[str, Any]
             _append_step(session, "APK/源码分析失败", "warning", "反编译任务 ID 为空", create_payload)
             return None
 
-        start_payload = _json_response_body(await analyze_apk(task_id))
+        start_payload = _json_body(await analyze_apk(task_id))
         if not start_payload.get("success"):
             _append_step(session, "APK/源码分析失败", "warning", start_payload.get("error") or "反编译启动失败", start_payload)
             return None
@@ -975,7 +640,7 @@ async def _start_test_with_plan(session: Dict[str, Any], request_shim: AgentRequ
         req_data["test_case"] = ""
     req = TestStartRequest(**req_data)
     response = await start_test(request_shim, help=False, req=req)
-    payload = _json_response_body(response)
+    payload = _json_body(response)
     if payload.get("success"):
         _append_step(
             session,
@@ -1008,7 +673,7 @@ async def _run_pre_actions(session: Dict[str, Any], plan: Dict[str, Any]) -> Dic
             password=action.get("password") or "1234567890",
         )
         response = await connect_wifi(wifi_req)
-        payload = _json_response_body(response)
+        payload = _json_body(response)
         summary = payload.get("summary") or {}
         detail = f"{wifi_req.ssid}: 成功 {summary.get('success', 0)}/{summary.get('total', len(devices))}"
         if payload.get("success"):
@@ -1136,7 +801,9 @@ async def _execute_plan(session: Dict[str, Any], request: Request, plan: Dict[st
 @router.post("/api/agent/chat")
 async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     """Chat with the local GMS workflow Agent."""
-    await _cleanup_sessions()
+    # Probabilistic session cleanup (~2% of requests) to avoid O(N) lock on every message
+    if time.time() % 50 < 1:
+        await _cleanup_sessions()
     message = (req.message or "").strip()
     if not message:
         return error_response("Message cannot be empty", 400)
@@ -1146,7 +813,6 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     _append_message(session, "user", message)
 
     # Record user message in context
-    from core.agent_context import record_user_message
     record_user_message(session, message)
 
     # --- 1. Check pending plan confirmation (existing behavior) ---
@@ -1156,10 +822,6 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
         # Check if this is a generic action plan (new) or a test plan (legacy)
         if pending_plan.get("type") == "generic_action":
             intent_data = pending_plan.get("intent")
-            from core.agent_executor import executor
-            from core.agent_response import generate as gen_response
-            from core.agent_context import update_context
-            from core.agent_tools import registry
 
             if isinstance(intent_data, dict):
                 tool_name = intent_data.get("tool_name", "")
@@ -1192,10 +854,6 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
 
     # --- 2. Resolve intent through multi-stage router ---
     from core.agent_intent import resolve as resolve_intent
-    from core.agent_executor import executor
-    from core.agent_response import generate as gen_response, generate_error, generate_clarification, generate_capability_overview
-    from core.agent_context import update_context
-    from core.agent_tools import registry
 
     if req.action:
         tool = registry.get(req.action)
@@ -1240,7 +898,6 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
 
     # --- 2a. Low confidence: ask for clarification ---
     if not intent.tool_name or intent.confidence < 0.3:
-        from core.agent_tools import registry
         scored = registry.find(message, top_k=3, min_score=0.5)
         if scored:
             suggestions = [
@@ -1273,7 +930,6 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     if intent.tool_name == "navigate":
         page = intent.params.get("page", "")
         if page:
-            from routers.agent import WEBAPP_PAGES
             name, desc = WEBAPP_PAGES.get(page, (page, ""))
             _append_message(session, "assistant", f"已打开「{name}」页面。", data={"page": page, "auto_open": True})
         else:
@@ -1377,10 +1033,8 @@ async def cancel_agent_session(session_id: str, request: Request):
 @router.get("/api/agent/capabilities")
 async def get_agent_capabilities():
     """List supported Agent capabilities with full tool catalog."""
-    from core.agent_tools import registry as tool_registry
-
     config = config_manager.load_config()
-    categories = tool_registry.get_all_categories()
+    categories = registry.get_all_categories()
     tools_by_category = {}
     for cat, tools in categories.items():
         tools_by_category[cat] = [
@@ -1402,7 +1056,7 @@ async def get_agent_capabilities():
             "analyze_suite_apk", "read_decompiled_source",
         ],
         "tool_catalog": tools_by_category,
-        "total_tools": len(tool_registry),
+        "total_tools": len(registry),
         "limits": {"max_retries": MAX_AGENT_RETRIES},
         "suite_source": "local" if is_config_host_local(config) else "ssh",
     })

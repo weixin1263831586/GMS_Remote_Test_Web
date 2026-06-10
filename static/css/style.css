@@ -216,12 +216,12 @@ body {
     display: flex;
     align-items: center;
     gap: 3px;
-    padding: 10px 6px 10px 6px;
+    padding: 7px 6px 7px 6px;
     color: var(--text-secondary);
     text-decoration: none;
     font-size: 13px;
     transition: var(--transition-normal);
-    border-radius: 8px;
+    border-radius: 7px;
     margin-bottom: 2px;
     cursor: pointer;
     position: relative;
@@ -260,9 +260,9 @@ body {
 }
 
 .sidebar-icon {
-    font-size: 20px;
-    width: 24px;
-    height: 24px;
+    font-size: 18px;
+    width: 22px;
+    height: 22px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -273,8 +273,8 @@ body {
 }
 
 .sidebar-icon img {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     object-fit: contain;
     display: block;
 }

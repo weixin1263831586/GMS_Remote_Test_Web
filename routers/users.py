@@ -27,11 +27,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def load_redmine_credentials():
-    """加载存储的 Redmine 凭证（委托给 config_manager）"""
-    return config_manager.load_redmine_credentials()
-
-
 @router.get("/api/users/current")
 async def get_client_info(request: Request):
     """获取客户端信息（返回client_id用于WebSocket连接）"""

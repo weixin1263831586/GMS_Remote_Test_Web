@@ -29,7 +29,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.settings import (
     CLEANUP_INTERVAL_SECONDS,
-    DEFAULT_SERVER_URL,
     FORWARDED_ALLOW_IPS,
     GMS_ENV,
     PROXY_HEADERS_ENABLED,
@@ -37,7 +36,6 @@ from core.settings import (
     SERVER_PORT,
     _parse_csv_env,
 )
-from core.config import config_manager
 from core.security_audit import classify_request_source
 from core.security_audit_utils import should_audit_request, summarize_audit_request, summarize_audit_response
 from core.state import global_state

@@ -11,11 +11,11 @@ Stage 5: 帮助兜底
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from core.agent_context import get_context, resolve_reference
-from core.agent_tools import AgentTool, ScoredTool, registry
+from core.agent_context import resolve_reference
+from core.agent_tools import AgentTool, registry
 
 
 # ==================== Result ====================
@@ -99,7 +99,7 @@ def _extract_module_and_case(text: str) -> tuple:
         module, case = hash_match.group(1), hash_match.group(2)
     if not module:
         m = re.search(
-            r"(?:跑|执行|测试)\s*(?:测试)?\s*[:：]?\s*([A-Za-z0-9_.-]*(?:TestCases|Tests|Test|Cases|_test)[A-Za-z0-9_.-]*)",
+            r"(?:模块|module|跑|执行|测试)\s*(?:测试)?\s*[:：]?\s*([A-Za-z0-9_.-]*(?:TestCases|Tests|Test|Cases|_test)[A-Za-z0-9_.-]*)",
             text,
             re.IGNORECASE,
         )
@@ -278,7 +278,7 @@ def resolve(message: str, session: Dict[str, Any]) -> ResolvedIntent:
             stage="keyword",
         )
 
-    # --- Stage 4: Regex fallback (legacy _detect_webapp_intent) ---
+    # --- Stage 4: Regex fallback ---
     fallback = _legacy_intent_detect(text)
     if fallback:
         tool = registry.get(fallback)

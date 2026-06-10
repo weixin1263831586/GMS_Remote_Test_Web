@@ -4,7 +4,7 @@ SSH管理器 - 同步SSH操作
 import paramiko
 import logging
 import os
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Dict, Any, Optional
 from contextlib import contextmanager
 import queue
 
@@ -72,7 +72,6 @@ class SSHManager:
             pool_size: 连接池大小
         """
         self.pool: queue.Queue = queue.Queue(maxsize=pool_size)
-        self._lock = None  # 用于简单的锁（如需）
 
     def _load_ssh_key(self, key_path: str) -> Optional[paramiko.PKey]:
         """
