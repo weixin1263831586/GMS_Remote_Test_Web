@@ -57,6 +57,9 @@ _EXACT_COMMANDS: List[tuple] = [
     (r"^(VPN状态|vpn\s*status)", "vpn_status", {}),
     (r"^(系统健康|健康检查|health)", "system_health", {}),
     (r"^(测试状态|运行状态|status)", "test_status", {}),
+    (r"^(设备|设备列表|空闲设备|可用设备|占用设备|adb设备)$", "devices_list", {}),
+    (r"^(报告|报告列表|最近报告|最新报告)$", "reports_list", {}),
+    (r"^(APK任务|apk任务|反编译任务)$", "apk_tasks", {}),
     (r"^(重启设备?)", "devices_reboot", {}),
     (r"^(用户|用户列表|在线用户)", "users_list", {}),
 ]
@@ -74,7 +77,8 @@ _NAV_ALIASES: Dict[str, str] = {
     "测试套件": "test-suites", "套件": "test-suites",
     "接口": "api-docs", "api": "api-docs",
     "架构": "architecture",
-    "常用网址": "tools", "网址": "tools",
+    "常用网址": "websites", "网址": "websites", "网站": "websites",
+    "常用工具": "tools", "工具下载": "tools", "下载工具": "tools",
     "审计": "security-audit", "安全审计": "security-audit",
     "gms助手": "gms-assistant",
     "agent": "agent", "对话agent": "agent",
@@ -129,6 +133,19 @@ def _extract_device_ids(text: str) -> List[str]:
             continue
         ids.append(token)
     return list(dict.fromkeys(ids))[:8]
+
+
+def _extract_device_keyword(text: str) -> str:
+    """Extract a non-serial device keyword such as rk3572 from natural language."""
+    lowered = text.lower()
+    match = re.search(r"(?<![a-z0-9_-])(rk\d{3,5}[a-z0-9_-]*|rk\d+[a-z0-9_-]*|[a-z0-9_-]*gms[a-z0-9_-]*)(?![a-z0-9_-])", lowered)
+    if match:
+        return match.group(1)
+    if re.search(r"空闲|可用|闲置", lowered):
+        return "available"
+    if re.search(r"占用|锁定|被锁", lowered):
+        return "locked"
+    return ""
 
 
 def _extract_retry_count(text: str) -> int:
@@ -193,7 +210,13 @@ def resolve(message: str, session: Dict[str, Any]) -> ResolvedIntent:
         )
 
     # --- Stage 0: Capabilities ---
-    if re.search(r"你是谁|你能做什么|能干什么|能干嘛|功能|帮助|怎么用|使用方法|全功能|web_app", lowered):
+    if re.search(r"你是谁|介绍.*你|自我介绍|你能做什么|能帮.*什么|能干什么|能干嘛|功能|帮助|怎么用|使用方法|全功能|web_app", lowered):
+        if re.search(r"每个页面|页面功能|页面.*介绍|功能页面|页面说明|导航说明", lowered):
+            return ResolvedIntent(
+                tool_name="page_overview", tool=None, confidence=1.0,
+                params={}, needs_confirm=False, is_run_test=False,
+                context_entities={}, stage="exact",
+            )
         tool = registry.get("agent_capabilities")
         return ResolvedIntent(
             tool_name="agent_capabilities", tool=tool, confidence=1.0,
@@ -216,6 +239,10 @@ def resolve(message: str, session: Dict[str, Any]) -> ResolvedIntent:
             # Special handling for reboot
             if tool_name == "devices_reboot":
                 params["devices"] = _extract_device_ids(text)
+            if tool_name == "devices_list":
+                keyword = _extract_device_keyword(text)
+                if keyword:
+                    params["query"] = keyword
             return ResolvedIntent(
                 tool_name=tool_name, tool=tool, confidence=0.95,
                 params=params, needs_confirm=(tool.requires_confirm if tool else False),
@@ -371,6 +398,11 @@ def _extract_params_for_tool(text: str, tool: AgentTool) -> Dict[str, Any]:
             if value:
                 params[pname] = value
 
+    if tool.name in {"devices_list", "devices_management"}:
+        keyword = _extract_device_keyword(text)
+        if keyword:
+            params["query"] = keyword
+
     return params
 
 
@@ -385,7 +417,7 @@ def _legacy_intent_detect(text: str) -> str:
         return "system_health"
     if re.search(r"测试套件|suite", lowered):
         return "test_suites"
-    if re.search(r"设备|adb|device", lowered) and re.search(query_words + r"|空闲|可用|占用", lowered):
+    if re.search(r"设备|adb|device|rk\d{3,5}", lowered) and re.search(query_words + r"|空闲|可用|占用|锁定|rk\d{3,5}", lowered):
         return "devices_list"
     if re.search(r"报告|report", lowered):
         return "reports_list"

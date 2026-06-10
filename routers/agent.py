@@ -23,7 +23,12 @@ from core.agent_intent import (
     _extract_test_type,
     _is_run_test_request,
 )
-from core.agent_response import generate as gen_response, generate_capability_overview, generate_clarification
+from core.agent_response import (
+    generate as gen_response,
+    generate_capability_overview,
+    generate_clarification,
+    generate_page_overview,
+)
 from core.agent_tools import registry
 from core.clients import get_client_id_from_request
 from core.config import config_manager
@@ -55,7 +60,8 @@ WEBAPP_PAGES = {
     "test-suites": ("测试套件", "浏览、下载、解压和反编译套件文件"),
     "api-docs": ("系统接口", "查看 API 和 curl 示例"),
     "architecture": ("系统架构", "查看系统架构图"),
-    "tools": ("常用网址", "管理常用站点"),
+    "websites": ("常用网址", "管理常用站点"),
+    "tools": ("常用工具", "下载和维护常用工具"),
     "security-audit": ("安全审计", "查看访问和接口审计"),
     "gms-assistant": ("GMS助手", "外部 GMS 助手"),
     "agent": ("对话Agent", "自然语言操作 Web_app"),
@@ -920,8 +926,28 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
         session["pending_plan"] = None
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
+    if intent.tool_name == "page_overview":
+        _append_message(
+            session,
+            "assistant",
+            generate_page_overview(),
+            data={
+                "page": "agent",
+                "quick_actions": [
+                    {"label": "测试界面", "page": "test"},
+                    {"label": "设备管理", "page": "devices"},
+                    {"label": "报告分析", "page": "report-analysis"},
+                    {"label": "APK分析", "page": "apk-analysis"},
+                    {"label": "常用工具", "page": "tools"},
+                ],
+            },
+        )
+        session["status"] = "idle"
+        session["pending_plan"] = None
+        return success_response({"session": _session_payload(session)}, "Agent updated")
+
     if intent.tool_name == "greeting":
-        _append_message(session, "assistant", "你好，我可以帮你查询设备/报告/套件，也可以按确认流程执行测试、retry 和分析。直接说要做什么就行。", data={"page": "agent"})
+        _append_message(session, "assistant", "你好，我是 GMS 远程测试 Agent。可以查设备/套件/报告/状态，也能生成测试计划、做 retry 和失败分析；问「每个页面功能」可以看完整页面说明。", data={"page": "agent"})
         session["status"] = "idle"
         session["pending_plan"] = None
         return success_response({"session": _session_payload(session)}, "Agent updated")
