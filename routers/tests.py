@@ -467,8 +467,7 @@ async def _run_test_background(
         if process_group_id:
             cmd_parts.extend(["--pgid", process_group_id])
 
-        import shlex as _shlex
-        command = " ".join(_shlex.quote(part) for part in cmd_parts)
+        command = " ".join(shlex.quote(part) for part in cmd_parts)
         command_full = f"cd {os.path.dirname(remote_script)} && {command}"
 
         await log_callback(f"Executing command: {command}", "info")

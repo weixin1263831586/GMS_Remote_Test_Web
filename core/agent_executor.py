@@ -11,12 +11,11 @@ import inspect
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from core.agent_tools import AgentTool, registry
 from core.config import config_manager
 from core.devices import device_manager, get_or_create_user_state
-from core.state import global_state
 from modules.device_lock_manager import device_lock_manager
 
 logger = logging.getLogger(__name__)
@@ -46,6 +45,59 @@ _UNSUPPORTED_DIRECT_TOOLS = {
     "burn_firmware",
     "burn_gsi",
 }
+
+# Request model mapping for tools that accept a body — built once at module level.
+_MODEL_BY_TOOL = None  # lazily initialized to avoid circular imports
+
+
+def _get_model_by_tool() -> Dict[str, type]:
+    """Lazy-initialised mapping of tool names to Pydantic request models."""
+    global _MODEL_BY_TOOL
+    if _MODEL_BY_TOOL is None:
+        from core.schemas import (
+            ADBForwardStartRequest,
+            ClientInfoRequest,
+            DeviceActionRequest,
+            DeviceLockRequest,
+            DeviceShellRequest,
+            ReportDiagnosisRequest,
+            SNBurnRequest,
+            SuiteApkAnalyzeRequest,
+            TestParseArgsRequest,
+            TestStartRequest,
+            TradefedListResultsRequest,
+            USBIPDisconnectRequest,
+            USBIPStartRequest,
+            VNCStartRequest,
+            VPNConnectRequest,
+            WifiConnectRequest,
+        )
+        _MODEL_BY_TOOL = {
+            "users_detect": ClientInfoRequest,
+            "users_set_username": ClientInfoRequest,
+            "devices_bootloader_lock": DeviceLockRequest,
+            "devices_bootloader_unlock": DeviceLockRequest,
+            "devices_bootloader_status": DeviceActionRequest,
+            "devices_info": DeviceActionRequest,
+            "devices_reboot": DeviceActionRequest,
+            "devices_remount": DeviceActionRequest,
+            "devices_wifi": WifiConnectRequest,
+            "devices_shell": DeviceShellRequest,
+            "devices_scrcpy": DeviceActionRequest,
+            "test_start": TestStartRequest,
+            "test_parse_args": TestParseArgsRequest,
+            "test_suites_result": TradefedListResultsRequest,
+            "reports_diagnose": ReportDiagnosisRequest,
+            "suites_apk_analyze": SuiteApkAnalyzeRequest,
+            "desktop_vnc_start": VNCStartRequest,
+            "desktop_validate": VNCStartRequest,
+            "vpn_connect": VPNConnectRequest,
+            "adb_forward_start": ADBForwardStartRequest,
+            "usbip_connect": USBIPStartRequest,
+            "usbip_disconnect": USBIPDisconnectRequest,
+            "burn_serial": SNBurnRequest,
+        }
+    return _MODEL_BY_TOOL
 
 
 # ==================== Result ====================
@@ -152,9 +204,6 @@ class ActionExecutor:
 
     async def _query_devices(self, session, request, params) -> ToolResult:
         """查询设备列表。"""
-        from core.test_suite_utils import is_config_host_local
-        config = config_manager.load_config()
-
         device_ids = await asyncio.to_thread(device_manager.get_connected_devices, True)
         details = []
         for did in device_ids:
@@ -567,50 +616,8 @@ class ActionExecutor:
 
     def _build_call_kwargs(self, func: Any, tool: AgentTool, request: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         from routers.agent import AgentRequestShim
-        from core.schemas import (
-            ADBForwardStartRequest,
-            ClientInfoRequest,
-            DeviceActionRequest,
-            DeviceLockRequest,
-            DeviceShellRequest,
-            ReportDiagnosisRequest,
-            SNBurnRequest,
-            SuiteApkAnalyzeRequest,
-            TestParseArgsRequest,
-            TestStartRequest,
-            TradefedListResultsRequest,
-            USBIPDisconnectRequest,
-            USBIPStartRequest,
-            VNCStartRequest,
-            VPNConnectRequest,
-            WifiConnectRequest,
-        )
 
-        model_by_tool = {
-            "users_detect": ClientInfoRequest,
-            "users_set_username": ClientInfoRequest,
-            "devices_bootloader_lock": DeviceLockRequest,
-            "devices_bootloader_unlock": DeviceLockRequest,
-            "devices_bootloader_status": DeviceActionRequest,
-            "devices_info": DeviceActionRequest,
-            "devices_reboot": DeviceActionRequest,
-            "devices_remount": DeviceActionRequest,
-            "devices_wifi": WifiConnectRequest,
-            "devices_shell": DeviceShellRequest,
-            "devices_scrcpy": DeviceActionRequest,
-            "test_start": TestStartRequest,
-            "test_parse_args": TestParseArgsRequest,
-            "test_suites_result": TradefedListResultsRequest,
-            "reports_diagnose": ReportDiagnosisRequest,
-            "suites_apk_analyze": SuiteApkAnalyzeRequest,
-            "desktop_vnc_start": VNCStartRequest,
-            "desktop_validate": VNCStartRequest,
-            "vpn_connect": VPNConnectRequest,
-            "adb_forward_start": ADBForwardStartRequest,
-            "usbip_connect": USBIPStartRequest,
-            "usbip_disconnect": USBIPDisconnectRequest,
-            "burn_serial": SNBurnRequest,
-        }
+        model_by_tool = _get_model_by_tool()
 
         query_params = self._query_params_for_tool(tool, params)
         shim = AgentRequestShim(request, query_params=query_params) if request else None
@@ -659,13 +666,26 @@ class ActionExecutor:
 # ==================== Helpers ====================
 
 def _json_body(response) -> Dict[str, Any]:
-    """从 JSONResponse 提取 body。"""
+    """Extract JSON body from a FastAPI JSONResponse or similar object."""
+    if isinstance(response, dict):
+        return response
+    if hasattr(response, "model_dump"):
+        return response.model_dump()
+    if response is None:
+        return {"success": False, "error": "Empty response"}
     try:
-        if hasattr(response, "body"):
-            return json.loads(response.body.decode("utf-8"))
-    except Exception:
-        pass
-    return {"success": False, "error": "Invalid response"}
+        body = getattr(response, "body", None)
+        if body is None and hasattr(response, "render"):
+            body = response.render(getattr(response, "content", None))
+        if isinstance(body, memoryview):
+            body = body.tobytes()
+        if isinstance(body, bytes):
+            body = body.decode("utf-8")
+        if isinstance(body, str) and body.strip():
+            return json.loads(body)
+    except Exception as e:
+        logger.warning("[Agent] Failed to parse JSON response from %s: %s", type(response).__name__, e)
+    return {"success": False, "error": f"Invalid JSON response: {type(response).__name__}"}
 
 
 def _format_payload(tool: AgentTool, payload: Dict[str, Any]) -> str:
@@ -696,6 +716,13 @@ def _format_payload(tool: AgentTool, payload: Dict[str, Any]) -> str:
 def _format_device_info_payload(payload: Dict[str, Any]) -> str:
     data = payload.get("data") or payload
     results = data.get("results") if isinstance(data, dict) else None
+    if not results and isinstance(data, dict):
+        props = data.get("properties") or data.get("info")
+        if isinstance(props, dict):
+            results = [{
+                "device": data.get("device") or data.get("device_id") or payload.get("device_id"),
+                "properties": props,
+            }]
     if not isinstance(results, list) or not results:
         return payload.get("message") or "未返回设备详情。"
 

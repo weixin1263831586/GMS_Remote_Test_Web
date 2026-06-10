@@ -133,7 +133,7 @@ function validateDeviceSelection() {
         showToast('请先选择设备', 'warning');
         return false;
     }
-    return true
+    return true;
 }
 
 // 获取Redmine配置（带缓存）
@@ -8438,6 +8438,8 @@ function goToTestCase(testType, moduleName, testCaseName) {
 // Redmine 回复对话框
 function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFromReport) {
     const modalId = 'redmine-reply-modal-' + Date.now();
+    const issueInputId = `${modalId}-issue-id`;
+    const replyTextId = `${modalId}-reply-text`;
     const modal = document.createElement('div');
     modal.id = modalId;
     modal.className = 'modal';
@@ -8462,12 +8464,12 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
             <div class="modal-body">
                 <div style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">Redmine Issue ID</label>
-                    <input type="text" id="redmine-issue-id-input" value="${issueIdFromReport}" placeholder="输入 Redmine Issue ID"
+                    <input type="text" id="${issueInputId}" data-redmine-issue-input value="${issueIdFromReport}" placeholder="输入 Redmine Issue ID"
                            style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 14px; font-family: 'Courier New', monospace;">
                 </div>
                 <div style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">回复内容</label>
-                    <textarea id="redmine-reply-text" rows="12" placeholder="输入回复内容..."
+                    <textarea id="${replyTextId}" data-redmine-reply-text rows="12" placeholder="输入回复内容..."
                               style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 13px; font-family: 'Courier New', monospace; white-space: pre-wrap; resize: vertical;">${defaultReply}</textarea>
                 </div>
                 <div style="display: flex; gap: 10px; justify-content: flex-end;">
@@ -8486,8 +8488,9 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
 
 // 确认并发送 Redmine 回复
 async function confirmAndSendRedmineReply(modalId) {
-    const issueId = document.getElementById('redmine-issue-id-input')?.value?.trim();
-    const replyText = document.getElementById('redmine-reply-text')?.value?.trim();
+    const modal = document.getElementById(modalId);
+    const issueId = modal?.querySelector('[data-redmine-issue-input]')?.value?.trim();
+    const replyText = modal?.querySelector('[data-redmine-reply-text]')?.value?.trim();
 
     if (!issueId) {
         showToast('❌ 请输入 Redmine Issue ID', 'error');

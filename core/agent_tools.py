@@ -8,8 +8,8 @@ Agent Tool Registry — 注册所有项目 API 为可调用的 Agent 工具。
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 
 # ==================== Data Structures ====================
