@@ -16,7 +16,7 @@ from core.settings import PROJECT_ROOT
 
 router = APIRouter()
 DB_PATH = Path(PROJECT_ROOT) / 'data' / 'mainline_known_issues.sqlite3'
-SYNC_SCRIPT = Path(PROJECT_ROOT) / 'scripts' / 'sync_mainline_known_issues.py'
+SYNC_SCRIPT = Path(PROJECT_ROOT) / 'modules' / 'sync_mainline_known_issues.py'
 _sync_lock = threading.Lock()
 _sync_status = {
     'running': False,
@@ -44,7 +44,7 @@ def _db_exists_response():
         content={
             'success': False,
             'error': f'Database not found: {DB_PATH}',
-            'hint': 'Run: python3 scripts/sync_mainline_known_issues.py --year 2026 --verbose',
+            'hint': 'Run: python3 modules/sync_mainline_known_issues.py --year 2026 --verbose',
         },
     )
 
