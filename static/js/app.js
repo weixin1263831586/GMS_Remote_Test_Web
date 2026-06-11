@@ -9869,7 +9869,7 @@ function renderApkFileTabs() {
         tabsEl.appendChild(tab);
     });
 
-    viewer.style.display = window.apkOpenFiles.size ? 'block' : 'none';
+    viewer.style.display = window.apkOpenFiles.size ? 'flex' : 'none';
 }
 
 function activateApkFileTab(filePath, targetLine = null) {

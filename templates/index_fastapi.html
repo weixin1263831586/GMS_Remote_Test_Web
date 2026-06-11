@@ -126,17 +126,15 @@
         .filter-btn { padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); color: var(--text-primary); font-size: 12px; cursor: pointer; transition: all 0.2s; }
         .filter-btn:hover { background: var(--darker-bg); border-color: var(--primary-color); }
         .filter-btn.active { background: var(--primary-color); color: white; border-color: var(--primary-color); }
-        #usage-examples-modal.modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
-        #usage-examples-modal .modal-content { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); max-width: 90%; max-height: 90%; overflow: hidden; display: flex; flex-direction: column; }
-        #usage-examples-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid #333; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; }
+        /* 弹框居中样式 - 通用 */
+        .modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
+        #usage-examples-modal .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); max-width: 90%; max-height: 90%; overflow: hidden; display: flex; flex-direction: column; }
+        #usage-examples-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid var(--border-color); padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; }
         #usage-examples-modal .modal-title { color: #fff; font-size: 16px; font-weight: 600; }
         #usage-examples-modal .modal-close { color: #fff; font-size: 24px; cursor: pointer; line-height: 1; }
         #usage-examples-modal .modal-close:hover { color: #ccc; }
-        #usage-examples-modal .modal-body { padding: 20px; overflow-y: auto; background: #1e1e1e; }
+        #usage-examples-modal .modal-body { padding: 20px; overflow-y: auto; background: var(--card-bg); }
         #usage-examples-modal.modal.show { display: flex !important; }
-        /* 弹框居中样式 */
-        #add-host-modal.modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
-        #add-local-suite-modal.modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
         #page-architecture .architecture-container { background: rgba(15,23,42,0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1rem; height: 92vh; overflow: hidden; }
         #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 0.5rem; }
     </style>
@@ -153,8 +151,8 @@
             pointer-events: none;
         }
         .snackbar {
-            background: #1e1e1e;
-            border: 1px solid #333;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 14px 18px;
             min-width: 300px;
@@ -169,9 +167,9 @@
             z-index: 999999 !important;
             position: relative;
         }
-        .snackbar.success { border-left-color: #4CAF50; }
-        .snackbar.error { border-left-color: #f44336; }
-        .snackbar.warning { border-left-color: #ff9800; }
+        .snackbar.success { border-left-color: var(--success-color); }
+        .snackbar.error { border-left-color: var(--danger-color); }
+        .snackbar.warning { border-left-color: var(--warning-color); }
         .snackbar.info { border-left-color: var(--primary-color); }
         @keyframes snackbar-slide-in {
             from { transform: translateX(100%); opacity: 0; }
@@ -200,14 +198,14 @@
         }
         .snackbar-message {
             font-size: 13px;
-            color: #aaa;
+            color: var(--text-muted);
             line-height: 1.4;
             word-wrap: break-word;
         }
         .snackbar-close {
             background: none;
             border: none;
-            color: #666;
+            color: var(--text-muted);
             font-size: 18px;
             cursor: pointer;
             padding: 0;
@@ -220,7 +218,7 @@
             flex-shrink: 0;
         }
         .snackbar-close:hover {
-            background: #333;
+            background: var(--border-color);
             color: #fff;
         }
     </style>
@@ -820,7 +818,7 @@
             <div class="section-title">📚 测试套件</div>
 
             <!-- 下载和解压区域 -->
-            <div class="suite-download-section" style="margin-bottom: 10px; padding: 8px; background: #1e1e1e; border-radius: 8px; border: 1px solid #333;">
+            <div class="suite-download-section" style="margin-bottom: 10px; padding: 8px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border-color);">
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; margin-bottom: 8px;">
                     <div style="flex: 1; min-width: 200px;">
                         <input type="text" id="suite-download-url" class="combo-box" placeholder="测试套件下载地址，如：https://dl.google.com/android/cts/android-cts-14_r1-linux_x86-arm.zip" style="width: 100%; height: 36px;" />
@@ -835,11 +833,11 @@
                 <!-- 下载进度 -->
                 <div id="suite-download-progress" style="display: none; margin-top: 10px;">
                     <div style="display: flex; align-items: center; gap: 10px;">
-                        <span id="suite-progress-status" style="font-size: 12px; color: #aaa; min-width: 80px;">正在下载...</span>
-                        <div style="flex: 1; background: #333; border-radius: 4px; height: 6px; overflow: hidden;">
-                            <div id="suite-progress-bar" style="background: linear-gradient(90deg, #4CAF50, #8BC34A); width: 0%; height: 100%; transition: width 0.3s;"></div>
+                        <span id="suite-progress-status" style="font-size: 12px; color: var(--text-muted); min-width: 80px;">正在下载...</span>
+                        <div style="flex: 1; background: var(--border-color); border-radius: 4px; height: 6px; overflow: hidden;">
+                            <div id="suite-progress-bar" style="background: linear-gradient(90deg, var(--success-color), var(--info-color)); width: 0%; height: 100%; transition: width 0.3s;"></div>
                         </div>
-                        <span id="suite-progress-percent" style="font-size: 12px; color: #4CAF50; min-width: 40px; text-align: right;">0%</span>
+                        <span id="suite-progress-percent" style="font-size: 12px; color: var(--success-color); min-width: 40px; text-align: right;">0%</span>
                     </div>
                 </div>
             </div>
@@ -977,7 +975,7 @@
                                 <!-- 动态生成文件树 -->
                             </div>
                             <div id="apk-source-resizer" class="apk-source-resizer" title="拖拽调整源码树宽度"></div>
-                            <div id="apk-file-viewer" style="display: none; flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden;">
+                            <div id="apk-file-viewer" style="display: none; flex: 1; flex-direction: column; min-width: 0; overflow: hidden;">
                                 <div id="apk-file-tabs" class="apk-file-tabs" style="flex-shrink: 0;"></div>
                                 <div id="apk-file-path" class="apk-file-path" style="flex-shrink: 0;"></div>
                                 <pre id="apk-file-content" style="flex: 1; background: var(--darker-bg); padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 11px; overflow-y: auto; margin: 0;"></pre>
@@ -1267,8 +1265,6 @@
             </div>
         </div>
 
-        <!-- 导入工具弹框 -->
-
         <!-- 常用工具 - 添加分类弹框 -->
         <div id="ut-category-modal" class="modal" style="display: none;">
             <div class="modal-content" style="max-width: 400px;">
@@ -1322,7 +1318,7 @@
                         <textarea id="ut-tool-desc" placeholder="工具的功能说明，鼠标悬停时显示" rows="3" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px; resize: vertical;"></textarea>
                     </div>
                     <div class="modal-form-row">
-                        <label>文件路径 (tools/目录下):</label>
+                        <label>文件路径 (tools/):</label>
                         <div style="display: flex; gap: 6px; align-items: center;">
                             <input type="text" id="ut-tool-filepath" placeholder="例如：gerrit_patch_export_and_apply_tool.sh" style="flex: 1; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
                             <button class="btn-xxs" onclick="ut_browseFiles()" style="white-space: nowrap; padding: 6px 10px; flex-shrink: 0;">浏览</button>
@@ -1425,7 +1421,7 @@
                 <form id="vpn-credential-form" onsubmit="event.preventDefault(); submitVpnCredential();" autocomplete="off">
                 <div class="modal-form-row">
                     <label>VPN账号:</label>
-                    <select id="vpn-credential-name" style="flex:1;padding:6px 8px;border-radius:4px;border:1px solid #555;background:#1e1e1e;color:#eee;font-size:13px;"></select>
+                    <select id="vpn-credential-name" style="flex:1;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:var(--card-bg);color:var(--text-primary);font-size:13px;"></select>
                 </div>
                 </form>
                 <div class="modal-ssh-info">
@@ -1826,6 +1822,26 @@
                 <div class="modal-buttons" style="margin-top: 20px;">
                     <button class="btn-xxs" id="confirm-cancel-btn">取消</button>
                     <button class="btn-xxs btn-primary" id="confirm-ok-btn" style="background: var(--danger-color);">确定</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mainline包豁免项扫描模式 -->
+    <div id="mainline-sync-modal" class="modal">
+        <div class="modal-content" style="max-width: 460px;">
+            <div class="modal-header">
+                <span class="modal-title">选择扫描方式</span>
+                <span class="modal-close" onclick="ut_closeMainlineSyncModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-text" style="margin-bottom: 14px;">
+                    增量扫描只检查未记录的新页面；全量扫描会重新解析左侧导航栏所有页面并刷新数据库。
+                </div>
+                <div class="modal-buttons" style="margin-top: 18px;">
+                    <button class="btn-xxs" onclick="ut_closeMainlineSyncModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="ut_confirmMainlineKnownIssuesSync('incremental')">增量扫描</button>
+                    <button class="btn-xxs btn-primary" onclick="ut_confirmMainlineKnownIssuesSync('full')">全量扫描</button>
                 </div>
             </div>
         </div>
@@ -2581,7 +2597,6 @@
         let terminalSocket = null;
         let isTerminalConnected = false;
         let terminalDomEventController = null;
-        let pageInitialized = false; // 防止重复初始化
         let vncChecked = false; // 防止重复检查VNC
 
         // 确保VNC服务已启动
@@ -2616,6 +2631,26 @@
             }
         }
 
+        // 页面标题映射
+        const PAGE_TITLES = {
+            'test': '测试界面 - GMS远程测试',
+            'desktop': '主机桌面 - GMS远程测试',
+            'terminal': '主机终端 - GMS远程测试',
+            'users': '用户管理 - GMS远程测试',
+            'devices': '设备管理 - GMS远程测试',
+            'reports': '报告管理 - GMS远程测试',
+            'report-analysis': '报告分析 - GMS远程测试',
+            'apk-analysis': 'APK分析 - GMS远程测试',
+            'test-suites': '测试套件 - GMS远程测试',
+            'api-docs': '系统接口 - GMS远程测试',
+            'architecture': '系统架构 - GMS远程测试',
+            'websites': '常用网址 - GMS远程测试',
+            'tools': '常用工具 - GMS远程测试',
+            'security-audit': '安全审计 - GMS 远程测试',
+            'gms-assistant': 'GMS助手 - GMS 远程测试',
+            'agent': '对话Agent - GMS 远程测试'
+        };
+
         // 页面切换函数
         function switchPage(pageName, event) {
             if (event) {
@@ -2646,25 +2681,7 @@
             localStorage.setItem('gms_current_page', pageName);
 
             // 动态更新页面标题
-            const titles = {
-                'test': '测试界面 - GMS远程测试',
-                'desktop': '主机桌面 - GMS远程测试',
-                'terminal': '主机终端 - GMS远程测试',
-                'users': '用户管理 - GMS远程测试',
-                'devices': '设备管理 - GMS远程测试',
-                'reports': '报告管理 - GMS远程测试',
-                'report-analysis': '报告分析 - GMS远程测试',
-                'apk-analysis': 'APK分析 - GMS远程测试',
-                'test-suites': '测试套件 - GMS远程测试',
-                'api-docs': '系统接口 - GMS远程测试',
-                'architecture': '系统架构 - GMS远程测试',
-                'websites': '常用网址 - GMS远程测试',
-                'tools': '常用工具 - GMS远程测试',
-                'security-audit': '安全审计 - GMS 远程测试',
-                'gms-assistant': 'GMS助手 - GMS 远程测试',
-                'agent': '对话Agent - GMS 远程测试'
-            };
-            document.title = titles[pageName] || 'GMS远程测试';
+            document.title = PAGE_TITLES[pageName] || 'GMS远程测试';
             if (typeof recordSecurityPageView === 'function') {
                 recordSecurityPageView(pageName);
             }
@@ -2965,40 +2982,8 @@
             }
         }
 
-        async function tryIconUrls(iconUrls, iconInput) {
-            // 先尝试前几个高质量的 SVG 图标
-            const highQualityUrls = iconUrls.slice(0, 5);
 
-            for (const url of highQualityUrls) {
-                try {
-                    const isValid = await checkImageUrl(url);
-                    if (isValid) {
-                        iconInput.value = url;
-                        showIconPreview(url);
-                        return;
-                    }
-                } catch (err) {
-                    continue;
-                }
-            }
 
-            // 如果都失败了，使用 Google Favicon 作为备选
-            const fallbackUrl = iconUrls[iconUrls.length - 1];
-            iconInput.value = proxiedIconUrl(fallbackUrl);
-            showIconPreview(fallbackUrl);
-        }
-
-        function checkImageUrl(url) {
-            return new Promise((resolve) => {
-                const img = new Image();
-                img.onload = () => resolve(true);
-                img.onerror = () => resolve(false);
-                img.src = proxiedIconUrl(url);
-
-                // 超时处理
-                setTimeout(() => resolve(false), 3000);
-            });
-        }
 
         function showIconPreview(iconValue) {
             const preview = document.getElementById('icon-preview');
@@ -3181,7 +3166,6 @@
 
         // ==================== 服务器同步功能 ====================
         let syncInProgress = false;
-        let lastSyncTime = null;
 
         async function syncToolsToServer() {
             if (syncInProgress) return;
@@ -3200,7 +3184,6 @@
                 const result = await response.json();
                 if (result.success) {
                     debugLog('[ToolsSync] Data synced to server successfully');
-                    lastSyncTime = new Date().toISOString();
                 } else {
                     console.error('[ToolsSync] Failed to sync data to server:', result.error);
                 }
@@ -3281,7 +3264,7 @@
 							<div class="category-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); cursor: move;">
                             <div style="display: flex; align-items: center;">
                                 <span style="font-size: 16px; margin-right: 6px; cursor: grab;">${categoryInfo.icon}</span>
-                                <span style="font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;" onclick="editCategory('${category}')"><span class="category-name">${category}</span>
+                                <span style="font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;" onclick="editCategory('${category}', event)"><span class="category-name">${category}</span>
                                 <span style="margin-left: 10px; padding: 2px 8px; background: var(--light-bg); border-radius: 10px; font-size: 11px; color: var(--text-muted);">${tools.length}</span>
                             </div>
                             <div style="display: flex; gap: 6px;">
@@ -3334,11 +3317,11 @@
             }
 
             let html = `
-                <div class="category-section">
-                    <div class="category-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color);">
+                <div class="category-section" data-category="${category}" data-category-index="0" draggable="true">
+                    <div class="category-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); cursor: move;">
                         <div style="display: flex; align-items: center;">
-                            <span style="font-size: 16px; margin-right: 6px;">${categoryInfo.icon}</span>
-                            <span style="font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;" onclick="editCategory(${category})"><span class="category-name">${category}</span>
+                            <span style="font-size: 16px; margin-right: 6px; cursor: grab;">${categoryInfo.icon}</span>
+                            <span style="font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;" onclick="editCategory('${category}', event)"><span class="category-name">${category}</span>
                             <span style="margin-left: 10px; padding: 2px 8px; background: var(--light-bg); border-radius: 10px; font-size: 11px; color: var(--text-muted);">${tools.length}</span>
                         </div>
                         <div style="display: flex; gap: 6px;">
@@ -3377,7 +3360,7 @@
         function renderToolCard(tool, category, index, cardColor) {
             return `
                 <div class="tool-card" data-tool-category="${category}" data-tool-index="${index}" draggable="true"
-                     style="background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: grab; min-width: 100px; max-width: 130px;"
+                     style="background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: grab; min-width: 100px; max-width: 130px; min-height: 118px;"
                      onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='var(--shadow-md)'; this.style.borderColor='${cardColor}';"
                      onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none'; this.style.borderColor='var(--border-color)';"
                      ondragstart="handleToolDragStart(event)"
@@ -3443,10 +3426,57 @@
             return icon;
         }
 
+        // ==================== 通用工具管理函数（websites + tools 复用）====================
+        function _closeModal(modalId, resetFn) {
+            ModalManager.close(modalId);
+            if (resetFn) resetFn();
+        }
+
+        function _showAddCategoryModal(modalId, fieldIds, resetFn) {
+            if (resetFn) resetFn();
+            document.getElementById(fieldIds.name).value = '';
+            document.getElementById(fieldIds.icon).value = fieldIds.iconDefault || '';
+            ModalManager.open(modalId);
+        }
+
+        function _deleteTool(dataObj, category, index, saveFn, renderFn, opts) {
+            const tool = dataObj[category][index];
+            const msg = opts && opts.showName ? `确定要删除工具"${tool.title}"吗？` : '确定要删除这个工具吗？';
+            showConfirmDialog('确认删除', msg).then(confirmed => {
+                if (confirmed) {
+                    dataObj[category].splice(index, 1);
+                    if (dataObj[category].length === 0) {
+                        delete dataObj[category];
+                        if (opts && opts.onCategoryEmpty) opts.onCategoryEmpty(category);
+                    }
+                    saveFn();
+                    renderFn();
+                    showToast(opts && opts.showName ? `工具"${tool.title}"已删除` : '删除成功', 'success');
+                }
+            });
+        }
+
+        function _deleteCategory(dataObj, categoryName, extraCleanups, saveFn, renderFn) {
+            const tools = dataObj[categoryName] || [];
+            let message = `确定要删除分类"${categoryName}"吗？`;
+            if (tools.length > 0) {
+                message += ` 该分类下有 ${tools.length} 个工具，删除后这些工具也会被删除。`;
+            }
+            showConfirmDialog('确认删除', message).then(confirmed => {
+                if (confirmed) {
+                    delete dataObj[categoryName];
+                    if (extraCleanups) extraCleanups.forEach(fn => fn(categoryName));
+                    saveFn();
+                    renderFn();
+                    showToast(`分类"${categoryName}"已删除`, 'success');
+                }
+            });
+        }
+
         function openToolLink(url) {
             if (!url) return;
-            // 如果 URL 不以 http 开头，自动添加 https://
-            const finalUrl = url.match(/^https?:\/\//) ? url : 'https://' + url;
+            // 站内相对路径（以 / 开头）直接跳转，外部 URL 自动补 https://
+            const finalUrl = url.startsWith('/') || url.match(/^https?:\/\//) ? url : 'https://' + url;
             window.open(finalUrl, '_blank');
         }
 
@@ -3507,44 +3537,22 @@
             const targetCategory = card.dataset.toolCategory;
             const targetIndex = parseInt(card.dataset.toolIndex);
 
-            // 不允许在自己身上拖拽
             if (targetCategory === draggedTool.category &&
-                targetIndex === draggedTool.index) {
-                return;
-            }
+                targetIndex === draggedTool.index) return;
 
-            // 移动工具
-            moveTool(draggedTool.category, draggedTool.index, targetCategory, targetIndex);
-
-            // 重新渲染
+            moveTool(categorizedTools, draggedTool.category, draggedTool.index, targetCategory, targetIndex, saveCategories);
             renderToolsGrid();
         }
 
-        // 移动工具函数
-        function moveTool(fromCategory, fromIndex, toCategory, toIndex) {
-            const fromTools = categorizedTools[fromCategory];
-            const toTools = categorizedTools[toCategory];
-
+        // 通用工具移动函数
+        function moveTool(dataObj, fromCategory, fromIndex, toCategory, toIndex, saveFn) {
+            const fromTools = dataObj[fromCategory];
+            const toTools = dataObj[toCategory];
             if (!fromTools || !toTools) return;
-
-            // 移除工具
             const [tool] = fromTools.splice(fromIndex, 1);
-
-            // 插入到目标位置
-            if (fromCategory === toCategory) {
-                // 同一分类内移动
-                if (fromIndex < toIndex) {
-                    toTools.splice(toIndex, 0, tool);
-                } else {
-                    toTools.splice(toIndex, 0, tool);
-                }
-            } else {
-                // 跨分类移动
-                toTools.splice(toIndex, 0, tool);
-            }
-
-            // 保存更改
-            saveCategories();
+            const insertAt = (fromCategory === toCategory && fromIndex < toIndex) ? toIndex - 1 : toIndex;
+            toTools.splice(insertAt, 0, tool);
+            saveFn();
         }
 
         // 分类拖拽事件处理
@@ -3591,49 +3599,32 @@
             const targetIndex = parseInt(section.dataset.categoryIndex);
             if (targetIndex === draggedCategoryIndex) return;
 
-            // 移动分类
-            moveCategory(draggedCategoryIndex, targetIndex);
-
-            // 重新渲染
+            moveCategory(categorizedTools, draggedCategoryIndex, targetIndex, (newData) => { categorizedTools = newData; saveCategories(); });
             renderToolsGrid();
         }
 
-        // 移动分类函数
-        function moveCategory(fromIndex, toIndex) {
-            const categories = Object.keys(categorizedTools);
-
+        // 通用分类移动函数
+        function moveCategory(dataObj, fromIndex, toIndex, applyFn) {
+            const categories = Object.keys(dataObj);
             if (fromIndex < 0 || fromIndex >= categories.length ||
-                toIndex < 0 || toIndex >= categories.length) {
-                return;
-            }
-
+                toIndex < 0 || toIndex >= categories.length) return;
             const categoryToMove = categories[fromIndex];
-
-            // 创建新的对象
             const newOrder = {};
-            const entries = Object.entries(categorizedTools);
-
-            // 重新排序
+            const entries = Object.entries(dataObj);
             if (fromIndex < toIndex) {
                 entries.forEach((entry, i) => {
-                    if (i === fromIndex) return; // 跳过要移动的项
-                    if (i === toIndex) {
-                        newOrder[categoryToMove] = categorizedTools[categoryToMove];
-                    }
+                    if (i === fromIndex) return;
+                    if (i === toIndex) newOrder[categoryToMove] = dataObj[categoryToMove];
                     newOrder[entry[0]] = entry[1];
                 });
             } else {
                 entries.forEach((entry, i) => {
-                    if (i === toIndex) {
-                        newOrder[categoryToMove] = categorizedTools[categoryToMove];
-                    }
-                    if (i === fromIndex) return; // 跳过要移动的项
+                    if (i === toIndex) newOrder[categoryToMove] = dataObj[categoryToMove];
+                    if (i === fromIndex) return;
                     newOrder[entry[0]] = entry[1];
                 });
             }
-
-            categorizedTools = newOrder;
-            saveCategories();
+            applyFn(newOrder);
         }
 
         // 初始化拖拽功能
@@ -3648,20 +3639,6 @@
         }
 
         // 修改 renderAllCategories 函数，在渲染完成后调用 initDragAndDrop
-
-        function addNewTool() {
-            updateCategorySelect();
-
-            document.getElementById('tool-index').value = '-1';
-            document.getElementById('tool-category').value = currentCategory === 'all' ? 'Rockchip' : currentCategory;
-            document.getElementById('tool-modal-title').textContent = '添加工具';
-            document.getElementById('tool-icon').value = '🌐';
-            document.getElementById('tool-title').value = '';
-            document.getElementById('tool-url').value = '';
-            // Emoji选择器现在默认显示，不需要隐藏逻辑
-
-            ModalManager.open('tool-modal');
-        }
 
         function addNewToolToCategory(category) {
             updateCategorySelect();
@@ -3695,23 +3672,8 @@
         }
 
         function deleteTool(category, index) {
-            // 使用现有的确认对话框 (Promise-based)
-            showConfirmDialog('确认删除', '确定要删除这个工具吗？').then(confirmed => {
-                if (confirmed) {
-                    categorizedTools[category].splice(index, 1);
-
-                    // 如果分类为空，删除分类
-                    if (categorizedTools[category].length === 0) {
-                        delete categorizedTools[category];
-                        if (currentCategory === category) {
-                            currentCategory = 'all';
-                        }
-                    }
-
-                    saveCategories();
-                    renderToolsGrid();
-                    showToast('删除成功', 'success');
-                }
+            _deleteTool(categorizedTools, category, index, saveCategories, renderToolsGrid, {
+                onCategoryEmpty: (cat) => { if (currentCategory === cat) currentCategory = 'all'; }
             });
         }
 
@@ -3775,17 +3737,15 @@
         }
 
         function closeToolModal() {
-            ModalManager.close('tool-modal');
+            _closeModal('tool-modal');
         }
 
         function showAddCategoryModal() {
-            document.getElementById('category-name').value = '';
-            document.getElementById('category-icon').value = '📁';
-            ModalManager.open('category-modal');
+            _showAddCategoryModal('category-modal', { name: 'category-name', icon: 'category-icon', iconDefault: '📁' });
         }
 
         function closeCategoryModal() {
-            ModalManager.close('category-modal');
+            _closeModal('category-modal');
         }
 
         function saveCategory() {
@@ -3815,9 +3775,9 @@
             showToast('分类添加成功', 'success');
         }
 
-        function editCategory(oldName) {
+        function editCategory(oldName, evt) {
             const categoryInfo = DEFAULT_CATEGORIES[oldName] || { icon: '📁', color: '#8e8e93' };
-            const categoryHeader = event.target.closest('.category-header');
+            const categoryHeader = evt.target.closest('.category-header');
 
             if (!categoryHeader) return;
 
@@ -3874,54 +3834,52 @@
         }
 
         function deleteCategory(categoryName) {
-            const tools = categorizedTools[categoryName] || [];
-
-            // 确认删除消息
-            let message = `确定要删除分类"${categoryName}"吗？`;
-            if (tools.length > 0) {
-                message += ` 该分类下有 ${tools.length} 个工具，删除分类后这些工具也会被删除。`;
-            }
-
-            // 使用现有的确认对话框 (Promise-based)
-            showConfirmDialog('确认删除', message).then(confirmed => {
-                if (confirmed) {
-                    // 删除分类及其工具
-                    delete categorizedTools[categoryName];
-                    delete DEFAULT_CATEGORIES[categoryName];
-
-                    // 保存并重新渲染
-                    saveCategories();
-                    renderToolsGrid();
-                    showToast(`分类"${categoryName}"已删除`, 'success');
-                }
-            });
+            _deleteCategory(categorizedTools, categoryName, [(cat) => delete DEFAULT_CATEGORIES[cat]], saveCategories, renderToolsGrid);
         }
 
         function selectEmoji(emoji) {
             document.getElementById('tool-icon').value = emoji;
         }
 
-        // ==================== 工具页面专用 Esc 键处理 ====================
+        // ==================== 全局 Esc 键关闭弹框 ====================
         document.addEventListener('keydown', function(e) {
-            // 只处理工具页面的 Esc 键
-            if (e.key !== 'Escape' || currentPage !== 'websites') return;
-
-            // 检查是否有打开的工具相关模态框
-            const toolModal = document.getElementById('tool-modal');
-            const categoryModal = document.getElementById('category-modal');
-
-            // 优先关闭工具模态框
-            if (toolModal && toolModal.classList.contains('show')) {
-                closeToolModal();
+            if (e.key !== 'Escape') return;
+            // 关闭 mainline-sync-modal
+            const mainlineModal = document.getElementById('mainline-sync-modal');
+            if (mainlineModal && mainlineModal.style.display === 'flex') {
+                ut_closeMainlineSyncModal();
                 e.preventDefault();
                 return;
             }
-
-            // 然后关闭分类模态框
-            if (categoryModal && categoryModal.classList.contains('show')) {
-                closeCategoryModal();
-                e.preventDefault();
-                return;
+            // 关闭 websites 页面的 tool/category modal
+            if (currentPage === 'websites') {
+                const toolModal = document.getElementById('tool-modal');
+                if (toolModal && toolModal.classList.contains('show')) {
+                    closeToolModal();
+                    e.preventDefault();
+                    return;
+                }
+                const categoryModal = document.getElementById('category-modal');
+                if (categoryModal && categoryModal.classList.contains('show')) {
+                    closeCategoryModal();
+                    e.preventDefault();
+                    return;
+                }
+            }
+            // 关闭 tools 页面的 ut-tool/ut-category modal
+            if (currentPage === 'tools') {
+                const utToolModal = document.getElementById('ut-tool-modal');
+                if (utToolModal && utToolModal.classList.contains('show')) {
+                    ut_closeToolModal();
+                    e.preventDefault();
+                    return;
+                }
+                const utCategoryModal = document.getElementById('ut-category-modal');
+                if (utCategoryModal && utCategoryModal.classList.contains('show')) {
+                    ut_closeCategoryModal();
+                    e.preventDefault();
+                    return;
+                }
             }
         });
 
@@ -3932,7 +3890,20 @@
             'Gerrit工具': { icon: '📦', color: '#34a853' },
             '设备工具': { icon: '📱', color: '#4285f4' },
             '烧写工具': { icon: '🔥', color: '#ea4335' },
+            '测试工具': { icon: '✅', color: '#7c3aed' },
             '其他工具': { icon: '🔧', color: '#8e8e93' },
+        };
+        const UT_BUILTIN_TOOLS = {
+            '测试工具': [
+                {
+                    icon: '📦',
+                    title: 'Mainline包豁免项',
+                    description: '查看Mainline包豁免项，支持按模块、用例和豁免ID搜索',
+                    url: '/mainline-known-issues',
+                    action: 'mainline-sync',
+                    builtin_id: 'mainline-known-issues'
+                }
+            ]
         };
         let ut_categorizedTools = {};
         let ut_categoryMeta = {};
@@ -3955,6 +3926,7 @@
             if (stored) {
                 try {
                     ut_categorizedTools = JSON.parse(stored);
+                    ut_ensureBuiltInTools();
                     ut_renderToolsGrid();
                     return;
                 } catch (e) { console.error('加载常用工具数据失败:', e); }
@@ -3990,10 +3962,35 @@
                         description: 'Android misc分区镜像文件，用于设备启动模式切换（bootloader/recovery）',
                         file_path: 'misc.img'
                     }
-                ]
+                ],
+                '测试工具': []
             };
+            ut_ensureBuiltInTools();
             ut_saveCategories();
             ut_renderToolsGrid();
+        }
+
+        function ut_ensureBuiltInTools() {
+            let changed = false;
+            Object.entries(UT_BUILTIN_TOOLS).forEach(([category, tools]) => {
+                if (!ut_categorizedTools[category]) {
+                    ut_categorizedTools[category] = [];
+                    changed = true;
+                }
+                tools.forEach((builtinTool) => {
+                    const existingIndex = ut_categorizedTools[category].findIndex(tool => tool.builtin_id === builtinTool.builtin_id);
+                    if (existingIndex >= 0) {
+                        ut_categorizedTools[category][existingIndex] = {
+                            ...ut_categorizedTools[category][existingIndex],
+                            ...builtinTool
+                        };
+                    } else {
+                        ut_categorizedTools[category].unshift(builtinTool);
+                        changed = true;
+                    }
+                });
+            });
+            if (changed) ut_saveCategories();
         }
 
         function ut_saveCategories() {
@@ -4005,6 +4002,37 @@
             const grid = document.getElementById('ut-grid');
             if (!grid) return;
             ut_renderAllCategories(grid);
+            ut_restoreSyncButtonState();
+        }
+
+        async function ut_restoreSyncButtonState() {
+            try {
+                const response = await fetch('/api/mainline-known-issues/sync/status');
+                const result = await response.json();
+                const status = result.status || {};
+                if (!status.running) return;
+                // 找到 sync 按钮并恢复为"扫描中"状态
+                const syncTool = ut_categorizedTools && Object.values(ut_categorizedTools)
+                    .flat().find(t => t.action === 'mainline-sync');
+                if (!syncTool) return;
+                // 在 DOM 中找到该按钮（按钮在卡片 actions 容器中）
+                const cards = document.querySelectorAll('#ut-grid .tool-card, #ut-grid [style*="cursor: pointer"]');
+                for (const card of cards) {
+                    const titleEl = card.querySelector('div[style*="font-weight: 600"]');
+                    if (titleEl && titleEl.textContent === syncTool.title) {
+                        const btn = card.querySelector('button');
+                        if (btn) {
+                            btn.disabled = true;
+                            btn.textContent = '扫描中';
+                            ut_mainlineSyncButton = btn;
+                            ut_pollMainlineKnownIssuesSync(btn, '触发扫描');
+                        }
+                        break;
+                    }
+                }
+            } catch (e) {
+                // 静默失败，不影响页面加载
+            }
         }
 
         function ut_renderAllCategories(grid) {
@@ -4020,21 +4048,28 @@
                 return;
             }
 
-            categories.forEach((category) => {
+            categories.forEach((category, catIndex) => {
                 const tools = ut_categorizedTools[category];
                 const catInfo = ut_getCategoryInfo(category);
                 const section = document.createElement('div');
                 section.className = 'category-section';
+                section.dataset.category = category;
+                section.dataset.categoryIndex = catIndex;
+                section.draggable = true;
                 section.style.marginBottom = '4px';
+                section.addEventListener('dragstart', handleCategoryDragStart);
+                section.addEventListener('dragend', handleCategoryDragEnd);
+                section.addEventListener('dragover', handleCategoryDragOver);
+                section.addEventListener('drop', ut_handleCategoryDrop);
 
                 const header = document.createElement('div');
-                header.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color);';
+                header.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); cursor: move;';
 
                 const titleWrap = document.createElement('div');
                 titleWrap.style.cssText = 'display: flex; align-items: center;';
 
                 const icon = document.createElement('span');
-                icon.style.cssText = 'font-size: 16px; margin-right: 6px;';
+                icon.style.cssText = 'font-size: 16px; margin-right: 6px; cursor: grab;';
                 icon.textContent = catInfo.icon || '📁';
                 titleWrap.appendChild(icon);
 
@@ -4074,7 +4109,7 @@
                 section.appendChild(header);
 
                 const cards = document.createElement('div');
-                cards.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px;';
+                cards.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px;';
                 tools.forEach((tool, index) => {
                     cards.appendChild(ut_createToolCard(tool, category, index, catInfo.color));
                 });
@@ -4085,8 +4120,17 @@
 
         function ut_createToolCard(tool, category, index, cardColor) {
             const card = document.createElement('div');
+            card.className = 'tool-card';
             card.title = tool.description || '';
-            card.style.cssText = `background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: default; min-width: 120px;`;
+            card.dataset.toolCategory = category;
+            card.dataset.toolIndex = index;
+            card.draggable = true;
+            card.style.cssText = `background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: grab; min-width: 100px; max-width: 130px; min-height: 118px;`;
+            if (tool.url) {
+                card.addEventListener('click', () => openToolLink(tool.url));
+            } else if (tool.file_path && tool.action !== 'mainline-sync') {
+                card.addEventListener('click', () => ut_downloadTool(tool.file_path, tool.title));
+            }
             card.addEventListener('mouseenter', () => {
                 card.style.transform = 'translateY(-2px)';
                 card.style.boxShadow = 'var(--shadow-md)';
@@ -4097,72 +4141,229 @@
                 card.style.boxShadow = 'none';
                 card.style.borderColor = 'var(--border-color)';
             });
+            card.addEventListener('dragstart', handleToolDragStart);
+            card.addEventListener('dragend', handleToolDragEnd);
+            card.addEventListener('dragover', handleToolDragOver);
+            card.addEventListener('drop', ut_handleToolDrop);
 
             const icon = document.createElement('div');
-            icon.style.cssText = 'width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--light-bg); border-radius: 6px; font-size: 24px;';
+            icon.style.cssText = 'width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--light-bg); border-radius: 6px; font-size: 24px; pointer-events: none;';
             icon.textContent = tool.icon || '🔧';
             card.appendChild(icon);
 
             const textWrap = document.createElement('div');
-            textWrap.style.cssText = 'text-align: center; width: 100%;';
+            textWrap.style.cssText = 'text-align: center; width: 100%; pointer-events: none;';
             const title = document.createElement('div');
             title.style.cssText = 'font-size: 12px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;';
             title.textContent = tool.title || '';
             textWrap.appendChild(title);
-            if (tool.description) {
-                const desc = document.createElement('div');
-                desc.style.cssText = 'font-size: 10px; color: var(--text-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;';
-                desc.textContent = tool.description;
-                textWrap.appendChild(desc);
-            }
             card.appendChild(textWrap);
 
             const actions = document.createElement('div');
             actions.style.cssText = 'display: flex; gap: 3px; width: 100%;';
 
-            const downloadBtn = document.createElement('button');
-            downloadBtn.textContent = '⬇️ 下载';
-            downloadBtn.title = '下载文件';
-            downloadBtn.style.cssText = 'flex: 2; padding: 3px 4px; background: var(--success-color); color: white; border: none; border-radius: 3px; font-size: 11px; cursor: pointer; transition: all 0.2s; line-height: 1;';
-            downloadBtn.addEventListener('mouseenter', () => { downloadBtn.style.opacity = '0.8'; });
-            downloadBtn.addEventListener('mouseleave', () => { downloadBtn.style.opacity = '1'; });
-            downloadBtn.addEventListener('click', () => ut_downloadTool(tool.file_path, tool.title));
-            actions.appendChild(downloadBtn);
+            const isSyncTool = tool.action === 'mainline-sync';
+            // sync 工具显示触发按钮
+            if (isSyncTool) {
+                const downloadBtn = document.createElement('button');
+                downloadBtn.textContent = '触发扫描';
+                downloadBtn.title = '扫描 Mainline release notes';
+                downloadBtn.style.cssText = 'flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
+                downloadBtn.addEventListener('mouseenter', () => { downloadBtn.style.opacity = '0.8'; });
+                downloadBtn.addEventListener('mouseleave', () => { downloadBtn.style.opacity = '1'; });
+                downloadBtn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    ut_startMainlineKnownIssuesSync(downloadBtn);
+                });
+                actions.appendChild(downloadBtn);
+            }
+            // 有 file_path 且无 url 的下载型工具不显示下载按钮（点击卡片即下载）
+            // 只有有 url 的非内置工具才显示下载按钮
+            const isDownloadOnlyTool = !isSyncTool && tool.file_path && !tool.url;
+            if (!tool.builtin_id && !isSyncTool && !isDownloadOnlyTool) {
+                const downloadBtn = document.createElement('button');
+                downloadBtn.textContent = '下载';
+                downloadBtn.title = '下载文件';
+                downloadBtn.style.cssText = 'flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
+                downloadBtn.addEventListener('mouseenter', () => { downloadBtn.style.opacity = '0.8'; });
+                downloadBtn.addEventListener('mouseleave', () => { downloadBtn.style.opacity = '1'; });
+                downloadBtn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    ut_downloadTool(tool.file_path, tool.title);
+                });
+                actions.appendChild(downloadBtn);
+            }
 
-            const editBtn = document.createElement('button');
-            editBtn.textContent = '✏️';
-            editBtn.style.cssText = 'flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
-            editBtn.addEventListener('mouseenter', () => {
-                editBtn.style.background = 'var(--primary-color)';
-                editBtn.style.color = 'white';
-                editBtn.style.borderColor = 'var(--primary-color)';
-            });
-            editBtn.addEventListener('mouseleave', () => {
-                editBtn.style.background = 'transparent';
-                editBtn.style.color = 'var(--text-secondary)';
-                editBtn.style.borderColor = 'var(--border-color)';
-            });
-            editBtn.addEventListener('click', () => ut_editTool(category, index));
-            actions.appendChild(editBtn);
+            if (!tool.builtin_id) {
+                const editBtn = document.createElement('button');
+                editBtn.textContent = '✏️';
+                editBtn.style.cssText = 'flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
+                editBtn.addEventListener('mouseenter', () => {
+                    editBtn.style.background = 'var(--primary-color)';
+                    editBtn.style.color = 'white';
+                    editBtn.style.borderColor = 'var(--primary-color)';
+                });
+                editBtn.addEventListener('mouseleave', () => {
+                    editBtn.style.background = 'transparent';
+                    editBtn.style.color = 'var(--text-secondary)';
+                    editBtn.style.borderColor = 'var(--border-color)';
+                });
+                editBtn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    ut_editTool(category, index);
+                });
+                actions.appendChild(editBtn);
 
-            const deleteBtn = document.createElement('button');
-            deleteBtn.textContent = '🗑️';
-            deleteBtn.style.cssText = 'flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
-            deleteBtn.addEventListener('mouseenter', () => {
-                deleteBtn.style.background = 'var(--danger-color)';
-                deleteBtn.style.color = 'white';
-                deleteBtn.style.borderColor = 'var(--danger-color)';
-            });
-            deleteBtn.addEventListener('mouseleave', () => {
-                deleteBtn.style.background = 'transparent';
-                deleteBtn.style.color = 'var(--text-muted)';
-                deleteBtn.style.borderColor = 'var(--border-color)';
-            });
-            deleteBtn.addEventListener('click', () => ut_deleteTool(category, index));
-            actions.appendChild(deleteBtn);
+                const deleteBtn = document.createElement('button');
+                deleteBtn.textContent = '🗑️';
+                deleteBtn.style.cssText = 'flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
+                deleteBtn.addEventListener('mouseenter', () => {
+                    deleteBtn.style.background = 'var(--danger-color)';
+                    deleteBtn.style.color = 'white';
+                    deleteBtn.style.borderColor = 'var(--danger-color)';
+                });
+                deleteBtn.addEventListener('mouseleave', () => {
+                    deleteBtn.style.background = 'transparent';
+                    deleteBtn.style.color = 'var(--text-muted)';
+                    deleteBtn.style.borderColor = 'var(--border-color)';
+                });
+                deleteBtn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    ut_deleteTool(category, index);
+                });
+                actions.appendChild(deleteBtn);
+            }
 
             card.appendChild(actions);
             return card;
+        }
+
+        // ==================== 常用工具拖拽排序（复用通用 moveTool/moveCategory）====================
+
+        function ut_handleToolDrop(e) {
+            e.preventDefault();
+            const card = e.target.closest('.tool-card');
+            if (!card || !draggedTool) return;
+            const targetCategory = card.dataset.toolCategory;
+            const targetIndex = parseInt(card.dataset.toolIndex);
+            if (targetCategory === draggedTool.category &&
+                targetIndex === draggedTool.index) return;
+            moveTool(ut_categorizedTools, draggedTool.category, draggedTool.index, targetCategory, targetIndex, ut_saveCategories);
+            ut_renderToolsGrid();
+        }
+
+        function ut_handleCategoryDrop(e) {
+            e.preventDefault();
+            const section = e.target.closest('.category-section');
+            if (!section || draggedCategoryIndex === null) return;
+            const targetIndex = parseInt(section.dataset.categoryIndex);
+            if (targetIndex === draggedCategoryIndex) return;
+            moveCategory(ut_categorizedTools, draggedCategoryIndex, targetIndex, (newData) => { ut_categorizedTools = newData; ut_saveCategories(); });
+            ut_renderToolsGrid();
+        }
+
+        let ut_mainlineSyncButton = null;
+
+        async function ut_startMainlineKnownIssuesSync(button) {
+            ut_mainlineSyncButton = button;
+            // 检查 db 是否存在，不存在则直接全量扫描
+            try {
+                const resp = await fetch('/api/mainline-known-issues/sync/status');
+                const data = await resp.json();
+                if (data.status && data.status.running) {
+                    showToast('扫描正在进行中，请稍候', 'warning');
+                    return;
+                }
+                if (!data.status || !data.status.db_exists) {
+                    // db 不存在，弹框提示后直接全量扫描
+                    showConfirmDialog(
+                        '首次扫描提示',
+                        '首次使用需要全量扫描，请确保本机浏览器已打开 https://docs.partner.android.com/mainline/release/release-notes 并可正常访问。'
+                    ).then(confirmed => {
+                        if (confirmed) {
+                            ut_confirmMainlineKnownIssuesSync('full');
+                        }
+                    });
+                    return;
+                }
+            } catch (e) {
+                // 查询失败，继续弹框选择
+            }
+            // db 存在，弹框选择扫描方式
+            const modal = document.getElementById('mainline-sync-modal');
+            if (modal) {
+                modal.style.display = 'flex';
+            }
+        }
+
+        function ut_closeMainlineSyncModal() {
+            const modal = document.getElementById('mainline-sync-modal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        async function ut_confirmMainlineKnownIssuesSync(mode) {
+            const button = ut_mainlineSyncButton;
+            ut_closeMainlineSyncModal();
+            if (!button) {
+                showToast('未找到扫描按钮，请刷新页面后重试', 'error');
+                return;
+            }
+            const modeText = mode === 'full' ? '全量扫描' : '增量扫描';
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = '扫描中';
+            try {
+                const response = await fetch('/api/mainline-known-issues/sync?mode=' + encodeURIComponent(mode), { method: 'POST' });
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error || '启动扫描失败');
+                }
+                showToast('Mainline包豁免项' + modeText + '已启动', 'info');
+                ut_pollMainlineKnownIssuesSync(button, originalText);
+            } catch (error) {
+                button.disabled = false;
+                button.textContent = originalText;
+                showToast('启动扫描失败: ' + error.message, 'error');
+            }
+        }
+
+        async function ut_pollMainlineKnownIssuesSync(button, originalText) {
+            try {
+                const response = await fetch('/api/mainline-known-issues/sync/status');
+                const result = await response.json();
+                const status = result.status || {};
+                if (status.running) {
+                    setTimeout(() => ut_pollMainlineKnownIssuesSync(button, originalText), 3000);
+                    return;
+                }
+                button.disabled = false;
+                button.textContent = originalText;
+                if (status.error) {
+                    showToast('扫描失败: ' + status.error, 'error');
+                    if (typeof notifyOperationResult === 'function') {
+                        notifyOperationResult('Mainline包豁免项扫描失败', status.error, 'error', 'system');
+                    }
+                    return;
+                }
+                // 显示扫描完成详情
+                let duration = '';
+                if (status.started_at && status.finished_at) {
+                    const sec = Math.round((new Date(status.finished_at) - new Date(status.started_at)) / 1000);
+                    duration = sec >= 60 ? `耗时 ${Math.floor(sec / 60)}分${sec % 60}秒` : `耗时 ${sec}秒`;
+                }
+                const msg = `Mainline包豁免项扫描完成${duration ? '（' + duration + '）' : ''}`;
+                showToast(msg, 'success');
+                // 发送 Windows 系统通知
+                if (typeof notifyOperationResult === 'function') {
+                    notifyOperationResult('Mainline包豁免项扫描完成', duration || '扫描已完成', 'success', 'system');
+                }
+            } catch (error) {
+                button.disabled = false;
+                button.textContent = originalText;
+                showToast('扫描状态查询失败: ' + error.message, 'error');
+            }
         }
 
         function ut_downloadTool(filePath, title) {
@@ -4171,7 +4372,12 @@
                 return;
             }
             const encodedPath = String(filePath).split('/').map(encodeURIComponent).join('/');
-            window.open(`/api/tools/download/${encodedPath}`, '_blank');
+            const a = document.createElement('a');
+            a.href = `/api/tools/download/${encodedPath}`;
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
             showToast(`正在下载: ${title}`, 'info');
         }
 
@@ -4234,39 +4440,26 @@
 
             ut_saveCategories();
             ut_renderToolsGrid();
+            const isEdit = !!ut_editingTool;
             ut_closeToolModal();
-            showToast(ut_editingTool ? '工具已更新' : '工具已添加', 'success');
+            showToast(isEdit ? '工具已更新' : '工具已添加', 'success');
         }
 
         function ut_deleteTool(category, index) {
-            const tool = ut_categorizedTools[category][index];
-            showConfirmDialog('确认删除', `确定要删除工具"${tool.title}"吗？`).then(confirmed => {
-                if (confirmed) {
-                    ut_categorizedTools[category].splice(index, 1);
-                    if (ut_categorizedTools[category].length === 0) delete ut_categorizedTools[category];
-                    ut_saveCategories();
-                    ut_renderToolsGrid();
-                    showToast(`工具"${tool.title}"已删除`, 'success');
-                }
-            });
+            _deleteTool(ut_categorizedTools, category, index, ut_saveCategories, ut_renderToolsGrid, { showName: true });
         }
 
         function ut_closeToolModal() {
-            ModalManager.close('ut-tool-modal');
-            ut_editingTool = null;
+            _closeModal('ut-tool-modal', () => { ut_editingTool = null; });
         }
 
         // --- Category CRUD ---
         function ut_showAddCategoryModal() {
-            ut_editingCategory = null;
-            document.getElementById('ut-category-name').value = '';
-            document.getElementById('ut-category-icon').value = '';
-            ModalManager.open('ut-category-modal');
+            _showAddCategoryModal('ut-category-modal', { name: 'ut-category-name', icon: 'ut-category-icon' }, () => { ut_editingCategory = null; });
         }
 
         function ut_closeCategoryModal() {
-            ModalManager.close('ut-category-modal');
-            ut_editingCategory = null;
+            _closeModal('ut-category-modal', () => { ut_editingCategory = null; });
         }
 
         function ut_saveCategory() {
@@ -4308,20 +4501,7 @@
         }
 
         function ut_deleteCategory(categoryName) {
-            const tools = ut_categorizedTools[categoryName] || [];
-            let message = `确定要删除分类"${categoryName}"吗？`;
-            if (tools.length > 0) {
-                message += ` 该分类下有 ${tools.length} 个工具，删除后这些工具也会被删除。`;
-            }
-            showConfirmDialog('确认删除', message).then(confirmed => {
-                if (confirmed) {
-                    delete ut_categorizedTools[categoryName];
-                    delete ut_categoryMeta[categoryName];
-                    ut_saveCategories();
-                    ut_renderToolsGrid();
-                    showToast(`分类"${categoryName}"已删除`, 'success');
-                }
-            });
+            _deleteCategory(ut_categorizedTools, categoryName, [(cat) => delete ut_categoryMeta[cat]], ut_saveCategories, ut_renderToolsGrid);
         }
 
         function ut_updateCategorySelect() {
@@ -4499,25 +4679,16 @@
             active: false,
             type: null,  // 'adb' | 'route'
             buffer: [],
-            pendingCommand: null,  // 仅用于route模式
-            isReconnecting: false
+            pendingCommand: null  // 仅用于route模式
         };
 
-        let adbSilentMode = false;
         let isReconnecting = false;
-        let routeCommandMode = false;
-        let pendingRouteCommand = null;
 
         // 同步函数
         function updateSilentMode(active, type = null, command = null) {
             silentMode.active = active;
             silentMode.type = type;
             silentMode.pendingCommand = command;
-
-            // 同步到旧变量
-            adbSilentMode = active;
-            routeCommandMode = (type === 'route');
-            pendingRouteCommand = command;
         }
 
         function updateTerminalStatus(connected) {
@@ -4714,13 +4885,13 @@
                             <div style="color:white;padding:40px;text-align:center;">
                                 <div style="font-size:48px;margin-bottom:20px;">❌</div>
                                 <div style="font-size:18px;margin-bottom:10px;">xterm.js 库加载失败</div>
-                                <div style="color:#aaa;font-size:14px;margin-bottom:20px;">
+                                <div style="color:var(--text-muted);font-size:14px;margin-bottom:20px;">
                                     可能原因：<br>
                                     1. 网络连接问题<br>
                                     2. 静态资源加载失败<br>
                                     3. 防火墙阻止
                                 </div>
-                                <button onclick="location.reload()" style="padding:10px 20px;font-size:14px;cursor:pointer;background:#4CAF50;color:white;border:none;border-radius:4px;">
+                                <button onclick="location.reload()" style="padding:10px 20px;font-size:14px;cursor:pointer;background:var(--success-color);color:white;border:none;border-radius:4px;">
                                     🔄 刷新页面重试
                                 </button>
                             </div>
@@ -5013,7 +5184,7 @@
                         if (typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
                             terminalSocket.send(JSON.stringify({
                                 type: 'terminal_input',
-                                data: '\r'
+                                input: '\r'
                             }));
                         }
                     } else {
@@ -5022,7 +5193,7 @@
                         if (typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
                             terminalSocket.send(JSON.stringify({
                                 type: 'terminal_input',
-                                data: '\r'
+                                input: '\r'
                             }));
                         }
                     }
@@ -5117,7 +5288,6 @@
             document.getElementById(`page-${targetPage}`).classList.add('active');
 
             currentPage = targetPage;
-            pageInitialized = true;
 
             // 执行页面特定的初始化逻辑
             if (targetPage === 'terminal' && !terminalInitialized) {
@@ -5146,25 +5316,7 @@
             }
 
             // 更新页面标题
-            const titles = {
-                'test': '测试界面 - GMS远程测试',
-                'desktop': '主机桌面 - GMS远程测试',
-                'terminal': '主机终端 - GMS远程测试',
-                'users': '用户管理 - GMS远程测试',
-                'devices': '设备管理 - GMS远程测试',
-                'reports': '报告管理 - GMS远程测试',
-                'report-analysis': '报告分析 - GMS远程测试',
-                'apk-analysis': 'APK分析 - GMS远程测试',
-                'test-suites': '测试套件 - GMS远程测试',
-                'api-docs': '系统接口 - GMS远程测试',
-                'architecture': '系统架构 - GMS 远程测试',
-                'websites': '常用网址 - GMS 远程测试',
-                'tools': '常用工具 - GMS 远程测试',
-                'security-audit': '安全审计 - GMS 远程测试',
-                'gms-assistant': 'GMS助手 - GMS 远程测试',
-                'agent': '对话Agent - GMS 远程测试'
-            };
-            document.title = titles[targetPage] || 'GMS远程测试';
+            document.title = PAGE_TITLES[targetPage] || 'GMS远程测试';
             if (typeof recordSecurityPageView === 'function') {
                 recordSecurityPageView(targetPage);
             }
@@ -5176,8 +5328,6 @@
                 }
             }
 
-            // 加载保存的导航栏排序
-            loadSidebarOrder();
         });
 
         // ==================== 导航栏拖拽排序 ====================
@@ -5230,11 +5380,6 @@
                 }
             });
         })();
-
-        async function loadSidebarOrder() {
-            // 已经由 applySavedSidebarOrder 处理，无需再次加载
-            return;
-        }
 
         function saveSidebarOrder() {
             const nav = document.getElementById('sidebar-nav');
@@ -5396,25 +5541,6 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            // 立即应用保存的导航栏排序（在 DOM 加载后）
-            const savedOrder = window.__savedSidebarOrder;
-            if (savedOrder && Array.isArray(savedOrder)) {
-                const nav = document.getElementById('sidebar-nav');
-                if (nav) {
-                    const itemByPage = new Map();
-                    nav.querySelectorAll('.sidebar-item').forEach(item => {
-                        itemByPage.set(item.dataset.page, item);
-                    });
-
-                    // 按保存的顺序重新排列导航项
-                    savedOrder.forEach(page => {
-                        const item = itemByPage.get(page);
-                        if (item) {
-                            nav.appendChild(item);
-                        }
-                    });
-                }
-            }
 
             // 初始化拖拽功能
             setTimeout(initSidebarDragDrop, 50);
@@ -5443,158 +5569,158 @@
                     <h3 style="color: var(--primary-color); margin-bottom: 10px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">🚀 完整测试流程指南</h3>
 
                     <!-- Step 1: 下载Skills包 -->
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📦 步骤1: 下载Skills包 (可在编译服务器205/206执行)</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl {% if request.url.scheme == 'https' %}-k {% endif %}-s -OJ "{{ request.url.scheme }}://{{ request.url.netloc }}/api/system/skills"</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-1')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
                     </div>
 
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-1-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">source ./gms-remote-test/scripts/gms-remote-test.sh</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-1-5')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-1-5')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 加载 gms-rt-* 命令，每次新开终端都需要执行</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 加载 gms-rt-* 命令，每次新开终端都需要执行</div>
                     </div>
 
                     <!-- Step 2: 系统健康检查 -->
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">🏥 步骤2: 测试主机网络连通性检查</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-2" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-ssh-ping</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-2')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-2')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
                     </div>
 
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-vpn-status</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-3')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 检查VPN连接状态（如果需要VPN访问设备）</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 检查VPN连接状态（如果需要VPN访问设备）</div>
                     </div>
 
                     <!-- Step 3: 设备检查 -->
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📱 步骤3: 设备检查</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-4" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-devices-list</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-4')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-4')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有可用的测试设备，确认目标设备在列表中</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 列出所有可用的测试设备，确认目标设备在列表中</div>
                     </div>
 
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-usbip" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-usbip-connect</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-usbip')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-usbip')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 12px; color: #999;">💡 可连接本地 Windows 电脑的ADB设备用于测试</div>
+                        <div style="margin-top: 4px; font-size: 12px; color: var(--text-muted);">💡 可连接本地 Windows 电脑的ADB设备用于测试</div>
                     </div>
 
                     <!-- Step 4: WiFi连接配置 (可选) -->
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📶 步骤4: WiFi连接配置 (可选)</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-devices-wifi-connect RK3572GMS4 SSID password</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-5')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-5')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 如果设备需要WiFi连接执行测试时使用</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 如果设备需要WiFi连接执行测试时使用</div>
                     </div>
 
                     <!-- Step 5: 查看测试套件 -->
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📚 步骤5: 查看测试套件</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-6" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-suites</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-6')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-6')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有配置的测试套件</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 列出所有配置的测试套件</div>
                     </div>
 
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-7" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-suites-result ~/GMS-Suite/android-vts/tools</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-7')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-7')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 查看指定套件的测试结果历史</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 查看指定套件的测试结果历史</div>
                     </div>
 
                     <!-- Step 6: 启动测试 -->
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">▶️  步骤6: 启动测试</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-8" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; padding-right: 70px; display: block;">gms-rt-test-start RK3572GMS4 CTS ~/GMS-Suite/android-cts/tools</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-8')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-8')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 启动CTS测试，会自动锁定设备</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 启动CTS测试，会自动锁定设备</div>
                     </div>
 
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-9" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; white-space: pre-wrap; padding-right: 70px; display: block;">gms-rt-test-start RK3572GMS4 CTS CtsKeystoreTestCases android.keystore.cts.KeyAttestationTest#testRsaAttestation</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-9')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-9')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 运行指定模块和用例</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 运行指定模块和用例</div>
                     </div>
 
                     <!-- Step 7: 实时查看日志 -->
                     <div style="margin-bottom: 12px;">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📊 步骤7: 实时查看测试日志</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-10" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-logs-stream</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-10')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-10')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 实时流式显示测试日志输出（使用Ctrl+C退出）</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 实时流式显示测试日志输出（使用Ctrl+C退出）</div>
                     </div>
 
 
                     <!-- Step 8: 查看测试结果 -->
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📈 步骤 8: 查看测试结果</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-11" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-reports-list</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-11')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-11')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 列出所有测试报告，查看最新测试结果</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 列出所有测试报告，查看最新测试结果</div>
                     </div>
 
                     <!-- Step 9: 清理测试环境（可选） -->
-                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #333;">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">🧹 步骤 9: 清理测试环境 <span style="color: #999; font-size: 11px;">(可选)</span></div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">🧹 步骤 9: 清理测试环境 <span style="color: var(--text-muted); font-size: 11px;">(可选)</span></div>
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-13" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-clean</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-13')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-13')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: #999;">💡 清理测试日志和临时文件，释放磁盘空间</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 清理测试日志和临时文件，释放磁盘空间</div>
                     </div>
 
                     <h3 style="color: var(--primary-color); margin-bottom: 10px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">🔄 retry测试流程指南</h3>
 
                     <!-- VTS Retry Workflow -->
-                    <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #333;">
+                    <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 600; margin-bottom: 4px; font-size: 15px;">步骤1: 查看测试结果</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-vts-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-suites-result ~/GMS-Suite/android-vts/tools</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-1')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-vts-1')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
                     </div>
 
-                    <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #333;">
+                    <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 600; margin-bottom: 4px; font-size: 15px;">步骤2: 启动VTS重试</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-vts-2" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-start --retry 2026.04.17_14.32.32 RK3572GMS4 VTS</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-2')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-vts-2')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
                     </div>
 
                     <div style="margin-bottom: 10px;">
                         <div style="color: var(--primary-color); font-weight: 600; margin-bottom: 4px; font-size: 15px;">步骤3: 查看日志</div>
-                        <div style="background: #252525; padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid #333;">
+                        <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
                             <code id="cmd-vts-3" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-test-logs-stream</code>
-                            <span style="position: absolute; right: 4px; top: 4px; color: #999; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: #444; transition: background 0.2s;" onclick="copyCommand('cmd-vts-3')" onmouseover="this.style.background='#666'" onmouseout="this.style.background='#444'">📋 复制</span>
+                            <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-vts-3')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
                     </div>
 
