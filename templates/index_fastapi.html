@@ -3902,9 +3902,40 @@
                     url: '/mainline-known-issues',
                     action: 'mainline-sync',
                     builtin_id: 'mainline-known-issues'
+                },
+                {
+                    icon: '✅',
+                    title: '测试套件更新',
+                    description: '扫描Android 14+ CTS/VTS/GTS和GMS包更新，默认全量扫描',
+                    url: '/gms-update-monitor?tab=artifacts',
+                    action: 'gms-update-sync',
+                    builtin_id: 'gms-update-suite-monitor',
+                    sync_sources: ['cts_downloads', 'vts_downloads', 'gts_downloads', 'gms_downloads'],
+                    sync_title: '测试套件更新'
+                },
+                {
+                    icon: '📦',
+                    title: 'GMS包更新',
+                    description: '扫描并查看Android 14+ GMS包更新表格，默认全量扫描',
+                    url: 'https://172.16.14.233:5001/gms-update-monitor?tab=packages',
+                    action: 'gms-update-sync',
+                    builtin_id: 'gms-package-monitor',
+                    sync_sources: ['gms_downloads'],
+                    sync_title: 'GMS包更新'
+                },
+                {
+                    icon: '📋',
+                    title: 'GMS要求',
+                    description: '扫描GMS认证要求章节和表格更新，默认展示顶层主章节',
+                    url: '/gms-update-monitor?tab=requirements',
+                    action: 'gms-update-sync',
+                    builtin_id: 'gms-requirements-monitor',
+                    sync_sources: ['gms_requirements'],
+                    sync_title: 'GMS要求'
                 }
             ]
         };
+        const UT_OBSOLETE_BUILTIN_IDS = ['gms-update-monitor'];
         let ut_categorizedTools = {};
         let ut_categoryMeta = {};
         let ut_editingCategory = null;
@@ -3972,6 +4003,12 @@
 
         function ut_ensureBuiltInTools() {
             let changed = false;
+            Object.keys(ut_categorizedTools).forEach((category) => {
+                const before = ut_categorizedTools[category].length;
+                ut_categorizedTools[category] = ut_categorizedTools[category]
+                    .filter(tool => !UT_OBSOLETE_BUILTIN_IDS.includes(tool.builtin_id));
+                if (ut_categorizedTools[category].length !== before) changed = true;
+            });
             Object.entries(UT_BUILTIN_TOOLS).forEach(([category, tools]) => {
                 if (!ut_categorizedTools[category]) {
                     ut_categorizedTools[category] = [];
@@ -4007,27 +4044,55 @@
 
         async function ut_restoreSyncButtonState() {
             try {
-                const response = await fetch('/api/mainline-known-issues/sync/status');
-                const result = await response.json();
-                const status = result.status || {};
-                if (!status.running) return;
-                // 找到 sync 按钮并恢复为"扫描中"状态
-                const syncTool = ut_categorizedTools && Object.values(ut_categorizedTools)
-                    .flat().find(t => t.action === 'mainline-sync');
-                if (!syncTool) return;
-                // 在 DOM 中找到该按钮（按钮在卡片 actions 容器中）
-                const cards = document.querySelectorAll('#ut-grid .tool-card, #ut-grid [style*="cursor: pointer"]');
-                for (const card of cards) {
-                    const titleEl = card.querySelector('div[style*="font-weight: 600"]');
-                    if (titleEl && titleEl.textContent === syncTool.title) {
-                        const btn = card.querySelector('button');
-                        if (btn) {
-                            btn.disabled = true;
-                            btn.textContent = '扫描中';
-                            ut_mainlineSyncButton = btn;
-                            ut_pollMainlineKnownIssuesSync(btn, '触发扫描');
+                const checks = [
+                    {
+                        action: 'mainline-sync',
+                        url: '/api/mainline-known-issues/sync/status',
+                        parse: data => data.status || {},
+                        poll: (btn) => { ut_mainlineSyncButton = btn; ut_pollMainlineKnownIssuesSync(btn, '触发扫描'); }
+                    },
+                    {
+                        action: 'gms-update-sync',
+                        url: '/api/v1/gms-update-monitor/sync/status',
+                        parse: data => (data.data && data.data.status) || {},
+                        poll: (btn, tool) => {
+                            ut_gmsUpdateSyncButton = btn;
+                            ut_pollGmsUpdateMonitorSync(
+                                btn,
+                                '触发扫描',
+                                (tool && tool.sync_title) || 'GMS/CTS更新',
+                                (tool && tool.sync_sources) || []
+                            );
                         }
-                        break;
+                    }
+                ];
+                for (const check of checks) {
+                    const response = await fetch(check.url);
+                    const result = await response.json();
+                    const status = check.parse(result);
+                    if (!status.running) continue;
+                    const runningSources = Array.isArray(status.source) ? status.source : [];
+                    const syncTool = ut_categorizedTools && Object.values(ut_categorizedTools)
+                        .flat().find(t => {
+                            if (t.action !== check.action) return false;
+                            if (check.action !== 'gms-update-sync' || runningSources.length === 0) return true;
+                            const toolSources = Array.isArray(t.sync_sources) ? t.sync_sources : [];
+                            return toolSources.length === runningSources.length &&
+                                runningSources.every(source => toolSources.includes(source));
+                        });
+                    if (!syncTool) continue;
+                    const cards = document.querySelectorAll('#ut-grid .tool-card, #ut-grid [style*="cursor: pointer"]');
+                    for (const card of cards) {
+                        const titleEl = card.querySelector('div[style*="font-weight: 600"]');
+                        if (titleEl && titleEl.textContent === syncTool.title) {
+                            const btn = card.querySelector('button');
+                            if (btn) {
+                                btn.disabled = true;
+                                btn.textContent = '扫描中';
+                                check.poll(btn, syncTool);
+                            }
+                            break;
+                        }
                     }
                 }
             } catch (e) {
@@ -4160,20 +4225,24 @@
             card.appendChild(textWrap);
 
             const actions = document.createElement('div');
-            actions.style.cssText = 'display: flex; gap: 3px; width: 100%;';
+            actions.style.cssText = 'display: flex; gap: 3px; width: 100%; margin-top: auto;';
 
-            const isSyncTool = tool.action === 'mainline-sync';
+            const isSyncTool = tool.action === 'mainline-sync' || tool.action === 'gms-update-sync';
             // sync 工具显示触发按钮
             if (isSyncTool) {
                 const downloadBtn = document.createElement('button');
                 downloadBtn.textContent = '触发扫描';
-                downloadBtn.title = '扫描 Mainline release notes';
+                downloadBtn.title = tool.action === 'gms-update-sync' ? '扫描 GMS/CTS 更新' : '扫描 Mainline release notes';
                 downloadBtn.style.cssText = 'flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
                 downloadBtn.addEventListener('mouseenter', () => { downloadBtn.style.opacity = '0.8'; });
                 downloadBtn.addEventListener('mouseleave', () => { downloadBtn.style.opacity = '1'; });
                 downloadBtn.addEventListener('click', (event) => {
                     event.stopPropagation();
-                    ut_startMainlineKnownIssuesSync(downloadBtn);
+                    if (tool.action === 'gms-update-sync') {
+                        ut_startGmsUpdateMonitorSync(downloadBtn, tool);
+                    } else {
+                        ut_startMainlineKnownIssuesSync(downloadBtn);
+                    }
                 });
                 actions.appendChild(downloadBtn);
             }
@@ -4263,6 +4332,7 @@
         }
 
         let ut_mainlineSyncButton = null;
+        let ut_gmsUpdateSyncButton = null;
 
         async function ut_startMainlineKnownIssuesSync(button) {
             ut_mainlineSyncButton = button;
@@ -4363,6 +4433,212 @@
                 button.disabled = false;
                 button.textContent = originalText;
                 showToast('扫描状态查询失败: ' + error.message, 'error');
+            }
+        }
+
+        async function ut_startGmsUpdateMonitorSync(button, tool) {
+            ut_gmsUpdateSyncButton = button;
+            const syncTitle = (tool && tool.sync_title) || 'GMS/CTS更新';
+            const sources = (tool && Array.isArray(tool.sync_sources)) ? tool.sync_sources : [];
+            try {
+                const resp = await fetch('/api/v1/gms-update-monitor/sync/status');
+                const data = await resp.json();
+                const status = (data.data && data.data.status) || {};
+                if (status.running) {
+                    showToast('更新扫描正在进行中，请稍候', 'warning');
+                    return;
+                }
+                if (!status.db_exists) {
+                    const confirmed = await showConfirmDialog(
+                        '首次扫描提示',
+                        '首次使用将执行全量扫描，请确保本机浏览器已可正常访问 docs.partner.android.com。'
+                    );
+                    if (confirmed) {
+                        ut_confirmGmsUpdateMonitorSync('full', sources, syncTitle);
+                    }
+                    return;
+                }
+            } catch (e) {
+                // 查询失败时继续确认全量扫描
+            }
+            const confirmed = await showConfirmDialog(
+                syncTitle + '扫描',
+                '确定执行全量扫描吗？'
+            );
+            if (confirmed) {
+                ut_confirmGmsUpdateMonitorSync('full', sources, syncTitle);
+            }
+        }
+
+        async function ut_confirmGmsUpdateMonitorSync(mode, sources, syncTitle) {
+            const button = ut_gmsUpdateSyncButton;
+            if (!button) {
+                showToast('未找到扫描按钮，请刷新页面后重试', 'error');
+                return;
+            }
+            sources = Array.isArray(sources) ? sources : [];
+            syncTitle = syncTitle || 'GMS/CTS更新';
+            const modeText = mode === 'full' ? '全量扫描' : '增量扫描';
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = '扫描中';
+            try {
+                const params = new URLSearchParams({ mode });
+                sources.forEach(source => params.append('source', source));
+                const response = await fetch('/api/v1/gms-update-monitor/sync?' + params.toString(), { method: 'POST' });
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error || '启动扫描失败');
+                }
+                showToast(syncTitle + modeText + '已启动', 'info');
+                ut_pollGmsUpdateMonitorSync(button, originalText, syncTitle, sources);
+            } catch (error) {
+                button.disabled = false;
+                button.textContent = originalText;
+                showToast('启动扫描失败: ' + error.message, 'error');
+            }
+        }
+
+        async function ut_pollGmsUpdateMonitorSync(button, originalText, syncTitle, sources) {
+            syncTitle = syncTitle || 'GMS/CTS更新';
+            sources = Array.isArray(sources) ? sources : [];
+            try {
+                const response = await fetch('/api/v1/gms-update-monitor/sync/status');
+                const result = await response.json();
+                const status = (result.data && result.data.status) || {};
+                if (status.running) {
+                    setTimeout(() => ut_pollGmsUpdateMonitorSync(button, originalText, syncTitle, sources), 3000);
+                    return;
+                }
+                button.disabled = false;
+                button.textContent = originalText;
+                if (status.error) {
+                    showToast(syncTitle + '扫描失败: ' + status.error, 'error');
+                    if (typeof notifyOperationResult === 'function') {
+                        notifyOperationResult(syncTitle + '扫描失败', status.error, 'error', 'system');
+                    }
+                    return;
+                }
+                let duration = '';
+                if (status.started_at && status.finished_at) {
+                    const sec = Math.round((new Date(status.finished_at) - new Date(status.started_at)) / 1000);
+                    duration = sec >= 60 ? `耗时 ${Math.floor(sec / 60)}分${sec % 60}秒` : `耗时 ${sec}秒`;
+                }
+                showToast(syncTitle + '扫描完成' + (duration ? '，' + duration : ''), 'success');
+                if (typeof notifyOperationResult === 'function') {
+                    notifyOperationResult(syncTitle + '扫描完成', (status.stdout || '').trim() || '扫描完成', 'success', 'system');
+                }
+                if (syncTitle === '测试套件更新') {
+                    ut_promptNewSuiteDownloads(sources);
+                }
+            } catch (error) {
+                setTimeout(() => ut_pollGmsUpdateMonitorSync(button, originalText, syncTitle, sources), 5000);
+            }
+        }
+
+        async function ut_promptNewSuiteDownloads(sources) {
+            try {
+                const params = new URLSearchParams({ limit: '20' });
+                (Array.isArray(sources) ? sources : []).forEach(source => params.append('source_key', source));
+                const response = await fetch('/api/v1/gms-update-monitor/artifacts/new?' + params.toString());
+                const result = await response.json();
+                const items = result && result.data && Array.isArray(result.data.items) ? result.data.items : [];
+                if (!items.length) return;
+                const first = items[0];
+                const confirmed = await showConfirmDialog(
+                    '发现新测试套件',
+                    `本次扫描发现 ${items.length} 个新测试套件。是否跳转到“测试套件”页面并填入下载地址？`
+                );
+                if (!confirmed) return;
+                switchPage('test-suites');
+                setTimeout(() => {
+                    const input = document.getElementById('suite-download-url');
+                    if (input) {
+                        input.value = first.download_url || '';
+                        input.focus();
+                        input.select();
+                    }
+                    showToast('已填入最新套件下载地址，可点击“⬇️ 下载套件”开始下载', 'info');
+                }, 120);
+            } catch (error) {
+                console.warn('检查新增测试套件失败:', error);
+            }
+        }
+
+        async function downloadTestSuite() {
+            const input = document.getElementById('suite-download-url');
+            const url = input ? input.value.trim() : '';
+            if (!url) {
+                showToast('请输入测试套件下载地址', 'warning');
+                return;
+            }
+            const button = document.getElementById('btn-download-suite');
+            const progressWrap = document.getElementById('suite-download-progress');
+            const statusEl = document.getElementById('suite-progress-status');
+            const barEl = document.getElementById('suite-progress-bar');
+            const percentEl = document.getElementById('suite-progress-percent');
+            if (button) button.disabled = true;
+            if (progressWrap) progressWrap.style.display = 'block';
+            if (statusEl) statusEl.textContent = '准备下载...';
+            if (barEl) barEl.style.width = '0%';
+            if (percentEl) percentEl.textContent = '0%';
+            try {
+                const response = await fetch('/api/test/suites/download-url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error || result.message || '启动下载失败');
+                }
+                showToast(result.message || '下载任务已启动', 'success');
+                if (result.task_id) {
+                    pollTestSuiteDownload(result.task_id, button);
+                } else {
+                    if (statusEl) statusEl.textContent = result.message || '下载完成';
+                    if (barEl) barEl.style.width = '100%';
+                    if (percentEl) percentEl.textContent = '100%';
+                    if (button) button.disabled = false;
+                    if (typeof refreshTestSuiteBrowser === 'function') refreshTestSuiteBrowser();
+                }
+            } catch (error) {
+                if (button) button.disabled = false;
+                if (statusEl) statusEl.textContent = '下载失败';
+                showToast('下载套件失败: ' + error.message, 'error');
+            }
+        }
+
+        async function pollTestSuiteDownload(taskId, button) {
+            const statusEl = document.getElementById('suite-progress-status');
+            const barEl = document.getElementById('suite-progress-bar');
+            const percentEl = document.getElementById('suite-progress-percent');
+            try {
+                const response = await fetch('/api/test/suites/download-status/' + encodeURIComponent(taskId));
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error || '下载状态查询失败');
+                }
+                const task = result.task || {};
+                const progress = Math.max(0, Math.min(100, Number(task.progress || 0)));
+                if (statusEl) statusEl.textContent = task.message || task.status || '下载中...';
+                if (barEl) barEl.style.width = progress.toFixed(0) + '%';
+                if (percentEl) percentEl.textContent = progress.toFixed(0) + '%';
+                if (task.status === 'completed') {
+                    if (button) button.disabled = false;
+                    showToast('测试套件下载完成', 'success');
+                    if (typeof refreshTestSuiteBrowser === 'function') refreshTestSuiteBrowser();
+                    return;
+                }
+                if (task.status === 'error') {
+                    if (button) button.disabled = false;
+                    showToast('测试套件下载失败: ' + (task.error || '未知错误'), 'error');
+                    return;
+                }
+                setTimeout(() => pollTestSuiteDownload(taskId, button), 1500);
+            } catch (error) {
+                if (button) button.disabled = false;
+                showToast('下载状态查询失败: ' + error.message, 'error');
             }
         }
 
