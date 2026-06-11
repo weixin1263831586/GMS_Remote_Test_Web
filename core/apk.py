@@ -207,8 +207,10 @@ async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
             JADX_PATH,
             '-d', output_dir,
             '-j', str(jadx_threads),
+            '-m', 'simple',
             '--log-level', 'error',
-            '--show-bad-code',
+            '--no-debug-info',
+            '--comments-level', 'none',
             '-Pdex-input.verify-checksum=no',
             apk_path
         ]

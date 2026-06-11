@@ -30,7 +30,6 @@ from core.terminal import (
     handle_terminal_resize,
     close_terminal_session_resources,
 )
-from starlette.websockets import WebSocketState
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -184,6 +183,54 @@ async def proxy_gms_assistant_public(path: str, request: Request):
 )
 async def proxy_gms_assistant_assets(path: str, request: Request):
     return await _proxy_gms_assistant_path(f"assets/{path}", request)
+
+
+@router.api_route(
+    "/@vite/{path:path}",
+    methods=["GET"],
+)
+async def proxy_gms_assistant_vite(path: str, request: Request):
+    return await _proxy_gms_assistant_path(f"@vite/{path}", request)
+
+
+@router.api_route(
+    "/@react-refresh",
+    methods=["GET"],
+)
+async def proxy_gms_assistant_react_refresh(request: Request):
+    return await _proxy_gms_assistant_path("@react-refresh", request)
+
+
+@router.api_route(
+    "/src/{path:path}",
+    methods=["GET"],
+)
+async def proxy_gms_assistant_src(path: str, request: Request):
+    return await _proxy_gms_assistant_path(f"src/{path}", request)
+
+
+@router.api_route(
+    "/node_modules/{path:path}",
+    methods=["GET"],
+)
+async def proxy_gms_assistant_node_modules(path: str, request: Request):
+    return await _proxy_gms_assistant_path(f"node_modules/{path}", request)
+
+
+@router.api_route(
+    "/@id/{path:path}",
+    methods=["GET"],
+)
+async def proxy_gms_assistant_vite_id(path: str, request: Request):
+    return await _proxy_gms_assistant_path(f"@id/{path}", request)
+
+
+@router.api_route(
+    "/@fs/{path:path}",
+    methods=["GET"],
+)
+async def proxy_gms_assistant_vite_fs(path: str, request: Request):
+    return await _proxy_gms_assistant_path(f"@fs/{path}", request)
 
 
 @router.api_route(

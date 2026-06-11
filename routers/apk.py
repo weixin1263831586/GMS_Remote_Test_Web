@@ -300,6 +300,38 @@ async def get_apk_source(task_id: str, path: str = "", view: bool = False):
         return ApiResponse.success({"items": items, "path": path, "total": len(items)})
 
 
+@router.get("/api/apk/search/{task_id}")
+@handle_api_errors
+async def search_apk_source_files(task_id: str, q: str, limit: int = 20):
+    """Search decompiled source files by filename without loading the full tree in the browser."""
+    task, err = _get_apk_task(task_id)
+    if err:
+        return err
+
+    query = (q or "").strip().lower()
+    if len(query) < 2:
+        return ApiResponse.success({"items": [], "total": 0})
+
+    limit = max(1, min(limit, 50))
+    sources_dir = _safe_join(task.get("output_dir", ""), "sources")
+    if not os.path.exists(sources_dir):
+        return ApiResponse.error("Source directory not found", status_code=404)
+
+    matches = []
+    for root, _dirnames, filenames in os.walk(sources_dir):
+        for name in filenames:
+            if query not in name.lower():
+                continue
+            path = os.path.relpath(os.path.join(root, name), sources_dir)
+            matches.append({"path": path, "name": name})
+            if len(matches) >= limit:
+                break
+        if len(matches) >= limit:
+            break
+
+    return ApiResponse.success({"items": matches, "total": len(matches), "limited": len(matches) >= limit})
+
+
 @router.get("/api/apk/definition/{task_id}")
 @handle_api_errors
 async def find_apk_symbol_definition(task_id: str, symbol: str, path: str = "", line: int = 0):

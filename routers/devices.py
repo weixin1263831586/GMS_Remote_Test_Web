@@ -8,7 +8,7 @@ import time
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, Body
 from fastapi.responses import JSONResponse
@@ -18,7 +18,6 @@ from core.ssh import ssh_manager
 from core.devices import device_manager
 from core.devices import (
     SSHConnection,
-    DeviceSSHConnection,
     get_or_create_user_state,
     get_device_properties_optimized,
     release_device_locks,
@@ -33,7 +32,7 @@ from core.schemas import DeviceActionRequest, DeviceLockRequest, DeviceShellRequ
 from core.enums import VerifiedBootState
 from core.state import global_state
 from core.clients import get_client_id_from_request, get_client_ip, parse_client_id
-from core.notifications import store_notification, safe_websocket_send as _ws_send
+from core.notifications import store_notification
 from modules.device_lock_manager import device_lock_manager
 from modules.client_manager import client_manager
 from core.test_suite_utils import get_default_suites_path

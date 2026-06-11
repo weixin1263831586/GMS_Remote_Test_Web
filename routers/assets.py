@@ -1,21 +1,29 @@
 """Assets router - file listing, favicon, and user tools APIs."""
 
 import html
+import json
 import logging
+import mimetypes
+import os
 import re
 import urllib.parse
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import aiohttp
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
 
-from core.api_response import error_response
+from core.api_response import error_response, success_response
+from core.clients import get_client_id_from_request
 from core.config import config_manager
 from core.devices import ssh_connection_failed_response
 from core.error_handling import handle_api_errors
+from core.settings import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, TOOLS_DATA_FILE
 from core.ssh import ssh_manager
 from core.state import global_state
+from modules.icon_fetcher import IconFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -204,20 +212,6 @@ async def search_opengrok(req: dict):
         'count': len(results),
         'warning': fetch_error,
     })
-import logging
-import mimetypes
-import os
-
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
-
-from core.api_response import error_response, success_response
-from core.settings import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE
-from core.error_handling import handle_api_errors
-from modules.icon_fetcher import IconFetcher
-
-logger = logging.getLogger(__name__)
-
 
 
 @router.get("/api/favicon/fetch")
@@ -353,21 +347,6 @@ async def batch_fetch_favicons(request: Request):
         })
     finally:
         await fetcher.close()
-import json
-import logging
-import os
-from datetime import datetime
-
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
-
-from core.api_response import error_response
-from core.clients import get_client_id_from_request
-from core.settings import TOOLS_DATA_FILE
-from core.error_handling import handle_api_errors
-
-logger = logging.getLogger(__name__)
-
 
 
 def load_tools_data():
@@ -549,8 +528,6 @@ async def sync_user_tools(request: Request):
 
 
 # ==================== 常用工具 (Utility Tools) ====================
-
-from pathlib import Path
 
 UTILITY_TOOLS_DIR = Path(__file__).resolve().parent.parent / "tools"
 UTILITY_TOOL_MANIFEST = {

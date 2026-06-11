@@ -139,28 +139,3 @@ class BaseSSHService:
         if data is not None:
             result['data'] = data
         return result
-
-    def safe_execute(
-        self,
-        func,
-        *args,
-        error_message: str = '操作失败',
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        安全执行函数，自动捕获异常
-
-        Args:
-            func: 要执行的函数
-            *args: 函数参数
-            error_message: 错误消息前缀
-            **kwargs: 函数关键字参数
-
-        Returns:
-            结果字典
-        """
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            logger.error(f"{error_message}: {e}")
-            return self.create_error_result(f"{error_message}: {str(e)}")

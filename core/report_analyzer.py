@@ -765,7 +765,7 @@ class ReportFileHandler:
                 self._extract_zip(archive_path)
             elif archive_path.endswith(('.tar.gz', '.tgz', '.tar.bz2', '.tar')):
                 self._extract_tar(archive_path)
-            elif archive_path.endswith('.rar'):
+            elif archive_path.endswith(('.rar', '.7z')):
                 self._extract_7z(archive_path)
             else:
                 logger.warning(f"不支持的压缩格式: {archive_path}")
@@ -875,7 +875,7 @@ class ReportAnalyzer:
         try:
             if lower_path.endswith('.zip'):
                 return self._analyze_zip_archive(archive_path)
-            if lower_path.endswith('.rar'):
+            if lower_path.endswith(('.rar', '.7z')):
                 return self._analyze_7z_archive(archive_path)
             return self._analyze_tar_archive(archive_path)
         except Exception as e:
@@ -925,6 +925,8 @@ class ReportAnalyzer:
                 current_is_file = True
             elif line == 'Folder = +':
                 current_is_file = False
+            elif line.startswith('Attributes = '):
+                current_is_file = not line.split(' = ', 1)[1].startswith('D')
             elif not line and current_path:
                 if current_is_file:
                     members.append(current_path)

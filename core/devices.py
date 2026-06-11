@@ -1,15 +1,24 @@
 """
 设备管理 - 核心业务逻辑
 """
+import asyncio
 import logging
 import re
 import subprocess
 import time
-from typing import List, Dict, Any
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
+
+from fastapi import HTTPException
+from fastapi.responses import JSONResponse
+
 from .ssh import ssh_manager
 from .config import config_manager
 from .device_utils import DeviceUtils
 from .common_utils import CommonUtils
+from .notifications import safe_websocket_send, store_notification
+from .state import global_state
+from modules.device_lock_manager import device_lock_manager
 
 logger = logging.getLogger(__name__)
 
@@ -323,20 +332,6 @@ device_manager = DeviceManager()
 
 
 # ==================== Device route/service helpers ====================
-
-"""设备管理辅助函数 - 广播、锁管理、并行执行"""
-import asyncio
-import logging
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
-
-from fastapi import HTTPException
-from fastapi.responses import JSONResponse
-from core.notifications import safe_websocket_send, store_notification
-from core.state import global_state
-from modules.device_lock_manager import device_lock_manager
-
-logger = logging.getLogger(__name__)
 
 
 

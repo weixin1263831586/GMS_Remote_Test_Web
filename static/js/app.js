@@ -5837,6 +5837,7 @@ function extractRedmineDropContext(dataTransfer, url) {
 }
 
 async function handleRedmineAttachment(url, context = {}) {
+    const originalUrl = url;
     const uploadZone = $('report-upload-zone');
     const content = uploadZone?.querySelector('.report-upload-content');
     const progress = $('report-upload-progress');
@@ -5907,7 +5908,9 @@ async function handleRedmineAttachment(url, context = {}) {
 
                     if (extractResult.success && extractResult.attachment_url) {
                         showToast(`📎 找到附件: ${extractResult.filename || '未知'}`, 'info');
-                        // 不替换URL，保持原始问题页面URL用于报告命名
+                        url = extractResult.attachment_url;
+                        context.source_issue_id = context.source_issue_id || issueMatch[1];
+                        context.source_issue_url = context.source_issue_url || originalUrl;
                         debugLog('[Report Analysis] Found attachment:', extractResult.filename);
                     } else {
                         throw new Error(extractResult.error || '无法提取附件');
@@ -6251,7 +6254,7 @@ function postFormDataWithProgress(url, formData, onProgress) {
                 return;
             }
 
-            reject(new Error(result.error || result.detail || `HTTP ${xhr.status}`));
+            reject(new Error(result.message || result.error || result.detail || `HTTP ${xhr.status}`));
         });
 
         xhr.addEventListener('error', () => reject(new Error('网络错误')));
@@ -8498,6 +8501,8 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
     const modalId = 'redmine-reply-modal-' + Date.now();
     const issueInputId = `${modalId}-issue-id`;
     const replyTextId = `${modalId}-reply-text`;
+    const fileInputId = `${modalId}-files`;
+    const fileListId = `${modalId}-file-list`;
     const modal = document.createElement('div');
     modal.id = modalId;
     modal.className = 'modal';
@@ -8527,8 +8532,20 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
                 </div>
                 <div style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">回复内容</label>
-                    <textarea id="${replyTextId}" data-redmine-reply-text rows="12" placeholder="输入回复内容..."
+                    <textarea id="${replyTextId}" data-redmine-reply-text rows="10" placeholder="输入回复内容..."
                               style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 13px; font-family: 'Courier New', monospace; white-space: pre-wrap; resize: vertical;">${defaultReply}</textarea>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">📎 附件</label>
+                    <input type="file" id="${fileInputId}" data-redmine-files multiple
+                           style="display: none;"
+                           onchange="updateRedmineFileList('${fileInputId}', '${fileListId}')">
+                    <div id="${fileInputId}-drop" class="redmine-drop-zone" data-redmine-drop
+                         onclick="document.getElementById('${fileInputId}').click()"
+                         style="padding: 20px 14px; background: var(--secondary-bg); color: var(--text-muted); border: 2px dashed var(--border-color); border-radius: 6px; cursor: pointer; font-size: 12px; width: 100%; text-align: center; transition: all 0.2s; user-select: none;">
+                        📎 拖拽文件到此处，或点击选择文件
+                    </div>
+                    <div id="${fileListId}" style="margin-top: 8px;"></div>
                 </div>
                 <div style="display: flex; gap: 10px; justify-content: flex-end;">
                     <button onclick="ModalManager.close('${modalId}')"
@@ -8542,6 +8559,51 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
 
     document.body.appendChild(modal);
     ModalManager.open(modalId);
+
+    // 绑定拖拽事件
+    const dropZone = document.getElementById(`${fileInputId}-drop`);
+    if (dropZone) {
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('drag-over'); });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            dropZone.classList.remove('drag-over');
+            if (!e.dataTransfer?.files?.length) return;
+            const input = document.getElementById(fileInputId);
+            const dt = new DataTransfer();
+            if (input.files) { for (const f of input.files) dt.items.add(f); }
+            for (const f of e.dataTransfer.files) dt.items.add(f);
+            input.files = dt.files;
+            updateRedmineFileList(fileInputId, fileListId);
+        });
+    }
+}
+
+function updateRedmineFileList(fileInputId, fileListId) {
+    const input = document.getElementById(fileInputId);
+    const container = document.getElementById(fileListId);
+    if (!input || !container) return;
+    const files = input.files;
+    if (!files || !files.length) { container.innerHTML = ''; return; }
+    container.innerHTML = Array.from(files).map((f, i) => {
+        const size = f.size >= 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' : (f.size / 1024).toFixed(0) + ' KB';
+        return `<div class="redmine-file-item">
+            <span class="redmine-file-name">📎 ${escapeHtml(f.name)} <span class="redmine-file-size">(${size})</span></span>
+            <span class="redmine-file-remove" onclick="removeRedmineFile('${fileInputId}', '${fileListId}', ${i})">✕</span>
+        </div>`;
+    }).join('');
+}
+
+function removeRedmineFile(fileInputId, fileListId, index) {
+    const input = document.getElementById(fileInputId);
+    if (!input) return;
+    const dt = new DataTransfer();
+    const files = input.files;
+    for (let i = 0; i < files.length; i++) {
+        if (i !== index) dt.items.add(files[i]);
+    }
+    input.files = dt.files;
+    updateRedmineFileList(fileInputId, fileListId);
 }
 
 // 确认并发送 Redmine 回复
@@ -8549,6 +8611,7 @@ async function confirmAndSendRedmineReply(modalId) {
     const modal = document.getElementById(modalId);
     const issueId = modal?.querySelector('[data-redmine-issue-input]')?.value?.trim();
     const replyText = modal?.querySelector('[data-redmine-reply-text]')?.value?.trim();
+    const fileInput = modal?.querySelector('[data-redmine-files]');
 
     if (!issueId) {
         showToast('❌ 请输入 Redmine Issue ID', 'error');
@@ -8560,25 +8623,34 @@ async function confirmAndSendRedmineReply(modalId) {
         return;
     }
 
+    const files = fileInput?.files;
+    const hasFiles = files && files.length > 0;
+
     // 立即关闭弹窗，提升响应速度
     ModalManager.close(modalId);
-    showToast('📤 正在发送回复...', 'info');
+    const attachHint = hasFiles ? `（含 ${files.length} 个附件）` : '';
+    showToast('📤 正在发送回复' + attachHint + '...', 'info');
+
+    // 构建 FormData
+    const formData = new FormData();
+    formData.append('issue_id', issueId);
+    formData.append('reply_text', replyText);
+    if (hasFiles) {
+        for (const f of files) {
+            formData.append('files', f);
+        }
+    }
 
     // 异步发送请求，不阻塞 UI
     fetch('/api/redmine/reply', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            issue_id: issueId,
-            reply_text: replyText
-        })
+        body: formData
     })
     .then(response => response.json())
     .then(result => {
         if (result.success) {
-            showToast(`✅ 回复已成功发送到 Redmine #${issueId}`, 'success');
+            const attachMsg = result.attachments ? `，携带 ${result.attachments} 个附件` : '';
+            showToast(`✅ 回复已成功发送到 Redmine #${issueId}${attachMsg}`, 'success');
             // 可选：打开 Redmine 页面查看
             setTimeout(() => {
                 window.open(`https://redmine.rock-chips.com/issues/${issueId}`, '_blank');
@@ -9794,6 +9866,7 @@ async function loadApkSourceTree(path = '') {
 }
 
 function renderApkSourceItems(items, container, parentPath) {
+    const fragment = document.createDocumentFragment();
     items.forEach(item => {
         const itemDiv = document.createElement('div');
 
@@ -9829,8 +9902,9 @@ function renderApkSourceItems(items, container, parentPath) {
             itemDiv.appendChild(itemHeader);
         }
 
-        container.appendChild(itemDiv);
+        fragment.appendChild(itemDiv);
     });
+    container.appendChild(fragment);
 }
 
 function getApkFileLabel(filePath) {
@@ -9924,37 +9998,46 @@ async function viewApkFile(filePath) {
     return viewApkFileAt(filePath, null);
 }
 
+// Java syntax highlighting constants (shared across renderApkCodeContent calls)
+const JAVA_KEYWORDS = new Set([
+    'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char', 'class',
+    'const', 'continue', 'default', 'do', 'double', 'else', 'enum', 'extends', 'final',
+    'finally', 'float', 'for', 'goto', 'if', 'implements', 'import', 'instanceof', 'int',
+    'interface', 'long', 'native', 'new', 'package', 'private', 'protected', 'public',
+    'return', 'short', 'static', 'strictfp', 'super', 'switch', 'synchronized', 'this',
+    'throw', 'throws', 'transient', 'try', 'void', 'volatile', 'while', 'true', 'false',
+    'null'
+]);
+const JAVA_IDENTIFIER_RE = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+
 function renderApkCodeContent(content, filePath) {
-    const javaKeywords = new Set([
-        'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char', 'class',
-        'const', 'continue', 'default', 'do', 'double', 'else', 'enum', 'extends', 'final',
-        'finally', 'float', 'for', 'goto', 'if', 'implements', 'import', 'instanceof', 'int',
-        'interface', 'long', 'native', 'new', 'package', 'private', 'protected', 'public',
-        'return', 'short', 'static', 'strictfp', 'super', 'switch', 'synchronized', 'this',
-        'throw', 'throws', 'transient', 'try', 'void', 'volatile', 'while', 'true', 'false',
-        'null'
-    ]);
-    const identifierRe = /[A-Za-z_$][A-Za-z0-9_$]*/g;
-    const lines = String(content || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    const source = String(content || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lightMode = source.length > 300000;
+    const lines = source.split('\n');
 
     return lines.map((line, index) => {
-        let html = '';
-        let lastIndex = 0;
-        identifierRe.lastIndex = 0;
-        let match;
-        while ((match = identifierRe.exec(line)) !== null) {
-            html += escapeHtml(line.slice(lastIndex, match.index));
-            const token = match[0];
-            if (javaKeywords.has(token)) {
-                html += `<span class="apk-code-keyword">${escapeHtml(token)}</span>`;
-            } else {
-                html += `<span class="apk-code-symbol" data-symbol="${escapeHtml(token)}">${escapeHtml(token)}</span>`;
-            }
-            lastIndex = match.index + token.length;
-        }
-        html += escapeHtml(line.slice(lastIndex));
-
         const lineNo = index + 1;
+        let html;
+        if (lightMode) {
+            html = escapeHtml(line);
+        } else {
+            html = '';
+            let lastIndex = 0;
+            JAVA_IDENTIFIER_RE.lastIndex = 0;
+            let match;
+            while ((match = JAVA_IDENTIFIER_RE.exec(line)) !== null) {
+                html += escapeHtml(line.slice(lastIndex, match.index));
+                const token = match[0];
+                if (JAVA_KEYWORDS.has(token)) {
+                    html += `<span class="apk-code-keyword">${escapeHtml(token)}</span>`;
+                } else {
+                    html += `<span class="apk-code-symbol" data-symbol="${escapeHtml(token)}">${escapeHtml(token)}</span>`;
+                }
+                lastIndex = match.index + token.length;
+            }
+            html += escapeHtml(line.slice(lastIndex));
+        }
+
         return `<div class="apk-code-line" id="apk-code-line-${lineNo}" data-line="${lineNo}">
             <span class="apk-code-line-no">${lineNo}</span><span class="apk-code-text">${html || ' '}</span>
         </div>`;
@@ -10100,7 +10183,7 @@ function resetApkAnalysis() {
     window.apkCurrentTaskId = null;
     window.apkNotifiedTaskId = null;
     window.apkPendingOpenTarget = null;
-    resetApkFileIndex();
+    window.apkLastSearchMatches = [];
 
     setApkUploadEmpty(true);
     $('apk-analysis-status').style.display = 'none';
@@ -10397,81 +10480,6 @@ window.exportSecurityAudit = exportSecurityAudit;
 // ==================== APK 文件搜索功能 ====================
 
 let apkSearchDebounceTimer = null;
-let apkFileIndex = new Map(); // 惰性缓存：path -> { name, type, children? }
-let apkIndexBuilt = false; // 索引是否已构建
-let apkIndexBuilding = false; // 是否正在构建索引
-
-function buildApkFileIndex(items, parentPath) {
-    // 缓存当前加载的目录层
-    for (const item of items) {
-        apkFileIndex.set(item.path, {
-            name: item.name,
-            type: item.type,
-            children: item.children?.map(c => c.path) || []
-        });
-    }
-}
-
-async function buildFullApkIndex() {
-    // 构建完整索引（首次搜索时调用）
-    if (apkIndexBuilt || apkIndexBuilding) return;
-    apkIndexBuilding = true;
-
-    try {
-        const rootData = await apiCall(`/api/apk/source/${window.apkCurrentTaskId}?path=`);
-        if (rootData.success && rootData.data.items) {
-            buildApkFileIndex(rootData.data.items, '');
-            // 递归缓存所有子目录（不管 children 是否有数据）
-            for (const item of rootData.data.items) {
-                if (item.type === 'dir') {
-                    await cacheApkDirectory(item.path);
-                }
-            }
-        }
-    } catch (e) {
-        console.error('[APK Index] Build failed:', e);
-    } finally {
-        apkIndexBuilding = false;
-        apkIndexBuilt = true;
-    }
-}
-
-async function cacheApkDirectory(path) {
-    // 递归缓存单个目录
-    try {
-        const data = await apiCall(`/api/apk/source/${window.apkCurrentTaskId}?path=${encodeURIComponent(path)}`);
-        if (data.success && data.data.items) {
-            buildApkFileIndex(data.data.items, path);
-            // 继续缓存子目录（不管 children 是否有数据）
-            for (const item of data.data.items) {
-                if (item.type === 'dir') {
-                    await cacheApkDirectory(item.path);
-                }
-            }
-        }
-    } catch (e) {
-        console.error('[APK Index] Cache dir failed:', path, e);
-    }
-}
-
-function resetApkFileIndex() {
-    apkFileIndex.clear();
-    apkIndexBuilt = false;
-    apkIndexBuilding = false;
-}
-
-function getApkFilesByQuery(query) {
-    // 惰性搜索：遍历索引找到匹配的文件
-    const matches = [];
-    const lowerQuery = query.toLowerCase();
-    for (const [path, info] of apkFileIndex) {
-        if (info.type === 'file' && info.name.toLowerCase().includes(lowerQuery)) {
-            matches.push({ path, name: info.name });
-            if (matches.length >= 20) break; // 提前退出
-        }
-    }
-    return matches;
-}
 
 async function filterApkFiles() {
     const query = $('apk-file-search')?.value?.toLowerCase() || '';
@@ -10482,30 +10490,16 @@ async function filterApkFiles() {
         return;
     }
 
-    // 首次搜索时构建完整索引，并切换到源码预览标签
-    if (!apkIndexBuilt && !apkIndexBuilding) {
-        // 自动切换到源码预览标签
-        if (typeof switchApkTab === 'function') {
-            switchApkTab('source');
+    let matches = [];
+    if (window.apkCurrentTaskId) {
+        try {
+            const data = await apiCall(`/api/apk/search/${window.apkCurrentTaskId}?q=${encodeURIComponent(query)}&limit=20`);
+            matches = data.success ? (data.data.items || []) : [];
+        } catch (e) {
+            debugLog('[APK Search] backend search failed:', e.message);
         }
-        showToast('正在构建文件索引...', 'info');
-        await buildFullApkIndex();
     }
-
-    // 等待索引构建完成
-    if (apkIndexBuilding) {
-        await new Promise(resolve => {
-            const check = setInterval(() => {
-                if (!apkIndexBuilding) {
-                    clearInterval(check);
-                    resolve();
-                }
-            }, 100);
-        });
-    }
-
-    // 过滤匹配的文件（最多 20 项）
-    const matches = getApkFilesByQuery(query);
+    window.apkLastSearchMatches = matches;
 
     if (!resultsEl || matches.length === 0) {
         if (resultsEl) resultsEl.style.display = 'none';
@@ -10518,7 +10512,7 @@ async function filterApkFiles() {
         const item = document.createElement('div');
         item.className = 'apk-search-result-item';
         item.onclick = () => jumpToApkFile(file.path);
-        item.innerHTML = `<span style="font-family: monospace;">${escapeHtml(file.name)}</span><span style="color: var(--text-secondary); font-size: 11px; margin-left: 8px;">${escapeHtml(file.path)}</span>`;
+        item.innerHTML = `<span class="apk-search-result-name">${escapeHtml(file.name)}</span><span class="apk-search-result-path">${escapeHtml(file.path)}</span>`;
         resultsEl.appendChild(item);
     }
     resultsEl.style.display = 'block';
@@ -10529,7 +10523,7 @@ async function filterApkFiles() {
         const rect = searchEl.getBoundingClientRect();
         resultsEl.style.position = 'absolute';
         resultsEl.style.top = (rect.bottom + window.scrollY) + 'px';
-        resultsEl.style.left = (rect.left + window.scrollY) + 'px';
+        resultsEl.style.left = (rect.left + window.scrollX) + 'px';
         resultsEl.style.width = rect.width + 'px';
     }
 }
@@ -10544,7 +10538,7 @@ function jumpToApkFile(selectedPath) {
     // 如果没有指定路径，从搜索结果或缓存中查找
     let path = selectedPath;
     if (!path && query) {
-        const matches = getApkFilesByQuery(query);
+        const matches = window.apkLastSearchMatches || [];
         if (matches.length > 0) {
             path = matches[0].path;
         }

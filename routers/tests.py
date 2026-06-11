@@ -13,7 +13,7 @@ import logging
 import subprocess
 from datetime import datetime
 from collections import deque
-from typing import Dict, Any, List, Optional, Union, Tuple
+from typing import Dict, Any, List, Optional, Union
 
 from fastapi import APIRouter, HTTPException, Query, Request, Body, UploadFile, File, Form
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse, FileResponse
@@ -71,12 +71,11 @@ from core.state import global_state
 from core.reports import save_test_report_to_db
 from core.api_response import ApiResponse, success_response, error_response
 from core.clients import get_client_id_from_request, parse_client_id
-from core.notifications import store_notification, safe_websocket_send as _ws_send
+from core.notifications import store_notification
 from core.settings import (
     APK_MAX_FILE_SIZE,
     APK_MAX_SOURCE_FILE_SIZE,
     APK_UPLOAD_DIR,
-    CLEANUP_INTERVAL_SECONDS,
     MAX_LOG_ENTRIES,
     PROJECT_ROOT,
 )

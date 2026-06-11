@@ -3711,6 +3711,48 @@ body.apk-resizing {
     border-bottom: none;
 }
 
+.apk-search-result-name {
+    font-family: monospace;
+}
+
+.apk-search-result-path {
+    color: var(--text-secondary);
+    font-size: 11px;
+    margin-left: 8px;
+}
+
+/* Redmine 附件文件列表 */
+.redmine-file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.redmine-file-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.redmine-file-size {
+    color: var(--text-muted);
+}
+
+.redmine-file-remove {
+    cursor: pointer;
+    color: var(--danger-color);
+    font-size: 14px;
+}
+
+.redmine-drop-zone.drag-over {
+    border-color: var(--primary-color, #3b82f6);
+    background: rgba(59, 130, 246, 0.08);
+}
+
 /* APK 搜索输入框 */
 .apk-search-input {
     width: 800px;
