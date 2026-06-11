@@ -4053,7 +4053,7 @@
                     },
                     {
                         action: 'gms-update-sync',
-                        url: '/api/v1/gms-update-monitor/sync/status',
+                        url: '/api/gms-update-monitor/sync/status',
                         parse: data => (data.data && data.data.status) || {},
                         poll: (btn, tool) => {
                             ut_gmsUpdateSyncButton = btn;
@@ -4441,7 +4441,7 @@
             const syncTitle = (tool && tool.sync_title) || 'GMS/CTS更新';
             const sources = (tool && Array.isArray(tool.sync_sources)) ? tool.sync_sources : [];
             try {
-                const resp = await fetch('/api/v1/gms-update-monitor/sync/status');
+                const resp = await fetch('/api/gms-update-monitor/sync/status');
                 const data = await resp.json();
                 const status = (data.data && data.data.status) || {};
                 if (status.running) {
@@ -4485,7 +4485,7 @@
             try {
                 const params = new URLSearchParams({ mode });
                 sources.forEach(source => params.append('source', source));
-                const response = await fetch('/api/v1/gms-update-monitor/sync?' + params.toString(), { method: 'POST' });
+                const response = await fetch('/api/gms-update-monitor/sync?' + params.toString(), { method: 'POST' });
                 const result = await response.json();
                 if (!response.ok || !result.success) {
                     throw new Error(result.error || '启动扫描失败');
@@ -4503,7 +4503,7 @@
             syncTitle = syncTitle || 'GMS/CTS更新';
             sources = Array.isArray(sources) ? sources : [];
             try {
-                const response = await fetch('/api/v1/gms-update-monitor/sync/status');
+                const response = await fetch('/api/gms-update-monitor/sync/status');
                 const result = await response.json();
                 const status = (result.data && result.data.status) || {};
                 if (status.running) {
@@ -4540,7 +4540,7 @@
             try {
                 const params = new URLSearchParams({ limit: '20' });
                 (Array.isArray(sources) ? sources : []).forEach(source => params.append('source_key', source));
-                const response = await fetch('/api/v1/gms-update-monitor/artifacts/new?' + params.toString());
+                const response = await fetch('/api/gms-update-monitor/artifacts/new?' + params.toString());
                 const result = await response.json();
                 const items = result && result.data && Array.isArray(result.data.items) ? result.data.items : [];
                 if (!items.length) return;

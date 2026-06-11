@@ -12,8 +12,6 @@ import time
 from typing import Tuple, Optional, Dict, Any
 from urllib.parse import urlparse
 
-from .config import get_ubuntu_user
-
 logger = logging.getLogger(__name__)
 
 # Pre-compiled regex for stripping ANSI escape sequences (CSI, OSC, and other VT100 codes)
@@ -164,26 +162,6 @@ class CommonUtils:
         return url
 
     @classmethod
-    def validate_url(cls, url: str) -> bool:
-        """
-        验证URL格式是否有效
-
-        Args:
-            url: 待验证的URL
-
-        Returns:
-            URL是否有效
-        """
-        if not url:
-            return False
-
-        try:
-            result = urlparse(url)
-            return all([result.scheme, result.netloc]) and result.scheme in ['http', 'https']
-        except Exception:
-            return False
-
-    @classmethod
     def parse_host_address(cls, host: str) -> Tuple[Optional[str], str]:
         """
         解析主机地址
@@ -276,50 +254,6 @@ class CommonUtils:
             标准错误结果字典
         """
         return cls.create_result_dict(False, '', error, data)
-
-    @staticmethod
-    def sanitize_path(path: str, default_user: str = None) -> str:
-        """
-        清理路径中的占位符
-
-        Args:
-            path: 包含占位符的路径（如 ${ubuntu_user}）
-            default_user: 默认用户名
-
-        Returns:
-            替换后的路径
-        """
-        if '${ubuntu_user}' in path:
-            if default_user is None:
-                default_user = get_ubuntu_user()
-            return path.replace('${ubuntu_user}', default_user)
-        return path
-
-    @staticmethod
-    def format_command_output(
-        stdout: str,
-        stderr: str = '',
-        exit_code: int = 0
-    ) -> str:
-        """
-        格式化命令输出
-
-        Args:
-            stdout: 标准输出
-            stderr: 标准错误
-            exit_code: 退出码
-
-        Returns:
-            格式化后的输出字符串
-        """
-        output = []
-        if stdout:
-            output.append(f"STDOUT:\n{stdout}")
-        if stderr:
-            output.append(f"STDERR:\n{stderr}")
-        if exit_code != 0:
-            output.append(f"Exit Code: {exit_code}")
-        return '\n'.join(output) if output else '(no output)'
 
     @staticmethod
     def extract_ip_from_host(host: str) -> str:

@@ -13,7 +13,6 @@ from fastapi.responses import JSONResponse, Response
 from core.api_response import error_response, success_response
 from core.common_utils import CommonUtils
 from core.config import config_manager
-from core.error_handling import handle_api_errors
 from core.schemas import VNCStartRequest
 from core.ssh import ssh_manager
 from core.vnc import calculate_window_positions, vnc_manager

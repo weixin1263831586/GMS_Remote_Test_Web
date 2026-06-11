@@ -125,26 +125,6 @@ class DeviceUtils:
         return {'x_offset': x_offset, 'y_offset': y_offset}
 
     @staticmethod
-    def check_process_running(ssh, process_pattern: str) -> bool:
-        """
-        检查进程是否运行
-
-        Args:
-            ssh: SSH连接对象
-            process_pattern: 进程匹配模式
-
-        Returns:
-            进程是否在运行
-        """
-        try:
-            stdout, _, code = ssh.exec_command(f"pgrep -f '{process_pattern}'")
-            output = stdout.read().decode('utf-8', errors='ignore').strip()
-            return bool(output) and code == 0
-        except Exception as e:
-            logger.error(f"Error checking process: {e}")
-            return False
-
-    @staticmethod
     def kill_process(ssh, process_pattern: str) -> bool:
         """
         终止进程

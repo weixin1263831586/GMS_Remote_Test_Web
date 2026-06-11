@@ -30,6 +30,7 @@ ALL_ROUTERS = [
     devices.router,
     firmware.router,
     gms_update_monitor.router,
+    gms_update_monitor.page_router,
     integrations.router,
     mainline_known_issues.router,
     notifications.router,

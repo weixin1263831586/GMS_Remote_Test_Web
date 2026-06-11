@@ -6,13 +6,14 @@ import json
 import shutil
 import asyncio
 import logging
+import tarfile
 import tempfile
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form, Body
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse
 
 from core.config import config_manager
 from core.ssh import ssh_manager
@@ -23,13 +24,12 @@ from core.redmine_utils import (
     COMPILED_REDMINE_ISSUE_PATTERN,
     COMPILED_REPORT_NAME_PATTERN,
     REDMINE_ISSUE_PATTERN,
-    build_redmine_download_url,
     create_basic_auth_header,
     extract_filename_from_content_disposition,
     extract_redmine_issue_id_from_text,
-    fetch_redmine_attachment_issue_id,
     strip_redmine_report_prefix,
 )
+from core.redmine_client import RedmineClient
 from core.api_response import error_response, success_response
 from core.state import global_state, REDMINE_ISSUE_ID_CACHE
 from core.settings import REDMINE_ISSUE_ID_CACHE_MAX_SIZE
@@ -39,6 +39,7 @@ from core.error_handling import handle_api_errors
 from core.upload_utils import extract_report_name_from_upload, safe_upload_target_path, save_upload_to_path
 from core.enums import AnalysisMode
 from core.common_utils import StackTraceUtils
+from core.archive_utils import ARCHIVE_EXTENSIONS
 
 import aiohttp
 
@@ -485,6 +486,8 @@ def _detected_report_extension(file_path: str, content_type: str = "") -> str:
         return ".zip"
     if head.startswith(b"Rar!\x1a\x07"):
         return ".rar"
+    if head.startswith(b"7z\xbc\xaf\x27\x1c"):
+        return ".7z"
     if head.lstrip().startswith(b"<?xml") or head.lstrip().startswith(b"<"):
         return ".xml"
     if head.startswith(b"\x1f\x8b"):
@@ -508,6 +511,27 @@ def _rename_downloaded_report_if_needed(file_path: str, filename: str, content_t
     if os.path.abspath(new_path) != os.path.abspath(file_path):
         os.replace(file_path, new_path)
         logger.info(f"[Report Analysis] Detected downloaded file type: {filename} -> {new_filename}")
+    return new_path, new_filename
+
+
+def _ensure_uploaded_report_extension(file_path: str, filename: str, content_type: str = "") -> tuple[str, str]:
+    """Ensure uploaded reports keep a parser-recognizable extension."""
+    lower_name = (filename or "").lower()
+    if lower_name.endswith(ARCHIVE_EXTENSIONS) or lower_name.endswith(".xml"):
+        return file_path, filename
+
+    detected_ext = _detected_report_extension(file_path, content_type)
+    if not detected_ext:
+        return file_path, filename
+
+    base_name = os.path.basename(filename or "uploaded_report")
+    if detected_ext == ".gz" and tarfile.is_tarfile(file_path):
+        detected_ext = ".tar.gz"
+    new_filename = f"{base_name}{detected_ext}"
+    new_path = safe_upload_target_path(os.path.dirname(file_path), new_filename, allow_nested=False)
+    if os.path.abspath(new_path) != os.path.abspath(file_path):
+        os.replace(file_path, new_path)
+        logger.info("[Report Analysis] Detected uploaded file type: %s -> %s", filename, new_filename)
     return new_path, new_filename
 
 
@@ -703,36 +727,22 @@ async def analyze_report_from_url(request: Request):
 
                     stored_creds = await _load_redmine_credentials()
                     if stored_creds:
-                        api_url = f"{base_url}/issues/{issue_id}.json?include=attachments"
                         username = stored_creds.get("username")
                         password = stored_creds.get("password")
-                        headers = {}
-                        headers.update(create_basic_auth_header(username, password))
                         logger.info(f"[Report Analysis] Using stored credentials for issue {issue_id}")
                     else:
-                        api_url = f"{base_url}/issues/{issue_id}.json?include=attachments"
-                        headers = {}
+                        username = ""
+                        password = ""
                         logger.warning("[Report Analysis] No stored credentials, anonymous query")
 
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                            if response.status != 200:
-                                return error_response(f"Cannot access issue page: HTTP {response.status}", 400)
-
-                            content_type = response.headers.get("Content-Type", "")
-                            if "application/json" not in content_type:
-                                return error_response("Redmine API returned non-JSON response, possible auth failure", 401)
-
-                            data = await response.json()
-                            attachments = data.get("issue", {}).get("attachments", [])
-                            if not attachments:
-                                return error_response(f"Issue {issue_id} has no attachments", 404)
-
-                            first_attachment = attachments[0]
-                            attachment_id = first_attachment.get("id")
-                            filename = first_attachment.get("filename", f"attachment_{attachment_id}")
-                            url = build_redmine_download_url(base_url, attachment_id)
-                            logger.info(f"[Report Analysis] Extracted attachment: {filename} -> {url}")
+                    client = RedmineClient(base_url, username, password)
+                    first_attachment = await client.first_issue_attachment(issue_id)
+                    if not first_attachment:
+                        return error_response(f"Issue {issue_id} has no attachments", 404)
+                    attachment_id = first_attachment.id
+                    filename = first_attachment.filename or f"attachment_{attachment_id}"
+                    url = first_attachment.content_url or client.download_url(attachment_id)
+                    logger.info(f"[Report Analysis] Extracted attachment: {filename} -> {url}")
                 except Exception as extract_error:
                     logger.error(f"[Report Analysis] Attachment extraction failed: {extract_error}")
                     return error_response(f"Cannot extract attachment: {str(extract_error)}", 500)
@@ -752,10 +762,8 @@ async def analyze_report_from_url(request: Request):
                             if not base_url:
                                 raise ValueError("Redmine base URL unavailable")
                             stored_creds = await _load_redmine_credentials()
-                            headers = {}
-                            if stored_creds:
-                                headers.update(create_basic_auth_header(stored_creds.get("username"), stored_creds.get("password")))
-                            attachment_owner_issue_id = await fetch_redmine_attachment_issue_id(base_url, attachment_id, headers)
+                            client = RedmineClient(base_url, (stored_creds or {}).get("username", ""), (stored_creds or {}).get("password", ""))
+                            attachment_owner_issue_id = await client.find_attachment_issue_id(attachment_id)
                             if attachment_owner_issue_id:
                                 if not original_issue_id:
                                     original_issue_id = attachment_owner_issue_id
@@ -765,7 +773,7 @@ async def analyze_report_from_url(request: Request):
                     if "/attachments/download/" not in url:
                         if not redmine_base_url:
                             return error_response("Redmine base URL unavailable", 404)
-                        url = build_redmine_download_url(redmine_base_url, attachment_id)
+                        url = RedmineClient(redmine_base_url).download_url(attachment_id)
                         logger.info(f"[Report Analysis] Converted to download URL: {url}")
 
                     filename = f"attachment_{attachment_id}"
@@ -812,7 +820,7 @@ async def analyze_report_from_url(request: Request):
                             original_issue_id = extracted_issue_id
 
                     with open(temp_file_path, "wb") as f:
-                        async for chunk in response.content.iter_chunked(8192):
+                        async for chunk in response.content.iter_chunked(262144):
                             f.write(chunk)
                             downloaded_size += len(chunk)
 
@@ -941,29 +949,16 @@ async def extract_redmine_attachment(request: Request):
         if not base_url:
             return error_response("Redmine base URL unavailable", 404)
 
-        api_url = f"{base_url}/issues/{issue_id}.json?include=attachments"
         username = stored_creds.get("username")
         password = stored_creds.get("password")
-        headers = create_basic_auth_header(username, password)
-        headers["User-Agent"] = "Mozilla/5.0"
+        client = RedmineClient(base_url, username, password)
+        first_attachment = await client.first_issue_attachment(issue_id)
+        if not first_attachment:
+            return error_response("Issue has no attachments", 404)
+        attachment_url = first_attachment.content_url or client.download_url(first_attachment.id)
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                if response.status != 200:
-                    return error_response(f"Cannot access issue: HTTP {response.status}", 400)
-
-                data = await response.json()
-                attachments = data.get("issue", {}).get("attachments", [])
-                if not attachments:
-                    return error_response("Issue has no attachments", 404)
-
-                first_attachment = attachments[0]
-                attachment_id = first_attachment.get("id")
-                filename = first_attachment.get("filename", f"attachment_{attachment_id}")
-                attachment_url = build_redmine_download_url(base_url, attachment_id)
-
-                logger.info(f"[Redmine Extract] Found attachment: {filename} (ID: {attachment_id})")
-                return JSONResponse(content={"success": True, "attachment_url": attachment_url, "filename": filename, "attachment_id": attachment_id})
+        logger.info(f"[Redmine Extract] Found attachment: {first_attachment.filename} (ID: {first_attachment.id})")
+        return JSONResponse(content={"success": True, "attachment_url": attachment_url, "filename": first_attachment.filename, "attachment_id": first_attachment.id})
 
     except Exception as e:
         logger.error(f"[Redmine Extract] Failed: {e}")
@@ -1054,7 +1049,19 @@ async def analyze_reports(
                     except ValueError as e:
                         return error_response(str(e), 400)
 
-                    await save_upload_to_path(uploaded_file, temp_file_path)
+                    bytes_written = await save_upload_to_path(uploaded_file, temp_file_path)
+                    temp_file_path, detected_filename = _ensure_uploaded_report_extension(
+                        temp_file_path,
+                        uploaded_file.filename or "uploaded_report",
+                        uploaded_file.content_type or "",
+                    )
+                    logger.info(
+                        "[Report Analysis] Uploaded report: filename=%s detected=%s content_type=%s size=%s",
+                        uploaded_file.filename,
+                        detected_filename,
+                        uploaded_file.content_type,
+                        bytes_written,
+                    )
 
                     analyzer = ReportAnalyzer(temp_dir=temp_dir)
                     result = await asyncio.to_thread(analyzer.analyze_file, temp_file_path)
@@ -1062,8 +1069,28 @@ async def analyze_reports(
                     if result:
                         result["report_name"] = extract_report_name_from_upload([uploaded_file])
                         return JSONResponse(content={"success": True, "data": result, "mode": "upload"})
-                    else:
-                        return JSONResponse(status_code=400, content={"success": False, "error": "Cannot parse report file", "message": "Please ensure valid XML or archive format"})
+
+                    fallback_result = await asyncio.to_thread(analyzer.analyze_log_dir, temp_dir)
+                    if fallback_result:
+                        fallback_result["report_type"] = "log"
+                        fallback_result["report_name"] = extract_report_name_from_upload([uploaded_file])
+                        return JSONResponse(content={"success": True, "data": fallback_result, "mode": "upload"})
+
+                    logger.warning(
+                        "[Report Analysis] Cannot parse uploaded report: filename=%s detected=%s content_type=%s size=%s",
+                        uploaded_file.filename,
+                        detected_filename,
+                        uploaded_file.content_type,
+                        bytes_written,
+                    )
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "success": False,
+                            "error": "Cannot parse report file",
+                            "message": f"无法解析上传文件：{uploaded_file.filename or 'unknown'}。请确认文件是 test_result.xml、包含 test_result.xml/host_log 的 ZIP/TAR/RAR 报告包，或选择报告文件夹上传。",
+                        },
+                    )
 
                 else:
                     for uploaded_file in all_files:

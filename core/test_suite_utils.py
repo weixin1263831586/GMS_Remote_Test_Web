@@ -104,7 +104,7 @@ def build_suite_info(full_path: str) -> Optional[Dict[str, str]]:
 
     if test_type == 'cts-v':
         for i, part in enumerate(parts):
-            if part == 'android-cts-verifier':
+            if part.startswith('android-cts-verifier'):
                 tools_dir = '/'.join(parts[:i + 1])
                 break
 

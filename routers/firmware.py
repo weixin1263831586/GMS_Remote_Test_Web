@@ -6,9 +6,7 @@ import time
 import shutil
 import asyncio
 import logging
-import subprocess
 import threading
-from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -20,7 +18,6 @@ from core.ssh import ssh_manager
 from core.schemas import SNBurnRequest
 from core.devices import (
     SSHConnection,
-    DeviceSSHConnection,
     release_device_locks,
     broadcast_device_lock_update,
     safe_websocket_send,

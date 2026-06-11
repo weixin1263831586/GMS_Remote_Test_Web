@@ -5,17 +5,24 @@ import ipaddress
 import logging
 import re
 import subprocess
-from typing import Optional
+import shlex
+import time
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 
+from core.api_response import error_response, success_response
 from core.clients import get_client_id_from_request, get_client_ip
 from core.clients import resolve_tailscale_device_host
+from core.clients import parse_client_id, probe_windows_usbipd
 from core.common_utils import CommonUtils
 from core.config import config_manager
 from core.devices import DeviceSSHConnection
+from core.devices import broadcast_device_change, notify_device_change, format_device_list_info
 from core.error_handling import handle_api_errors
+from core.adb_forward import adb_forward_manager
+from core.schemas import ADBForwardStartRequest, USBIPStartRequest, USBIPDisconnectRequest, VPNConnectRequest
 from core.api_help import generate_help_or_continue
 from core.network import (
     _extract_network,
@@ -23,8 +30,18 @@ from core.network import (
     _parse_ping_output,
     _validate_ip_address,
     are_same_network,
+    check_local_vpn_connected,
+    execute_config_host_command,
+    get_primary_vpn_target,
+    parse_vpn_connection_names,
+    resolve_vpn_connection_name,
 )
 from core.ssh import SSHD_INSTALL_GUIDE, ssh_manager
+from core.state import global_state
+from core.test_suite_utils import is_config_host_local
+from core.usbip import usbip_manager, split_host_port, USBIPD_INSTALL_CMD, USBIPD_INSTALL_GUIDE
+from core.usbip import is_windows_host, detach_ubuntu_usbip_ports, wait_for_adb_serial_ready, find_device_host_password
+from core.redmine_client import RedmineClient
 
 logger = logging.getLogger(__name__)
 
@@ -315,29 +332,6 @@ async def ping_route_test(request: Request):
             content={'success': False, 'error': str(e)},
             status_code=500
         )
-import asyncio
-import logging
-import shlex
-from typing import Optional
-
-from fastapi import APIRouter, Body
-from fastapi.responses import JSONResponse
-
-from core.config import config_manager
-from core.error_handling import handle_api_errors
-from core.network import (
-    check_local_vpn_connected,
-    execute_config_host_command,
-    get_primary_vpn_target,
-    parse_vpn_connection_names,
-    resolve_vpn_connection_name,
-)
-from core.schemas import VPNConnectRequest
-from core.ssh import ssh_manager
-from core.test_suite_utils import is_config_host_local
-
-logger = logging.getLogger(__name__)
-
 
 
 @router.get("/api/vpn/connections")
@@ -559,18 +553,6 @@ async def disconnect_vpn():
             content={"success": False, "error": str(e)},
             status_code=500
         )
-import logging
-from typing import Dict
-
-import aiohttp
-from fastapi import APIRouter, Request
-
-from core.api_response import error_response, success_response
-from core.config import config_manager
-from core.redmine_utils import create_basic_auth_header
-
-logger = logging.getLogger(__name__)
-
 
 
 async def load_redmine_credentials():
@@ -581,11 +563,12 @@ async def load_redmine_credentials():
 @router.post("/api/redmine/reply")
 async def redmine_reply(request: Request):
     """
-    向 Redmine Issue 发送回复
+    向 Redmine Issue 发送回复（支持附件）
 
     参数：
         issue_id: Redmine Issue ID
         reply_text: 回复内容
+        files: 可选附件列表
 
     返回：
         success: 是否成功
@@ -593,9 +576,17 @@ async def redmine_reply(request: Request):
         error: 错误信息（如果失败）
     """
     try:
-        body = await request.json()
-        issue_id = body.get('issue_id', '').strip()
-        reply_text = body.get('reply_text', '').strip()
+        content_type = (request.headers.get("content-type") or "").lower()
+        files: list[UploadFile] = []
+        if content_type.startswith("multipart/form-data"):
+            form = await request.form()
+            issue_id = str(form.get("issue_id") or "").strip()
+            reply_text = str(form.get("reply_text") or "").strip()
+            files = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
+        else:
+            body = await request.json()
+            issue_id = str(body.get("issue_id") or "").strip()
+            reply_text = str(body.get("reply_text") or "").strip()
 
         if not issue_id:
             return error_response('缺少 issue_id 参数', status_code=400)
@@ -603,7 +594,7 @@ async def redmine_reply(request: Request):
         if not reply_text:
             return error_response('缺少 reply_text 参数', status_code=400)
 
-        logger.info(f"[Redmine Reply] 准备发送回复到 Issue #{issue_id}")
+        logger.info(f"[Redmine Reply] 准备发送回复到 Issue #{issue_id}，附件数: {len(files)}")
 
         stored_creds = await load_redmine_credentials()
         if not stored_creds:
@@ -615,42 +606,27 @@ async def redmine_reply(request: Request):
         except ValueError as e:
             return error_response(str(e), status_code=404)
 
-        api_url = f"{base_url}/issues/{issue_id}.json"
-        username = stored_creds.get('username')
-        password = stored_creds.get('password')
+        attachment_files = []
+        for f in files:
+            content = await f.read()
+            if not content:
+                continue
+            file_content_type = f.content_type or 'application/octet-stream'
+            filename = f.filename or 'attachment'
+            logger.info(f"[Redmine Reply] 上传附件: {filename} ({len(content)} bytes)")
+            attachment_files.append({'content': content, 'filename': filename, 'content_type': file_content_type})
 
-        payload = {'issue': {'notes': reply_text}}
-        headers = create_basic_auth_header(username, password)
-        headers['Content-Type'] = 'application/json'
-        headers['User-Agent'] = 'GMS Remote Test/1.0'
-
-        async with aiohttp.ClientSession() as session:
-            async with session.put(api_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                if response.status in (200, 204):
-                    logger.info(f"[Redmine Reply] 回复已成功发送到 Issue #{issue_id}")
-                    return success_response({
-                        'issue_url': f"{base_url}/issues/{issue_id}"
-                    }, message=f'回复已发送到 Redmine Issue #{issue_id}')
-                else:
-                    error_body = await response.text()
-                    logger.error(f"[Redmine Reply] 发送失败：HTTP {response.status} - {error_body}")
-                    return error_response(f'Redmine API 返回错误：HTTP {response.status}', status_code=500)
+        client = RedmineClient(base_url, stored_creds.get('username'), stored_creds.get('password'))
+        result = await client.reply_issue(issue_id, reply_text, attachment_files)
+        attachment_info = f"，携带 {result.get('attachments', 0)} 个附件" if result.get('attachments') else ''
+        logger.info(f"[Redmine Reply] 回复已成功发送到 Issue #{issue_id}{attachment_info}")
+        return success_response(result, message=f'回复已发送到 Redmine Issue #{issue_id}{attachment_info}')
 
     except Exception as e:
         logger.error(f"[Redmine Reply] 发送回复失败：{e}")
         return error_response(f'发送失败：{str(e)}', status_code=500)
-import logging
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 
-from core.adb_forward import adb_forward_manager
-from core.api_response import error_response, success_response
-from core.config import config_manager
-from core.error_handling import handle_api_errors
-from core.schemas import ADBForwardStartRequest
-
-logger = logging.getLogger(__name__)
 @router.post("/api/adb-forward/start")
 async def start_adb_forward(req: ADBForwardStartRequest):
     """启动ADB转发"""
@@ -688,42 +664,6 @@ async def stop_adb_forward():
                 status_code=500,
                 detail=f"{str(e)}. 请检查配置和参数是否正确。"
             )
-import time
-import asyncio
-import logging
-from typing import Dict, Any, List, Optional
-
-from fastapi import APIRouter, HTTPException, Query, Request, Body
-from fastapi.responses import JSONResponse
-
-from core.config import config_manager
-from core.ssh import ssh_manager
-from core.usbip import usbip_manager, split_host_port, USBIPD_INSTALL_CMD, USBIPD_INSTALL_GUIDE
-from core.usbip import (
-    is_windows_host,
-    detach_ubuntu_usbip_ports,
-    wait_for_adb_serial_ready,
-    find_device_host_password,
-)
-from core.clients import (
-    get_client_id_from_request,
-    parse_client_id,
-    resolve_tailscale_device_host,
-    probe_windows_usbipd,
-)
-from core.devices import (
-    DeviceSSHConnection,
-    broadcast_device_change,
-    notify_device_change,
-    format_device_list_info,
-)
-from core.error_handling import handle_api_errors
-from core.schemas import USBIPStartRequest, USBIPDisconnectRequest
-from core.state import global_state
-
-logger = logging.getLogger(__name__)
-
-
 
 
 # ==================== USB/IP Status ====================

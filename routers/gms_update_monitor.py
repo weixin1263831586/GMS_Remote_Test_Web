@@ -18,7 +18,8 @@ from core.settings import PROJECT_ROOT
 from modules.gms_update_monitor import SOURCES
 
 
-router = APIRouter()
+router = APIRouter(prefix='/api/gms-update-monitor')
+page_router = APIRouter()
 DB_PATH = Path(PROJECT_ROOT) / 'data' / 'gms_update_monitor.sqlite3'
 SYNC_SCRIPT = Path(PROJECT_ROOT) / 'modules' / 'gms_update_monitor.py'
 
@@ -157,7 +158,7 @@ def _run_sync_job(mode: str, source: list[str]):
             )
 
 
-@router.get('/api/v1/gms-update-monitor/sources')
+@router.get('/sources')
 async def gms_update_monitor_sources():
     configured = [
         {
@@ -186,7 +187,7 @@ async def gms_update_monitor_sources():
     return {'success': True, 'data': {'configured': configured, 'scanned': scanned}}
 
 
-@router.post('/api/v1/gms-update-monitor/sync')
+@router.post('/sync')
 async def start_gms_update_monitor_sync(
     mode: str = Query('incremental', pattern='^(full|incremental)$'),
     source: list[str] = Query(default=[]),
@@ -220,7 +221,7 @@ async def start_gms_update_monitor_sync(
     return {'success': True, 'data': {'status': status}}
 
 
-@router.get('/api/v1/gms-update-monitor/sync/status')
+@router.get('/sync/status')
 async def gms_update_monitor_sync_status():
     with _sync_lock:
         status = dict(_sync_status)
@@ -228,7 +229,7 @@ async def gms_update_monitor_sync_status():
     return {'success': True, 'data': {'status': status}}
 
 
-@router.get('/api/v1/gms-update-monitor/summary')
+@router.get('/summary')
 async def gms_update_monitor_summary():
     conn, missing = _get_db()
     if missing:
@@ -299,7 +300,7 @@ async def gms_update_monitor_summary():
     }
 
 
-@router.get('/api/v1/gms-update-monitor/scan-runs')
+@router.get('/scan-runs')
 async def list_gms_update_monitor_scan_runs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -321,7 +322,7 @@ async def list_gms_update_monitor_scan_runs(
     return {'success': True, 'data': {'items': _rows_to_dicts(rows)}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
-@router.get('/api/v1/gms-update-monitor/changes')
+@router.get('/changes')
 async def list_gms_update_monitor_changes(
     run_id: int | None = Query(None),
     source_key: str = Query(''),
@@ -375,7 +376,7 @@ async def list_gms_update_monitor_changes(
     return {'success': True, 'data': {'items': items}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
-@router.get('/api/v1/gms-update-monitor/artifacts')
+@router.get('/artifacts')
 async def list_gms_update_monitor_artifacts(
     source_key: str = Query(''),
     suite_type: str = Query(''),
@@ -426,7 +427,7 @@ async def list_gms_update_monitor_artifacts(
     return {'success': True, 'data': {'items': items}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
-@router.get('/api/v1/gms-update-monitor/artifacts/new')
+@router.get('/artifacts/new')
 async def list_new_gms_update_monitor_artifacts(
     run_id: int | None = Query(None),
     source_key: list[str] = Query(default=[]),
@@ -488,7 +489,7 @@ async def list_new_gms_update_monitor_artifacts(
     }
 
 
-@router.get('/api/v1/gms-update-monitor/packages')
+@router.get('/packages')
 async def list_gms_update_monitor_packages(
     android_version: str = Query(''),
     section: str = Query(''),
@@ -527,7 +528,7 @@ async def list_gms_update_monitor_packages(
     return {'success': True, 'data': {'items': _rows_to_dicts(rows)}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
-@router.get('/api/v1/gms-update-monitor/requirements/sections')
+@router.get('/requirements/sections')
 async def list_gms_update_monitor_requirement_sections(
     level: int | None = Query(None, ge=2, le=3),
     top_only: bool = Query(False, description='Only return top-level numbered chapters such as 1, 2, 3'),
@@ -565,7 +566,7 @@ async def list_gms_update_monitor_requirement_sections(
     return {'success': True, 'data': {'items': _rows_to_dicts(rows)}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
-@router.get('/api/v1/gms-update-monitor/requirements/version-summary')
+@router.get('/requirements/version-summary')
 async def gms_update_monitor_requirement_version_summary():
     conn, missing = _get_db()
     if missing:
@@ -590,7 +591,7 @@ async def gms_update_monitor_requirement_version_summary():
     return {'success': True, 'data': {'summary': _rows_to_dicts(rows), 'by_section': _rows_to_dicts(by_section)}}
 
 
-@router.get('/api/v1/gms-update-monitor/requirements/version-tags')
+@router.get('/requirements/version-tags')
 async def list_gms_update_monitor_requirement_version_tags(
     android_version: str = Query('', description='Android 15, Android 16, or Android 17'),
     change_kind: str = Query('', description='added, changed, or specific'),
@@ -629,7 +630,7 @@ async def list_gms_update_monitor_requirement_version_tags(
     return {'success': True, 'data': {'items': _rows_to_dicts(rows)}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
-@router.get('/api/v1/gms-update-monitor/requirements/table-rows')
+@router.get('/requirements/table-rows')
 async def list_gms_update_monitor_requirement_table_rows(
     section_key: str = Query(''),
     q: str = Query(''),
@@ -670,7 +671,7 @@ async def list_gms_update_monitor_requirement_table_rows(
     return {'success': True, 'data': {'items': items}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
-@router.get('/gms-update-monitor', response_class=HTMLResponse)
+@page_router.get('/gms-update-monitor', response_class=HTMLResponse)
 async def gms_update_monitor_page():
     return HTMLResponse(
         """
@@ -780,7 +781,7 @@ async def gms_update_monitor_page():
       reload(true);
     }
     async function loadSummary() {
-      const r = await fetch('/api/v1/gms-update-monitor/summary');
+      const r = await fetch('/api/gms-update-monitor/summary');
       const data = await r.json();
       if (!data.success) throw new Error(data.error || 'summary failed');
       const d = data.data;
@@ -814,7 +815,7 @@ async def gms_update_monitor_page():
       const buttons = document.querySelectorAll('header button');
       buttons.forEach(b => b.disabled = true);
       try {
-        const r = await fetch('/api/v1/gms-update-monitor/sync?mode=' + encodeURIComponent(mode), {method:'POST'});
+        const r = await fetch('/api/gms-update-monitor/sync?mode=' + encodeURIComponent(mode), {method:'POST'});
         const data = await r.json();
         if (!r.ok || !data.success) throw new Error(data.error || '启动失败');
         pollSync();
@@ -824,7 +825,7 @@ async def gms_update_monitor_page():
       }
     }
     async function pollSync() {
-      const r = await fetch('/api/v1/gms-update-monitor/sync/status');
+      const r = await fetch('/api/gms-update-monitor/sync/status');
       const data = await r.json();
       const status = data.data.status;
       if (status.running) {
@@ -848,16 +849,16 @@ async def gms_update_monitor_page():
     async function reload(reset=false) {
       if (reset) offset = 0;
       const {params, type} = paramsBase();
-      let endpoint = '/api/v1/gms-update-monitor/changes';
+      let endpoint = '/api/gms-update-monitor/changes';
       if (tab === 'artifacts') {
-        endpoint = '/api/v1/gms-update-monitor/artifacts';
+        endpoint = '/api/gms-update-monitor/artifacts';
         if (type) params.set(type.match(/^Android/i) ? 'android_version' : 'suite_type', type);
       } else if (tab === 'packages') {
-        endpoint = '/api/v1/gms-update-monitor/packages';
+        endpoint = '/api/gms-update-monitor/packages';
         params.delete('source_key');
         if (type) params.set('android_version', type);
       } else if (tab === 'requirements') {
-        endpoint = '/api/v1/gms-update-monitor/requirements/version-tags';
+        endpoint = '/api/gms-update-monitor/requirements/version-tags';
         params.delete('source_key');
         if (type && /^Android\s+1[5-7]$/i.test(type)) params.set('android_version', type);
         else if (type && /^(added|changed|specific)$/i.test(type)) params.set('change_kind', type);
