@@ -1,0 +1,390 @@
+"""Mainline known issues database viewer APIs."""
+
+import subprocess
+import sys
+import threading
+from datetime import datetime
+import re
+import sqlite3
+from pathlib import Path
+
+from fastapi import APIRouter, Query
+from fastapi.responses import HTMLResponse, JSONResponse
+
+from core.settings import PROJECT_ROOT
+
+
+router = APIRouter()
+DB_PATH = Path(PROJECT_ROOT) / 'data' / 'mainline_known_issues.sqlite3'
+SYNC_SCRIPT = Path(PROJECT_ROOT) / 'scripts' / 'sync_mainline_known_issues.py'
+_sync_lock = threading.Lock()
+_sync_status = {
+    'running': False,
+    'mode': None,
+    'started_at': None,
+    'finished_at': None,
+    'returncode': None,
+    'stdout': '',
+    'stderr': '',
+    'error': None,
+}
+
+
+def _connect_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(f'file:{DB_PATH}?mode=ro', uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _db_exists_response():
+    if DB_PATH.exists():
+        return None
+    return JSONResponse(
+        status_code=404,
+        content={
+            'success': False,
+            'error': f'Database not found: {DB_PATH}',
+            'hint': 'Run: python3 scripts/sync_mainline_known_issues.py --year 2026 --verbose',
+        },
+    )
+
+
+def _run_sync_job(mode: str):
+    global _sync_status
+    command = [sys.executable, str(SYNC_SCRIPT), '--verbose']
+    if mode == 'full':
+        command.append('--force')
+    elif mode == 'incremental':
+        command.append('--new-only')
+
+    with _sync_lock:
+        _sync_status.update(
+            {
+                'running': True,
+                'mode': mode,
+                'started_at': datetime.now().isoformat(),
+                'finished_at': None,
+                'returncode': None,
+                'stdout': '',
+                'stderr': '',
+                'error': None,
+            }
+        )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(PROJECT_ROOT),
+            text=True,
+            capture_output=True,
+            timeout=3600,
+            check=False,
+        )
+        with _sync_lock:
+            _sync_status.update(
+                {
+                    'running': False,
+                    'finished_at': datetime.now().isoformat(),
+                    'returncode': result.returncode,
+                    'stdout': result.stdout[-4000:],
+                    'stderr': result.stderr[-4000:],
+                    'error': None if result.returncode == 0 else f'sync exited with {result.returncode}',
+                }
+            )
+    except Exception as exc:
+        with _sync_lock:
+            _sync_status.update(
+                {
+                    'running': False,
+                    'finished_at': datetime.now().isoformat(),
+                    'returncode': None,
+                    'error': str(exc),
+                }
+            )
+
+
+@router.post('/api/mainline-known-issues/sync')
+async def start_mainline_known_issues_sync(
+    mode: str = Query('incremental', pattern='^(full|incremental)$'),
+):
+    with _sync_lock:
+        if _sync_status['running']:
+            return JSONResponse(
+                status_code=409,
+                content={'success': False, 'error': 'sync already running', 'status': dict(_sync_status)},
+            )
+        _sync_status.update(
+            {
+                'running': True,
+                'mode': mode,
+                'started_at': datetime.now().isoformat(),
+                'finished_at': None,
+                'returncode': None,
+                'stdout': '',
+                'stderr': '',
+                'error': None,
+            }
+        )
+        thread = threading.Thread(target=_run_sync_job, args=(mode,), daemon=True)
+        thread.start()
+        status = dict(_sync_status)
+    return {'success': True, 'status': status}
+
+
+@router.get('/api/mainline-known-issues/sync/status')
+async def mainline_known_issues_sync_status():
+    with _sync_lock:
+        status = dict(_sync_status)
+    status['db_exists'] = DB_PATH.exists()
+    return {'success': True, 'status': status}
+
+
+@router.get('/api/mainline-known-issues')
+async def list_mainline_known_issues(
+    q: str = Query('', description='Keyword search across module, testcase, exemption, issue text, and source URL'),
+    issue_type: str = Query('', description='MTS, CTS, or GTS'),
+    product_section: str = Query('', description='Android or Android Go'),
+    test_module: str = Query('', description='Exact test module'),
+    test_case: str = Query('', description='Exact test case'),
+    exemption_id: str = Query('', description='Exact internal bug/exemption id'),
+    release_year: int | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    missing = _db_exists_response()
+    if missing:
+        return missing
+
+    where = []
+    params: list[str | int] = []
+    if q:
+        safe_q = q.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        like = f'%{safe_q}%'
+        where.append(
+            '('
+            'test_module LIKE ? OR test_case LIKE ? OR exemption_id LIKE ? OR '
+            'issue_text LIKE ? OR source_url LIKE ? OR release_label LIKE ? OR '
+            'android_versions LIKE ? OR category LIKE ? OR product_section LIKE ? OR issue_type LIKE ?'
+            ')'
+        )
+        params.extend([like, like, like, like, like, like, like, like, like, like])
+    if issue_type:
+        where.append('issue_type = ?')
+        params.append(issue_type.upper())
+    if product_section:
+        where.append('product_section = ? COLLATE NOCASE')
+        params.append(product_section)
+    if test_module:
+        where.append('test_module = ?')
+        params.append(test_module)
+    if test_case:
+        where.append('test_case = ?')
+        params.append(test_case)
+    if exemption_id:
+        where.append('exemption_id = ?')
+        params.append(exemption_id)
+    if release_year is not None:
+        where.append('release_year = ?')
+        params.append(release_year)
+
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ''
+    with _connect_db() as conn:
+        total = conn.execute(f'SELECT COUNT(*) FROM mainline_known_issues {where_sql}', params).fetchone()[0]
+        rows = conn.execute(
+            f"""
+            SELECT
+                id, issue_type, product_section, release_year, release_label,
+                exemption_id, test_module, test_case, android_versions, category,
+                source_url, issue_text, last_seen_at
+            FROM mainline_known_issues
+            {where_sql}
+            ORDER BY release_year DESC, source_url DESC, issue_type, product_section, test_module, test_case
+            LIMIT ? OFFSET ?
+            """,
+            [*params, limit, offset],
+        ).fetchall()
+    items = []
+    for row in rows:
+        d = dict(row)
+        m = re.search(r'/release-notes/\d{4}/([a-z-]+?)(?:/|$)', d.get('source_url', ''))
+        d['release_month'] = m.group(1) if m else ''
+        items.append(d)
+    return {
+        'success': True,
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'items': items,
+    }
+
+
+@router.get('/api/mainline-known-issues/summary')
+async def mainline_known_issues_summary():
+    missing = _db_exists_response()
+    if missing:
+        return missing
+    with _connect_db() as conn:
+        total = conn.execute('SELECT COUNT(*) FROM mainline_known_issues').fetchone()[0]
+        by_type = conn.execute(
+            """
+            SELECT issue_type, product_section, COUNT(*) AS count
+            FROM mainline_known_issues
+            GROUP BY issue_type, product_section
+            ORDER BY issue_type, product_section
+            """
+        ).fetchall()
+        last_sync = conn.execute(
+            """
+            SELECT release_year, pages_scanned, pages_skipped, issues_found, finished_at
+            FROM mainline_known_issue_sync_runs
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        year_range = conn.execute(
+            """
+            SELECT MIN(release_year) AS min_year, MAX(release_year) AS max_year
+            FROM mainline_known_issues
+            """
+        ).fetchone()
+    return {
+        'success': True,
+        'total': total,
+        'by_type': [dict(row) for row in by_type],
+        'last_sync': dict(last_sync) if last_sync else None,
+        'year_range': dict(year_range) if year_range and year_range['min_year'] else None,
+        'db_path': str(DB_PATH),
+    }
+
+
+@router.get('/mainline-known-issues', response_class=HTMLResponse)
+async def mainline_known_issues_page():
+    return HTMLResponse(
+        """
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mainline Known Issues</title>
+  <style>
+    :root { color-scheme: dark; --border:#2a2a35; --muted:#9090a0; --bg:#0a0a0f; --text:#e0e0e8; --head:#141419; --card:#111116; --primary:#3b82f6; }
+    body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--text); background:var(--bg); display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+    header { padding:18px 24px 10px; background:var(--card); border-bottom:1px solid var(--border); flex-shrink:0; }
+    h1 { margin:0 0 8px; font-size:22px; color:var(--text); }
+    .summary { display:flex; flex-wrap:wrap; gap:8px 16px; color:var(--muted); font-size:13px; }
+    main { padding:16px 24px 24px; flex:1; overflow-y:auto; }
+    .filters { display:grid; grid-template-columns: minmax(220px, 1fr) 120px 150px 120px 120px; gap:8px; margin-bottom:12px; }
+    input, select { height:34px; border:1px solid var(--border); border-radius:6px; padding:0 10px; background:var(--card); color:var(--text); font:inherit; }
+    input::placeholder { color:var(--muted); }
+    select { appearance:auto; }
+    button { height:34px; cursor:pointer; background:var(--primary); color:white; border:none; border-radius:6px; padding:0 10px; font:inherit; font-weight:600; }
+    table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--border); font-size:13px; table-layout:fixed; }
+    th, td { border-bottom:1px solid var(--border); padding:8px 10px; text-align:left; vertical-align:top; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    th { background:var(--head); color:var(--text); position:sticky; top:0; z-index:1; }
+    td.wrap { white-space:normal; overflow:visible; text-overflow:unset; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
+    .table-wrap { max-height: calc(100vh - 190px); overflow:auto; border-radius:6px; }
+    .muted { color:var(--muted); }
+    .pager { position:fixed; bottom:8px; right:12px; display:flex; align-items:center; gap:4px; background:var(--card); border:1px solid var(--border); border-radius:5px; padding:3px 6px; box-shadow:0 2px 8px rgba(0,0,0,.4); z-index:100; font-size:11px; }
+    .pager button { width:auto; height:22px; font-size:11px; padding:0 8px; font-weight:500; border-radius:4px; }
+    .pager .muted { color:var(--muted); font-size:11px; }
+    a { color:var(--primary); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    @media (max-width: 980px) { .filters { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Mainline Known Issues</h1>
+    <div id="summary" class="summary">Loading...</div>
+  </header>
+  <main>
+    <div class="filters">
+      <input id="q" placeholder="模糊搜索 module / testcase / bug id / Android版本 / 类别 / issue text">
+      <select id="issue_type"><option value="">全部类型</option><option>CTS</option><option>MTS</option><option>GTS</option></select>
+      <select id="product_section"><option value="">全部小节</option><option>Android</option><option>Android Go</option></select>
+      <input id="exemption_id" placeholder="豁免ID">
+      <button onclick="reload(true)">查询</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <colgroup>
+          <col style="width:30px"><col style="width:40px"><col style="width:70px"><col style="width:60px"><col style="width:100px"><col style="width:40px"><col style="width:15%"><col style="width:35%"><col style="width:30px">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>类型</th><th>文档小节</th><th>Android版本</th><th>类别</th><th>发布版本</th><th>豁免ID</th><th>测试模块</th><th>测试用例</th><th>来源</th>
+          </tr>
+        </thead>
+        <tbody id="rows"><tr><td colspan="9" class="muted">Loading...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button onclick="page(-1)">上一页</button>
+      <span id="pageinfo" class="muted"></span>
+      <button onclick="page(1)">下一页</button>
+    </div>
+  </main>
+  <script>
+    let offset = 0;
+    const limit = 100;
+    let total = 0;
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    async function loadSummary() {
+      const r = await fetch('/api/mainline-known-issues/summary');
+      const data = await r.json();
+      if (!data.success) throw new Error(data.error || 'summary failed');
+      const parts = [`总数 ${data.total}`];
+      for (const row of data.by_type) parts.push(`${row.issue_type}/${row.product_section}: ${row.count}`);
+      if (data.year_range) {
+        const yr = data.year_range;
+        parts.push(`数据覆盖: ${yr.min_year === yr.max_year ? yr.min_year : yr.min_year + '-' + yr.max_year}`);
+      }
+      if (data.last_sync) {
+        const ls = data.last_sync;
+        const syncTime = ls.finished_at ? new Date(ls.finished_at).toLocaleString('zh-CN') : '未知';
+        parts.push(`最近同步: ${syncTime}, ${ls.mode === 'full' ? '全量' : '增量'}${ls.pages_scanned ? ', ' + ls.pages_scanned + '页' : ''}, ${ls.issues_found || 0}条`);
+      }
+      document.getElementById('summary').textContent = parts.join(' | ');
+    }
+    async function reload(reset=false) {
+      if (reset) offset = 0;
+      const params = new URLSearchParams({limit, offset});
+      for (const id of ['q','issue_type','product_section','exemption_id']) {
+        const value = document.getElementById(id).value.trim();
+        if (value) params.set(id, value);
+      }
+      const r = await fetch('/api/mainline-known-issues?' + params.toString());
+      const data = await r.json();
+      if (!data.success) throw new Error(data.error || 'query failed');
+      total = data.total;
+      document.getElementById('rows').innerHTML = data.items.map(item => `
+        <tr>
+          <td>${esc(item.issue_type)}</td>
+          <td>${esc(item.product_section)}</td>
+          <td>${esc(item.android_versions)}</td>
+          <td>${esc(item.category)}</td>
+          <td>${esc(item.release_year)} ${item.release_month ? '<span class="muted">' + esc(item.release_month.charAt(0).toUpperCase() + item.release_month.slice(1)) + '</span> ' : ''}<span class="muted">${esc(item.release_label)}</span></td>
+          <td><code>${esc(item.exemption_id)}</code></td>
+          <td><code>${esc(item.test_module)}</code></td>
+          <td><code>${esc(item.test_case)}</code></td>
+          <td><a href="${esc(item.source_url)}" target="_blank">打开</a></td>
+        </tr>`).join('') || '<tr><td colspan="9" class="muted">无记录</td></tr>';
+      document.getElementById('pageinfo').textContent = `${offset + 1}-${Math.min(offset + limit, total)} / ${total}`;
+    }
+    function page(delta) {
+      const next = offset + delta * limit;
+      if (next < 0 || next >= total) return;
+      offset = next;
+      reload(false);
+    }
+    document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') reload(true); });
+    document.getElementById('exemption_id').addEventListener('keydown', e => { if (e.key === 'Enter') reload(true); });
+    loadSummary().then(() => reload()).catch(err => {
+      document.getElementById('summary').textContent = err.message;
+    });
+  </script>
+</body>
+</html>
+        """
+    )
