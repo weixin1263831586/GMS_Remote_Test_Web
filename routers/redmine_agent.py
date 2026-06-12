@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from core.redmine_agent import RedmineAgent
-from core.redmine_agent_db import RedmineAgentDB
+from core.redmine_agent_db import (
+    RedmineAgentDB, USER_MAP_PATH, find_user_mapping, display_names_from_mapping, load_redmine_user_map,
+    compute_user_overdue_stats, _name_keys as _nk,
+)
+from core.settings import PROJECT_ROOT
+from core.config import config_manager
 from modules.redmine_agent_scheduler import get_scheduler_config
 
 
@@ -23,7 +29,27 @@ _agent = RedmineAgent(_db)
 _run_lock = asyncio.Lock()
 _active_task: Optional[asyncio.Task] = None
 _active_run_id: Optional[str] = None
-_db.mark_stale_running_runs()
+_stale_runs_marked = False
+_DEPARTMENT_OVERDUE_CACHE: Dict[str, Any] = {}
+_WORKLOAD_STATS_CACHE: Dict[str, Any] = {}
+
+
+def _get_redmine_stats_config() -> Dict[str, Any]:
+    """Read redmine_stats config (stale_days, window_days, cache_ttl) with defaults."""
+    cfg = config_manager.load_config().get("redmine_stats") or {}
+    return {
+        "stale_days": int(cfg.get("stale_days") or 3),
+        "window_days": int(cfg.get("window_days") or 0),
+        "cache_ttl": int(cfg.get("cache_ttl") or 600),
+    }
+
+
+def _ensure_stale_runs_marked() -> None:
+    """Mark stale runs on first API call instead of at import time."""
+    global _stale_runs_marked
+    if not _stale_runs_marked:
+        _stale_runs_marked = True
+        _db.mark_stale_running_runs()
 
 
 async def _start_task(coro_factory, run_id: str, message: str) -> dict:
@@ -64,11 +90,13 @@ async def create_run(
     hours: int = Query(48, ge=1, le=168),
     max_issues: int = Query(20, ge=1, le=100),
 ):
+    _ensure_stale_runs_marked()
     return await start_redmine_agent_run(hours=hours, max_issues=max_issues, mode="manual")
 
 
 @router.get("/status")
 async def get_status():
+    _ensure_stale_runs_marked()
     running = bool(_active_task and not _active_task.done())
     result = None
     if _active_task and _active_task.done():
@@ -146,6 +174,7 @@ async def search_issues(q: str = Query(..., min_length=1), limit: int = Query(10
 
 @router.get("/statistics")
 async def get_statistics():
+    _ensure_stale_runs_marked()
     return {"success": True, "data": _db.get_issue_statistics()}
 
 
@@ -169,24 +198,204 @@ async def _resolve_owner_names() -> List[str]:
     return list(dict.fromkeys(name for name in names if name))
 
 
+def _empty_user_stats(user: Dict[str, Any], error: str = "") -> Dict[str, Any]:
+    return {
+        "id": user.get("id"),
+        "name": user.get("name") or "",
+        "aliases": user.get("aliases") or [],
+        "total_owned": 0,
+        "open_count": 0,
+        "closed_count": 0,
+        "scanned_open_count": 0,
+        "waiting_my_reply": 0,
+        "no_reply_3_days": 0,
+        "max_unreplied_days": 0,
+        "overdue_issues": [],
+        "detail_source": "local_db",
+        **({"error": error} if error else {}),
+    }
+
+
+@router.get("/users")
+async def list_stat_users():
+    users = [
+        {
+            "id": item.get("id"),
+            "name": item.get("name") or "",
+            "aliases": item.get("aliases") or [],
+        }
+        for item in load_redmine_user_map()
+    ]
+    current_names = await _resolve_owner_names()
+    if current_names:
+        from core.redmine_agent_db import _name_keys as _nk
+        current_keys = set()
+        for n in current_names:
+            current_keys.update(_nk(n))
+        # Only insert if not already in user_map
+        already_mapped = any(
+            _nk(item.get("name") or "") & current_keys
+            for item in users
+        )
+        if not already_mapped:
+            users.insert(0, {"id": "me", "name": current_names[0], "aliases": current_names[1:]})
+    return {"success": True, "data": {"items": users}}
+
+
+@router.post("/users")
+async def add_stat_user(request: Request):
+    body = await request.json()
+    uid = body.get("id")
+    name = str(body.get("name") or "").strip()
+    if not uid or not name:
+        return {"success": False, "error": "id and name are required"}
+    # Load existing map
+    user_map = {"users": []}
+    if USER_MAP_PATH.exists():
+        try:
+            user_map = json.loads(USER_MAP_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    users_list = user_map.get("users") or []
+    # Check duplicate id
+    for item in users_list:
+        if item.get("id") == uid:
+            return {"success": False, "error": f"user id {uid} already exists"}
+    # Append and save
+    users_list.append({"id": uid, "name": name, "aliases": [name]})
+    user_map["users"] = users_list
+    USER_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    USER_MAP_PATH.write_text(json.dumps(user_map, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"success": True}
+
+
 @router.get("/statistics/workload")
 async def get_workload_statistics(
     stale_days: int = Query(3, ge=1, le=30),
     list_limit: int = Query(30, ge=1, le=100),
+    name: str = Query(""),
 ):
-    owner_names = await _resolve_owner_names()
+    # Check cache
+    cache_key = f"{stale_days}:{list_limit}:{name}"
+    now_ts = datetime.now().timestamp()
+    cache_ttl = _get_redmine_stats_config()["cache_ttl"]
+    cached = _WORKLOAD_STATS_CACHE.get(cache_key)
+    if cached and cache_ttl > 0 and now_ts - cached.get("cached_at_ts", 0) < cache_ttl:
+        return {"success": True, "data": {**cached["data"], "cache_hit": True}}
+
+    owner_names = []
+    display_names = []
+    live_counts: Dict[str, int] = {}
+    if name:
+        mapped = find_user_mapping(name)
+        if mapped:
+            owner_names = display_names_from_mapping(mapped)
+            display_names = owner_names
+            client = _agent._make_client()
+            try:
+                live_counts = await client.count_issues_by_assignee(int(mapped["id"]))
+                live_counts.update(await client.resolved_trends_by_assignee(int(mapped["id"])))
+            except Exception:
+                live_counts = {}
+            finally:
+                await client.close()
+        else:
+            owner_names = [name]
+            display_names = [name]
+    if not owner_names:
+        owner_names = await _resolve_owner_names()
+        display_names = owner_names
     # Collect extra names from run history for matching only, not display
     extra_names = []
-    try:
-        for run in _db.list_runs(10):
-            assigned_to = str(run.get("assigned_to") or "").strip()
-            if assigned_to:
-                extra_names.append(assigned_to)
-    except Exception:
-        pass
+    if not name:
+        try:
+            for run in _db.list_runs(10):
+                assigned_to = str(run.get("assigned_to") or "").strip()
+                if assigned_to:
+                    extra_names.append(assigned_to)
+        except Exception:
+            pass
     all_names = owner_names + [n for n in extra_names if n]
-    data = _db.get_workload_statistics(owner_names=all_names, stale_days=stale_days, list_limit=list_limit, display_names=owner_names)
+    stats_cfg = _get_redmine_stats_config()
+    data = _db.get_workload_statistics(
+        owner_names=all_names,
+        stale_days=stale_days,
+        list_limit=list_limit,
+        display_names=display_names,
+        window_days=stats_cfg["window_days"],
+    )
+    if live_counts:
+        data.update(live_counts)
+    data["generated_at"] = datetime.now().isoformat(timespec="seconds")
+    # Update cache
+    _WORKLOAD_STATS_CACHE[cache_key] = {"cached_at_ts": now_ts, "data": data}
+    # Evict stale entries (keep only current key)
+    stale_keys = [k for k in _WORKLOAD_STATS_CACHE if k != cache_key]
+    for k in stale_keys:
+        del _WORKLOAD_STATS_CACHE[k]
     return {"success": True, "data": data}
+
+
+async def _department_user_overdue(client, user: Dict[str, Any], stale_days: int, issue_limit: int, window_days: int = 0) -> Dict[str, Any]:
+    try:
+        return await compute_user_overdue_stats(client, _db, user, stale_days, issue_limit, window_days)
+    except Exception as exc:
+        return _empty_user_stats(user, error=str(exc))
+
+
+@router.get("/statistics/department-overdue")
+async def get_department_overdue_statistics(
+    stale_days: int = Query(3, ge=1, le=30),
+    list_limit: int = Query(50, ge=1, le=500),
+    issue_limit: int = Query(500, ge=1, le=1000),
+    refresh: bool = Query(False),
+):
+    cache_key = f"{stale_days}:{list_limit}:{issue_limit}:{USER_MAP_PATH.stat().st_mtime if USER_MAP_PATH.exists() else 0}"
+    now_ts = datetime.now().timestamp()
+    cache_ttl = _get_redmine_stats_config()["cache_ttl"]
+    cached = _DEPARTMENT_OVERDUE_CACHE.get(cache_key)
+    if cached and not refresh and cache_ttl > 0 and now_ts - cached.get("cached_at_ts", 0) < cache_ttl:
+        return {"success": True, "data": {**cached["data"], "cache_hit": True}}
+
+    users = load_redmine_user_map()
+    client = _agent._make_client()
+    stats_cfg = _get_redmine_stats_config()
+    window_days = stats_cfg["window_days"]
+    semaphore = asyncio.Semaphore(4)
+
+    async def _safe_user(user: Dict[str, Any]) -> Dict[str, Any]:
+        async with semaphore:
+            return await _department_user_overdue(client, user, stale_days, issue_limit, window_days)
+
+    try:
+        if users:
+            results = await asyncio.gather(*[_safe_user(user) for user in users])
+        else:
+            results = []
+        for item in results:
+            item["overdue_issues"] = item.get("overdue_issues", [])[:list_limit]
+        summary = {
+            "user_count": len(results),
+            "open_count": sum(int(item.get("open_count") or 0) for item in results),
+            "waiting_my_reply": sum(int(item.get("waiting_my_reply") or 0) for item in results),
+            "no_reply_3_days": sum(int(item.get("no_reply_3_days") or 0) for item in results),
+            "total_owned": sum(int(item.get("total_owned") or 0) for item in results),
+        }
+        data = {
+            "summary": summary,
+            "users": results,
+            "stale_days": stale_days,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "cache_hit": False,
+        }
+        _DEPARTMENT_OVERDUE_CACHE[cache_key] = {"cached_at_ts": now_ts, "data": data}
+        # Evict stale entries (keep only current key)
+        stale_keys = [k for k in _DEPARTMENT_OVERDUE_CACHE if k != cache_key]
+        for k in stale_keys:
+            del _DEPARTMENT_OVERDUE_CACHE[k]
+        return {"success": True, "data": data}
+    finally:
+        await client.close()
 
 
 @router.post("/sync")
@@ -221,8 +430,29 @@ async def get_config():
     return {"success": True, "data": get_scheduler_config()}
 
 
-# ------------------------------------------------------------------
-# Web UI
+@router.get("/config/stats")
+async def get_stats_config():
+    """Read redmine_stats config for the settings UI."""
+    return {"success": True, "data": _get_redmine_stats_config()}
+
+
+@router.post("/config/stats")
+async def update_stats_config(request: Request):
+    """Update redmine_stats config from the settings UI."""
+    body = await request.json()
+    config = config_manager.load_config()
+    stats = config.get("redmine_stats") or {}
+    if "stale_days" in body:
+        stats["stale_days"] = max(1, min(30, int(body["stale_days"])))
+    if "window_days" in body:
+        stats["window_days"] = max(0, min(365, int(body["window_days"])))
+    if "cache_ttl" in body:
+        stats["cache_ttl"] = max(0, min(3600, int(body["cache_ttl"])))
+    config["redmine_stats"] = stats
+    config_manager.save_config(config)
+    return {"success": True, "data": stats}
+
+
 # ------------------------------------------------------------------
 # Web UI
 # ------------------------------------------------------------------
@@ -250,6 +480,19 @@ async def redmine_agent_page():
     button.warn { background:#b45309; }
     button:disabled { opacity:.55; cursor:not-allowed; }
     .btn-group { display:flex; gap:6px; flex-wrap:wrap; }
+
+    /* Modal */
+    .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:9999; padding:20px; }
+    .modal.show { display:flex; }
+    .modal-content { background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.4); max-width:400px; width:100%; overflow:hidden; }
+    .modal-header { background:linear-gradient(135deg,#667eea,#764ba2); border-bottom:1px solid var(--border); padding:12px 16px; display:flex; justify-content:space-between; align-items:center; }
+    .modal-title { color:#fff; font-size:15px; font-weight:600; }
+    .modal-close { color:#fff; font-size:22px; cursor:pointer; line-height:1; background:none; border:none; padding:0; height:auto; }
+    .modal-close:hover { color:#ccc; }
+    .modal-body { padding:16px; display:flex; flex-direction:column; gap:10px; }
+    .modal-body label { font-size:13px; font-weight:600; color:var(--muted); margin-bottom:2px; display:block; }
+    .modal-body input { width:100%; padding:8px 10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; font-size:13px; }
+    .modal-buttons { display:flex; gap:8px; justify-content:flex-end; margin-top:6px; }
 
     /* Tabs — inline in header, left side */
     .tabs { display:flex; gap:0; }
@@ -361,6 +604,18 @@ async def redmine_agent_page():
     .issue-mini-title strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-weight:600; }
     .issue-mini-title span { display:block; color:var(--muted); font-size:12px; line-height:1.5; margin-top:2px; }
     .issue-mini-meta { color:var(--muted); font-size:12px; text-align:right; line-height:1.5; }
+    .dept-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+    .dept-table-wrap { overflow:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:18px; }
+    .dept-table { width:100%; border-collapse:collapse; min-width:760px; font-size:13px; }
+    .dept-table th { text-align:left; color:var(--muted); font-weight:600; font-size:12px; padding:8px 10px; background:var(--panel2); border-bottom:1px solid var(--border); white-space:nowrap; }
+    .dept-table td { padding:9px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+    .dept-table tr:last-child td { border-bottom:0; }
+    .dept-table tbody tr:hover { background:#111927; }
+    .dept-table a { color:#7bb0ff; text-decoration:none; font-weight:700; }
+    .dept-table a:hover { text-decoration:underline; }
+    .dept-user-block { margin-bottom:18px; }
+    .dept-user-title { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:0 0 8px; }
+    .dept-user-title h2 { margin:0; font-size:15px; }
 
     /* Layout */
     .two-col { display:grid; grid-template-columns:340px minmax(0,1fr); gap:12px; min-height:calc(100vh - 160px); }
@@ -378,12 +633,19 @@ async def redmine_agent_page():
 <body>
 <header>
   <div class="tabs">
-    <div class="tab active" data-tab="stats" onclick="switchTab('stats')">📈 统计</div>
+    <div class="tab active" data-tab="stats" onclick="switchTab('stats')">📈 个人看板</div>
+    <div class="tab" data-tab="department" onclick="switchTab('department')">🏢 部门看板</div>
     <div class="tab" data-tab="issues" onclick="switchTab('issues')">📋 工单列表</div>
     <div class="tab" data-tab="runs" onclick="switchTab('runs')">📊 扫描记录</div>
   </div>
   <div style="flex:1"></div>
   <div class="filter-bar" style="margin:0">
+    <div style="position:relative;display:inline-flex;align-items:center">
+      <select id="statsUserSelect" onchange="onStatsUserChange()" style="width:140px;padding-right:24px">
+        <option value="">当前登录用户</option>
+      </select>
+      <button onclick="showAddUserModal()" title="添加用户" style="position:absolute;right:2px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);font-size:14px;padding:0 4px;line-height:1;cursor:pointer;height:auto">＋</button>
+    </div>
     <input type="text" id="searchInput" placeholder="搜索工单 / 输入 #工单号查询Redmine..." onkeydown="if(event.key==='Enter')smartSearch()" style="width:260px">
     <select id="statusFilter" onchange="loadIssues()">
       <option value="">全部状态</option>
@@ -405,6 +667,7 @@ async def redmine_agent_page():
     <button id="scanBtn" onclick="startScan()">🔍 扫描</button>
     <button class="secondary" onclick="triggerSync()">🔄 同步</button>
     <button class="secondary" onclick="refreshCurrentTab()">刷新</button>
+    <button class="secondary" onclick="showSettingsModal()" title="设置">⚙️</button>
   </div>
 </header>
 
@@ -430,6 +693,65 @@ async def redmine_agent_page():
   <div id="statsContent"><div class="muted">加载中...</div></div>
 </div>
 
+<div id="tab-department" class="tab-content">
+  <div id="departmentContent"><div class="muted">加载中...</div></div>
+</div>
+
+<!-- Add User Modal -->
+<div id="addUserModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">添加用户</span>
+      <span class="modal-close" onclick="hideAddUserModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div>
+        <label>Redmine 用户 ID</label>
+        <input type="number" id="addUserId" placeholder="例如：8912">
+      </div>
+      <div>
+        <label>用户姓名</label>
+        <input type="text" id="addUserName" placeholder="例如：张三">
+      </div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="hideAddUserModal()">取消</button>
+        <button onclick="submitAddUser()">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settingsModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header" style="background:linear-gradient(135deg,#3b82f6,#6366f1)">
+      <span class="modal-title">⚙️ 统计设置</span>
+      <span class="modal-close" onclick="hideSettingsModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div>
+        <label>未回复天数阈值 (stale_days)</label>
+        <input type="number" id="settingStaleDays" min="1" max="30" placeholder="默认 3">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">超过此天数未回复的工单标记为"过期"</div>
+      </div>
+      <div>
+        <label>统计时间窗口 (window_days)</label>
+        <input type="number" id="settingWindowDays" min="0" max="365" placeholder="0 = 不限制">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">只统计最近 N 天内有活动的工单，0 表示不限制</div>
+      </div>
+      <div>
+        <label>缓存有效期 (秒)</label>
+        <input type="number" id="settingCacheTtl" min="0" max="3600" placeholder="600">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">统计数据缓存时间，期间内重复访问直接返回缓存</div>
+      </div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="hideSettingsModal()">取消</button>
+        <button onclick="saveSettings()">保存并刷新</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 function scrollToSection(id) {
   var el = document.getElementById(id);
@@ -439,6 +761,7 @@ let currentTab = 'stats';
 let currentPage = 1;
 const pageSize = 15;
 let currentRunId = '';
+let statsUserInitialized = false;
 
 // ---- API helper ----
 async function api(url, options) {
@@ -454,18 +777,11 @@ function trunc(s, n) {
   s = String(s || '');
   return s.length > n ? s.slice(0, n) + '...' : s;
 }
-function truncSafe(s, n) {
-  s = trunc(s, n);
-  var opens = (s.match(new RegExp(_F3, 'g')) || []).length;
-  if (opens % 2 !== 0) s += _NL + _F3;
-  return s;
-}
 
 // ---- Formatted content rendering ----
 var _BT = String.fromCharCode(96);
 var _F3 = _BT+_BT+_BT;
 var _NL = String.fromCharCode(10);
-var _MD_RE = new RegExp(_F3 + '(\\\\w*)' + _NL + '([\\\\s\\\\S]*?)' + _F3, 'g');
 var _HTML_RE = /<pre><code(?:\s+class="(\w*)")?\s*>([\s\S]*?)<\/code><\/pre>/g;
 
 function _nl2br(s) { return s.replace(new RegExp(_NL, 'g'), '<br>'); }
@@ -551,14 +867,123 @@ function copyCode(btn) {
 // ---- Tab switching ----
 function switchTab(tab) {
   currentTab = tab;
+  try { window.sessionStorage.setItem('redmineLastTab', tab); } catch(_) {}
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'tab-' + tab));
   if (tab === 'issues') loadIssues();
   else if (tab === 'runs') loadRuns();
+  else if (tab === 'department') loadDepartmentOverdue(false);
   else if (tab === 'stats') loadStatistics();
 }
 
-function refreshCurrentTab() { switchTab(currentTab); }
+async function refreshCurrentTab() {
+  var refreshBtns = document.querySelectorAll('.btn-group .secondary');
+  var targetBtn = null;
+  refreshBtns.forEach(function(b) { if (b.textContent.includes('刷新')) targetBtn = b; });
+  if (targetBtn) { targetBtn.disabled = true; targetBtn.textContent = '⏳ 刷新中...'; }
+  try {
+    await (currentTab === 'issues' ? loadIssues() : currentTab === 'runs' ? loadRuns() : currentTab === 'department' ? loadDepartmentOverdue(false) : loadStatistics());
+  } finally {
+    if (targetBtn) { targetBtn.disabled = false; targetBtn.textContent = '刷新'; }
+  }
+}
+
+async function initStatsUserSelect() {
+  if (statsUserInitialized) return;
+  statsUserInitialized = true;
+  var select = document.getElementById('statsUserSelect');
+  if (!select) return;
+  try {
+    var data = await api('/api/redmine-agent/users');
+    var items = (data.items || []).slice().sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
+    select.innerHTML = '<option value="">当前登录用户</option>' + items.map(function(item) {
+      var name = item.name || '';
+      return '<option value="' + esc(name) + '">' + esc(name) + '</option>';
+    }).join('');
+    var q = new URLSearchParams(window.location.search);
+    var name = q.get('name') || '';
+    if (name) select.value = name;
+  } catch (_) {}
+}
+
+async function onStatsUserChange() {
+  var select = document.getElementById('statsUserSelect');
+  var name = select ? select.value : '';
+  var url = new URL(window.location.href);
+  if (name) url.searchParams.set('name', name);
+  else url.searchParams.delete('name');
+  url.searchParams.set('tab', 'stats');
+  window.history.replaceState({}, '', url.toString());
+  if (select) select.disabled = true;
+  document.getElementById('statsContent').innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在加载 ' + esc(name || '当前用户') + ' 的统计数据...</div>';
+  try {
+    await loadStatistics();
+  } finally {
+    if (select) select.disabled = false;
+  }
+}
+
+// ---- Add User Modal ----
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') hideAddUserModal();
+});
+function showAddUserModal() {
+  document.getElementById('addUserId').value = '';
+  document.getElementById('addUserName').value = '';
+  document.getElementById('addUserModal').classList.add('show');
+  document.getElementById('addUserId').focus();
+}
+function hideAddUserModal() {
+  document.getElementById('addUserModal').classList.remove('show');
+}
+async function submitAddUser() {
+  var id = document.getElementById('addUserId').value.trim();
+  var name = document.getElementById('addUserName').value.trim();
+  if (!id || !name) { alert('请输入用户 ID 和姓名'); return; }
+  try {
+    await api('/api/redmine-agent/users', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: Number(id), name: name})});
+    hideAddUserModal();
+    statsUserInitialized = false;
+    await initStatsUserSelect();
+    document.getElementById('statsUserSelect').value = name;
+    onStatsUserChange();
+  } catch (e) { alert('添加失败: ' + e.message); }
+}
+
+// ---- Settings Modal ----
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') hideSettingsModal();
+});
+function showSettingsModal() {
+  document.getElementById('settingsModal').classList.add('show');
+  // Load current config
+  (async function() {
+    try {
+      var data = await api('/api/redmine-agent/config/stats');
+      document.getElementById('settingStaleDays').value = data.stale_days || 3;
+      document.getElementById('settingWindowDays').value = data.window_days || 0;
+      document.getElementById('settingCacheTtl').value = data.cache_ttl || 600;
+    } catch (_) {}
+  })();
+}
+function hideSettingsModal() {
+  document.getElementById('settingsModal').classList.remove('show');
+}
+async function saveSettings() {
+  var stale = parseInt(document.getElementById('settingStaleDays').value) || 3;
+  var window_ = parseInt(document.getElementById('settingWindowDays').value) || 0;
+  var cacheTtl = parseInt(document.getElementById('settingCacheTtl').value) || 600;
+  try {
+    await api('/api/redmine-agent/config/stats', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({stale_days: stale, window_days: window_, cache_ttl: cacheTtl})
+    });
+    hideSettingsModal();
+    // Clear caches so new settings take effect immediately
+    refreshCurrentTab();
+  } catch (e) { alert('保存失败: ' + e.message); }
+}
 
 // ---- Smart search: detect issue ID and fetch from Redmine ----
 async function smartSearch() {
@@ -738,7 +1163,7 @@ function renderIssueCard(item) {
 
     <div class="field">
       <div class="field-label">🔴 报错信息</div>
-      ${renderFormattedContent(truncSafe(errorInfoCombined, 2000), 'field-content error-section')}
+      ${renderFormattedContent(trunc(errorInfoCombined, 2000), 'field-content error-section')}
     </div>
 
     <div class="field">
@@ -748,7 +1173,7 @@ function renderIssueCard(item) {
 
     <div class="field">
       <div class="field-label">✅ 解决方案</div>
-      <div class="field-content solution-section">${renderFormattedContent(truncSafe(solutionRaw, 1500), 'field-content solution-section')}</div>
+      <div class="field-content solution-section">${renderFormattedContent(trunc(solutionRaw, 1500), 'field-content solution-section')}</div>
     </div>
 
     ${patchRaw && patchRaw !== '-' && patchRaw !== '需要进一步分析具体日志和源码' ? `<div class="field">
@@ -767,7 +1192,7 @@ function renderIssueCard(item) {
 
 function _extractErrorHtml(failures) {
   if (!failures || !failures.length) return '';
-  return failures.slice(0, 3).map(f => `[${f.module || '-'}] ${f.name || '-'}: ${trunc(f.reason || '', 200)}`).join('\\n');
+  return failures.slice(0, 3).map(f => `[${f.module || '-'}] ${f.name || '-'}: ${trunc(f.reason || '', 200)}`).join(_NL);
 }
 
 function renderPagination(total, limit, offset) {
@@ -854,11 +1279,105 @@ function renderGroupCards(title, data) {
   return `<section class="stats-section"><h2>${esc(title)}</h2><div class="stats-grid">${cards || '<div class="muted">无数据</div>'}</div></section>`;
 }
 
+function renderDepartmentIssue(item) {
+  const issueId = item.issue_id || '';
+  const lastAt = item.last_external_reply_at || item.updated_on || '-';
+  const days = Number(item.unreplied_days || 0);
+  const replyText = item.last_external_reply ? ' | ' + esc(trunc(item.last_external_reply, 140)) : '';
+  return `<div class="issue-mini">
+    <div><a href="https://redmine.rock-chips.com/issues/${issueId}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
+    <div class="issue-mini-title">
+      <strong title="${esc(item.subject || '')}">${esc(item.subject || '-')}</strong>
+      <span>最后回复: ${esc(item.last_external_reply_by || '-')} | 未回复 ${days} 天${replyText}</span>
+    </div>
+    <div class="issue-mini-meta">${esc(item.priority_name || '-')}<br>${esc(String(lastAt).slice(0, 16))}</div>
+  </div>`;
+}
+
+function renderDepartmentOverdue(data) {
+  const summary = data.summary || {};
+  const users = (data.users || []).slice().sort(function(a, b) {
+    return Number(b.no_reply_3_days || 0) - Number(a.no_reply_3_days || 0)
+      || Number(b.max_unreplied_days || 0) - Number(a.max_unreplied_days || 0)
+      || Number(b.open_count || 0) - Number(a.open_count || 0);
+  });
+  const generatedAt = String(data.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, '');
+  const cards = `
+    <div class="stats-grid">
+      <div class="stat-card"><div class="value">${summary.user_count || 0}</div><div class="label">配置用户</div></div>
+      <div class="stat-card"><div class="value">${summary.total_owned || 0}</div><div class="label">历史总数</div></div>
+      <div class="stat-card warn"><div class="value">${summary.open_count || 0}</div><div class="label">当前未 Close</div></div>
+      <div class="stat-card bad"><div class="value">${summary.waiting_my_reply || 0}</div><div class="label">待回复</div></div>
+      <div class="stat-card bad"><div class="value">${summary.no_reply_3_days || 0}</div><div class="label">3天未回复</div></div>
+    </div>`;
+  const rows = users.map(function(user) {
+    const names = (user.owner_names || []).join(' / ');
+    const nameLine = esc(user.name || '-');
+    const subLine = names ? '<div class="muted">' + esc(names) + '</div>' : '';
+    return `<tr style="cursor:pointer" onclick="scrollToSection('dept-user-${esc(user.id || '')}')">
+      <td><strong>${nameLine}</strong>${subLine}</td>
+      <td>${user.total_owned || 0}</td>
+      <td>${user.open_count || 0}</td>
+      <td>${user.scanned_open_count || 0}</td>
+      <td>${user.waiting_my_reply || 0}</td>
+      <td><strong style="color:var(--bad)">${user.no_reply_3_days || 0}</strong></td>
+      <td>${user.max_unreplied_days || 0}</td>
+    </tr>`;
+  }).join('');
+  const table = `<div class="dept-table-wrap">
+    <table class="dept-table">
+      <thead><tr><th>人员</th><th>历史数量</th><th>未 Close</th><th>本地未关闭</th><th>待回复</th><th>3天未回复</th><th>最长未回复天数</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="7" class="muted">暂无配置用户</td></tr>'}</tbody>
+    </table>
+  </div>`;
+  const detailUsers = users.filter(function(user) { return (user.overdue_issues || []).length > 0; });
+  const details = detailUsers.map(function(user) {
+    const issues = (user.overdue_issues || []).map(renderDepartmentIssue).join('');
+    const names = (user.owner_names || []).join(' / ');
+    return `<section class="dept-user-block" id="dept-user-${esc(user.id || '')}">
+      <div class="dept-user-title">
+        <h2>${esc(user.name || '-')} 3天未回复问题 (${(user.overdue_issues || []).length})</h2>
+        <div class="muted">${esc(names || '-')} | 最长 ${user.max_unreplied_days || 0} 天 -- (只统计60天内的Redmine)</div>
+      </div>
+      <div class="issue-mini-list">${issues}</div>
+    </section>`;
+  }).join('');
+  document.getElementById('departmentContent').innerHTML = `
+    <section class="stats-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:12px;flex-wrap:wrap">
+        <h2 style="margin:0">部门 Redmine 未回复汇总</h2>
+        <div class="muted" style="font-size:12px">更新时间: ${esc(generatedAt)} | 阈值: ${esc(data.stale_days || 3)} 天 | 缓存: ${data.cache_hit ? '是' : '否'}</div>
+      </div>
+      ${cards}
+    </section>
+    ${table}
+    ${details || '<div class="muted" style="padding:12px">当前所有配置用户暂无超过 3 天未回复的问题。</div>'}
+  `;
+}
+
+async function loadDepartmentOverdue(force) {
+  const box = document.getElementById('departmentContent');
+  if (!box) return;
+  box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计部门所有配置用户 3 天未回复问题...</div>';
+  try {
+    var url = '/api/redmine-agent/statistics/department-overdue?stale_days=3&list_limit=50&issue_limit=500';
+    if (force) url += '&refresh=true';
+    const data = await api(url);
+    renderDepartmentOverdue(data);
+  } catch (e) {
+    box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+  }
+}
+
 async function loadStatistics() {
   try {
+    await initStatsUserSelect();
+    var selectedName = (document.getElementById('statsUserSelect') || {}).value || '';
+    var workloadUrl = '/api/redmine-agent/statistics/workload?stale_days=3&list_limit=30';
+    if (selectedName) workloadUrl += '&name=' + encodeURIComponent(selectedName);
     const [basic, workload] = await Promise.all([
       api('/api/redmine-agent/statistics'),
-      api('/api/redmine-agent/statistics/workload?stale_days=3&list_limit=30')
+      api(workloadUrl)
     ]);
     const lists = workload.lists || {};
     const meta = workload.meta || {};
@@ -866,16 +1385,16 @@ async function loadStatistics() {
     document.getElementById('statsContent').innerHTML = `
       <section class="stats-section">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0">
-          <h2 style="margin:0">我的 Redmine 概览</h2>
+          <h2 style="margin:0">Redmine概览</h2>
           <div class="muted" style="margin:0;font-size:12px">统计身份: ${(meta.owner_names || []).map(esc).join(' / ') || '未识别'} | 更新时间: ${esc((meta.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, ''))}</div>
         </div>
         <div class="stats-grid" style="margin-top:12px">
           <div class="stat-card warn"><div class="value">${workload.open_count || 0}</div><div class="label">当前未 Close</div></div>
-          <div class="stat-card bad clickable-stat" onclick="scrollToSection('sec-waiting-reply')"><div class="value">${workload.waiting_my_reply || 0}</div><div class="label">待我回复 ⬇</div></div>
-          <div class="stat-card bad clickable-stat" onclick="scrollToSection('sec-no-reply-3d')"><div class="value">${workload.no_reply_3_days || 0}</div><div class="label">3 天未回复 ⬇</div></div>
+          <div class="stat-card bad clickable-stat" onclick="scrollToSection('sec-waiting-reply')"><div class="value">${workload.waiting_my_reply || 0}</div><div class="label">待回复 ⬇</div></div>
+          <div class="stat-card bad clickable-stat" onclick="scrollToSection('sec-no-reply-3d')"><div class="value">${workload.no_reply_3_days || 0}</div><div class="label">3天未回复 ⬇</div></div>
           <div class="stat-card warn clickable-stat" onclick="scrollToSection('sec-missing-report')"><div class="value">${workload.missing_test_report || 0}</div><div class="label">缺失测试报告 ⬇</div></div>
-          <div class="stat-card"><div class="value">${workload.total_owned || 0}</div><div class="label">我名下历史数量</div></div>
           <div class="stat-card ok"><div class="value">${workload.closed_count || 0}</div><div class="label">已解决 / 已关闭</div></div>
+          <div class="stat-card"><div class="value">${workload.total_owned || 0}</div><div class="label">名下历史数量</div></div>
         </div>
       </section>
 
@@ -886,8 +1405,8 @@ async function loadStatistics() {
         ${renderTrend('每年解决的 Redmine 问题', workload.resolved_yearly || [], 'year')}
       </div>
 
-      ${renderMiniIssueList('待我回复的问题 (' + (lists.waiting_my_reply || []).length + ')', lists.waiting_my_reply || [], '暂无待回复问题', 'sec-waiting-reply')}
-      ${renderMiniIssueList('3天我未回复的问题 (' + (lists.no_reply_3_days || []).length + ')', lists.no_reply_3_days || [], '暂无超过3天未回复问题', 'sec-no-reply-3d')}
+      ${renderMiniIssueList('待回复的问题 (' + (lists.waiting_my_reply || []).length + ')', lists.waiting_my_reply || [], '暂无待回复问题', 'sec-waiting-reply')}
+      ${renderMiniIssueList('3天未回复的问题 (' + (lists.no_reply_3_days || []).length + ')', lists.no_reply_3_days || [], '暂无超过3天未回复问题', 'sec-no-reply-3d')}
       ${renderMiniIssueList('缺失测试报告的问题 (' + (lists.missing_test_report || []).length + ')', lists.missing_test_report || [], '暂无缺失测试报告问题', 'sec-missing-report')}
     `;
   } catch (e) {
@@ -942,7 +1461,9 @@ async function waitForRun(runId, label) {
 }
 
 // ---- Init ----
-loadStatistics();
+var initialTab = new URLSearchParams(window.location.search).get('tab') || (window.sessionStorage.getItem('redmineLastTab') || 'stats');
+if (!document.getElementById('tab-' + initialTab)) initialTab = 'stats';
+switchTab(initialTab);
 
 // Check if a task is already running on page load — reset button state
 (async function() {

@@ -173,6 +173,27 @@ def _extract_page_name(text: str) -> str:
     return ""
 
 
+def _extract_redmine_names(text: str) -> List[str]:
+    cleaned = re.sub(r"(?i)redmine", " Redmine ", text)
+    cleaned = re.sub(r"(帮我|帮忙|请|麻烦|查看|查询|统计|看一下|看下|生成|的|Redmine|信息|统计信息|工单|问题单|情况|一下)", " ", cleaned)
+    spaced_names = re.findall(r"(?<![\u4e00-\u9fff])([\u4e00-\u9fff]{1,2}\s+[\u4e00-\u9fff]{1,3})(?![\u4e00-\u9fff])", cleaned)
+    cleaned = re.sub(r"[，,、；;和及跟与]+", " ", cleaned)
+    names = [name.strip() for name in spaced_names if name.strip()]
+    spaced_compacts = {name.replace(" ", "") for name in names}
+    for token in cleaned.split():
+        token = token.strip()
+        if not token:
+            continue
+        if any(token != compact and token in compact for compact in spaced_compacts):
+            continue
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{1,63}", token):
+            names.append(token)
+            continue
+        if re.fullmatch(r"[\u4e00-\u9fff]{2,4}(?:\s+[\u4e00-\u9fff]{1,3})?", token):
+            names.append(token)
+    return list(dict.fromkeys(names))[:8]
+
+
 def _extract_task_id(text: str) -> str:
     m = re.search(r"task[_-]?id\s*[:：]?\s*([a-f0-9\-]{8,})", text, re.IGNORECASE)
     return m.group(1) if m else ""
@@ -397,6 +418,10 @@ def _extract_params_for_tool(text: str, tool: AgentTool) -> Dict[str, Any]:
             value = _extract_quoted_value(text, ["command", "命令", "shell"])
             if value:
                 params[pname] = value
+        elif pname == "names":
+            extracted = _extract_redmine_names(text)
+            if extracted:
+                params["names"] = extracted
 
     if tool.name in {"devices_list", "devices_management"}:
         keyword = _extract_device_keyword(text)

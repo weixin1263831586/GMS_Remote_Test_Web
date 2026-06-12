@@ -16,6 +16,10 @@ from typing import Any, Dict, List
 from core.agent_tools import AgentTool, registry
 from core.config import config_manager
 from core.devices import device_manager, get_or_create_user_state
+from core.redmine_agent_db import (
+    find_user_mapping, display_names_from_mapping, load_redmine_user_map,
+    _name_keys, _norm_name,
+)
 from modules.device_lock_manager import device_lock_manager
 
 logger = logging.getLogger(__name__)
@@ -35,6 +39,7 @@ _TOOL_PAGES = {
     "system": "api-docs",
     "apk": "apk-analysis",
     "assets": "websites",
+    "redmine": "redmine-agent",
 }
 
 _CATEGORY_LABELS = {
@@ -55,6 +60,7 @@ _CATEGORY_LABELS = {
     "audit": "审计",
     "assets": "网址/工具",
     "agent": "Agent",
+    "redmine": "Redmine",
 }
 
 _UNSUPPORTED_DIRECT_TOOLS = {
@@ -174,6 +180,7 @@ class ActionExecutor:
             "apk_tasks": self._query_apk_tasks,
             "ssh_sshd": self._query_ssh_status,
             "agent_capabilities": self._query_capabilities,
+            "redmine_workload_stats": self._query_redmine_workload_stats,
             "devices_wifi": self._connect_wifi,
         }
 
@@ -640,6 +647,236 @@ class ActionExecutor:
                 {"label": "打开测试界面", "page": "test"},
             ],
         )
+
+    async def _query_redmine_workload_stats(self, session, request, params) -> ToolResult:
+        """统计一个或多个人员的 Redmine 工作量。"""
+        from routers.redmine_agent import _db, _agent, _resolve_owner_names
+
+        raw_names = params.get("names") or []
+        if isinstance(raw_names, str):
+            raw_names = [raw_names]
+        names = [str(name).strip() for name in raw_names if str(name).strip()]
+        stale_days = int(params.get("stale_days") or 3)
+
+        if not names:
+            try:
+                names = await _resolve_owner_names()
+            except Exception:
+                names = []
+        if not names:
+            return ToolResult(
+                success=False,
+                tool_name="redmine_workload_stats",
+                formatted_text="没有识别到要统计的人员，请指定姓名，例如：统计 卞金晨 Redmine 信息。",
+                page="redmine-agent",
+                error="missing names",
+            )
+
+        user_map = load_redmine_user_map()
+        resolved = _db.resolve_assignee_names(names)
+        rows = []
+        for requested_name in names:
+            matched_names, stats = await self._resolve_user_stats(
+                _agent, _db, requested_name, resolved, user_map, stale_days,
+            )
+            rows.append({
+                "requested_name": requested_name,
+                "matched_names": matched_names,
+                "stats": stats,
+            })
+
+        header = "| 人员 | 匹配到的 Redmine 指派人 | 历史数量 | 未 Close | 待回复 | 3天未回复 | 缺测试报告 | 已解决/关闭 |"
+        sep = "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |"
+        lines = [f"Redmine 统计结果（未回复阈值 {stale_days} 天）：", "", header, sep]
+        for row in rows:
+            stats = row["stats"]
+            matched_text = " / ".join(row["matched_names"])
+            lines.append(
+                f"| {row['requested_name']} | {matched_text} | {stats.get('total_owned', 0)} | "
+                f"{stats.get('open_count', 0)} | {stats.get('waiting_my_reply', 0)} | "
+                f"{stats.get('no_reply_3_days', 0)} | {stats.get('missing_test_report', 0)} | "
+                f"{stats.get('closed_count', 0)} |"
+            )
+
+        zero_rows = [row["requested_name"] for row in rows if row["stats"].get("total_owned", 0) == 0]
+        if zero_rows:
+            lines.append("")
+            lines.append(
+                "提示：以下人员未在本地 RedmineAgent 缓存或当前 Redmine 可访问范围内匹配到问题："
+                + "、".join(zero_rows)
+                + "。如果 Redmine 禁止用户搜索，需要先同步到这些人的问题，或补充姓名到 Redmine 用户 ID 的映射。"
+            )
+        if any(find_user_mapping(row["requested_name"]) for row in rows):
+            lines.append("")
+            lines.append("口径：历史数量、未 Close、已解决/关闭来自 Redmine 实时 count；待回复、3天未回复、缺测试报告依赖本地已同步的 journal/附件详情。")
+
+        for row in rows:
+            stats = row["stats"]
+            waiting = (stats.get("lists") or {}).get("waiting_my_reply") or []
+            stale = (stats.get("lists") or {}).get("no_reply_3_days") or []
+            missing = (stats.get("lists") or {}).get("missing_test_report") or []
+            lines.append("")
+            lines.append(f"{row['requested_name']} 重点问题：")
+            lines.append(self._format_redmine_issue_lines("待回复", waiting))
+            lines.append(self._format_redmine_issue_lines("3天未回复", stale))
+            lines.append(self._format_redmine_issue_lines("缺测试报告", missing))
+
+        return ToolResult(
+            success=True,
+            tool_name="redmine_workload_stats",
+            data={"rows": rows, "stale_days": stale_days},
+            formatted_text="\n".join(lines),
+            kind="table",
+            page="redmine-agent",
+            entities={"redmine_users": names},
+            quick_actions=[
+                {
+                    "label": "打开 Redmine 统计页",
+                    "page": "redmine-agent",
+                    "params": {"name": names[0]} if len(names) == 1 else {},
+                }
+            ],
+        )
+
+    async def _resolve_user_stats(
+        self, agent: Any, db: Any, requested_name: str,
+        resolved: Dict[str, List[str]], user_map: List[Dict], stale_days: int,
+    ) -> tuple:
+        """Resolve a single user's Redmine stats: name matching → live counts → workload.
+
+        Encapsulates the "try user map → try sync fallback" flow for one person.
+        Returns (matched_names, stats_dict).
+        """
+        matched_names = resolved.get(requested_name) or [requested_name]
+        mapped_user = find_user_mapping(requested_name) if user_map else {}
+        live_counts = {}
+
+        if mapped_user:
+            matched_names = display_names_from_mapping(mapped_user)
+            live_counts = await self._count_redmine_user_for_stats(agent, mapped_user)
+
+        # Read window_days from config
+        try:
+            from core.config import config_manager
+            stats_cfg = config_manager.load_config().get("redmine_stats") or {}
+            window_days = int(stats_cfg.get("window_days") or 0)
+        except Exception:
+            window_days = 0
+
+        stats = db.get_workload_statistics(
+            owner_names=matched_names, stale_days=stale_days,
+            list_limit=5, display_names=matched_names,
+            window_days=window_days,
+        )
+
+        # Fallback: if no local data, try syncing from Redmine
+        if not mapped_user and (stats.get("total_owned", 0) == 0 or matched_names == [requested_name]):
+            live_names = await self._sync_redmine_user_for_stats(agent, requested_name)
+            if live_names:
+                matched_names = live_names
+                resolved[requested_name] = live_names
+                stats = db.get_workload_statistics(
+                    owner_names=matched_names, stale_days=stale_days,
+                    list_limit=5, display_names=matched_names,
+                    window_days=window_days,
+                )
+
+        if live_counts:
+            stats.update(live_counts)
+        return matched_names, stats
+
+    async def _count_redmine_user_for_stats(self, agent: Any, user: Dict[str, Any]) -> Dict[str, int]:
+        client = agent._make_client()
+        try:
+            data = await client.count_issues_by_assignee(int(user["id"]))
+            data.update(await client.resolved_trends_by_assignee(int(user["id"])))
+            return data
+        except Exception as exc:
+            logger.info("[Agent] Redmine user count failed for %s: %s", user.get("id"), exc)
+            return {}
+
+    async def _sync_redmine_user_for_stats(self, agent: Any, requested_name: str) -> List[str]:
+        """Try to find and sync a Redmine user by name. Returns display names on success."""
+        client = agent._make_client()
+        mapped_user = find_user_mapping(requested_name)
+        if mapped_user:
+            await self._sync_redmine_user_issues(agent, client, mapped_user)
+            return display_names_from_mapping(mapped_user)
+
+        # Single search with the compact name — good enough for most cases
+        compact = _norm_name(requested_name).replace(" ", "")
+        try:
+            candidates = await client.search_users(compact or requested_name, limit=10)
+        except Exception as exc:
+            logger.info("[Agent] Redmine user search failed for %s: %s", requested_name, exc)
+            return []
+        if not candidates:
+            return []
+
+        query_keys = _name_keys(requested_name)
+        for candidate in candidates:
+            if not candidate.get("id"):
+                continue
+            values = [
+                candidate.get("name") or "",
+                f"{candidate.get('lastname', '')} {candidate.get('firstname', '')}".strip(),
+                candidate.get("mail") or "",
+            ]
+            if any(query_keys.intersection(_name_keys(v)) for v in values):
+                best_names = list(dict.fromkeys([
+                    candidate.get("name") or "",
+                    f"{candidate.get('lastname', '')} {candidate.get('firstname', '')}".strip(),
+                ]))
+                await self._sync_redmine_user_issues(
+                    agent, client, {"id": candidate["id"], "name": best_names[0] or requested_name},
+                )
+                return [n for n in best_names if n]
+
+        return []
+
+    async def _sync_redmine_user_issues(self, agent: Any, client: Any, user: Dict[str, Any]) -> None:
+        from core.redmine_agent import RESOLVED_STATUSES
+
+        issues = await client.fetch_issues_by_assignee(int(user["id"]), status_id="*", limit=2000)
+        display_names = display_names_from_mapping(user)
+        detail_refreshed = 0
+        for issue_stub in issues:
+            issue_id = int(getattr(issue_stub, "id"))
+            existing = agent.db.get_issue(issue_id)
+            payload = agent._stub_to_dict(issue_stub, f"agent-user-{user['id']}")
+            status_name = payload.get("status_name") or ""
+            payload["is_resolved"] = 1 if status_name in RESOLVED_STATUSES else 0
+            if not payload.get("assigned_to_name"):
+                payload["assigned_to_name"] = display_names[0]
+            if payload["is_resolved"] == 0 and detail_refreshed < 30:
+                try:
+                    detail = await agent.fetch_issue_snapshot(client, issue_id, payload.get("run_id") or "")
+                    if existing:
+                        detail["attachments_json"] = agent._merge_attachment_analysis(
+                            existing.get("attachments_json") or [],
+                            detail.get("attachments_json") or [],
+                        )
+                    payload.update({k: v for k, v in detail.items() if v not in (None, "", [], {})})
+                    detail_refreshed += 1
+                except Exception as exc:
+                    logger.info("[Agent] Redmine detail refresh failed for #%s: %s", issue_id, exc)
+            if existing:
+                agent._preserve_existing_analysis_fields(payload, existing)
+            agent.db.upsert_issue(payload)
+
+    @staticmethod
+    def _format_redmine_issue_lines(label: str, issues: List[Dict[str, Any]]) -> str:
+        if not issues:
+            return f"- {label}: 无"
+        parts = []
+        for item in issues[:3]:
+            issue_id = item.get("issue_id")
+            subject = str(item.get("subject") or "-")
+            if len(subject) > 42:
+                subject = subject[:42] + "..."
+            time_text = (item.get("last_external_reply_at") or item.get("updated_on") or "")[:10]
+            parts.append(f"#{issue_id} {subject}" + (f" ({time_text})" if time_text else ""))
+        return f"- {label}: " + "；".join(parts)
 
     # ==================== Router Function Caller ====================
 

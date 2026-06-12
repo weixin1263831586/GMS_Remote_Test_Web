@@ -13,6 +13,7 @@ from core.settings import PROJECT_ROOT
 
 DB_PATH = Path(PROJECT_ROOT) / "data" / "redmine_agent.sqlite3"
 DOCS_DIR = Path(PROJECT_ROOT) / "data" / "redmine_agent_docs"
+USER_MAP_PATH = Path(PROJECT_ROOT) / "configs" / "redmine_user_map.json"
 
 
 def _now() -> str:
@@ -84,14 +85,85 @@ def _name_keys(value: Any) -> set:
     normalized = _norm_name(value)
     if not normalized:
         return set()
-    keys = {normalized}
+    compact = normalized.replace(" ", "")
+    keys = {normalized, compact}
     if "@" in normalized:
         keys.add(normalized.split("@", 1)[0])
     parts = [part for part in normalized.split() if part]
     if len(parts) > 1:
         keys.add(" ".join(reversed(parts)))
         keys.add(" ".join(sorted(parts)))
+        keys.add("".join(reversed(parts)))
+        keys.add("".join(sorted(parts)))
     return keys
+
+
+def _identity_compacts(value: Any) -> set:
+    normalized = _norm_name(value)
+    if not normalized:
+        return set()
+    values = {normalized}
+    for marker in ("（", "(", "【", "["):
+        if marker in normalized:
+            values.add(normalized.split(marker, 1)[0].strip())
+    return {item.replace(" ", "") for item in values if item}
+
+
+def _name_matches_keys(value: Any, owner_keys: set) -> bool:
+    if not owner_keys:
+        return True
+    value_keys = _name_keys(value)
+    if value_keys and value_keys.intersection(owner_keys):
+        return True
+    compacts = _identity_compacts(value)
+    for key in owner_keys:
+        compact_key = str(key or "").replace(" ", "")
+        if len(compact_key) >= 2 and any(compact_key in compact for compact in compacts):
+            return True
+    return False
+
+
+# ------------------------------------------------------------------
+# User-map helpers (shared by executor and router)
+# ------------------------------------------------------------------
+
+_user_map_cache: tuple = (0.0, [])  # (mtime, parsed_list)
+
+
+def load_redmine_user_map() -> List[Dict[str, Any]]:
+    global _user_map_cache
+    if not USER_MAP_PATH.exists():
+        _user_map_cache = (0.0, [])
+        return []
+    try:
+        mtime = USER_MAP_PATH.stat().st_mtime
+        if _user_map_cache[0] == mtime:
+            return _user_map_cache[1]
+        payload = json.loads(USER_MAP_PATH.read_text(encoding="utf-8"))
+        result = [item for item in payload.get("users") or [] if item.get("id")]
+        _user_map_cache = (mtime, result)
+        return result
+    except Exception:
+        return []
+
+
+def display_names_from_mapping(item: Dict[str, Any]) -> List[str]:
+    values = [item.get("name") or "", *(item.get("aliases") or [])]
+    return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
+
+
+def find_user_mapping(name: str) -> Optional[Dict[str, Any]]:
+    keys = _name_keys(name)
+    for item in load_redmine_user_map():
+        for value in display_names_from_mapping(item):
+            if keys.intersection(_name_keys(value)):
+                return item
+    return None
+
+
+def _sorted_slice(bucket: Dict[str, int], key_name: str, limit: int) -> List[Dict[str, Any]]:
+    """Return [{key_name: k, count: v}] sorted by key ascending, last *limit* items."""
+    return [{key_name: k, "count": bucket[k]} for k in sorted(bucket.keys())[-limit:]]
 
 
 def _looks_like_report_attachment(attachment: Dict[str, Any]) -> bool:
@@ -109,6 +181,54 @@ def _looks_like_report_attachment(attachment: Dict[str, Any]) -> bool:
     has_report_word = any(token in filename for token in REPORT_ATTACHMENT_RE)
     has_report_ext = filename.endswith(REPORT_ATTACHMENT_EXTENSIONS)
     return has_report_word or (has_report_ext and any(token in filename for token in ("log", "result", "report", "cts", "gts", "vts", "gms")))
+
+
+async def compute_user_overdue_stats(
+    client: Any,
+    db: "RedmineAgentDB",
+    user: Dict[str, Any],
+    stale_days: int = 3,
+    issue_limit: int = 500,
+    window_days: int = 0,
+) -> Dict[str, Any]:
+    """Compute workload + overdue stats for a single mapped user.
+
+    Shared by the router's department-overdue endpoint, the workload endpoint,
+    and the agent executor. Returns a dict with counts and overdue issue lists.
+
+    Args:
+        window_days: If > 0, only count stale issues updated within this window.
+    """
+    owner_names = display_names_from_mapping(user)
+    counts = await client.count_issues_by_assignee(int(user["id"]))
+    workload = db.get_workload_statistics(
+        owner_names=owner_names,
+        stale_days=stale_days,
+        list_limit=min(issue_limit, 100),
+        display_names=owner_names,
+        window_days=window_days,
+    )
+    overdue = list((workload.get("lists") or {}).get("no_reply_3_days") or [])
+    now = datetime.now()
+    for item in overdue:
+        last_dt = _parse_dt(item.get("last_external_reply_at"))
+        item["unreplied_days"] = max(0, int((now - last_dt).total_seconds() // 86400)) if last_dt else 0
+        item["stale"] = True
+    overdue.sort(key=lambda item: (item.get("unreplied_days") or 0, item.get("last_external_reply_at") or ""), reverse=True)
+    return {
+        "id": user.get("id"),
+        "name": user.get("name") or "",
+        "aliases": user.get("aliases") or [],
+        "total_owned": counts.get("total_owned", 0),
+        "open_count": counts.get("open_count", 0),
+        "closed_count": counts.get("closed_count", 0),
+        "scanned_open_count": workload.get("open_count", 0),
+        "waiting_my_reply": workload.get("waiting_my_reply", 0),
+        "no_reply_3_days": workload.get("no_reply_3_days", 0),
+        "max_unreplied_days": max([item.get("unreplied_days") or 0 for item in overdue] or [0]),
+        "overdue_issues": overdue,
+        "detail_source": "local_db",
+    }
 
 
 class RedmineAgentDB:
@@ -439,17 +559,24 @@ class RedmineAgentDB:
         stale_days: int = 3,
         list_limit: int = 30,
         display_names: Optional[List[str]] = None,
+        window_days: int = 0,
     ) -> Dict[str, Any]:
         """Return Redmine workload metrics for the statistics dashboard.
 
         The database stores Redmine snapshots, so journal-based metrics are as
         fresh as the latest sync/analyze pass that populated journals_json.
+
+        Args:
+            window_days: If > 0, only count issues with activity within this many
+                         days. Prevents ancient issues from inflating stale counts.
         """
         owner_keys = set()
         for name in owner_names or []:
             owner_keys.update(_name_keys(name))
         stale_after = datetime.now() - timedelta(days=max(1, int(stale_days or 3)))
         list_limit = max(1, min(int(list_limit or 30), 100))
+        now = datetime.now()
+        window_cutoff = now - timedelta(days=int(window_days)) if int(window_days or 0) > 0 else None
 
         with self.connect() as conn:
             rows = conn.execute(
@@ -497,7 +624,13 @@ class RedmineAgentDB:
                 waiting_my_reply.append(summary)
                 last_dt = _parse_dt(reply_info.get("last_external_reply_at"))
                 if last_dt and last_dt <= stale_after:
-                    stale_my_reply.append(summary)
+                    in_window = True
+                    if window_cutoff:
+                        issue_updated = _parse_dt(issue.get("updated_on"))
+                        if not issue_updated or issue_updated < window_cutoff:
+                            in_window = False
+                    if in_window:
+                        stale_my_reply.append(summary)
 
             if self._is_missing_test_report(issue):
                 missing_test_report.append(self._issue_summary(issue))
@@ -505,9 +638,6 @@ class RedmineAgentDB:
         waiting_my_reply.sort(key=lambda item: item.get("last_external_reply_at") or item.get("updated_on") or "", reverse=True)
         stale_my_reply.sort(key=lambda item: item.get("last_external_reply_at") or item.get("updated_on") or "")
         missing_test_report.sort(key=lambda item: item.get("updated_on") or "", reverse=True)
-
-        def _sorted_slice(bucket, key_name, limit):
-            return [{key_name: k, "count": bucket[k]} for k in sorted(bucket.keys())[-limit:]]
 
         return {
             "total_owned": len(owned_issues),
@@ -534,6 +664,40 @@ class RedmineAgentDB:
             },
         }
 
+    def list_assignee_names(self) -> List[str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT assigned_to_name, COUNT(*) AS c
+                FROM redmine_agent_issues
+                WHERE assigned_to_name IS NOT NULL AND assigned_to_name != ''
+                GROUP BY assigned_to_name
+                ORDER BY c DESC, assigned_to_name
+                """
+            ).fetchall()
+        return [str(row["assigned_to_name"] or "") for row in rows if row["assigned_to_name"]]
+
+    def resolve_assignee_names(self, query_names: List[str]) -> Dict[str, List[str]]:
+        assignees = self.list_assignee_names()
+        assignee_keys = {
+            name: _name_keys(name)
+            for name in assignees
+        }
+        resolved: Dict[str, List[str]] = {}
+        for raw_name in query_names:
+            name = str(raw_name or "").strip()
+            if not name:
+                continue
+            query_keys = _name_keys(name)
+            compact_query = _norm_name(name).replace(" ", "")
+            matches = []
+            for assignee, keys in assignee_keys.items():
+                compact_assignee = _norm_name(assignee).replace(" ", "")
+                if query_keys.intersection(keys) or (compact_query and compact_query in compact_assignee):
+                    matches.append(assignee)
+            resolved[name] = list(dict.fromkeys(matches)) or [name]
+        return resolved
+
     @staticmethod
     def _is_issue_resolved(issue: Dict[str, Any]) -> bool:
         return bool(issue.get("is_resolved")) or str(issue.get("status_name") or "") in RESOLVED_STATUS_NAMES
@@ -542,8 +706,7 @@ class RedmineAgentDB:
     def _is_assigned_to_owner(issue: Dict[str, Any], owner_keys: set) -> bool:
         if not owner_keys:
             return True
-        assigned_keys = _name_keys(issue.get("assigned_to_name"))
-        return bool(assigned_keys and assigned_keys.intersection(owner_keys))
+        return _name_matches_keys(issue.get("assigned_to_name"), owner_keys)
 
     @staticmethod
     def _last_note_journal(issue: Dict[str, Any]) -> Dict[str, Any]:
@@ -558,8 +721,7 @@ class RedmineAgentDB:
         last_note = cls._last_note_journal(issue)
         if not last_note:
             return {"waiting": False, "reason": "no_journal_notes"}
-        last_user_keys = _name_keys(last_note.get("user"))
-        if owner_keys and last_user_keys.intersection(owner_keys):
+        if _name_matches_keys(last_note.get("user"), owner_keys):
             return {"waiting": False, "reason": "last_reply_is_owner"}
         return {
             "waiting": True,

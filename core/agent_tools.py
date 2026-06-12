@@ -72,6 +72,7 @@ _CATEGORY_KEYWORDS: Dict[str, List[str]] = {
     "audit": ["审计", "audit", "安全审计", "访问日志"],
     "assets": ["工具", "tools", "网址", "favicon", "图标"],
     "agent": ["agent", "对话", "会话", "session", "能力", "capabilities"],
+    "redmine": ["Redmine", "redmine", "工单", "问题单", "统计", "待回复"],
 }
 
 # 按 API path 模式补充额外关键词
@@ -423,6 +424,25 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
         return list(dict.fromkeys(kws))
 
     extras = [
+        AgentTool(
+            name="redmine_workload_stats",
+            category="redmine",
+            description="统计指定人员的 Redmine 工作量",
+            api_path="/api/redmine-agent/statistics/workload/by-users",
+            method="GET",
+            params=[
+                {"name": "names", "type": "array", "required": False, "desc": "人员姓名列表"},
+                {"name": "stale_days", "type": "integer", "required": False, "desc": "未回复天数阈值"},
+            ],
+            keywords=["Redmine统计", "redmine统计", "Redmine信息", "redmine信息", "Redmine问题",
+                      "Redmine工单", "问题单统计", "工单统计", "待回复问题", "缺失测试报告",
+                      "Redmine", "redmine", "工单", "问题单"],
+            is_readonly=True,
+            is_dangerous=False,
+            requires_confirm=False,
+            executor_ref="",
+            response_type="list",
+        ),
         AgentTool(
             name="reports_diagnose",
             category="report",
