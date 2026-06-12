@@ -1,58 +1,70 @@
 {
-    "ubuntu_user": "hcq",
-    "ubuntu_host": "172.16.14.233",
-    "ubuntu_pswd": "rockchip",
-    "local_server": "hcq@10.10.10.206",
-    "use_key_auth": false,
-    "usbip_vid_pid": "2207:0006",
-    "private_key_path": "~/.ssh/id_rsa",
-    "vnc_password": "rockchip",
-    "vpn_gateways": ["10.10.10.1"],
-    "vpn_target": [
-        "www.google.com"
-    ],
-    "suites_path": "/home/${ubuntu_user}/GMS-Suite",
-    "script_path": "/home/${ubuntu_user}/GMS-Suite/run_GMS_Test_Auto.sh",
-    "gsi_scripts": "/home/${ubuntu_user}/GMS-Suite/run_GSI_Burn.sh",
-    "scrcpy_path": "/home/${ubuntu_user}/Software/scrcpy-linux-x86_64-v3.3.4/scrcpy",
-    "opengrok": {
-        "base_url": "http://10.10.10.203:8080/source",
-        "default_project": "Android16",
-        "project_mapping": {
-            "13": "Android13",
-            "14": "Android14",
-            "15": "Android15",
-            "16": "Android16",
-            "17": "Android17",
-            "18": "Android18"
-        }
-    },
-    "redmine": {
-        "domain": "redmine.rock-chips.com",
-        "base_url": "https://redmine.rock-chips.com"
-    },
-    "ai_models": {
-        "enabled": true,
-        "primary_provider": "qwen",
-        "providers": {
-            "qwen": {
-                "name": "Qwen3.5-397B-A17B",
-                "enabled": true,
-                "api_key": "sk-n59SFal6iyndmvp3EjnFjiyTXs6jYPlQ5U88QY8tBYYNIi9v",
-                "model": "qwen3.5-397b-a17b",
-                "base_url": "http://172.16.14.248:3000",
-                "temperature": 0.3,
-                "max_tokens": 4000
-            },
-            "zhipu": {
-                "name": "GLM-4.7 (Z.ai)",
-                "enabled": false,
-                "api_key": "d386361b9cf14b0b8c33aa5c272fe525.zELxeFIpUHhxkxsL",
-                "model": "glm-4.7",
-                "base_url": "https://api.z.ai/api/anthropic",
-                "temperature": 0.3,
-                "max_tokens": 2000
-            }
-        }
+  "ubuntu_user": "hcq",
+  "ubuntu_host": "172.16.14.233",
+  "ubuntu_pswd": "rockchip",
+  "local_server": "hcq@10.10.10.206",
+  "use_key_auth": false,
+  "usbip_vid_pid": "2207:0006",
+  "private_key_path": "~/.ssh/id_rsa",
+  "vnc_password": "rockchip",
+  "vpn_gateways": [
+    "10.10.10.1"
+  ],
+  "vpn_target": [
+    "www.google.com"
+  ],
+  "suites_path": "/home/${ubuntu_user}/GMS-Suite",
+  "script_path": "/home/${ubuntu_user}/GMS-Suite/run_GMS_Test_Auto.sh",
+  "gsi_scripts": "/home/${ubuntu_user}/GMS-Suite/run_GSI_Burn.sh",
+  "scrcpy_path": "/home/${ubuntu_user}/Software/scrcpy-linux-x86_64-v3.3.4/scrcpy",
+  "opengrok": {
+    "base_url": "http://10.10.10.203:8080/source",
+    "default_project": "Android16",
+    "project_mapping": {
+      "13": "Android13",
+      "14": "Android14",
+      "15": "Android15",
+      "16": "Android16",
+      "17": "Android17",
+      "18": "Android18"
     }
+  },
+  "redmine": {
+    "domain": "redmine.rock-chips.com",
+    "base_url": "https://redmine.rock-chips.com"
+  },
+  "ai_models": {
+    "enabled": true,
+    "primary_provider": "zhipu",
+    "providers": {
+      "glm_local": {
+        "name": "GLM-5.1 Local",
+        "enabled": true,
+        "api_key": "sk-n59SFal6iyndmvp3EjnFjiyTXs6jYPlQ5U88QY8tBYYNIi9v",
+        "model": "glm-5.1-local",
+        "base_url": "http://172.16.14.248:3000",
+        "api_format": "anthropic",
+        "temperature": 0.3,
+        "max_tokens": 4000
+      },
+      "zhipu": {
+        "name": "GLM-5.1 (Z.ai)",
+        "enabled": true,
+        "api_key": "d386361b9cf14b0b8c33aa5c272fe525.zELxeFIpUHhxkxsL",
+        "model": "GLM-5.1",
+        "base_url": "https://api.z.ai/api/anthropic",
+        "api_format": "anthropic",
+        "temperature": 0.3,
+        "max_tokens": 4000
+      }
+    }
+  },
+  "redmine_agent": {
+    "max_issues_per_run": 50,
+    "sync_max_issues": 5000,
+    "detail_sync_limit": 5000,
+    "scan_hour": 0,
+    "scan_minute": 0,
+    "scan_hours_window": 24
+  }
 }

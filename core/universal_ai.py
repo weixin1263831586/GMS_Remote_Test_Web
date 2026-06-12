@@ -337,6 +337,31 @@ class UniversalAIAnalyzer:
         except Exception as e:
             return {'success': False, 'error': f'{provider_name}调用失败: {str(e)}'}
 
+    def _parse_response_raw(self, payload: dict, api_format: str) -> str:
+        """Extract raw text content from an AI model response JSON.
+
+        Shared by UniversalAIAnalyzer internals and RedmineAgent to avoid
+        duplicating Anthropic/OpenAI response parsing logic.
+        """
+        if api_format == self.API_FORMAT_ANTHROPIC and 'content' in payload:
+            content_items = payload.get('content') or []
+            first = content_items[0] if content_items else {}
+            return (first or {}).get('text', '') if isinstance(first, dict) else str(first or '')
+
+        # OpenAI / compatible format
+        choices = payload.get('choices') or []
+        if choices:
+            choice = choices[0] or {}
+            message = choice.get('message', {})
+            content = message.get('content') or ''
+            if not content and message.get('reasoning'):
+                content = message.get('reasoning', '')
+            if not content:
+                content = choice.get('text', '')
+            return content
+
+        return str(payload)
+
     def _safe_import(self, module_path: str, error_result=None):
         """
         安全导入模块，失败时返回默认值

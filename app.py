@@ -40,6 +40,7 @@ from core.security_audit import classify_request_source
 from core.security_audit_utils import should_audit_request, summarize_audit_request, summarize_audit_response
 from core.state import global_state
 from core.usb_monitor import init_usb_monitor, start_usb_monitor, stop_usb_monitor
+from modules.redmine_agent_scheduler import start_redmine_agent_scheduler, stop_redmine_agent_scheduler
 
 from routers import ALL_ROUTERS
 from routers.system import init_templates
@@ -89,6 +90,7 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(300)
 
     cleanup_task = asyncio.create_task(periodic_cleanup())
+    redmine_agent_scheduler_task = start_redmine_agent_scheduler()
 
     # USB monitor
     usb_dispatch_task = None
@@ -178,6 +180,12 @@ async def lifespan(app: FastAPI):
             await usb_dispatch_task
         except asyncio.CancelledError:
             pass
+
+    if redmine_agent_scheduler_task:
+        try:
+            await stop_redmine_agent_scheduler()
+        except Exception as e:
+            logger.error(f"Error stopping RedmineAgent scheduler: {e}")
 
     try:
         stop_usb_monitor()
