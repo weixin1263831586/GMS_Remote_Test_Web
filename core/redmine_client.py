@@ -68,6 +68,115 @@ class RedmineClient:
         issue = await self.get_issue(issue_id, include=["journals"])
         return list(getattr(issue, "journals", []) or [])
 
+    async def get_current_user(self) -> Any:
+        """Fetch the authenticated Redmine user."""
+        return await asyncio.to_thread(self._redmine.user.get, "current")
+
+    async def fetch_all_assigned_issues(
+        self,
+        status_id: str = "*",
+        limit: int = 100,
+        sort: str = "updated_on:desc",
+    ) -> List[Any]:
+        """Fetch ALL issues assigned to the authenticated user (no date window).
+
+        Use this to build a complete local database of assigned issues.
+        """
+        limit = max(1, min(int(limit or 100), 5000))
+        page_size = min(limit, 100)
+
+        def _fetch():
+            all_items = []
+            seen_ids = set()
+            offset = 0
+            while len(all_items) < limit:
+                issues = self._redmine.issue.filter(
+                    assigned_to_id="me",
+                    status_id=status_id,
+                    sort=sort,
+                    limit=page_size,
+                    offset=offset,
+                )
+                page = list(issues)
+                if not page:
+                    break
+                added = 0
+                for issue in page:
+                    issue_id = int(getattr(issue, "id"))
+                    if issue_id in seen_ids:
+                        continue
+                    seen_ids.add(issue_id)
+                    all_items.append(issue)
+                    added += 1
+                    if len(all_items) >= limit:
+                        break
+                if len(page) < page_size or added == 0:
+                    break
+                offset += page_size
+            return all_items
+
+        return await asyncio.to_thread(_fetch)
+
+    async def search_assigned_issues(
+        self,
+        created_from: str,
+        created_to: str,
+        limit: int = 5,
+        status_id: str = "*",
+    ) -> List[Any]:
+        """Fetch issues assigned to the authenticated user in a created_on range.
+
+        Dates must be formatted as YYYY-MM-DD. Redmine date filters use the
+        ><start|end syntax.
+        """
+        limit = max(1, min(int(limit or 5), 100))
+
+        def _search():
+            issues = self._redmine.issue.filter(
+                assigned_to_id="me",
+                status_id=status_id,
+                created_on=f"><{created_from}|{created_to}",
+                sort="created_on:desc",
+                limit=limit,
+            )
+            return list(issues)
+
+        return await asyncio.to_thread(_search)
+
+    async def search_issues_by_subject(
+        self,
+        term: str,
+        project_id: str = "fae",
+        limit: int = 10,
+        status_id: str = "*",
+    ) -> List[Dict[str, Any]]:
+        """Search Redmine issues by subject using the Issues API."""
+        term = (term or "").strip()
+        if not term:
+            return []
+        limit = max(1, min(int(limit or 10), 50))
+
+        def _search():
+            issues = self._redmine.issue.filter(
+                project_id=project_id,
+                status_id=status_id,
+                subject=f"~{term}",
+                sort="updated_on:desc",
+                limit=limit,
+            )
+            return [
+                {
+                    "issue_id": int(getattr(issue, "id")),
+                    "subject": str(getattr(issue, "subject") or ""),
+                    "status_name": str(getattr(getattr(issue, "status", None), "name") or ""),
+                    "updated_on": str(getattr(issue, "updated_on") or ""),
+                    "project_name": str(getattr(getattr(issue, "project", None), "name") or ""),
+                }
+                for issue in issues
+            ]
+
+        return await asyncio.to_thread(_search)
+
     def auth_headers(self) -> Dict[str, str]:
         if not (self.username and self.password):
             return {}
@@ -119,6 +228,25 @@ class RedmineClient:
             raise RuntimeError(f"Redmine upload returned no token: {result}")
         logger.info("[Redmine Upload] File '%s' uploaded, token=%s...", filename, token[:16])
         return token
+
+    async def download_attachment(self, attachment_id: str, destination: str, content_url: str = "") -> int:
+        """Download an attachment to destination using aiohttp."""
+        url = content_url or self.download_url(attachment_id)
+        headers = self.auth_headers()
+        headers.setdefault("User-Agent", "GMS Remote Test/1.0")
+        total = 0
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=180), allow_redirects=True) as response:
+                if response.status not in (200, 206):
+                    body = await response.text(errors="ignore")
+                    raise RuntimeError(f"Redmine attachment download failed: HTTP {response.status} - {body[:300]}")
+                with open(destination, "wb") as target:
+                    async for chunk in response.content.iter_chunked(1024 * 1024):
+                        if not chunk:
+                            continue
+                        target.write(chunk)
+                        total += len(chunk)
+        return total
 
     async def reply_issue(self, issue_id: str, notes: str, files: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         uploads = []

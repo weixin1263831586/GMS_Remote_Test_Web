@@ -71,7 +71,7 @@
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant', 'agent'].includes(hashPage)) {
+            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant', 'redmine-agent', 'agent'].includes(hashPage)) {
                 targetPage = hashPage;
             } else {
                 targetPage = savedPage;
@@ -306,7 +306,12 @@
                     <span class="sidebar-icon">🎓</span>
                     <span class="sidebar-text">GMS助手</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="agent" data-page-order="15" onclick="switchPage('agent', event)">
+                <a href="#" class="sidebar-item" data-page="redmine-agent" data-page-order="15" onclick="switchPage('redmine-agent', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">🧭</span>
+                    <span class="sidebar-text">Redmine</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="agent" data-page-order="16" onclick="switchPage('agent', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">💬</span>
                     <span class="sidebar-text">对话Agent</span>
@@ -1150,6 +1155,14 @@
         <div class="container page-content" id="page-gms-assistant">
             <div class="section-title">🎓 GMS助手</div>
             <iframe id="gms-assistant-frame" src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
+                    style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
+            </iframe>
+        </div>
+
+        <!-- RedmineAgent页面 -->
+        <div class="container page-content" id="page-redmine-agent">
+            <div class="section-title">🧭 Redmine</div>
+            <iframe id="redmine-agent-frame" src="/redmine-agent"
                     style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
         </div>
@@ -2648,6 +2661,7 @@
             'tools': '常用工具 - GMS远程测试',
             'security-audit': '安全审计 - GMS 远程测试',
             'gms-assistant': 'GMS助手 - GMS 远程测试',
+            'redmine-agent': 'RedmineAgent - GMS 远程测试',
             'agent': '对话Agent - GMS 远程测试'
         };
 
@@ -6230,6 +6244,15 @@
 
         window.open(url, '_blank');
     }
+
+    // Listen for RedmineAgent notifications from iframe
+    window.addEventListener('message', function(e) {
+        if (e.data && e.data.type === 'redmine-agent-notification') {
+            if (typeof notifyOperationResult === 'function') {
+                notifyOperationResult(e.data.title, e.data.message, e.data.level || 'info');
+            }
+        }
+    });
 </script>
 </body>
 </html>
