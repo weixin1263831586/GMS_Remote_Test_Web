@@ -236,6 +236,8 @@ class RedmineAgent:
             logger.error("[RedmineAgent] sync failed: %s", exc, exc_info=True)
             self.db.update_run(run_id, status="failed", finished_at=_now_iso(), error=str(exc))
             return {"run_id": run_id, "status": "failed", "error": str(exc)}
+        finally:
+            await client.close()
 
     # ------------------------------------------------------------------
     # Timed scan (daily midnight run)
@@ -314,6 +316,8 @@ class RedmineAgent:
             logger.error("[RedmineAgent] run failed: %s", exc, exc_info=True)
             self.db.update_run(run_id, status="failed", finished_at=_now_iso(), error=str(exc))
             return {"run_id": run_id, "status": "failed", "error": str(exc)}
+        finally:
+            await client.close()
 
     # ------------------------------------------------------------------
     # Single issue analysis

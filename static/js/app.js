@@ -7940,7 +7940,7 @@ function renderAgentMessages(session) {
         if (quickActions.length > 0) {
             const actionBtns = quickActions.map(a => {
                 if (a.page) {
-                    return `<button class="btn-xs" onclick="switchPage('${escapeJsAttr(a.page)}', null)">${escapeHtml(a.label)}</button>`;
+                    return `<button class="btn-xs" onclick="openAgentPageAction('${escapeJsAttr(a.page)}', '${escapeJsAttr(JSON.stringify(a.params || {}))}')">${escapeHtml(a.label)}</button>`;
                 } else if (a.action) {
                     return `<button class="btn-xs" onclick="sendAgentAction('${escapeJsAttr(a.action)}', '${escapeJsAttr(JSON.stringify(a.params || {}))}', '${escapeJsAttr(a.label || a.action)}')">${escapeHtml(a.label)}</button>`;
                 }
@@ -8193,6 +8193,23 @@ async function sendAgentAction(action, paramsJson = '{}', label = '') {
         if (indicator) indicator.remove();
         showToast(`Agent 操作失败: ${error.message}`, 'error');
     }
+}
+
+function openAgentPageAction(page, paramsJson = '{}') {
+    let params = {};
+    try {
+        params = JSON.parse(paramsJson || '{}');
+    } catch (_) {
+        params = {};
+    }
+    if (page === 'redmine-agent') {
+        const frame = document.getElementById('redmine-agent-frame');
+        const query = new URLSearchParams();
+        query.set('tab', 'stats');
+        if (params.name) query.set('name', params.name);
+        if (frame) frame.src = '/redmine-agent?' + query.toString();
+    }
+    switchPage(page, null);
 }
 
 function confirmAgentPlan() {

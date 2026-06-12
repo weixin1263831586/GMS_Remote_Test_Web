@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -21,8 +22,12 @@ from core.redmine_utils import (
     create_basic_auth_header,
     extract_redmine_issue_id_from_text,
 )
+from core.redmine_agent_db import _parse_dt, _time_key, _sorted_slice
 
 logger = logging.getLogger(__name__)
+_ASSIGNEE_COUNT_CACHE: Dict[int, tuple] = {}
+_ASSIGNEE_TREND_CACHE: Dict[int, tuple] = {}
+_CACHE_TTL_SECONDS = 600
 
 
 @dataclass
@@ -35,7 +40,13 @@ class RedmineAttachment:
 
 
 class RedmineClient:
-    """Small project-facing Redmine API wrapper."""
+    """Small project-facing Redmine API wrapper.
+
+    Holds a lazily-created aiohttp.ClientSession that is reused across requests
+    for connection pooling and HTTP keep-alive. Call ``close()`` when done
+    (the RedmineAgent creates short-lived clients per operation, so the session
+    is lightweight).
+    """
 
     def __init__(self, base_url: str, username: str = "", password: str = ""):
         self.base_url = (base_url or "").rstrip("/")
@@ -45,6 +56,19 @@ class RedmineClient:
         if self.username and self.password:
             kwargs.update({"username": self.username, "password": self.password})
         self._redmine = Redmine(self.base_url, **kwargs)
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    def _get_session(self) -> aiohttp.ClientSession:
+        """Return a reusable aiohttp session (created on first use)."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self) -> None:
+        """Close the underlying aiohttp session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
 
     async def get_issue(self, issue_id: str, include: Optional[List[str]] = None) -> Any:
         """Fetch an issue through python-redmine."""
@@ -72,6 +96,29 @@ class RedmineClient:
         """Fetch the authenticated Redmine user."""
         return await asyncio.to_thread(self._redmine.user.get, "current")
 
+    async def search_users(self, term: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Search Redmine users by name/login/mail."""
+        term = (term or "").strip()
+        if not term:
+            return []
+        limit = max(1, min(int(limit or 10), 50))
+
+        def _search():
+            users = self._redmine.user.filter(name=term, limit=limit)
+            return [
+                {
+                    "id": int(getattr(user, "id")),
+                    "login": str(getattr(user, "login", "") or ""),
+                    "firstname": str(getattr(user, "firstname", "") or ""),
+                    "lastname": str(getattr(user, "lastname", "") or ""),
+                    "mail": str(getattr(user, "mail", "") or ""),
+                    "name": f"{getattr(user, 'firstname', '')} {getattr(user, 'lastname', '')}".strip(),
+                }
+                for user in users
+            ]
+
+        return await asyncio.to_thread(_search)
+
     async def fetch_all_assigned_issues(
         self,
         status_id: str = "*",
@@ -82,7 +129,27 @@ class RedmineClient:
 
         Use this to build a complete local database of assigned issues.
         """
-        limit = max(1, min(int(limit or 100), 5000))
+        return await self._paginate_issues("me", status_id, limit, sort)
+
+    async def fetch_issues_by_assignee(
+        self,
+        assignee_id: int,
+        status_id: str = "*",
+        limit: int = 1000,
+        sort: str = "updated_on:desc",
+    ) -> List[Any]:
+        """Fetch issues assigned to a specific Redmine user id."""
+        return await self._paginate_issues(int(assignee_id), status_id, limit, sort)
+
+    async def _paginate_issues(
+        self,
+        assigned_to_id: Any,
+        status_id: str = "*",
+        limit: int = 1000,
+        sort: str = "updated_on:desc",
+    ) -> List[Any]:
+        """Shared paginated issue fetcher for both 'me' and specific assignee."""
+        limit = max(1, min(int(limit or 1000), 5000))
         page_size = min(limit, 100)
 
         def _fetch():
@@ -91,7 +158,7 @@ class RedmineClient:
             offset = 0
             while len(all_items) < limit:
                 issues = self._redmine.issue.filter(
-                    assigned_to_id="me",
+                    assigned_to_id=assigned_to_id,
                     status_id=status_id,
                     sort=sort,
                     limit=page_size,
@@ -114,6 +181,108 @@ class RedmineClient:
                     break
                 offset += page_size
             return all_items
+
+        return await asyncio.to_thread(_fetch)
+
+    async def count_issues_by_assignee(self, assignee_id: int) -> Dict[str, int]:
+        """Count all/open/closed issues assigned to a Redmine user id."""
+        cache_key = int(assignee_id)
+        cached = _ASSIGNEE_COUNT_CACHE.get(cache_key)
+        if cached and time.time() - cached[0] < _CACHE_TTL_SECONDS:
+            return dict(cached[1])
+
+        def _count(status_id: str) -> int:
+            result = self._redmine.issue.filter(
+                assigned_to_id=int(assignee_id),
+                status_id=status_id,
+                limit=1,
+            )
+            list(result)
+            return int(getattr(result, "total_count", 0) or 0)
+
+        data = await asyncio.to_thread(lambda: {
+            "total_owned": (total := _count("*")),
+            "open_count": (open_count := _count("open")),
+            "closed_count": max(0, total - open_count),
+        })
+        _ASSIGNEE_COUNT_CACHE[cache_key] = (time.time(), dict(data))
+        return data
+
+    async def resolved_trends_by_assignee(self, assignee_id: int, limit: int = 5000) -> Dict[str, List[Dict[str, Any]]]:
+        """Aggregate closed issue trends for a Redmine user from issue stubs."""
+        cache_key = int(assignee_id)
+        cached = _ASSIGNEE_TREND_CACHE.get(cache_key)
+        if cached and time.time() - cached[0] < _CACHE_TTL_SECONDS:
+            return {key: list(value) for key, value in cached[1].items()}
+
+        issues = await self.fetch_issues_by_assignee(
+            assignee_id=int(assignee_id),
+            status_id="closed",
+            limit=limit,
+            sort="closed_on:desc",
+        )
+        buckets: Dict[str, Dict[str, int]] = {"day": {}, "week": {}, "month": {}, "year": {}}
+
+        for issue in issues:
+            closed_at = _parse_dt(getattr(issue, "closed_on", None)) or _parse_dt(getattr(issue, "updated_on", None))
+            if not closed_at:
+                continue
+            for granularity in ("day", "week", "month", "year"):
+                key = _time_key(closed_at, granularity)
+                if key:
+                    buckets[granularity][key] = buckets[granularity].get(key, 0) + 1
+
+        data = {
+            "resolved_daily": _sorted_slice(buckets["day"], "date", 90),
+            "resolved_weekly": _sorted_slice(buckets["week"], "week", 52),
+            "resolved_monthly": _sorted_slice(buckets["month"], "month", 24),
+            "resolved_yearly": _sorted_slice(buckets["year"], "year", 10),
+        }
+        _ASSIGNEE_TREND_CACHE[cache_key] = (time.time(), {key: list(value) for key, value in data.items()})
+        return data
+
+    async def discover_assignees_from_issues(
+        self,
+        limit: int = 2000,
+        status_id: str = "*",
+        sort: str = "updated_on:desc",
+    ) -> List[Dict[str, Any]]:
+        """Discover assignable users from issue payloads when /users is forbidden."""
+        limit = max(1, min(int(limit or 2000), 5000))
+        page_size = min(limit, 100)
+
+        def _fetch():
+            users: Dict[int, Dict[str, Any]] = {}
+            offset = 0
+            fetched = 0
+            while fetched < limit:
+                issues = self._redmine.issue.filter(
+                    status_id=status_id,
+                    sort=sort,
+                    limit=page_size,
+                    offset=offset,
+                )
+                page = list(issues)
+                if not page:
+                    break
+                fetched += len(page)
+                for issue in page:
+                    assigned = getattr(issue, "assigned_to", None)
+                    user_id = int(getattr(assigned, "id", 0) or 0) if assigned else 0
+                    if not user_id:
+                        continue
+                    users[user_id] = {
+                        "id": user_id,
+                        "name": str(getattr(assigned, "name", "") or assigned or ""),
+                        "login": "",
+                        "firstname": "",
+                        "lastname": "",
+                        "mail": "",
+                    }
+                if len(page) < page_size:
+                    break
+                offset += page_size
+            return list(users.values())
 
         return await asyncio.to_thread(_fetch)
 
@@ -216,8 +385,8 @@ class RedmineClient:
         headers["Content-Type"] = "application/octet-stream"
         headers["User-Agent"] = "GMS Remote Test/1.0"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, data=file_content, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as response:
+        session = self._get_session()
+        async with session.post(url, data=file_content, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as response:
                 if response.status not in (200, 201):
                     error_body = await response.text()
                     raise RuntimeError(f"Redmine upload failed: HTTP {response.status} - {error_body}")
@@ -235,8 +404,8 @@ class RedmineClient:
         headers = self.auth_headers()
         headers.setdefault("User-Agent", "GMS Remote Test/1.0")
         total = 0
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=180), allow_redirects=True) as response:
+        session = self._get_session()
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=180), allow_redirects=True) as response:
                 if response.status not in (200, 206):
                     body = await response.text(errors="ignore")
                     raise RuntimeError(f"Redmine attachment download failed: HTTP {response.status} - {body[:300]}")
@@ -268,8 +437,8 @@ class RedmineClient:
         headers["Content-Type"] = "application/json"
         headers["User-Agent"] = "GMS Remote Test/1.0"
         api_url = f"{self.base_url}/issues/{issue_id}.json"
-        async with aiohttp.ClientSession() as session:
-            async with session.put(api_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+        session = self._get_session()
+        async with session.put(api_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
                 if response.status in (200, 204):
                     return {"issue_url": f"{self.base_url}/issues/{issue_id}", "attachments": len(uploads)}
                 error_body = await response.text()
@@ -281,8 +450,8 @@ class RedmineClient:
         headers.setdefault("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         headers.setdefault("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(detail_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True) as response:
+            session = self._get_session()
+            async with session.get(detail_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True) as response:
                     final_url_issue_id = extract_redmine_issue_id_from_text(str(response.url))
                     if final_url_issue_id:
                         return final_url_issue_id
