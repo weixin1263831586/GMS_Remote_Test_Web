@@ -7,7 +7,6 @@ import socket
 import logging
 import re
 import subprocess
-import os
 import time
 from typing import Tuple, Optional, Dict, Any
 from urllib.parse import urlparse

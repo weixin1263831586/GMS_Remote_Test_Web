@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form, Body
+from fastapi import APIRouter, Query, Request, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 
 from core.config import config_manager
@@ -31,11 +31,10 @@ from core.redmine_utils import (
 )
 from core.redmine_client import RedmineClient
 from core.api_response import error_response, success_response
-from core.state import global_state, REDMINE_ISSUE_ID_CACHE
+from core.state import REDMINE_ISSUE_ID_CACHE
 from core.settings import REDMINE_ISSUE_ID_CACHE_MAX_SIZE
 from core.schemas import ReportDiagnosisRequest
-from core.clients import get_client_id_from_request, parse_client_id
-from core.error_handling import handle_api_errors
+from core.clients import get_client_id_from_request
 from core.upload_utils import extract_report_name_from_upload, safe_upload_target_path, save_upload_to_path
 from core.enums import AnalysisMode
 from core.common_utils import StackTraceUtils
@@ -324,7 +323,6 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
     if failure_location:
         logger.info(f"从堆栈提取失败位置: {failure_location['file_name']}.{failure_location['file_type']}:{failure_location['line_number']}")
 
-    source_search_results = []
     # 优先使用通用AI分析器（内部会自动进行源码搜索，无需手动重复搜索）
     try:
         from core.universal_ai import get_universal_analyzer
@@ -370,10 +368,6 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
                 response['source_url'] = source_info.get('url', '')
                 response['source_project'] = source_info.get('project', '')
                 logger.info(f"成功获取源码信息: {source_info.get('file_path', 'unknown')}")
-
-            # 添加源码搜索结果（供前端显示OpenGrok链接）
-            if source_search_results:
-                response['source_search_results'] = source_search_results
 
             return response
         else:

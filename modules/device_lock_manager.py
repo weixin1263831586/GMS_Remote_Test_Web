@@ -87,9 +87,9 @@ class DeviceLockManager:
                 'device_id': device_id,
                 'locked': True,
                 'locked_by': lock_info['client_id'],
-                'client_id': lock_info['client_id'],  # 添加 client_id 键以保持一致性
+                'client_id': lock_info['client_id'],
                 'username': lock_info['username'],
-                'locked_at': lock_info['timestamp']
+                'locked_at': lock_info['timestamp'],
             }
 
     def get_all_locks(self) -> Dict[str, Dict[str, Any]]:
@@ -109,18 +109,10 @@ class DeviceLockManager:
     def unlock_all(self, client_id: str) -> int:
         """解锁客户端的所有设备"""
         with self.lock:
-            unlocked_count = 0
-            to_unlock = []
-
-            for device_id, lock_info in self.locks.items():
-                if lock_info['client_id'] == client_id:
-                    to_unlock.append(device_id)
-
+            to_unlock = [did for did, info in self.locks.items() if info['client_id'] == client_id]
             for device_id in to_unlock:
                 del self.locks[device_id]
-                unlocked_count += 1
-
-            return unlocked_count
+            return len(to_unlock)
 
 
 # 全局实例

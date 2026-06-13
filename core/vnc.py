@@ -579,13 +579,13 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
 
             # 检查VNC进程
             check_cmd = "pgrep -f 'x11vnc' | wc -l"
-            stdout, stderr, code = self.ssh_manager.execute_command(ssh, check_cmd)
+            stdout, _, code = self.ssh_manager.execute_command(ssh, check_cmd)
 
             vnc_count = int(stdout.strip()) if code == 0 else 0
 
             # 检查VNC端口
             port_check = "netstat -tuln | grep 6080"
-            stdout, stderr, code = self.ssh_manager.execute_command(ssh, port_check)
+            stdout, _, code = self.ssh_manager.execute_command(ssh, port_check)
 
             port_listening = code == 0 and '6080' in stdout
 

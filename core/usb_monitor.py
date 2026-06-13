@@ -6,7 +6,6 @@ USB设备监控模块 - 监听USB插拔事件并自动刷新设备列表
 2. 轮询模式: 定期轮询adb设备变化 (兼容性好，无需额外依赖)
 """
 import logging
-import asyncio
 import threading
 import time
 from typing import Callable, Optional, Set, List
@@ -57,7 +56,6 @@ class USBMonitor:
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._current_devices: Set[str] = set()
 
         # 防抖相关

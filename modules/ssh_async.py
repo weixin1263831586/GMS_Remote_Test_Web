@@ -228,7 +228,7 @@ class SSHAsyncManager:
 
     def close_all(self):
         """关闭所有连接"""
-        for host in list(self.connections.keys()):
+        for host in list(self.connections):
             self.close(host)
 
 

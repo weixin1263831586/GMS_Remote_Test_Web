@@ -7,6 +7,7 @@ Agent Action Executor — 统一执行层。
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect
 import json
 import logging
@@ -40,6 +41,7 @@ _TOOL_PAGES = {
     "apk": "apk-analysis",
     "assets": "websites",
     "redmine": "redmine-agent",
+    "gerrit": "gerrit-dashboard",
 }
 
 _CATEGORY_LABELS = {
@@ -61,6 +63,7 @@ _CATEGORY_LABELS = {
     "assets": "网址/工具",
     "agent": "Agent",
     "redmine": "Redmine",
+    "gerrit": "Gerrit",
 }
 
 _UNSUPPORTED_DIRECT_TOOLS = {
@@ -181,6 +184,10 @@ class ActionExecutor:
             "ssh_sshd": self._query_ssh_status,
             "agent_capabilities": self._query_capabilities,
             "redmine_workload_stats": self._query_redmine_workload_stats,
+            "redmine_department_stats": self._query_redmine_department_stats,
+            "redmine_stats_config": self._query_redmine_stats_config,
+            "gerrit_dashboard_config": self._query_gerrit_dashboard_config,
+            "gerrit_dashboard_changes": self._query_gerrit_dashboard_changes,
             "devices_wifi": self._connect_wifi,
         }
 
@@ -226,6 +233,27 @@ class ActionExecutor:
             error=f"工具 {tool_name} 暂未实现执行逻辑",
             formatted_text=f"抱歉，工具「{tool.display_name}」暂未实现。请在对应页面操作。",
         )
+
+    # ==================== Query Helpers ====================
+
+    @staticmethod
+    async def _fetch_router_json(module_path: str, func_name: str, tool_name_for_error: str = "", **kwargs) -> tuple:
+        """Import and call an async router function, returning (error_result | None, payload_dict).
+
+        Returns (None, payload) on success, or (error_ToolResult, {}) on failure.
+        kwargs are forwarded to the router function.
+        """
+        try:
+            module = importlib.import_module(module_path)
+            func = getattr(module, func_name)
+            response = await func(**kwargs) if kwargs else await func()
+            return None, _json_body(response)
+        except Exception as e:
+            label = tool_name_for_error or func_name
+            return ToolResult(
+                success=False, tool_name=label,
+                error=str(e), formatted_text=f"查询失败: {e}",
+            ), {}
 
     # ==================== Query Handlers ====================
 
@@ -531,84 +559,67 @@ class ActionExecutor:
 
     async def _query_vpn_status(self, session, request, params) -> ToolResult:
         """查询 VPN 状态。"""
-        try:
-            from routers.integrations import get_vpn_status
-            response = await get_vpn_status()
-            payload = _json_body(response)
-            text = f"VPN 状态：{payload.get('status', 'unknown')}"
-            return ToolResult(
-                success=True, tool_name="vpn_status",
-                data=payload, formatted_text=text, kind="status",
-                quick_actions=[
-                    {"label": "连接 VPN", "action": "vpn_connect"},
-                    {"label": "断开 VPN", "action": "vpn_disconnect"},
-                ],
-            )
-        except Exception as e:
-            return ToolResult(success=False, tool_name="vpn_status", error=str(e), formatted_text=f"VPN 状态查询失败: {e}")
+        result, payload = await self._fetch_router_json("routers.integrations", "get_vpn_status")
+        if result is not None:
+            return result
+        text = f"VPN 状态：{payload.get('status', 'unknown')}"
+        return ToolResult(
+            success=True, tool_name="vpn_status",
+            data=payload, formatted_text=text, kind="status",
+            quick_actions=[
+                {"label": "连接 VPN", "action": "vpn_connect"},
+                {"label": "断开 VPN", "action": "vpn_disconnect"},
+            ],
+        )
 
     async def _query_vnc_status(self, session, request, params) -> ToolResult:
         """查询 VNC 状态。"""
-        try:
-            from routers.desktop import get_desktop_vnc_status
-            response = await get_desktop_vnc_status()
-            payload = _json_body(response)
-            text = f"VNC 状态：{payload.get('status', 'unknown')}"
-            return ToolResult(
-                success=True, tool_name="desktop_vnc_status",
-                data=payload, formatted_text=text, kind="status", page="desktop",
-                quick_actions=[
-                    {"label": "打开桌面", "page": "desktop"},
-                ],
-            )
-        except Exception as e:
-            return ToolResult(success=False, tool_name="desktop_vnc_status", error=str(e), formatted_text=f"VNC 状态查询失败: {e}")
+        result, payload = await self._fetch_router_json("routers.desktop", "get_desktop_vnc_status")
+        if result is not None:
+            return result
+        text = f"VNC 状态：{payload.get('status', 'unknown')}"
+        return ToolResult(
+            success=True, tool_name="desktop_vnc_status",
+            data=payload, formatted_text=text, kind="status", page="desktop",
+            quick_actions=[{"label": "打开桌面", "page": "desktop"}],
+        )
 
     async def _query_terminal(self, session, request, params) -> ToolResult:
         """查询终端连接信息。"""
-        try:
-            from routers.terminal import get_ssh_terminal_info
-            response = await get_ssh_terminal_info()
-            payload = _json_body(response)
-            text = f"终端连接：{payload.get('connection_command', 'ssh ' + payload.get('host', ''))}"
-            return ToolResult(
-                success=True, tool_name="terminal_open",
-                data=payload, formatted_text=text, kind="status", page="terminal",
-                quick_actions=[{"label": "打开终端", "page": "terminal"}],
-            )
-        except Exception as e:
-            return ToolResult(success=False, tool_name="terminal_open", error=str(e), formatted_text=f"终端查询失败: {e}")
+        result, payload = await self._fetch_router_json("routers.terminal", "get_ssh_terminal_info")
+        if result is not None:
+            return result
+        text = f"终端连接：{payload.get('connection_command', 'ssh ' + payload.get('host', ''))}"
+        return ToolResult(
+            success=True, tool_name="terminal_open",
+            data=payload, formatted_text=text, kind="status", page="terminal",
+            quick_actions=[{"label": "打开终端", "page": "terminal"}],
+        )
 
     async def _query_usbip_status(self, session, request, params) -> ToolResult:
         """查询 USB/IP 状态。"""
-        try:
-            from routers.integrations import get_usbip_status
-            response = await get_usbip_status()
-            payload = _json_body(response)
-            return ToolResult(
-                success=True, tool_name="usbip_status",
-                data=payload, formatted_text=f"USB/IP 状态：{payload.get('status', 'unknown')}",
-                kind="status",
-            )
-        except Exception as e:
-            return ToolResult(success=False, tool_name="usbip_status", error=str(e), formatted_text=f"USB/IP 状态查询失败: {e}")
+        result, payload = await self._fetch_router_json("routers.integrations", "get_usbip_status")
+        if result is not None:
+            return result
+        return ToolResult(
+            success=True, tool_name="usbip_status",
+            data=payload, formatted_text=f"USB/IP 状态：{payload.get('status', 'unknown')}",
+            kind="status",
+        )
 
     async def _query_apk_tasks(self, session, request, params) -> ToolResult:
         """查询 APK 反编译任务。"""
-        try:
-            from routers.apk import list_apk_tasks
-            response = await list_apk_tasks()
-            payload = _json_body(response)
-            tasks = (payload.get("data") or {}).get("tasks", [])
-            lines = [f"- {t.get('filename') or t.get('task_id')} | {t.get('status')} | {t.get('progress', 0)}%" for t in tasks[:8]]
-            text = f"APK 任务 {len(tasks)} 个。\n" + ("\n".join(lines) if lines else "- 无任务")
-            return ToolResult(
-                success=True, tool_name="apk_tasks",
-                data={"tasks": tasks}, formatted_text=text, kind="table", page="apk-analysis",
-                entities={"tasks": [t.get("task_id", "") for t in tasks[:8]]},
-            )
-        except Exception as e:
-            return ToolResult(success=False, tool_name="apk_tasks", error=str(e), formatted_text=f"APK 任务查询失败: {e}")
+        result, payload = await self._fetch_router_json("routers.apk", "list_apk_tasks")
+        if result is not None:
+            return result
+        tasks = (payload.get("data") or {}).get("tasks", [])
+        lines = [f"- {t.get('filename') or t.get('task_id')} | {t.get('status')} | {t.get('progress', 0)}%" for t in tasks[:8]]
+        text = f"APK 任务 {len(tasks)} 个。\n" + ("\n".join(lines) if lines else "- 无任务")
+        return ToolResult(
+            success=True, tool_name="apk_tasks",
+            data={"tasks": tasks}, formatted_text=text, kind="table", page="apk-analysis",
+            entities={"tasks": [t.get("task_id", "") for t in tasks[:8]]},
+        )
 
     async def _query_ssh_status(self, session, request, params) -> ToolResult:
         """查询 SSH 服务状态。"""
@@ -631,6 +642,8 @@ class ActionExecutor:
             "- 设备：查设备/型号/空闲占用，查看详情，WiFi、重启、remount、投屏。\n"
             "- 测试：查套件和状态，按模块/用例启动测试，失败 retry，后台监控结果。\n"
             "- 报告：列最近报告、下载/删除报告、分析失败、生成诊断线索。\n"
+            "- Redmine：查询个人/部门统计、超阈值未回复问题、统计设置和 RedmineAgent 页面。\n"
+            "- Gerrit：打开 Gerrit 看板、读取 dashboard 配置、按配置查询变更。\n"
             "- APK/源码：查看反编译任务，上传 APK/JAR 需到页面，支持套件 APK 源码分析。\n"
             "- 运维：终端、桌面、VPN、USB/IP、SSH、配置、系统健康、安全审计。\n\n"
             "已注册工具概览：\n" + "\n".join(lines[:12]) + "\n\n"
@@ -646,6 +659,110 @@ class ActionExecutor:
                 {"label": "最近报告", "action": "reports_list", "params": {}},
                 {"label": "打开测试界面", "page": "test"},
             ],
+        )
+
+    async def _query_redmine_stats_config(self, session, request, params) -> ToolResult:
+        cfg = config_manager.get_redmine_stats_config()
+        dashboard = config_manager.get_redmine_dashboard_config()
+        profiles = ", ".join(profile.get("name", "") for profile in dashboard.get("profiles", []))
+        text = (
+            f"Redmine 统计设置：未回复阈值 {cfg['stale_days']} 天，统计窗口 {cfg['window_days']} 天，"
+            f"缓存 {cfg['cache_ttl']} 秒。\n部门看板：{profiles or '未配置'}"
+        )
+        return ToolResult(
+            success=True,
+            tool_name="redmine_stats_config",
+            data={"stats": cfg, "dashboard": dashboard},
+            formatted_text=text,
+            kind="status",
+            page="redmine-agent",
+            quick_actions=[{"label": "打开 Redmine 看板", "page": "redmine-agent", "params": {"tab": "department"}}],
+        )
+
+    async def _query_redmine_department_stats(self, session, request, params) -> ToolResult:
+        result, payload = await self._fetch_router_json(
+            "routers.redmine_agent", "get_department_overdue_statistics",
+            tool_name_for_error="redmine_department_stats",
+            stale_days=params.get("stale_days"),
+            list_limit=None,
+            issue_limit=None,
+            profile_id=str(params.get("profile_id") or ""),
+            refresh=True,
+        )
+        if result is not None:
+            return result
+        data = payload.get("data") or payload
+        summary = data.get("summary") or {}
+        profile = data.get("profile") or {}
+        top_users = sorted(data.get("users") or [], key=lambda item: int(item.get("no_reply_3_days") or 0), reverse=True)[:5]
+        lines = [
+            f"{profile.get('name') or '部门'} Redmine 统计：配置用户 {summary.get('user_count', 0)}，"
+            f"未 Close {summary.get('open_count', 0)}，待回复 {summary.get('waiting_my_reply', 0)}，"
+            f"超阈值未回复 {summary.get('no_reply_3_days', 0)}。",
+            "",
+            "| 人员 | 超阈值未回复 | 最长未回复天数 | 待回复 |",
+            "| --- | ---: | ---: | ---: |",
+        ]
+        for user in top_users:
+            lines.append(
+                f"| {user.get('name') or '-'} | {user.get('no_reply_3_days', 0)} | "
+                f"{user.get('max_unreplied_days', 0)} | {user.get('waiting_my_reply', 0)} |"
+            )
+        return ToolResult(
+            success=True,
+            tool_name="redmine_department_stats",
+            data=data,
+            formatted_text="\n".join(lines),
+            kind="table",
+            page="redmine-agent",
+            quick_actions=[{"label": "打开部门看板", "page": "redmine-agent", "params": {"tab": "department"}}],
+        )
+
+    async def _query_gerrit_dashboard_config(self, session, request, params) -> ToolResult:
+        cfg = config_manager.get_gerrit_dashboard_config()
+        profiles = ", ".join(profile.get("name", "") for profile in cfg.get("dashboard_profiles", []))
+        text = (
+            f"Gerrit 看板配置：base_url={cfg.get('base_url') or '-'}，ssh={cfg.get('ssh_user') or '-'}@"
+            f"{cfg.get('ssh_host') or '-'}:{cfg.get('ssh_port')}，profiles={profiles or '-'}。"
+        )
+        return ToolResult(
+            success=True,
+            tool_name="gerrit_dashboard_config",
+            data=cfg,
+            formatted_text=text,
+            kind="status",
+            page="gerrit-dashboard",
+            quick_actions=[{"label": "打开 Gerrit 看板", "page": "gerrit-dashboard"}],
+        )
+
+    async def _query_gerrit_dashboard_changes(self, session, request, params) -> ToolResult:
+        result, payload = await self._fetch_router_json(
+            "routers.gerrit_dashboard", "list_gerrit_changes",
+            tool_name_for_error="gerrit_dashboard_changes",
+            profile_id=str(params.get("profile_id") or ""),
+            query=str(params.get("query") or ""),
+        )
+        if result is not None:
+            return result
+        data = payload.get("data") or payload
+        if data.get("error"):
+            text = f"Gerrit 查询失败：{data['error']}"
+        elif not data.get("configured"):
+            text = data.get("message") or "Gerrit 尚未配置。"
+        else:
+            items = data.get("items") or []
+            lines = [f"Gerrit 查询结果 {len(items)} 条："]
+            for item in items[:8]:
+                lines.append(f"- #{item.get('number') or item.get('id')} {item.get('subject') or '-'} [{item.get('status') or '-'}]")
+            text = "\n".join(lines)
+        return ToolResult(
+            success=True,
+            tool_name="gerrit_dashboard_changes",
+            data=data,
+            formatted_text=text,
+            kind="table",
+            page="gerrit-dashboard",
+            quick_actions=[{"label": "打开 Gerrit 看板", "page": "gerrit-dashboard"}],
         )
 
     async def _query_redmine_workload_stats(self, session, request, params) -> ToolResult:
@@ -674,10 +791,14 @@ class ActionExecutor:
 
         user_map = load_redmine_user_map()
         resolved = _db.resolve_assignee_names(names)
+        try:
+            window_days = int((config_manager.load_config().get("redmine_stats") or {}).get("window_days") or 0)
+        except Exception:
+            window_days = 0
         rows = []
         for requested_name in names:
             matched_names, stats = await self._resolve_user_stats(
-                _agent, _db, requested_name, resolved, user_map, stale_days,
+                _agent, _db, requested_name, resolved, user_map, stale_days, window_days,
             )
             rows.append({
                 "requested_name": requested_name,
@@ -685,7 +806,7 @@ class ActionExecutor:
                 "stats": stats,
             })
 
-        header = "| 人员 | 匹配到的 Redmine 指派人 | 历史数量 | 未 Close | 待回复 | 3天未回复 | 缺测试报告 | 已解决/关闭 |"
+        header = "| 人员 | 匹配到的 Redmine 指派人 | 历史数量 | 未 Close | 待回复 | 超阈值未回复 | 缺测试报告 | 已解决/关闭 |"
         sep = "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |"
         lines = [f"Redmine 统计结果（未回复阈值 {stale_days} 天）：", "", header, sep]
         for row in rows:
@@ -708,7 +829,7 @@ class ActionExecutor:
             )
         if any(find_user_mapping(row["requested_name"]) for row in rows):
             lines.append("")
-            lines.append("口径：历史数量、未 Close、已解决/关闭来自 Redmine 实时 count；待回复、3天未回复、缺测试报告依赖本地已同步的 journal/附件详情。")
+            lines.append("口径：历史数量、未 Close、已解决/关闭来自 Redmine 实时 count；待回复、超阈值未回复、缺测试报告依赖本地已同步的 journal/附件详情。")
 
         for row in rows:
             stats = row["stats"]
@@ -718,7 +839,7 @@ class ActionExecutor:
             lines.append("")
             lines.append(f"{row['requested_name']} 重点问题：")
             lines.append(self._format_redmine_issue_lines("待回复", waiting))
-            lines.append(self._format_redmine_issue_lines("3天未回复", stale))
+            lines.append(self._format_redmine_issue_lines("超阈值未回复", stale))
             lines.append(self._format_redmine_issue_lines("缺测试报告", missing))
 
         return ToolResult(
@@ -741,6 +862,7 @@ class ActionExecutor:
     async def _resolve_user_stats(
         self, agent: Any, db: Any, requested_name: str,
         resolved: Dict[str, List[str]], user_map: List[Dict], stale_days: int,
+        window_days: int = 0,
     ) -> tuple:
         """Resolve a single user's Redmine stats: name matching → live counts → workload.
 
@@ -754,14 +876,6 @@ class ActionExecutor:
         if mapped_user:
             matched_names = display_names_from_mapping(mapped_user)
             live_counts = await self._count_redmine_user_for_stats(agent, mapped_user)
-
-        # Read window_days from config
-        try:
-            from core.config import config_manager
-            stats_cfg = config_manager.load_config().get("redmine_stats") or {}
-            window_days = int(stats_cfg.get("window_days") or 0)
-        except Exception:
-            window_days = 0
 
         stats = db.get_workload_statistics(
             owner_names=matched_names, stale_days=stale_days,
@@ -901,7 +1015,6 @@ class ActionExecutor:
 
         module_path, func_name = ref.rsplit(":", 1)
         try:
-            import importlib
             module = importlib.import_module(module_path)
             func = getattr(module, func_name)
         except (ImportError, AttributeError) as e:
@@ -1011,25 +1124,33 @@ def _json_body(response) -> Dict[str, Any]:
 
 def _format_payload(tool: AgentTool, payload: Dict[str, Any]) -> str:
     if payload.get("error"):
-        return str(payload.get("error"))
+        return str(payload["error"])
     if tool.name == "devices_info":
         return _format_device_info_payload(payload)
     if payload.get("message"):
-        return str(payload.get("message"))
+        return str(payload["message"])
     if "connected" in payload:
-        return f"{tool.display_name}：{'已连接/正常' if payload.get('connected') else '未连接'}"
+        return f"{tool.display_name}：{'已连接/正常' if payload['connected'] else '未连接'}"
     data = payload.get("data", payload)
     if isinstance(data, dict):
-        if "results" in data or "results" in payload:
-            results = data.get("results") or payload.get("results") or []
-            total = len(results) if isinstance(results, list) else 0
-            ok = sum(1 for item in results if isinstance(item, dict) and item.get("success")) if isinstance(results, list) else 0
-            return f"{tool.display_name}完成：成功 {ok}/{total}"
-        if "reports" in data or "reports" in payload:
-            reports = data.get("reports") or payload.get("reports") or []
+        # Helper to get a list from data or payload
+        def _first_list(*keys):
+            for container in (data, payload):
+                for k in keys:
+                    v = container.get(k)
+                    if isinstance(v, list):
+                        return v
+            return []
+
+        results = _first_list("results")
+        if results:
+            ok = sum(1 for item in results if isinstance(item, dict) and item.get("success"))
+            return f"{tool.display_name}完成：成功 {ok}/{len(results)}"
+        reports = _first_list("reports")
+        if reports:
             return f"查询到 {len(reports)} 份报告。"
-        if "devices" in data or "devices" in payload:
-            devices = data.get("devices") or payload.get("devices") or []
+        devices = _first_list("devices")
+        if devices:
             return f"查询到 {len(devices)} 台设备。"
     return f"{tool.display_name}已完成。"
 
@@ -1047,7 +1168,7 @@ def _format_device_info_payload(payload: Dict[str, Any]) -> str:
     if not isinstance(results, list) or not results:
         return payload.get("message") or "未返回设备详情。"
 
-    preferred_fields = [
+    preferred_fields = (
         "Model",
         "Android Version",
         "API Level",
@@ -1065,7 +1186,7 @@ def _format_device_info_payload(payload: Dict[str, Any]) -> str:
         "Timezone",
         "Language",
         "Fingerprint",
-    ]
+    )
 
     sections = []
     for item in results:

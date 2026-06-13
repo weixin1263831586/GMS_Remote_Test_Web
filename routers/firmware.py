@@ -2,12 +2,12 @@
 
 import os
 import re
+import shlex
 import time
-import shutil
 import asyncio
 import logging
 import threading
-from typing import Dict, Any, List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -17,7 +17,6 @@ from core.config import config_manager
 from core.ssh import ssh_manager
 from core.schemas import SNBurnRequest
 from core.devices import (
-    SSHConnection,
     release_device_locks,
     broadcast_device_lock_update,
     safe_websocket_send,
@@ -30,7 +29,6 @@ from core.test_suite_utils import get_default_suites_path
 from core.clients import get_client_id_from_request
 from core.notifications import store_notification
 from core.common_utils import strip_ansi_codes
-from core.device_utils import DeviceUtils
 
 from modules.device_lock_manager import device_lock_manager
 
@@ -41,6 +39,31 @@ router = APIRouter()
 UPLOAD_PROGRESS_EXPIRATION = 10
 _FASTBOOT_OKAY_RE = re.compile(r"\s+OKAY\s+\[\s*[\d.]+s\]$")
 
+
+async def _lock_devices(client_id: str, devices: list, error_prefix="Devices occupied"):
+    """Lock devices for an operation. Returns (locked_devices, error_response_or_None)."""
+    config = config_manager.load_config()
+    username = config.get("client_username", "unknown")
+
+    locked_devices, failed_devices = [], []
+    for device_id in devices:
+        success, message = device_lock_manager.lock_device(device_id, client_id, username)
+        (locked_devices if success else failed_devices).append(
+            device_id if success else {"device_id": device_id, "error": message}
+        )
+
+    if failed_devices:
+        await release_device_locks(client_id, locked_devices, broadcast=False)
+        error_msg = f"{error_prefix}:\n" + "\n".join(
+            f"- {f['device_id']} ({f['error']})" for f in failed_devices
+        )
+        return [], JSONResponse(
+            content={"success": False, "error": error_msg, "failed_devices": failed_devices},
+            status_code=409,
+        )
+
+    await broadcast_device_lock_update(locked_devices)
+    return locked_devices, None
 
 
 # ==================== Upload Progress ====================
@@ -214,26 +237,9 @@ async def burn_firmware(request: Request, h: Optional[str] = Query(None), help: 
         if not devices:
             return error_response("No devices selected")
 
-        config = config_manager.load_config()
-        username = config.get("client_username", "unknown")
-
-        locked_devices = []
-        failed_devices = []
-        for device_id in devices:
-            success, message = device_lock_manager.lock_device(device_id, client_id, username)
-            if success:
-                locked_devices.append(device_id)
-            else:
-                failed_devices.append({"device_id": device_id, "error": message})
-
-        if failed_devices:
-            await release_device_locks(client_id, locked_devices, broadcast=False)
-            error_msg = "The following devices are occupied:\n"
-            for fail in failed_devices:
-                error_msg += f"- {fail['device_id']} ({fail['error']})\n"
-            return JSONResponse(content={"success": False, "error": error_msg.strip(), "failed_devices": failed_devices}, status_code=409)
-
-        await broadcast_device_lock_update(locked_devices)
+        locked_devices, lock_err = await _lock_devices(client_id, devices, "The following devices are occupied")
+        if lock_err:
+            return lock_err
 
         form = await request.form()
         firmware_file = form.get("firmware_file")
@@ -251,7 +257,6 @@ async def burn_firmware(request: Request, h: Optional[str] = Query(None), help: 
         try:
             # Upload upgrade_tool
             logger.info("[Firmware Burn] Uploading upgrade_tool...")
-            import shlex
             gms_suite_dir = get_default_suites_path(config)
             local_tool = os.path.join(PROJECT_ROOT, "tools", "upgrade_tool")
             remote_tool = os.path.join(gms_suite_dir, "upgrade_tool")
@@ -467,26 +472,9 @@ async def burn_gsi(request: Request):
         if not system_img:
             return error_response("System image path is required")
 
-        config = config_manager.load_config()
-        username = config.get("client_username", "unknown")
-
-        locked_devices = []
-        failed_devices = []
-        for device_id in devices:
-            success, message = device_lock_manager.lock_device(device_id, client_id, username)
-            if success:
-                locked_devices.append(device_id)
-            else:
-                failed_devices.append({"device_id": device_id, "error": message})
-
-        if failed_devices:
-            await release_device_locks(client_id, locked_devices, broadcast=False)
-            error_msg = "Devices occupied:\n"
-            for fail in failed_devices:
-                error_msg += f"- {fail['device_id']} ({fail['error']})\n"
-            return JSONResponse(content={"success": False, "error": error_msg.strip(), "failed_devices": failed_devices}, status_code=409)
-
-        await broadcast_device_lock_update(locked_devices)
+        locked_devices, lock_err = await _lock_devices(client_id, devices)
+        if lock_err:
+            return lock_err
 
         config = config_manager.load_config()
         ssh = ssh_manager.get_connection(config)
@@ -654,20 +642,17 @@ async def burn_sn(req: SNBurnRequest):
         if not ssh:
             return error_response("SSH connection failed", 500)
 
-        try:
-            results = []
-            for device_id in devices:
-                results.append({
-                    "device": device_id,
-                    "success": False,
-                    "error": "SN burning requires device in loader mode. Feature needs specific tool support.",
-                })
+        results = [
+            {
+                "device": device_id,
+                "success": False,
+                "error": "SN burning requires device in loader mode. Feature needs specific tool support.",
+            }
+            for device_id in devices
+        ]
 
-            ssh_manager.return_connection(ssh)
-            return JSONResponse(content={"success": True, "results": results})
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            raise e
+        ssh_manager.return_connection(ssh)
+        return JSONResponse(content={"success": True, "results": results})
     except HTTPException:
         raise
     except Exception as e:

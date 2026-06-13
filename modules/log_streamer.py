@@ -164,10 +164,11 @@ class LogStreamer:
                 try:
                     # 批量收集日志
                     batch = []
-                    deadline = asyncio.get_event_loop().time() + self.batch_timeout
+                    loop = asyncio.get_running_loop()
+                    deadline = loop.time() + self.batch_timeout
 
                     # 收集最多 batch_size 条日志，或等待超时
-                    while len(batch) < self.batch_size and asyncio.get_event_loop().time() < deadline:
+                    while len(batch) < self.batch_size and loop.time() < deadline:
                         if queue:
                             batch.append(queue.popleft())
                         else:
@@ -210,9 +211,7 @@ class LogStreamer:
         return {
             **self.stats,
             'active_clients': len(self.connections),
-            'queues': {
-                cid: len(q) for cid, q in self.client_queues.items()
-            }
+            'queues': {cid: len(q) for cid, q in self.client_queues.items()},
         }
 
     def is_connected(self, client_id: str) -> bool:

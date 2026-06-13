@@ -18,16 +18,19 @@ router = APIRouter()
 DB_PATH = Path(PROJECT_ROOT) / 'data' / 'mainline_known_issues.sqlite3'
 SYNC_SCRIPT = Path(PROJECT_ROOT) / 'modules' / 'sync_mainline_known_issues.py'
 _sync_lock = threading.Lock()
-_sync_status = {
-    'running': False,
-    'mode': None,
-    'started_at': None,
-    'finished_at': None,
-    'returncode': None,
-    'stdout': '',
-    'stderr': '',
-    'error': None,
-}
+
+
+def _initial_sync_status(**overrides):
+    base = {
+        'running': False, 'mode': None, 'started_at': None,
+        'finished_at': None, 'returncode': None, 'stdout': '',
+        'stderr': '', 'error': None,
+    }
+    base.update(overrides)
+    return base
+
+
+_sync_status = _initial_sync_status()
 
 
 def _connect_db() -> sqlite3.Connection:
@@ -58,18 +61,9 @@ def _run_sync_job(mode: str):
         command.append('--new-only')
 
     with _sync_lock:
-        _sync_status.update(
-            {
-                'running': True,
-                'mode': mode,
-                'started_at': datetime.now().isoformat(),
-                'finished_at': None,
-                'returncode': None,
-                'stdout': '',
-                'stderr': '',
-                'error': None,
-            }
-        )
+        _sync_status.update(_initial_sync_status(
+            running=True, mode=mode, started_at=datetime.now().isoformat(),
+        ))
     try:
         result = subprocess.run(
             command,
@@ -80,26 +74,18 @@ def _run_sync_job(mode: str):
             check=False,
         )
         with _sync_lock:
-            _sync_status.update(
-                {
-                    'running': False,
-                    'finished_at': datetime.now().isoformat(),
-                    'returncode': result.returncode,
-                    'stdout': result.stdout[-4000:],
-                    'stderr': result.stderr[-4000:],
-                    'error': None if result.returncode == 0 else f'sync exited with {result.returncode}',
-                }
-            )
+            _sync_status.update(_initial_sync_status(
+                running=False, finished_at=datetime.now().isoformat(),
+                returncode=result.returncode,
+                stdout=result.stdout[-4000:], stderr=result.stderr[-4000:],
+                error=None if result.returncode == 0 else f'sync exited with {result.returncode}',
+            ))
     except Exception as exc:
         with _sync_lock:
-            _sync_status.update(
-                {
-                    'running': False,
-                    'finished_at': datetime.now().isoformat(),
-                    'returncode': None,
-                    'error': str(exc),
-                }
-            )
+            _sync_status.update(_initial_sync_status(
+                running=False, finished_at=datetime.now().isoformat(),
+                returncode=None, error=str(exc),
+            ))
 
 
 @router.post('/api/mainline-known-issues/sync')
@@ -112,18 +98,9 @@ async def start_mainline_known_issues_sync(
                 status_code=409,
                 content={'success': False, 'error': 'sync already running', 'status': dict(_sync_status)},
             )
-        _sync_status.update(
-            {
-                'running': True,
-                'mode': mode,
-                'started_at': datetime.now().isoformat(),
-                'finished_at': None,
-                'returncode': None,
-                'stdout': '',
-                'stderr': '',
-                'error': None,
-            }
-        )
+        _sync_status.update(_initial_sync_status(
+            running=True, mode=mode, started_at=datetime.now().isoformat(),
+        ))
         thread = threading.Thread(target=_run_sync_job, args=(mode,), daemon=True)
         thread.start()
         status = dict(_sync_status)
@@ -166,22 +143,18 @@ async def list_mainline_known_issues(
             'android_versions LIKE ? OR category LIKE ? OR product_section LIKE ? OR issue_type LIKE ?'
             ')'
         )
-        params.extend([like, like, like, like, like, like, like, like, like, like])
-    if issue_type:
-        where.append('issue_type = ?')
-        params.append(issue_type.upper())
-    if product_section:
-        where.append('product_section = ? COLLATE NOCASE')
-        params.append(product_section)
-    if test_module:
-        where.append('test_module = ?')
-        params.append(test_module)
-    if test_case:
-        where.append('test_case = ?')
-        params.append(test_case)
-    if exemption_id:
-        where.append('exemption_id = ?')
-        params.append(exemption_id)
+        params.extend([like] * 10)
+    for col, val in [
+        ('issue_type', issue_type.upper() if issue_type else ''),
+        ('product_section', product_section),
+        ('test_module', test_module),
+        ('test_case', test_case),
+        ('exemption_id', exemption_id),
+    ]:
+        if val:
+            suffix = ' COLLATE NOCASE' if col == 'product_section' else ''
+            where.append(f'{col} = ?{suffix}')
+            params.append(val)
     if release_year is not None:
         where.append('release_year = ?')
         params.append(release_year)

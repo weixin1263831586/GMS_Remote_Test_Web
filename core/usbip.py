@@ -11,7 +11,7 @@ import logging
 import re
 import shlex
 import time
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 from .ssh import ssh_manager
 from .config import config_manager
@@ -28,7 +28,7 @@ USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行Power
 验证安装：usbipd --version'''
 
 
-def split_host_port(hostname: str, default_port: int = 22) -> Tuple[str, int]:
+def split_host_port(hostname: str, default_port: int = 22) -> tuple[str, int]:
     """Parse host[:port] for IPv4/hostname targets."""
     if not hostname:
         return hostname, default_port
@@ -39,18 +39,8 @@ def split_host_port(hostname: str, default_port: int = 22) -> Tuple[str, int]:
     return hostname, default_port
 
 
-def is_windows_host(ssh) -> bool:
-    """检查 SSH 主机是否为 Windows。"""
-    try:
-        _, stdout, _ = ssh.exec_command('ver 2>&1', timeout=3)
-        output = stdout.read().decode('utf-8', errors='ignore').lower()
-        return 'microsoft' in output or 'windows' in output
-    except Exception:
-        return False
-
-
-def find_device_host_password(config, device_host) -> Optional[str]:
-    """从 client_ssh_credentials 中查找对应 device_host 的密码。"""
+def find_device_host_password(device_host: str, config: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Compatibility wrapper for callers that import the USB/IP helper directly."""
     return config_manager.find_device_host_password(device_host, config)
 
 
@@ -302,7 +292,6 @@ class USBIPManager:
                         busids
                     )
 
-
                     # 更新设备来源记录
                     for device_id in device_list:
                         self.device_sources[device_id] = {
@@ -475,7 +464,7 @@ class USBIPManager:
         ssh,
         device_ip: str,
         busids: List[str]
-    ) -> Tuple[List[str], List[str]]:
+    ) -> tuple[list[str], list[str]]:
         """在Ubuntu上attach设备，返回已attach的BUSID和新设备ID列表"""
         try:
             # 获取attach前的设备列表
@@ -527,7 +516,7 @@ class USBIPManager:
             logger.error(f"Error attaching devices: {e}")
             return [], []
 
-    def check_usbipd_installed(self, ssh) -> Tuple[bool, str]:
+    def check_usbipd_installed(self, ssh) -> tuple[bool, str]:
         """
         检查 usbipd 是否已安装
 

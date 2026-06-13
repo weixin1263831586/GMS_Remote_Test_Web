@@ -3,12 +3,11 @@
 import os
 import re
 import shlex
-import subprocess
 import time
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from fastapi import APIRouter, HTTPException, Query, Request, Body
 from fastapi.responses import JSONResponse
@@ -20,8 +19,6 @@ from core.devices import (
     SSHConnection,
     get_or_create_user_state,
     get_device_properties_optimized,
-    release_device_locks,
-    broadcast_device_lock_update,
     safe_websocket_send,
     ssh_connection_failed_response,
 )
@@ -31,8 +28,7 @@ from core.device_utils import DeviceUtils
 from core.schemas import DeviceActionRequest, DeviceLockRequest, DeviceShellRequest, WifiConnectRequest
 from core.enums import VerifiedBootState
 from core.state import global_state
-from core.clients import get_client_id_from_request, get_client_ip, parse_client_id
-from core.notifications import store_notification
+from core.clients import get_client_id_from_request, get_client_ip
 from modules.device_lock_manager import device_lock_manager
 from modules.client_manager import client_manager
 from core.test_suite_utils import get_default_suites_path
@@ -202,7 +198,7 @@ async def _manage_bootloader_lock(devices: List[str], action: str) -> JSONRespon
                 },
             }
 
-            action_text = "lock" if action == "lock" else "unlock"
+            action_text = "unlock" if action == "unlock" else "lock"
             return ApiResponse.success(response_data, f"Device {action_text} operation completed")
 
     except HTTPException:
@@ -212,9 +208,15 @@ async def _manage_bootloader_lock(devices: List[str], action: str) -> JSONRespon
         return ApiResponse.error(str(e), status_code=500)
 
 
+def _resolve_device_lock_devices(req: DeviceLockRequest) -> List[str]:
+    """Extract device list from a lock/unlock request."""
+    if req.device_id:
+        return [req.device_id]
+    return req.devices or []
+
+
 @router.post("/api/devices/bootloader-lock")
 async def lock_bootloader(
-    request: Request,
     help: bool = Query(False),
     req: DeviceLockRequest = Body(None),
 ):
@@ -222,17 +224,11 @@ async def lock_bootloader(
     resp = generate_help_or_continue(help, "POST", "/api/devices/bootloader-lock")
     if resp:
         return resp
-
-    devices = req.devices if req.devices else []
-    if req.device_id:
-        devices = [req.device_id]
-
-    return await _manage_bootloader_lock(devices, "lock")
+    return await _manage_bootloader_lock(_resolve_device_lock_devices(req), "lock")
 
 
 @router.post("/api/devices/bootloader-unlock")
 async def unlock_bootloader(
-    request: Request,
     help: bool = Query(False),
     req: DeviceLockRequest = Body(None),
 ):
@@ -240,12 +236,7 @@ async def unlock_bootloader(
     resp = generate_help_or_continue(help, "POST", "/api/devices/bootloader-unlock")
     if resp:
         return resp
-
-    devices = req.devices if req.devices else []
-    if req.device_id:
-        devices = [req.device_id]
-
-    return await _manage_bootloader_lock(devices, "unlock")
+    return await _manage_bootloader_lock(_resolve_device_lock_devices(req), "unlock")
 
 
 @router.post("/api/devices/bootloader-status")
@@ -381,28 +372,19 @@ def _parse_management_device_props(props_output: str) -> Dict[str, Dict[str, str
     device_data: Dict[str, Dict[str, str]] = {}
     current_device = None
 
+    prop_keys = ("serial_no", "model", "android_version", "battery_level", "soc_model")
+
     for line in props_output.split("\n"):
         line = line.strip()
         if line.startswith("===DEVICE:"):
             current_device = line.split("===DEVICE:")[1].split("===")[0]
-            device_data[current_device] = {
-                "serial_no": "",
-                "model": "",
-                "android_version": "",
-                "battery_level": "",
-                "soc_model": "",
-            }
+            device_data[current_device] = dict.fromkeys(prop_keys, "")
         elif current_device and line:
-            if not device_data[current_device]["serial_no"]:
-                device_data[current_device]["serial_no"] = line
-            elif not device_data[current_device]["model"]:
-                device_data[current_device]["model"] = line
-            elif not device_data[current_device]["android_version"]:
-                device_data[current_device]["android_version"] = line
-            elif not device_data[current_device]["battery_level"]:
-                device_data[current_device]["battery_level"] = line
-            elif not device_data[current_device]["soc_model"]:
-                device_data[current_device]["soc_model"] = line
+            props = device_data[current_device]
+            for key in prop_keys:
+                if not props[key]:
+                    props[key] = line
+                    break
 
     return device_data
 

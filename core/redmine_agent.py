@@ -155,7 +155,7 @@ class RedmineAgent:
                 existing = self.db.get_issue(issue_id)
                 stub_data = self._stub_to_dict(issue_stub, run_id)
                 status_name = stub_data["status_name"]
-                stub_data["is_resolved"] = 1 if status_name in RESOLVED_STATUSES else 0
+                stub_data["is_resolved"] = int(status_name in RESOLVED_STATUSES)
 
                 if stub_data["is_resolved"] == 0 and detail_refreshed < _agent_cfg["detail_sync_limit"]:
                     try:
@@ -170,7 +170,7 @@ class RedmineAgent:
                             for key, value in detail_data.items()
                             if value not in (None, "", [], {})
                         })
-                        stub_data["is_resolved"] = 1 if stub_data.get("status_name") in RESOLVED_STATUSES else 0
+                        stub_data["is_resolved"] = int(stub_data.get("status_name") in RESOLVED_STATUSES)
                         detail_refreshed += 1
                     except Exception as exc:
                         logger.warning("[RedmineAgent] sync detail refresh failed for %s: %s", issue_id, exc)
@@ -344,7 +344,7 @@ class RedmineAgent:
 
         # Track status
         status_name = _obj_name(getattr(issue, "status", None))
-        issue_payload["is_resolved"] = 1 if status_name in RESOLVED_STATUSES else 0
+        issue_payload["is_resolved"] = int(status_name in RESOLVED_STATUSES)
 
         # Find similar references with similarity scoring
         references = await self._find_similar_references(client, issue_payload, failures)
@@ -387,7 +387,7 @@ class RedmineAgent:
         ]
         issue_payload = self._issue_payload(issue, run_id, journals, attachment_records, [])
         status_name = _obj_name(getattr(issue, "status", None))
-        issue_payload["is_resolved"] = 1 if status_name in RESOLVED_STATUSES else 0
+        issue_payload["is_resolved"] = int(status_name in RESOLVED_STATUSES)
         issue_payload["category"] = self._detect_category(issue_payload.get("subject", ""), issue_payload.get("description", ""))
         issue_payload["analysis_status"] = "pending"
         return issue_payload
@@ -481,16 +481,9 @@ class RedmineAgent:
     @staticmethod
     def _detect_category(subject: str, description: str) -> str:
         text = f"{subject} {description}".upper()
-        if "VTS" in text:
-            return "VTS"
-        if "GTS" in text:
-            return "GTS"
-        if "CTS" in text:
-            return "CTS"
-        if "GSI" in text:
-            return "GSI"
-        if "GMS" in text:
-            return "GMS认证"
+        for keyword, category in (("VTS", "VTS"), ("GTS", "GTS"), ("CTS", "CTS"), ("GSI", "GSI"), ("GMS", "GMS认证")):
+            if keyword in text:
+                return category
         return ""
 
     @staticmethod
@@ -913,25 +906,22 @@ class RedmineAgent:
         details: Dict[str, Any] = {}
         row_text = " ".join(str(row.get(key) or "") for key in ("subject", "description", "summary", "doc_content"))
 
+        def _first_match_score(key: str, max_score: float, label: str) -> float:
+            """Find first failure field `key` that appears in row_text."""
+            for failure in failures[:5]:
+                value = failure.get(key) or ""
+                if value and value in row_text:
+                    reasons.append(f"{label} {value[:60]}")
+                    return max_score
+            return 0.0
+
         # Dimension 1: Same test case name (0-30)
-        test_case_score = 0.0
-        for failure in failures[:5]:
-            name = failure.get("name") or ""
-            if name and name in row_text:
-                test_case_score = 30
-                reasons.append(f"同失败用例 {name[:60]}")
-                break
+        test_case_score = _first_match_score("name", 30, "同失败用例")
         score += test_case_score
         details["same_test_case"] = test_case_score > 0
 
         # Dimension 2: Same module (0-20)
-        module_score = 0.0
-        for failure in failures[:5]:
-            module = failure.get("module") or ""
-            if module and module in row_text:
-                module_score = 20
-                reasons.append(f"同模块 {module[:60]}")
-                break
+        module_score = _first_match_score("module", 20, "同模块")
         score += module_score
         details["same_module"] = module_score > 0
 
@@ -958,8 +948,7 @@ class RedmineAgent:
             jaccard = len(intersection) / len(union) if union else 0
             title_score = round(jaccard * 15, 1)
         else:
-            common = subject_words & ref_words
-            title_score = min(15, len(common) * 4)
+            title_score = 0
         score += title_score
         details["title_similarity"] = round(title_score / 15, 2) if title_score > 0 else 0
         if title_score > 0:
@@ -1381,6 +1370,13 @@ Redmine: #{issue_payload.get('issue_id')} {issue_payload.get('subject')}
     # Structured field extraction
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _format_journal_patches(patches: List[Dict[str, str]]) -> str:
+        """Format journal-extracted patches into joined HTML code blocks."""
+        if not patches:
+            return ""
+        return "\n\n".join(f'<pre><code class="diff">{jp["patch"]}</code></pre>' for jp in patches)
+
     def _extract_structured_fields(
         self,
         ai_result: Dict[str, Any],
@@ -1429,28 +1425,19 @@ Redmine: #{issue_payload.get('issue_id')} {issue_payload.get('subject')}
                 solution = self._rule_solution(issue_payload, failures, references)
 
         # 6. patch_direction
-        # Priority: AI result > journal patches > rule-based
+        # Priority: verified journal patches > AI result > journal patches > rule-based
+        journal_patch_html = self._format_journal_patches(resolution.get("patches") or [])
         patch_direction = ai_result.get("patch_direction") or ai_result.get("risk") or ""
-        if not patch_direction:
-            if resolution["patches"]:
-                patch_parts = []
-                for jp in resolution["patches"]:
-                    patch_parts.append(f'<pre><code class="diff">{jp["patch"]}</code></pre>')
-                patch_direction = "\n\n".join(patch_parts)
-            else:
-                patch_direction = self._rule_patch_direction(issue_payload, failures, references)
+
+        if resolution["status"] == "verified" and journal_patch_html:
+            # Verified resolution from journals always takes priority
+            patch_direction = journal_patch_html
+        elif not patch_direction:
+            patch_direction = journal_patch_html or self._rule_patch_direction(issue_payload, failures, references)
         else:
-            # AI returned patch_direction — but for verified closed issues, prefer journal patches
-            if resolution["status"] == "verified" and resolution["patches"]:
-                # Verified resolution from journals takes priority over AI-generated patch
-                patch_parts = []
-                for jp in resolution["patches"]:
-                    patch_parts.append(f'<pre><code class="diff">{jp["patch"]}</code></pre>')
-                patch_direction = "\n\n".join(patch_parts)
-            else:
-                patch_direction = self._markdown_to_html_code_blocks(
-                    self._wrap_patch_direction(patch_direction)
-                )
+            patch_direction = self._markdown_to_html_code_blocks(
+                self._wrap_patch_direction(patch_direction)
+            )
 
         # 7. reference_redmine (formatted)
         ai_refs = ai_result.get("reference_redmine") or []
@@ -1712,8 +1699,8 @@ Redmine: #{issue_payload.get('issue_id')} {issue_payload.get('subject')}
             "## 概览",
         ]
 
-        high_priority = [i for i in issues if "紧急" in (i.get("priority_name") or "") or "Urgent" in (i.get("priority_name") or "") or "高" in (i.get("priority_name") or "")]
-        medium_priority = [i for i in issues if "正常" in (i.get("priority_name") or "") or "Normal" in (i.get("priority_name") or "")]
+        high_priority = [i for i in issues if any(kw in (i.get("priority_name") or "") for kw in ("紧急", "Urgent", "高"))]
+        medium_priority = [i for i in issues if any(kw in (i.get("priority_name") or "") for kw in ("正常", "Normal"))]
 
         lines.extend([
             f"- 高优先级: {len(high_priority)}",

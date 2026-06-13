@@ -81,6 +81,8 @@ _NAV_ALIASES: Dict[str, str] = {
     "常用工具": "tools", "工具下载": "tools", "下载工具": "tools",
     "审计": "security-audit", "安全审计": "security-audit",
     "gms助手": "gms-assistant",
+    "redmine": "redmine-agent", "redmine看板": "redmine-agent", "部门看板": "redmine-agent",
+    "gerrit": "gerrit-dashboard", "gerrit看板": "gerrit-dashboard", "代码评审": "gerrit-dashboard",
     "agent": "agent", "对话agent": "agent",
 }
 
@@ -205,6 +207,21 @@ def _extract_quoted_value(text: str, labels: List[str]) -> str:
     return m.group(1) if m else ""
 
 
+def _extract_profile_id(text: str) -> str:
+    lowered = text.lower()
+    if "系统一部" in text or "system-1" in lowered or "sys-1" in lowered:
+        return "system-1"
+    if "系统二部" in text or "system-2" in lowered or "sys-2" in lowered:
+        return "system-2"
+    m = re.search(r"profile[_\s-]?id\s*[:：=]?\s*([a-zA-Z0-9_-]+)", text, re.IGNORECASE)
+    return m.group(1) if m else ""
+
+
+def _extract_query_text(text: str) -> str:
+    m = re.search(r"(?:query|查询条件)\s*[:：=]\s*(.+)$", text, re.IGNORECASE)
+    return m.group(1).strip() if m else ""
+
+
 def _is_run_test_request(text: str) -> bool:
     lowered = text.lower()
     if re.search(r"\b(run|start|retry)\b|启动|开始|执行|重试|再跑|跑测试|跑\s*[a-z0-9_.-]*_test", lowered):
@@ -303,6 +320,36 @@ def resolve(message: str, session: Dict[str, Any]) -> ResolvedIntent:
             )
 
     # --- Stage 3: Keyword scoring ---
+    lowered_text = text.lower()
+    if ("redmine" in lowered_text or "工单" in text or "问题单" in text) and (
+        "部门" in text or "系统一部" in text or "系统二部" in text
+    ):
+        tool = registry.get("redmine_department_stats")
+        if tool:
+            return ResolvedIntent(
+                tool_name="redmine_department_stats",
+                tool=tool,
+                confidence=0.9,
+                params=_extract_params_for_tool(text, tool),
+                needs_confirm=False,
+                is_run_test=False,
+                context_entities={},
+                stage="rule",
+            )
+    if "gerrit" in lowered_text and ("配置" in text or "设置" in text):
+        tool = registry.get("gerrit_dashboard_config")
+        if tool:
+            return ResolvedIntent(
+                tool_name="gerrit_dashboard_config",
+                tool=tool,
+                confidence=0.9,
+                params=_extract_params_for_tool(text, tool),
+                needs_confirm=False,
+                is_run_test=False,
+                context_entities={},
+                stage="rule",
+            )
+
     scored = registry.find(text, top_k=5, min_score=1.0)
     if scored:
         # Pick best non-test_start result first (test_start is handled separately)
@@ -422,6 +469,14 @@ def _extract_params_for_tool(text: str, tool: AgentTool) -> Dict[str, Any]:
             extracted = _extract_redmine_names(text)
             if extracted:
                 params["names"] = extracted
+        elif pname == "profile_id":
+            profile_id = _extract_profile_id(text)
+            if profile_id:
+                params["profile_id"] = profile_id
+        elif pname == "query":
+            query = _extract_query_text(text)
+            if query:
+                params["query"] = query
 
     if tool.name in {"devices_list", "devices_management"}:
         keyword = _extract_device_keyword(text)

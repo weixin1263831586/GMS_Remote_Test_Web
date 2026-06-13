@@ -11,11 +11,16 @@ import shutil
 import asyncio
 import logging
 import subprocess
+import tarfile
+import zipfile
+from pathlib import Path
+import mimetypes
+import urllib.parse
 from datetime import datetime
 from collections import deque
 from typing import Dict, Any, List, Optional, Union
 
-from fastapi import APIRouter, HTTPException, Query, Request, Body, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, Request, Body
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse, FileResponse
 
 from core.config import config_manager
@@ -298,8 +303,7 @@ async def _run_test_background(
             await log_callback("Test cancelled", "warning")
             return
 
-        import time as _time
-        process_group_id = f"gms_test_{client_id.replace('@', '_')}_{int(_time.time() * 1000)}"
+        process_group_id = f"gms_test_{client_id.replace('@', '_')}_{int(time.time() * 1000)}"
         update_user_state_field(client_id, {"process_group_id": process_group_id})
 
         await log_callback(f"Process group ID: {process_group_id}", "info")
@@ -685,7 +689,6 @@ async def get_test_logs(request: Request):
         log_file = global_state.last_saved_log_file.get(client_id)
 
         if not log_file or not os.path.exists(log_file):
-            from pathlib import Path
             logs_dir = Path(os.path.join(PROJECT_ROOT, "logs"))
             if logs_dir.exists():
                 existing_files = [(f, f.stat().st_mtime) for f in logs_dir.glob("*.log") if f.exists()]
@@ -699,9 +702,8 @@ async def get_test_logs(request: Request):
         if not log_file or not os.path.exists(log_file):
             raise HTTPException(status_code=404, detail="No log file available")
 
-        from fastapi.responses import FileResponse as FastAPIFileResponse
         filename = os.path.basename(log_file)
-        return FastAPIFileResponse(log_file, media_type="text/plain", filename=filename)
+        return FileResponse(log_file, media_type="text/plain", filename=filename)
 
     except HTTPException:
         raise
@@ -765,7 +767,6 @@ async def save_current_log(req: dict):
         log_filename = f"{user_id}_{display_test_type}_{timestamp}.log"
         log_path = os.path.join(logs_dir, log_filename)
 
-        from pathlib import Path
         log_file = Path(log_path)
         log_file.write_text(
             f"GMS Test Log - {display_test_type}\n"
@@ -1315,9 +1316,6 @@ def _run_suite_file_script(ssh, script: str, suite_root: str, remote_path: str, 
 @handle_api_errors
 async def list_suite_files(suite_path: str = Query(...), path: str = Query("")):
     """Browse test suite directory files."""
-    import mimetypes
-    import urllib.parse
-
     config = config_manager.load_config()
     try:
         suite_root, rel_path, remote_path = _build_suite_remote_path(suite_path, path, config)
@@ -1341,9 +1339,6 @@ async def list_suite_files(suite_path: str = Query(...), path: str = Query("")):
 @handle_api_errors
 async def download_suite_file(suite_path: str = Query(...), path: str = Query(...)):
     """Download a specified file from test suite directory."""
-    import mimetypes
-    import urllib.parse
-
     config = config_manager.load_config()
     try:
         suite_root, _, remote_path = _build_suite_remote_path(suite_path, path, config)
@@ -1551,9 +1546,6 @@ async def _run_suite_download_task(task_id: str, url: str, archive_path: str):
 
 
 def _extract_archive_local_with_progress(archive_path: str, extract_dir: str, target_dir_name: str, task_id: Optional[str] = None) -> Dict[str, Any]:
-    import tarfile
-    import zipfile
-
     target_extract_dir = os.path.join(extract_dir, target_dir_name) if target_dir_name else extract_dir
     if target_dir_name:
         os.makedirs(target_extract_dir, exist_ok=True)

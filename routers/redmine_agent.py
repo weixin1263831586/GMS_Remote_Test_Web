@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import smtplib
 import uuid
 from datetime import datetime
+from email.message import EmailMessage
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
@@ -14,9 +16,21 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from core.redmine_agent import RedmineAgent
 from core.redmine_agent_db import (
     RedmineAgentDB, USER_MAP_PATH, find_user_mapping, display_names_from_mapping, load_redmine_user_map,
+    load_user_map_payload, save_user_map_payload,
     compute_user_overdue_stats, _name_keys as _nk,
 )
-from core.settings import PROJECT_ROOT
+from core.redmine_dashboard_config import (
+    add_department_profile,
+    assign_user_to_profiles,
+    denormalize_redmine_dashboard_config,
+    filter_users_for_profile,
+    issue_id_list,
+    issue_url_text,
+    add_project_profile,
+    merge_resolved_trends,
+    select_redmine_dashboard_profile,
+    summarize_project_issues,
+)
 from core.config import config_manager
 from modules.redmine_agent_scheduler import get_scheduler_config
 
@@ -32,16 +46,127 @@ _active_run_id: Optional[str] = None
 _stale_runs_marked = False
 _DEPARTMENT_OVERDUE_CACHE: Dict[str, Any] = {}
 _WORKLOAD_STATS_CACHE: Dict[str, Any] = {}
+_PROJECT_STATS_CACHE: Dict[str, Any] = {}
 
 
 def _get_redmine_stats_config() -> Dict[str, Any]:
     """Read redmine_stats config (stale_days, window_days, cache_ttl) with defaults."""
-    cfg = config_manager.load_config().get("redmine_stats") or {}
-    return {
-        "stale_days": int(cfg.get("stale_days") or 3),
-        "window_days": int(cfg.get("window_days") or 0),
-        "cache_ttl": int(cfg.get("cache_ttl") or 600),
-    }
+    return config_manager.get_redmine_stats_config()
+
+
+def _clear_stats_caches() -> None:
+    _DEPARTMENT_OVERDUE_CACHE.clear()
+    _WORKLOAD_STATS_CACHE.clear()
+    _PROJECT_STATS_CACHE.clear()
+
+
+def _get_redmine_base_url() -> str:
+    try:
+        return str(config_manager.get_redmine_config().get("base_url") or "").rstrip("/")
+    except Exception:
+        return "https://redmine.rock-chips.com"
+
+
+
+
+def _profile_ids_from_body(body: Dict[str, Any]) -> List[str]:
+    raw = body.get("profile_ids")
+    if raw is None:
+        raw = body.get("department_ids")
+    if raw is None:
+        raw = [body.get("profile_id") or body.get("department_id") or ""]
+    if not isinstance(raw, list):
+        raw = [raw]
+    return [str(item or "").strip() for item in raw if str(item or "").strip() and str(item or "").strip() != "all"]
+
+
+def _department_from_profiles(profile_ids: List[str]) -> Dict[str, str]:
+    if not profile_ids:
+        return {}
+    dashboard = config_manager.get_redmine_dashboard_config()
+    for profile in dashboard.get("profiles") or []:
+        if profile.get("id") == profile_ids[0]:
+            return {
+                "department_id": str(profile.get("id") or ""),
+                "department": str(profile.get("name") or ""),
+            }
+    return {"department_id": profile_ids[0], "department": ""}
+
+
+def _send_reminder_email(to_addr: str, subject: str, body: str) -> Dict[str, Any]:
+    dashboard_cfg = config_manager.load_config().get("redmine_dashboard") or {}
+    email_cfg = dashboard_cfg.get("email") or {}
+    smtp_host = str(email_cfg.get("smtp_host") or "").strip()
+    from_addr = str(email_cfg.get("from_addr") or email_cfg.get("username") or "trac@rock-chips.com").strip()
+    if not smtp_host:
+        return {"sent": False, "mode": "unconfigured", "error": "SMTP 未配置，请在设置中填写 smtp_host"}
+
+    smtp_port = int(email_cfg.get("smtp_port") or 465)
+    username = str(email_cfg.get("username") or "").strip()
+    password = str(email_cfg.get("password") or "").strip()
+    is_qiye_163 = smtp_host.lower().endswith("qiye.163.com")
+    if (not username or not password) and is_qiye_163:
+        creds = config_manager.load_redmine_credentials() or {}
+        username = username or str(creds.get("username") or "").strip()
+        password = password or str(creds.get("password") or "").strip()
+    if is_qiye_163 and username and (not from_addr or from_addr == "trac@rock-chips.com" or from_addr != username):
+        from_addr = username
+    use_ssl = bool(email_cfg.get("use_ssl", smtp_port == 465))
+    use_tls = bool(email_cfg.get("use_tls", not use_ssl and smtp_port != 465))
+    timeout = int(email_cfg.get("timeout") or 10)
+
+    if is_qiye_163 and (not username or not password):
+        return {"sent": False, "mode": "unconfigured", "error": "163 企业邮箱 SMTP 需要用户名和密码，请在设置中填写或先保存 Redmine 凭证"}
+
+    message = EmailMessage()
+    message["From"] = from_addr
+    message["To"] = to_addr
+    message["Subject"] = subject
+    message.set_content(body)
+    try:
+        if use_ssl:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=timeout) as smtp:
+                if username and password:
+                    smtp.login(username, password)
+                smtp.send_message(message)
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=timeout) as smtp:
+                if use_tls:
+                    smtp.starttls()
+                if username and password:
+                    smtp.login(username, password)
+                smtp.send_message(message)
+    except smtplib.SMTPAuthenticationError as exc:
+        return {
+            "sent": False,
+            "mode": "smtp",
+            "error": f"SMTP认证失败，请在设置中填写企业邮箱SMTP授权码/密码，发件人需与账号一致: {exc}",
+        }
+    except smtplib.SMTPServerDisconnected as exc:
+        return {
+            "sent": False,
+            "mode": "smtp",
+            "error": f"SMTP连接被服务器关闭，请检查企业邮箱SMTP授权码/密码、账号是否开启SMTP服务，发件人需与账号一致: {exc}",
+        }
+    return {"sent": True, "mode": "smtp"}
+
+
+def _check_ttl_cache(cache_dict: Dict, cache_key: str, ttl: int, now_ts: float, refresh: bool = False) -> Optional[Dict]:
+    """Check a TTL cache dict. Returns cached data on hit, None on miss."""
+    if refresh:
+        return None
+    cached = cache_dict.get(cache_key)
+    if cached and ttl > 0 and now_ts - cached.get("cached_at_ts", 0) < ttl:
+        return cached.get("data")
+    return None
+
+
+def _update_ttl_cache(cache_dict: Dict, cache_key: str, now_ts: float, data: Any) -> None:
+    """Store data in a TTL cache dict and evict stale keys."""
+    cache_dict[cache_key] = {"cached_at_ts": now_ts, "data": data}
+    stale_keys = [k for k in cache_dict if k != cache_key]
+    for k in stale_keys:
+        del cache_dict[k]
 
 
 def _ensure_stale_runs_marked() -> None:
@@ -223,12 +348,14 @@ async def list_stat_users():
             "id": item.get("id"),
             "name": item.get("name") or "",
             "aliases": item.get("aliases") or [],
+            "email": item.get("email") or item.get("eamil") or "",
+            "department_id": item.get("department_id") or "",
+            "department": item.get("department") or "",
         }
         for item in load_redmine_user_map()
     ]
     current_names = await _resolve_owner_names()
     if current_names:
-        from core.redmine_agent_db import _name_keys as _nk
         current_keys = set()
         for n in current_names:
             current_keys.update(_nk(n))
@@ -247,41 +374,116 @@ async def add_stat_user(request: Request):
     body = await request.json()
     uid = body.get("id")
     name = str(body.get("name") or "").strip()
+    email = str(body.get("email") or body.get("eamil") or "").strip()
+    profile_ids = _profile_ids_from_body(body)
+    department = _department_from_profiles(profile_ids)
     if not uid or not name:
         return {"success": False, "error": "id and name are required"}
-    # Load existing map
-    user_map = {"users": []}
-    if USER_MAP_PATH.exists():
-        try:
-            user_map = json.loads(USER_MAP_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+    uid_text = str(uid).strip()
+
+    user_map = load_user_map_payload()
     users_list = user_map.get("users") or []
-    # Check duplicate id
+    created = True
     for item in users_list:
-        if item.get("id") == uid:
-            return {"success": False, "error": f"user id {uid} already exists"}
-    # Append and save
-    users_list.append({"id": uid, "name": name, "aliases": [name]})
+        if str(item.get("id") or "").strip() == uid_text:
+            item["name"] = name
+            aliases = [str(alias).strip() for alias in item.get("aliases") or [] if str(alias).strip()]
+            aliases.append(name)
+            item["aliases"] = list(dict.fromkeys(aliases))
+            if email:
+                item["email"] = email
+            if department:
+                item.update(department)
+            created = False
+            break
+    if created:
+        users_list.append({"id": uid, "name": name, "aliases": [name], "email": email, **department})
     user_map["users"] = users_list
-    USER_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
-    USER_MAP_PATH.write_text(json.dumps(user_map, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"success": True}
+    save_user_map_payload(user_map)
+
+    if profile_ids:
+        dashboard_cfg = assign_user_to_profiles(config_manager.get_redmine_dashboard_config(), uid_text, profile_ids)
+        if not config_manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
+            return JSONResponse(status_code=500, content={"success": False, "error": "failed to save department membership"})
+        _clear_stats_caches()
+    return {"success": True, "data": {"created": created, "profile_ids": profile_ids}}
+
+
+@router.post("/dashboard/profiles")
+async def create_dashboard_profile(request: Request):
+    body = await request.json()
+    name = str(body.get("name") or "").strip()
+    profile_id = str(body.get("id") or body.get("profile_id") or "").strip()
+    try:
+        dashboard_cfg = add_department_profile(config_manager.get_redmine_dashboard_config(), name, profile_id)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
+    if not config_manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
+        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save dashboard profile"})
+    _clear_stats_caches()
+    return {"success": True, "data": {"dashboard": dashboard_cfg, "profile": dashboard_cfg["profiles"][-1]}}
+
+
+@router.post("/dashboard/projects")
+async def create_project_profile(request: Request):
+    body = await request.json()
+    name = str(body.get("name") or "").strip()
+    project_id = str(body.get("project_id") or body.get("project_url") or "").strip()
+    profile_id = str(body.get("id") or body.get("profile_id") or "").strip()
+    try:
+        dashboard_cfg = add_project_profile(config_manager.get_redmine_dashboard_config(), name, project_id, profile_id)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
+    if not config_manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
+        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save project profile"})
+    _clear_stats_caches()
+    return {"success": True, "data": {"dashboard": dashboard_cfg, "profile": dashboard_cfg["project_profiles"][-1]}}
+
+
+@router.post("/reminders/email")
+async def send_department_reminder_email(request: Request):
+    body = await request.json()
+    user_id = str(body.get("user_id") or "").strip()
+    issue_ids = [str(item or "").strip() for item in body.get("issue_ids") or [] if str(item or "").strip()]
+    if not user_id:
+        return JSONResponse(status_code=400, content={"success": False, "error": "user_id is required"})
+    if not issue_ids:
+        return JSONResponse(status_code=400, content={"success": False, "error": "issue_ids are required"})
+    user = next((item for item in load_redmine_user_map() if str(item.get("id") or "").strip() == user_id), None)
+    if not user:
+        return JSONResponse(status_code=404, content={"success": False, "error": "user not found"})
+    to_addr = str(user.get("email") or user.get("eamil") or "").strip()
+    if not to_addr:
+        return JSONResponse(status_code=400, content={"success": False, "error": "user email is not configured"})
+
+    base_url = _get_redmine_base_url()
+    issues = [{"issue_id": issue_id} for issue_id in issue_ids]
+    url_text = issue_url_text(issues, base_url)
+    subject = str(body.get("subject") or "").strip() or f"Redmine 超阈值未回复提醒 - {user.get('name') or user_id}"
+    intro = str(body.get("intro") or "").strip() or "以下 Redmine 问题已超过未回复阈值，请及时处理："
+    body_text = intro + "\n\n" + url_text
+    try:
+        result = await asyncio.to_thread(_send_reminder_email, to_addr, subject, body_text)
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"success": False, "error": f"邮件发送失败: {exc}"})
+    if not result.get("sent"):
+        return JSONResponse(status_code=503, content={"success": False, "error": result.get("error", "邮件发送失败"), "data": result})
+    return {"success": True, "data": {"to": to_addr, "subject": subject, "body": body_text, **result}}
 
 
 @router.get("/statistics/workload")
 async def get_workload_statistics(
-    stale_days: int = Query(3, ge=1, le=30),
+    stale_days: int = Query(20, ge=1, le=30),
     list_limit: int = Query(30, ge=1, le=100),
     name: str = Query(""),
 ):
     # Check cache
+    stats_cfg = _get_redmine_stats_config()
     cache_key = f"{stale_days}:{list_limit}:{name}"
     now_ts = datetime.now().timestamp()
-    cache_ttl = _get_redmine_stats_config()["cache_ttl"]
-    cached = _WORKLOAD_STATS_CACHE.get(cache_key)
-    if cached and cache_ttl > 0 and now_ts - cached.get("cached_at_ts", 0) < cache_ttl:
-        return {"success": True, "data": {**cached["data"], "cache_hit": True}}
+    cached = _check_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, stats_cfg["cache_ttl"], now_ts)
+    if cached is not None:
+        return {"success": True, "data": {**cached, "cache_hit": True}}
 
     owner_names = []
     display_names = []
@@ -316,7 +518,6 @@ async def get_workload_statistics(
         except Exception:
             pass
     all_names = owner_names + [n for n in extra_names if n]
-    stats_cfg = _get_redmine_stats_config()
     data = _db.get_workload_statistics(
         owner_names=all_names,
         stale_days=stale_days,
@@ -327,12 +528,7 @@ async def get_workload_statistics(
     if live_counts:
         data.update(live_counts)
     data["generated_at"] = datetime.now().isoformat(timespec="seconds")
-    # Update cache
-    _WORKLOAD_STATS_CACHE[cache_key] = {"cached_at_ts": now_ts, "data": data}
-    # Evict stale entries (keep only current key)
-    stale_keys = [k for k in _WORKLOAD_STATS_CACHE if k != cache_key]
-    for k in stale_keys:
-        del _WORKLOAD_STATS_CACHE[k]
+    _update_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, now_ts, data)
     return {"success": True, "data": data}
 
 
@@ -345,27 +541,35 @@ async def _department_user_overdue(client, user: Dict[str, Any], stale_days: int
 
 @router.get("/statistics/department-overdue")
 async def get_department_overdue_statistics(
-    stale_days: int = Query(3, ge=1, le=30),
-    list_limit: int = Query(50, ge=1, le=500),
-    issue_limit: int = Query(500, ge=1, le=1000),
+    stale_days: Optional[int] = Query(None, ge=1, le=30),
+    list_limit: Optional[int] = Query(None, ge=1, le=500),
+    issue_limit: Optional[int] = Query(None, ge=1, le=2000),
+    profile_id: str = Query(""),
     refresh: bool = Query(False),
 ):
-    cache_key = f"{stale_days}:{list_limit}:{issue_limit}:{USER_MAP_PATH.stat().st_mtime if USER_MAP_PATH.exists() else 0}"
     now_ts = datetime.now().timestamp()
-    cache_ttl = _get_redmine_stats_config()["cache_ttl"]
-    cached = _DEPARTMENT_OVERDUE_CACHE.get(cache_key)
-    if cached and not refresh and cache_ttl > 0 and now_ts - cached.get("cached_at_ts", 0) < cache_ttl:
-        return {"success": True, "data": {**cached["data"], "cache_hit": True}}
-
-    users = load_redmine_user_map()
-    client = _agent._make_client()
     stats_cfg = _get_redmine_stats_config()
-    window_days = stats_cfg["window_days"]
+    dashboard_cfg = config_manager.get_redmine_dashboard_config()
+    profile = select_redmine_dashboard_profile(dashboard_cfg, profile_id)
+    effective_stale_days = int(stale_days or profile.get("stale_days") or stats_cfg["stale_days"])
+    effective_list_limit = int(list_limit or profile.get("list_limit") or dashboard_cfg["defaults"]["list_limit"])
+    effective_issue_limit = int(issue_limit or profile.get("issue_limit") or dashboard_cfg["defaults"]["issue_limit"])
+    cache_key = (
+        f"{profile.get('id')}:{effective_stale_days}:{effective_list_limit}:{effective_issue_limit}:"
+        f"{USER_MAP_PATH.stat().st_mtime if USER_MAP_PATH.exists() else 0}"
+    )
+    cached = _check_ttl_cache(_DEPARTMENT_OVERDUE_CACHE, cache_key, stats_cfg["cache_ttl"], now_ts, refresh=refresh)
+    if cached is not None:
+        return {"success": True, "data": {**cached, "cache_hit": True}}
+
+    users = filter_users_for_profile(load_redmine_user_map(), profile)
+    client = _agent._make_client()
+    window_days = int(profile.get("window_days") or stats_cfg["window_days"])
     semaphore = asyncio.Semaphore(4)
 
     async def _safe_user(user: Dict[str, Any]) -> Dict[str, Any]:
         async with semaphore:
-            return await _department_user_overdue(client, user, stale_days, issue_limit, window_days)
+            return await _department_user_overdue(client, user, effective_stale_days, effective_issue_limit, window_days)
 
     try:
         if users:
@@ -373,7 +577,8 @@ async def get_department_overdue_statistics(
         else:
             results = []
         for item in results:
-            item["overdue_issues"] = item.get("overdue_issues", [])[:list_limit]
+            item["overdue_issues"] = item.get("overdue_issues", [])[:effective_list_limit]
+            item["overdue_issue_ids"] = issue_id_list(item.get("overdue_issues", []))
         summary = {
             "user_count": len(results),
             "open_count": sum(int(item.get("open_count") or 0) for item in results),
@@ -384,15 +589,52 @@ async def get_department_overdue_statistics(
         data = {
             "summary": summary,
             "users": results,
-            "stale_days": stale_days,
+            "trends": merge_resolved_trends(results),
+            "profile": profile,
+            "available_profiles": dashboard_cfg["profiles"],
+            "stale_days": effective_stale_days,
+            "window_days": window_days,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "cache_hit": False,
         }
-        _DEPARTMENT_OVERDUE_CACHE[cache_key] = {"cached_at_ts": now_ts, "data": data}
-        # Evict stale entries (keep only current key)
-        stale_keys = [k for k in _DEPARTMENT_OVERDUE_CACHE if k != cache_key]
-        for k in stale_keys:
-            del _DEPARTMENT_OVERDUE_CACHE[k]
+        _update_ttl_cache(_DEPARTMENT_OVERDUE_CACHE, cache_key, now_ts, data)
+        return {"success": True, "data": data}
+    finally:
+        await client.close()
+
+
+@router.get("/statistics/project")
+async def get_project_statistics(
+    profile_id: str = Query(""),
+    refresh: bool = Query(False),
+):
+    now_ts = datetime.now().timestamp()
+    stats_cfg = _get_redmine_stats_config()
+    dashboard_cfg = config_manager.get_redmine_dashboard_config()
+    profiles = dashboard_cfg.get("project_profiles") or []
+    if not profiles:
+        return JSONResponse(status_code=404, content={"success": False, "error": "project dashboard is not configured"})
+    requested = str(profile_id or "").strip()
+    profile = next((item for item in profiles if item.get("id") == requested or item.get("project_id") == requested), profiles[0])
+    project_id = str(profile.get("project_id") or profile.get("id") or "").strip()
+    issue_limit = int(profile.get("issue_limit") or dashboard_cfg["defaults"]["issue_limit"])
+    list_limit = int(profile.get("list_limit") or dashboard_cfg["defaults"]["list_limit"])
+    cache_key = f"{project_id}:{issue_limit}:{list_limit}"
+    cached = _check_ttl_cache(_PROJECT_STATS_CACHE, cache_key, stats_cfg["cache_ttl"], now_ts, refresh=refresh)
+    if cached is not None:
+        return {"success": True, "data": {**cached, "cache_hit": True}}
+
+    client = _agent._make_client()
+    try:
+        issues = await client.fetch_project_issues(project_id=project_id, status_id="*", limit=issue_limit)
+        data = summarize_project_issues(issues, list_limit=list_limit)
+        data.update({
+            "profile": profile,
+            "available_profiles": profiles,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "cache_hit": False,
+        })
+        _update_ttl_cache(_PROJECT_STATS_CACHE, cache_key, now_ts, data)
         return {"success": True, "data": data}
     finally:
         await client.close()
@@ -432,8 +674,21 @@ async def get_config():
 
 @router.get("/config/stats")
 async def get_stats_config():
-    """Read redmine_stats config for the settings UI."""
-    return {"success": True, "data": _get_redmine_stats_config()}
+    """Read redmine_stats config for the settings UI — single config load."""
+    config = config_manager.load_config()
+    stats_cfg = config_manager.get_redmine_stats_config()
+    dashboard_cfg = config_manager.get_redmine_dashboard_config()
+    gerrit_cfg = config_manager.get_gerrit_dashboard_config()
+    redmine_cfg = config.get("redmine") or {}
+    email_cfg = (config.get("redmine_dashboard") or {}).get("email") or {}
+    base_url = str(redmine_cfg.get("base_url") or "").rstrip("/") or "https://redmine.rock-chips.com"
+    return {"success": True, "data": {
+        **stats_cfg,
+        "dashboard": dashboard_cfg,
+        "gerrit_dashboard": gerrit_cfg,
+        "redmine_base_url": base_url,
+        "email_mode": "smtp" if email_cfg.get("smtp_host") else "smtp_unconfigured",
+    }}
 
 
 @router.post("/config/stats")
@@ -448,9 +703,70 @@ async def update_stats_config(request: Request):
         stats["window_days"] = max(0, min(365, int(body["window_days"])))
     if "cache_ttl" in body:
         stats["cache_ttl"] = max(0, min(3600, int(body["cache_ttl"])))
-    config["redmine_stats"] = stats
-    config_manager.save_config(config)
-    return {"success": True, "data": stats}
+    if "chart_start_dates" in body and isinstance(body.get("chart_start_dates"), dict):
+        current_dates = dict(stats.get("chart_start_dates") or {})
+        for key, value in body.get("chart_start_dates", {}).items():
+            clean_key = str(key or "").strip()
+            clean_value = str(value or "").strip()
+            if not clean_key:
+                continue
+            if clean_value:
+                current_dates[clean_key] = clean_value
+            else:
+                current_dates.pop(clean_key, None)
+        stats["chart_start_dates"] = current_dates
+    if "chart_date_ranges" in body and isinstance(body.get("chart_date_ranges"), dict):
+        current_ranges = dict(stats.get("chart_date_ranges") or {})
+        for key, value in body.get("chart_date_ranges", {}).items():
+            clean_key = str(key or "").strip()
+            if not clean_key:
+                continue
+            if isinstance(value, dict):
+                start = str(value.get("start") or "").strip()
+                end = str(value.get("end") or "").strip()
+                if start or end:
+                    current_ranges[clean_key] = {
+                        **({"start": start} if start else {}),
+                        **({"end": end} if end else {}),
+                    }
+                    continue
+            current_ranges.pop(clean_key, None)
+        stats["chart_date_ranges"] = current_ranges
+    if not config_manager.save_redmine_stats_config(stats):
+        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save stats config"})
+    _clear_stats_caches()
+    return {"success": True, "data": config_manager.get_redmine_stats_config()}
+
+
+@router.post("/config/email")
+async def update_email_config(request: Request):
+    """Update SMTP email config from the settings UI."""
+    body = await request.json()
+    config = config_manager.load_config()
+    dashboard = config.get("redmine_dashboard") or {}
+    email = dashboard.get("email") or {}
+    if "smtp_host" in body:
+        email["smtp_host"] = str(body["smtp_host"] or "").strip()
+    if "smtp_port" in body:
+        email["smtp_port"] = int(body["smtp_port"] or 465)
+    if "from_addr" in body:
+        email["from_addr"] = str(body["from_addr"] or "").strip()
+    if "username" in body:
+        email["username"] = str(body["username"] or "").strip()
+    if "password" in body:
+        new_pass = str(body["password"] or "").strip()
+        if new_pass:
+            email["password"] = new_pass
+    if email.get("smtp_port") == 465:
+        email["use_ssl"] = True
+        email.pop("use_tls", None)
+    else:
+        email["use_tls"] = True
+        email.pop("use_ssl", None)
+    dashboard["email"] = email
+    if not config_manager.save_redmine_dashboard_config(dashboard):
+        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save email config"})
+    return {"success": True, "data": {"email": email, "email_mode": "smtp" if email.get("smtp_host") else "unconfigured"}}
 
 
 # ------------------------------------------------------------------
@@ -470,8 +786,9 @@ async def redmine_agent_page():
   <style>
     :root { color-scheme: dark; --bg:#0b0d12; --panel:#131720; --panel2:#191f2b; --border:#2b3342; --text:#e8edf7; --muted:#96a1b5; --primary:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --high:#ef4444; --medium:#f59e0b; --low:#6b7280; }
     * { box-sizing: border-box; }
+    html { scrollbar-gutter: stable; overflow-y: scroll; }
     body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
-    header { display:flex; align-items:center; gap:16px; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--panel); }
+    header { position:sticky; top:0; z-index:1000; display:grid; grid-template-columns:max-content minmax(0, 1fr) 480px 340px; align-items:center; column-gap:16px; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
     .header-title { font-size:18px; font-weight:700; white-space:nowrap; margin:0; }
     .header-right { display:flex; align-items:center; gap:12px; flex-shrink:0; flex-wrap:wrap; }
     .muted { color:var(--muted); font-size:13px; line-height:1.6; }
@@ -480,6 +797,15 @@ async def redmine_agent_page():
     button.warn { background:#b45309; }
     button:disabled { opacity:.55; cursor:not-allowed; }
     .btn-group { display:flex; gap:6px; flex-wrap:wrap; }
+    /* Header toolbar: freeze layout so text changes (扫描/同步/刷新 中…) don't reflow */
+    .header-spacer { min-width:0; }
+    header .filter-bar { width:480px; min-width:480px; justify-content:flex-start; flex-wrap:nowrap; }
+    header .btn-group { flex-wrap:nowrap; }
+    header .btn-group { width:340px; min-width:340px; justify-content:flex-end; }
+    header .btn-group > button { width:78px; min-width:78px; white-space:nowrap; box-sizing:border-box; padding:0 6px; }
+    header .btn-group > button[title="设置"] { width:38px; min-width:38px; }
+    header .filter-bar input { width:260px; min-width:260px; }
+    header .filter-bar select { width:100px; min-width:100px; }
 
     /* Modal */
     .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:9999; padding:20px; }
@@ -509,6 +835,10 @@ async def redmine_agent_page():
     .filter-bar input, .filter-bar select { height:28px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:0 8px; font-size:13px; }
     .filter-bar input { width:240px; }
     .filter-bar select { width:100px; }
+    .select-with-add { position:relative; display:inline-flex; align-items:center; }
+    .select-with-add select { padding-right:26px; }
+    .select-add-btn { position:absolute; right:2px; top:50%; transform:translateY(-50%); background:none; border:0; color:var(--muted); font-size:14px; padding:0 5px; line-height:1; cursor:pointer; height:24px; min-width:20px; }
+    .select-add-btn:hover { color:var(--text); background:transparent; }
 
     /* Issue cards */
     .issue-card { border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px; background:#101620; }
@@ -583,10 +913,17 @@ async def redmine_agent_page():
     .clickable-stat:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.3); }
     .stats-section { margin-bottom:18px; }
     .stats-section h2 { font-size:15px; margin:0 0 10px; }
+    .dashboard-summary-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:12px; flex-wrap:wrap; min-height:30px; }
+    .dashboard-summary-title { margin:0; font-size:15px; line-height:30px; }
+    .dashboard-summary-controls { display:flex; align-items:center; gap:8px; margin-left:auto; flex-wrap:wrap; min-height:30px; }
+    .dashboard-summary-meta { font-size:12px; min-height:30px; display:flex; align-items:center; }
     .trend-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:12px; margin-bottom:18px; }
     .trend-panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; min-height:180px; display:flex; flex-direction:column; }
-    .trend-panel h3 { margin:0 0 10px; font-size:14px; flex-shrink:0; }
-    .trend-body { overflow-y:auto; max-height:400px; flex:1; }
+    .trend-panel h3 { margin:0; font-size:14px; flex-shrink:0; line-height:30px; }
+    .trend-title-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; min-height:30px; }
+    .trend-start-btn { width:30px; min-width:30px; padding:0; background:#30394a; color:var(--muted); }
+    .trend-start-btn:hover { color:var(--text); }
+    .trend-body { overflow-y:auto; max-height:330px; flex:1; }
     .trend-body::-webkit-scrollbar { width:6px; }
     .trend-body::-webkit-scrollbar-track { background:var(--panel2); border-radius:3px; }
     .trend-body::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
@@ -613,6 +950,10 @@ async def redmine_agent_page():
     .dept-table tbody tr:hover { background:#111927; }
     .dept-table a { color:#7bb0ff; text-decoration:none; font-weight:700; }
     .dept-table a:hover { text-decoration:underline; }
+    .dept-action-btn { width:48px; min-width:48px; max-width:48px; padding:0; text-align:center; overflow:hidden; white-space:nowrap; }
+    .toggle-btn.active { background:var(--primary); color:#fff; }
+    .project-filter-th { width:132px; min-width:132px; text-align:right !important; }
+    .project-filter-cell { width:132px; min-width:132px; }
     .dept-user-block { margin-bottom:18px; }
     .dept-user-title { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:0 0 8px; }
     .dept-user-title h2 { margin:0; font-size:15px; }
@@ -627,7 +968,7 @@ async def redmine_agent_page():
     details summary { cursor:pointer; font-size:13px; color:var(--muted); font-weight:600; }
     pre { white-space:pre-wrap; word-break:break-word; background:#090c11; border:1px solid var(--border); border-radius:6px; padding:10px; color:#d7e1f5; font-size:12px; }
 
-    @media (max-width:900px) { header { flex-wrap:wrap; } .tabs { margin-left:0; width:100%; } .filter-bar input { width:140px; } .two-col { grid-template-columns:1fr; } .issue-mini { grid-template-columns:1fr; } .issue-mini-meta { text-align:left; } }
+    @media (max-width:900px) { header { grid-template-columns:1fr; row-gap:8px; } .tabs { margin-left:0; width:100%; } header .filter-bar { width:100%; min-width:0; } header .filter-bar input { width:140px; min-width:140px; } header .btn-group { width:100%; min-width:0; justify-content:flex-start; } .two-col { grid-template-columns:1fr; } .issue-mini { grid-template-columns:1fr; } .issue-mini-meta { text-align:left; } }
   </style>
 </head>
 <body>
@@ -635,17 +976,12 @@ async def redmine_agent_page():
   <div class="tabs">
     <div class="tab active" data-tab="stats" onclick="switchTab('stats')">📈 个人看板</div>
     <div class="tab" data-tab="department" onclick="switchTab('department')">🏢 部门看板</div>
+    <div class="tab" data-tab="project" onclick="switchTab('project')">🧩 项目看板</div>
     <div class="tab" data-tab="issues" onclick="switchTab('issues')">📋 工单列表</div>
     <div class="tab" data-tab="runs" onclick="switchTab('runs')">📊 扫描记录</div>
   </div>
-  <div style="flex:1"></div>
+  <div class="header-spacer"></div>
   <div class="filter-bar" style="margin:0">
-    <div style="position:relative;display:inline-flex;align-items:center">
-      <select id="statsUserSelect" onchange="onStatsUserChange()" style="width:140px;padding-right:24px">
-        <option value="">当前登录用户</option>
-      </select>
-      <button onclick="showAddUserModal()" title="添加用户" style="position:absolute;right:2px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);font-size:14px;padding:0 4px;line-height:1;cursor:pointer;height:auto">＋</button>
-    </div>
     <input type="text" id="searchInput" placeholder="搜索工单 / 输入 #工单号查询Redmine..." onkeydown="if(event.key==='Enter')smartSearch()" style="width:260px">
     <select id="statusFilter" onchange="loadIssues()">
       <option value="">全部状态</option>
@@ -697,6 +1033,10 @@ async def redmine_agent_page():
   <div id="departmentContent"><div class="muted">加载中...</div></div>
 </div>
 
+<div id="tab-project" class="tab-content">
+  <div id="projectContent"><div class="muted">加载中...</div></div>
+</div>
+
 <!-- Add User Modal -->
 <div id="addUserModal" class="modal">
   <div class="modal-content">
@@ -713,9 +1053,69 @@ async def redmine_agent_page():
         <label>用户姓名</label>
         <input type="text" id="addUserName" placeholder="例如：张三">
       </div>
+      <div>
+        <label>邮箱</label>
+        <input type="email" id="addUserEmail" placeholder="例如：zhangsan@example.com">
+      </div>
+      <div>
+        <label>所属部门</label>
+        <div class="select-with-add" style="width:100%">
+          <select id="addUserDepartment" style="width:100%"></select>
+          <button class="select-add-btn" type="button" onclick="showAddDepartmentModal('addUserDepartment')" title="添加部门">＋</button>
+        </div>
+      </div>
       <div class="modal-buttons">
         <button class="secondary" onclick="hideAddUserModal()">取消</button>
         <button onclick="submitAddUser()">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Department Modal -->
+<div id="addDepartmentModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">添加部门</span>
+      <span class="modal-close" onclick="hideAddDepartmentModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div>
+        <label>部门名称</label>
+        <input type="text" id="addDepartmentName" placeholder="例如：系统三部">
+      </div>
+      <div>
+        <label>部门 ID</label>
+        <input type="text" id="addDepartmentId" placeholder="可选，例如：system-3">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">留空时自动生成 dept-N</div>
+      </div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="hideAddDepartmentModal()">取消</button>
+        <button onclick="submitAddDepartment()">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Project Modal -->
+<div id="addProjectModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">添加项目</span>
+      <span class="modal-close" onclick="hideAddProjectModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div>
+        <label>项目名称</label>
+        <input type="text" id="addProjectName" placeholder="例如：RK3572 Android 16 SDK">
+      </div>
+      <div>
+        <label>项目标识或 URL</label>
+        <input type="text" id="addProjectId" placeholder="例如：https://redmine.rock-chips.com/projects/rk3572-android-16-sdk">
+      </div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="hideAddProjectModal()">取消</button>
+        <button onclick="submitAddProject()">确定</button>
       </div>
     </div>
   </div>
@@ -731,8 +1131,8 @@ async def redmine_agent_page():
     <div class="modal-body">
       <div>
         <label>未回复天数阈值 (stale_days)</label>
-        <input type="number" id="settingStaleDays" min="1" max="30" placeholder="默认 3">
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">超过此天数未回复的工单标记为"过期"</div>
+        <input type="number" id="settingStaleDays" min="1" max="30" placeholder="默认 20">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">超过/达到此天数未回复的工单标记为过期</div>
       </div>
       <div>
         <label>统计时间窗口 (window_days)</label>
@@ -744,9 +1144,60 @@ async def redmine_agent_page():
         <input type="number" id="settingCacheTtl" min="0" max="3600" placeholder="600">
         <div style="font-size:11px;color:var(--muted);margin-top:2px">统计数据缓存时间，期间内重复访问直接返回缓存</div>
       </div>
+      <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+      <div>
+        <label>SMTP 服务器</label>
+        <input type="text" id="settingSmtpHost" placeholder="例如：smtphz.qiye.163.com">
+      </div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1">
+          <label>端口</label>
+          <input type="number" id="settingSmtpPort" placeholder="465">
+        </div>
+        <div style="flex:1">
+          <label>发件人地址</label>
+          <input type="text" id="settingFromAddr" placeholder="trac@rock-chips.com">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1">
+          <label>SMTP 用户名</label>
+          <input type="text" id="settingSmtpUser" placeholder="chaoqun.huang@rock-chips.com">
+        </div>
+        <div style="flex:1">
+          <label>SMTP授权码/密码</label>
+          <input type="password" id="settingSmtpPass" placeholder="企业邮箱SMTP授权码或密码">
+        </div>
+      </div>
       <div class="modal-buttons">
         <button class="secondary" onclick="hideSettingsModal()">取消</button>
         <button onclick="saveSettings()">保存并刷新</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Trend Start Date Modal -->
+<div id="trendStartModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header" style="background:linear-gradient(135deg,#2563eb,#4f46e5)">
+      <span class="modal-title" id="trendStartModalTitle">设置统计日期范围</span>
+      <span class="modal-close" onclick="hideTrendStartModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div>
+        <label>起始日期</label>
+        <input type="date" id="trendStartDateInput">
+      </div>
+      <div>
+        <label>结束日期</label>
+        <input type="date" id="trendEndDateInput">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">清空后表示不限；仅填一侧日期也可以</div>
+      </div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="clearTrendStartDate()">不限</button>
+        <button class="secondary" onclick="hideTrendStartModal()">取消</button>
+        <button onclick="saveTrendStartDate()">保存并刷新</button>
       </div>
     </div>
   </div>
@@ -762,6 +1213,22 @@ let currentPage = 1;
 const pageSize = 15;
 let currentRunId = '';
 let statsUserInitialized = false;
+let statsConfig = {stale_days: 20, window_days: 60, cache_ttl: 600, redmine_base_url: 'https://redmine.rock-chips.com', dashboard: {profiles: [], defaults: {list_limit: 50, issue_limit: 500}}};
+let departmentProfileId = '';
+let projectProfileId = '';
+let pendingDepartmentTargetSelect = '';
+let pendingTrendChartKey = '';
+let projectOpenOnly = false;
+
+// ---- Load stats config from backend (cached 60s) ----
+let _statsConfigCacheTs = 0;
+async function loadStatsConfig() {
+  if (statsConfig.stale_days && Date.now() - _statsConfigCacheTs < 60000) return;
+  try {
+    statsConfig = await api('/api/redmine-agent/config/stats');
+    _statsConfigCacheTs = Date.now();
+  } catch (_) {}
+}
 
 // ---- API helper ----
 async function api(url, options) {
@@ -776,6 +1243,34 @@ function esc(s) {
 function trunc(s, n) {
   s = String(s || '');
   return s.length > n ? s.slice(0, n) + '...' : s;
+}
+function redmineBaseUrl() {
+  return String(statsConfig.redmine_base_url || 'https://redmine.rock-chips.com').replace(new RegExp('/+$'), '');
+}
+function redmineIssueUrl(issueId) {
+  return redmineBaseUrl() + '/issues/' + encodeURIComponent(String(issueId || '').trim());
+}
+function redmineIssueUrls(items) {
+  return (items || []).map(function(item) { return item.issue_id || ''; }).filter(Boolean).map(redmineIssueUrl);
+}
+function departmentProfiles() {
+  return ((statsConfig.dashboard || {}).profiles || []);
+}
+function projectProfiles() {
+  return ((statsConfig.dashboard || {}).project_profiles || []);
+}
+function departmentOptionsHtml(selectedId, includeAll) {
+  var profiles = departmentProfiles().filter(function(item) { return includeAll || item.id !== 'all'; });
+  return profiles.map(function(item) {
+    var selected = item.id === selectedId ? ' selected' : '';
+    return '<option value="' + esc(item.id || '') + '"' + selected + '>' + esc(item.name || item.id || '-') + '</option>';
+  }).join('');
+}
+function projectOptionsHtml(selectedId) {
+  return projectProfiles().map(function(item) {
+    var selected = item.id === selectedId ? ' selected' : '';
+    return '<option value="' + esc(item.id || '') + '"' + selected + '>' + esc(item.name || item.project_id || '-') + '</option>';
+  }).join('');
 }
 
 // ---- Formatted content rendering ----
@@ -863,6 +1358,14 @@ function copyCode(btn) {
     setTimeout(function() { btn.textContent = '复制'; }, 1500);
   });
 }
+function copyText(text, btn) {
+  navigator.clipboard.writeText(String(text || '')).then(function() {
+    if (!btn) return;
+    var old = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(function() { btn.textContent = old; }, 1500);
+  });
+}
 
 // ---- Tab switching ----
 function switchTab(tab) {
@@ -873,6 +1376,7 @@ function switchTab(tab) {
   if (tab === 'issues') loadIssues();
   else if (tab === 'runs') loadRuns();
   else if (tab === 'department') loadDepartmentOverdue(false);
+  else if (tab === 'project') loadProjectDashboard(false);
   else if (tab === 'stats') loadStatistics();
 }
 
@@ -882,7 +1386,7 @@ async function refreshCurrentTab() {
   refreshBtns.forEach(function(b) { if (b.textContent.includes('刷新')) targetBtn = b; });
   if (targetBtn) { targetBtn.disabled = true; targetBtn.textContent = '⏳ 刷新中...'; }
   try {
-    await (currentTab === 'issues' ? loadIssues() : currentTab === 'runs' ? loadRuns() : currentTab === 'department' ? loadDepartmentOverdue(false) : loadStatistics());
+    await (currentTab === 'issues' ? loadIssues() : currentTab === 'runs' ? loadRuns() : currentTab === 'department' ? loadDepartmentOverdue(true) : currentTab === 'project' ? loadProjectDashboard(true) : loadStatistics());
   } finally {
     if (targetBtn) { targetBtn.disabled = false; targetBtn.textContent = '刷新'; }
   }
@@ -923,64 +1427,157 @@ async function onStatsUserChange() {
   }
 }
 
-// ---- Add User Modal ----
+// ---- Shared modal helpers ----
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') hideAddUserModal();
+  if (e.key === 'Escape') document.querySelectorAll('.modal.show').forEach(function(m) { m.classList.remove('show'); });
 });
-function showAddUserModal() {
+function showModal(id) { document.getElementById(id).classList.add('show'); }
+function hideModal(id) { document.getElementById(id).classList.remove('show'); }
+
+// ---- Add User Modal ----
+async function populateDepartmentSelect(selectId, selectedId, includeAll) {
+  await loadStatsConfig();
+  var select = document.getElementById(selectId);
+  if (!select) return;
+  var html = departmentOptionsHtml(selectedId || '', includeAll);
+  select.innerHTML = html || '<option value="">暂无部门</option>';
+}
+async function showAddUserModal() {
   document.getElementById('addUserId').value = '';
   document.getElementById('addUserName').value = '';
-  document.getElementById('addUserModal').classList.add('show');
+  document.getElementById('addUserEmail').value = '';
+  var selected = (currentTab === 'department' && departmentProfileId && departmentProfileId !== 'all') ? departmentProfileId : '';
+  await populateDepartmentSelect('addUserDepartment', selected, false);
+  showModal('addUserModal');
   document.getElementById('addUserId').focus();
 }
-function hideAddUserModal() {
-  document.getElementById('addUserModal').classList.remove('show');
-}
+function hideAddUserModal() { hideModal('addUserModal'); }
 async function submitAddUser() {
   var id = document.getElementById('addUserId').value.trim();
   var name = document.getElementById('addUserName').value.trim();
+  var email = document.getElementById('addUserEmail').value.trim();
+  var profileId = (document.getElementById('addUserDepartment') || {}).value || '';
   if (!id || !name) { alert('请输入用户 ID 和姓名'); return; }
   try {
-    await api('/api/redmine-agent/users', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: Number(id), name: name})});
-    hideAddUserModal();
+    await api('/api/redmine-agent/users', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: Number(id), name: name, email: email, profile_id: profileId})
+    });
+    hideModal('addUserModal');
     statsUserInitialized = false;
+    _statsConfigCacheTs = 0;
     await initStatsUserSelect();
     document.getElementById('statsUserSelect').value = name;
-    onStatsUserChange();
+    if (currentTab === 'department') loadDepartmentOverdue(true);
+    else onStatsUserChange();
   } catch (e) { alert('添加失败: ' + e.message); }
 }
 
+// ---- Add Department Modal ----
+function showAddDepartmentModal(targetSelectId) {
+  pendingDepartmentTargetSelect = targetSelectId || 'departmentProfileSelect';
+  document.getElementById('addDepartmentName').value = '';
+  document.getElementById('addDepartmentId').value = '';
+  showModal('addDepartmentModal');
+  document.getElementById('addDepartmentName').focus();
+}
+function hideAddDepartmentModal() { hideModal('addDepartmentModal'); }
+async function submitAddDepartment() {
+  var name = document.getElementById('addDepartmentName').value.trim();
+  var id = document.getElementById('addDepartmentId').value.trim();
+  if (!name) { alert('请输入部门名称'); return; }
+  try {
+    var result = await api('/api/redmine-agent/dashboard/profiles', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, id: id})
+    });
+    hideAddDepartmentModal();
+    _statsConfigCacheTs = 0;
+    await loadStatsConfig();
+    var profile = result.profile || {};
+    if (pendingDepartmentTargetSelect === 'addUserDepartment') {
+      await populateDepartmentSelect('addUserDepartment', profile.id || '', false);
+    } else {
+      departmentProfileId = profile.id || departmentProfileId;
+      loadDepartmentOverdue(true);
+    }
+  } catch (e) { alert('添加部门失败: ' + e.message); }
+}
+
+// ---- Add Project Modal ----
+function showAddProjectModal() {
+  document.getElementById('addProjectName').value = '';
+  document.getElementById('addProjectId').value = '';
+  showModal('addProjectModal');
+  document.getElementById('addProjectName').focus();
+}
+function hideAddProjectModal() { hideModal('addProjectModal'); }
+async function submitAddProject() {
+  var name = document.getElementById('addProjectName').value.trim();
+  var projectId = document.getElementById('addProjectId').value.trim();
+  if (!projectId) { alert('请输入项目标识或 URL'); return; }
+  try {
+    var result = await api('/api/redmine-agent/dashboard/projects', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, project_id: projectId})
+    });
+    hideAddProjectModal();
+    _statsConfigCacheTs = 0;
+    await loadStatsConfig();
+    projectProfileId = (result.profile || {}).id || projectProfileId;
+    loadProjectDashboard(true);
+  } catch (e) { alert('添加项目失败: ' + e.message); }
+}
+
 // ---- Settings Modal ----
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') hideSettingsModal();
-});
 function showSettingsModal() {
-  document.getElementById('settingsModal').classList.add('show');
-  // Load current config
+  showModal('settingsModal');
   (async function() {
     try {
-      var data = await api('/api/redmine-agent/config/stats');
-      document.getElementById('settingStaleDays').value = data.stale_days || 3;
-      document.getElementById('settingWindowDays').value = data.window_days || 0;
-      document.getElementById('settingCacheTtl').value = data.cache_ttl || 600;
+      await loadStatsConfig();
+      document.getElementById('settingStaleDays').value = statsConfig.stale_days || 20;
+      document.getElementById('settingWindowDays').value = statsConfig.window_days || 0;
+      document.getElementById('settingCacheTtl').value = statsConfig.cache_ttl || 600;
+      // SMTP fields from statsConfig (returned by get_stats_config)
+      var cfg = await api('/api/redmine-agent/config/stats');
+      var email = (cfg.dashboard || {}).email || {};
+      document.getElementById('settingSmtpHost').value = email.smtp_host || '';
+      document.getElementById('settingSmtpPort').value = email.smtp_port || 465;
+      document.getElementById('settingFromAddr').value = email.from_addr || 'trac@rock-chips.com';
+      document.getElementById('settingSmtpUser').value = email.username || '';
+      document.getElementById('settingSmtpPass').value = '';
     } catch (_) {}
   })();
 }
-function hideSettingsModal() {
-  document.getElementById('settingsModal').classList.remove('show');
-}
+function hideSettingsModal() { hideModal('settingsModal'); }
 async function saveSettings() {
-  var stale = parseInt(document.getElementById('settingStaleDays').value) || 3;
-  var window_ = parseInt(document.getElementById('settingWindowDays').value) || 0;
+  var stale = parseInt(document.getElementById('settingStaleDays').value) || 20;
+  var window_ = parseInt(document.getElementById('settingWindowDays').value) || 60;
   var cacheTtl = parseInt(document.getElementById('settingCacheTtl').value) || 600;
   try {
-    await api('/api/redmine-agent/config/stats', {
+    // Save stats config
+    var result = await api('/api/redmine-agent/config/stats', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({stale_days: stale, window_days: window_, cache_ttl: cacheTtl})
     });
+    if (result) { statsConfig = Object.assign({}, statsConfig, result); _statsConfigCacheTs = Date.now(); }
+    // Save SMTP config
+    var smtpHost = document.getElementById('settingSmtpHost').value.trim();
+    var smtpPort = parseInt(document.getElementById('settingSmtpPort').value) || 465;
+    var fromAddr = document.getElementById('settingFromAddr').value.trim();
+    var smtpUser = document.getElementById('settingSmtpUser').value.trim();
+    var smtpPass = document.getElementById('settingSmtpPass').value;
+    await api('/api/redmine-agent/config/email', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({smtp_host: smtpHost, smtp_port: smtpPort, from_addr: fromAddr, username: smtpUser, password: smtpPass})
+    });
+    _statsConfigCacheTs = 0; // force reload
     hideSettingsModal();
-    // Clear caches so new settings take effect immediately
     refreshCurrentTab();
   } catch (e) { alert('保存失败: ' + e.message); }
 }
@@ -1112,7 +1709,7 @@ function renderIssueCard(item) {
       const score = (r.score || 0).toFixed(0);
       const levelText = level === 'high' ? '高' : level === 'medium' ? '中' : '低';
       return `<div class="ref-item">
-        <a href="https://redmine.rock-chips.com/issues/${r.issue_id}" target="_blank">#${r.issue_id}</a>
+        <a href="${redmineIssueUrl(r.issue_id)}" target="_blank">#${r.issue_id}</a>
         <span class="ref-badge ${level}">${levelText} ${score}</span>
         <span class="ref-title">${esc(r.subject || '')}</span>
       </div>`;
@@ -1138,7 +1735,7 @@ function renderIssueCard(item) {
 
   return `<div class="issue-card">
     <h3>
-      <a href="https://redmine.rock-chips.com/issues/${item.issue_id}" target="_blank">#${item.issue_id}</a>
+      <a href="${redmineIssueUrl(item.issue_id)}" target="_blank">#${item.issue_id}</a>
       <span>${title}</span>
       <span style="margin-left:auto;font-size:12px;color:var(--muted)">${esc(item.priority_name || '-')}</span>
     </h3>
@@ -1241,8 +1838,98 @@ async function loadRun(runId) {
 }
 
 // ---- Statistics ----
-function renderTrend(title, items, keyName) {
-  const reversed = items.slice().reverse();
+function trendStartDate(chartKey) {
+  return ((trendDateRange(chartKey) || {}).start || '').trim();
+}
+function trendEndDate(chartKey) {
+  return ((trendDateRange(chartKey) || {}).end || '').trim();
+}
+function trendDateRange(chartKey) {
+  var ranges = statsConfig.chart_date_ranges || {};
+  if (ranges[chartKey]) return ranges[chartKey] || {};
+  var legacy = ((statsConfig.chart_start_dates || {})[chartKey] || '').trim();
+  return legacy ? {start: legacy} : {};
+}
+function filterTrendItems(items, keyName, chartKey) {
+  var start = trendStartDate(chartKey);
+  var end = trendEndDate(chartKey);
+  if (!start && !end) return items || [];
+  return (items || []).filter(function(item) {
+    var label = String(item[keyName] || '');
+    var minLabel = start;
+    var maxLabel = end;
+    if (keyName === 'week') {
+      minLabel = start ? start.slice(0, 4) + '-W' + startWeekNumber(start) : '';
+      maxLabel = end ? end.slice(0, 4) + '-W' + startWeekNumber(end) : '';
+    } else if (keyName === 'month') {
+      minLabel = start ? start.slice(0, 7) : '';
+      maxLabel = end ? end.slice(0, 7) : '';
+    } else if (keyName === 'year') {
+      minLabel = start ? start.slice(0, 4) : '';
+      maxLabel = end ? end.slice(0, 4) : '';
+    }
+    return (!minLabel || label >= minLabel) && (!maxLabel || label <= maxLabel);
+  });
+}
+function startWeekNumber(dateText) {
+  var d = new Date(dateText + 'T00:00:00');
+  if (isNaN(d.getTime())) return '01';
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+  var week1 = new Date(d.getFullYear(), 0, 4);
+  var week = 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+  return String(week).padStart(2, '0');
+}
+async function setTrendStartDate(chartKey, title) {
+  pendingTrendChartKey = chartKey || '';
+  document.getElementById('trendStartModalTitle').textContent = title + ' 日期范围';
+  document.getElementById('trendStartDateInput').value = trendStartDate(chartKey);
+  document.getElementById('trendEndDateInput').value = trendEndDate(chartKey);
+  showModal('trendStartModal');
+  setTimeout(function() {
+    var input = document.getElementById('trendStartDateInput');
+    if (!input) return;
+    input.focus();
+    if (typeof input.showPicker === 'function') {
+      try { input.showPicker(); } catch (_) {}
+    }
+  }, 50);
+}
+function hideTrendStartModal() { hideModal('trendStartModal'); }
+async function clearTrendStartDate() {
+  document.getElementById('trendStartDateInput').value = '';
+  document.getElementById('trendEndDateInput').value = '';
+  await saveTrendStartDate();
+}
+async function saveTrendStartDate() {
+  var chartKey = pendingTrendChartKey;
+  var start = (document.getElementById('trendStartDateInput').value || '').trim();
+  var end = (document.getElementById('trendEndDateInput').value || '').trim();
+  if (!chartKey) return;
+  if (start && end && start > end) {
+    var tmp = start; start = end; end = tmp;
+  }
+  var ranges = Object.assign({}, statsConfig.chart_date_ranges || {});
+  if (start || end) ranges[chartKey] = Object.assign({}, start ? {start: start} : {}, end ? {end: end} : {});
+  else delete ranges[chartKey];
+  try {
+    var result = await api('/api/redmine-agent/config/stats', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({chart_date_ranges: ranges})
+    });
+    statsConfig = Object.assign({}, statsConfig, result);
+    _statsConfigCacheTs = Date.now();
+    hideTrendStartModal();
+    refreshCurrentTab();
+  } catch (e) {
+    alert('保存起始时间失败: ' + e.message);
+  }
+}
+function renderTrend(title, items, keyName, chartKey) {
+  chartKey = chartKey || title;
+  const filtered = filterTrendItems(items || [], keyName, chartKey);
+  const reversed = filtered.slice().reverse();
   const max = Math.max(1, ...reversed.map(item => Number(item.count || 0)));
   const rows = reversed.map(item => {
     const label = item[keyName] || '-';
@@ -1254,7 +1941,16 @@ function renderTrend(title, items, keyName) {
       <div class="bar-count">${count}</div>
     </div>`;
   }).join('');
-  return `<section class="trend-panel"><h3>${esc(title)}</h3><div class="trend-body">${rows || '<div class="muted">暂无已解决数据</div>'}</div></section>`;
+  var start = trendStartDate(chartKey);
+  var end = trendEndDate(chartKey);
+  var tip = (start || end) ? ('范围: ' + (start || '不限') + ' 至 ' + (end || '不限')) : '设置统计日期范围';
+  return `<section class="trend-panel">
+    <div class="trend-title-row">
+      <h3>${esc(title)}</h3>
+      <button class="trend-start-btn" onclick="setTrendStartDate('${esc(chartKey)}','${esc(title)}')" title="${esc(tip)}">⚙</button>
+    </div>
+    <div class="trend-body">${rows || '<div class="muted">暂无已解决数据</div>'}</div>
+  </section>`;
 }
 
 function renderMiniIssueList(title, items, emptyText, sectionId) {
@@ -1263,7 +1959,7 @@ function renderMiniIssueList(title, items, emptyText, sectionId) {
     const reply = item.last_external_reply_by ? `最后回复: ${item.last_external_reply_by}` : `附件: ${item.attachment_count || 0}`;
     const time = item.last_external_reply_at || item.updated_on || item.created_on || '-';
     return `<div class="issue-mini">
-      <div><a href="https://redmine.rock-chips.com/issues/${issueId}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
+      <div><a href="${redmineIssueUrl(issueId)}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
       <div class="issue-mini-title">
         <strong title="${esc(item.subject || '')}">${esc(item.subject || '-')}</strong>
         <span>${esc(reply)}${item.last_external_reply ? ' | ' + esc(trunc(item.last_external_reply, 120)) : ''}</span>
@@ -1278,6 +1974,89 @@ function renderGroupCards(title, data) {
   const cards = Object.entries(data || {}).map(([k,v]) => `<div class="stat-card"><div class="value">${v}</div><div class="label">${esc(k)}</div></div>`).join('');
   return `<section class="stats-section"><h2>${esc(title)}</h2><div class="stats-grid">${cards || '<div class="muted">无数据</div>'}</div></section>`;
 }
+function renderSummaryHeader(title, controlsHtml, metaHtml) {
+  return `<div class="dashboard-summary-header">
+    <h2 class="dashboard-summary-title">${esc(title)}</h2>
+    <div class="dashboard-summary-controls">${controlsHtml || ''}</div>
+    <div class="muted dashboard-summary-meta">${metaHtml || ''}</div>
+  </div>`;
+}
+function renderStatsCards(cards) {
+  return '<div class="stats-grid">' + (cards || []).map(function(card) {
+    var cls = card.className ? ' ' + card.className : '';
+    var onclick = card.onclick ? ' onclick="' + card.onclick + '"' : '';
+    return '<div class="stat-card' + cls + '"' + onclick + '><div class="value">' + esc(card.value == null ? 0 : card.value) + '</div><div class="label">' + esc(card.label || '') + '</div></div>';
+  }).join('') + '</div>';
+}
+
+function redmineIssueIds(items) {
+  return (items || []).map(function(item) { return item.issue_id || ''; }).filter(Boolean);
+}
+
+function copyDepartmentIssues(userId, btn) {
+  var user = (window._departmentUsers || []).find(function(item) { return String(item.id || '') === String(userId || ''); });
+  var urls = redmineIssueUrls((user || {}).overdue_issues || []);
+  copyText(urls.join(_NL), btn);
+}
+function copyProjectIssues(userId, btn) {
+  var user = (window._projectUsers || []).find(function(item) { return String(item.id || '') === String(userId || ''); });
+  var urls = redmineIssueUrls((user || {}).issues || []);
+  copyText(urls.join(_NL), btn);
+}
+
+async function sendDepartmentReminder(userId, btn) {
+  var user = (window._departmentUsers || []).find(function(item) { return String(item.id || '') === String(userId || ''); });
+  var ids = redmineIssueIds((user || {}).overdue_issues || []);
+  if (!ids.length) {
+    alert('该人员没有超过阈值未回复的 Redmine 问题。');
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    var data = await api('/api/redmine-agent/reminders/email', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({user_id: userId, issue_ids: ids})
+    });
+    alert('✅ 已发送到 ' + (data.to || '绑定邮箱'));
+  } catch (e) {
+    alert('❌ ' + (e.message || '发送失败'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '邮箱'; }
+  }
+}
+async function sendProjectReminder(userId, btn) {
+  var user = (window._projectUsers || []).find(function(item) { return String(item.id || '') === String(userId || ''); });
+  var ids = redmineIssueIds((user || {}).issues || []);
+  if (!ids.length) {
+    alert('该人员没有项目未关闭 Redmine 问题。');
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    var data = await api('/api/redmine-agent/reminders/email', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        user_id: userId,
+        issue_ids: ids,
+        subject: 'Redmine 项目未关闭问题提醒 - ' + (user.name || userId),
+        intro: '以下 Redmine 问题在项目看板中仍未关闭，请及时处理：'
+      })
+    });
+    alert('✅ 已发送到 ' + (data.to || '绑定邮箱'));
+  } catch (e) {
+    alert('❌ ' + (e.message || '发送失败'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '邮箱'; }
+  }
+}
+
+function onDepartmentProfileChange() {
+  var select = document.getElementById('departmentProfileSelect');
+  departmentProfileId = select ? select.value : '';
+  loadDepartmentOverdue(true);
+}
 
 function renderDepartmentIssue(item) {
   const issueId = item.issue_id || '';
@@ -1285,7 +2064,7 @@ function renderDepartmentIssue(item) {
   const days = Number(item.unreplied_days || 0);
   const replyText = item.last_external_reply ? ' | ' + esc(trunc(item.last_external_reply, 140)) : '';
   return `<div class="issue-mini">
-    <div><a href="https://redmine.rock-chips.com/issues/${issueId}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
+    <div><a href="${redmineIssueUrl(issueId)}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
     <div class="issue-mini-title">
       <strong title="${esc(item.subject || '')}">${esc(item.subject || '-')}</strong>
       <span>最后回复: ${esc(item.last_external_reply_by || '-')} | 未回复 ${days} 天${replyText}</span>
@@ -1294,26 +2073,57 @@ function renderDepartmentIssue(item) {
   </div>`;
 }
 
+function renderProjectIssue(item) {
+  const issueId = item.issue_id || '';
+  const updated = item.updated_on || item.created_on || '-';
+  return `<div class="issue-mini">
+    <div><a href="${redmineIssueUrl(issueId)}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
+    <div class="issue-mini-title">
+      <strong title="${esc(item.subject || '')}">${esc(item.subject || '-')}</strong>
+      <span>指派给: ${esc(item.assigned_to_name || '-')}</span>
+    </div>
+    <div class="issue-mini-meta">${esc(item.priority_name || '-')}<br>${esc(String(updated).slice(0, 16))}</div>
+  </div>`;
+}
+
 function renderDepartmentOverdue(data) {
   const summary = data.summary || {};
+  window._departmentUsers = data.users || [];
   const users = (data.users || []).slice().sort(function(a, b) {
-    return Number(b.no_reply_3_days || 0) - Number(a.no_reply_3_days || 0)
-      || Number(b.max_unreplied_days || 0) - Number(a.max_unreplied_days || 0)
-      || Number(b.open_count || 0) - Number(a.open_count || 0);
+    return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN-u-co-pinyin');
   });
   const generatedAt = String(data.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, '');
-  const cards = `
-    <div class="stats-grid">
-      <div class="stat-card"><div class="value">${summary.user_count || 0}</div><div class="label">配置用户</div></div>
-      <div class="stat-card"><div class="value">${summary.total_owned || 0}</div><div class="label">历史总数</div></div>
-      <div class="stat-card warn"><div class="value">${summary.open_count || 0}</div><div class="label">当前未 Close</div></div>
-      <div class="stat-card bad"><div class="value">${summary.waiting_my_reply || 0}</div><div class="label">待回复</div></div>
-      <div class="stat-card bad"><div class="value">${summary.no_reply_3_days || 0}</div><div class="label">3天未回复</div></div>
-    </div>`;
+  const profile = data.profile || {};
+  departmentProfileId = profile.id || departmentProfileId || '';
+  if (data.available_profiles) {
+    statsConfig.dashboard = Object.assign({}, statsConfig.dashboard || {}, {profiles: data.available_profiles});
+  }
+  const profileSelect = `<div class="select-with-add">
+    <select id="departmentProfileSelect" onchange="onDepartmentProfileChange()" style="min-width:160px">
+      ${departmentOptionsHtml(departmentProfileId, true)}
+    </select>
+    <button class="select-add-btn" type="button" onclick="showAddDepartmentModal('departmentProfileSelect')" title="添加部门">＋</button>
+  </div>`;
+  const cards = renderStatsCards([
+    {value: summary.user_count || 0, label: '配置用户'},
+    {value: summary.total_owned || 0, label: '历史总数'},
+    {value: summary.open_count || 0, label: '当前未关闭', className: 'warn'},
+    {value: summary.waiting_my_reply || 0, label: '待回复', className: 'bad'},
+    {value: summary.no_reply_3_days || 0, label: (data.stale_days || 20) + '天未回复', className: 'bad'},
+  ]);
+  const trends = data.trends || {};
+  const trendPanels = `<div class="trend-grid">
+    ${renderTrend('每天解决Redmine问题', trends.resolved_daily || [], 'date', 'department_daily')}
+    ${renderTrend('每周解决Redmine问题', trends.resolved_weekly || [], 'week', 'department_weekly')}
+    ${renderTrend('每月解决Redmine问题', trends.resolved_monthly || [], 'month', 'department_monthly')}
+    ${renderTrend('每年解决Redmine问题', trends.resolved_yearly || [], 'year', 'department_yearly')}
+  </div>`;
   const rows = users.map(function(user) {
     const names = (user.owner_names || []).join(' / ');
     const nameLine = esc(user.name || '-');
     const subLine = names ? '<div class="muted">' + esc(names) + '</div>' : '';
+    const ids = redmineIssueIds(user.overdue_issues || []);
+    const copyDisabled = ids.length ? '' : ' disabled';
     return `<tr style="cursor:pointer" onclick="scrollToSection('dept-user-${esc(user.id || '')}')">
       <td><strong>${nameLine}</strong>${subLine}</td>
       <td>${user.total_owned || 0}</td>
@@ -1322,12 +2132,16 @@ function renderDepartmentOverdue(data) {
       <td>${user.waiting_my_reply || 0}</td>
       <td><strong style="color:var(--bad)">${user.no_reply_3_days || 0}</strong></td>
       <td>${user.max_unreplied_days || 0}</td>
+      <td onclick="event.stopPropagation()">
+        <button class="secondary dept-action-btn"${copyDisabled} onclick="copyDepartmentIssues('${esc(user.id || '')}', this)">复制</button>
+        <button class="secondary dept-action-btn"${copyDisabled} onclick="sendDepartmentReminder('${esc(user.id || '')}', this)">邮箱</button>
+      </td>
     </tr>`;
   }).join('');
   const table = `<div class="dept-table-wrap">
     <table class="dept-table">
-      <thead><tr><th>人员</th><th>历史数量</th><th>未 Close</th><th>本地未关闭</th><th>待回复</th><th>3天未回复</th><th>最长未回复天数</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="7" class="muted">暂无配置用户</td></tr>'}</tbody>
+      <thead><tr><th>人员</th><th>历史数量</th><th>未关闭</th><th>本地未关闭</th><th>待回复</th><th>超阈值未回复</th><th>最长未回复天数</th><th>操作</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="8" class="muted">暂无配置用户</td></tr>'}</tbody>
     </table>
   </div>`;
   const detailUsers = users.filter(function(user) { return (user.overdue_issues || []).length > 0; });
@@ -1336,31 +2150,37 @@ function renderDepartmentOverdue(data) {
     const names = (user.owner_names || []).join(' / ');
     return `<section class="dept-user-block" id="dept-user-${esc(user.id || '')}">
       <div class="dept-user-title">
-        <h2>${esc(user.name || '-')} 3天未回复问题 (${(user.overdue_issues || []).length})</h2>
-        <div class="muted">${esc(names || '-')} | 最长 ${user.max_unreplied_days || 0} 天 -- (只统计60天内的Redmine)</div>
+        <h2>${esc(user.name || '-')} 超阈值未回复问题 (${(user.overdue_issues || []).length})</h2>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div class="muted">${esc(names || '-')} | 最长 ${user.max_unreplied_days || 0} 天 | 窗口 ${data.window_days || 0} 天</div>
+        </div>
       </div>
       <div class="issue-mini-list">${issues}</div>
     </section>`;
   }).join('');
   document.getElementById('departmentContent').innerHTML = `
     <section class="stats-section">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:12px;flex-wrap:wrap">
-        <h2 style="margin:0">部门 Redmine 未回复汇总</h2>
-        <div class="muted" style="font-size:12px">更新时间: ${esc(generatedAt)} | 阈值: ${esc(data.stale_days || 3)} 天 | 缓存: ${data.cache_hit ? '是' : '否'}</div>
-      </div>
+      ${renderSummaryHeader((profile.name || '部门') + ' Redmine 未回复汇总', '<div class="filter-bar">' + profileSelect + '</div>', '更新时间: ' + esc(generatedAt) + ' | 阈值: ' + esc(data.stale_days || 3) + ' 天 | 缓存: ' + (data.cache_hit ? '是' : '否'))}
       ${cards}
     </section>
+    ${trendPanels}
     ${table}
-    ${details || '<div class="muted" style="padding:12px">当前所有配置用户暂无超过 3 天未回复的问题。</div>'}
+    ${details || '<div class="muted" style="padding:12px">当前配置用户暂无超过阈值未回复的问题。</div>'}
   `;
 }
 
 async function loadDepartmentOverdue(force) {
   const box = document.getElementById('departmentContent');
   if (!box) return;
-  box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计部门所有配置用户 3 天未回复问题...</div>';
+  await loadStatsConfig();
+  var sd = statsConfig.stale_days || 20;
+  box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计部门看板超阈值未回复问题...</div>';
   try {
-    var url = '/api/redmine-agent/statistics/department-overdue?stale_days=3&list_limit=50&issue_limit=500';
+    var defaults = (statsConfig.dashboard || {}).defaults || {};
+    var url = '/api/redmine-agent/statistics/department-overdue?stale_days=' + sd
+      + '&list_limit=' + (defaults.list_limit || 50)
+      + '&issue_limit=' + (defaults.issue_limit || 500)
+      + '&profile_id=' + encodeURIComponent(departmentProfileId || '');
     if (force) url += '&refresh=true';
     const data = await api(url);
     renderDepartmentOverdue(data);
@@ -1370,10 +2190,18 @@ async function loadDepartmentOverdue(force) {
 }
 
 async function loadStatistics() {
+  var savedName = '';
   try {
-    await initStatsUserSelect();
-    var selectedName = (document.getElementById('statsUserSelect') || {}).value || '';
-    var workloadUrl = '/api/redmine-agent/statistics/workload?stale_days=3&list_limit=30';
+    var oldSel = document.getElementById('statsUserSelect');
+    if (oldSel) savedName = oldSel.value;
+  } catch(_) {}
+  try {
+    await loadStatsConfig();
+    var selectedName = savedName || '';
+    var q = new URLSearchParams(window.location.search);
+    if (!selectedName) selectedName = q.get('name') || '';
+    var sd = statsConfig.stale_days || 3;
+    var workloadUrl = '/api/redmine-agent/statistics/workload?stale_days=' + sd + '&list_limit=30';
     if (selectedName) workloadUrl += '&name=' + encodeURIComponent(selectedName);
     const [basic, workload] = await Promise.all([
       api('/api/redmine-agent/statistics'),
@@ -1382,35 +2210,139 @@ async function loadStatistics() {
     const lists = workload.lists || {};
     const meta = workload.meta || {};
 
+    const userSelectHtml = '<div class="select-with-add">'
+      + '<select id="statsUserSelect" onchange="onStatsUserChange()" style="width:160px">'
+      + '<option value="">当前登录用户</option>'
+      + '</select>'
+      + '<button class="select-add-btn" onclick="showAddUserModal()" title="添加用户">＋</button>'
+      + '</div>';
+
     document.getElementById('statsContent').innerHTML = `
       <section class="stats-section">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0">
-          <h2 style="margin:0">Redmine概览</h2>
-          <div class="muted" style="margin:0;font-size:12px">统计身份: ${(meta.owner_names || []).map(esc).join(' / ') || '未识别'} | 更新时间: ${esc((meta.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, ''))}</div>
-        </div>
-        <div class="stats-grid" style="margin-top:12px">
-          <div class="stat-card warn"><div class="value">${workload.open_count || 0}</div><div class="label">当前未 Close</div></div>
-          <div class="stat-card bad clickable-stat" onclick="scrollToSection('sec-waiting-reply')"><div class="value">${workload.waiting_my_reply || 0}</div><div class="label">待回复 ⬇</div></div>
-          <div class="stat-card bad clickable-stat" onclick="scrollToSection('sec-no-reply-3d')"><div class="value">${workload.no_reply_3_days || 0}</div><div class="label">3天未回复 ⬇</div></div>
-          <div class="stat-card warn clickable-stat" onclick="scrollToSection('sec-missing-report')"><div class="value">${workload.missing_test_report || 0}</div><div class="label">缺失测试报告 ⬇</div></div>
-          <div class="stat-card ok"><div class="value">${workload.closed_count || 0}</div><div class="label">已解决 / 已关闭</div></div>
-          <div class="stat-card"><div class="value">${workload.total_owned || 0}</div><div class="label">名下历史数量</div></div>
-        </div>
+        ${renderSummaryHeader('Redmine概览', '<div class="filter-bar">' + userSelectHtml + '</div>', '统计身份: ' + ((meta.owner_names || []).map(esc).join(' / ') || '未识别') + ' | 更新时间: ' + esc((meta.generated_at || '-').replace('T', ' ').replace(/:\\d{2}$/, '')))}
+        ${renderStatsCards([
+          {value: workload.open_count || 0, label: '当前未关闭', className: 'warn'},
+          {value: workload.waiting_my_reply || 0, label: '待回复 ⬇', className: 'bad clickable-stat', onclick: "scrollToSection('sec-waiting-reply')"},
+          {value: workload.no_reply_3_days || 0, label: sd + '天未回复 ⬇', className: 'bad clickable-stat', onclick: "scrollToSection('sec-no-reply-3d')"},
+          {value: workload.missing_test_report || 0, label: '缺失测试报告 ⬇', className: 'warn clickable-stat', onclick: "scrollToSection('sec-missing-report')"},
+          {value: workload.closed_count || 0, label: '已解决 / 已关闭', className: 'ok'},
+          {value: workload.total_owned || 0, label: '名下历史数量'},
+        ])}
       </section>
 
       <div class="trend-grid">
-        ${renderTrend('每天解决的 Redmine 问题', workload.resolved_daily || [], 'date')}
-        ${renderTrend('每周解决的 Redmine 问题', workload.resolved_weekly || [], 'week')}
-        ${renderTrend('每月解决的 Redmine 问题', workload.resolved_monthly || [], 'month')}
-        ${renderTrend('每年解决的 Redmine 问题', workload.resolved_yearly || [], 'year')}
+        ${renderTrend('每天解决Redmine问题', workload.resolved_daily || [], 'date', 'personal_daily')}
+        ${renderTrend('每周解决Redmine问题', workload.resolved_weekly || [], 'week', 'personal_weekly')}
+        ${renderTrend('每月解决Redmine问题', workload.resolved_monthly || [], 'month', 'personal_monthly')}
+        ${renderTrend('每年解决Redmine问题', workload.resolved_yearly || [], 'year', 'personal_yearly')}
       </div>
 
       ${renderMiniIssueList('待回复的问题 (' + (lists.waiting_my_reply || []).length + ')', lists.waiting_my_reply || [], '暂无待回复问题', 'sec-waiting-reply')}
-      ${renderMiniIssueList('3天未回复的问题 (' + (lists.no_reply_3_days || []).length + ')', lists.no_reply_3_days || [], '暂无超过3天未回复问题', 'sec-no-reply-3d')}
+      ${renderMiniIssueList(sd + '天未回复的问题 (' + (lists.no_reply_3_days || []).length + ')', lists.no_reply_3_days || [], '暂无超过阈值未回复问题', 'sec-no-reply-3d')}
       ${renderMiniIssueList('缺失测试报告的问题 (' + (lists.missing_test_report || []).length + ')', lists.missing_test_report || [], '暂无缺失测试报告问题', 'sec-missing-report')}
     `;
+    statsUserInitialized = false;
+    await initStatsUserSelect();
+    if (selectedName) {
+      var sel = document.getElementById('statsUserSelect');
+      if (sel) sel.value = selectedName;
+    }
   } catch (e) {
     document.getElementById('statsContent').innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+  }
+}
+
+function onProjectProfileChange() {
+  var select = document.getElementById('projectProfileSelect');
+  projectProfileId = select ? select.value : '';
+  loadProjectDashboard(true);
+}
+function toggleProjectOpenOnly() {
+  projectOpenOnly = !projectOpenOnly;
+  renderProjectDashboard(window._projectData || {});
+}
+
+function renderProjectDashboard(data) {
+  window._projectData = data || {};
+  const summary = data.summary || {};
+  const profile = data.profile || {};
+  projectProfileId = profile.id || projectProfileId || '';
+  if (data.available_profiles) {
+    statsConfig.dashboard = Object.assign({}, statsConfig.dashboard || {}, {project_profiles: data.available_profiles});
+  }
+  window._projectUsers = data.assignees || [];
+  const generatedAt = String(data.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, '');
+  const profileSelect = `<div class="select-with-add">
+    <select id="projectProfileSelect" onchange="onProjectProfileChange()" style="min-width:220px">${projectOptionsHtml(projectProfileId)}</select>
+    <button class="select-add-btn" type="button" onclick="showAddProjectModal()" title="添加项目">＋</button>
+  </div>`;
+  const openOnlyBtn = `<button class="secondary toggle-btn ${projectOpenOnly ? 'active' : ''}" onclick="toggleProjectOpenOnly()">${projectOpenOnly ? '显示全员' : '仅未关闭人员'}</button>`;
+  const assignees = (data.assignees || []).slice().filter(function(user) {
+    return !projectOpenOnly || Number(user.open_count || 0) > 0;
+  }).sort(function(a, b) {
+    return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN-u-co-pinyin');
+  });
+  const cards = renderStatsCards([
+    {value: summary.issue_count || 0, label: '项目总数'},
+    {value: summary.assignee_count || 0, label: '涉及人员'},
+    {value: summary.open_count || 0, label: '当前未关闭', className: 'warn'},
+    {value: summary.closed_count || 0, label: '已解决 / 已关闭', className: 'ok'},
+  ]);
+  const rows = assignees.map(function(user) {
+    const ids = redmineIssueIds(user.issues || []);
+    const actionDisabled = ids.length ? '' : ' disabled';
+    return `<tr style="cursor:pointer" onclick="scrollToSection('project-user-${esc(user.id || '')}')">
+      <td><strong>${esc(user.name || '-')}</strong></td>
+      <td>${user.total_owned || 0}</td>
+      <td>${user.open_count || 0}</td>
+      <td>${user.closed_count || 0}</td>
+      <td onclick="event.stopPropagation()">
+        <button class="secondary dept-action-btn"${actionDisabled} onclick="copyProjectIssues('${esc(user.id || '')}', this)">复制</button>
+        <button class="secondary dept-action-btn"${actionDisabled} onclick="sendProjectReminder('${esc(user.id || '')}', this)">邮箱</button>
+      </td>
+      <td class="project-filter-cell"></td>
+    </tr>`;
+  }).join('');
+  const table = `<div class="dept-table-wrap">
+    <table class="dept-table">
+      <thead><tr><th>人员</th><th>项目内数量</th><th>未关闭</th><th>已关闭</th><th>操作</th><th class="project-filter-th">${openOnlyBtn || ''}</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6" class="muted">暂无项目人员数据</td></tr>'}</tbody>
+    </table>
+  </div>`;
+  const details = assignees.filter(function(user) { return (user.issues || []).length > 0; }).map(function(user) {
+    const issues = (user.issues || []).map(renderProjectIssue).join('');
+    return `<section class="dept-user-block" id="project-user-${esc(user.id || '')}">
+      <div class="dept-user-title"><h2>${esc(user.name || '-')} 未关闭问题 (${(user.issues || []).length})</h2></div>
+      <div class="issue-mini-list">${issues}</div>
+    </section>`;
+  }).join('');
+  document.getElementById('projectContent').innerHTML = `
+    <section class="stats-section">
+      ${renderSummaryHeader((profile.name || profile.project_id || '项目') + ' Redmine 当前情况', '<div class="filter-bar">' + profileSelect + '</div>', '项目: ' + esc(profile.project_id || '-') + ' | 更新时间: ' + esc(generatedAt) + ' | 缓存: ' + (data.cache_hit ? '是' : '否') + ' | ' + (projectOpenOnly ? '仅显示未关闭人员' : '显示全员'))}
+      ${cards}
+    </section>
+    ${table}
+    ${details || '<div class="muted" style="padding:12px">当前项目暂无未关闭问题。</div>'}
+  `;
+}
+
+async function loadProjectDashboard(force) {
+  const box = document.getElementById('projectContent');
+  if (!box) return;
+  await loadStatsConfig();
+  if (!projectProfiles().length) {
+    box.innerHTML = '<div class="muted" style="padding:20px">暂无项目看板配置。<button style="margin-left:10px" onclick="showAddProjectModal()">＋ 添加项目</button></div>';
+    return;
+  }
+  box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计项目 Redmine 当前情况...</div>';
+  try {
+    var selected = projectProfileId || (projectProfiles()[0] || {}).id || '';
+    var url = '/api/redmine-agent/statistics/project?profile_id=' + encodeURIComponent(selected);
+    if (force) url += '&refresh=true';
+    const data = await api(url);
+    renderProjectDashboard(data);
+  } catch (e) {
+    box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
   }
 }
 

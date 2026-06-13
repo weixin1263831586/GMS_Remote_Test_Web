@@ -7,7 +7,7 @@ import re
 import subprocess
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
@@ -570,8 +570,6 @@ async def execute_on_devices_parallel(devices: List[str], operation_func, ssh, *
 
 async def get_device_properties_optimized(device_id: str, ssh) -> Dict[str, str]:
     """获取设备属性 - 一次SSH调用获取所有属性"""
-    from core.ssh import ssh_manager
-
     cmd = f"""adb -s {device_id} shell "
     getprop ro.boot.verifiedbootstate;
     getprop | grep api_level;
@@ -614,8 +612,6 @@ class SSHConnection:
     """SSH连接上下文管理器，自动处理连接获取和归还"""
 
     def __init__(self, config=None):
-        from core.config import config_manager
-        from core.ssh import ssh_manager
         self.config = config or config_manager.load_config()
         self.ssh = None
         self._ssh_manager = ssh_manager
@@ -641,7 +637,6 @@ class DeviceSSHConnection:
     """设备SSH连接上下文管理器，自动处理连接获取和归还（连接池）"""
 
     def __init__(self, config=None):
-        from core.config import config_manager
         self.config = config or config_manager.load_config()
         self.ssh = None
         self._pool_key = None

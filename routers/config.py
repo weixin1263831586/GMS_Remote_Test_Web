@@ -13,10 +13,8 @@ from core.api_response import error_response, success_response
 from core.clients import (
     get_client_id_from_request,
     hide_sensitive_info,
-    is_public_origin_request,
 )
 from core.config import config_manager
-from core.settings import DEFAULT_SERVER_URL, PROJECT_ROOT
 from core.devices import get_or_create_user_state
 from core.error_handling import handle_api_errors
 from core.test_suite_utils import get_effective_local_server
@@ -27,12 +25,6 @@ router = APIRouter()
 
 
 # ==================== Tailscale helpers ====================
-
-def get_request_base_url(request: Request) -> str:
-    scheme = request.headers.get('x-forwarded-proto') or request.url.scheme
-    host = request.headers.get('x-forwarded-host') or request.headers.get('host') or request.url.netloc
-    return f"{scheme}://{host}".rstrip('/')
-
 
 def _get_tailscale_status() -> dict:
     """Get Tailscale IP and connection status via `tailscale ip -4`."""

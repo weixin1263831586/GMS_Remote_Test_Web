@@ -32,11 +32,11 @@ def extract_filename_from_content_disposition(content_disposition: str) -> Optio
     """Extract filename from a Content-Disposition header."""
     if not content_disposition:
         return None
-    filename_match = COMPILED_CONTENT_DISPOSITION_PATTERN.search(content_disposition)
-    if filename_match:
-        filename = filename_match.group(1) or filename_match.group(2) or filename_match.group(3)
-        return urllib.parse.unquote(filename) if filename else None
-    return None
+    match = COMPILED_CONTENT_DISPOSITION_PATTERN.search(content_disposition)
+    if not match:
+        return None
+    filename = match.group(1) or match.group(2) or match.group(3)
+    return urllib.parse.unquote(filename) if filename else None
 
 
 def extract_redmine_issue_id_from_text(text: str) -> Optional[str]:

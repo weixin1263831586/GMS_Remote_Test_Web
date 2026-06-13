@@ -6,9 +6,8 @@ import shutil
 import asyncio
 import logging
 import subprocess
-import uuid
 import xml.etree.ElementTree as ET
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
@@ -130,12 +129,9 @@ async def upload_apk(
 @handle_api_errors
 async def analyze_apk(task_id: str):
     """Start jadx decompilation analysis."""
-    with global_state.apk_analysis_tasks_lock:
-        task = global_state.apk_analysis_tasks.get(task_id)
-        task = dict(task) if task else None
-
-    if not task:
-        return ApiResponse.error("Task not found", status_code=404)
+    task, err = _get_apk_task(task_id, require_completed=False)
+    if err:
+        return err
 
     if task["status"] == "analyzing":
         return ApiResponse.error("Analysis in progress", status_code=400)
@@ -153,10 +149,8 @@ async def analyze_apk(task_id: str):
     output_dir = os.path.join(APK_UPLOAD_DIR, task_id, "jadx_output")
 
     with global_state.apk_analysis_tasks_lock:
-        global_state.apk_analysis_tasks[task_id]["status"] = "analyzing"
-        global_state.apk_analysis_tasks[task_id]["progress"] = 5
-        global_state.apk_analysis_tasks[task_id]["output_dir"] = output_dir
-        global_state.apk_analysis_tasks[task_id]["error"] = None
+        t = global_state.apk_analysis_tasks[task_id]
+        t.update({"status": "analyzing", "progress": 5, "output_dir": output_dir, "error": None})
 
     task = asyncio.create_task(_run_jadx_analysis(task_id, apk_path, output_dir))
     global_state.background_tasks.add(task)
@@ -168,12 +162,9 @@ async def analyze_apk(task_id: str):
 @handle_api_errors
 async def get_apk_status(task_id: str):
     """Get APK analysis status."""
-    with global_state.apk_analysis_tasks_lock:
-        task = global_state.apk_analysis_tasks.get(task_id)
-        task = dict(task) if task else None
-
-    if not task:
-        return ApiResponse.error("Task not found", status_code=404)
+    task, err = _get_apk_task(task_id, require_completed=False)
+    if err:
+        return err
 
     return ApiResponse.success({
         "task_id": task_id,
@@ -396,18 +387,19 @@ async def download_apk_source(task_id: str):
 async def list_apk_tasks():
     """List all APK analysis tasks."""
     with global_state.apk_analysis_tasks_lock:
-        tasks = []
-        for tid, task in global_state.apk_analysis_tasks.items():
-            tasks.append({
+        tasks = [
+            {
                 "task_id": tid,
                 "filename": task.get("filename", ""),
                 "status": task["status"],
                 "progress": task["progress"],
                 "timestamp": task.get("timestamp", 0),
                 "error": task.get("error"),
-            })
+            }
+            for tid, task in global_state.apk_analysis_tasks.items()
+        ]
 
-    tasks.sort(key=lambda t: t.get("timestamp", 0), reverse=True)
+    tasks.sort(key=lambda t: t["timestamp"], reverse=True)
     return ApiResponse.success({"tasks": tasks, "total": len(tasks)})
 
 

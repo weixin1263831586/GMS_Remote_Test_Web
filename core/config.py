@@ -384,6 +384,51 @@ class ConfigManager:
         """Public read-only access to the runtime configuration."""
         return self._load_runtime_config() or {}
 
+    def get_redmine_stats_config(self) -> Dict[str, int]:
+        """Return normalized Redmine stats settings after static/runtime merge."""
+        from core.redmine_dashboard_config import normalize_redmine_stats_config
+
+        return normalize_redmine_stats_config((self.load_config().get('redmine_stats') or {}))
+
+    def save_redmine_stats_config(self, stats_config: Dict[str, Any]) -> bool:
+        """Save Redmine stats settings to runtime config so UI changes take effect immediately."""
+        from core.redmine_dashboard_config import normalize_redmine_stats_config
+
+        try:
+            runtime = self._load_runtime_config() or {}
+            current = runtime.get('redmine_stats') or self.load_config().get('redmine_stats') or {}
+            runtime['redmine_stats'] = normalize_redmine_stats_config({**current, **(stats_config or {})})
+            return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
+        except Exception as e:
+            logger.error(f"Error saving Redmine stats config: {e}")
+            return False
+
+    def get_redmine_dashboard_config(self) -> Dict[str, Any]:
+        """Return normalized Redmine dashboard profile configuration."""
+        from core.redmine_dashboard_config import normalize_redmine_dashboard_profiles
+
+        return normalize_redmine_dashboard_profiles(self.load_config().get('redmine_dashboard') or {})
+
+    def save_redmine_dashboard_config(self, dashboard_config: Dict[str, Any]) -> bool:
+        """Save Redmine dashboard profiles to runtime config."""
+        from core.redmine_dashboard_config import denormalize_redmine_dashboard_config
+
+        try:
+            runtime = self._load_runtime_config() or {}
+            current = self.load_config().get('redmine_dashboard') or {}
+            merged = {**current, **(dashboard_config or {})}
+            runtime['redmine_dashboard'] = denormalize_redmine_dashboard_config(merged)
+            return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
+        except Exception as e:
+            logger.error(f"Error saving Redmine dashboard config: {e}")
+            return False
+
+    def get_gerrit_dashboard_config(self) -> Dict[str, Any]:
+        """Return normalized Gerrit dashboard configuration."""
+        from core.gerrit_dashboard_config import normalize_gerrit_dashboard_config
+
+        return normalize_gerrit_dashboard_config(self.load_config().get('gerrit_dashboard') or {})
+
     def save_client_ssh_credentials(self, credentials: list) -> bool:
         """保存客户端 SSH 凭据到运行时配置文件。"""
         try:
@@ -413,6 +458,7 @@ class ConfigManager:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)
             logger.info(f"Saved config to {self.config_path}")
+            self.invalidate_cache()
             return True
         except Exception as e:
             logger.error(f"Error saving config: {e}")
