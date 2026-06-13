@@ -1,7 +1,6 @@
 """Conversation Agent router for guided GMS Remote Test workflows."""
 
 import asyncio
-import json
 import logging
 import re
 import time
@@ -64,6 +63,8 @@ WEBAPP_PAGES = {
     "tools": ("常用工具", "下载和维护常用工具"),
     "security-audit": ("安全审计", "查看访问和接口审计"),
     "gms-assistant": ("GMS助手", "外部 GMS 助手"),
+    "redmine-agent": ("Redmine看板", "个人/部门 Redmine 统计、未回复问题和 RedmineAgent 扫描"),
+    "gerrit-dashboard": ("Gerrit看板", "查询 Gerrit 变更和配置 Gerrit dashboard profiles"),
     "agent": ("对话Agent", "自然语言操作 Web_app"),
 }
 

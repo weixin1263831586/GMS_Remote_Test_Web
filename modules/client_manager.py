@@ -29,9 +29,12 @@ class ClientManager:
         self.ssh_credentials = config.get('client_ssh_credentials', [])
         return config
 
-    def save_client_info(self, config: Dict[str, Any]) -> bool:
-        """保存客户端信息"""
-        return config_manager.save_runtime_config(config)
+    def _save_client_runtime(self) -> bool:
+        """保存客户端运行时配置"""
+        return config_manager.save_runtime_config({
+            'client_hosts': self.client_hosts,
+            'client_ssh_credentials': self.ssh_credentials
+        })
 
     def _ssh_whoami(self, client_ip: str, username: str, password: str) -> str:
         """Connect via SSH, run whoami, return username. Raises on failure."""
@@ -84,12 +87,7 @@ class ClientManager:
                 if not any(c.get('username') == username for c in self.ssh_credentials):
                     self.ssh_credentials.insert(0, {'username': username, 'password': password})
 
-                # 只保存客户端相关配置
-                runtime_config = {
-                    'client_hosts': self.client_hosts,
-                    'client_ssh_credentials': self.ssh_credentials
-                }
-                self.save_client_info(runtime_config)
+                self._save_client_runtime()
 
                 return True, detected_username, None
             except Exception as e:
@@ -115,12 +113,7 @@ class ClientManager:
 
                 self.client_hosts[client_ip] = detected_username
 
-                # 只保存客户端相关配置
-                runtime_config = {
-                    'client_hosts': self.client_hosts,
-                    'client_ssh_credentials': self.ssh_credentials
-                }
-                self.save_client_info(runtime_config)
+                self._save_client_runtime()
 
                 return True, detected_username, None
             except Exception:

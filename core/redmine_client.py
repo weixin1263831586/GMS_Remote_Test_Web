@@ -141,6 +141,52 @@ class RedmineClient:
         """Fetch issues assigned to a specific Redmine user id."""
         return await self._paginate_issues(int(assignee_id), status_id, limit, sort)
 
+    async def fetch_project_issues(
+        self,
+        project_id: str,
+        status_id: str = "*",
+        limit: int = 1000,
+        sort: str = "updated_on:desc",
+    ) -> List[Any]:
+        """Fetch issues in a Redmine project."""
+        project_id = str(project_id or "").strip().strip("/")
+        if not project_id:
+            return []
+        limit = max(1, min(int(limit or 1000), 5000))
+        page_size = min(limit, 100)
+
+        def _fetch():
+            all_items = []
+            seen_ids = set()
+            offset = 0
+            while len(all_items) < limit:
+                issues = self._redmine.issue.filter(
+                    project_id=project_id,
+                    status_id=status_id,
+                    sort=sort,
+                    limit=page_size,
+                    offset=offset,
+                )
+                page = list(issues)
+                if not page:
+                    break
+                added = 0
+                for issue in page:
+                    issue_id = int(getattr(issue, "id"))
+                    if issue_id in seen_ids:
+                        continue
+                    seen_ids.add(issue_id)
+                    all_items.append(issue)
+                    added += 1
+                    if len(all_items) >= limit:
+                        break
+                if len(page) < page_size or added == 0:
+                    break
+                offset += page_size
+            return all_items
+
+        return await asyncio.to_thread(_fetch)
+
     async def _paginate_issues(
         self,
         assigned_to_id: Any,
@@ -387,10 +433,10 @@ class RedmineClient:
 
         session = self._get_session()
         async with session.post(url, data=file_content, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as response:
-                if response.status not in (200, 201):
-                    error_body = await response.text()
-                    raise RuntimeError(f"Redmine upload failed: HTTP {response.status} - {error_body}")
-                result = await response.json()
+            if response.status not in (200, 201):
+                error_body = await response.text()
+                raise RuntimeError(f"Redmine upload failed: HTTP {response.status} - {error_body}")
+            result = await response.json()
 
         token = (result.get("upload") or {}).get("token", "")
         if not token:
@@ -406,15 +452,15 @@ class RedmineClient:
         total = 0
         session = self._get_session()
         async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=180), allow_redirects=True) as response:
-                if response.status not in (200, 206):
-                    body = await response.text(errors="ignore")
-                    raise RuntimeError(f"Redmine attachment download failed: HTTP {response.status} - {body[:300]}")
-                with open(destination, "wb") as target:
-                    async for chunk in response.content.iter_chunked(1024 * 1024):
-                        if not chunk:
-                            continue
-                        target.write(chunk)
-                        total += len(chunk)
+            if response.status not in (200, 206):
+                body = await response.text(errors="ignore")
+                raise RuntimeError(f"Redmine attachment download failed: HTTP {response.status} - {body[:300]}")
+            with open(destination, "wb") as target:
+                async for chunk in response.content.iter_chunked(1024 * 1024):
+                    if not chunk:
+                        continue
+                    target.write(chunk)
+                    total += len(chunk)
         return total
 
     async def reply_issue(self, issue_id: str, notes: str, files: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
@@ -439,10 +485,10 @@ class RedmineClient:
         api_url = f"{self.base_url}/issues/{issue_id}.json"
         session = self._get_session()
         async with session.put(api_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                if response.status in (200, 204):
-                    return {"issue_url": f"{self.base_url}/issues/{issue_id}", "attachments": len(uploads)}
-                error_body = await response.text()
-                raise RuntimeError(f"Redmine API returned HTTP {response.status}: {error_body}")
+            if response.status in (200, 204):
+                return {"issue_url": f"{self.base_url}/issues/{issue_id}", "attachments": len(uploads)}
+            error_body = await response.text()
+            raise RuntimeError(f"Redmine API returned HTTP {response.status}: {error_body}")
 
     async def find_attachment_issue_id(self, attachment_id: str) -> Optional[str]:
         detail_url = f"{self.base_url}/attachments/{attachment_id}"
@@ -452,19 +498,18 @@ class RedmineClient:
         try:
             session = self._get_session()
             async with session.get(detail_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True) as response:
-                    final_url_issue_id = extract_redmine_issue_id_from_text(str(response.url))
-                    if final_url_issue_id:
-                        return final_url_issue_id
-                    content_type = response.headers.get("Content-Type", "")
-                    if response.status != 200 or "html" not in content_type.lower():
-                        logger.info("[RedmineClient] Attachment detail did not return HTML: %s status=%s type=%s", detail_url, response.status, content_type)
-                        return None
-                    text = await response.text(errors="ignore")
+                final_url_issue_id = extract_redmine_issue_id_from_text(str(response.url))
+                if final_url_issue_id:
+                    return final_url_issue_id
+                content_type = response.headers.get("Content-Type", "")
+                if response.status != 200 or "html" not in content_type.lower():
+                    logger.info("[RedmineClient] Attachment detail did not return HTML: %s status=%s type=%s", detail_url, response.status, content_type)
+                    return None
+                text = await response.text(errors="ignore")
+                link_match = COMPILED_ISSUE_LINK_PATTERN.search(text)
+                if link_match:
+                    return link_match.group(1)
+                return extract_redmine_issue_id_from_text(text)
         except Exception as e:
             logger.warning("[RedmineClient] Attachment issue lookup failed: %s, error=%s", detail_url, e)
             return None
-
-        link_match = COMPILED_ISSUE_LINK_PATTERN.search(text)
-        if link_match:
-            return link_match.group(1)
-        return extract_redmine_issue_id_from_text(text)

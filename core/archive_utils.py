@@ -60,7 +60,6 @@ def strip_common_archive_root(names: List[str]) -> Tuple[str, List[Tuple[str, st
     files = [name for name in names if name and not name.endswith('/')]
     top_levels = {name.split('/', 1)[0] for name in files if '/' in name}
     if len(top_levels) == 1:
-        root = next(iter(top_levels))
-        if all(name.startswith(root + '/') for name in files):
-            return root, [(name, name[len(root) + 1:]) for name in names if name != root and name != root + '/']
+        root = top_levels.pop()
+        return root, [(name, name[len(root) + 1:]) for name in names if name != root and name != root + '/']
     return '', [(name, name) for name in names]

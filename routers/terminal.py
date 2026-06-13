@@ -114,6 +114,9 @@ async def upload_file(
                 os.remove(temp_path)
                 return error_response("SSH connection failed", 500)
 
+            # Determine target path and upload via SFTP
+            default_remote = f"/home/{config['ubuntu_user']}/{safe_filename}"
+
             if path and path.strip():
                 target_dir = path.rstrip("/")
                 try:
@@ -127,12 +130,12 @@ async def upload_file(
                         sftp.put(temp_path, remote_path)
                 except Exception as e:
                     logger.error(f"Failed to upload to specified path: {e}")
-                    remote_path = f"/home/{config['ubuntu_user']}/{safe_filename}"
+                    remote_path = default_remote
                     with ssh.open_sftp() as sftp:
                         ssh_manager.optimize_sftp_performance(sftp)
                         sftp.put(temp_path, remote_path)
             else:
-                remote_path = f"/home/{config['ubuntu_user']}/{safe_filename}"
+                remote_path = default_remote
                 with ssh.open_sftp() as sftp:
                     ssh_manager.optimize_sftp_performance(sftp)
                     sftp.put(temp_path, remote_path)
@@ -232,46 +235,46 @@ async def _upload_file_chunk(
             config = config_manager.load_config()
             ssh = ssh_manager.get_connection(config)
 
-            if ssh:
-                try:
-                    remote_filename = os.path.basename(merged_file)
-                    remote_path = f"/home/{config['ubuntu_user']}/{remote_filename}"
-                    upload_start = time.time()
-
-                    with ssh.open_sftp() as sftp:
-                        ssh_manager.optimize_sftp_performance(sftp)
-                        sftp.put(merged_file, remote_path, confirm=True)
-
-                    upload_time = time.time() - upload_start
-                    file_size_mb = os.path.getsize(merged_file) / (1024 * 1024)
-                    upload_speed = file_size_mb / upload_time if upload_time > 0 else 0
-                    logger.info(f"[ChunkUpload] Uploaded {file_size_mb:.2f}MB to remote in {upload_time:.2f}s ({upload_speed:.2f} MB/s)")
-
-                    ssh_manager.return_connection(ssh)
-                    shutil.rmtree(session_dir)
-
-                    return JSONResponse(content={
-                        "success": True, "upload_complete": True,
-                        "remote_path": remote_path, "message": f"File uploaded to {remote_path}",
-                    })
-                except Exception as e:
-                    ssh_manager.return_connection(ssh)
-                    try:
-                        os.remove(merge_lock_path)
-                    except OSError:
-                        pass
-                    logger.error(f"Error uploading merged file: {e}")
-                    return JSONResponse(content={
-                        "success": False, "error": f"Upload failed: {str(e)}",
-                        "chunks_uploaded": len(uploaded_chunks), "total_chunks": total_chunks,
-                    }, status_code=500)
-            else:
+            if not ssh:
                 try:
                     os.remove(merge_lock_path)
                 except OSError:
                     pass
                 return JSONResponse(content={
                     "success": False, "error": "SSH connection failed",
+                    "chunks_uploaded": len(uploaded_chunks), "total_chunks": total_chunks,
+                }, status_code=500)
+
+            try:
+                remote_filename = os.path.basename(merged_file)
+                remote_path = f"/home/{config['ubuntu_user']}/{remote_filename}"
+                upload_start = time.time()
+
+                with ssh.open_sftp() as sftp:
+                    ssh_manager.optimize_sftp_performance(sftp)
+                    sftp.put(merged_file, remote_path, confirm=True)
+
+                upload_time = time.time() - upload_start
+                file_size_mb = os.path.getsize(merged_file) / (1024 * 1024)
+                upload_speed = file_size_mb / upload_time if upload_time > 0 else 0
+                logger.info(f"[ChunkUpload] Uploaded {file_size_mb:.2f}MB to remote in {upload_time:.2f}s ({upload_speed:.2f} MB/s)")
+
+                ssh_manager.return_connection(ssh)
+                shutil.rmtree(session_dir)
+
+                return JSONResponse(content={
+                    "success": True, "upload_complete": True,
+                    "remote_path": remote_path, "message": f"File uploaded to {remote_path}",
+                })
+            except Exception as e:
+                ssh_manager.return_connection(ssh)
+                try:
+                    os.remove(merge_lock_path)
+                except OSError:
+                    pass
+                logger.error(f"Error uploading merged file: {e}")
+                return JSONResponse(content={
+                    "success": False, "error": f"Upload failed: {str(e)}",
                     "chunks_uploaded": len(uploaded_chunks), "total_chunks": total_chunks,
                 }, status_code=500)
 

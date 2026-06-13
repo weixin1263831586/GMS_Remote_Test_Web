@@ -362,24 +362,6 @@ class UniversalAIAnalyzer:
 
         return str(payload)
 
-    def _safe_import(self, module_path: str, error_result=None):
-        """
-        安全导入模块，失败时返回默认值
-
-        Args:
-            module_path: 模块路径
-            error_result: 导入失败时的返回值
-
-        Returns:
-            模块对象或 error_result
-        """
-        try:
-            from importlib import import_module
-            return import_module(module_path)
-        except ImportError:
-            logger.warning(f"{module_path} 不可用")
-            return error_result
-
     def _build_prompt(self, class_name: str, method_name: Optional[str],
                       error_message: str, stack_trace: Optional[str], source_code: Optional[str]) -> str:
         """构造分析提示词"""

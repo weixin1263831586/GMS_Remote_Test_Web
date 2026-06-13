@@ -3,7 +3,7 @@
 import ipaddress
 import logging
 import urllib.parse
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from core.common_utils import CommonUtils
 from core.config import config_manager
@@ -33,18 +33,13 @@ def get_client_id_from_request(request) -> str:
 
 
 def get_client_ip(request, fallback_ip: Optional[str] = None) -> str:
-    """提取客户端真实IP地址（支持代理）"""
+    """提取客户端真实IP地址（支持代理）。"""
     if fallback_ip:
         return fallback_ip
-
-    forwarded_for = request.headers.get('X-Forwarded-For', '').strip()
-    if forwarded_for:
-        return forwarded_for.split(',')[0].strip()
-
-    real_ip = request.headers.get('X-Real-IP')
-    if real_ip:
-        return real_ip
-
+    for header in ('X-Forwarded-For', 'X-Real-IP'):
+        value = request.headers.get(header, '').strip()
+        if value:
+            return value.split(',')[0].strip()
     return request.client.host if request.client else 'unknown'
 
 
@@ -71,12 +66,14 @@ def is_public_origin_request(request) -> bool:
     """Return True when the browser is accessing through a Tailscale network."""
     if not request:
         return False
-    host = (request.headers.get('host') or '').lower()
-    forwarded_host = (request.headers.get('x-forwarded-host') or '').lower()
-    for part in (host, forwarded_host):
+    hosts = [
+        (request.headers.get('host') or '').lower(),
+        (request.headers.get('x-forwarded-host') or '').lower(),
+    ]
+    for part in hosts:
         if part and part.split(':')[0].startswith('100.'):
             return True
-    if 'tailscale.com' in host or 'tailscale.com' in forwarded_host:
+    if any('tailscale.com' in h for h in hosts):
         return True
     origin = (request.headers.get('origin') or '').lower()
     return 'tailscale.com' in origin
@@ -140,33 +137,25 @@ def is_manual_username_fallback_error(error: Optional[str]) -> bool:
     ))
 
 
-def hide_sensitive_info(config: dict) -> dict:
-    """隐藏配置中的敏感信息"""
-    sensitive_fields = ['password', 'pswd', 'api_key', 'secret', 'token', 'private_key']
+_SENSITIVE_FIELDS = ('password', 'pswd', 'api_key', 'secret', 'token', 'private_key')
 
+
+def _mask_value(value: str) -> str:
+    return value[:4] + '*' * (len(value) - 4) if len(value) > 4 else '****'
+
+
+def hide_sensitive_info(config: dict) -> dict:
+    """隐藏配置中的敏感信息。"""
     if not isinstance(config, dict):
         return config
-
-    safe_config = {}
+    safe = {}
     for key, value in config.items():
-        is_sensitive = any(sensitive in key.lower() for sensitive in sensitive_fields)
-
-        if is_sensitive and isinstance(value, str) and value:
-            if len(value) > 4:
-                safe_config[key] = value[:4] + '*' * (len(value) - 4)
-            else:
-                safe_config[key] = '****'
+        if any(s in key.lower() for s in _SENSITIVE_FIELDS) and isinstance(value, str) and value:
+            safe[key] = _mask_value(value)
         elif isinstance(value, dict):
-            safe_config[key] = hide_sensitive_info(value)
+            safe[key] = hide_sensitive_info(value)
         elif isinstance(value, list):
-            safe_list = []
-            for item in value:
-                if isinstance(item, dict):
-                    safe_list.append(hide_sensitive_info(item))
-                else:
-                    safe_list.append(item)
-            safe_config[key] = safe_list
+            safe[key] = [hide_sensitive_info(item) if isinstance(item, dict) else item for item in value]
         else:
-            safe_config[key] = value
-
-    return safe_config
+            safe[key] = value
+    return safe

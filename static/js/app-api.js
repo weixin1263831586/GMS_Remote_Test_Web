@@ -49,17 +49,13 @@ function applyClientIdentityHeadersToXhr(xhr) {
 
 async function apiCall(url, method = 'GET', data = null) {
     try {
-        const headers = {
-            'Content-Type': 'application/json',
-            ...getClientIdentityHeaders()
-        };
-
         const options = {
             method,
-            headers
+            headers: { ...getClientIdentityHeaders() }
         };
 
         if (data && !['GET', 'HEAD'].includes(method.toUpperCase())) {
+            options.headers['Content-Type'] = 'application/json';
             options.body = JSON.stringify(data);
         }
 

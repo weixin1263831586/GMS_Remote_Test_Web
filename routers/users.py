@@ -136,17 +136,14 @@ async def list_users():
     """获取所有在线用户列表"""
     from core.common_utils import CommonUtils
 
-    users = []
     now = datetime.now()
     config = config_manager.load_config()
 
     # 本地地址列表，不显示在用户列表中
     local_addresses = set(CommonUtils.LOCAL_HOSTS) | {'0.0.0.0'}
-
     vpn_gateway_addresses = set(config.get('vpn_gateways', []))
 
     with global_state.user_states_lock:
-        # 收集所有用户
         temp_users = {}
         for client_id, state in global_state.user_states.items():
             # 检查会话是否活跃（最近24小时内有活动）
@@ -168,35 +165,22 @@ async def list_users():
             # 过滤本地地址和VPN网关地址
             if ip in local_addresses or ip in vpn_gateway_addresses:
                 continue
-            # 过滤unknown用户（用户名识别失败的情况）
+
+            user_info = {
+                'client_id': client_id,
+                'username': username,
+                'ip': ip,
+                **get_client_source(ip),
+                'running': state.get('running', False),
+                'devices': state.get('devices', []),
+                'last_seen': state.get('last_seen', ''),
+                'created_at': state.get('created_at', ''),
+            }
 
             # 如果同一个IP有多个用户记录，优先保留非unknown的用户
-            if ip in temp_users:
-                existing_user = temp_users[ip]
-                if existing_user['username'] == 'unknown' and username != 'unknown':
-                    # 用真实用户替换unknown用户
-                    temp_users[ip] = {
-                        'client_id': client_id,
-                        'username': username,
-                        'ip': ip,
-                        **get_client_source(ip),
-                        'running': state.get('running', False),
-                        'devices': state.get('devices', []),
-                        'last_seen': state.get('last_seen', ''),
-                        'created_at': state.get('created_at', '')
-                    }
-                # 否则保留第一个
-            else:
-                temp_users[ip] = {
-                    'client_id': client_id,
-                    'username': username,
-                    'ip': ip,
-                    **get_client_source(ip),
-                    'running': state.get('running', False),
-                    'devices': state.get('devices', []),
-                    'last_seen': state.get('last_seen', ''),
-                    'created_at': state.get('created_at', '')
-                }
+            existing = temp_users.get(ip)
+            if existing is None or (existing['username'] == 'unknown' and username != 'unknown'):
+                temp_users[ip] = user_info
 
         users = list(temp_users.values())
 

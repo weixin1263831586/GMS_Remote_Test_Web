@@ -71,12 +71,8 @@ class TestRunner:
             config = self.config_manager.load_config()
 
             # 检查必要参数
-            devices = test_params.get('devices', [])
-            if not devices:
-                # 空设备列表也是可以的（用于测试）
+            if not test_params.get('devices'):
                 await log_callback("⚠️ 未选择设备，将使用默认设备", 'warning')
-                devices = []  # 使用空列表
-                # 不返回False，继续执行
 
             # 获取主机配置
             device_host = test_params.get('device_host', '')
@@ -173,7 +169,7 @@ class TestRunner:
             )
 
             if not os.path.exists(local_script):
-                logger.info(f"Checking local script: {local_script}"); logger.warning(f"Script not found: {local_script}, using remote fallback")
+                logger.warning(f"Script not found: {local_script}, using remote fallback")
                 # 脚本不存在，直接返回True（使用已有脚本）
                 return True
 
@@ -365,51 +361,38 @@ class TestRunner:
                 await log_callback("❌ SSH连接失败", 'error')
                 return False
 
+            def _kill_and_finish(pids: list, msg: str) -> int:
+                """Kill processes and mark test as stopped. Returns number killed."""
+                killed_count = 0
+                for pid in pids:
+                    pid = pid.strip()
+                    if pid:
+                        self.ssh_manager.execute_command(ssh, f"kill -9 {pid} 2>/dev/null")
+                        self.ssh_manager.execute_command(ssh, f"pkill -9 -P {pid} 2>/dev/null")
+                        killed_count += 1
+                self.ssh_manager.return_connection(ssh)
+                test_info['status'] = 'stopped'
+                test_info['end_time'] = datetime.now().isoformat()
+                return killed_count
+
             # 方法1: 使用进程组ID杀死进程
             if process_group_id:
                 find_cmd = f"ps eww -e | grep 'GMS_TEST_PGID={process_group_id}' | grep -v grep | awk '{{print $1}}'"
                 stdout, stderr, code = self.ssh_manager.execute_command(ssh, find_cmd, timeout=10)
 
                 if stdout.strip():
-                    pids = stdout.strip().split('\n')
-                    killed_count = 0
-                    for pid in pids:
-                        if pid.strip():
-                            # 杀死进程
-                            self.ssh_manager.execute_command(ssh, f"kill -9 {pid.strip()} 2>/dev/null")
-                            # 杀死子进程
-                            self.ssh_manager.execute_command(ssh, f"pkill -9 -P {pid.strip()} 2>/dev/null")
-                            killed_count += 1
-
-                    await log_callback(f"✅ 已终止 {killed_count} 个测试进程", 'success')
-                    self.ssh_manager.return_connection(ssh)
-
-                    # 更新测试状态
-                    test_info['status'] = 'stopped'
-                    test_info['end_time'] = datetime.now().isoformat()
-
-                    return True
+                    killed = _kill_and_finish(stdout.strip().split('\n'), '')
+                    await log_callback(f"✅ 已终止 {killed} 个测试进程", 'success')
+                    return bool(killed)
 
                 # 回退：尝试通过命令行参数查找
                 fallback_cmd = f"ps aux | grep -- '--pgid {process_group_id}' | grep -v grep | awk '{{print $2}}'"
                 stdout, stderr, code = self.ssh_manager.execute_command(ssh, fallback_cmd, timeout=10)
 
                 if stdout.strip():
-                    pids = stdout.strip().split('\n')
-                    killed_count = 0
-                    for pid in pids:
-                        if pid.strip():
-                            self.ssh_manager.execute_command(ssh, f"kill -9 {pid.strip()} 2>/dev/null")
-                            killed_count += 1
-
-                    await log_callback(f"✅ 已终止 {killed_count} 个测试进程（命令行匹配）", 'success')
-                    self.ssh_manager.return_connection(ssh)
-
-                    # 更新测试状态
-                    test_info['status'] = 'stopped'
-                    test_info['end_time'] = datetime.now().isoformat()
-
-                    return True
+                    killed = _kill_and_finish(stdout.strip().split('\n'), '')
+                    await log_callback(f"✅ 已终止 {killed} 个测试进程（命令行匹配）", 'success')
+                    return bool(killed)
 
             # 方法2: 回退到传统方法（杀死tradefed进程）
             binary_map = {

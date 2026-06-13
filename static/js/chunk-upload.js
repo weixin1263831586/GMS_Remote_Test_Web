@@ -131,13 +131,11 @@ async function uploadFileInChunks(file, url, options = {}) {
     try {
         const chunks = Array.from({length: totalChunks}, (_, i) => i);
 
-        const chunksToUpload = chunks;
-
-        chunkDebugLog(`[ChunkUpload] Chunks to upload: ${chunksToUpload.length}/${totalChunks}`);
+        chunkDebugLog(`[ChunkUpload] Chunks to upload: ${chunks.length}/${totalChunks}`);
 
         // 分批并发上传
-        for (let i = 0; i < chunksToUpload.length; i += concurrent) {
-            const batch = chunksToUpload.slice(i, i + concurrent);
+        for (let i = 0; i < chunks.length; i += concurrent) {
+            const batch = chunks.slice(i, i + concurrent);
             await Promise.all(batch.map(index => uploadChunk(index)));
         }
 
@@ -240,8 +238,9 @@ async function uploadFileRegular(file, url, options = {}) {
         });
 
         xhr.addEventListener('error', () => {
-            if (onError) onError(new Error('Network error'));
-            reject(new Error('Network error'));
+            const err = new Error('Network error');
+            if (onError) onError(err);
+            reject(err);
         });
 
         xhr.open('POST', url);

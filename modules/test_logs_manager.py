@@ -157,7 +157,6 @@ class TestLogsManager:
         """清理旧日志"""
         cleaned = 0
         total_size = 0
-
         cutoff_time = datetime.now().timestamp() - (days * 86400)
 
         for base_dir in self.log_dirs:
@@ -167,11 +166,11 @@ class TestLogsManager:
 
             for log_file in base_path.rglob('*.log'):
                 try:
-                    if log_file.stat().st_mtime < cutoff_time:
-                        size = log_file.stat().st_size
+                    st = log_file.stat()
+                    if st.st_mtime < cutoff_time:
+                        total_size += st.st_size
                         log_file.unlink()
                         cleaned += 1
-                        total_size += size
                 except Exception:
                     pass
 

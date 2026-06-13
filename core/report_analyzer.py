@@ -13,7 +13,7 @@ import shutil
 import glob
 import io
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
 from .archive_utils import ARCHIVE_EXTENSIONS
@@ -465,23 +465,13 @@ class HostLogParser:
 
     def _extract_test_type(self, log_content: str, log_dir: str) -> str:
         """提取测试类型"""
-        # 从目录名判断
         dir_name = os.path.basename(log_dir).lower()
-        if 'cts' in dir_name:
-            return 'CTS'
-        elif 'vts' in dir_name:
-            return 'VTS'
-        elif 'gts' in dir_name:
-            return 'GTS'
-
-        # 从日志内容判断
-        if 'VTS' in log_content or 'vts' in log_content:
-            return 'VTS'
-        elif 'CTS' in log_content or 'cts' in log_content:
-            return 'CTS'
-        elif 'GTS' in log_content or 'gts' in log_content:
-            return 'GTS'
-
+        for suite in ('CTS', 'VTS', 'GTS'):
+            if suite.lower() in dir_name:
+                return suite
+        for suite in ('VTS', 'CTS', 'GTS'):
+            if suite in log_content or suite.lower() in log_content:
+                return suite
         return 'UNKNOWN'
 
     def _extract_device_info(self, log_content: str) -> str:
@@ -590,7 +580,7 @@ class HostLogParser:
                 full_failure_text = '\n'.join(failure_lines)
 
                 # 使用详细模块名（如果可用）
-                module_to_use = detailed_module if detailed_module else current_module
+                module_to_use = detailed_module or current_module
 
                 if 'ASSUMPTION_FAILURE:' in line:
                     failure = self._parse_assumption_failure(full_failure_text, module_to_use)
@@ -1017,6 +1007,29 @@ class ReportAnalyzer:
             return self._report_to_dict(report)
         return None
 
+    def _run_codesearch(self, cmd: List[str], cwd: str) -> Optional[subprocess.CompletedProcess]:
+        """Run a codesearch subprocess with standard error handling."""
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=cwd)
+            return result if result.returncode == 0 else None
+        except subprocess.TimeoutExpired:
+            logger.warning("代码搜索超时（30秒）")
+            return None
+        except Exception as e:
+            logger.error(f"代码搜索异常: {e}")
+            return None
+
+    def _attach_opengrok_url(self, item: Dict[str, Any], base_url: str, project: str) -> None:
+        """Build and attach an OpenGrok xref URL to a search result item, then clean temp keys."""
+        path = item.get("path", "")
+        line = item.get("line")
+        if line:
+            item["url"] = f"{base_url}/xref/{project}/{path}#{line}"
+        else:
+            item["url"] = f"{base_url}/xref/{project}/{path}"
+        item.pop("_opengrok_base_url", None)
+        item.pop("_opengrok_project", None)
+
     def rk_codesearch(self, class_name: str, failure_location: dict = None, max_results: int = 5) -> List[Dict[str, str]]:
         """
         Args:
@@ -1038,100 +1051,47 @@ class ReportAnalyzer:
                 file_type = failure_location.get('file_type', '')
                 line_number = failure_location.get('line_number', '')
 
-                # 直接使用文件名搜索（更精确）
-                simple_name = file_name.split('$')[0]  # 去除内部类后缀
+                simple_name = file_name.split('$')[0]
 
-                cmd = [
-                    'python3',
-                    codesearch_script,
-                    'search',
-                    '--keywords', simple_name,
-                    '--search-field', 'path',
-                    '--limit', '10'
-                ]
+                result = self._run_codesearch(
+                    ['python3', codesearch_script, 'search', '--keywords', simple_name, '--search-field', 'path', '--limit', '10'],
+                    str(codesearch_dir),
+                )
+                if result:
+                    lines = result.stdout.strip().split('\n')
+                    target_file = f"{simple_name}.{file_type}"
 
-                try:
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        cwd=str(codesearch_dir)
-                    )
-                except subprocess.TimeoutExpired:
-                    logger.warning("代码搜索超时（30秒）")
-                    return []
-                except Exception as e:
-                    logger.error(f"代码搜索异常: {e}")
-                    return []
-
-                if result.returncode != 0:
-                    return []
-
-                # 解析输出，找到匹配的文件
-                search_results = []
-                lines = result.stdout.strip().split('\n')
-
-                target_file = f"{simple_name}.{file_type}"
-
-                for i, line in enumerate(lines):
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    # 查找包含目标文件的路径
-                    if target_file in line or (simple_name in line and f".{file_type}" in line):
-                        # 提取项目信息
-                        project = ''
-                        for j in range(i + 1, min(len(lines), i + 3)):
-                            if lines[j].strip().startswith('project:'):
-                                project = lines[j].strip().split(':', 1)[1].strip()
-                                break
-
-                        search_results.append({
-                            'type': 'definition',
-                            'path': line.replace('[definition] ', '').strip() if line.startswith('[definition]') else line,
-                            'line': line_number,
-                            'file_type': file_type,
-                            'project': project,
-                            'is_exact_location': True
-                        })
-                        break
-
-                if search_results:
-                    return search_results[:max_results]
+                    for i, line_text in enumerate(lines):
+                        line_text = line_text.strip()
+                        if not line_text:
+                            continue
+                        if target_file in line_text or (simple_name in line_text and f".{file_type}" in line_text):
+                            project = ''
+                            for j in range(i + 1, min(len(lines), i + 3)):
+                                if lines[j].strip().startswith('project:'):
+                                    project = lines[j].strip().split(':', 1)[1].strip()
+                                    break
+                            return [{
+                                'type': 'definition',
+                                'path': line_text.replace('[definition] ', '').strip() if line_text.startswith('[definition]') else line_text,
+                                'line': line_number,
+                                'file_type': file_type,
+                                'project': project,
+                                'is_exact_location': True,
+                            }][:max_results]
+                    # Fall through to class name search
 
             # 没有失败位置时，使用类名搜索定义
             simple_class_name = class_name.split('.')[-1]
 
-            cmd = [
-                'python3',
-                codesearch_script,
-                'search',
-                '--keywords', simple_class_name,
-                '--search-field', 'def',
-                '--limit', str(max_results)
-            ]
-
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    cwd=str(codesearch_dir)
-                )
-            except subprocess.TimeoutExpired:
-                logger.warning("代码搜索超时（30秒）")
-                return []
-            except Exception as e:
-                logger.error(f"代码搜索异常: {e}")
+            result = self._run_codesearch(
+                ['python3', codesearch_script, 'search', '--keywords', simple_class_name, '--search-field', 'def', '--limit', str(max_results)],
+                str(codesearch_dir),
+            )
+            if not result:
                 return []
 
-            if result.returncode != 0:
-                return []
-
-            # 预加载OpenGrok配置（避免在循环中重复加载）
+            # 预加载OpenGrok配置
             opengrok_config = {}
             try:
                 from core.config import config_manager
@@ -1139,70 +1099,56 @@ class ReportAnalyzer:
             except Exception:
                 pass
 
-            # 根据Android版本动态选择OpenGrok项目
             selected_project = get_opengrok_project_for_android_version(
                 self.report.android_version if self.report else '', opengrok_config
             )
+            base_url = opengrok_config.get('base_url', '')
 
-            # 解析输出
             search_results = []
             lines = result.stdout.strip().split('\n')
 
             i = 0
             while i < len(lines):
                 line = lines[i].strip()
-                if not line:
+                if not line or not (line.startswith('[') and ']' in line):
                     i += 1
                     continue
 
-                if line.startswith('[') and ']' in line:
-                    bracket_content = line[1:line.index(']')]
-                    rest_of_line = line[line.index(']')+1:].strip()
+                bracket_end = line.index(']')
+                bracket_content = line[1:bracket_end]
+                rest_of_line = line[bracket_end + 1:].strip()
 
-                    result_item = {
-                        'type': bracket_content,
-                        'path': rest_of_line,
-                        'file_type': 'kt' if rest_of_line.endswith('.kt') else 'java'
-                    }
+                result_item = {
+                    'type': bracket_content,
+                    'path': rest_of_line,
+                    'file_type': 'kt' if rest_of_line.endswith('.kt') else 'java',
+                }
 
-                    # 生成OpenGrok URL（使用动态选择的项目）
-                    if opengrok_config.get('base_url') and selected_project:
-                        base_url = opengrok_config['base_url']
-                        project = selected_project
-                        result_item['_opengrok_base_url'] = base_url
-                        result_item['_opengrok_project'] = project
+                if base_url and selected_project:
+                    result_item['_opengrok_base_url'] = base_url
+                    result_item['_opengrok_project'] = selected_project
 
-                    for j in range(i + 1, min(len(lines), i + 3)):
-                        next_line = lines[j].strip()
-                        if next_line.startswith('project:'):
-                            result_item['project'] = next_line.split(':', 1)[1].strip()
-                            break
-                        elif next_line.startswith('['):
-                            break
+                for j in range(i + 1, min(len(lines), i + 3)):
+                    next_line = lines[j].strip()
+                    if next_line.startswith('project:'):
+                        result_item['project'] = next_line.split(':', 1)[1].strip()
+                        break
+                    elif next_line.startswith('['):
+                        break
 
-                    for j in range(i + 1, min(len(lines), i + 4)):
-                        next_line = lines[j].strip()
-                        if next_line and not next_line.startswith('project:') and not next_line.startswith('['):
-                            if ':' in next_line:
-                                line_num_part = next_line.split(':')[0].strip()
-                                if line_num_part.isdigit():
-                                    result_item['line'] = line_num_part
-                                    # 生成完整的OpenGrok URL
-                                    if '_opengrok_base_url' in result_item and '_opengrok_project' in result_item:
-                                        result_item['url'] = f"{result_item['_opengrok_base_url']}/xref/{result_item['_opengrok_project']}/{result_item['path']}#{result_item['line']}"
-                                        # 清理临时字段
-                                        del result_item['_opengrok_base_url']
-                                        del result_item['_opengrok_project']
-                                    break
+                for j in range(i + 1, min(len(lines), i + 4)):
+                    next_line = lines[j].strip()
+                    if next_line and not next_line.startswith('project:') and not next_line.startswith('['):
+                        if ':' in next_line:
+                            line_num_part = next_line.split(':')[0].strip()
+                            if line_num_part.isdigit():
+                                result_item['line'] = line_num_part
+                                break
 
-                    # 如果没有找到line号，但有OpenGrok配置，也生成URL（没有#行号）
-                    if 'line' not in result_item and '_opengrok_base_url' in result_item:
-                        result_item['url'] = f"{result_item['_opengrok_base_url']}/xref/{result_item['_opengrok_project']}/{result_item['path']}"
-                        del result_item['_opengrok_base_url']
-                        del result_item['_opengrok_project']
+                if '_opengrok_base_url' in result_item:
+                    self._attach_opengrok_url(result_item, base_url, selected_project)
 
-                    search_results.append(result_item)
-
+                search_results.append(result_item)
                 i += 1
 
             # 去重：按路径去重

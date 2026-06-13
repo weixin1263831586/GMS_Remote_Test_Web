@@ -167,6 +167,8 @@ class TestReportManager:
 
             # 读取 invocation_summary.txt 获取 log 目录路径
             summary_content = ""
+            log_dir = None
+            inv_dir = None
             inv_summary = os.path.join(result_dir, 'invocation_summary.txt')
             if os.path.exists(inv_summary):
                 try:
@@ -175,26 +177,30 @@ class TestReportManager:
                 except Exception as e:
                     logger.error(f"Error reading invocation summary: {e}")
 
-            # 如果 XML 显示 0 个测试，从 host_log 中提取模块执行失败信息
-            if analysis['summary'].get('total', 0) == 0 and not result.get('failures'):
-                logger.info("No tests found in XML, checking host_log for module failures")
-                if summary_content:
-                    log_dir_match = re.search(r'LOG DIRECTORY\s*:\s*(/[^\s]+)', summary_content)
-                    if log_dir_match:
-                        log_dir = log_dir_match.group(1).strip()
+            # Extract LOG DIRECTORY once (used by both host_log and error extraction)
+            if summary_content:
+                log_dir_match = re.search(r'LOG DIRECTORY\s*:\s*(/[^\s]+)', summary_content)
+                if log_dir_match:
+                    log_dir = log_dir_match.group(1).strip()
+                    if os.path.exists(log_dir):
                         inv_dirs = [d for d in os.listdir(log_dir) if d.startswith('inv_')]
                         if inv_dirs:
                             inv_dir = os.path.join(log_dir, inv_dirs[0])
-                            log_result = self.host_log_parser.parse_log_dir(inv_dir)
-                            if log_result:
-                                analysis['summary']['total'] = log_result.total
-                                analysis['summary']['pass'] = log_result.pass_count
-                                analysis['summary']['failed'] = log_result.fail_count
-                                analysis['failures'] = [
-                                    {'name': f.name, 'reason': f.reason, 'module': f.module}
-                                    for f in log_result.failures
-                                ]
-                                logger.info(f"Extracted {len(log_result.failures)} module failures from host_log")
+
+            # 如果 XML 显示 0 个测试，从 host_log 中提取模块执行失败信息
+            if analysis['summary'].get('total', 0) == 0 and not result.get('failures'):
+                logger.info("No tests found in XML, checking host_log for module failures")
+                if inv_dir:
+                    log_result = self.host_log_parser.parse_log_dir(inv_dir)
+                    if log_result:
+                        analysis['summary']['total'] = log_result.total
+                        analysis['summary']['pass'] = log_result.pass_count
+                        analysis['summary']['failed'] = log_result.fail_count
+                        analysis['failures'] = [
+                            {'name': f.name, 'reason': f.reason, 'module': f.module}
+                            for f in log_result.failures
+                        ]
+                        logger.info(f"Extracted {len(log_result.failures)} module failures from host_log")
 
             # 解析失败 HTML
             failures_html = os.path.join(result_dir, 'test_result_failures_suite.html')
@@ -207,41 +213,33 @@ class TestReportManager:
                     logger.error(f"Error parsing failures HTML: {e}")
 
             # 从 log 目录提取 host_log 和 device_log 错误
-            if summary_content:
-                log_dir_match = re.search(r'LOG DIRECTORY\s*:\s*(/[^\s]+)', summary_content)
-                if log_dir_match:
-                    log_dir = log_dir_match.group(1).strip()
-                    if os.path.exists(log_dir):
-                        inv_dirs = [d for d in os.listdir(log_dir) if d.startswith('inv_')]
-                        if inv_dirs:
-                            inv_dir = os.path.join(log_dir, inv_dirs[0])
+            if inv_dir:
+                # 单次遍历收集所有日志文件
+                host_log_path = None
+                device_log_path = None
+                for f in os.listdir(inv_dir):
+                    if f.startswith('host_log') and f.endswith('.txt'):
+                        host_log_path = os.path.join(inv_dir, f)
+                    elif f.startswith('device_logcat_test') and f.endswith('.txt'):
+                        device_log_path = os.path.join(inv_dir, f)
 
-                            # 单次遍历收集所有日志文件
-                            host_log_path = None
-                            device_log_path = None
-                            for f in os.listdir(inv_dir):
-                                if f.startswith('host_log') and f.endswith('.txt'):
-                                    host_log_path = os.path.join(inv_dir, f)
-                                elif f.startswith('device_logcat_test') and f.endswith('.txt'):
-                                    device_log_path = os.path.join(inv_dir, f)
+                # 读取并分析 host_log
+                if host_log_path:
+                    try:
+                        with open(host_log_path, 'r', encoding='utf-8') as f:
+                            host_log_content = f.read()
+                        analysis['host_log_errors'] = self._extract_log_errors(host_log_content, 'host')
+                    except Exception as e:
+                        logger.error(f"Error reading host log: {e}")
 
-                            # 读取并分析 host_log
-                            if host_log_path:
-                                try:
-                                    with open(host_log_path, 'r', encoding='utf-8') as f:
-                                        host_log_content = f.read()
-                                    analysis['host_log_errors'] = self._extract_log_errors(host_log_content, 'host')
-                                except Exception as e:
-                                    logger.error(f"Error reading host log: {e}")
-
-                            # 读取并分析 device_log
-                            if device_log_path:
-                                try:
-                                    with open(device_log_path, 'r', encoding='utf-8') as f:
-                                        device_log_content = f.read()
-                                    analysis['device_log_errors'] = self._extract_log_errors(device_log_content, 'device')
-                                except Exception as e:
-                                    logger.error(f"Error reading device log: {e}")
+                # 读取并分析 device_log
+                if device_log_path:
+                    try:
+                        with open(device_log_path, 'r', encoding='utf-8') as f:
+                            device_log_content = f.read()
+                        analysis['device_log_errors'] = self._extract_log_errors(device_log_content, 'device')
+                    except Exception as e:
+                        logger.error(f"Error reading device log: {e}")
 
             return analysis
         except Exception as e:

@@ -39,7 +39,7 @@ class ApiResponse:
 
     @staticmethod
     def device_results(results, operation_name):
-        success_count = sum(1 for r in results if r.get('success', False))
+        success_count = sum(r.get('success', False) for r in results)
         fail_count = len(results) - success_count
         return ApiResponse.success({
             'results': results,

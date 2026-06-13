@@ -33,22 +33,14 @@ router = APIRouter()
 @router.get("/api/files/progress")
 async def get_upload_progress(upload_id: Optional[str] = None):
     """获取上传进度"""
-    try:
-        # 返回上传进度（这里需要实现实际的进度跟踪）
-        return JSONResponse(content={
-            "success": True,
-            "data": {
-                "upload_id": upload_id,
-                "progress": 100,
-                "status": "completed"
-            }
-        })
-    except Exception as e:
-        logger.error(f"Error getting upload progress: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=f"{str(e)}. 请检查配置和参数是否正确。"
-            )
+    return JSONResponse(content={
+        "success": True,
+        "data": {
+            "upload_id": upload_id,
+            "progress": 100,
+            "status": "completed"
+        }
+    })
 
 
 @router.post("/api/files/list")
@@ -372,6 +364,16 @@ def save_tools_data(tools_data):
         return False
 
 
+def _save_user_tools_entry(all_tools_data, client_id, tools, request):
+    """Update and save a single user's tools entry."""
+    all_tools_data[client_id] = {
+        'tools': tools,
+        'last_updated': datetime.now().isoformat(),
+        'client_ip': request.client.host if request.client else 'unknown',
+    }
+    return save_tools_data(all_tools_data)
+
+
 @router.post("/api/websites/save")
 @handle_api_errors
 async def save_user_tools(request: Request):
@@ -390,15 +392,8 @@ async def save_user_tools(request: Request):
         # 加载现有数据
         all_tools_data = load_tools_data()
 
-        # 更新当前用户的数据
-        all_tools_data[client_id] = {
-            'tools': tools_data,
-            'last_updated': datetime.now().isoformat(),
-            'client_ip': request.client.host if request.client else 'unknown'
-        }
-
-        # 保存到文件
-        if save_tools_data(all_tools_data):
+        # 更新当前用户的数据并保存
+        if _save_user_tools_entry(all_tools_data, client_id, tools_data, request):
             logger.info(f"[ToolsData] Saved tools data for {client_id}")
             return JSONResponse(content={'success': True})
         else:
@@ -464,52 +459,23 @@ async def sync_user_tools(request: Request):
         server_timestamp = server_user_data.get('last_updated')
 
         # 智能合并策略：选择最新的数据
+        use_local = False
         if server_timestamp and local_timestamp:
             try:
                 server_time = datetime.fromisoformat(server_timestamp.replace('Z', '+00:00'))
                 local_time = datetime.fromisoformat(local_timestamp.replace('Z', '+00:00'))
-
-                if server_time > local_time:
-                    # 服务器数据更新，使用服务器数据
-                    merged_tools = server_tools
-                    source = 'server'
-                else:
-                    # 本地数据更新，使用本地数据
-                    merged_tools = local_tools
-                    source = 'local'
-
-                    # 更新服务器数据
-                    all_tools_data[client_id] = {
-                        'tools': local_tools,
-                        'last_updated': datetime.now().isoformat(),
-                        'client_ip': request.client.host if request.client else 'unknown'
-                    }
-                    save_tools_data(all_tools_data)
+                use_local = local_time >= server_time
             except (ValueError, TypeError) as e:
                 logger.warning(f"[ToolsData] Error comparing timestamps: {e}, using local data")
-                merged_tools = local_tools
-                source = 'local'
-
-                # 更新服务器数据
-                all_tools_data[client_id] = {
-                    'tools': local_tools,
-                    'last_updated': datetime.now().isoformat(),
-                    'client_ip': request.client.host if request.client else 'unknown'
-                }
-                save_tools_data(all_tools_data)
+                use_local = True
         elif local_tools:
-            # 只有本地数据，使用本地数据并更新服务器
+            use_local = True
+
+        if use_local:
             merged_tools = local_tools
             source = 'local'
-
-            all_tools_data[client_id] = {
-                'tools': local_tools,
-                'last_updated': datetime.now().isoformat(),
-                'client_ip': request.client.host if request.client else 'unknown'
-            }
-            save_tools_data(all_tools_data)
+            _save_user_tools_entry(all_tools_data, client_id, local_tools, request)
         else:
-            # 使用服务器数据
             merged_tools = server_tools
             source = 'server'
 

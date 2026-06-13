@@ -23,6 +23,9 @@ page_router = APIRouter()
 DB_PATH = Path(PROJECT_ROOT) / 'data' / 'gms_update_monitor.sqlite3'
 SYNC_SCRIPT = Path(PROJECT_ROOT) / 'modules' / 'gms_update_monitor.py'
 
+_DOWNLOAD_API = {'method': 'POST', 'path': '/api/test/suites/download-url', 'body_template': {'url': '<download_url>'}}
+_VERSION_TO_API = {'13': '33', '14': '34', '15': '35', '16': '36', '17': '37'}
+
 _sync_lock = threading.Lock()
 _sync_status = {
     'running': False,
@@ -82,7 +85,7 @@ def _artifact_api_level(item: dict, release: str = '') -> str:
     if item.get('suite_type') == 'GTS' and target_platform:
         range_match = re.search(r'Android\s+(1[3-7])\s*-\s*(1[3-7])', target_platform, flags=re.IGNORECASE)
         versions = list(range_match.groups()) if range_match else re.findall(r'Android\s+(1[3-7])', target_platform, flags=re.IGNORECASE)
-        api_map_full = {'13': '33', '14': '34', '15': '35', '16': '36', '17': '37'}
+        api_map_full = _VERSION_TO_API
         apis = [api_map_full[v] for v in versions if v in api_map_full]
         if len(apis) >= 2:
             return f'{apis[0]}-{apis[-1]}'
@@ -93,8 +96,7 @@ def _artifact_api_level(item: dict, release: str = '') -> str:
     if not release:
         return ''
     major_text, _, minor = release.partition('.')
-    api_map = {'14': '34', '15': '35', '16': '36', '17': '37'}
-    api = api_map.get(major_text)
+    api = _VERSION_TO_API.get(major_text)
     if not api:
         return ''
     return f'{api}.{minor}' if minor else api
@@ -173,6 +175,7 @@ async def gms_update_monitor_sources():
     ]
     scanned = []
     if DB_PATH.exists():
+        conn = _connect_db()
         with conn:
             scanned = _rows_to_dicts(
                 conn.execute(
@@ -447,7 +450,7 @@ async def list_new_gms_update_monitor_artifacts(
                 'data': {
                     'run_id': None,
                     'items': [],
-                    'download_api': {'method': 'POST', 'path': '/api/test/suites/download-url', 'body_template': {'url': '<download_url>'}},
+                    'download_api': _DOWNLOAD_API,
                 },
                 'meta': {'total': 0, 'limit': limit},
             }
@@ -483,7 +486,7 @@ async def list_new_gms_update_monitor_artifacts(
         'data': {
             'run_id': target_run_id,
             'items': items,
-            'download_api': {'method': 'POST', 'path': '/api/test/suites/download-url', 'body_template': {'url': '<download_url>'}},
+            'download_api': _DOWNLOAD_API,
         },
         'meta': {'total': len(items), 'limit': limit},
     }

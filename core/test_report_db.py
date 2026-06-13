@@ -12,6 +12,17 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 
+def _empty_indexes() -> dict:
+    """Create a fresh index structure."""
+    return {
+        'timestamp': {},
+        'test_type': defaultdict(list),
+        'client_id': defaultdict(list),
+        'status': defaultdict(list),
+        'created_at': defaultdict(list),
+    }
+
+
 class TestReportDB:
     """测试报告数据库 - 使用 JSON 文件存储 + 内存索引"""
 
@@ -32,13 +43,7 @@ class TestReportDB:
         self._cache_dirty = True  # 缓存是否脏
 
         # 内存索引
-        self._indexes = {
-            'timestamp': {},  # timestamp -> report
-            'test_type': defaultdict(list),  # test_type -> [timestamps]
-            'client_id': defaultdict(list),  # client_id -> [timestamps]
-            'status': defaultdict(list),  # status -> [timestamps]
-            'created_at': defaultdict(list)  # date -> [timestamps]
-        }
+        self._indexes = _empty_indexes()
         self._indexes_dirty = True  # 索引是否需要重建
 
         # 确保数据目录存在
@@ -92,13 +97,7 @@ class TestReportDB:
 
         try:
             # 清空索引
-            self._indexes = {
-                'timestamp': {},
-                'test_type': defaultdict(list),
-                'client_id': defaultdict(list),
-                'status': defaultdict(list),
-                'created_at': defaultdict(list)
-            }
+            self._indexes = _empty_indexes()
 
             data = self._load_data()
             reports = data.get('reports', [])

@@ -158,22 +158,21 @@ async function loadNotifications() {
 function toggleNotificationPanel() {
     const panel = $('notification-panel');
     if (!panel) return;
-    const isShowing = panel.classList.contains('show');
-    panel.classList.toggle('show');
-    if (!isShowing) {
-        loadNotifications();
-        if (notificationPanelEscHandler) {
-            document.removeEventListener('keydown', notificationPanelEscHandler);
-        }
-        notificationPanelEscHandler = (e) => {
-            if (e.key === 'Escape') {
-                closeNotificationPanel();
-            }
-        };
-        document.addEventListener('keydown', notificationPanelEscHandler);
-    } else {
+    if (panel.classList.contains('show')) {
         closeNotificationPanel();
+        return;
     }
+    panel.classList.add('show');
+    loadNotifications();
+    if (notificationPanelEscHandler) {
+        document.removeEventListener('keydown', notificationPanelEscHandler);
+    }
+    notificationPanelEscHandler = (e) => {
+        if (e.key === 'Escape') {
+            closeNotificationPanel();
+        }
+    };
+    document.addEventListener('keydown', notificationPanelEscHandler);
 }
 
 function closeNotificationPanel() {

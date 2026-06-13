@@ -133,10 +133,6 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
         if is_config_host_local(config):
             ssh = None
             channel = create_local_terminal_channel()
-            channel.resize_pty(width=80, height=24)
-            channel.send('\n\n\n')
-            channel.send('clear\n')
-            channel.send(f'adb -s {shlex.quote(serial_no)} shell\n')
             backend_mode = 'local_adb'
         else:
             ssh = ssh_manager.get_connection(config)
@@ -149,11 +145,11 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
 
             channel = ssh.invoke_shell(term='xterm-256color')
             channel.setblocking(0)
-            channel.resize_pty(width=80, height=24)
-            channel.send('\n\n\n')
-            channel.send('clear\n')
-            channel.send(f'adb -s {shlex.quote(serial_no)} shell\n')
             backend_mode = 'adb'
+
+        channel.resize_pty(width=80, height=24)
+        for cmd in ('\n\n\n', 'clear\n', f'adb -s {shlex.quote(serial_no)} shell\n'):
+            channel.send(cmd)
 
         loop = asyncio.get_event_loop()
         session_id = client_id
@@ -199,10 +195,7 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
                             if not data_chunk:
                                 break
 
-                            try:
-                                text = data_chunk.decode('utf-8')
-                            except UnicodeDecodeError:
-                                text = data_chunk.decode('utf-8', errors='ignore')
+                            text = data_chunk.decode('utf-8', errors='replace')
 
                             try:
                                 future = asyncio.run_coroutine_threadsafe(
@@ -362,10 +355,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                             data_chunk = current_channel.recv(4096)
                             if not data_chunk:
                                 break
-                            try:
-                                text = data_chunk.decode('utf-8')
-                            except UnicodeDecodeError:
-                                text = data_chunk.decode('utf-8', errors='ignore')
+                            text = data_chunk.decode('utf-8', errors='replace')
                             try:
                                 future = asyncio.run_coroutine_threadsafe(
                                     websocket.send_json({'type': 'terminal_data', 'data': text}),

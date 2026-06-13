@@ -2112,18 +2112,6 @@ async function loadUsers(forceRefresh = false) {
 }
 
 
-function formatTime(timestamp) {
-    if (!timestamp) return '-';
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = Math.floor((now - date) / 1000); // 秒
-
-    if (diff < 60) return '刚刚';
-    if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
-    return `${Math.floor(diff / 86400)}天前`;
-}
-
 // 防抖版本的刷新函数
 const debouncedRefreshDevices = debounce(() => loadDevices(false), 500);
 const debouncedRefreshUsers = debounce(() => loadUsers(false), 500);
@@ -5328,82 +5316,6 @@ async function downloadReport(timestamp) {
     }
 }
 
-async function downloadReportWithFileSystemAPI(timestamp, files) {
-    try {
-        // 让用户选择保存目录
-        const dirHandle = await window.showDirectoryPicker({
-            startIn: 'downloads',
-            suggestedName: timestamp
-        });
-
-        let successCount = 0;
-        let failCount = 0;
-
-        // 下载每个文件
-        for (const file of files) {
-            try {
-                // 创建目录结构
-                const pathParts = file.relative_path.split('/');
-                let currentHandle = dirHandle;
-
-                // 创建子目录（除了最后的部分，那是文件名）
-                for (let i = 0; i < pathParts.length - 1; i++) {
-                    const part = pathParts[i];
-                    currentHandle = await currentHandle.getDirectoryHandle(part, { create: true });
-                }
-
-                // 获取文件内容
-                const fileResponse = await fetch(`/api/reports/download?path=${encodeURIComponent(file.path)}`);
-                if (!fileResponse.ok) {
-                    console.error(`Failed to download ${file.relative_path}`);
-                    failCount++;
-                    continue;
-                }
-
-                const fileData = await fileResponse.json();
-                if (!fileData.success) {
-                    console.error(`Failed to download ${file.relative_path}: ${fileData.error}`);
-                    failCount++;
-                    continue;
-                }
-
-                // 解码base64内容
-                const binaryString = atob(fileData.content);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-
-                // 创建文件
-                const fileName = pathParts[pathParts.length - 1];
-                const fileHandle = await currentHandle.getFileHandle(fileName, { create: true });
-                const writable = await fileHandle.createWritable();
-                await writable.write(bytes);
-                await writable.close();
-
-                successCount++;
-                debugLog(`Downloaded: ${file.relative_path}`);
-            } catch (error) {
-                console.error(`Error downloading ${file.relative_path}:`, error);
-                failCount++;
-            }
-        }
-
-        notifyOperationResult(
-            '报告下载完成',
-            `成功 ${successCount} 个文件，失败 ${failCount} 个`,
-            successCount > 0 ? 'success' : 'error',
-            'report-download',
-            { timestamp, success_count: successCount, fail_count: failCount }
-        );
-    } catch (error) {
-        console.error('File System Access API error:', error);
-        // 如果用户取消或 API 失败，回退到 ZIP 下载
-        showToast('文件夹下载失败，正在切换到 ZIP 下载...', 'info');
-        await downloadReportAsZip(timestamp);
-    }
-}
-
 // 回退方案：下载为 ZIP
 async function downloadReportAsZip(timestamp) {
     try {
@@ -8205,9 +8117,13 @@ function openAgentPageAction(page, paramsJson = '{}') {
     if (page === 'redmine-agent') {
         const frame = document.getElementById('redmine-agent-frame');
         const query = new URLSearchParams();
-        query.set('tab', 'stats');
+        query.set('tab', params.tab || 'stats');
         if (params.name) query.set('name', params.name);
         if (frame) frame.src = '/redmine-agent?' + query.toString();
+    }
+    if (page === 'gerrit-dashboard') {
+        const frame = document.getElementById('gerrit-dashboard-frame');
+        if (frame) frame.src = '/gerrit-dashboard';
     }
     switchPage(page, null);
 }

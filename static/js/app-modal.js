@@ -70,31 +70,18 @@ const ModalManager = {
     },
 
     closeAll() {
-        document.querySelectorAll('.modal.show').forEach(m => {
+        const modals = document.querySelectorAll('.modal.show');
+        this._activeModals = [];
+        modals.forEach(m => {
             m.classList.remove('show');
             m.style.display = 'none';
-            this._removeActiveModal(m.id);
             this._emitClose(m.id);
         });
         this._cleanupEscListener();
     },
 
     toggle(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.toggle('show');
-            if (modal.classList.contains('show')) {
-                this._addActiveModal(modalId);
-                this._ensureEscListener();
-            } else {
-                if (modal.classList.contains('modal')) {
-                    modal.style.display = 'none';
-                }
-                this._removeActiveModal(modalId);
-                this._emitClose(modalId);
-                this._cleanupEscListener();
-            }
-        }
+        this.isOpen(modalId) ? this.close(modalId) : this.open(modalId);
     },
 
     isOpen(modalId) {

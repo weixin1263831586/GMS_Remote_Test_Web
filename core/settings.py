@@ -19,7 +19,7 @@ def _parse_int_env(env_name: str, default: int) -> int:
     raw = os.getenv(env_name, str(default)).strip()
     try:
         return int(raw)
-    except (TypeError, ValueError):
+    except ValueError:
         return default
 
 
@@ -37,8 +37,7 @@ FORWARDED_ALLOW_IPS = os.getenv('GMS_FORWARDED_ALLOW_IPS', '127.0.0.1')
 
 def _parse_csv_env(env_name: str, default: str) -> List[str]:
     """Parse CSV environment variable into a normalized non-empty list."""
-    raw = os.getenv(env_name, default)
-    items = [item.strip() for item in raw.split(',') if item.strip()]
+    items = [item.strip() for item in os.getenv(env_name, default).split(',') if item.strip()]
     return items or [default]
 
 

@@ -201,7 +201,7 @@ async def validate_desktop_host(req: dict = Body(...)):
             if not ssh:
                 logger.info(f"[Desktop] Password auth failed for {user}@{ip}, trying key authentication")
                 config['use_key_auth'] = True
-                config.pop('password', None)  # Remove password for key auth
+                config.pop('password', None)
                 ssh = ssh_manager.create_connection(config)
 
             if not ssh:

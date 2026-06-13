@@ -7,7 +7,7 @@ import re
 import subprocess
 import shlex
 import time
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -15,11 +15,11 @@ from fastapi.responses import JSONResponse
 from core.api_response import error_response, success_response
 from core.clients import get_client_id_from_request, get_client_ip
 from core.clients import resolve_tailscale_device_host
-from core.clients import parse_client_id, probe_windows_usbipd
+from core.clients import probe_windows_usbipd
 from core.common_utils import CommonUtils
 from core.config import config_manager
 from core.devices import DeviceSSHConnection
-from core.devices import broadcast_device_change, notify_device_change, format_device_list_info
+from core.devices import notify_device_change, format_device_list_info
 from core.error_handling import handle_api_errors
 from core.adb_forward import adb_forward_manager
 from core.schemas import ADBForwardStartRequest, USBIPStartRequest, USBIPDisconnectRequest, VPNConnectRequest
@@ -39,8 +39,8 @@ from core.network import (
 from core.ssh import SSHD_INSTALL_GUIDE, ssh_manager
 from core.state import global_state
 from core.test_suite_utils import is_config_host_local
-from core.usbip import usbip_manager, split_host_port, USBIPD_INSTALL_CMD, USBIPD_INSTALL_GUIDE
-from core.usbip import is_windows_host, detach_ubuntu_usbip_ports, wait_for_adb_serial_ready, find_device_host_password
+from core.usbip import usbip_manager, USBIPD_INSTALL_CMD, USBIPD_INSTALL_GUIDE
+from core.usbip import detach_ubuntu_usbip_ports, find_device_host_password
 from core.redmine_client import RedmineClient
 
 logger = logging.getLogger(__name__)
@@ -125,6 +125,14 @@ async def check_ssh_sshd(request: Request, device_host: Optional[str] = Query(No
         })
 
 
+def _get_network_address(ip: str) -> str:
+    """Extract the /24 network address for an IP, with fallback."""
+    try:
+        return str(ipaddress.IPv4Network(f"{ip}/24", strict=False).network_address)
+    except (ipaddress.AddressValueError, ValueError):
+        return '.'.join(ip.split('.')[:3]) + '.0'
+
+
 @router.get("/api/ssh/route")
 @handle_api_errors
 async def check_ssh_route(request: Request):
@@ -168,14 +176,8 @@ async def check_ssh_route(request: Request):
 
     # 只有网段不同且实际不通时才提示添加路由
     if need_route and not connectivity_ok:
-        try:
-            ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
-            device_network_obj = ipaddress.IPv4Network(f"{device_ip}/24", strict=False)
-            ubuntu_network = str(ubuntu_network_obj.network_address)
-            device_network = str(device_network_obj.network_address)
-        except (ipaddress.AddressValueError, ValueError):
-            ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
-            device_network = '.'.join(device_ip.split('.')[:3]) + '.0'
+        ubuntu_network = _get_network_address(ubuntu_ip)
+        device_network = _get_network_address(device_ip)
 
         route_commands = {
             'windows': [
@@ -209,11 +211,7 @@ async def check_ssh_route(request: Request):
         })
     elif need_route and connectivity_ok:
         # 网段不同但已连通，路由已配置
-        try:
-            ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
-            ubuntu_network = str(ubuntu_network_obj.network_address)
-        except (ipaddress.AddressValueError, ValueError):
-            ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
+        ubuntu_network = _get_network_address(ubuntu_ip)
 
         return JSONResponse(content={
             'success': True,
@@ -229,11 +227,7 @@ async def check_ssh_route(request: Request):
         })
     else:
         # 同网段
-        try:
-            ubuntu_network_obj = ipaddress.IPv4Network(f"{ubuntu_ip}/24", strict=False)
-            ubuntu_network = str(ubuntu_network_obj.network_address)
-        except (ipaddress.AddressValueError, ValueError):
-            ubuntu_network = '.'.join(ubuntu_ip.split('.')[:3]) + '.0'
+        ubuntu_network = _get_network_address(ubuntu_ip)
 
         return JSONResponse(content={
             'success': True,
@@ -251,7 +245,6 @@ async def check_ssh_route(request: Request):
 @router.post("/api/ssh/ping")
 async def ping_route_test(request: Request):
     """测试测试主机和客户端的网络连通性"""
-    import subprocess
     try:
         # 获取请求数据
         data = await request.json()
@@ -555,11 +548,6 @@ async def disconnect_vpn():
         )
 
 
-async def load_redmine_credentials():
-    """加载存储的 Redmine 凭证（委托给 config_manager）"""
-    return config_manager.load_redmine_credentials()
-
-
 @router.post("/api/redmine/reply")
 async def redmine_reply(request: Request):
     """
@@ -596,7 +584,7 @@ async def redmine_reply(request: Request):
 
         logger.info(f"[Redmine Reply] 准备发送回复到 Issue #{issue_id}，附件数: {len(files)}")
 
-        stored_creds = await load_redmine_credentials()
+        stored_creds = config_manager.load_redmine_credentials()
         if not stored_creds:
             return error_response('未配置 Redmine 凭证', status_code=401)
 
@@ -634,36 +622,27 @@ async def start_adb_forward(req: ADBForwardStartRequest):
         result = adb_forward_manager.start_forward(req.device_host, req.device_password)
         if result.get('success'):
             return JSONResponse(content=result)
-        else:
-            raise HTTPException(status_code=500, detail=result.get('error', 'ADB转发启动失败'))
+        raise HTTPException(status_code=500, detail=result.get('error', 'ADB转发启动失败'))
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error starting ADB forward: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=f"{str(e)}. 请检查配置和参数是否正确。"
-            )
+        raise HTTPException(status_code=500, detail=f"{str(e)}. 请检查配置和参数是否正确。")
 
 
 @router.post("/api/adb-forward/stop")
 async def stop_adb_forward():
     """停止ADB转发"""
     try:
-        client_id = 'test_client'
-        result = adb_forward_manager.stop_forward(client_id)
+        result = adb_forward_manager.stop_forward('test_client')
         if result.get('success'):
             return JSONResponse(content=result)
-        else:
-            raise HTTPException(status_code=500, detail=result.get('error', 'ADB转发停止失败'))
+        raise HTTPException(status_code=500, detail=result.get('error', 'ADB转发停止失败'))
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error stopping ADB forward: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=f"{str(e)}. 请检查配置和参数是否正确。"
-            )
+        raise HTTPException(status_code=500, detail=f"{str(e)}. 请检查配置和参数是否正确。")
 
 
 # ==================== USB/IP Status ====================

@@ -275,11 +275,11 @@ class IconFetcher:
         """本地文件路径转 URL"""
         return f"{self.LOCAL_ICON_URL_PREFIX}/{os.path.basename(path)}"
 
-    def _local_cache_key(self, icon_url: str) -> str:
-        return f"iconfile:{hashlib.sha256(icon_url.encode('utf-8')).hexdigest()}"
-
     def _icon_hash(self, icon_url: str) -> str:
         return hashlib.sha256(icon_url.encode('utf-8')).hexdigest()
+
+    def _local_cache_key(self, icon_url: str) -> str:
+        return f"iconfile:{self._icon_hash(icon_url)}"
 
     def _find_existing_local_icon(self, icon_url: str) -> str:
         """查找远程图标是否已下载到本地"""
@@ -649,37 +649,21 @@ class IconFetcher:
                 if response.status != 200:
                     return IconResult(success=False, error=f"HTTP {response.status}")
 
-                html = await response.text()
+                html_text = await response.text()
 
                 # 使用正则表达式查找图标链接（比BeautifulSoup更快）
                 icon_candidates = []
-
-                # 查找 apple-touch-icon
-                apple_icons = _RE_APPLE_ICON.findall(html)
-                for icon_url in apple_icons:
-                    icon_candidates.append({
-                        'url': urljoin(url, icon_url),
-                        'type': 'png',
-                        'priority': 1
-                    })
-
-                # 查找 icon
-                icons = _RE_ICON.findall(html)
-                for icon_url in icons:
-                    icon_candidates.append({
-                        'url': urljoin(url, icon_url),
-                        'type': 'unknown',
-                        'priority': 2
-                    })
-
-                # 查找 shortcut icon
-                shortcut_icons = _RE_SHORTCUT_ICON.findall(html)
-                for icon_url in shortcut_icons:
-                    icon_candidates.append({
-                        'url': urljoin(url, icon_url),
-                        'type': 'ico',
-                        'priority': 3
-                    })
+                for regex, icon_type, priority in (
+                    (_RE_APPLE_ICON, 'png', 1),
+                    (_RE_ICON, 'unknown', 2),
+                    (_RE_SHORTCUT_ICON, 'ico', 3),
+                ):
+                    for icon_url in regex.findall(html_text):
+                        icon_candidates.append({
+                            'url': urljoin(url, icon_url),
+                            'type': icon_type,
+                            'priority': priority,
+                        })
 
                 # 按优先级排序并验证
                 icon_candidates.sort(key=lambda x: x['priority'])
@@ -745,9 +729,9 @@ class IconFetcher:
     async def _fetch_from_api(self, domain: str) -> IconResult:
         """使用第三方API获取图标"""
         api_services = [
-            ('https://www.google.com/s2/favicons?domain=' + domain + '&sz=128', 'google'),
-            ('https://icons.duckduckgo.com/ip3/' + domain + '.ico', 'duckduckgo'),
-            ('https://www.google.com/s2/favicons?domain=' + domain + '&sz=64', 'google_small'),
+            (f'https://www.google.com/s2/favicons?domain={domain}&sz=128', 'google'),
+            (f'https://icons.duckduckgo.com/ip3/{domain}.ico', 'duckduckgo'),
+            (f'https://www.google.com/s2/favicons?domain={domain}&sz=64', 'google_small'),
         ]
 
         for api_url, service_name in api_services:
@@ -765,25 +749,25 @@ class IconFetcher:
         """验证图标URL是否可访问"""
         try:
             session = await self.get_session()
+            validation_timeout = aiohttp.ClientTimeout(total=self.ICON_VALIDATION_TIMEOUT)
 
             # 先尝试HEAD请求
             try:
-                async with session.head(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=self.ICON_VALIDATION_TIMEOUT)) as response:
+                async with session.head(url, allow_redirects=True, timeout=validation_timeout) as response:
                     if response.status == 200:
-                        content_type = response.headers.get('Content-Type', '')
-                        if any(ct in content_type.lower() for ct in ['image/', 'svg', 'octet-stream']):
+                        content_type = response.headers.get('Content-Type', '').lower()
+                        if any(ct in content_type for ct in ['image/', 'svg', 'octet-stream']):
                             return True
             except Exception:
                 pass
 
             # HEAD失败，尝试GET请求
             try:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=self.ICON_VALIDATION_TIMEOUT)) as response:
+                async with session.get(url, timeout=validation_timeout) as response:
                     if response.status == 200:
-                        content_type = response.headers.get('Content-Type', '')
-                        if any(ct in content_type.lower() for ct in ['image/', 'svg']):
+                        content_type = response.headers.get('Content-Type', '').lower()
+                        if any(ct in content_type for ct in ['image/', 'svg']):
                             return True
-
                         # 检查文件头
                         chunk = await response.content.read(self.IMAGE_CHUNK_SIZE)
                         if self._is_image_content(chunk):
@@ -792,7 +776,6 @@ class IconFetcher:
                 pass
 
             return False
-
         except Exception:
             return False
 

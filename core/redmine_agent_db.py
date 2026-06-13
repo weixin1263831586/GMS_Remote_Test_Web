@@ -147,6 +147,26 @@ def load_redmine_user_map() -> List[Dict[str, Any]]:
         return []
 
 
+def load_user_map_payload() -> Dict[str, Any]:
+    """Load the raw user-map JSON payload (for mutation + save round-trips)."""
+    if not USER_MAP_PATH.exists():
+        return {"users": []}
+    try:
+        payload = json.loads(USER_MAP_PATH.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            payload.setdefault("users", [])
+            return payload
+    except Exception:
+        pass
+    return {"users": []}
+
+
+def save_user_map_payload(payload: Dict[str, Any]) -> None:
+    """Write the raw user-map JSON payload to disk."""
+    USER_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    USER_MAP_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def display_names_from_mapping(item: Dict[str, Any]) -> List[str]:
     values = [item.get("name") or "", *(item.get("aliases") or [])]
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
@@ -227,6 +247,10 @@ async def compute_user_overdue_stats(
         "no_reply_3_days": workload.get("no_reply_3_days", 0),
         "max_unreplied_days": max([item.get("unreplied_days") or 0 for item in overdue] or [0]),
         "overdue_issues": overdue,
+        "resolved_daily": workload.get("resolved_daily", []),
+        "resolved_weekly": workload.get("resolved_weekly", []),
+        "resolved_monthly": workload.get("resolved_monthly", []),
+        "resolved_yearly": workload.get("resolved_yearly", []),
         "detail_source": "local_db",
     }
 
@@ -356,6 +380,7 @@ class RedmineAgentDB:
 
             # --- safe migrations for columns added after initial schema ---
             self._migrate_columns(conn)
+            self._migrate_indexes(conn)
 
     @staticmethod
     def _migrate_columns(conn: sqlite3.Connection) -> None:
@@ -385,6 +410,24 @@ class RedmineAgentDB:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
             except sqlite3.OperationalError:
                 pass  # already exists
+
+    @staticmethod
+    def _migrate_indexes(conn: sqlite3.Connection) -> None:
+        """Create query-path indexes for Redmine dashboards (idempotent)."""
+        conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_redmine_agent_issues_assignee_status
+                ON redmine_agent_issues(assigned_to_name, is_resolved, status_name);
+            CREATE INDEX IF NOT EXISTS idx_redmine_agent_issues_updated
+                ON redmine_agent_issues(updated_on, created_on, issue_id);
+            CREATE INDEX IF NOT EXISTS idx_redmine_agent_issues_resolved_closed
+                ON redmine_agent_issues(is_resolved, closed_on, updated_on);
+            CREATE INDEX IF NOT EXISTS idx_redmine_agent_issues_run
+                ON redmine_agent_issues(run_id, priority_name, issue_id);
+            CREATE INDEX IF NOT EXISTS idx_redmine_agent_runs_started
+                ON redmine_agent_runs(started_at, finished_at);
+            """
+        )
 
     # ------------------------------------------------------------------
     # Runs
@@ -581,7 +624,9 @@ class RedmineAgentDB:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT *
+                SELECT issue_id, subject, status_name, priority_name, assigned_to_name,
+                       created_on, updated_on, closed_on, description, category,
+                       is_resolved, last_scanned_at, journals_json, attachments_json, failures_json
                 FROM redmine_agent_issues
                 ORDER BY COALESCE(updated_on, created_on) DESC, issue_id DESC
                 """

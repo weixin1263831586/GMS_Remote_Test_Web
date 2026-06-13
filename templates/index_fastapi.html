@@ -71,7 +71,7 @@
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant', 'redmine-agent', 'agent'].includes(hashPage)) {
+            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant', 'redmine-agent', 'gerrit-dashboard', 'agent'].includes(hashPage)) {
                 targetPage = hashPage;
             } else {
                 targetPage = savedPage;
@@ -311,7 +311,12 @@
                     <span class="sidebar-icon">🧭</span>
                     <span class="sidebar-text">Redmine</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="agent" data-page-order="16" onclick="switchPage('agent', event)">
+                <a href="#" class="sidebar-item" data-page="gerrit-dashboard" data-page-order="16" onclick="switchPage('gerrit-dashboard', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">🔀</span>
+                    <span class="sidebar-text">Gerrit看板</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="agent" data-page-order="17" onclick="switchPage('agent', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">💬</span>
                     <span class="sidebar-text">对话Agent</span>
@@ -1163,6 +1168,14 @@
         <div class="container page-content" id="page-redmine-agent">
             <div class="section-title" style="text-transform:none">🧭 Redmine</div>
             <iframe id="redmine-agent-frame" src="/redmine-agent"
+                    style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
+            </iframe>
+        </div>
+
+        <!-- Gerrit看板页面 -->
+        <div class="container page-content" id="page-gerrit-dashboard">
+            <div class="section-title" style="text-transform:none">🔀 Gerrit看板</div>
+            <iframe id="gerrit-dashboard-frame" src="/gerrit-dashboard"
                     style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
         </div>
@@ -2662,6 +2675,7 @@
             'security-audit': '安全审计 - GMS 远程测试',
             'gms-assistant': 'GMS助手 - GMS 远程测试',
             'redmine-agent': 'RedmineAgent - GMS 远程测试',
+            'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
             'agent': '对话Agent - GMS 远程测试'
         };
 
