@@ -64,17 +64,33 @@
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
+            const sidebarAllPages = ['test', 'desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant', 'redmine-agent', 'gerrit-dashboard', 'agent'];
+
             // 确定要显示的页面（在页面渲染前）
             const hash = window.location.hash.substring(1);
             const hashPage = hash.split('?')[0];
             const savedPage = localStorage.getItem('gms_current_page') || 'test';
+            let savedVisiblePages = null;
+            try {
+                savedVisiblePages = JSON.parse(localStorage.getItem('gms_sidebar_visible_pages') || 'null');
+                if (!Array.isArray(savedVisiblePages) || savedVisiblePages.length === 0) {
+                    savedVisiblePages = null;
+                }
+            } catch (e) {
+                console.error('[Sidebar] Failed to parse visible pages:', e);
+                savedVisiblePages = null;
+            }
+            const visiblePages = savedVisiblePages || sidebarAllPages;
 
             // 优先使用 hash，否则使用保存的页面
             let targetPage;
-            if (hashPage && ['desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant', 'redmine-agent', 'gerrit-dashboard', 'agent'].includes(hashPage)) {
+            if (hashPage && sidebarAllPages.includes(hashPage)) {
                 targetPage = hashPage;
             } else {
                 targetPage = savedPage;
+            }
+            if (!visiblePages.includes(targetPage)) {
+                targetPage = visiblePages[0] || 'test';
             }
 
             // 保存目标页面供后续使用
@@ -95,6 +111,7 @@
 
             // 保存排序供 DOMContentLoaded 使用
             window.__savedSidebarOrder = savedOrder;
+            window.__savedSidebarVisiblePages = savedVisiblePages;
 
             // 添加内联样式来立即显示正确的页面和导航栏选中状态
             var style = document.createElement('style');
@@ -118,6 +135,13 @@
         .btn-xs:hover { background: var(--border-color); transform: translateY(-1px); }
         .terminal-status.connected { background: rgba(76, 175, 80, 0.2); color: var(--success-color); }
         .terminal-status.disconnected { background: rgba(244, 67, 54, 0.2); color: var(--danger-color); }
+        .sidebar-brand { cursor: pointer; user-select: none; }
+        .sidebar-brand:focus { outline: 2px solid var(--primary-color); outline-offset: 3px; border-radius: 4px; }
+        .sidebar-visibility-list { display: grid; gap: 8px; max-height: min(60vh, 520px); overflow-y: auto; padding-right: 4px; }
+        .sidebar-visibility-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); cursor: pointer; }
+        .sidebar-visibility-option input { margin: 0; }
+        .sidebar-visibility-option .sidebar-icon { width: 22px; display: inline-flex; justify-content: center; }
+        .sidebar-visibility-option .sidebar-text { flex: 1; }
         #terminal { width: 100%; height: 100%; }
         .host-input-group { display: flex; gap: 8px; align-items: center; }
         .host-input { flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg); color: var(--text-primary); font-size: 15px; font-family: monospace; }
@@ -228,7 +252,7 @@
         <!-- 左侧导航栏 -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <div class="sidebar-brand">GMS远程测试</div>
+                <div class="sidebar-brand" role="button" tabindex="0" title="导航显示设置" onclick="openSidebarVisibilityModal()" onkeydown="handleSidebarBrandKeydown(event)">GMS远程测试</div>
             </div>
             <nav class="sidebar-nav" id="sidebar-nav">
                 <a href="#" class="sidebar-item" data-page="test" data-page-order="0" onclick="switchPage('test', event)">
@@ -337,6 +361,24 @@
                 </div>
             </div>
         </aside>
+
+        <div id="sidebar-visibility-modal" class="modal" style="display: none;">
+            <div class="modal-content" style="max-width: 520px; width: min(520px, 100%);">
+                <div class="modal-header">
+                    <span class="modal-title">导航显示设置</span>
+                    <span class="modal-close" onclick="closeSidebarVisibilityModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div id="sidebar-visibility-list" class="sidebar-visibility-list"></div>
+                    <div class="modal-info-text" style="margin-top: 12px;">至少保留一个页面可见。</div>
+                    <div class="modal-buttons">
+                        <button type="button" class="btn-xxs" onclick="selectAllSidebarVisibility()">全选</button>
+                        <button type="button" class="btn-xxs" onclick="closeSidebarVisibilityModal()">取消</button>
+                        <button type="button" class="btn-xxs btn-primary" onclick="saveSidebarVisibilityFromModal()">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- 右侧主内容区 -->
         <!-- 测试界面页面 -->
@@ -2679,11 +2721,200 @@
             'agent': '对话Agent - GMS 远程测试'
         };
 
+        const SIDEBAR_VISIBLE_STORAGE_KEY = 'gms_sidebar_visible_pages';
+
+        function getSidebarNav() {
+            return document.getElementById('sidebar-nav');
+        }
+
+        function getSidebarItems() {
+            const nav = getSidebarNav();
+            return nav ? Array.from(nav.querySelectorAll('.sidebar-item')) : [];
+        }
+
+        function getAllSidebarPages() {
+            return getSidebarItems().map(item => item.dataset.page).filter(Boolean);
+        }
+
+        function normalizeSidebarVisiblePages(pages) {
+            const allPages = getAllSidebarPages();
+            if (!Array.isArray(pages) || pages.length === 0) {
+                return allPages;
+            }
+            const valid = [];
+            const seen = new Set();
+            pages.forEach(page => {
+                if (allPages.includes(page) && !seen.has(page)) {
+                    valid.push(page);
+                    seen.add(page);
+                }
+            });
+            return valid.length > 0 ? valid : allPages;
+        }
+
+        function getSavedSidebarVisiblePages() {
+            if (Array.isArray(window.__savedSidebarVisiblePages)) {
+                return normalizeSidebarVisiblePages(window.__savedSidebarVisiblePages);
+            }
+            try {
+                return normalizeSidebarVisiblePages(JSON.parse(localStorage.getItem(SIDEBAR_VISIBLE_STORAGE_KEY) || 'null'));
+            } catch (e) {
+                console.error('[Sidebar] Failed to parse visible pages:', e);
+                return normalizeSidebarVisiblePages(null);
+            }
+        }
+
+        function getCurrentVisibleSidebarPages() {
+            return getSidebarItems()
+                .filter(item => item.style.display !== 'none')
+                .map(item => item.dataset.page)
+                .filter(Boolean);
+        }
+
+        function resolveVisiblePage(pageName) {
+            const visiblePages = getCurrentVisibleSidebarPages();
+            if (visiblePages.includes(pageName)) {
+                return pageName;
+            }
+            return visiblePages[0] || getAllSidebarPages()[0] || 'test';
+        }
+
+        function applySidebarVisibility(pages) {
+            const visiblePages = normalizeSidebarVisiblePages(pages);
+            const visibleSet = new Set(visiblePages);
+            getSidebarItems().forEach(item => {
+                item.style.display = visibleSet.has(item.dataset.page) ? '' : 'none';
+            });
+            return visiblePages;
+        }
+
+        function getSidebarItemLabel(item) {
+            const icon = item.querySelector('.sidebar-icon')?.innerHTML || '';
+            const text = item.querySelector('.sidebar-text')?.textContent?.trim() || item.dataset.page;
+            return { icon, text };
+        }
+
+        function handleSidebarBrandKeydown(event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openSidebarVisibilityModal();
+            }
+        }
+
+        function openSidebarVisibilityModal() {
+            const modal = document.getElementById('sidebar-visibility-modal');
+            const list = document.getElementById('sidebar-visibility-list');
+            if (!modal || !list) return;
+
+            const visibleSet = new Set(getCurrentVisibleSidebarPages());
+            list.innerHTML = getSidebarItems().map(item => {
+                const { icon, text } = getSidebarItemLabel(item);
+                const page = item.dataset.page;
+                const checked = visibleSet.has(page) ? 'checked' : '';
+                return `<label class="sidebar-visibility-option">
+                    <input type="checkbox" value="${page}" ${checked}>
+                    <span class="sidebar-icon">${icon}</span>
+                    <span class="sidebar-text">${text}</span>
+                </label>`;
+            }).join('');
+
+            modal.style.display = 'flex';
+            modal.classList.add('show');
+        }
+
+        function closeSidebarVisibilityModal() {
+            const modal = document.getElementById('sidebar-visibility-modal');
+            if (!modal) return;
+            modal.classList.remove('show');
+            modal.style.display = 'none';
+        }
+
+        function selectAllSidebarVisibility() {
+            document.querySelectorAll('#sidebar-visibility-list input[type="checkbox"]').forEach(input => {
+                input.checked = true;
+            });
+        }
+
+        function saveSidebarVisibilityFromModal() {
+            const checkedPages = Array.from(document.querySelectorAll('#sidebar-visibility-list input[type="checkbox"]:checked'))
+                .map(input => input.value)
+                .filter(Boolean);
+            if (checkedPages.length === 0) {
+                if (typeof showToast === 'function') {
+                    showToast('至少保留一个导航页面', 'warning');
+                } else {
+                    alert('至少保留一个导航页面');
+                }
+                return;
+            }
+
+            const visiblePages = applySidebarVisibility(checkedPages);
+            localStorage.setItem(SIDEBAR_VISIBLE_STORAGE_KEY, JSON.stringify(visiblePages));
+            window.__savedSidebarVisiblePages = visiblePages;
+            saveSidebarVisibilityToBackend(visiblePages);
+            closeSidebarVisibilityModal();
+
+            const nextPage = resolveVisiblePage(currentPage);
+            if (nextPage !== currentPage) {
+                switchPage(nextPage);
+            }
+        }
+
+        async function saveSidebarVisibilityToBackend(visiblePages) {
+            const nav = getSidebarNav();
+            const order = nav ? getSidebarPages(nav) : getAllSidebarPages();
+            try {
+                const response = await fetch('/api/sidebar-order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ order, visible_pages: visiblePages })
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.success === false) {
+                    throw new Error(data.error || 'Save failed');
+                }
+            } catch (e) {
+                console.error('[Sidebar] Failed to save visibility:', e);
+            }
+        }
+
+        async function loadSidebarConfigFromBackend() {
+            try {
+                const response = await fetch('/api/sidebar-order');
+                if (!response.ok) return;
+                const data = await response.json();
+                if (data.success === false || !data.data) return;
+
+                const nav = getSidebarNav();
+                if (nav && Array.isArray(data.data.order) && data.data.order.length > 0) {
+                    applySidebarOrder(nav, data.data.order);
+                    localStorage.setItem('gms_sidebar_order', JSON.stringify(getSidebarPages(nav)));
+                }
+                if (Array.isArray(data.data.visible_pages) && data.data.visible_pages.length > 0) {
+                    const visiblePages = applySidebarVisibility(data.data.visible_pages);
+                    localStorage.setItem(SIDEBAR_VISIBLE_STORAGE_KEY, JSON.stringify(visiblePages));
+                    window.__savedSidebarVisiblePages = visiblePages;
+                    const nextPage = resolveVisiblePage(currentPage);
+                    if (currentPage && nextPage !== currentPage) {
+                        switchPage(nextPage);
+                    }
+                }
+            } catch (e) {
+                console.error('[Sidebar] Failed to load config:', e);
+            }
+        }
+
         // 页面切换函数
         function switchPage(pageName, event) {
             if (event) {
                 event.preventDefault();
             }
+            pageName = resolveVisiblePage(pageName);
+            const pageEl = document.getElementById(`page-${pageName}`);
+            if (!pageEl) return;
 
             // 更新导航栏高亮
             document.querySelectorAll('.sidebar-item').forEach(item => {
@@ -2698,7 +2929,7 @@
             document.querySelectorAll('.page-content.active').forEach(el => el.classList.remove('active'));
 
             // 显示目标页面
-            document.getElementById(`page-${pageName}`).classList.add('active');
+            pageEl.classList.add('active');
 
             // 清除DOM缓存，避免保留已隐藏页面的元素引用
             if (typeof clearDomCache === 'function') clearDomCache();
@@ -5562,7 +5793,9 @@
         // 页面加载完成后，如果是终端页面则初始化终端
         window.addEventListener('load', () => {
             // 获取页面加载前确定的目标页面
-            const targetPage = window.__targetPage || localStorage.getItem('gms_current_page') || 'test';
+            let targetPage = window.__targetPage || localStorage.getItem('gms_current_page') || 'test';
+            applySidebarVisibility(getSavedSidebarVisiblePages());
+            targetPage = resolveVisiblePage(targetPage);
 
             // 保存初始页面状态到 localStorage（确保首次访问后刷新能保持）
             localStorage.setItem('gms_current_page', targetPage);
@@ -5589,7 +5822,10 @@
             document.querySelectorAll('.page-content').forEach(page => {
                 page.classList.remove('active');
             });
-            document.getElementById(`page-${targetPage}`).classList.add('active');
+            const targetPageEl = document.getElementById(`page-${targetPage}`);
+            if (targetPageEl) {
+                targetPageEl.classList.add('active');
+            }
 
             currentPage = targetPage;
 
@@ -5662,27 +5898,25 @@
         // 页面加载时立即应用保存的导航栏排序（同步执行，防止闪烁）
         (function applySavedSidebarOrder() {
             const savedOrder = window.__savedSidebarOrder;
-            if (!savedOrder || !Array.isArray(savedOrder) || savedOrder.length === 0) return;
-
-            if (savedOrder[0] === 'gms-assistant') {
-                return;
-            }
-
             const nav = document.getElementById('sidebar-nav');
             if (!nav) return;
 
-            const itemByPage = new Map();
-            nav.querySelectorAll('.sidebar-item').forEach(item => {
-                itemByPage.set(item.dataset.page, item);
-            });
+            if (savedOrder && Array.isArray(savedOrder) && savedOrder.length > 0 && savedOrder[0] !== 'gms-assistant') {
+                const itemByPage = new Map();
+                nav.querySelectorAll('.sidebar-item').forEach(item => {
+                    itemByPage.set(item.dataset.page, item);
+                });
 
-            // 按保存的顺序重新排列导航项
-            savedOrder.forEach(page => {
-                const item = itemByPage.get(page);
-                if (item) {
-                    nav.appendChild(item);
-                }
-            });
+                // 按保存的顺序重新排列导航项
+                savedOrder.forEach(page => {
+                    const item = itemByPage.get(page);
+                    if (item) {
+                        nav.appendChild(item);
+                    }
+                });
+            }
+
+            applySidebarVisibility(getSavedSidebarVisiblePages());
         })();
 
         function saveSidebarOrder() {
@@ -5848,6 +6082,7 @@
 
             // 初始化拖拽功能
             setTimeout(initSidebarDragDrop, 50);
+            loadSidebarConfigFromBackend();
 
             // 初始化默认页面的组件（如果默认是 APK 分析页面）
             const defaultPage = localStorage.getItem('gms_current_page') || 'test';
