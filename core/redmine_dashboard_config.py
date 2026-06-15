@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from datetime import date, datetime
 from typing import Any
@@ -21,7 +20,8 @@ DEFAULT_DEPARTMENT_DASHBOARD = {
     "issue_limit": 500,
 }
 
-_PROFILE_ID_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+from core.dashboard_config_utils import bounded_int as _bounded_int, profile_id as _profile_id  # noqa: E402
+from core.config import DEFAULT_REDMINE_BASE_URL
 
 
 def normalize_redmine_stats_config(raw: dict[str, Any] | None) -> dict[str, int]:
@@ -271,7 +271,7 @@ def issue_id_list(issues: Iterable[dict[str, Any]]) -> list[str]:
 
 def issue_url_list(issues: Iterable[dict[str, Any]], base_url: str) -> list[str]:
     """Return stable Redmine issue URLs for copy/email actions."""
-    root = str(base_url or "").strip().rstrip("/") or "https://redmine.rock-chips.com"
+    root = str(base_url or "").strip().rstrip("/") or DEFAULT_REDMINE_BASE_URL
     return [f"{root}/issues/{issue_id}" for issue_id in issue_id_list(issues)]
 
 
@@ -306,11 +306,6 @@ def _to_raw_dashboard_config(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _profile_id(value: Any) -> str:
-    normalized = _PROFILE_ID_RE.sub("-", str(value or "").strip()).strip("-").lower()
-    return normalized or "profile"
-
-
 def _project_id(value: Any) -> str:
     text = str(value or "").strip().rstrip("/")
     if "/projects/" in text:
@@ -327,14 +322,6 @@ def _date_text(value: Any) -> str:
     except ValueError:
         return ""
     return text
-
-
-def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    return max(minimum, min(maximum, parsed))
 
 
 def summarize_project_issues(issues: Iterable[Any], list_limit: int = 15) -> dict[str, Any]:

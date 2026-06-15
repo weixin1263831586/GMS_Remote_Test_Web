@@ -8,7 +8,6 @@ import asyncio
 import logging
 import tarfile
 import tempfile
-from datetime import datetime
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
 
@@ -453,7 +452,7 @@ def _redmine_base_url_for(redmine_config: Optional[Dict[str, Any]], configured_m
 
 def _redmine_public_url_hint(url: str, redmine_config: Optional[Dict[str, Any]]) -> str:
     """Build the public Redmine URL that corresponds to a rejected Redmine-like URL."""
-    base_url = (redmine_config or {}).get("base_url") or "https://redmine.rock-chips.com"
+    base_url = config_manager.get_redmine_base_url({"redmine": redmine_config or {}})
     parsed = urlparse(url)
     if parsed.path:
         return f"{base_url.rstrip('/')}{parsed.path}"
@@ -630,14 +629,12 @@ async def download_report(
         elif path:
             logger.info(f"[DOWNLOAD] View file content: path='{path}'")
             config = config_manager.load_config()
-            ssh = ssh_manager.get_connection(config)
-            if not ssh:
-                return error_response("SSH connection failed", 500)
+            with ssh_manager.optional_connection(config) as ssh:
+                if not ssh:
+                    return error_response("SSH connection failed", 500)
 
-            try:
                 cat_cmd = f"cat '{path}' 2>/dev/null"
                 output, error, code = ssh_manager.execute_command(ssh, cat_cmd, timeout=30)
-                ssh_manager.return_connection(ssh)
 
                 file_ext = os.path.splitext(path)[1].lower()
                 if file_ext in [".xml", ".html"]:
@@ -648,9 +645,6 @@ async def download_report(
                     content_type = "text/plain"
 
                 return JSONResponse(content={"success": True, "content": output, "content_type": content_type})
-            except Exception:
-                ssh_manager.return_connection(ssh)
-                raise
         else:
             return error_response("Please provide report_timestamp or path parameter", 400)
 
@@ -790,13 +784,13 @@ async def analyze_report_from_url(request: Request):
                         redmine_password = stored_creds.get("password")
                         headers.update(create_basic_auth_header(redmine_username, redmine_password))
                     else:
-                        return JSONResponse(content={"success": False, "error": "Redmine credentials not configured", "requires_auth": True, "is_redmine": True}, status_code=401)
+                        return error_response("Redmine credentials not configured", status_code=401, requires_auth=True, is_redmine=True)
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=120), headers=headers) as response:
                     if response.status == 401 or response.status == 403:
                         if is_redmine:
-                            return JSONResponse(content={"success": False, "error": "Redmine auth failed", "requires_auth": True, "is_redmine": True}, status_code=403)
+                            return error_response("Redmine auth failed", status_code=403, requires_auth=True, is_redmine=True)
                         else:
                             return error_response(f"Download failed, HTTP {response.status}", 400)
                     elif response.status != 200:

@@ -5,11 +5,10 @@ import ipaddress
 import logging
 import os
 import subprocess
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
-from core.config import config_manager
 from core.ssh import ssh_manager
-from core.state import _IP_PATTERN, _PING_RTT_PATTERN, _PING_AVG_PATTERN, _PING_LOSS_PATTERN
+from core.state import _PING_RTT_PATTERN, _PING_AVG_PATTERN, _PING_LOSS_PATTERN
 
 logger = logging.getLogger(__name__)
 

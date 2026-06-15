@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import smtplib
 import uuid
 from datetime import datetime
@@ -61,10 +60,7 @@ def _clear_stats_caches() -> None:
 
 
 def _get_redmine_base_url() -> str:
-    try:
-        return str(config_manager.get_redmine_config().get("base_url") or "").rstrip("/")
-    except Exception:
-        return "https://redmine.rock-chips.com"
+    return config_manager.get_redmine_base_url()
 
 
 
@@ -97,7 +93,9 @@ def _send_reminder_email(to_addr: str, subject: str, body: str) -> Dict[str, Any
     dashboard_cfg = config_manager.load_config().get("redmine_dashboard") or {}
     email_cfg = dashboard_cfg.get("email") or {}
     smtp_host = str(email_cfg.get("smtp_host") or "").strip()
-    from_addr = str(email_cfg.get("from_addr") or email_cfg.get("username") or "trac@rock-chips.com").strip()
+    # from_addr 默认值统一来自 config.json 的 redmine_dashboard.email.default_from_addr
+    default_from = str(email_cfg.get("default_from_addr") or "").strip()
+    from_addr = str(email_cfg.get("from_addr") or email_cfg.get("username") or default_from).strip()
     if not smtp_host:
         return {"sent": False, "mode": "unconfigured", "error": "SMTP 未配置，请在设置中填写 smtp_host"}
 
@@ -105,18 +103,18 @@ def _send_reminder_email(to_addr: str, subject: str, body: str) -> Dict[str, Any
     username = str(email_cfg.get("username") or "").strip()
     password = str(email_cfg.get("password") or "").strip()
     is_qiye_163 = smtp_host.lower().endswith("qiye.163.com")
-    if (not username or not password) and is_qiye_163:
-        creds = config_manager.load_redmine_credentials() or {}
-        username = username or str(creds.get("username") or "").strip()
-        password = password or str(creds.get("password") or "").strip()
-    if is_qiye_163 and username and (not from_addr or from_addr == "trac@rock-chips.com" or from_addr != username):
+    # 163 企业邮要求发件人与登录账号一致；缺省（default_from）或与账号不符时，强制对齐
+    if is_qiye_163 and username and (not from_addr or from_addr == default_from or from_addr != username):
         from_addr = username
     use_ssl = bool(email_cfg.get("use_ssl", smtp_port == 465))
     use_tls = bool(email_cfg.get("use_tls", not use_ssl and smtp_port != 465))
     timeout = int(email_cfg.get("timeout") or 10)
 
+    # 注意：SMTP 授权码 与 Redmine 网页登录/API 密码是两回事，不能互相兜底。
+    # 163 企业邮用错误凭据会被服务器直接断开连接（而非返回认证失败码），
+    # 因此这里必须用专门的 SMTP 授权码；为空时直接返回明确错误，引导用户填写。
     if is_qiye_163 and (not username or not password):
-        return {"sent": False, "mode": "unconfigured", "error": "163 企业邮箱 SMTP 需要用户名和密码，请在设置中填写或先保存 Redmine 凭证"}
+        return {"sent": False, "mode": "unconfigured", "error": "163 企业邮箱 SMTP 需要用户名和授权码（注意：是邮箱 SMTP 授权码，不是 Redmine 登录密码），请在 Redmine 看板「设置 → SMTP」中填写"}
 
     message = EmailMessage()
     message["From"] = from_addr
@@ -382,23 +380,42 @@ async def add_stat_user(request: Request):
     uid_text = str(uid).strip()
 
     user_map = load_user_map_payload()
-    users_list = user_map.get("users") or []
+    departments = user_map.setdefault("departments", [])
+    dept_id = str(department.get("department_id") or "").strip()
+    dept_name = str(department.get("department") or "").strip()
     created = True
-    for item in users_list:
-        if str(item.get("id") or "").strip() == uid_text:
-            item["name"] = name
-            aliases = [str(alias).strip() for alias in item.get("aliases") or [] if str(alias).strip()]
-            aliases.append(name)
-            item["aliases"] = list(dict.fromkeys(aliases))
-            if email:
-                item["email"] = email
-            if department:
-                item.update(department)
-            created = False
+    target_department = None
+    for dept in departments:
+        if not isinstance(dept, dict):
+            continue
+        if dept_id and str(dept.get("department_id") or "").strip() == dept_id:
+            target_department = dept
             break
+        if not dept_id and dept_name and str(dept.get("department") or "").strip() == dept_name:
+            target_department = dept
+            break
+    if target_department is None:
+        target_department = {"department_id": dept_id, "department": dept_name, "members": []}
+        departments.append(target_department)
+    updated_member = {"id": uid, "name": name}
+    if email:
+        updated_member["email"] = email
+    for dept in departments:
+        if not isinstance(dept, dict):
+            continue
+        members = dept.setdefault("members", [])
+        kept = []
+        for item in members:
+            if isinstance(item, dict) and str(item.get("id") or "").strip() == uid_text:
+                created = False
+                if dept is target_department:
+                    kept.append(updated_member)
+                continue
+            kept.append(item)
+        dept["members"] = kept
     if created:
-        users_list.append({"id": uid, "name": name, "aliases": [name], "email": email, **department})
-    user_map["users"] = users_list
+        target_department.setdefault("members", []).append(updated_member)
+    user_map.pop("users", None)
     save_user_map_payload(user_map)
 
     if profile_ids:
@@ -539,6 +556,81 @@ async def _department_user_overdue(client, user: Dict[str, Any], stale_days: int
         return _empty_user_stats(user, error=str(exc))
 
 
+@router.get("/statistics/resolved-by-date")
+async def get_resolved_issues_by_date(
+    start: str = Query("", description="起始日期 YYYY-MM-DD（含）"),
+    end: str = Query("", description="结束日期 YYYY-MM-DD（不含，即次日）"),
+    names: str = Query("", description="指派人姓名列表，逗号分隔；为空则不过滤"),
+    profile_id: str = Query("", description="部门看板 profile_id；传入时按部门配置展开成员和别名"),
+    limit: int = Query(500, ge=1, le=2000),
+):
+    """按日期范围查询已解决的 Redmine issue（供趋势柱状图点击查看明细）。"""
+    owner_names = [n.strip() for n in names.split(",") if n.strip()] if names else []
+    profile_key = str(profile_id or "").strip()
+    profile_users: List[Dict[str, Any]] = []
+    if profile_key:
+        dashboard_cfg = config_manager.get_redmine_dashboard_config()
+        profile = select_redmine_dashboard_profile(dashboard_cfg, profile_key)
+        if str(profile.get("id") or "") == profile_key:
+            profile_users = list(filter_users_for_profile(load_redmine_user_map(), profile))
+            for user in profile_users:
+                owner_names.extend(display_names_from_mapping(user))
+    owner_names = list(dict.fromkeys(name for name in owner_names if name))
+    try:
+        if profile_users:
+            # Live fetch per assignee so the drill-down reflects the whole
+            # department, independent of which issues were synced to the local
+            # DB (the DB only holds issues assigned to the configured sync user).
+            client = _agent._make_client()
+            semaphore = asyncio.Semaphore(4)
+
+            async def _user_issues(user: Dict[str, Any]) -> List[Dict[str, Any]]:
+                async with semaphore:
+                    return await client.fetch_resolved_issues_by_assignee(
+                        assignee_id=int(user["id"]),
+                        start=start.strip(),
+                        end=end.strip(),
+                        limit=limit,
+                    )
+
+            try:
+                batches = await asyncio.gather(*[_user_issues(u) for u in profile_users])
+            finally:
+                await client.close()
+            seen: set[int] = set()
+            issues: List[Dict[str, Any]] = []
+            for batch in batches:
+                for item in batch:
+                    iid = int(item.get("issue_id") or 0)
+                    if iid and iid not in seen:
+                        seen.add(iid)
+                        issues.append(item)
+            issues.sort(key=lambda i: (i.get("resolved_on") or "", i.get("issue_id") or 0), reverse=True)
+            issues = issues[:limit]
+        else:
+            issues = _db.get_resolved_issues_by_date(
+                owner_names=owner_names or None, start=start.strip(), end=end.strip(), limit=limit,
+            )
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+    items = [
+        {
+            "issue_id": i.get("issue_id"),
+            "subject": i.get("subject"),
+            "status_name": i.get("status_name"),
+            "priority_name": i.get("priority_name"),
+            "assigned_to_name": i.get("assigned_to_name"),
+            "closed_on": (i.get("resolved_on") or i.get("closed_on") or "")[:10],
+            "resolved_on": (i.get("resolved_on") or i.get("closed_on") or "")[:19],
+            "updated_on": (i.get("updated_on") or "")[:19],
+            "tracker_name": i.get("tracker_name"),
+            "category": i.get("category"),
+        }
+        for i in issues
+    ]
+    return {"success": True, "data": {"start": start, "end": end, "count": len(items), "items": items}}
+
+
 @router.get("/statistics/department-overdue")
 async def get_department_overdue_statistics(
     stale_days: Optional[int] = Query(None, ge=1, le=30),
@@ -584,6 +676,9 @@ async def get_department_overdue_statistics(
             "open_count": sum(int(item.get("open_count") or 0) for item in results),
             "waiting_my_reply": sum(int(item.get("waiting_my_reply") or 0) for item in results),
             "no_reply_3_days": sum(int(item.get("no_reply_3_days") or 0) for item in results),
+            "waiting_customer_reply": sum(int(item.get("waiting_customer_reply") or 0) for item in results),
+            "customer_no_reply_3_days": sum(int(item.get("customer_no_reply_3_days") or 0) for item in results),
+            "rk_colleague_no_reply_3_days": sum(int(item.get("rk_colleague_no_reply_3_days") or 0) for item in results),
             "total_owned": sum(int(item.get("total_owned") or 0) for item in results),
         }
         data = {
@@ -679,9 +774,11 @@ async def get_stats_config():
     stats_cfg = config_manager.get_redmine_stats_config()
     dashboard_cfg = config_manager.get_redmine_dashboard_config()
     gerrit_cfg = config_manager.get_gerrit_dashboard_config()
+    if gerrit_cfg.get("rest_password"):
+        gerrit_cfg = {**gerrit_cfg, "rest_password": "***"}
     redmine_cfg = config.get("redmine") or {}
     email_cfg = (config.get("redmine_dashboard") or {}).get("email") or {}
-    base_url = str(redmine_cfg.get("base_url") or "").rstrip("/") or "https://redmine.rock-chips.com"
+    base_url = config_manager.get_redmine_base_url(config)
     return {"success": True, "data": {
         **stats_cfg,
         "dashboard": dashboard_cfg,
@@ -786,7 +883,7 @@ async def redmine_agent_page():
   <style>
     :root { color-scheme: dark; --bg:#0b0d12; --panel:#131720; --panel2:#191f2b; --border:#2b3342; --text:#e8edf7; --muted:#96a1b5; --primary:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --high:#ef4444; --medium:#f59e0b; --low:#6b7280; }
     * { box-sizing: border-box; }
-    html { scrollbar-gutter: stable; overflow-y: scroll; }
+    html { scrollbar-gutter: stable; overflow-y: scroll; scroll-padding-top:86px; }
     body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
     header { position:sticky; top:0; z-index:1000; display:grid; grid-template-columns:max-content minmax(0, 1fr) 480px 340px; align-items:center; column-gap:16px; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
     .header-title { font-size:18px; font-weight:700; white-space:nowrap; margin:0; }
@@ -810,12 +907,12 @@ async def redmine_agent_page():
     /* Modal */
     .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:9999; padding:20px; }
     .modal.show { display:flex; }
-    .modal-content { background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.4); max-width:400px; width:100%; overflow:hidden; }
+    .modal-content { background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.4); max-width:400px; width:100%; max-height:85vh; display:flex; flex-direction:column; overflow:hidden; }
     .modal-header { background:linear-gradient(135deg,#667eea,#764ba2); border-bottom:1px solid var(--border); padding:12px 16px; display:flex; justify-content:space-between; align-items:center; }
-    .modal-title { color:#fff; font-size:15px; font-weight:600; }
+    .modal-title { color:#fff; font-size:15px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .modal-close { color:#fff; font-size:22px; cursor:pointer; line-height:1; background:none; border:none; padding:0; height:auto; }
     .modal-close:hover { color:#ccc; }
-    .modal-body { padding:16px; display:flex; flex-direction:column; gap:10px; }
+    .modal-body { padding:16px; display:flex; flex-direction:column; gap:10px; overflow:auto; min-height:0; }
     .modal-body label { font-size:13px; font-weight:600; color:var(--muted); margin-bottom:2px; display:block; }
     .modal-body input { width:100%; padding:8px 10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; font-size:13px; }
     .modal-buttons { display:flex; gap:8px; justify-content:flex-end; margin-top:6px; }
@@ -912,6 +1009,7 @@ async def redmine_agent_page():
     .clickable-stat { cursor:pointer; transition:transform .15s,box-shadow .15s; }
     .clickable-stat:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.3); }
     .stats-section { margin-bottom:18px; }
+    .stats-section[id], .dept-user-block[id], .project-user-block[id] { scroll-margin-top:86px; }
     .stats-section h2 { font-size:15px; margin:0 0 10px; }
     .dashboard-summary-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:12px; flex-wrap:wrap; min-height:30px; }
     .dashboard-summary-title { margin:0; font-size:15px; line-height:30px; }
@@ -950,7 +1048,11 @@ async def redmine_agent_page():
     .dept-table tbody tr:hover { background:#111927; }
     .dept-table a { color:#7bb0ff; text-decoration:none; font-weight:700; }
     .dept-table a:hover { text-decoration:underline; }
-    .dept-action-btn { width:48px; min-width:48px; max-width:48px; padding:0; text-align:center; overflow:hidden; white-space:nowrap; }
+    .dept-action-btn { padding:0 10px; text-align:center; white-space:nowrap; }
+    /* Keep the person column compact so numeric columns don't get squeezed. */
+    .dept-table .col-person { width:1%; white-space:nowrap; }
+    .dept-table td.col-person { padding-right:18px; }
+    #trendDetailBody { max-height:calc(85vh - 62px); }
     .toggle-btn.active { background:var(--primary); color:#fff; }
     .project-filter-th { width:132px; min-width:132px; text-align:right !important; }
     .project-filter-cell { width:132px; min-width:132px; }
@@ -974,8 +1076,8 @@ async def redmine_agent_page():
 <body>
 <header>
   <div class="tabs">
-    <div class="tab active" data-tab="stats" onclick="switchTab('stats')">📈 个人看板</div>
     <div class="tab" data-tab="department" onclick="switchTab('department')">🏢 部门看板</div>
+    <div class="tab active" data-tab="stats" onclick="switchTab('stats')">📈 个人看板</div>
     <div class="tab" data-tab="project" onclick="switchTab('project')">🧩 项目看板</div>
     <div class="tab" data-tab="issues" onclick="switchTab('issues')">📋 工单列表</div>
     <div class="tab" data-tab="runs" onclick="switchTab('runs')">📊 扫描记录</div>
@@ -1156,7 +1258,7 @@ async def redmine_agent_page():
         </div>
         <div style="flex:1">
           <label>发件人地址</label>
-          <input type="text" id="settingFromAddr" placeholder="trac@rock-chips.com">
+          <input type="text" id="settingFromAddr" placeholder="留空则使用默认发件人">
         </div>
       </div>
       <div style="display:flex;gap:8px">
@@ -1202,11 +1304,24 @@ async def redmine_agent_page():
     </div>
   </div>
 </div>
+<div id="trendDetailModal" class="modal">
+  <div class="modal-content" style="max-width:900px">
+    <div class="modal-header" style="background:linear-gradient(135deg,#2563eb,#4f46e5)">
+      <span class="modal-title" id="trendDetailTitle">解决Redmine问题明细</span>
+      <span class="modal-close" onclick="hideModal('trendDetailModal')">&times;</span>
+    </div>
+    <div class="modal-body" id="trendDetailBody"><div class="muted">加载中…</div></div>
+  </div>
+</div>
 
 <script>
 function scrollToSection(id) {
   var el = document.getElementById(id);
-  if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+  if (!el) return;
+  var header = document.querySelector('header');
+  var offset = (header ? header.getBoundingClientRect().height : 0) + 14;
+  var top = el.getBoundingClientRect().top + window.pageYOffset - offset;
+  window.scrollTo({top: Math.max(0, top), behavior: 'smooth'});
 }
 let currentTab = 'stats';
 let currentPage = 1;
@@ -1216,6 +1331,17 @@ let statsUserInitialized = false;
 let statsConfig = {stale_days: 20, window_days: 60, cache_ttl: 600, redmine_base_url: 'https://redmine.rock-chips.com', dashboard: {profiles: [], defaults: {list_limit: 50, issue_limit: 500}}};
 let departmentProfileId = '';
 let projectProfileId = '';
+// 趋势明细点击上下文：当前看板作用的指派人姓名列表（个人=[name]，部门=全员）
+let redmineTrendNames = [];
+function updateRedmineTrendNames(selectedName, meta) {
+  if (selectedName) {
+    redmineTrendNames = [selectedName];
+    return;
+  }
+  redmineTrendNames = ((meta || {}).owner_names || []).map(function(name) {
+    return String(name || '').trim();
+  }).filter(Boolean);
+}
 let pendingDepartmentTargetSelect = '';
 let pendingTrendChartKey = '';
 let projectOpenOnly = false;
@@ -1233,7 +1359,14 @@ async function loadStatsConfig() {
 // ---- API helper ----
 async function api(url, options) {
   const r = await fetch(url, options || {});
-  const data = await r.json();
+  const text = await r.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (e) {
+    throw new Error((r.status ? 'HTTP ' + r.status + ': ' : '') + (text || e.message).slice(0, 180));
+  }
+  if (!r.ok) throw new Error(data.error || data.detail || ('HTTP ' + r.status));
   if (!data.success) throw new Error(data.error || '请求失败');
   return data.data || data;
 }
@@ -1434,6 +1567,81 @@ document.addEventListener('keydown', function(e) {
 function showModal(id) { document.getElementById(id).classList.add('show'); }
 function hideModal(id) { document.getElementById(id).classList.remove('show'); }
 
+// 趋势柱状图点击：粒度+标签 → 日期范围 [start, end)（ISO，闭开区间）
+function utcDateText(date) {
+  return date.toISOString().slice(0, 10);
+}
+function utcDate(year, monthIndex, day) {
+  return new Date(Date.UTC(year, monthIndex, day));
+}
+function trendLabelToDateRange(granularity, label) {
+  label = String(label || '');
+  if (granularity === 'date') {
+    var parts = label.split('-').map(function(v) { return parseInt(v, 10); });
+    if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) return null;
+    var d = utcDate(parts[0], parts[1] - 1, parts[2]);
+    if (isNaN(d.getTime())) return null;
+    return [label, utcDateText(new Date(d.getTime() + 86400000))];
+  }
+  if (granularity === 'month') {
+    var mp = label.split('-').map(function(v) { return parseInt(v, 10); });
+    if (mp.length !== 2 || !mp[0] || !mp[1]) return null;
+    var m = utcDate(mp[0], mp[1] - 1, 1);
+    if (isNaN(m.getTime())) return null;
+    return [label + '-01', utcDateText(utcDate(mp[0], mp[1], 1))];
+  }
+  if (granularity === 'year') {
+    var y = parseInt(label, 10); if (!y) return null;
+    return [y + '-01-01', (y + 1) + '-01-01'];
+  }
+  if (granularity === 'week') {
+    var match = /^(\d{4})-W(\d{2})$/.exec(label);
+    if (!match) return null;
+    var year = parseInt(match[1], 10), week = parseInt(match[2], 10);
+    var jan4 = utcDate(year, 0, 4);
+    var dow = (jan4.getUTCDay() + 6) % 7;
+    var week1Monday = new Date(jan4.getTime() - dow * 86400000);
+    var ws = new Date(week1Monday.getTime() + (week - 1) * 7 * 86400000);
+    return [utcDateText(ws), utcDateText(new Date(ws.getTime() + 7 * 86400000))];
+  }
+  return null;
+}
+function displayTrendRange(range) {
+  var parts = String(range[1] || '').split('-').map(function(v) { return parseInt(v, 10); });
+  var end = parts.length === 3 && parts[0] && parts[1] && parts[2] ? utcDate(parts[0], parts[1] - 1, parts[2]) : null;
+  var displayEnd = end ? utcDateText(new Date(end.getTime() - 86400000)) : range[1];
+  return range[0] + ' 至 ' + displayEnd;
+}
+async function showRedmineTrendDetail(granularity, label, namesCsv, profileId) {
+  var range = trendLabelToDateRange(granularity, label);
+  var title = document.getElementById('trendDetailTitle');
+  var body = document.getElementById('trendDetailBody');
+  if (!range || !title || !body) { alert('无法解析时段：' + label); return; }
+  title.textContent = '解决Redmine问题明细：' + label + '（' + displayTrendRange(range) + '）';
+  body.innerHTML = '<div class="muted">查询中…</div>';
+  showModal('trendDetailModal');
+  try {
+    var names = String(namesCsv || '').trim();
+    profileId = String(profileId || '').trim();
+    if (!names && redmineTrendNames && redmineTrendNames.length) names = redmineTrendNames.join(',');
+    var url = '/api/redmine-agent/statistics/resolved-by-date?start=' + encodeURIComponent(range[0])
+      + '&end=' + encodeURIComponent(range[1])
+      + (names ? '&names=' + encodeURIComponent(names) : '')
+      + (profileId ? '&profile_id=' + encodeURIComponent(profileId) : '');
+    var data = await api(url);
+    var items = (data && data.items) || [];
+    if (!items.length) { body.innerHTML = '<div class="muted">该时段无已解决的问题单。</div>'; return; }
+    body.innerHTML = '<div class="muted" style="margin-bottom:8px">共 ' + items.length + ' 条</div><div class="wrap"><table class="dept-table"><thead><tr><th>#</th><th>主题</th><th>状态</th><th>指派人</th><th>解决日期</th></tr></thead><tbody>'
+      + items.slice(0, 200).map(function(i) {
+        var issueId = i.issue_id || '';
+        var issueCell = issueId ? '<a href="' + redmineIssueUrl(issueId) + '" target="_blank">#' + esc(issueId) + '</a>' : '-';
+        return '<tr><td>' + issueCell + '</td><td>' + esc((i.subject || '-').slice(0, 60)) + '</td><td>' + esc(i.status_name || '-') + '</td><td>' + esc(i.assigned_to_name || '-') + '</td><td>' + esc(i.closed_on || '-') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  } catch (e) {
+    body.innerHTML = '<span class="error">' + esc(e.message) + '</span>';
+  }
+}
+
 // ---- Add User Modal ----
 async function populateDepartmentSelect(selectId, selectedId, includeAll) {
   await loadStatsConfig();
@@ -1546,7 +1754,7 @@ function showSettingsModal() {
       var email = (cfg.dashboard || {}).email || {};
       document.getElementById('settingSmtpHost').value = email.smtp_host || '';
       document.getElementById('settingSmtpPort').value = email.smtp_port || 465;
-      document.getElementById('settingFromAddr').value = email.from_addr || 'trac@rock-chips.com';
+      document.getElementById('settingFromAddr').value = email.from_addr || email.default_from_addr || '';
       document.getElementById('settingSmtpUser').value = email.username || '';
       document.getElementById('settingSmtpPass').value = '';
     } catch (_) {}
@@ -1926,7 +2134,7 @@ async function saveTrendStartDate() {
     alert('保存起始时间失败: ' + e.message);
   }
 }
-function renderTrend(title, items, keyName, chartKey) {
+function renderTrend(title, items, keyName, chartKey, detailNames, detailProfileId) {
   chartKey = chartKey || title;
   const filtered = filterTrendItems(items || [], keyName, chartKey);
   const reversed = filtered.slice().reverse();
@@ -1935,8 +2143,11 @@ function renderTrend(title, items, keyName, chartKey) {
     const label = item[keyName] || '-';
     const count = Number(item.count || 0);
     const pct = Math.max(5, Math.round((count / max) * 100));
-    return `<div class="bar-row">
-      <div class="bar-label" title="${esc(label)}">${esc(label)}</div>
+    const namesArg = Array.isArray(detailNames) ? detailNames.join(',') : String(detailNames || '');
+    const profileArg = String(detailProfileId || '');
+    const clickAttr = count > 0 ? ` style="cursor:pointer" onclick="showRedmineTrendDetail('${esc(keyName)}','${esc(String(label))}','${esc(namesArg)}','${esc(profileArg)}')" title="点击查看该时段解决的问题单"` : '';
+    return `<div class="bar-row"${clickAttr}>
+      <div class="bar-label">${esc(label)}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
       <div class="bar-count">${count}</div>
     </div>`;
@@ -1956,13 +2167,15 @@ function renderTrend(title, items, keyName, chartKey) {
 function renderMiniIssueList(title, items, emptyText, sectionId) {
   const rows = (items || []).map(item => {
     const issueId = item.issue_id || '';
-    const reply = item.last_external_reply_by ? `最后回复: ${item.last_external_reply_by}` : `附件: ${item.attachment_count || 0}`;
-    const time = item.last_external_reply_at || item.updated_on || item.created_on || '-';
+    const reply = item.last_external_reply_by ? `最后回复: ${item.last_external_reply_by}` :
+      (item.last_owner_reply_by ? `最后回复: ${item.last_owner_reply_by}` : `附件: ${item.attachment_count || 0}`);
+    const note = item.last_external_reply || item.last_owner_reply || '';
+    const time = item.last_external_reply_at || item.last_owner_reply_at || item.updated_on || item.created_on || '-';
     return `<div class="issue-mini">
       <div><a href="${redmineIssueUrl(issueId)}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
       <div class="issue-mini-title">
         <strong title="${esc(item.subject || '')}">${esc(item.subject || '-')}</strong>
-        <span>${esc(reply)}${item.last_external_reply ? ' | ' + esc(trunc(item.last_external_reply, 120)) : ''}</span>
+        <span>${esc(reply)}${note ? ' | ' + esc(trunc(note, 120)) : ''}</span>
       </div>
       <div class="issue-mini-meta">${esc(item.priority_name || '-')}<br>${esc(String(time).slice(0, 16))}</div>
     </div>`;
@@ -2089,11 +2302,13 @@ function renderProjectIssue(item) {
 function renderDepartmentOverdue(data) {
   const summary = data.summary || {};
   window._departmentUsers = data.users || [];
+  redmineTrendNames = (data.users || []).map(function(u) { return u.name; }).filter(Boolean);
   const users = (data.users || []).slice().sort(function(a, b) {
     return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN-u-co-pinyin');
   });
   const generatedAt = String(data.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, '');
   const profile = data.profile || {};
+  const sd = data.stale_days || 20;
   departmentProfileId = profile.id || departmentProfileId || '';
   if (data.available_profiles) {
     statsConfig.dashboard = Object.assign({}, statsConfig.dashboard || {}, {profiles: data.available_profiles});
@@ -2105,18 +2320,25 @@ function renderDepartmentOverdue(data) {
     <button class="select-add-btn" type="button" onclick="showAddDepartmentModal('departmentProfileSelect')" title="添加部门">＋</button>
   </div>`;
   const cards = renderStatsCards([
-    {value: summary.user_count || 0, label: '配置用户'},
-    {value: summary.total_owned || 0, label: '历史总数'},
     {value: summary.open_count || 0, label: '当前未关闭', className: 'warn'},
     {value: summary.waiting_my_reply || 0, label: '待回复', className: 'bad'},
-    {value: summary.no_reply_3_days || 0, label: (data.stale_days || 20) + '天未回复', className: 'bad'},
+    {value: summary.no_reply_3_days || 0, label: 'RK ' + sd + '天未回复', className: 'bad'},
+    {value: summary.customer_no_reply_3_days || 0, label: '客户 ' + sd + '天未回复', className: 'warn'},
+    {value: summary.total_owned || 0, label: '历史总数'},
+    {value: summary.user_count || 0, label: '配置用户'},
   ]);
   const trends = data.trends || {};
+  const trendNames = users.reduce(function(acc, user) {
+    (user.owner_names || [user.name]).forEach(function(name) {
+      if (name) acc.push(name);
+    });
+    return acc;
+  }, []);
   const trendPanels = `<div class="trend-grid">
-    ${renderTrend('每天解决Redmine问题', trends.resolved_daily || [], 'date', 'department_daily')}
-    ${renderTrend('每周解决Redmine问题', trends.resolved_weekly || [], 'week', 'department_weekly')}
-    ${renderTrend('每月解决Redmine问题', trends.resolved_monthly || [], 'month', 'department_monthly')}
-    ${renderTrend('每年解决Redmine问题', trends.resolved_yearly || [], 'year', 'department_yearly')}
+    ${renderTrend('每天解决Redmine问题', trends.resolved_daily || [], 'date', 'department_daily', trendNames, departmentProfileId)}
+    ${renderTrend('每周解决Redmine问题', trends.resolved_weekly || [], 'week', 'department_weekly', trendNames, departmentProfileId)}
+    ${renderTrend('每月解决Redmine问题', trends.resolved_monthly || [], 'month', 'department_monthly', trendNames, departmentProfileId)}
+    ${renderTrend('每年解决Redmine问题', trends.resolved_yearly || [], 'year', 'department_yearly', trendNames, departmentProfileId)}
   </div>`;
   const rows = users.map(function(user) {
     const names = (user.owner_names || []).join(' / ');
@@ -2125,23 +2347,24 @@ function renderDepartmentOverdue(data) {
     const ids = redmineIssueIds(user.overdue_issues || []);
     const copyDisabled = ids.length ? '' : ' disabled';
     return `<tr style="cursor:pointer" onclick="scrollToSection('dept-user-${esc(user.id || '')}')">
-      <td><strong>${nameLine}</strong>${subLine}</td>
+      <td class="col-person"><strong>${nameLine}</strong>${subLine}</td>
       <td>${user.total_owned || 0}</td>
       <td>${user.open_count || 0}</td>
       <td>${user.scanned_open_count || 0}</td>
       <td>${user.waiting_my_reply || 0}</td>
       <td><strong style="color:var(--bad)">${user.no_reply_3_days || 0}</strong></td>
+      <td>${user.customer_no_reply_3_days || 0}</td>
       <td>${user.max_unreplied_days || 0}</td>
       <td onclick="event.stopPropagation()">
-        <button class="secondary dept-action-btn"${copyDisabled} onclick="copyDepartmentIssues('${esc(user.id || '')}', this)">复制</button>
+        <button class="secondary dept-action-btn"${copyDisabled} onclick="copyDepartmentIssues('${esc(user.id || '')}', this)">复制3天未回复工单</button>
         <button class="secondary dept-action-btn"${copyDisabled} onclick="sendDepartmentReminder('${esc(user.id || '')}', this)">邮箱</button>
       </td>
     </tr>`;
   }).join('');
   const table = `<div class="dept-table-wrap">
     <table class="dept-table">
-      <thead><tr><th>人员</th><th>历史数量</th><th>未关闭</th><th>本地未关闭</th><th>待回复</th><th>超阈值未回复</th><th>最长未回复天数</th><th>操作</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="8" class="muted">暂无配置用户</td></tr>'}</tbody>
+      <thead><tr><th class="col-person">人员</th><th>历史数量</th><th>未关闭</th><th>本地未关闭</th><th>待回复</th><th>RK ${sd}天未回复</th><th>客户 ${sd}天未回复</th><th>最长未回复天数</th><th>操作</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="9" class="muted">暂无配置用户</td></tr>'}</tbody>
     </table>
   </div>`;
   const detailUsers = users.filter(function(user) { return (user.overdue_issues || []).length > 0; });
@@ -2150,7 +2373,7 @@ function renderDepartmentOverdue(data) {
     const names = (user.owner_names || []).join(' / ');
     return `<section class="dept-user-block" id="dept-user-${esc(user.id || '')}">
       <div class="dept-user-title">
-        <h2>${esc(user.name || '-')} 超阈值未回复问题 (${(user.overdue_issues || []).length})</h2>
+        <h2>${esc(user.name || '-')} ${sd}天未回复问题 (${(user.overdue_issues || []).length})</h2>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <div class="muted">${esc(names || '-')} | 最长 ${user.max_unreplied_days || 0} 天 | 窗口 ${data.window_days || 0} 天</div>
         </div>
@@ -2165,7 +2388,7 @@ function renderDepartmentOverdue(data) {
     </section>
     ${trendPanels}
     ${table}
-    ${details || '<div class="muted" style="padding:12px">当前配置用户暂无超过阈值未回复的问题。</div>'}
+    ${details || '<div class="muted" style="padding:12px">当前配置用户暂无超过 ' + sd + ' 天未回复的问题。</div>'}
   `;
 }
 
@@ -2209,6 +2432,7 @@ async function loadStatistics() {
     ]);
     const lists = workload.lists || {};
     const meta = workload.meta || {};
+    updateRedmineTrendNames(selectedName, meta);
 
     const userSelectHtml = '<div class="select-with-add">'
       + '<select id="statsUserSelect" onchange="onStatsUserChange()" style="width:160px">'
@@ -2223,7 +2447,8 @@ async function loadStatistics() {
         ${renderStatsCards([
           {value: workload.open_count || 0, label: '当前未关闭', className: 'warn'},
           {value: workload.waiting_my_reply || 0, label: '待回复 ⬇', className: 'bad clickable-stat', onclick: "scrollToSection('sec-waiting-reply')"},
-          {value: workload.no_reply_3_days || 0, label: sd + '天未回复 ⬇', className: 'bad clickable-stat', onclick: "scrollToSection('sec-no-reply-3d')"},
+          {value: workload.no_reply_3_days || 0, label: 'RK ' + sd + '天未回复客户 ⬇', className: 'bad clickable-stat', onclick: "scrollToSection('sec-no-reply-3d')"},
+          {value: workload.customer_no_reply_3_days || 0, label: '客户 ' + sd + '天未回复RK ⬇', className: 'warn clickable-stat', onclick: "scrollToSection('sec-customer-no-reply')"},
           {value: workload.missing_test_report || 0, label: '缺失测试报告 ⬇', className: 'warn clickable-stat', onclick: "scrollToSection('sec-missing-report')"},
           {value: workload.closed_count || 0, label: '已解决 / 已关闭', className: 'ok'},
           {value: workload.total_owned || 0, label: '名下历史数量'},
@@ -2231,14 +2456,15 @@ async function loadStatistics() {
       </section>
 
       <div class="trend-grid">
-        ${renderTrend('每天解决Redmine问题', workload.resolved_daily || [], 'date', 'personal_daily')}
-        ${renderTrend('每周解决Redmine问题', workload.resolved_weekly || [], 'week', 'personal_weekly')}
-        ${renderTrend('每月解决Redmine问题', workload.resolved_monthly || [], 'month', 'personal_monthly')}
-        ${renderTrend('每年解决Redmine问题', workload.resolved_yearly || [], 'year', 'personal_yearly')}
+        ${renderTrend('每天解决Redmine问题', workload.resolved_daily || [], 'date', 'personal_daily', redmineTrendNames)}
+        ${renderTrend('每周解决Redmine问题', workload.resolved_weekly || [], 'week', 'personal_weekly', redmineTrendNames)}
+        ${renderTrend('每月解决Redmine问题', workload.resolved_monthly || [], 'month', 'personal_monthly', redmineTrendNames)}
+        ${renderTrend('每年解决Redmine问题', workload.resolved_yearly || [], 'year', 'personal_yearly', redmineTrendNames)}
       </div>
 
       ${renderMiniIssueList('待回复的问题 (' + (lists.waiting_my_reply || []).length + ')', lists.waiting_my_reply || [], '暂无待回复问题', 'sec-waiting-reply')}
-      ${renderMiniIssueList(sd + '天未回复的问题 (' + (lists.no_reply_3_days || []).length + ')', lists.no_reply_3_days || [], '暂无超过阈值未回复问题', 'sec-no-reply-3d')}
+      ${renderMiniIssueList('RK ' + sd + '天未回复客户的问题 (' + (lists.no_reply_3_days || []).length + ')', lists.no_reply_3_days || [], '暂无RK超过阈值未回复客户问题', 'sec-no-reply-3d')}
+      ${renderMiniIssueList('客户 ' + sd + '天未回复RK的问题 (' + (lists.customer_no_reply_3_days || []).length + ')', lists.customer_no_reply_3_days || [], '暂无客户超过阈值未回复RK问题', 'sec-customer-no-reply')}
       ${renderMiniIssueList('缺失测试报告的问题 (' + (lists.missing_test_report || []).length + ')', lists.missing_test_report || [], '暂无缺失测试报告问题', 'sec-missing-report')}
     `;
     statsUserInitialized = false;
@@ -2292,7 +2518,7 @@ function renderProjectDashboard(data) {
     const ids = redmineIssueIds(user.issues || []);
     const actionDisabled = ids.length ? '' : ' disabled';
     return `<tr style="cursor:pointer" onclick="scrollToSection('project-user-${esc(user.id || '')}')">
-      <td><strong>${esc(user.name || '-')}</strong></td>
+      <td class="col-person"><strong>${esc(user.name || '-')}</strong></td>
       <td>${user.total_owned || 0}</td>
       <td>${user.open_count || 0}</td>
       <td>${user.closed_count || 0}</td>
@@ -2305,7 +2531,7 @@ function renderProjectDashboard(data) {
   }).join('');
   const table = `<div class="dept-table-wrap">
     <table class="dept-table">
-      <thead><tr><th>人员</th><th>项目内数量</th><th>未关闭</th><th>已关闭</th><th>操作</th><th class="project-filter-th">${openOnlyBtn || ''}</th></tr></thead>
+      <thead><tr><th class="col-person">人员</th><th>项目内数量</th><th>未关闭</th><th>已关闭</th><th>操作</th><th class="project-filter-th">${openOnlyBtn || ''}</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="6" class="muted">暂无项目人员数据</td></tr>'}</tbody>
     </table>
   </div>`;

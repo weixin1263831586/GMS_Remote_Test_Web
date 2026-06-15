@@ -101,6 +101,11 @@ _PATH_KEYWORDS: Dict[str, List[str]] = {
     "/api/usbip/disconnect": ["USB断开", "usbip disconnect"],
     "/api/adb-forward": ["ADB转发", "端口转发", "adb forward"],
     "/api/opengrok/search": ["源码搜索", "代码搜索", "opengrok"],
+    "/api/tailscale/status": ["tailscale", "Tailscale状态", "tailscale status", "Tailscale"],
+    "/api/knowledgebase/search": ["知识库", "知识库搜索", "kb search", "knowledge base"],
+    "/api/knowledgebase/stats": ["知识库统计", "kb stats"],
+    "/api/security-audit/logs": ["审计日志", "访问日志", "audit logs", "安全日志"],
+    "/api/notifications": ["通知", "消息", "未读通知", "notifications"],
 }
 
 # 按路径标记只读/危险/需确认
@@ -217,6 +222,56 @@ _EXECUTOR_REF_OVERRIDES: Dict[str, str] = {
     "/api/system/skills": "routers.system:download_skills_zip",
     "/api/system/docs": "routers.system:get_api_docs",
     "/api/system/help": "routers.system:get_api_help",
+    # --- 补充：报告 ---
+    "/api/reports/diagnose": "routers.reports:diagnose_report_failure",
+    "/api/reports/analyze-url": "routers.reports:analyze_report_from_url",
+    "/api/reports/extract-redmine-attachment": "routers.reports:extract_redmine_attachment",
+    # --- 补充：知识库 ---
+    "/api/knowledgebase/search": "routers.reports:knowledgebase_search",
+    "/api/knowledgebase/stats": "routers.reports:knowledgebase_stats",
+    # --- 补充：测试日志/套件 ---
+    "/api/test/logs/list": "routers.tests:list_test_logs",
+    "/api/test/logs/get": "routers.tests:get_test_logs",
+    "/api/test/logs/batch": "routers.tests:download_test_logs",
+    "/api/test/suites/archives": "routers.tests:list_test_suite_archives",
+    "/api/test/suites/diagnose-target": "routers.tests:diagnose_suite_target",
+    # --- 补充：通知 ---
+    "/api/notifications": "routers.notifications:get_notifications",
+    "/api/notifications/mark-read": "routers.notifications:mark_notifications_read",
+    "/api/notifications/clear": "routers.notifications:clear_notifications",
+    # --- 补充：安全审计 ---
+    "/api/security-audit/logs": "routers.audit:list_security_audit_logs",
+    "/api/security-audit/export": "routers.audit:export_security_audit_logs",
+    # --- 补充：网址/工具 ---
+    "/api/websites/load": "routers.assets:load_user_tools",
+    "/api/tools/list": "routers.assets:list_utility_tools",
+    # --- 补充：配置 ---
+    "/api/config/ai": "routers.config:get_ai_config",
+    "/api/config/opengrok": "routers.config:get_opengrok_config",
+    "/api/config/redmine": "routers.reports:get_redmine_config",
+    "/api/tailscale/status": "routers.config:get_tailscale_status",
+    # --- 补充：APK（路径参数 task_id 作为函数参数） ---
+    "/api/apk/status/{task_id}": "routers.apk:get_apk_status",
+    "/api/apk/manifest/{task_id}": "routers.apk:get_apk_manifest",
+    "/api/apk/permissions/{task_id}": "routers.apk:get_apk_permissions",
+    "/api/apk/source/{task_id}": "routers.apk:get_apk_source",
+    "/api/apk/search/{task_id}": "routers.apk:search_apk_source_files",
+    "/api/apk/definition/{task_id}": "routers.apk:find_apk_symbol_definition",
+    "/api/apk/analyze/{task_id}": "routers.apk:analyze_apk",
+    # --- 补充：测试套件 ---
+    "/api/test/parse-args": "routers.tests:parse_test_args",
+    "/api/test/suites/files": "routers.tests:list_suite_files",
+    "/api/test/suites/download": "routers.tests:download_suite_file",
+    "/api/test/suites/extract": "routers.tests:extract_test_suite_archive",
+    "/api/test/suites/download-url": "routers.tests:download_test_suite_from_url",
+    "/api/test/suites/extract-start": "routers.tests:start_test_suite_extract",
+    "/api/test/suites/add-local": "routers.tests:add_local_test_suite",
+    "/api/test/suites/download-status/{task_id}": "routers.tests:get_test_suite_download_status",
+    "/api/test/suites/extract-status/{task_id}": "routers.tests:get_test_suite_extract_status",
+    # --- 补充：安全审计详情 ---
+    "/api/security-audit/detail/{event_id}": "routers.audit:get_security_audit_detail",
+    # --- 补充：VPN 连接 ---
+    "/api/vpn/connections": "routers.integrations:get_vpn_connections",
 }
 
 _AGENT_UNSUPPORTED_DIRECT_PATHS = {
@@ -224,6 +279,10 @@ _AGENT_UNSUPPORTED_DIRECT_PATHS = {
     "/api/test/logs/stream",
     "/api/system/websocket/{client_id}",
     "/api/terminal/push",
+    "/api/apk/upload",
+    "/api/favicon/fetch",
+    "/api/favicon/proxy",
+    "/api/tools/download/{file_path:path}",
 }
 
 
@@ -584,32 +643,18 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             response_type="detail",
         ),
         AgentTool(
-            name="config_tailscale_status",
-            category="config",
-            description="检查 Tailscale VPN 状态",
-            api_path="/api/config/tailscale/status",
-            method="GET",
-            params=[],
-            keywords=["tailscale", "Tailscale状态", "VPN状态", "tailscale status"],
-            is_readonly=True,
-            is_dangerous=False,
-            requires_confirm=False,
-            executor_ref="",
-            response_type="status",
-        ),
-        AgentTool(
             name="suites_download",
             category="test",
-            description="下载测试套件到主机",
+            description="下载测试套件文件",
             api_path="/api/test/suites/download",
-            method="POST",
-            params=[{"name": "url", "type": "string", "required": True, "desc": "下载地址"}],
+            method="GET",
+            params=[{"name": "path", "type": "string", "required": True, "desc": "套件文件路径"}],
             keywords=["下载套件", "下载测试套件", "download suite", "套件下载"],
             is_readonly=False,
             is_dangerous=False,
             requires_confirm=True,
-            executor_ref="",
-            response_type="status",
+            executor_ref="routers.tests:download_suite_file",
+            response_type="file",
         ),
         AgentTool(
             name="suites_extract",
@@ -617,12 +662,12 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             description="解压测试套件",
             api_path="/api/test/suites/extract",
             method="POST",
-            params=[{"name": "path", "type": "string", "required": True, "desc": "套件路径"}],
+            params=[{"name": "path", "type": "string", "required": True, "desc": "套件归档路径"}],
             keywords=["解压套件", "extract suite", "解压", "解包"],
             is_readonly=False,
             is_dangerous=False,
             requires_confirm=False,
-            executor_ref="",
+            executor_ref="routers.tests:extract_test_suite_archive",
             response_type="status",
         ),
         AgentTool(
@@ -650,14 +695,14 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             is_readonly=True,
             is_dangerous=False,
             requires_confirm=False,
-            executor_ref="",
+            executor_ref="routers.tests:parse_test_args",
             response_type="detail",
         ),
         AgentTool(
             name="architecture",
             category="system",
             description="查看系统架构图",
-            api_path="/api/system/architecture",
+            api_path="/templates/architecture.html",
             method="GET",
             params=[],
             keywords=["架构", "architecture", "系统架构", "架构图"],

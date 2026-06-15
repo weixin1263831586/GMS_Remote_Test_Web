@@ -15,6 +15,16 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# 测试用 WiFi 默认值（CTS/GTS 等要求连接 AndroidWifi 热点）。
+# 各处不要再直接写字面量，统一经 config_manager.get_wifi_defaults() 读取，
+# 以便在 config_runtime.json 的 "wifi" 段覆盖。
+DEFAULT_WIFI_SSID = "AndroidWifi"
+DEFAULT_WIFI_PASSWORD = "1234567890"
+
+# Redmine 默认 base URL。各处不要再直接写字面量，
+# 统一经 config_manager.get_redmine_base_url() 读取（config.redmine.base_url 覆盖此默认）。
+DEFAULT_REDMINE_BASE_URL = "https://redmine.rock-chips.com"
+
 # Precompile regex pattern for placeholder replacement (efficiency)
 PLACEHOLDER_PATTERN = re.compile(r'\$\{([^}]+)\}')
 
@@ -200,6 +210,17 @@ class ConfigManager:
 
         return redmine_config
 
+    def get_redmine_base_url(self, config: Dict[str, Any] = None) -> str:
+        """读取 Redmine base_url，未配置时返回 DEFAULT_REDMINE_BASE_URL（不抛异常）。
+
+        集中管理曾经散落在多处的 'https://redmine.rock-chips.com' 默认值。
+        """
+        try:
+            redmine_config = (config if config is not None else self.load_config()).get("redmine") or {}
+        except Exception:
+            redmine_config = {}
+        return str(redmine_config.get("base_url") or "").strip().rstrip("/") or DEFAULT_REDMINE_BASE_URL
+
     def get_ai_provider_config(self, provider_name: str) -> Optional[Dict[str, Any]]:
         """
         获取指定 AI provider 的配置
@@ -384,50 +405,61 @@ class ConfigManager:
         """Public read-only access to the runtime configuration."""
         return self._load_runtime_config() or {}
 
+    def _get_section(self, key: str, normalizer) -> Dict[str, Any]:
+        """读取并规范化配置中的某个区段（如 redmine_dashboard / gerrit_dashboard）。"""
+        return normalizer(self.load_config().get(key) or {})
+
+    def _save_section(self, key: str, payload: Dict[str, Any], denormalizer, *, merge_from_runtime: bool = False) -> bool:
+        """合并并持久化某个配置区段到运行时配置文件。
+
+        merge_from_runtime=True 时优先从已加载的 runtime 取 current（用于 stats 这类
+        只在 runtime 维护、静态配置不持有的区段），否则从合并后的 load_config 取。
+        """
+        try:
+            runtime = self._load_runtime_config() or {}
+            current = (runtime.get(key) if merge_from_runtime else None) or self.load_config().get(key) or {}
+            runtime[key] = denormalizer({**current, **(payload or {})})
+            return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
+        except Exception as e:
+            logger.error(f"Error saving {key} config: {e}")
+            return False
+
     def get_redmine_stats_config(self) -> Dict[str, int]:
         """Return normalized Redmine stats settings after static/runtime merge."""
         from core.redmine_dashboard_config import normalize_redmine_stats_config
 
-        return normalize_redmine_stats_config((self.load_config().get('redmine_stats') or {}))
+        return self._get_section('redmine_stats', normalize_redmine_stats_config)
 
     def save_redmine_stats_config(self, stats_config: Dict[str, Any]) -> bool:
         """Save Redmine stats settings to runtime config so UI changes take effect immediately."""
         from core.redmine_dashboard_config import normalize_redmine_stats_config
 
-        try:
-            runtime = self._load_runtime_config() or {}
-            current = runtime.get('redmine_stats') or self.load_config().get('redmine_stats') or {}
-            runtime['redmine_stats'] = normalize_redmine_stats_config({**current, **(stats_config or {})})
-            return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
-        except Exception as e:
-            logger.error(f"Error saving Redmine stats config: {e}")
-            return False
+        # redmine_stats 只在 runtime 维护，current 从 runtime 取，故 merge_from_runtime=True
+        return self._save_section('redmine_stats', stats_config, normalize_redmine_stats_config, merge_from_runtime=True)
 
     def get_redmine_dashboard_config(self) -> Dict[str, Any]:
         """Return normalized Redmine dashboard profile configuration."""
         from core.redmine_dashboard_config import normalize_redmine_dashboard_profiles
 
-        return normalize_redmine_dashboard_profiles(self.load_config().get('redmine_dashboard') or {})
+        return self._get_section('redmine_dashboard', normalize_redmine_dashboard_profiles)
 
     def save_redmine_dashboard_config(self, dashboard_config: Dict[str, Any]) -> bool:
         """Save Redmine dashboard profiles to runtime config."""
         from core.redmine_dashboard_config import denormalize_redmine_dashboard_config
 
-        try:
-            runtime = self._load_runtime_config() or {}
-            current = self.load_config().get('redmine_dashboard') or {}
-            merged = {**current, **(dashboard_config or {})}
-            runtime['redmine_dashboard'] = denormalize_redmine_dashboard_config(merged)
-            return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
-        except Exception as e:
-            logger.error(f"Error saving Redmine dashboard config: {e}")
-            return False
+        return self._save_section('redmine_dashboard', dashboard_config, denormalize_redmine_dashboard_config)
 
     def get_gerrit_dashboard_config(self) -> Dict[str, Any]:
         """Return normalized Gerrit dashboard configuration."""
         from core.gerrit_dashboard_config import normalize_gerrit_dashboard_config
 
-        return normalize_gerrit_dashboard_config(self.load_config().get('gerrit_dashboard') or {})
+        return self._get_section('gerrit_dashboard', normalize_gerrit_dashboard_config)
+
+    def save_gerrit_dashboard_config(self, dashboard_config: Dict[str, Any]) -> bool:
+        """Save Gerrit dashboard settings to runtime config."""
+        from core.gerrit_dashboard_config import denormalize_gerrit_dashboard_config
+
+        return self._save_section('gerrit_dashboard', dashboard_config, denormalize_gerrit_dashboard_config)
 
     def save_client_ssh_credentials(self, credentials: list) -> bool:
         """保存客户端 SSH 凭据到运行时配置文件。"""
@@ -577,6 +609,20 @@ class ConfigManager:
         if config is None:
             config = self.load_config()
         return config.get('ubuntu_user') or get_ubuntu_user()
+
+    def get_wifi_defaults(self, config: Dict[str, Any] = None) -> Dict[str, str]:
+        """读取测试用 WiFi 默认 SSID/密码（config.wifi 覆盖内置默认值）。
+
+        集中管理曾经散落在多处的 'AndroidWifi' / '1234567890' 硬编码，
+        便于在 config_runtime.json 的 "wifi" 段统一覆盖。
+        """
+        if config is None:
+            config = self.load_config()
+        wifi_cfg = config.get("wifi") or {}
+        return {
+            "ssid": str(wifi_cfg.get("ssid") or DEFAULT_WIFI_SSID),
+            "password": str(wifi_cfg.get("password") or DEFAULT_WIFI_PASSWORD),
+        }
 
     def get_ubuntu_host(self, config: Dict[str, Any] = None) -> str:
         """

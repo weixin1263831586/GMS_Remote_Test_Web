@@ -111,8 +111,6 @@ async def check_ssh_sshd(request: Request, device_host: Optional[str] = Query(No
                 'running': running,
                 'install_guide': SSHD_INSTALL_GUIDE if not installed else None
             })
-    except HTTPException:
-        raise
     except Exception as _exc:
         import traceback
         logger.warning(f"[SSHD Check] Cannot connect to {device_host}: {traceback.format_exc()}")
@@ -275,23 +273,21 @@ async def ping_route_test(request: Request):
             # 不同网段，需要从测试主机执行ping来验证连通性
             try:
                 config = config_manager.load_config()
-                ssh = ssh_manager.get_connection(config)
-                if ssh:
-                    # 从测试主机ping客户端IP
-                    ping_cmd = f"ping -c 3 -W 2 {client_ip}"
-                    stdin, stdout, stderr = ssh.exec_command(ping_cmd, timeout=10)
+                with ssh_manager.optional_connection(config) as ssh:
+                    if ssh:
+                        # 从测试主机ping客户端IP
+                        ping_cmd = f"ping -c 3 -W 2 {client_ip}"
+                        stdin, stdout, stderr = ssh.exec_command(ping_cmd, timeout=10)
 
-                    # 读取ping输出（限制大小防止内存溢出）
-                    ping_output = stdout.read(8192).decode('utf-8', errors='ignore')   # 8KB sufficient for ping
-                    stderr.read(2048).decode('utf-8', errors='ignore')   # 2KB sufficient for errors
-                    exit_status = stdout.channel.recv_exit_status()
+                        # 读取ping输出（限制大小防止内存溢出）
+                        ping_output = stdout.read(8192).decode('utf-8', errors='ignore')   # 8KB sufficient for ping
+                        stderr.read(2048).decode('utf-8', errors='ignore')   # 2KB sufficient for errors
+                        exit_status = stdout.channel.recv_exit_status()
 
-                    ssh_manager.return_connection(ssh)
+                        # 解析ping结果
+                        reachable, latency = _parse_ping_output(ping_output, exit_status)
 
-                    # 解析ping结果
-                    reachable, latency = _parse_ping_output(ping_output, exit_status)
-
-                    logger.info(f"Ping test from {test_host_ip} to {client_ip}: reachable={reachable}, latency={latency}")
+                        logger.info(f"Ping test from {test_host_ip} to {client_ip}: reachable={reachable}, latency={latency}")
 
             except Exception as e:
                 logger.warning(f"Ping test failed: {e}")
@@ -337,7 +333,7 @@ async def get_vpn_connections():
         if not is_config_host_local(config):
             ssh = ssh_manager.get_connection(config)
         if not is_config_host_local(config) and not ssh:
-            return JSONResponse(content={"success": False, "error": "SSH连接失败"}, status_code=500)
+            return error_response("SSH连接失败", status_code=500)
 
         cmd = "nmcli -t -f NAME,TYPE connection show 2>/dev/null"
         output, _, _ = await execute_config_host_command(config, ssh, cmd, timeout=5)
@@ -350,7 +346,7 @@ async def get_vpn_connections():
         if ssh:
             ssh_manager.return_connection(ssh)
         logger.error(f"Error listing VPN connections: {e}")
-        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+        return error_response(str(e), status_code=500)
 
 
 @router.get("/api/vpn/status")
@@ -368,47 +364,44 @@ async def get_vpn_status():
             "source": "local"
         })
 
-    ssh = ssh_manager.get_connection(config)
-    if not ssh:
-        return JSONResponse(
-            content={"success": False, "error": "SSH连接失败"},
-            status_code=500
-        )
+    with ssh_manager.optional_connection(config) as ssh:
+        if not ssh:
+            return JSONResponse(
+                content={"success": False, "error": "SSH连接失败"},
+                status_code=500
+            )
 
-    max_attempts = 2
-    for attempt in range(max_attempts):
-        output, error, code = ssh_manager.execute_command(
-            ssh,
-            f"ping -c 1 -W 1 {vpn_target} 2>&1",  # 减少-W timeout从2到1
-            timeout=3  # 减少timeout从5到3
-        )
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            output, error, code = ssh_manager.execute_command(
+                ssh,
+                f"ping -c 1 -W 1 {vpn_target} 2>&1",  # 减少-W timeout从2到1
+                timeout=3  # 减少timeout从5到3
+            )
 
-        # 检查ping结果（成功则立即返回）
-        if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
-            ssh_manager.return_connection(ssh)
-            logger.info(f"[VPN Status] {vpn_target}: connected (attempt {attempt + 1})")
-            return JSONResponse(content={"success": True, "connected": True})
+            # 检查ping结果（成功则立即返回）
+            if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
+                logger.info(f"[VPN Status] {vpn_target}: connected (attempt {attempt + 1})")
+                return JSONResponse(content={"success": True, "connected": True})
 
-    # 所有尝试都失败，尝试通过nmcli检查VPN连接状态
-    try:
-        nmcli_output, _, _ = ssh_manager.execute_command(
-            ssh,
-            "nmcli -t -f NAME,TYPE,STATE connection show --active 2>&1",
-            timeout=3  # 减少timeout从5到3
-        )
+        # 所有尝试都失败，尝试通过nmcli检查VPN连接状态
+        try:
+            nmcli_output, _, _ = ssh_manager.execute_command(
+                ssh,
+                "nmcli -t -f NAME,TYPE,STATE connection show --active 2>&1",
+                timeout=3  # 减少timeout从5到3
+            )
 
-        # 检查是否有VPN类型的活跃连接
-        if 'vpn' in nmcli_output.lower() or 'tun' in nmcli_output.lower() or 'tap' in nmcli_output.lower():
-            ssh_manager.return_connection(ssh)
-            logger.info(f"[VPN Status] VPN detected via nmcli: {nmcli_output.strip()}")
-            return JSONResponse(content={"success": True, "connected": True})
-    except Exception as e:
-        logger.warning(f"[VPN Status] nmcli check failed: {e}")
+            # 检查是否有VPN类型的活跃连接
+            if 'vpn' in nmcli_output.lower() or 'tun' in nmcli_output.lower() or 'tap' in nmcli_output.lower():
+                logger.info(f"[VPN Status] VPN detected via nmcli: {nmcli_output.strip()}")
+                return JSONResponse(content={"success": True, "connected": True})
+        except Exception as e:
+            logger.warning(f"[VPN Status] nmcli check failed: {e}")
 
-    # 所有尝试都失败
-    ssh_manager.return_connection(ssh)
-    logger.info(f"[VPN Status] {vpn_target}: disconnected (0/{max_attempts} successful)")
-    return JSONResponse(content={"success": True, "connected": False})
+        # 所有尝试都失败
+        logger.info(f"[VPN Status] {vpn_target}: disconnected (0/{max_attempts} successful)")
+        return JSONResponse(content={"success": True, "connected": False})
 
 
 @router.post("/api/vpn/connect")
@@ -622,12 +615,10 @@ async def start_adb_forward(req: ADBForwardStartRequest):
         result = adb_forward_manager.start_forward(req.device_host, req.device_password)
         if result.get('success'):
             return JSONResponse(content=result)
-        raise HTTPException(status_code=500, detail=result.get('error', 'ADB转发启动失败'))
-    except HTTPException:
-        raise
+        return error_response(result.get('error', 'ADB转发启动失败'), status_code=500)
     except Exception as e:
         logger.error(f"Error starting ADB forward: {e}")
-        raise HTTPException(status_code=500, detail=f"{str(e)}. 请检查配置和参数是否正确。")
+        return error_response(f"{str(e)}. 请检查配置和参数是否正确。", status_code=500)
 
 
 @router.post("/api/adb-forward/stop")
@@ -637,12 +628,10 @@ async def stop_adb_forward():
         result = adb_forward_manager.stop_forward('test_client')
         if result.get('success'):
             return JSONResponse(content=result)
-        raise HTTPException(status_code=500, detail=result.get('error', 'ADB转发停止失败'))
-    except HTTPException:
-        raise
+        return error_response(result.get('error', 'ADB转发停止失败'), status_code=500)
     except Exception as e:
         logger.error(f"Error stopping ADB forward: {e}")
-        raise HTTPException(status_code=500, detail=f"{str(e)}. 请检查配置和参数是否正确。")
+        return error_response(f"{str(e)}. 请检查配置和参数是否正确。", status_code=500)
 
 
 # ==================== USB/IP Status ====================
@@ -932,4 +921,4 @@ async def install_usbipd(request: Request, device_host: Optional[str] = None):
 
     except Exception as e:
         logger.error(f"Error installing usbipd: {e}")
-        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+        return error_response(str(e), status_code=500)

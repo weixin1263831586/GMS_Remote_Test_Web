@@ -3,20 +3,17 @@
 import os
 import json
 import shutil
-import asyncio
 import logging
 import tempfile
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from core.api_response import error_response
 
 from core.config import config_manager
-from core.network import run_local_shell_command
 from core.ssh import ssh_manager
 from core.upload_utils import safe_upload_target_path, save_upload_to_path, merge_files_to_path
-from core.clients import get_client_id_from_request
 
 logger = logging.getLogger(__name__)
 
@@ -109,51 +106,49 @@ async def upload_file(
         await save_upload_to_path(file, temp_path)
 
         try:
-            ssh = ssh_manager.get_connection(config)
-            if not ssh:
-                os.remove(temp_path)
-                return error_response("SSH connection failed", 500)
+            with ssh_manager.optional_connection(config) as ssh:
+                if not ssh:
+                    os.remove(temp_path)
+                    return error_response("SSH connection failed", 500)
 
-            # Determine target path and upload via SFTP
-            default_remote = f"/home/{config['ubuntu_user']}/{safe_filename}"
+                # Determine target path and upload via SFTP
+                default_remote = f"/home/{config['ubuntu_user']}/{safe_filename}"
 
-            if path and path.strip():
-                target_dir = path.rstrip("/")
-                try:
-                    with ssh.open_sftp() as sftp:
-                        ssh_manager.optimize_sftp_performance(sftp)
-                        try:
-                            sftp.stat(target_dir)
-                        except IOError:
-                            sftp.mkdir(target_dir)
-                        remote_path = f"{target_dir}/{safe_filename}"
-                        sftp.put(temp_path, remote_path)
-                except Exception as e:
-                    logger.error(f"Failed to upload to specified path: {e}")
+                if path and path.strip():
+                    target_dir = path.rstrip("/")
+                    try:
+                        with ssh.open_sftp() as sftp:
+                            ssh_manager.optimize_sftp_performance(sftp)
+                            try:
+                                sftp.stat(target_dir)
+                            except IOError:
+                                sftp.mkdir(target_dir)
+                            remote_path = f"{target_dir}/{safe_filename}"
+                            sftp.put(temp_path, remote_path)
+                    except Exception as e:
+                        logger.error(f"Failed to upload to specified path: {e}")
+                        remote_path = default_remote
+                        with ssh.open_sftp() as sftp:
+                            ssh_manager.optimize_sftp_performance(sftp)
+                            sftp.put(temp_path, remote_path)
+                else:
                     remote_path = default_remote
                     with ssh.open_sftp() as sftp:
                         ssh_manager.optimize_sftp_performance(sftp)
                         sftp.put(temp_path, remote_path)
-            else:
-                remote_path = default_remote
-                with ssh.open_sftp() as sftp:
-                    ssh_manager.optimize_sftp_performance(sftp)
-                    sftp.put(temp_path, remote_path)
 
-            ssh_manager.return_connection(ssh)
-            os.remove(temp_path)
+                os.remove(temp_path)
 
-            return JSONResponse(content={"success": True, "remote_path": remote_path, "message": f"File uploaded to {remote_path}"})
+                return JSONResponse(content={"success": True, "remote_path": remote_path, "message": f"File uploaded to {remote_path}"})
         except Exception as e:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
-            if "ssh" in locals():
-                ssh_manager.return_connection(ssh)
             raise e
+
 
     except Exception as e:
         logger.error(f"Error uploading file: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(str(e), status_code=500)
 
 
 async def _upload_file_chunk(
@@ -233,50 +228,48 @@ async def _upload_file_chunk(
             logger.info(f"[ChunkUpload] Merged {total_chunks} chunks in {merge_time:.2f}s")
 
             config = config_manager.load_config()
-            ssh = ssh_manager.get_connection(config)
+            with ssh_manager.optional_connection(config) as ssh:
 
-            if not ssh:
+                if not ssh:
+                    try:
+                        os.remove(merge_lock_path)
+                    except OSError:
+                        pass
+                    return JSONResponse(content={
+                        "success": False, "error": "SSH connection failed",
+                        "chunks_uploaded": len(uploaded_chunks), "total_chunks": total_chunks,
+                    }, status_code=500)
+
                 try:
-                    os.remove(merge_lock_path)
-                except OSError:
-                    pass
-                return JSONResponse(content={
-                    "success": False, "error": "SSH connection failed",
-                    "chunks_uploaded": len(uploaded_chunks), "total_chunks": total_chunks,
-                }, status_code=500)
+                    remote_filename = os.path.basename(merged_file)
+                    remote_path = f"/home/{config['ubuntu_user']}/{remote_filename}"
+                    upload_start = time.time()
 
-            try:
-                remote_filename = os.path.basename(merged_file)
-                remote_path = f"/home/{config['ubuntu_user']}/{remote_filename}"
-                upload_start = time.time()
+                    with ssh.open_sftp() as sftp:
+                        ssh_manager.optimize_sftp_performance(sftp)
+                        sftp.put(merged_file, remote_path, confirm=True)
 
-                with ssh.open_sftp() as sftp:
-                    ssh_manager.optimize_sftp_performance(sftp)
-                    sftp.put(merged_file, remote_path, confirm=True)
+                    upload_time = time.time() - upload_start
+                    file_size_mb = os.path.getsize(merged_file) / (1024 * 1024)
+                    upload_speed = file_size_mb / upload_time if upload_time > 0 else 0
+                    logger.info(f"[ChunkUpload] Uploaded {file_size_mb:.2f}MB to remote in {upload_time:.2f}s ({upload_speed:.2f} MB/s)")
 
-                upload_time = time.time() - upload_start
-                file_size_mb = os.path.getsize(merged_file) / (1024 * 1024)
-                upload_speed = file_size_mb / upload_time if upload_time > 0 else 0
-                logger.info(f"[ChunkUpload] Uploaded {file_size_mb:.2f}MB to remote in {upload_time:.2f}s ({upload_speed:.2f} MB/s)")
+                    shutil.rmtree(session_dir)
 
-                ssh_manager.return_connection(ssh)
-                shutil.rmtree(session_dir)
-
-                return JSONResponse(content={
-                    "success": True, "upload_complete": True,
-                    "remote_path": remote_path, "message": f"File uploaded to {remote_path}",
-                })
-            except Exception as e:
-                ssh_manager.return_connection(ssh)
-                try:
-                    os.remove(merge_lock_path)
-                except OSError:
-                    pass
-                logger.error(f"Error uploading merged file: {e}")
-                return JSONResponse(content={
-                    "success": False, "error": f"Upload failed: {str(e)}",
-                    "chunks_uploaded": len(uploaded_chunks), "total_chunks": total_chunks,
-                }, status_code=500)
+                    return JSONResponse(content={
+                        "success": True, "upload_complete": True,
+                        "remote_path": remote_path, "message": f"File uploaded to {remote_path}",
+                    })
+                except Exception as e:
+                    try:
+                        os.remove(merge_lock_path)
+                    except OSError:
+                        pass
+                    logger.error(f"Error uploading merged file: {e}")
+                    return JSONResponse(content={
+                        "success": False, "error": f"Upload failed: {str(e)}",
+                        "chunks_uploaded": len(uploaded_chunks), "total_chunks": total_chunks,
+                    }, status_code=500)
 
         return JSONResponse(content={
             "success": True, "chunk_index": chunk_index,
@@ -291,4 +284,4 @@ async def _upload_file_chunk(
             except OSError:
                 pass
         logger.error(f"Error uploading chunk {chunk_index}: {e}")
-        return JSONResponse(content={"success": False, "error": str(e), "chunk_index": chunk_index}, status_code=500)
+        return error_response(str(e), status_code=500, chunk_index=chunk_index)

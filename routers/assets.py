@@ -22,7 +22,6 @@ from core.devices import ssh_connection_failed_response
 from core.error_handling import handle_api_errors
 from core.settings import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, TOOLS_DATA_FILE
 from core.ssh import ssh_manager
-from core.state import global_state
 from modules.icon_fetcher import IconFetcher
 
 logger = logging.getLogger(__name__)
@@ -54,17 +53,15 @@ async def list_files(req: dict):
             # Default to user home directory
             path = f"/home/{config_manager.get_ubuntu_user(config)}"
 
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return ssh_connection_failed_response()
+        with ssh_manager.optional_connection(config) as ssh:
+            if not ssh:
+                return ssh_connection_failed_response()
 
-        try:
             list_cmd = f"ls -la '{path}' 2>/dev/null || echo 'ERROR'"
             output, error, code = ssh_manager.execute_command(ssh, list_cmd)
 
             if 'ERROR' in output or code != 0:
-                ssh_manager.return_connection(ssh)
-                return JSONResponse(content={'success': False, 'error': 'Failed to list directory'}, status_code=500)
+                return error_response('Failed to list directory', status_code=500)
 
             files = []
             for line in output.split('\n'):
@@ -90,15 +87,11 @@ async def list_files(req: dict):
 
             files.sort(key=lambda x: (x['type'] != 'directory', x['name'].lower()))
 
-            ssh_manager.return_connection(ssh)
             return JSONResponse(content={
                 'success': True,
                 'path': path,
                 'files': files
             })
-        except Exception:
-            ssh_manager.return_connection(ssh)
-            raise
     except Exception as e:
         logger.error(f"Error listing files: {e}")
         return JSONResponse(
@@ -553,7 +546,7 @@ async def browse_utility_tools(req: dict):
     try:
         subpath = req.get('path', '').strip('/')
         if '..' in Path(subpath).parts:
-            return JSONResponse(content={'success': False, 'error': '非法路径'}, status_code=400)
+            return error_response('非法路径', status_code=400)
 
         files = []
         directories = set()

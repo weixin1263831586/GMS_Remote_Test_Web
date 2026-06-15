@@ -654,5 +654,310 @@ API_DOCS_LIST = [
         ],
         "category": "system",
         "skill": "gms-rt-system-help"
+    },
+
+    # ==================== APK/源码分析（补充） ====================
+    {
+        "method": "GET",
+        "path": "/api/apk/status/{task_id}",
+        "description": "查询APK反编译任务状态（任务ID）",
+        "params": [{"name": "task_id", "type": "string", "required": True, "desc": "APK任务ID"}],
+        "category": "apk",
+        "skill": "gms-rt-apk-status"
+    },
+    {
+        "method": "GET",
+        "path": "/api/apk/tasks",
+        "description": "列出所有APK反编译任务",
+        "params": [],
+        "category": "apk",
+        "skill": "gms-rt-apk-tasks"
+    },
+    {
+        "method": "GET",
+        "path": "/api/apk/manifest/{task_id}",
+        "description": "查看APK的AndroidManifest.xml（任务ID）",
+        "params": [{"name": "task_id", "type": "string", "required": True, "desc": "APK任务ID"}],
+        "category": "apk",
+        "skill": "gms-rt-apk-manifest"
+    },
+    {
+        "method": "GET",
+        "path": "/api/apk/permissions/{task_id}",
+        "description": "查看APK声明的权限列表（任务ID）",
+        "params": [{"name": "task_id", "type": "string", "required": True, "desc": "APK任务ID"}],
+        "category": "apk",
+        "skill": "gms-rt-apk-permissions"
+    },
+    {
+        "method": "GET",
+        "path": "/api/apk/source/{task_id}",
+        "description": "查看反编译后的源码文件（任务ID，需view/path参数）",
+        "params": [
+            {"name": "task_id", "type": "string", "required": True, "desc": "APK任务ID"},
+            {"name": "path", "type": "string", "required": False, "desc": "源码相对路径"},
+            {"name": "view", "type": "boolean", "required": False, "desc": "是否返回内容"}
+        ],
+        "category": "apk",
+        "skill": "gms-rt-apk-source"
+    },
+    {
+        "method": "GET",
+        "path": "/api/apk/search/{task_id}",
+        "description": "在反编译源码中搜索符号定义（任务ID，需symbol参数）",
+        "params": [
+            {"name": "task_id", "type": "string", "required": True, "desc": "APK任务ID"},
+            {"name": "symbol", "type": "string", "required": True, "desc": "类名/方法名等符号"}
+        ],
+        "category": "apk",
+        "skill": "gms-rt-apk-search"
+    },
+    {
+        "method": "GET",
+        "path": "/api/apk/definition/{task_id}",
+        "description": "查找符号的定义位置（任务ID，需symbol参数）",
+        "params": [
+            {"name": "task_id", "type": "string", "required": True, "desc": "APK任务ID"},
+            {"name": "symbol", "type": "string", "required": True, "desc": "符号名"}
+        ],
+        "category": "apk",
+        "skill": "gms-rt-apk-definition"
+    },
+    {
+        "method": "POST",
+        "path": "/api/apk/analyze/{task_id}",
+        "description": "启动APK反编译任务（任务ID）",
+        "params": [{"name": "task_id", "type": "string", "required": True, "desc": "APK任务ID"}],
+        "category": "apk",
+        "skill": "gms-rt-apk-analyze"
+    },
+
+    # ==================== 报告（补充） ====================
+    {
+        "method": "POST",
+        "path": "/api/reports/diagnose",
+        "description": "诊断报告中的失败用例（根因分析）",
+        "params": [
+            {"name": "test_name", "type": "string", "required": True, "desc": "测试名"},
+            {"name": "error_message", "type": "string", "required": False, "desc": "错误信息"},
+            {"name": "stack_trace", "type": "string", "required": False, "desc": "堆栈"},
+            {"name": "report_name", "type": "string", "required": False, "desc": "报告时间戳"}
+        ],
+        "category": "report",
+        "skill": "gms-rt-reports-diagnose"
+    },
+    {
+        "method": "POST",
+        "path": "/api/reports/analyze-url",
+        "description": "从URL分析测试报告",
+        "params": [{"name": "url", "type": "string", "required": True, "desc": "报告URL"}],
+        "category": "report",
+        "skill": "gms-rt-reports-analyze-url"
+    },
+    {
+        "method": "POST",
+        "path": "/api/reports/extract-redmine-attachment",
+        "description": "从Redmine附件提取报告信息",
+        "params": [],
+        "category": "report",
+        "skill": "gms-rt-reports-extract-redmine"
+    },
+
+    # ==================== 知识库 ====================
+    {
+        "method": "GET",
+        "path": "/api/knowledgebase/search",
+        "description": "知识库搜索（按关键词检索）",
+        "params": [
+            {"name": "q", "type": "string", "required": True, "desc": "搜索关键词"},
+            {"name": "limit", "type": "integer", "required": False, "desc": "返回条数"}
+        ],
+        "category": "file",
+        "skill": "gms-rt-kb-search"
+    },
+    {
+        "method": "GET",
+        "path": "/api/knowledgebase/stats",
+        "description": "知识库统计信息",
+        "params": [],
+        "category": "file",
+        "skill": "gms-rt-kb-stats"
+    },
+
+    # ==================== 测试日志/套件（补充） ====================
+    {
+        "method": "GET",
+        "path": "/api/test/logs/list",
+        "description": "列出测试日志文件",
+        "params": [],
+        "category": "test",
+        "skill": "gms-rt-test-logs-list"
+    },
+    {
+        "method": "GET",
+        "path": "/api/test/logs/get",
+        "description": "读取指定测试日志内容",
+        "params": [{"name": "name", "type": "string", "required": True, "desc": "日志文件名"}],
+        "category": "test",
+        "skill": "gms-rt-test-logs-get"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/suites/files",
+        "description": "列出测试套件目录下的文件",
+        "params": [{"name": "path", "type": "string", "required": False, "desc": "套件路径"}],
+        "category": "test",
+        "skill": "gms-rt-suites-files"
+    },
+    {
+        "method": "GET",
+        "path": "/api/test/suites/archives",
+        "description": "列出测试套件归档文件",
+        "params": [],
+        "category": "test",
+        "skill": "gms-rt-suites-archives"
+    },
+    {
+        "method": "POST",
+        "path": "/api/test/suites/diagnose-target",
+        "description": "根据失败信息定位套件中的APK/JAR构件",
+        "params": [],
+        "category": "test",
+        "skill": "gms-rt-suites-diagnose-target"
+    },
+    {
+        "method": "GET",
+        "path": "/api/test/suites/download-status/{task_id}",
+        "description": "查询套件下载任务状态（任务ID）",
+        "params": [{"name": "task_id", "type": "string", "required": True, "desc": "下载任务ID"}],
+        "category": "test",
+        "skill": "gms-rt-suites-download-status"
+    },
+    {
+        "method": "GET",
+        "path": "/api/test/suites/extract-status/{task_id}",
+        "description": "查询套件解压任务状态（任务ID）",
+        "params": [{"name": "task_id", "type": "string", "required": True, "desc": "解压任务ID"}],
+        "category": "test",
+        "skill": "gms-rt-suites-extract-status"
+    },
+
+    # ==================== 通知 ====================
+    {
+        "method": "GET",
+        "path": "/api/notifications",
+        "description": "获取通知列表",
+        "params": [],
+        "category": "notification",
+        "skill": "gms-rt-notifications"
+    },
+    {
+        "method": "POST",
+        "path": "/api/notifications/mark-read",
+        "description": "标记通知为已读",
+        "params": [{"name": "id", "type": "string", "required": False, "desc": "通知ID，不传则全部已读"}],
+        "category": "notification",
+        "skill": "gms-rt-notifications-mark-read"
+    },
+    {
+        "method": "POST",
+        "path": "/api/notifications/clear",
+        "description": "清空通知",
+        "params": [],
+        "category": "notification",
+        "skill": "gms-rt-notifications-clear"
+    },
+
+    # ==================== 安全审计 ====================
+    {
+        "method": "GET",
+        "path": "/api/security-audit/logs",
+        "description": "查询安全审计/访问日志",
+        "params": [
+            {"name": "limit", "type": "integer", "required": False, "desc": "返回条数"},
+            {"name": "action_type", "type": "string", "required": False, "desc": "事件类型过滤（api/page_view/page_visit）"}
+        ],
+        "category": "audit",
+        "skill": "gms-rt-audit-logs"
+    },
+    {
+        "method": "GET",
+        "path": "/api/security-audit/detail/{event_id}",
+        "description": "查看审计事件详情（事件ID）",
+        "params": [{"name": "event_id", "type": "string", "required": True, "desc": "事件ID"}],
+        "category": "audit",
+        "skill": "gms-rt-audit-detail"
+    },
+    {
+        "method": "GET",
+        "path": "/api/security-audit/export",
+        "description": "导出安全审计日志",
+        "params": [],
+        "category": "audit",
+        "skill": "gms-rt-audit-export"
+    },
+
+    # ==================== 网址/工具/Favicon（assets 补充） ====================
+    {
+        "method": "GET",
+        "path": "/api/websites/load",
+        "description": "加载常用网址列表",
+        "params": [],
+        "category": "assets",
+        "skill": "gms-rt-websites-load"
+    },
+    {
+        "method": "GET",
+        "path": "/api/tools/list",
+        "description": "列出常用工具",
+        "params": [],
+        "category": "assets",
+        "skill": "gms-rt-tools-list"
+    },
+
+    # ==================== Tailscale ====================
+    {
+        "method": "GET",
+        "path": "/api/tailscale/status",
+        "description": "查询Tailscale VPN状态",
+        "params": [],
+        "category": "vpn",
+        "skill": "gms-rt-tailscale-status"
+    },
+
+    # ==================== 配置（补充） ====================
+    {
+        "method": "GET",
+        "path": "/api/config/ai",
+        "description": "获取AI模型配置",
+        "params": [],
+        "category": "config",
+        "skill": "gms-rt-config-ai"
+    },
+    {
+        "method": "GET",
+        "path": "/api/config/opengrok",
+        "description": "获取OpenGrok源码搜索配置",
+        "params": [],
+        "category": "config",
+        "skill": "gms-rt-config-opengrok"
+    },
+    {
+        "method": "GET",
+        "path": "/api/config/redmine",
+        "description": "获取Redmine看板配置",
+        "params": [],
+        "category": "config",
+        "skill": "gms-rt-config-redmine"
+    },
+
+    # ==================== VPN/连接（补充） ====================
+    {
+        "method": "GET",
+        "path": "/api/vpn/connections",
+        "description": "获取VPN连接列表",
+        "params": [],
+        "category": "vpn",
+        "skill": "gms-rt-vpn-connections"
     }
 ]

@@ -5,11 +5,17 @@ from typing import Any
 from fastapi.responses import JSONResponse
 
 
-def success_response(data: Any = None, message: str = "Success") -> JSONResponse:
-    """Build the standard success JSON response."""
-    content = {'success': True, 'message': message}
+def success_response(data: Any = None, message: str = "Success", **extra_fields) -> JSONResponse:
+    """Build the standard success JSON response.
+
+    message=None 时不写入 message 字段（用于需要与裸 dict 完全等价的场景）。
+    """
+    content = {'success': True}
+    if message is not None:
+        content['message'] = message
     if data is not None:
         content['data'] = data
+    content.update(extra_fields)
     return JSONResponse(content=content)
 
 

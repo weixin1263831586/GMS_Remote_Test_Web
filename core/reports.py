@@ -6,7 +6,6 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
-from core.state import global_state
 
 logger = logging.getLogger(__name__)
 

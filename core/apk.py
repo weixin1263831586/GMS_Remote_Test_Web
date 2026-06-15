@@ -10,12 +10,11 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-import xml.etree.ElementTree as ET
 
 from core.api_response import ApiResponse
-from core.settings import APK_MAX_FILE_SIZE, APK_MAX_TASKS, APK_UPLOAD_DIR, JADX_PATH, JADX_TIMEOUT
+from core.settings import APK_MAX_TASKS, APK_UPLOAD_DIR, JADX_PATH, JADX_TIMEOUT
 from core.state import global_state
-from core.upload_utils import safe_upload_target_path, save_upload_to_path, merge_files_to_path
+from core.upload_utils import safe_upload_target_path
 
 logger = logging.getLogger(__name__)
 

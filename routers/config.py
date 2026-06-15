@@ -16,7 +16,6 @@ from core.clients import (
 )
 from core.config import config_manager
 from core.devices import get_or_create_user_state
-from core.error_handling import handle_api_errors
 from core.test_suite_utils import get_effective_local_server
 
 logger = logging.getLogger(__name__)
@@ -214,9 +213,9 @@ async def update_config(req: dict):
     # 检查是否有不允许修改的字段
     invalid_fields = set(req.keys()) - runtime_keys
     if invalid_fields:
-        raise HTTPException(
+        return error_response(
+            f"不允许修改以下字段: {', '.join(invalid_fields)}. 可修改的字段: {', '.join(runtime_keys)}",
             status_code=400,
-            detail=f"不允许修改以下字段: {', '.join(invalid_fields)}. 可修改的字段: {', '.join(runtime_keys)}"
         )
 
     # 合并现有配置和请求配置（单次遍历）
@@ -230,7 +229,7 @@ async def update_config(req: dict):
     if config_manager.save_runtime_config(runtime_updates):
         return success_response()
     else:
-        raise HTTPException(status_code=500, detail="保存配置失败")
+        return error_response("保存配置失败", status_code=500)
 
 
 @router.get("/api/sidebar-order")
@@ -252,4 +251,4 @@ async def save_sidebar_order(req: dict = Body(default={})):
 
     if config_manager.save_runtime_config(existing_runtime):
         return success_response({'order': order})
-    raise HTTPException(status_code=500, detail="保存侧边栏排序失败")
+    return error_response("保存侧边栏排序失败", status_code=500)

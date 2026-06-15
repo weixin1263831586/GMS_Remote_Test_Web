@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from core.config import DEFAULT_WIFI_SSID, DEFAULT_WIFI_PASSWORD
+
 
 class ClientInfoRequest(BaseModel):
     username: Optional[str] = None
@@ -33,8 +35,10 @@ class DeviceActionRequest(BaseModel):
 
 
 class WifiConnectRequest(DeviceActionRequest):
-    ssid: str = "AndroidWifi"
-    password: str = "1234567890"
+    # 默认值仅用于裸构造（如直接 WifiConnectRequest(devices=...)）。
+    # 业务代码应优先经 config_manager.get_wifi_defaults() 获取可覆盖的默认值。
+    ssid: str = DEFAULT_WIFI_SSID
+    password: str = DEFAULT_WIFI_PASSWORD
 
 
 class VNCStartRequest(BaseModel):

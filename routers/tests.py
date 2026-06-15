@@ -26,7 +26,6 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from core.config import config_manager
 from core.ssh import ssh_manager
 from core.devices import (
-    SSHConnection,
     get_or_create_user_state,
     update_user_state_field,
     release_device_locks,
@@ -46,12 +45,6 @@ from core.test_suite_utils import (
     get_effective_local_server,
     is_config_host_local,
     list_local_test_suites,
-)
-from core.upload_utils import (
-    extract_report_name_from_upload,
-    merge_files_to_path,
-    safe_upload_target_path,
-    save_upload_to_path,
 )
 from core.archive_utils import (
     derive_suite_dir_name_from_archive,
@@ -79,7 +72,6 @@ from core.clients import get_client_id_from_request, parse_client_id
 from core.notifications import store_notification
 from core.settings import (
     APK_MAX_FILE_SIZE,
-    APK_MAX_SOURCE_FILE_SIZE,
     APK_UPLOAD_DIR,
     MAX_LOG_ENTRIES,
     PROJECT_ROOT,
@@ -270,7 +262,6 @@ async def _run_test_background(
     locked_devices: List[str],
 ):
     """Run test in background."""
-    from core.tradefed import find_tradefed_binary, execute_tradefed_command
 
     ssh = None
 
@@ -308,233 +299,233 @@ async def _run_test_background(
 
         await log_callback(f"Process group ID: {process_group_id}", "info")
 
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            await log_callback("SSH connection failed", "error")
-            update_user_state_field(client_id, {"running": False})
-            await release_device_locks(client_id, locked_devices)
-            return
+        with ssh_manager.optional_connection(config) as ssh:
+            if not ssh:
+                await log_callback("SSH connection failed", "error")
+                update_user_state_field(client_id, {"running": False})
+                await release_device_locks(client_id, locked_devices)
+                return
 
-        await log_callback("SSH connection successful", "success")
+            await log_callback("SSH connection successful", "success")
 
-        local_script = os.path.realpath(
-            os.path.join(PROJECT_ROOT, "scripts", "run_GMS_Test_Auto.sh")
-        )
+            local_script = os.path.realpath(
+                os.path.join(PROJECT_ROOT, "scripts", "run_GMS_Test_Auto.sh")
+            )
 
-        suites_path = config.get("suites_path") or get_default_suites_path(config)
-        remote_script = os.path.join(suites_path, "run_GMS_Test_Auto.sh")
+            suites_path = config.get("suites_path") or get_default_suites_path(config)
+            remote_script = os.path.join(suites_path, "run_GMS_Test_Auto.sh")
 
-        try:
-            script_size = os.path.getsize(local_script)
-            size_kb = script_size / 1024
-            await log_callback(f"Uploading: run_GMS_Test_Auto.sh -> {remote_script} ({size_kb:.2f}KB)", "info")
-            with ssh.open_sftp() as sftp:
-                sftp.put(local_script, remote_script)
-            stdin, stdout, stderr = ssh.exec_command(f"chmod +x '{remote_script}'")
-            stdout.read()
-            await log_callback(f"Upload complete ({size_kb:.2f}KB)", "success")
-        except FileNotFoundError:
-            await log_callback("Local script not found, using remote script", "warning")
-        except Exception as e:
-            await log_callback(f"Script upload failed: {str(e)}", "warning")
+            try:
+                script_size = os.path.getsize(local_script)
+                size_kb = script_size / 1024
+                await log_callback(f"Uploading: run_GMS_Test_Auto.sh -> {remote_script} ({size_kb:.2f}KB)", "info")
+                with ssh.open_sftp() as sftp:
+                    sftp.put(local_script, remote_script)
+                stdin, stdout, stderr = ssh.exec_command(f"chmod +x '{remote_script}'")
+                stdout.read()
+                await log_callback(f"Upload complete ({size_kb:.2f}KB)", "success")
+            except FileNotFoundError:
+                await log_callback("Local script not found, using remote script", "warning")
+            except Exception as e:
+                await log_callback(f"Script upload failed: {str(e)}", "warning")
 
-        test_type = test_params.get("test_type", "")
-        test_module = test_params.get("test_module", "")
-        test_case = test_params.get("test_case", "")
-        retry_dir = test_params.get("retry_dir", "")
-        test_suite = test_params.get("test_suite", "")
+            test_type = test_params.get("test_type", "")
+            test_module = test_params.get("test_module", "")
+            test_case = test_params.get("test_case", "")
+            retry_dir = test_params.get("retry_dir", "")
+            test_suite = test_params.get("test_suite", "")
 
-        test_type_lower = test_type.lower() if test_type else ""
+            test_type_lower = test_type.lower() if test_type else ""
 
-        if test_suite and "testcases" in test_suite:
-            test_suite_tools = test_suite.replace("/testcases", "/tools")
-        else:
-            test_suite_tools = test_suite
-
-        if not test_type_lower and test_suite_tools:
-            test_type_lower = detect_test_type_from_suite_path(test_suite_tools)
-            if test_type_lower:
-                await log_callback(f"Detected test type from suite path: {test_type_lower}", "info")
-
-        local_server = get_effective_local_server(client_id, test_params.get("local_server", ""))
-        devices = test_params.get("devices", [])
-
-        if not retry_dir and not test_suite_tools:
-            await log_callback("Missing test suite path", "error")
-            await log_callback("Please use --test-suite parameter to specify test suite path", "info")
-            update_user_state_field(client_id, {"running": False})
-            await release_device_locks(client_id, locked_devices)
-            return
-
-        suites_path = config.get("suites_path") or get_default_suites_path(config)
-        remote_script = os.path.join(suites_path, "run_GMS_Test_Auto.sh")
-
-        cmd_parts = [remote_script]
-
-        if retry_dir:
-            timestamp = os.path.basename(retry_dir.strip().rstrip("/"))
+            if test_suite and "testcases" in test_suite:
+                test_suite_tools = test_suite.replace("/testcases", "/tools")
+            else:
+                test_suite_tools = test_suite
 
             if not test_type_lower and test_suite_tools:
-                await log_callback("Detecting test type from test_suite path...", "info")
                 test_type_lower = detect_test_type_from_suite_path(test_suite_tools)
                 if test_type_lower:
-                    await log_callback(f"Detected test type: {test_type_lower}", "info")
+                    await log_callback(f"Detected test type from suite path: {test_type_lower}", "info")
 
-            if not test_type_lower:
-                await log_callback(f"Looking up report {timestamp} test type from DB...", "info")
-                try:
-                    report = test_report_db.get_report_by_timestamp(timestamp)
-                    if report and report.get("test_type"):
-                        test_type_lower = report["test_type"].lower()
-                        await log_callback(f"Detected test type from report: {test_type_lower}", "info")
-                    else:
-                        await log_callback(f"Report {timestamp} not found in DB, trying directory name", "warning")
-                except Exception as e:
-                    await log_callback(f"DB read failed: {e}, trying directory name", "warning")
+            local_server = get_effective_local_server(client_id, test_params.get("local_server", ""))
+            devices = test_params.get("devices", [])
 
-            if not test_type_lower and retry_dir:
-                await log_callback("Detecting test type from directory name...", "info")
-                test_type_lower = detect_test_type_from_dir_path(retry_dir)
-                if test_type_lower:
-                    await log_callback(f"Detected {test_type_lower.upper()} test from path", "info")
+            if not retry_dir and not test_suite_tools:
+                await log_callback("Missing test suite path", "error")
+                await log_callback("Please use --test-suite parameter to specify test suite path", "info")
+                update_user_state_field(client_id, {"running": False})
+                await release_device_locks(client_id, locked_devices)
+                return
 
-            if not test_type_lower:
-                test_type_lower = ""
-                await log_callback("Test type not detected, will be auto-detected by script", "warning")
+            suites_path = config.get("suites_path") or get_default_suites_path(config)
+            remote_script = os.path.join(suites_path, "run_GMS_Test_Auto.sh")
 
-            cmd_parts.extend([test_type_lower, "retry", timestamp])
-            await log_callback(f"Retry mode: test_type={test_type_lower or '(auto)'}, timestamp={timestamp}", "info")
+            cmd_parts = [remote_script]
 
-            if not test_suite_tools and test_type_lower:
-                await log_callback(f"Auto-searching for {test_type_lower.upper()} test suite...", "info")
-                try:
-                    suite_pattern = os.path.join(suites_path, f"android-{test_type_lower}-*")
-                    suite_dirs = [d for d in await asyncio.to_thread(glob.glob, suite_pattern) if os.path.isdir(d)]
+            if retry_dir:
+                timestamp = os.path.basename(retry_dir.strip().rstrip("/"))
 
-                    if suite_dirs:
-                        suite_dir = max(suite_dirs, key=os.path.getmtime)
-                        await log_callback(f"Found test suite directory: {suite_dir}", "info")
-                        possible_tools_dirs = [
-                            os.path.join(suite_dir, f"android-{test_type_lower}", "tools"),
-                            os.path.join(suite_dir, "tools"),
-                            suite_dir,
-                        ]
+                if not test_type_lower and test_suite_tools:
+                    await log_callback("Detecting test type from test_suite path...", "info")
+                    test_type_lower = detect_test_type_from_suite_path(test_suite_tools)
+                    if test_type_lower:
+                        await log_callback(f"Detected test type: {test_type_lower}", "info")
 
-                        for tools_dir in possible_tools_dirs:
-                            if os.path.isdir(tools_dir):
-                                tradefed_path = os.path.join(tools_dir, f"{test_type_lower}-tradefed")
-                                if os.path.exists(tradefed_path):
-                                    test_suite_tools = tools_dir
-                                    await log_callback(f"Found tools directory: {test_suite_tools}", "info")
-                                    break
-                                has_tradefed = any(
-                                    os.path.exists(os.path.join(tools_dir, tf))
-                                    for tf in TRADEFED_BINARY_LIST
-                                )
-                                if has_tradefed or os.path.exists(os.path.join(tools_dir, "test.xml")):
-                                    test_suite_tools = tools_dir
-                                    await log_callback(f"Found tools directory: {test_suite_tools}", "info")
-                                    break
+                if not test_type_lower:
+                    await log_callback(f"Looking up report {timestamp} test type from DB...", "info")
+                    try:
+                        report = test_report_db.get_report_by_timestamp(timestamp)
+                        if report and report.get("test_type"):
+                            test_type_lower = report["test_type"].lower()
+                            await log_callback(f"Detected test type from report: {test_type_lower}", "info")
+                        else:
+                            await log_callback(f"Report {timestamp} not found in DB, trying directory name", "warning")
+                    except Exception as e:
+                        await log_callback(f"DB read failed: {e}, trying directory name", "warning")
 
-                        if not test_suite_tools:
-                            await log_callback(f"Valid tools directory not found, tried: {possible_tools_dirs}", "warning")
-                    else:
-                        await log_callback(f"{test_type_lower.upper()} test suite not found", "warning")
-                except Exception as e:
-                    await log_callback(f"Test suite search failed: {e}", "error")
-        else:
-            cmd_parts.append(test_type_lower)
-            if test_module:
-                cmd_parts.append(test_module)
-            if test_case:
-                cmd_parts.append(test_case)
+                if not test_type_lower and retry_dir:
+                    await log_callback("Detecting test type from directory name...", "info")
+                    test_type_lower = detect_test_type_from_dir_path(retry_dir)
+                    if test_type_lower:
+                        await log_callback(f"Detected {test_type_lower.upper()} test from path", "info")
 
-        if devices:
-            device_args_list = []
-            if len(devices) > 1:
-                device_args_list.extend(["--shard-count", str(len(devices))])
-            for device in devices:
-                device_args_list.extend(["-s", device])
+                if not test_type_lower:
+                    test_type_lower = ""
+                    await log_callback("Test type not detected, will be auto-detected by script", "warning")
 
-            device_args_str = " ".join(device_args_list)
-            cmd_parts.extend(["--device-args", device_args_str])
+                cmd_parts.extend([test_type_lower, "retry", timestamp])
+                await log_callback(f"Retry mode: test_type={test_type_lower or '(auto)'}, timestamp={timestamp}", "info")
 
-        if test_suite_tools:
-            cmd_parts.extend(["--test-suite", test_suite_tools])
+                if not test_suite_tools and test_type_lower:
+                    await log_callback(f"Auto-searching for {test_type_lower.upper()} test suite...", "info")
+                    try:
+                        suite_pattern = os.path.join(suites_path, f"android-{test_type_lower}-*")
+                        suite_dirs = [d for d in await asyncio.to_thread(glob.glob, suite_pattern) if os.path.isdir(d)]
 
-        if local_server:
-            cmd_parts.extend(["--local-server", local_server])
-        else:
-            await log_callback("local_server is empty, test may fail", "warning")
+                        if suite_dirs:
+                            suite_dir = max(suite_dirs, key=os.path.getmtime)
+                            await log_callback(f"Found test suite directory: {suite_dir}", "info")
+                            possible_tools_dirs = [
+                                os.path.join(suite_dir, f"android-{test_type_lower}", "tools"),
+                                os.path.join(suite_dir, "tools"),
+                                suite_dir,
+                            ]
 
-        if process_group_id:
-            cmd_parts.extend(["--pgid", process_group_id])
+                            for tools_dir in possible_tools_dirs:
+                                if os.path.isdir(tools_dir):
+                                    tradefed_path = os.path.join(tools_dir, f"{test_type_lower}-tradefed")
+                                    if os.path.exists(tradefed_path):
+                                        test_suite_tools = tools_dir
+                                        await log_callback(f"Found tools directory: {test_suite_tools}", "info")
+                                        break
+                                    has_tradefed = any(
+                                        os.path.exists(os.path.join(tools_dir, tf))
+                                        for tf in TRADEFED_BINARY_LIST
+                                    )
+                                    if has_tradefed or os.path.exists(os.path.join(tools_dir, "test.xml")):
+                                        test_suite_tools = tools_dir
+                                        await log_callback(f"Found tools directory: {test_suite_tools}", "info")
+                                        break
 
-        command = " ".join(shlex.quote(part) for part in cmd_parts)
-        command_full = f"cd {os.path.dirname(remote_script)} && {command}"
+                            if not test_suite_tools:
+                                await log_callback(f"Valid tools directory not found, tried: {possible_tools_dirs}", "warning")
+                        else:
+                            await log_callback(f"{test_type_lower.upper()} test suite not found", "warning")
+                    except Exception as e:
+                        await log_callback(f"Test suite search failed: {e}", "error")
+            else:
+                cmd_parts.append(test_type_lower)
+                if test_module:
+                    cmd_parts.append(test_module)
+                if test_case:
+                    cmd_parts.append(test_case)
 
-        await log_callback(f"Executing command: {command}", "info")
+            if devices:
+                device_args_list = []
+                if len(devices) > 1:
+                    device_args_list.extend(["--shard-count", str(len(devices))])
+                for device in devices:
+                    device_args_list.extend(["-s", device])
 
-        stdin, stdout, stderr = ssh.exec_command(command_full, get_pty=True)
+                device_args_str = " ".join(device_args_list)
+                cmd_parts.extend(["--device-args", device_args_str])
 
-        while not stdout.channel.exit_status_ready():
-            user_state = get_or_create_user_state(client_id)
-            if not user_state.get("running", False):
-                await log_callback("Test stopped by user", "warning")
-                try:
-                    ssh.exec_command("pkill -f 'run_GMS_Test_Auto.sh'")
-                except Exception:
-                    pass
-                break
+            if test_suite_tools:
+                cmd_parts.extend(["--test-suite", test_suite_tools])
+
+            if local_server:
+                cmd_parts.extend(["--local-server", local_server])
+            else:
+                await log_callback("local_server is empty, test may fail", "warning")
+
+            if process_group_id:
+                cmd_parts.extend(["--pgid", process_group_id])
+
+            command = " ".join(shlex.quote(part) for part in cmd_parts)
+            command_full = f"cd {os.path.dirname(remote_script)} && {command}"
+
+            await log_callback(f"Executing command: {command}", "info")
+
+            stdin, stdout, stderr = ssh.exec_command(command_full, get_pty=True)
+
+            while not stdout.channel.exit_status_ready():
+                user_state = get_or_create_user_state(client_id)
+                if not user_state.get("running", False):
+                    await log_callback("Test stopped by user", "warning")
+                    try:
+                        ssh.exec_command("pkill -f 'run_GMS_Test_Auto.sh'")
+                    except Exception:
+                        pass
+                    break
+
+                if stdout.channel.recv_ready():
+                    try:
+                        data = stdout.channel.recv(65536).decode("utf-8", errors="replace")
+                        if data:
+                            for line in data.split("\n"):
+                                if line.strip():
+                                    await log_callback(line.strip(), "info")
+                    except Exception as e:
+                        logger.error(f"Error reading stdout: {e}")
+
+                if stderr.channel.recv_stderr_ready():
+                    try:
+                        error_data = stderr.channel.recv_stderr(65536).decode("utf-8", errors="replace")
+                        if error_data:
+                            for line in error_data.split("\n"):
+                                if line.strip():
+                                    await log_callback(line.strip(), "error")
+                    except Exception as e:
+                        logger.error(f"Error reading stderr: {e}")
+
+                await asyncio.sleep(0.05)
+
+            exit_code = stdout.channel.recv_exit_status()
 
             if stdout.channel.recv_ready():
                 try:
-                    data = stdout.channel.recv(65536).decode("utf-8", errors="replace")
-                    if data:
-                        for line in data.split("\n"):
+                    remaining_data = stdout.channel.recv(65536).decode("utf-8", errors="replace")
+                    if remaining_data:
+                        for line in remaining_data.split("\n"):
                             if line.strip():
                                 await log_callback(line.strip(), "info")
                 except Exception as e:
-                    logger.error(f"Error reading stdout: {e}")
+                    logger.error(f"Error reading remaining stdout: {e}")
 
             if stderr.channel.recv_stderr_ready():
                 try:
-                    error_data = stderr.channel.recv_stderr(65536).decode("utf-8", errors="replace")
-                    if error_data:
-                        for line in error_data.split("\n"):
+                    remaining_error = stderr.channel.recv_stderr(65536).decode("utf-8", errors="replace")
+                    if remaining_error:
+                        for line in remaining_error.split("\n"):
                             if line.strip():
                                 await log_callback(line.strip(), "error")
                 except Exception as e:
-                    logger.error(f"Error reading stderr: {e}")
+                    logger.error(f"Error reading remaining stderr: {e}")
 
-            await asyncio.sleep(0.05)
-
-        exit_code = stdout.channel.recv_exit_status()
-
-        if stdout.channel.recv_ready():
-            try:
-                remaining_data = stdout.channel.recv(65536).decode("utf-8", errors="replace")
-                if remaining_data:
-                    for line in remaining_data.split("\n"):
-                        if line.strip():
-                            await log_callback(line.strip(), "info")
-            except Exception as e:
-                logger.error(f"Error reading remaining stdout: {e}")
-
-        if stderr.channel.recv_stderr_ready():
-            try:
-                remaining_error = stderr.channel.recv_stderr(65536).decode("utf-8", errors="replace")
-                if remaining_error:
-                    for line in remaining_error.split("\n"):
-                        if line.strip():
-                            await log_callback(line.strip(), "error")
-            except Exception as e:
-                logger.error(f"Error reading remaining stderr: {e}")
-
-        if exit_code == 0:
-            await log_callback(f"Test completed successfully (exit code: {exit_code})", "success")
-        else:
-            await log_callback(f"Test failed with exit code: {exit_code}", "error")
+            if exit_code == 0:
+                await log_callback(f"Test completed successfully (exit code: {exit_code})", "success")
+            else:
+                await log_callback(f"Test failed with exit code: {exit_code}", "error")
 
     except Exception as e:
         logger.error(f"Error in _run_test_background: {e}")
@@ -549,9 +540,6 @@ async def _run_test_background(
                 await log_callback(f"Test report recorded: {report_timestamp}", "success")
         except Exception as e:
             logger.error(f"Failed to save test report: {e}")
-
-        if ssh:
-            ssh_manager.return_connection(ssh)
 
         await release_device_locks(client_id, locked_devices)
         logger.info(f"[Device Lock] Test completed, device unlock broadcast: {locked_devices}")
@@ -611,55 +599,51 @@ async def stop_test(
     update_user_state_field(client_id, {"devices": []})
 
     config = config_manager.load_config()
-    ssh = ssh_manager.get_connection(config)
-    if not ssh:
-        return error_response("SSH connection failed", 500)
+    with ssh_manager.optional_connection(config) as ssh:
+        if not ssh:
+            return error_response("SSH connection failed", 500)
 
-    try:
-        killed_count = 0
+        try:
+            killed_count = 0
 
-        if process_group_id:
-            find_cmd = f"ps eww -e | grep 'GMS_TEST_PGID={process_group_id}' | grep -v grep | awk '{{print $1}}'"
-            user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminating test process group: {process_group_id}...")
+            if process_group_id:
+                find_cmd = f"ps eww -e | grep 'GMS_TEST_PGID={process_group_id}' | grep -v grep | awk '{{print $1}}'"
+                user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminating test process group: {process_group_id}...")
 
-            output, error, code = ssh_manager.execute_command(ssh, find_cmd, timeout=10)
-            if output.strip():
-                pids = output.strip().split("\n")
-                for pid in pids:
-                    if pid.strip():
-                        ssh_manager.execute_command(ssh, f"kill -9 {pid.strip()} 2>/dev/null")
-                        ssh_manager.execute_command(ssh, f"pkill -9 -P {pid.strip()} 2>/dev/null")
-                        killed_count += 1
+                output, error, code = ssh_manager.execute_command(ssh, find_cmd, timeout=10)
+                if output.strip():
+                    pids = output.strip().split("\n")
+                    for pid in pids:
+                        if pid.strip():
+                            ssh_manager.execute_command(ssh, f"kill -9 {pid.strip()} 2>/dev/null")
+                            ssh_manager.execute_command(ssh, f"pkill -9 -P {pid.strip()} 2>/dev/null")
+                            killed_count += 1
 
-                await asyncio.sleep(1)
-                user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminated {killed_count} test processes")
-                ssh_manager.return_connection(ssh)
-                return success_response(message="Test stopped")
+                    await asyncio.sleep(1)
+                    user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminated {killed_count} test processes")
+                    return success_response(message="Test stopped")
 
-            fallback_cmd = f"ps aux | grep -- '--pgid {process_group_id}' | grep -v grep | awk '{{print $2}}'"
-            output2, error2, code2 = ssh_manager.execute_command(ssh, fallback_cmd, timeout=10)
-            if output2.strip():
-                pids = output2.strip().split("\n")
-                for pid in pids:
-                    if pid.strip():
-                        ssh_manager.execute_command(ssh, f"kill -9 {pid.strip()} 2>/dev/null")
-                        ssh_manager.execute_command(ssh, f"pkill -9 -P {pid.strip()} 2>/dev/null")
-                        killed_count += 1
+                fallback_cmd = f"ps aux | grep -- '--pgid {process_group_id}' | grep -v grep | awk '{{print $2}}'"
+                output2, error2, code2 = ssh_manager.execute_command(ssh, fallback_cmd, timeout=10)
+                if output2.strip():
+                    pids = output2.strip().split("\n")
+                    for pid in pids:
+                        if pid.strip():
+                            ssh_manager.execute_command(ssh, f"kill -9 {pid.strip()} 2>/dev/null")
+                            ssh_manager.execute_command(ssh, f"pkill -9 -P {pid.strip()} 2>/dev/null")
+                            killed_count += 1
 
-                await asyncio.sleep(1)
-                user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminated {killed_count} test processes (command match)")
-                ssh_manager.return_connection(ssh)
-                return success_response(message="Test stopped")
+                    await asyncio.sleep(1)
+                    user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminated {killed_count} test processes (command match)")
+                    return success_response(message="Test stopped")
 
-        user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] No test process found (may have already stopped or manual test)")
-        ssh_manager.return_connection(ssh)
-        return success_response(message="Test stopped (no running test process found)")
+            user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] No test process found (may have already stopped or manual test)")
+            return success_response(message="Test stopped (no running test process found)")
 
-    except Exception as e:
-        ssh_manager.return_connection(ssh)
-        user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Error stopping test: {str(e)}")
-        logger.error(f"Error stopping test: {e}")
-        return error_response(str(e), 500)
+        except Exception as e:
+            user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Error stopping test: {str(e)}")
+            logger.error(f"Error stopping test: {e}")
+            return error_response(str(e), 500)
 
 
 # ==================== Clean Logs ====================
@@ -676,7 +660,7 @@ async def clean_test_logs(request: Request):
         return success_response(message="Logs cleared")
     except Exception as e:
         logger.error(f"Error cleaning logs: {e}")
-        raise HTTPException(status_code=500, detail=f"{str(e)}")
+        return error_response(f"{str(e)}", status_code=500)
 
 
 # ==================== Get Logs ====================
@@ -700,16 +684,14 @@ async def get_test_logs(request: Request):
             log_file = user_state.get("log_file")
 
         if not log_file or not os.path.exists(log_file):
-            raise HTTPException(status_code=404, detail="No log file available")
+            return error_response("No log file available", status_code=404)
 
         filename = os.path.basename(log_file)
         return FileResponse(log_file, media_type="text/plain", filename=filename)
 
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error getting test logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(str(e), status_code=500)
 
 
 # ==================== Batch Download Logs ====================
@@ -720,7 +702,7 @@ async def download_test_logs(req: dict):
     try:
         file_paths = req.get("files", [])
         if not file_paths:
-            raise HTTPException(status_code=400, detail="No files selected")
+            return error_response("No files selected", status_code=400)
 
         result = test_logs_manager.download_logs(file_paths)
         if result["success"]:
@@ -730,12 +712,10 @@ async def download_test_logs(req: dict):
                 filename=f"logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
             )
         else:
-            raise HTTPException(status_code=500, detail=result["error"])
-    except HTTPException:
-        raise
+            return error_response(result["error"], status_code=500)
     except Exception as e:
         logger.error(f"Error downloading logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(str(e), status_code=500)
 
 
 # ==================== Save Log ====================
@@ -748,7 +728,7 @@ async def save_current_log(req: dict):
     test_type = req.get("test_type", "").strip()
 
     if not log_content:
-        raise HTTPException(status_code=400, detail="No log content provided")
+        return error_response("No log content provided", status_code=400)
 
     try:
         logs_dir = os.path.join(PROJECT_ROOT, "logs")
@@ -788,24 +768,19 @@ async def save_current_log(req: dict):
                 "message": f"Log saved: {log_filename}",
             }
         )
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error saving log: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(str(e), status_code=500)
 
 
 # ==================== List Logs ====================
 
 @router.get("/api/test/logs/list")
+@handle_api_errors
 async def list_test_logs():
     """List test logs."""
-    try:
-        result = test_logs_manager.list_log_files()
-        return JSONResponse(content=result)
-    except Exception as e:
-        logger.error(f"Error listing logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    result = test_logs_manager.list_log_files()
+    return JSONResponse(content=result)
 
 
 # ==================== Suite helpers ====================
@@ -816,11 +791,10 @@ def _get_available_test_suites(config: Dict[str, Any], base_path: Optional[str] 
     if is_config_host_local(config):
         return list_local_test_suites(base_path)
 
-    ssh = ssh_manager.get_connection(config)
-    if not ssh:
-        raise RuntimeError("SSH connection failed")
+    with ssh_manager.optional_connection(config) as ssh:
+        if not ssh:
+            raise RuntimeError("SSH connection failed")
 
-    try:
         find_cmd = f"find {shlex.quote(base_path)} -maxdepth 5 -type f -executable -name '*-tradefed' 2>/dev/null | sort"
         output, _, _ = ssh_manager.execute_command(ssh, find_cmd, timeout=30)
         suites = []
@@ -830,8 +804,6 @@ def _get_available_test_suites(config: Dict[str, Any], base_path: Optional[str] 
                 if suite:
                     suites.append(suite)
         return suites
-    finally:
-        ssh_manager.return_connection(ssh)
 
 
 def _normalize_suite_match_text(text: str) -> str:
@@ -1191,19 +1163,16 @@ def _resolve_suite_diagnosis_target(config: Dict[str, Any], *, test_type: str = 
 # ==================== List Suites ====================
 
 @router.get("/api/test/suites")
+@handle_api_errors
 async def list_suites(base_path: str = None):
     """List all available test suites."""
-    try:
-        config = config_manager.load_config()
-        base_path = base_path or config.get("suites_path") or get_default_suites_path(config)
-        suites = _get_available_test_suites(config, base_path)
-        return JSONResponse(content={
-            "success": True, "suites": suites, "count": len(suites),
-            "base_path": base_path, "source": "local" if is_config_host_local(config) else "ssh",
-        })
-    except Exception as e:
-        logger.error(f"Error listing suites: {e}")
-        return error_response(str(e), 500)
+    config = config_manager.load_config()
+    base_path = base_path or config.get("suites_path") or get_default_suites_path(config)
+    suites = _get_available_test_suites(config, base_path)
+    return JSONResponse(content={
+        "success": True, "suites": suites, "count": len(suites),
+        "base_path": base_path, "source": "local" if is_config_host_local(config) else "ssh",
+    })
 
 
 # ==================== Diagnose Target ====================
@@ -1322,17 +1291,14 @@ async def list_suite_files(suite_path: str = Query(...), path: str = Query("")):
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)
 
-    ssh = ssh_manager.get_connection(config)
-    if not ssh:
-        return ssh_connection_failed_response()
+    with ssh_manager.optional_connection(config) as ssh:
+        if not ssh:
+            return ssh_connection_failed_response()
 
-    try:
         payload = _run_suite_file_script(ssh, SUITE_FILE_LIST_SCRIPT, suite_root, remote_path)
         if not payload.get("success"):
             return ApiResponse.error(payload.get("error", "Directory read failed"), status_code=400)
         return ApiResponse.success({"suite_path": suite_path, "suite_root": suite_root, "path": payload.get("path", rel_path), "items": payload.get("items", [])})
-    finally:
-        ssh_manager.return_connection(ssh)
 
 
 @router.get("/api/test/suites/download")
@@ -1661,13 +1627,13 @@ async def add_local_test_suite(req: TestSuiteAddLocalRequest):
         if not os.path.isdir(req.path):
             return error_response(f"Not a directory: {req.path}", 400)
     else:
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return ssh_connection_failed_response()
-        check_cmd = f"[ -d '{req.path}' ] && echo 'exists' || echo 'not_exists'"
-        output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=10)
-        if output.strip() != "exists":
-            return error_response(f"Path not found: {req.path}", 404)
+        with ssh_manager.optional_connection(config) as ssh:
+            if not ssh:
+                return ssh_connection_failed_response()
+            check_cmd = f"[ -d '{req.path}' ] && echo 'exists' || echo 'not_exists'"
+            output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=10)
+            if output.strip() != "exists":
+                return error_response(f"Path not found: {req.path}", 404)
 
     return JSONResponse(content={"success": True, "message": f"Added local path: {os.path.basename(req.path.rstrip('/'))}", "path": req.path})
 
@@ -1710,7 +1676,7 @@ async def list_tradefed_results(
             ssh_manager.return_connection(ssh)
 
             if code != 0:
-                return JSONResponse(content={"success": False, "error": error or f"Command failed with exit code: {code}", "raw_output": output}, status_code=500)
+                return error_response(error or f"Command failed with exit code: {code}", status_code=500, raw_output=output)
 
             results = parse_tradefed_list_results(output)
             return JSONResponse(content={"success": True, "results": results, "count": len(results), "raw_output": output, "cached": False})
@@ -1761,10 +1727,9 @@ async def download_test_suite_from_url(req: TestSuiteDownloadRequest):
         task.add_done_callback(global_state.background_tasks.discard)
         return JSONResponse(content={"success": True, "message": f"Download started: {filename}", "task_id": task_id, "archive_path": archive_path, "file_size": 0, "download_method": "local_async"})
     else:
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return ssh_connection_failed_response()
-        try:
+        with ssh_manager.optional_connection(config) as ssh:
+            if not ssh:
+                return ssh_connection_failed_response()
             cmd = f"curl -L -o '{archive_path}' '{req.url}' 2>&1"
             output, exit_code, _ = ssh_manager.execute_command(ssh, cmd, timeout=600)
             if exit_code != 0:
@@ -1773,8 +1738,6 @@ async def download_test_suite_from_url(req: TestSuiteDownloadRequest):
             size_output, _, _ = ssh_manager.execute_command(ssh, size_cmd, timeout=10)
             file_size = int(size_output.strip())
             return JSONResponse(content={"success": True, "message": f"Download complete: {filename}", "archive_path": archive_path, "file_size": file_size, "download_method": "ssh"})
-        finally:
-            ssh_manager.return_connection(ssh)
 
 
 @router.get("/api/test/suites/download-status/{task_id}")
@@ -1803,10 +1766,9 @@ async def list_test_suite_archives():
                     archives.append({"name": name, "path": path, "size": stat.st_size, "mtime": stat.st_mtime, "default_dir_name": derive_suite_dir_name_from_archive(path)})
         return JSONResponse(content={"success": True, "archives": archives, "base_path": base_path})
 
-    ssh = ssh_manager.get_connection(config)
-    if not ssh:
-        return ssh_connection_failed_response()
-    try:
+    with ssh_manager.optional_connection(config) as ssh:
+        if not ssh:
+            return ssh_connection_failed_response()
         find_cmd = f"find {shlex.quote(base_path)} -maxdepth 1 -type f \\( -name '*.zip' -o -name '*.tar.gz' -o -name '*.tgz' -o -name '*.tar.bz2' -o -name '*.tar' \\) -printf '%T@\\t%s\\t%f\\t%p\\n' 2>/dev/null | sort -nr"
         output, _, _ = ssh_manager.execute_command(ssh, find_cmd, timeout=20)
         archives = []
@@ -1816,8 +1778,6 @@ async def list_test_suite_archives():
                 mtime, size, name, path = parts
                 archives.append({"name": name, "path": path, "size": int(float(size)) if size else 0, "mtime": float(mtime) if mtime else 0, "default_dir_name": derive_suite_dir_name_from_archive(path)})
         return JSONResponse(content={"success": True, "archives": archives, "base_path": base_path})
-    finally:
-        ssh_manager.return_connection(ssh)
 
 
 @router.post("/api/test/suites/extract-start")
@@ -1888,10 +1848,9 @@ async def extract_test_suite_archive(req: TestSuiteExtractRequest):
         except Exception as e:
             return error_response(f"Extraction failed: {str(e)}", 500)
     else:
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return ssh_connection_failed_response()
-        try:
+        with ssh_manager.optional_connection(config) as ssh:
+            if not ssh:
+                return ssh_connection_failed_response()
             remote_extract_dir = os.path.join(extract_dir, target_dir_name) if target_dir_name else extract_dir
             mkdir_cmd = f"mkdir -p {shlex.quote(remote_extract_dir)}"
             ssh_manager.execute_command(ssh, mkdir_cmd, timeout=20)
@@ -1904,8 +1863,6 @@ async def extract_test_suite_archive(req: TestSuiteExtractRequest):
             extracted_name = target_dir_name or derive_suite_dir_name_from_archive(req.archive_path)
             extracted_path = os.path.join(extract_dir, extracted_name)
             return JSONResponse(content={"success": True, "message": f"Extraction complete: {extracted_name}", "extracted_path": extracted_path, "extract_method": "ssh"})
-        finally:
-            ssh_manager.return_connection(ssh)
 
 
 # ==================== Test Status ====================
@@ -1977,7 +1934,7 @@ async def get_status(
         return JSONResponse(content=response)
     except Exception as e:
         logger.error(f"Error getting status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(str(e), status_code=500)
 
 
 # ==================== Log Stream ====================

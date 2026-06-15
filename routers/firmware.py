@@ -21,7 +21,6 @@ from core.devices import (
     broadcast_device_lock_update,
     safe_websocket_send,
 )
-from core.error_handling import handle_api_errors
 from core.api_help import generate_help_or_continue
 from core.state import global_state
 from core.settings import GSI_PROGRESS_POLL_INTERVAL, GSI_PROGRESS_INCREMENT, GSI_PROGRESS_MAX, PROJECT_ROOT
@@ -249,201 +248,190 @@ async def burn_firmware(request: Request, h: Optional[str] = Query(None), help: 
             await release_device_locks(client_id, locked_devices)
             return error_response("Please upload a firmware file or provide a firmware path")
 
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            await release_device_locks(client_id, locked_devices)
-            return error_response("SSH connection failed")
-
-        try:
-            # Upload upgrade_tool
-            logger.info("[Firmware Burn] Uploading upgrade_tool...")
-            gms_suite_dir = get_default_suites_path(config)
-            local_tool = os.path.join(PROJECT_ROOT, "tools", "upgrade_tool")
-            remote_tool = os.path.join(gms_suite_dir, "upgrade_tool")
-
-            if not os.path.exists(local_tool):
-                ssh_manager.return_connection(ssh)
+        config = config_manager.load_config()
+        with ssh_manager.optional_connection(config) as ssh:
+            if not ssh:
                 await release_device_locks(client_id, locked_devices)
-                return error_response(f"upgrade_tool not found: {local_tool}")
+                return error_response("SSH connection failed")
 
-            import scp
-            scp_client = scp.SCPClient(ssh.get_transport())
-            scp_client.put(local_tool, remote_tool)
-            scp_client.close()
+            try:
+                # Upload upgrade_tool
+                logger.info("[Firmware Burn] Uploading upgrade_tool...")
+                gms_suite_dir = get_default_suites_path(config)
+                local_tool = os.path.join(PROJECT_ROOT, "tools", "upgrade_tool")
+                remote_tool = os.path.join(gms_suite_dir, "upgrade_tool")
 
-            # Handle firmware file
-            if firmware_file:
-                firmware_name = os.path.basename(firmware_file.filename or "").strip()
-                if not firmware_name:
-                    ssh_manager.return_connection(ssh)
+                if not os.path.exists(local_tool):
                     await release_device_locks(client_id, locked_devices)
-                    return error_response("Invalid firmware filename")
+                    return error_response(f"upgrade_tool not found: {local_tool}")
 
-                firmware_stream = firmware_file.file
-                try:
-                    firmware_stream.seek(0, os.SEEK_END)
-                    firmware_size = firmware_stream.tell()
-                    firmware_stream.seek(0)
-                except Exception as e:
-                    ssh_manager.return_connection(ssh)
-                    await release_device_locks(client_id, locked_devices)
-                    return error_response(f"Failed to inspect firmware size: {e}")
+                import scp
+                scp_client = scp.SCPClient(ssh.get_transport())
+                scp_client.put(local_tool, remote_tool)
+                scp_client.close()
 
-                if firmware_size <= 0:
-                    ssh_manager.return_connection(ssh)
-                    await release_device_locks(client_id, locked_devices)
-                    return error_response("Uploaded firmware file is empty")
+                # Handle firmware file
+                if firmware_file:
+                    firmware_name = os.path.basename(firmware_file.filename or "").strip()
+                    if not firmware_name:
+                        await release_device_locks(client_id, locked_devices)
+                        return error_response("Invalid firmware filename")
 
-                remote_firmware = os.path.join(gms_suite_dir, firmware_name)
-                await _upload_firmware_to_test_host(ssh, client_id, firmware_stream, remote_firmware, firmware_name, firmware_size)
-            else:
-                firmware_name = os.path.basename(firmware_path.rstrip("/"))
-                remote_firmware = os.path.join(gms_suite_dir, firmware_name)
-                local_firmware_path = None
+                    firmware_stream = firmware_file.file
+                    try:
+                        firmware_stream.seek(0, os.SEEK_END)
+                        firmware_size = firmware_stream.tell()
+                        firmware_stream.seek(0)
+                    except Exception as e:
+                        await release_device_locks(client_id, locked_devices)
+                        return error_response(f"Failed to inspect firmware size: {e}")
 
-                if firmware_path.startswith("/") or firmware_path.startswith("./"):
-                    quoted = shlex.quote(firmware_path)
-                    check_cmd = f"test -f {quoted} && echo 'found' || echo 'not_found'"
-                    output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
-                    if "found" in output:
-                        remote_firmware = firmware_path
+                    if firmware_size <= 0:
+                        await release_device_locks(client_id, locked_devices)
+                        return error_response("Uploaded firmware file is empty")
+
+                    remote_firmware = os.path.join(gms_suite_dir, firmware_name)
+                    await _upload_firmware_to_test_host(ssh, client_id, firmware_stream, remote_firmware, firmware_name, firmware_size)
+                else:
+                    firmware_name = os.path.basename(firmware_path.rstrip("/"))
+                    remote_firmware = os.path.join(gms_suite_dir, firmware_name)
+                    local_firmware_path = None
+
+                    if firmware_path.startswith("/") or firmware_path.startswith("./"):
+                        quoted = shlex.quote(firmware_path)
+                        check_cmd = f"test -f {quoted} && echo 'found' || echo 'not_found'"
+                        output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
+                        if "found" in output:
+                            remote_firmware = firmware_path
+                        elif os.path.exists(firmware_path):
+                            local_firmware_path = firmware_path
+                        else:
+                            await release_device_locks(client_id, locked_devices)
+                            return error_response(f"Firmware not found: {firmware_path}")
                     elif os.path.exists(firmware_path):
                         local_firmware_path = firmware_path
                     else:
-                        ssh_manager.return_connection(ssh)
-                        await release_device_locks(client_id, locked_devices)
-                        return error_response(f"Firmware not found: {firmware_path}")
-                elif os.path.exists(firmware_path):
-                    local_firmware_path = firmware_path
-                else:
-                    remote_candidate = os.path.join(gms_suite_dir, firmware_path)
-                    check_cmd = f"test -f {shlex.quote(remote_candidate)} && echo 'found' || echo 'not_found'"
-                    output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
-                    if "found" in output:
-                        remote_firmware = remote_candidate
-                    else:
-                        ssh_manager.return_connection(ssh)
-                        await release_device_locks(client_id, locked_devices)
-                        return error_response(f"Firmware not found: {firmware_path}")
+                        remote_candidate = os.path.join(gms_suite_dir, firmware_path)
+                        check_cmd = f"test -f {shlex.quote(remote_candidate)} && echo 'found' || echo 'not_found'"
+                        output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
+                        if "found" in output:
+                            remote_firmware = remote_candidate
+                        else:
+                            await release_device_locks(client_id, locked_devices)
+                            return error_response(f"Firmware not found: {firmware_path}")
 
-                if local_firmware_path:
-                    file_size = os.path.getsize(local_firmware_path)
-                    if file_size <= 0:
-                        ssh_manager.return_connection(ssh)
-                        await release_device_locks(client_id, locked_devices)
-                        return error_response("Firmware file is empty")
-                    await _upload_firmware_to_test_host(ssh, client_id, local_firmware_path, remote_firmware, firmware_name, file_size)
+                    if local_firmware_path:
+                        file_size = os.path.getsize(local_firmware_path)
+                        if file_size <= 0:
+                            await release_device_locks(client_id, locked_devices)
+                            return error_response("Firmware file is empty")
+                        await _upload_firmware_to_test_host(ssh, client_id, local_firmware_path, remote_firmware, firmware_name, file_size)
 
-            # Enter Loader mode
-            for device in devices:
-                cmd = f"adb -s {device} reboot loader"
-                ssh_manager.execute_command(ssh, cmd, timeout=5)
+                # Enter Loader mode
+                for device in devices:
+                    cmd = f"adb -s {device} reboot loader"
+                    ssh_manager.execute_command(ssh, cmd, timeout=5)
 
-            await asyncio.sleep(8)
+                await asyncio.sleep(8)
 
-            # Check Loader devices
-            check_cmd = f"cd {gms_suite_dir} && ./upgrade_tool ld"
-            output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
+                # Check Loader devices
+                check_cmd = f"cd {gms_suite_dir} && ./upgrade_tool ld"
+                output, _, _ = ssh_manager.execute_command(ssh, check_cmd, timeout=5)
 
-            if "List of rockusb connected(0)" in output or "List of rockusb connected" not in output:
-                ssh_manager.return_connection(ssh)
-                await release_device_locks(client_id, locked_devices)
-                return error_response(f"No Loader devices detected. Output:\n{output}")
+                if "List of rockusb connected(0)" in output or "List of rockusb connected" not in output:
+                    await release_device_locks(client_id, locked_devices)
+                    return error_response(f"No Loader devices detected. Output:\n{output}")
 
-            # Burn firmware
-            burn_cmd = f"cd {gms_suite_dir} && ./upgrade_tool uf {shlex.quote(remote_firmware)}"
+                # Burn firmware
+                burn_cmd = f"cd {gms_suite_dir} && ./upgrade_tool uf {shlex.quote(remote_firmware)}"
 
-            if client_id in global_state.websocket_connections:
-                try:
-                    await safe_websocket_send(client_id, {"type": "log_update", "log": "Starting firmware burn...", "log_type": "info"})
-                except Exception:
-                    pass
+                if client_id in global_state.websocket_connections:
+                    try:
+                        await safe_websocket_send(client_id, {"type": "log_update", "log": "Starting firmware burn...", "log_type": "info"})
+                    except Exception:
+                        pass
 
-            stdin, stdout, stderr = ssh.exec_command(burn_cmd, get_pty=True, timeout=300)
-            output_buffer = []
+                stdin, stdout, stderr = ssh.exec_command(burn_cmd, get_pty=True, timeout=300)
+                output_buffer = []
 
-            firmware_burn_start = False
-            current_progress = 0
-            last_progress_time = 0
+                firmware_burn_start = False
+                current_progress = 0
+                last_progress_time = 0
 
-            while not stdout.channel.exit_status_ready():
-                current_time = asyncio.get_event_loop().time()
+                while not stdout.channel.exit_status_ready():
+                    current_time = asyncio.get_event_loop().time()
 
-                if stdout.channel.recv_ready():
-                    chunk = stdout.channel.recv(1024).decode("utf-8", errors="ignore")
-                    output_buffer.append(chunk)
-                    clean_chunk = strip_ansi_codes(chunk)
+                    if stdout.channel.recv_ready():
+                        chunk = stdout.channel.recv(1024).decode("utf-8", errors="ignore")
+                        output_buffer.append(chunk)
+                        clean_chunk = strip_ansi_codes(chunk)
 
-                    if "Download Firmware Start" in clean_chunk and not firmware_burn_start:
-                        firmware_burn_start = True
-                        current_progress = 0
+                        if "Download Firmware Start" in clean_chunk and not firmware_burn_start:
+                            firmware_burn_start = True
+                            current_progress = 0
+                            last_progress_time = current_time
+
+                        if client_id in global_state.websocket_connections:
+                            try:
+                                for line in clean_chunk.split("\n"):
+                                    line = line.strip()
+                                    if line:
+                                        if firmware_burn_start:
+                                            if any(kw in line.lower() for kw in ["error", "failed", "fail"]):
+                                                await safe_websocket_send(client_id, {"type": "log_update", "log": line, "log_type": "error"})
+                                            continue
+                                        await safe_websocket_send(client_id, {"type": "log_update", "log": line, "log_type": "info"})
+                            except Exception as e:
+                                logger.error(f"[Firmware Burn] Log send failed: {e}")
+
+                    if firmware_burn_start and (current_time - last_progress_time > GSI_PROGRESS_POLL_INTERVAL):
+                        current_progress = min(current_progress + GSI_PROGRESS_INCREMENT, GSI_PROGRESS_MAX)
                         last_progress_time = current_time
 
+                        if client_id in global_state.websocket_connections:
+                            try:
+                                await safe_websocket_send(client_id, {"type": "firmware_progress", "percentage": current_progress})
+                            except Exception:
+                                pass
+
+                    await asyncio.sleep(0.1)
+
+                final_output = "".join(output_buffer)
+                exit_status = stdout.channel.recv_exit_status()
+
+                if exit_status == 0:
                     if client_id in global_state.websocket_connections:
                         try:
-                            for line in clean_chunk.split("\n"):
-                                line = line.strip()
-                                if line:
-                                    if firmware_burn_start:
-                                        if any(kw in line.lower() for kw in ["error", "failed", "fail"]):
-                                            await safe_websocket_send(client_id, {"type": "log_update", "log": line, "log_type": "error"})
-                                        continue
-                                    await safe_websocket_send(client_id, {"type": "log_update", "log": line, "log_type": "info"})
-                        except Exception as e:
-                            logger.error(f"[Firmware Burn] Log send failed: {e}")
-
-                if firmware_burn_start and (current_time - last_progress_time > GSI_PROGRESS_POLL_INTERVAL):
-                    current_progress = min(current_progress + GSI_PROGRESS_INCREMENT, GSI_PROGRESS_MAX)
-                    last_progress_time = current_time
-
-                    if client_id in global_state.websocket_connections:
+                            await safe_websocket_send(client_id, {"type": "firmware_progress", "percentage": 100})
+                        except Exception:
+                            pass
                         try:
-                            await safe_websocket_send(client_id, {"type": "firmware_progress", "percentage": current_progress})
+                            await safe_websocket_send(client_id, {"type": "log_update", "log": "Firmware burn complete!", "log_type": "success"})
                         except Exception:
                             pass
 
-                await asyncio.sleep(0.1)
+                    store_notification(client_id, "Firmware burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "firmware": firmware_name})
+                    await release_device_locks(client_id, locked_devices)
+                    return success_response(message="Firmware burn completed successfully")
+                else:
+                    error_output = final_output or stderr.read().decode("utf-8", errors="ignore")
 
-            final_output = "".join(output_buffer)
-            exit_status = stdout.channel.recv_exit_status()
+                    if client_id in global_state.websocket_connections:
+                        try:
+                            await safe_websocket_send(client_id, {"type": "log_update", "log": f"Firmware burn failed (exit code: {exit_status})", "log_type": "error"})
+                            if error_output and len(error_output) < 500:
+                                await safe_websocket_send(client_id, {"type": "log_update", "log": f"Error: {error_output[:200]}", "log_type": "error"})
+                        except Exception:
+                            pass
 
-            if exit_status == 0:
-                ssh_manager.return_connection(ssh)
+                    store_notification(client_id, "Firmware burn failed", (error_output or "Burn failed")[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name, "exit_status": exit_status})
+                    await release_device_locks(client_id, locked_devices)
+                    return error_response(error_output or "Firmware burn failed")
 
-                if client_id in global_state.websocket_connections:
-                    try:
-                        await safe_websocket_send(client_id, {"type": "firmware_progress", "percentage": 100})
-                    except Exception:
-                        pass
-                    try:
-                        await safe_websocket_send(client_id, {"type": "log_update", "log": "Firmware burn complete!", "log_type": "success"})
-                    except Exception:
-                        pass
-
-                store_notification(client_id, "Firmware burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "firmware": firmware_name})
+            except Exception as e:
                 await release_device_locks(client_id, locked_devices)
-                return success_response(message="Firmware burn completed successfully")
-            else:
-                error_output = final_output or stderr.read().decode("utf-8", errors="ignore")
-                ssh_manager.return_connection(ssh)
-
-                if client_id in global_state.websocket_connections:
-                    try:
-                        await safe_websocket_send(client_id, {"type": "log_update", "log": f"Firmware burn failed (exit code: {exit_status})", "log_type": "error"})
-                        if error_output and len(error_output) < 500:
-                            await safe_websocket_send(client_id, {"type": "log_update", "log": f"Error: {error_output[:200]}", "log_type": "error"})
-                    except Exception:
-                        pass
-
-                store_notification(client_id, "Firmware burn failed", (error_output or "Burn failed")[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name, "exit_status": exit_status})
-                await release_device_locks(client_id, locked_devices)
-                return error_response(error_output or "Firmware burn failed")
-
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            await release_device_locks(client_id, locked_devices)
-            store_notification(client_id, "Firmware burn error", str(e)[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name if 'firmware_name' in dir() else ""})
-            return error_response(str(e))
+                store_notification(client_id, "Firmware burn error", str(e)[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name if 'firmware_name' in dir() else ""})
+                return error_response(str(e))
 
     except Exception as e:
         import traceback
@@ -477,146 +465,142 @@ async def burn_gsi(request: Request):
             return lock_err
 
         config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            await release_device_locks(client_id, locked_devices)
-            return error_response("SSH connection failed")
+        with ssh_manager.optional_connection(config) as ssh:
+            if not ssh:
+                await release_device_locks(client_id, locked_devices)
+                return error_response("SSH connection failed")
 
-        try:
-            import scp
-            import shlex
+            try:
+                import scp
 
-            gms_suite_dir = get_default_suites_path(config)
+                gms_suite_dir = get_default_suites_path(config)
 
-            # Upload script
-            local_script = os.path.join(PROJECT_ROOT, "scripts", "run_GSI_Burn.sh")
-            remote_script = os.path.join(gms_suite_dir, "run_GSI_Burn.sh")
+                # Upload script
+                local_script = os.path.join(PROJECT_ROOT, "scripts", "run_GSI_Burn.sh")
+                remote_script = os.path.join(gms_suite_dir, "run_GSI_Burn.sh")
 
-            if os.path.exists(local_script):
-                scp_client = scp.SCPClient(ssh.get_transport())
-                scp_client.put(local_script, remote_script)
-                scp_client.close()
-                ssh_manager.execute_command(ssh, f"chmod +x {remote_script}")
-            else:
-                ssh_manager.return_connection(ssh)
-                return error_response(f"GSI burn script not found: {local_script}")
+                if os.path.exists(local_script):
+                    scp_client = scp.SCPClient(ssh.get_transport())
+                    scp_client.put(local_script, remote_script)
+                    scp_client.close()
+                    ssh_manager.execute_command(ssh, f"chmod +x {remote_script}")
+                else:
+                    return error_response(f"GSI burn script not found: {local_script}")
 
             # Upload misc.img
-            local_misc = os.path.join(PROJECT_ROOT, "tools", "misc.img")
-            remote_misc = os.path.join(gms_suite_dir, "misc.img")
-            if os.path.exists(local_misc):
-                scp_client = scp.SCPClient(ssh.get_transport())
-                scp_client.put(local_misc, remote_misc)
-                scp_client.close()
-
-            # Handle vendor image
-            remote_vendor = ""
-            if vendor_img:
-                if os.path.exists(vendor_img):
-                    vendor_name = os.path.basename(vendor_img)
-                    remote_vendor = os.path.join(gms_suite_dir, vendor_name)
+                local_misc = os.path.join(PROJECT_ROOT, "tools", "misc.img")
+                remote_misc = os.path.join(gms_suite_dir, "misc.img")
+                if os.path.exists(local_misc):
                     scp_client = scp.SCPClient(ssh.get_transport())
-                    scp_client.put(vendor_img, remote_vendor)
+                    scp_client.put(local_misc, remote_misc)
                     scp_client.close()
-                else:
-                    remote_vendor = vendor_img
 
-            results = []
+                # Handle vendor image
+                remote_vendor = ""
+                if vendor_img:
+                    if os.path.exists(vendor_img):
+                        vendor_name = os.path.basename(vendor_img)
+                        remote_vendor = os.path.join(gms_suite_dir, vendor_name)
+                        scp_client = scp.SCPClient(ssh.get_transport())
+                        scp_client.put(vendor_img, remote_vendor)
+                        scp_client.close()
+                    else:
+                        remote_vendor = vendor_img
 
-            if client_id in global_state.websocket_connections:
-                try:
-                    await safe_websocket_send(client_id, {"type": "log_update", "log": f"Starting GSI burn for {len(devices)} devices...", "log_type": "info"})
-                except Exception:
-                    pass
-
-            for device in devices:
-                img_args = f"--system {system_img}"
-                if remote_vendor:
-                    img_args += f" --vendor {remote_vendor}"
-
-                burn_cmd = f"{remote_script} {device} {img_args}"
+                results = []
 
                 if client_id in global_state.websocket_connections:
                     try:
-                        await safe_websocket_send(client_id, {"type": "log_update", "log": f"Burning device: {device}", "log_type": "info"})
+                        await safe_websocket_send(client_id, {"type": "log_update", "log": f"Starting GSI burn for {len(devices)} devices...", "log_type": "info"})
                     except Exception:
                         pass
 
-                stdin, stdout, stderr = ssh.exec_command(burn_cmd, get_pty=True, timeout=600)
-                output_buffer = []
+                for device in devices:
+                    img_args = f"--system {system_img}"
+                    if remote_vendor:
+                        img_args += f" --vendor {remote_vendor}"
 
-                while not stdout.channel.exit_status_ready():
-                    if stdout.channel.recv_ready():
-                        chunk = stdout.channel.recv(1024).decode("utf-8", errors="ignore")
-                        output_buffer.append(chunk)
-                        clean_chunk = strip_ansi_codes(chunk)
+                    burn_cmd = f"{remote_script} {device} {img_args}"
 
+                    if client_id in global_state.websocket_connections:
+                        try:
+                            await safe_websocket_send(client_id, {"type": "log_update", "log": f"Burning device: {device}", "log_type": "info"})
+                        except Exception:
+                            pass
+
+                    stdin, stdout, stderr = ssh.exec_command(burn_cmd, get_pty=True, timeout=600)
+                    output_buffer = []
+
+                    while not stdout.channel.exit_status_ready():
+                        if stdout.channel.recv_ready():
+                            chunk = stdout.channel.recv(1024).decode("utf-8", errors="ignore")
+                            output_buffer.append(chunk)
+                            clean_chunk = strip_ansi_codes(chunk)
+
+                            if client_id in global_state.websocket_connections:
+                                try:
+                                    for line in clean_chunk.split("\n"):
+                                        line = line.strip()
+                                        if not line:
+                                            continue
+                                        # 过滤 fastboot 冗余输出
+                                        if (line.startswith("OKAY") or
+                                            line.startswith("Writing '") or
+                                            line.startswith("Finished.") or
+                                            line.startswith("< waiting for")):
+                                            continue
+                                        # 保留操作名，去掉尾部的 OKAY [x.xxxs]
+                                        cleaned = _FASTBOOT_OKAY_RE.sub("", line)
+                                        await safe_websocket_send(client_id, {"type": "log_update", "log": cleaned, "log_type": "info"})
+                                except Exception:
+                                    pass
+                        else:
+                            await asyncio.sleep(0.5)
+
+                    final_output = "".join(output_buffer)
+                    exit_status = stdout.channel.recv_exit_status()
+                    error_output = ""
+                    if stderr.channel.recv_ready():
+                        error_output = stderr.read().decode("utf-8", errors="ignore")
+
+                    if exit_status == 0:
+                        results.append({"device": device, "success": True, "output": final_output})
                         if client_id in global_state.websocket_connections:
                             try:
-                                for line in clean_chunk.split("\n"):
-                                    line = line.strip()
-                                    if not line:
-                                        continue
-                                    # 过滤 fastboot 冗余输出
-                                    if (line.startswith("OKAY") or
-                                        line.startswith("Writing '") or
-                                        line.startswith("Finished.") or
-                                        line.startswith("< waiting for")):
-                                        continue
-                                    # 保留操作名，去掉尾部的 OKAY [x.xxxs]
-                                    cleaned = _FASTBOOT_OKAY_RE.sub("", line)
-                                    await safe_websocket_send(client_id, {"type": "log_update", "log": cleaned, "log_type": "info"})
+                                await safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn complete", "log_type": "success"})
                             except Exception:
                                 pass
                     else:
-                        await asyncio.sleep(0.5)
+                        results.append({"device": device, "success": False, "error": error_output, "output": final_output})
+                        if client_id in global_state.websocket_connections:
+                            try:
+                                error_msg = error_output or "Unknown error"
+                                if final_output:
+                                    lines = final_output.strip().split("\n")
+                                    if lines:
+                                        last_lines = lines[-3:]
+                                        error_detail = " ".join(last_lines)
+                                        if error_detail and len(error_detail) < 200:
+                                            error_msg = error_detail
+                                await safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn failed: {error_msg}", "log_type": "error"})
+                            except Exception:
+                                pass
 
-                final_output = "".join(output_buffer)
-                exit_status = stdout.channel.recv_exit_status()
-                error_output = ""
-                if stderr.channel.recv_ready():
-                    error_output = stderr.read().decode("utf-8", errors="ignore")
+                await release_device_locks(client_id, locked_devices)
 
-                if exit_status == 0:
-                    results.append({"device": device, "success": True, "output": final_output})
-                    if client_id in global_state.websocket_connections:
-                        try:
-                            await safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn complete", "log_type": "success"})
-                        except Exception:
-                            pass
+                all_success = all(r["success"] for r in results)
+                if all_success:
+                    store_notification(client_id, "GSI burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "results": results})
+                    return JSONResponse(content={"success": True, "message": "GSI burn completed successfully", "results": results})
                 else:
-                    results.append({"device": device, "success": False, "error": error_output, "output": final_output})
-                    if client_id in global_state.websocket_connections:
-                        try:
-                            error_msg = error_output or "Unknown error"
-                            if final_output:
-                                lines = final_output.strip().split("\n")
-                                if lines:
-                                    last_lines = lines[-3:]
-                                    error_detail = " ".join(last_lines)
-                                    if error_detail and len(error_detail) < 200:
-                                        error_msg = error_detail
-                            await safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn failed: {error_msg}", "log_type": "error"})
-                        except Exception:
-                            pass
+                    failed = [r.get("device") for r in results if not r.get("success")]
+                    store_notification(client_id, "GSI burn failed", f"Failed: {', '.join(failed)}", "error", "firmware", {"devices": devices, "results": results})
+                    return error_response("Some devices failed", results=results)
 
-            ssh_manager.return_connection(ssh)
-            await release_device_locks(client_id, locked_devices)
-
-            all_success = all(r["success"] for r in results)
-            if all_success:
-                store_notification(client_id, "GSI burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "results": results})
-                return JSONResponse(content={"success": True, "message": "GSI burn completed successfully", "results": results})
-            else:
-                failed = [r.get("device") for r in results if not r.get("success")]
-                store_notification(client_id, "GSI burn failed", f"Failed: {', '.join(failed)}", "error", "firmware", {"devices": devices, "results": results})
-                return JSONResponse(content={"success": False, "error": "Some devices failed", "results": results})
-
-        except Exception as e:
-            ssh_manager.return_connection(ssh)
-            store_notification(client_id, "GSI burn error", str(e)[:300], "error", "firmware", {"devices": devices})
-            await release_device_locks(client_id, locked_devices)
-            return error_response(str(e))
+            except Exception as e:
+                store_notification(client_id, "GSI burn error", str(e)[:300], "error", "firmware", {"devices": devices})
+                await release_device_locks(client_id, locked_devices)
+                return error_response(str(e))
 
     except Exception as e:
         logger.error(f"Error in burn_gsi: {e}")
@@ -638,23 +622,22 @@ async def burn_sn(req: SNBurnRequest):
             return error_response("SN code is required", 400)
 
         config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-        if not ssh:
-            return error_response("SSH connection failed", 500)
+        with ssh_manager.optional_connection(config) as ssh:
+            if not ssh:
+                return error_response("SSH connection failed", 500)
 
-        results = [
-            {
-                "device": device_id,
-                "success": False,
-                "error": "SN burning requires device in loader mode. Feature needs specific tool support.",
-            }
-            for device_id in devices
-        ]
+            results = [
+                {
+                    "device": device_id,
+                    "success": False,
+                    "error": "SN burning requires device in loader mode. Feature needs specific tool support.",
+                }
+                for device_id in devices
+            ]
 
-        ssh_manager.return_connection(ssh)
-        return JSONResponse(content={"success": True, "results": results})
+            return JSONResponse(content={"success": True, "results": results})
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error burning SN: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(str(e), status_code=500)
