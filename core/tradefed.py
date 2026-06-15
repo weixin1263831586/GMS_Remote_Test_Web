@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from core.config import config_manager
 from core.ssh import ssh_manager
-from core.common_utils import CommonUtils, strip_ansi_codes
+from core.common_utils import strip_ansi_codes
 
 logger = logging.getLogger(__name__)
 

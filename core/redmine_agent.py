@@ -106,6 +106,17 @@ def _obj_name(value: Any) -> str:
     return str(getattr(value, "name", "") or value)
 
 
+def _obj_email(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(
+        getattr(value, "mail", "")
+        or getattr(value, "email", "")
+        or getattr(value, "login", "")
+        or ""
+    )
+
+
 def _truncate(text: str, limit: int) -> str:
     text = str(text or "")
     return text if len(text) <= limit else text[:limit] + "\n...[truncated]"
@@ -753,6 +764,7 @@ class RedmineAgent:
             result.append({
                 "id": str(getattr(item, "id", "")),
                 "user": _obj_name(getattr(item, "user", None)),
+                "user_email": _obj_email(getattr(item, "user", None)),
                 "created_on": _iso(getattr(item, "created_on", "")),
                 "notes": _truncate(str(getattr(item, "notes", "")), 2000),
                 "details": details,

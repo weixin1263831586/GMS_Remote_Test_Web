@@ -6,25 +6,21 @@
 """
 
 import logging
-import os
 import queue
 import re
 import threading
 import time
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
 
 import paramiko
 from starlette.websockets import WebSocketState
 
 from core.common_utils import CommonUtils
-from core.config import config_manager
 from core.settings import (
     APK_TASK_MAX_AGE_SECONDS,
     DEVICE_SSH_POOLS_MAX,
     FIRMWARE_UPLOAD_PROGRESS_MAX_ITEMS_PER_CLIENT,
-    TERMINAL_SESSION_MAX_AGE_SECONDS,
     UPLOAD_PROGRESS_MAX_AGE_SECONDS,
     USBIP_STATE_MAX_AGE_SECONDS,
     USER_STATE_MAX_AGE_HOURS,

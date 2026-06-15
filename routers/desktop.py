@@ -15,7 +15,7 @@ from core.common_utils import CommonUtils
 from core.config import config_manager
 from core.schemas import VNCStartRequest
 from core.ssh import ssh_manager
-from core.vnc import calculate_window_positions, vnc_manager
+from core.vnc import vnc_manager
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +44,7 @@ async def get_desktop_vnc_status():
         return success_response(result)
     except Exception as e:
         logger.error(f"Error getting VNC status: {e}")
-        raise HTTPException(
-                status_code=500,
-                detail=f"{str(e)}. 请检查配置和参数是否正确。"
-            )
+        return error_response(f"{str(e)}. 请检查配置和参数是否正确。", status_code=500)
 
 
 @router.post("/api/desktop/vnc/start")

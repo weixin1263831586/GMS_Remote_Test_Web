@@ -130,6 +130,73 @@ def _name_matches_keys(value: Any, owner_keys: set) -> bool:
 _user_map_cache: tuple = (0.0, [])  # (mtime, parsed_list)
 
 
+def _name_display_variants(value: Any) -> List[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    variants = [text]
+    compact = text.replace(" ", "")
+    if compact and compact != text:
+        variants.append(compact)
+    if " " not in text and len(text) >= 3 and all("\u4e00" <= ch <= "\u9fff" for ch in text):
+        variants.append(text[0] + " " + text[1:])
+    return list(dict.fromkeys(item for item in variants if item))
+
+
+def _flatten_departments(payload: Any) -> List[Dict[str, Any]]:
+    """Flatten the on-disk departments layout into flat user dicts.
+
+    On disk the map is grouped by department:
+        {"departments": [ {"department_id", "department", "members": [ {id,name,aliases,email}, ... ]} ]}
+    Each member is returned with its parent department fields merged in, so callers
+    keep speaking the legacy flat-user shape ({id,name,aliases,email,department_id,department}).
+    Also tolerates a legacy flat {"users": [...]} payload as a safety net.
+    """
+    if not isinstance(payload, dict):
+        return []
+    result: List[Dict[str, Any]] = []
+    for dept in payload.get("departments") or []:
+        if not isinstance(dept, dict):
+            continue
+        dept_id = str(dept.get("department_id") or "").strip()
+        dept_name = str(dept.get("department") or "").strip()
+        for member in dept.get("members") or []:
+            if isinstance(member, dict) and member.get("id"):
+                flat = dict(member)
+                flat.setdefault("department_id", dept_id)
+                flat.setdefault("department", dept_name)
+                result.append(flat)
+    # Legacy fallback: a flat {"users": [...]} payload.
+    if not result:
+        for item in payload.get("users") or []:
+            if isinstance(item, dict) and item.get("id"):
+                result.append(item)
+    return result
+
+
+def _departments_payload_from_flat_users(users: List[Dict[str, Any]]) -> Dict[str, Any]:
+    departments: List[Dict[str, Any]] = []
+    by_key: Dict[str, Dict[str, Any]] = {}
+    for item in users or []:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        dept_id = str(item.get("department_id") or "").strip()
+        dept_name = str(item.get("department") or "").strip()
+        key = dept_id or dept_name or "default"
+        department = by_key.get(key)
+        if not department:
+            department = {"department_id": dept_id, "department": dept_name, "members": []}
+            by_key[key] = department
+            departments.append(department)
+        member = {
+            "id": item.get("id"),
+            "name": item.get("name") or "",
+            "email": item.get("email") or item.get("eamil") or "",
+        }
+        department["members"].append({k: v for k, v in member.items() if v not in ("", None)})
+    return {"departments": departments}
+
+
 def load_redmine_user_map() -> List[Dict[str, Any]]:
     global _user_map_cache
     if not USER_MAP_PATH.exists():
@@ -140,7 +207,7 @@ def load_redmine_user_map() -> List[Dict[str, Any]]:
         if _user_map_cache[0] == mtime:
             return _user_map_cache[1]
         payload = json.loads(USER_MAP_PATH.read_text(encoding="utf-8"))
-        result = [item for item in payload.get("users") or [] if item.get("id")]
+        result = _flatten_departments(payload)
         _user_map_cache = (mtime, result)
         return result
     except Exception:
@@ -150,25 +217,35 @@ def load_redmine_user_map() -> List[Dict[str, Any]]:
 def load_user_map_payload() -> Dict[str, Any]:
     """Load the raw user-map JSON payload (for mutation + save round-trips)."""
     if not USER_MAP_PATH.exists():
-        return {"users": []}
+        return {"departments": []}
     try:
         payload = json.loads(USER_MAP_PATH.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
-            payload.setdefault("users", [])
+            if not payload.get("departments") and payload.get("users"):
+                return _departments_payload_from_flat_users(payload.get("users") or [])
+            payload.setdefault("departments", [])
             return payload
     except Exception:
         pass
-    return {"users": []}
+    return {"departments": []}
 
 
 def save_user_map_payload(payload: Dict[str, Any]) -> None:
     """Write the raw user-map JSON payload to disk."""
+    global _user_map_cache
     USER_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
     USER_MAP_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _user_map_cache = (0.0, [])
 
 
 def display_names_from_mapping(item: Dict[str, Any]) -> List[str]:
-    values = [item.get("name") or "", *(item.get("aliases") or [])]
+    values = []
+    values.extend(_name_display_variants(item.get("name") or ""))
+    for alias in item.get("aliases") or []:
+        values.extend(_name_display_variants(alias))
+    email = str(item.get("email") or item.get("eamil") or "").strip()
+    if email:
+        values.append(email)
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
 
 
@@ -203,6 +280,31 @@ def _looks_like_report_attachment(attachment: Dict[str, Any]) -> bool:
     return has_report_word or (has_report_ext and any(token in filename for token in ("log", "result", "report", "cts", "gts", "vts", "gms")))
 
 
+def _looks_like_rk_actor(actor: Any) -> bool:
+    if isinstance(actor, dict):
+        email = str(actor.get("user_email") or actor.get("email") or actor.get("mail") or "").strip().lower()
+        if email.endswith("@rock-chips.com"):
+            return True
+        name = actor.get("user") or actor.get("name") or ""
+    else:
+        name = actor
+    text = str(name or "").strip()
+    lowered = text.lower()
+    if not text:
+        return False
+    if "rock-chips.com" in lowered or "rockchip" in lowered or lowered.startswith("rk "):
+        return True
+    if "fae" in lowered or "瑞芯" in text:
+        return True
+    actor_keys = _name_keys(text)
+    for item in load_redmine_user_map():
+        for value in display_names_from_mapping(item):
+            value_keys = _name_keys(value)
+            if actor_keys.intersection(value_keys) or _name_matches_keys(text, value_keys):
+                return True
+    return False
+
+
 async def compute_user_overdue_stats(
     client: Any,
     db: "RedmineAgentDB",
@@ -220,7 +322,8 @@ async def compute_user_overdue_stats(
         window_days: If > 0, only count stale issues updated within this window.
     """
     owner_names = display_names_from_mapping(user)
-    counts = await client.count_issues_by_assignee(int(user["id"]))
+    user_id = int(user["id"])
+    counts = await client.count_issues_by_assignee(user_id)
     workload = db.get_workload_statistics(
         owner_names=owner_names,
         stale_days=stale_days,
@@ -228,6 +331,36 @@ async def compute_user_overdue_stats(
         display_names=owner_names,
         window_days=window_days,
     )
+    if counts.get("open_count") and int(workload.get("open_count") or 0) == 0:
+        try:
+            live_issues = await client.fetch_open_issue_snapshots_by_assignee(
+                user_id,
+                limit=issue_limit,
+                window_days=window_days,
+            )
+        except Exception:
+            live_issues = []
+        for issue in live_issues or []:
+            if isinstance(issue, dict) and issue.get("issue_id"):
+                db.upsert_issue(issue)
+        if live_issues:
+            workload = db.get_workload_statistics(
+                owner_names=owner_names,
+                stale_days=stale_days,
+                list_limit=min(issue_limit, 100),
+                display_names=owner_names,
+                window_days=window_days,
+            )
+    # Resolve trends live from Redmine (per assignee) so the department view
+    # reflects every member, independent of which issues were synced to the
+    # local DB (the DB only holds issues assigned to the configured sync user).
+    # Fall back to the local-DB trends if the live fetch fails.
+    try:
+        live_trends = await client.resolved_trends_by_assignee(user_id)
+    except Exception:
+        live_trends = {}
+    if live_trends:
+        workload.update(live_trends)
     overdue = list((workload.get("lists") or {}).get("no_reply_3_days") or [])
     now = datetime.now()
     for item in overdue:
@@ -239,12 +372,17 @@ async def compute_user_overdue_stats(
         "id": user.get("id"),
         "name": user.get("name") or "",
         "aliases": user.get("aliases") or [],
+        "owner_names": owner_names,
         "total_owned": counts.get("total_owned", 0),
         "open_count": counts.get("open_count", 0),
         "closed_count": counts.get("closed_count", 0),
         "scanned_open_count": workload.get("open_count", 0),
         "waiting_my_reply": workload.get("waiting_my_reply", 0),
         "no_reply_3_days": workload.get("no_reply_3_days", 0),
+        "rk_no_reply_3_days": workload.get("rk_no_reply_3_days", workload.get("no_reply_3_days", 0)),
+        "waiting_customer_reply": workload.get("waiting_customer_reply", 0),
+        "customer_no_reply_3_days": workload.get("customer_no_reply_3_days", 0),
+        "rk_colleague_no_reply_3_days": workload.get("rk_colleague_no_reply_3_days", 0),
         "max_unreplied_days": max([item.get("unreplied_days") or 0 for item in overdue] or [0]),
         "overdue_issues": overdue,
         "resolved_daily": workload.get("resolved_daily", []),
@@ -263,7 +401,11 @@ class RedmineAgentDB:
         self.docs_dir.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
-    def connect(self) -> sqlite3.Connection:
+    def connect(self, initialize_if_missing: bool = True) -> sqlite3.Connection:
+        if initialize_if_missing and not self.db_path.exists():
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.docs_dir.mkdir(parents=True, exist_ok=True)
+            self.init_db()
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
@@ -273,7 +415,9 @@ class RedmineAgentDB:
     # ------------------------------------------------------------------
 
     def init_db(self) -> None:
-        with self.connect() as conn:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.docs_dir.mkdir(parents=True, exist_ok=True)
+        with self.connect(initialize_if_missing=False) as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS redmine_agent_runs (
@@ -647,6 +791,9 @@ class RedmineAgentDB:
         open_issues: List[Dict[str, Any]] = []
         waiting_my_reply: List[Dict[str, Any]] = []
         stale_my_reply: List[Dict[str, Any]] = []
+        waiting_customer_reply: List[Dict[str, Any]] = []
+        stale_customer_reply: List[Dict[str, Any]] = []
+        stale_rk_colleague_reply: List[Dict[str, Any]] = []
         missing_test_report: List[Dict[str, Any]] = []
         resolved_counts: Dict[str, Dict[str, int]] = {
             "day": {}, "week": {}, "month": {}, "year": {},
@@ -676,12 +823,29 @@ class RedmineAgentDB:
                             in_window = False
                     if in_window:
                         stale_my_reply.append(summary)
+                        if reply_info.get("last_reply_side") == "rk_colleague":
+                            stale_rk_colleague_reply.append(summary)
+            elif reply_info.get("waiting_customer"):
+                summary = self._issue_summary(issue, reply_info=reply_info)
+                waiting_customer_reply.append(summary)
+                last_dt = _parse_dt(reply_info.get("last_owner_reply_at"))
+                if last_dt and last_dt <= stale_after:
+                    in_window = True
+                    if window_cutoff:
+                        issue_updated = _parse_dt(issue.get("updated_on"))
+                        if not issue_updated or issue_updated < window_cutoff:
+                            in_window = False
+                    if in_window:
+                        stale_customer_reply.append(summary)
 
             if self._is_missing_test_report(issue):
                 missing_test_report.append(self._issue_summary(issue))
 
         waiting_my_reply.sort(key=lambda item: item.get("last_external_reply_at") or item.get("updated_on") or "", reverse=True)
         stale_my_reply.sort(key=lambda item: item.get("last_external_reply_at") or item.get("updated_on") or "")
+        waiting_customer_reply.sort(key=lambda item: item.get("last_owner_reply_at") or item.get("updated_on") or "", reverse=True)
+        stale_customer_reply.sort(key=lambda item: item.get("last_owner_reply_at") or item.get("updated_on") or "")
+        stale_rk_colleague_reply.sort(key=lambda item: item.get("last_external_reply_at") or item.get("updated_on") or "")
         missing_test_report.sort(key=lambda item: item.get("updated_on") or "", reverse=True)
 
         return {
@@ -690,6 +854,10 @@ class RedmineAgentDB:
             "closed_count": len(owned_issues) - len(open_issues),
             "waiting_my_reply": len(waiting_my_reply),
             "no_reply_3_days": len(stale_my_reply),
+            "rk_no_reply_3_days": len(stale_my_reply),
+            "waiting_customer_reply": len(waiting_customer_reply),
+            "customer_no_reply_3_days": len(stale_customer_reply),
+            "rk_colleague_no_reply_3_days": len(stale_rk_colleague_reply),
             "missing_test_report": len(missing_test_report),
             "resolved_daily": _sorted_slice(resolved_counts["day"], "date", 90),
             "resolved_weekly": _sorted_slice(resolved_counts["week"], "week", 52),
@@ -698,6 +866,9 @@ class RedmineAgentDB:
             "lists": {
                 "waiting_my_reply": waiting_my_reply[:list_limit],
                 "no_reply_3_days": stale_my_reply[:list_limit],
+                "customer_no_reply_3_days": stale_customer_reply[:list_limit],
+                "waiting_customer_reply": waiting_customer_reply[:list_limit],
+                "rk_colleague_no_reply_3_days": stale_rk_colleague_reply[:list_limit],
                 "missing_test_report": missing_test_report[:list_limit],
                 "open_issues": [self._issue_summary(item) for item in open_issues[:list_limit]],
             },
@@ -761,18 +932,38 @@ class RedmineAgentDB:
             return {}
         return max(note_journals, key=lambda item: _parse_dt(item.get("created_on")) or datetime.min)
 
+    @staticmethod
+    def _last_activity_journal(issue: Dict[str, Any]) -> Dict[str, Any]:
+        journals = issue.get("journals_json") or []
+        activity_journals = [
+            j for j in journals
+            if str(j.get("notes") or "").strip() or (j.get("details") or [])
+        ]
+        if not activity_journals:
+            return {}
+        return max(activity_journals, key=lambda item: _parse_dt(item.get("created_on")) or datetime.min)
+
     @classmethod
     def _reply_wait_info(cls, issue: Dict[str, Any], owner_keys: set) -> Dict[str, Any]:
-        last_note = cls._last_note_journal(issue)
-        if not last_note:
+        last_activity = cls._last_activity_journal(issue)
+        if not last_activity:
             return {"waiting": False, "reason": "no_journal_notes"}
-        if _name_matches_keys(last_note.get("user"), owner_keys):
-            return {"waiting": False, "reason": "last_reply_is_owner"}
+        last_user = last_activity.get("user") or ""
+        if _name_matches_keys(last_user, owner_keys) or _looks_like_rk_actor(last_activity):
+            return {
+                "waiting": False,
+                "reason": "last_reply_is_rk",
+                "waiting_customer": True,
+                "last_owner_reply_at": last_activity.get("created_on") or issue.get("updated_on") or "",
+                "last_owner_reply_by": last_user,
+                "last_owner_reply": str(last_activity.get("notes") or "")[:260],
+            }
         return {
             "waiting": True,
-            "last_external_reply_at": last_note.get("created_on") or issue.get("updated_on") or "",
-            "last_external_reply_by": last_note.get("user") or "",
-            "last_external_reply": str(last_note.get("notes") or "")[:260],
+            "last_reply_side": "customer",
+            "last_external_reply_at": last_activity.get("created_on") or issue.get("updated_on") or "",
+            "last_external_reply_by": last_user,
+            "last_external_reply": str(last_activity.get("notes") or "")[:260],
         }
 
     @staticmethod
@@ -815,6 +1006,10 @@ class RedmineAgentDB:
             "last_external_reply_at": reply_info.get("last_external_reply_at") or "",
             "last_external_reply_by": reply_info.get("last_external_reply_by") or "",
             "last_external_reply": reply_info.get("last_external_reply") or "",
+            "last_reply_side": reply_info.get("last_reply_side") or "",
+            "last_owner_reply_at": reply_info.get("last_owner_reply_at") or "",
+            "last_owner_reply_by": reply_info.get("last_owner_reply_by") or "",
+            "last_owner_reply": reply_info.get("last_owner_reply") or "",
             "attachment_count": len(issue.get("attachments_json") or []),
         }
 
@@ -855,6 +1050,47 @@ class RedmineAgentDB:
                 (limit,),
             ).fetchall()
         return [self._decode_row(row) for row in rows]
+
+    def get_resolved_issues_by_date(
+        self,
+        owner_names: Optional[List[str]] = None,
+        start: str = "",
+        end: str = "",
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        """查询某日期范围（按 closed_on，闭区间 [start, end)）内已解决的 issue。
+
+        owner_names 为空时不过滤指派人。用于趋势柱状图点击查看该天/周解决的问题单明细。
+        日期范围用 closed_on 的字符串前缀比较（ISO 格式可字典序排序）。
+        """
+        owner_keys = set()
+        for name in owner_names or []:
+            owner_keys.update(_name_keys(name))
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM redmine_agent_issues
+                WHERE is_resolved = 1
+                ORDER BY COALESCE(closed_on, updated_on, created_on) DESC, issue_id DESC
+                """
+            ).fetchall()
+        issues = [self._decode_row(row) for row in rows]
+        result: List[Dict[str, Any]] = []
+        max_items = max(1, min(int(limit or 500), 2000))
+        for issue in issues:
+            if owner_keys and not owner_keys.intersection(_name_keys(issue.get("assigned_to_name"))):
+                continue
+            resolved_on = issue.get("closed_on") or self._resolved_at_from_journals(issue)
+            if start and resolved_on < start:
+                continue
+            if end and resolved_on >= end:
+                continue
+            issue["resolved_on"] = resolved_on
+            result.append(issue)
+            if len(result) >= max_items:
+                break
+        result.sort(key=lambda item: (item.get("resolved_on") or "", item.get("issue_id") or 0), reverse=True)
+        return result
 
     def search_similar(self, query: str, exclude_issue_id: int, limit: int = 5) -> List[Dict[str, Any]]:
         query = (query or "").strip()

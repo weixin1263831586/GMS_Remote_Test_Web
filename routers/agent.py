@@ -299,10 +299,11 @@ def _build_plan(intent: Dict[str, Any], selected_devices: List[str], device_deta
     ]
     pre_actions = []
     if intent.get("connect_wifi"):
+        _wifi = config_manager.get_wifi_defaults()
         pre_actions.append({
             "type": "connect_wifi",
-            "ssid": intent.get("wifi_ssid") or "AndroidWifi",
-            "password": intent.get("wifi_password") or "1234567890",
+            "ssid": intent.get("wifi_ssid") or _wifi["ssid"],
+            "password": intent.get("wifi_password") or _wifi["password"],
         })
         steps.append({"title": "连接 WiFi", "detail": "测试前连接到 AndroidWifi"})
     steps.append({"title": "启动测试", "detail": intent.get("test_module") or intent.get("test_case") or "按测试套件执行"})
@@ -676,8 +677,8 @@ async def _run_pre_actions(session: Dict[str, Any], plan: Dict[str, Any]) -> Dic
 
         wifi_req = WifiConnectRequest(
             devices=devices,
-            ssid=action.get("ssid") or "AndroidWifi",
-            password=action.get("password") or "1234567890",
+            ssid=action.get("ssid"),
+            password=action.get("password"),
         )
         response = await connect_wifi(wifi_req)
         payload = _json_body(response)

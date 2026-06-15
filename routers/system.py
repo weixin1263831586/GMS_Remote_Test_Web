@@ -478,7 +478,7 @@ async def get_api_docs():
         )
     except Exception as e:
         logger.error(f"Error getting API docs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(str(e), status_code=500)
 
 
 # ==================== API Help ====================
@@ -511,13 +511,13 @@ async def get_api_help(api_path: Optional[str] = None):
                     break
 
             if not api_doc:
-                raise HTTPException(status_code=404, detail=f"API not found: /{api_path}")
+                return error_response(f"API not found: /{api_path}", status_code=404)
 
             # 生成帮助文本
             help_text = generate_per_api_help_text(api_doc['method'], api_doc['path'])
 
             if not help_text:
-                raise HTTPException(status_code=404, detail=f"Help not available for: /{api_path}")
+                return error_response(f"Help not available for: /{api_path}", status_code=404)
 
             return PlainTextResponse(
                 content=help_text,
@@ -564,7 +564,7 @@ async def get_api_help(api_path: Optional[str] = None):
         raise
     except Exception as e:
         logger.error(f"Error getting API help: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(str(e), status_code=500)
 
 
 # ==================== WebSocket ====================

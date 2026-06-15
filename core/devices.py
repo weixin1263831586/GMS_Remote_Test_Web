@@ -7,7 +7,7 @@ import re
 import subprocess
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
@@ -16,7 +16,8 @@ from .ssh import ssh_manager
 from .config import config_manager
 from .device_utils import DeviceUtils
 from .common_utils import CommonUtils
-from .notifications import safe_websocket_send, store_notification
+from .notifications import store_notification
+from .notifications import safe_websocket_send  # noqa: F401  (re-exported for routers)
 from .state import global_state
 from modules.device_lock_manager import device_lock_manager
 

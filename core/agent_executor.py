@@ -78,6 +78,18 @@ _UNSUPPORTED_DIRECT_TOOLS = {
 # Request model mapping for tools that accept a body — built once at module level.
 _MODEL_BY_TOOL = None  # lazily initialized to avoid circular imports
 
+# Cache of inspect.signature(func) — a function's signature never changes, so the
+# repeated signature introspection on every tool call (now ~40+ generic tools) is pure waste.
+_SIGNATURE_CACHE: Dict[Any, inspect.Signature] = {}
+
+
+def _cached_signature(func: Any) -> inspect.Signature:
+    sig = _SIGNATURE_CACHE.get(func)
+    if sig is None:
+        sig = inspect.signature(func)
+        _SIGNATURE_CACHE[func] = sig
+    return sig
+
 
 def _get_model_by_tool() -> Dict[str, type]:
     """Lazy-initialised mapping of tool names to Pydantic request models."""
@@ -188,6 +200,9 @@ class ActionExecutor:
             "redmine_stats_config": self._query_redmine_stats_config,
             "gerrit_dashboard_config": self._query_gerrit_dashboard_config,
             "gerrit_dashboard_changes": self._query_gerrit_dashboard_changes,
+            "knowledgebase_search": self._query_knowledgebase_search,
+            "knowledgebase_stats": self._query_knowledgebase_stats,
+            "security_audit_logs": self._query_security_audit_logs,
             "devices_wifi": self._connect_wifi,
         }
 
@@ -365,10 +380,11 @@ class ActionExecutor:
                 page="devices",
             )
 
+        wifi_defaults = config_manager.get_wifi_defaults()
         req = WifiConnectRequest(
             devices=devices,
-            ssid=params.get("ssid") or "AndroidWifi",
-            password=params.get("password") or "1234567890",
+            ssid=params.get("ssid") or wifi_defaults["ssid"],
+            password=params.get("password") or wifi_defaults["password"],
         )
         response = await connect_wifi(req)
         payload = _json_body(response)
@@ -765,6 +781,80 @@ class ActionExecutor:
             quick_actions=[{"label": "打开 Gerrit 看板", "page": "gerrit-dashboard"}],
         )
 
+    async def _query_knowledgebase_search(self, session, request, params) -> ToolResult:
+        """搜索本地 GMS 知识库（参数名映射：q/query → query）。"""
+        query = str(params.get("query") or params.get("q") or "").strip()
+        if not query:
+            return ToolResult(
+                success=False, tool_name="knowledgebase_search",
+                error="缺少搜索关键词", formatted_text="请提供要搜索的关键词。",
+                page="report-analysis",
+            )
+        try:
+            limit = max(1, min(int(params.get("limit") or 8), 20))
+        except (TypeError, ValueError):
+            limit = 8
+        result, payload = await self._fetch_router_json(
+            "routers.reports", "knowledgebase_search",
+            tool_name_for_error="knowledgebase_search", query=query, limit=limit,
+        )
+        if result is not None:
+            return result
+        data = payload.get("data") or payload
+        items = data.get("results") or []
+        lines = [f"知识库搜索「{query}」命中 {data.get('count', len(items))} 条："]
+        for item in items[:8]:
+            title = str(item.get("title") or item.get("subject") or "-")
+            score = item.get("score")
+            lines.append(f"- {title}" + (f"（相关度 {score}）" if score else ""))
+        return ToolResult(
+            success=True, tool_name="knowledgebase_search",
+            data=data, formatted_text="\n".join(lines) if items else f"知识库未命中「{query}」。",
+            kind="table", page="report-analysis",
+        )
+
+    async def _query_knowledgebase_stats(self, session, request, params) -> ToolResult:
+        """知识库统计。"""
+        result, payload = await self._fetch_router_json("routers.reports", "knowledgebase_stats")
+        if result is not None:
+            return result
+        stats = (payload.get("data") or payload).get("stats") or {}
+        text = "知识库统计：" + "，".join(f"{k}={v}" for k, v in stats.items()) if stats else "知识库为空或未生成。"
+        return ToolResult(
+            success=True, tool_name="knowledgebase_stats",
+            data={"stats": stats}, formatted_text=text, kind="status", page="report-analysis",
+        )
+
+    async def _query_security_audit_logs(self, session, request, params) -> ToolResult:
+        """查询安全审计日志。"""
+        kwargs = {"limit": max(1, min(int(params.get("limit") or 50), 1000))}
+        if params.get("source"):
+            kwargs["source"] = str(params.get("source"))
+        if params.get("action_type"):
+            kwargs["action_type"] = str(params.get("action_type"))
+        if params.get("q"):
+            kwargs["q"] = str(params.get("q"))
+        result, payload = await self._fetch_router_json(
+            "routers.audit", "list_security_audit_logs",
+            tool_name_for_error="security_audit_logs", **kwargs,
+        )
+        if result is not None:
+            return result
+        data = payload.get("data") or payload
+        events = data.get("records") or []
+        lines = [f"安全审计日志 {len(events)} 条："]
+        for ev in events[:10]:
+            ts = str(ev.get("timestamp") or "")[:19]
+            who = ev.get("username") or ev.get("source") or "-"
+            act = ev.get("operation") or ev.get("action_type") or ev.get("path") or "-"
+            lines.append(f"- [{ts}] {who} | {act}")
+        return ToolResult(
+            success=True, tool_name="security_audit_logs",
+            data=data, formatted_text="\n".join(lines) if events else "暂无审计日志。",
+            kind="table", page="security-audit",
+            quick_actions=[{"label": "打开安全审计", "page": "security-audit"}],
+        )
+
     async def _query_redmine_workload_stats(self, session, request, params) -> ToolResult:
         """统计一个或多个人员的 Redmine 工作量。"""
         from routers.redmine_agent import _db, _agent, _resolve_owner_names
@@ -1055,7 +1145,7 @@ class ActionExecutor:
 
         query_params = self._query_params_for_tool(tool, params)
         shim = AgentRequestShim(request, query_params=query_params) if request else None
-        sig = inspect.signature(func)
+        sig = _cached_signature(func)
         kwargs: Dict[str, Any] = {}
 
         for name in sig.parameters:

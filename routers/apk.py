@@ -5,11 +5,10 @@ import re
 import shutil
 import asyncio
 import logging
-import subprocess
 import xml.etree.ElementTree as ET
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, Form, Query
+from fastapi import APIRouter, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 
 from core.apk import (
@@ -21,9 +20,6 @@ from core.apk import (
     _cleanup_files,
     _get_apk_task,
     _read_manifest_xml,
-    _get_apk_sources_dir,
-    _add_apk_symbol,
-    _index_java_source_file,
     _build_apk_symbol_index,
     _score_apk_symbol_candidate,
     _run_jadx_analysis,
@@ -34,9 +30,6 @@ from core.settings import (
     APK_MAX_FILE_SIZE,
     APK_MAX_SOURCE_FILE_SIZE,
     APK_UPLOAD_DIR,
-    APK_MAX_TASKS,
-    JADX_PATH,
-    JADX_TIMEOUT,
 )
 from core.state import global_state
 from core.api_response import ApiResponse

@@ -344,6 +344,21 @@ class SSHManager:
         finally:
             self.return_connection(ssh)
 
+    @contextmanager
+    def optional_connection(self, config: dict):
+        """None-safe SSH 连接上下文管理器。
+
+        与 connection() 的区别：拿不到连接时不抛异常，而是 yield None，
+        由调用方按各自的语义处理（返回错误响应 / 跳过 / 记日志等）。
+        连接正常时同样在退出时归还到连接池。
+        """
+        ssh = self.get_connection(config)
+        try:
+            yield ssh
+        finally:
+            if ssh is not None:
+                self.return_connection(ssh)
+
     def optimize_sftp_performance(self, sftp):
         """
         优化SFTP传输性能

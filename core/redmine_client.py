@@ -11,6 +11,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -137,9 +138,10 @@ class RedmineClient:
         status_id: str = "*",
         limit: int = 1000,
         sort: str = "updated_on:desc",
+        filters: Optional[Dict[str, Any]] = None,
     ) -> List[Any]:
         """Fetch issues assigned to a specific Redmine user id."""
-        return await self._paginate_issues(int(assignee_id), status_id, limit, sort)
+        return await self._paginate_issues(int(assignee_id), status_id, limit, sort, filters=filters)
 
     async def fetch_project_issues(
         self,
@@ -193,10 +195,12 @@ class RedmineClient:
         status_id: str = "*",
         limit: int = 1000,
         sort: str = "updated_on:desc",
+        filters: Optional[Dict[str, Any]] = None,
     ) -> List[Any]:
         """Shared paginated issue fetcher for both 'me' and specific assignee."""
         limit = max(1, min(int(limit or 1000), 5000))
         page_size = min(limit, 100)
+        extra_filters = dict(filters or {})
 
         def _fetch():
             all_items = []
@@ -209,6 +213,7 @@ class RedmineClient:
                     sort=sort,
                     limit=page_size,
                     offset=offset,
+                    **extra_filters,
                 )
                 page = list(issues)
                 if not page:
@@ -229,6 +234,93 @@ class RedmineClient:
             return all_items
 
         return await asyncio.to_thread(_fetch)
+
+    async def fetch_open_issue_snapshots_by_assignee(
+        self,
+        assignee_id: int,
+        limit: int = 500,
+        window_days: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Fetch recent open issues with journals for live reply statistics."""
+        max_items = max(1, min(int(limit or 500), 1000))
+        cutoff = datetime.now() - timedelta(days=int(window_days)) if int(window_days or 0) > 0 else None
+        filters: Dict[str, Any] = {}
+        if cutoff:
+            filters["updated_on"] = f">={cutoff.date().isoformat()}"
+        issues = await self.fetch_issues_by_assignee(
+            assignee_id=int(assignee_id),
+            status_id="open",
+            limit=max_items,
+            sort="updated_on:desc",
+            filters=filters,
+        )
+        candidates = []
+        for issue in issues:
+            updated = _parse_dt(getattr(issue, "updated_on", None))
+            if cutoff and (not updated or updated < cutoff):
+                continue
+            candidates.append(issue)
+
+        def _obj_name(obj: Any) -> str:
+            if isinstance(obj, dict):
+                return str(obj.get("name") or "")
+            return str(getattr(obj, "name", "") or obj or "")
+
+        def _obj_email(obj: Any) -> str:
+            if obj is None:
+                return ""
+            return str(getattr(obj, "mail", "") or getattr(obj, "email", "") or getattr(obj, "login", "") or "")
+
+        def _detail(issue_id: int) -> Dict[str, Any]:
+            issue = self._redmine.issue.get(int(issue_id), include=["journals"])
+            journals = []
+            for item in getattr(issue, "journals", []) or []:
+                details = []
+                for detail in getattr(item, "details", []) or []:
+                    details.append({
+                        "property": str(getattr(detail, "property", "")),
+                        "name": str(getattr(detail, "name", "")),
+                        "old_value": str(getattr(detail, "old_value", "")),
+                        "new_value": str(getattr(detail, "new_value", "")),
+                    })
+                journals.append({
+                    "id": str(getattr(item, "id", "")),
+                    "user": _obj_name(getattr(item, "user", None)),
+                    "user_email": _obj_email(getattr(item, "user", None)),
+                    "created_on": str(getattr(item, "created_on", "") or ""),
+                    "notes": str(getattr(item, "notes", "") or "")[:2000],
+                    "details": details,
+                })
+            status = getattr(issue, "status", None)
+            priority = getattr(issue, "priority", None)
+            assigned_to = getattr(issue, "assigned_to", None)
+            return {
+                "issue_id": int(getattr(issue, "id", 0) or 0),
+                "subject": str(getattr(issue, "subject", "") or ""),
+                "status_name": _obj_name(status),
+                "priority_name": _obj_name(priority),
+                "assigned_to_name": _obj_name(assigned_to),
+                "created_on": str(getattr(issue, "created_on", "") or ""),
+                "updated_on": str(getattr(issue, "updated_on", "") or ""),
+                "closed_on": str(getattr(issue, "closed_on", "") or ""),
+                "description": str(getattr(issue, "description", "") or ""),
+                "journals_json": journals,
+                "attachments_json": [],
+                "failures_json": [],
+                "is_resolved": 0,
+                "last_scanned_at": datetime.now().isoformat(timespec="seconds"),
+            }
+
+        async def _one(issue: Any) -> Dict[str, Any]:
+            return await asyncio.to_thread(_detail, int(getattr(issue, "id")))
+
+        semaphore = asyncio.Semaphore(8)
+
+        async def _guarded(issue: Any) -> Dict[str, Any]:
+            async with semaphore:
+                return await _one(issue)
+
+        return [item for item in await asyncio.gather(*[_guarded(issue) for issue in candidates]) if item.get("issue_id")]
 
     async def count_issues_by_assignee(self, assignee_id: int) -> Dict[str, int]:
         """Count all/open/closed issues assigned to a Redmine user id."""
@@ -286,6 +378,66 @@ class RedmineClient:
         }
         _ASSIGNEE_TREND_CACHE[cache_key] = (time.time(), {key: list(value) for key, value in data.items()})
         return data
+
+    async def fetch_resolved_issues_by_assignee(
+        self,
+        assignee_id: int,
+        start: str = "",
+        end: str = "",
+        limit: int = 2000,
+    ) -> List[Dict[str, Any]]:
+        """Fetch closed issues for a Redmine user within [start, end).
+
+        Returns normalized dicts so the caller does not need access to the raw
+        python-redmine objects. Dates are compared as ISO string prefixes. This
+        powers the department trend drill-down independent of the local DB sync
+        scope (which only covers the configured sync user).
+        """
+        max_items = max(1, min(int(limit or 2000), 5000))
+        filters: Dict[str, Any] = {}
+        if start or end:
+            filters["closed_on"] = f"><{start or '1900-01-01'}|{end or '9999-12-31'}"
+        issues = await self.fetch_issues_by_assignee(
+            assignee_id=int(assignee_id),
+            status_id="closed",
+            limit=max_items,
+            sort="closed_on:desc",
+            filters=filters,
+        )
+
+        def _obj_name(obj: Any) -> str:
+            if isinstance(obj, dict):
+                return str(obj.get("name") or "")
+            return str(getattr(obj, "name", "") or obj or "")
+
+        result: List[Dict[str, Any]] = []
+        for issue in issues:
+            closed_on = str(getattr(issue, "closed_on", "") or "")[:19]
+            resolved_on = closed_on or str(getattr(issue, "updated_on", "") or "")[:19]
+            if start and resolved_on[:10] < start:
+                continue
+            if end and resolved_on[:10] >= end:
+                continue
+            tracker = getattr(issue, "tracker", None)
+            priority = getattr(issue, "priority", None)
+            status = getattr(issue, "status", None)
+            category = getattr(issue, "category", None)
+            result.append({
+                "issue_id": int(getattr(issue, "id", 0) or 0),
+                "subject": str(getattr(issue, "subject", "") or ""),
+                "status_name": _obj_name(status),
+                "priority_name": _obj_name(priority),
+                "assigned_to_name": _obj_name(getattr(issue, "assigned_to", None)),
+                "closed_on": closed_on[:10],
+                "resolved_on": resolved_on,
+                "updated_on": str(getattr(issue, "updated_on", "") or "")[:19],
+                "tracker_name": _obj_name(tracker),
+                "category": _obj_name(category),
+            })
+            if len(result) >= max_items:
+                break
+        result.sort(key=lambda item: (item.get("resolved_on") or "", item.get("issue_id") or 0), reverse=True)
+        return result
 
     async def discover_assignees_from_issues(
         self,
