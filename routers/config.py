@@ -22,6 +22,27 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+SIDEBAR_PAGES = {
+    'test',
+    'desktop',
+    'terminal',
+    'users',
+    'devices',
+    'reports',
+    'report-analysis',
+    'apk-analysis',
+    'test-suites',
+    'api-docs',
+    'architecture',
+    'websites',
+    'tools',
+    'security-audit',
+    'gms-assistant',
+    'redmine-agent',
+    'gerrit-dashboard',
+    'agent',
+}
+
 
 # ==================== Tailscale helpers ====================
 
@@ -80,6 +101,23 @@ def normalize_sidebar_order(raw_order: Any) -> List[str]:
     if not order:
         raise HTTPException(status_code=400, detail="order 不能为空")
     return order
+
+
+def normalize_sidebar_visible_pages(raw_pages: Any) -> List[str]:
+    """校验并去重侧边栏可见页面。空数组表示使用默认全量可见。"""
+    if not isinstance(raw_pages, list):
+        return []
+
+    pages = []
+    seen = set()
+    for item in raw_pages:
+        if not isinstance(item, str):
+            continue
+        page = item.strip()
+        if page in SIDEBAR_PAGES and page not in seen:
+            pages.append(page)
+            seen.add(page)
+    return pages
 
 
 _tailscale_start_lock = asyncio.Lock()
@@ -207,7 +245,7 @@ async def update_config(req: dict):
     # 运行时配置字段（保存在 config_runtime.json）
     # 注意：client_ip 和 client_username 是运行时状态，不应保存到配置文件
     runtime_keys = {
-        'client_hosts', 'client_ssh_credentials', 'local_server', 'sidebar_order'
+        'client_hosts', 'client_ssh_credentials', 'local_server', 'sidebar_order', 'sidebar_visible_pages'
     }
 
     # 检查是否有不允许修改的字段
@@ -239,16 +277,32 @@ async def get_sidebar_order():
     order = existing_runtime.get('sidebar_order', [])
     if not isinstance(order, list):
         order = []
-    return success_response({'order': order})
+    visible_pages = normalize_sidebar_visible_pages(existing_runtime.get('sidebar_visible_pages'))
+    return success_response({'order': order, 'visible_pages': visible_pages})
 
 
 @router.post("/api/sidebar-order")
 async def save_sidebar_order(req: dict = Body(default={})):
-    """保存侧边栏导航顺序。"""
-    order = normalize_sidebar_order(req.get('order'))
+    """保存侧边栏导航顺序和可见页面。"""
     existing_runtime = config_manager.get_runtime_config()
-    existing_runtime['sidebar_order'] = order
+    order = existing_runtime.get('sidebar_order', [])
+
+    if 'order' in req:
+        order = normalize_sidebar_order(req.get('order'))
+        existing_runtime['sidebar_order'] = order
+
+    if 'visible_pages' in req:
+        visible_pages = normalize_sidebar_visible_pages(req.get('visible_pages'))
+        if not visible_pages:
+            return error_response("侧边栏至少需要保留一个可见页面", status_code=400)
+        existing_runtime['sidebar_visible_pages'] = visible_pages
+
+    if 'order' not in req and 'visible_pages' not in req:
+        return error_response("缺少可保存的侧边栏配置", status_code=400)
 
     if config_manager.save_runtime_config(existing_runtime):
-        return success_response({'order': order})
+        return success_response({
+            'order': order if isinstance(order, list) else [],
+            'visible_pages': existing_runtime.get('sidebar_visible_pages', []),
+        })
     return error_response("保存侧边栏排序失败", status_code=500)
