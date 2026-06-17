@@ -638,6 +638,12 @@ class ConfigManager:
             config = self.load_config()
         return config.get('ubuntu_host') or get_ubuntu_host()
 
+    def _split_device_host(self, device_host: str) -> tuple[str, str]:
+        if not device_host or '@' not in device_host:
+            return "", ""
+        username, hostname = device_host.split('@', 1)
+        return username.strip(), hostname.strip()
+
     def find_device_host_password(self, device_host: str, config: Dict[str, Any] = None) -> Optional[str]:
         """
         从 client_ssh_credentials 中查找对应 device_host 的密码
@@ -655,9 +661,21 @@ class ConfigManager:
         if '@' not in device_host:
             return None
 
-        username, hostname = device_host.split('@', 1)
+        username, hostname = self._split_device_host(device_host)
 
-        # 从 client_ssh_credentials 中查找匹配的凭据
+        # 优先用完整 device_host 或 username+host 匹配，避免同一用户名多台客户端串用密码。
+        for cred in config.get('client_ssh_credentials', []):
+            cred_device_host = str(cred.get('device_host') or '').strip()
+            cred_host = str(cred.get('host') or cred.get('hostname') or '').strip()
+            cred_username = str(cred.get('username') or '').strip()
+            if cred_device_host and cred_device_host == device_host:
+                logger.debug(f"[Config] Found SSH credential for device_host={device_host}")
+                return cred.get('password')
+            if cred_username == username and cred_host == hostname:
+                logger.debug(f"[Config] Found SSH credential for username={username}, host={hostname}")
+                return cred.get('password')
+
+        # 兼容旧配置：只保存 username 的凭据仍可用于同名用户。
         for cred in config.get('client_ssh_credentials', []):
             if cred.get('username') == username:
                 logger.debug(f"[Config] Found SSH credential for username={username}")
@@ -665,6 +683,44 @@ class ConfigManager:
 
         logger.debug(f"[Config] No SSH credential found for {device_host}")
         return None
+
+    def upsert_device_host_password(self, device_host: str, password: str) -> bool:
+        """Insert or update one Windows client SSH password in runtime config."""
+        device_host = str(device_host or '').strip()
+        password = str(password or '')
+        username, hostname = self._split_device_host(device_host)
+        if not username or not hostname or not password:
+            return False
+
+        runtime = self._load_runtime_config() or {}
+        credentials = runtime.get('client_ssh_credentials') or []
+        if not isinstance(credentials, list):
+            credentials = []
+
+        updated = False
+        next_credentials = []
+        for cred in credentials:
+            if not isinstance(cred, dict):
+                continue
+            cred_device_host = str(cred.get('device_host') or '').strip()
+            cred_host = str(cred.get('host') or cred.get('hostname') or '').strip()
+            cred_username = str(cred.get('username') or '').strip()
+            is_same_host = cred_device_host == device_host or (cred_username == username and cred_host == hostname)
+            if is_same_host:
+                cred = {**cred, "device_host": device_host, "username": username, "host": hostname, "password": password}
+                updated = True
+            next_credentials.append(cred)
+
+        if not updated:
+            next_credentials.append({
+                "device_host": device_host,
+                "username": username,
+                "host": hostname,
+                "password": password,
+            })
+
+        runtime['client_ssh_credentials'] = next_credentials
+        return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
 
     def _get_redmine_cipher_suite(self):
         """获取 Redmine 凭证加密用的 Fernet 实例"""

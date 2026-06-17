@@ -41,6 +41,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _known_usbip_device_ids() -> set:
+    """Return USB/IP device ids from in-memory and persisted runtime state."""
+    device_ids = set()
+    with global_state.usbip_devices_source_lock:
+        device_ids.update(global_state.usbip_devices_source.keys())
+    runtime_sources = (config_manager.get_runtime_config() or {}).get("usbip_devices_source") or {}
+    if isinstance(runtime_sources, dict):
+        device_ids.update(str(device_id) for device_id in runtime_sources.keys() if device_id)
+    return device_ids
+
+
 
 
 @router.get("/api/devices/list")
@@ -62,18 +73,10 @@ async def get_connected_devices(
     # Refresh device list first
     devices = await asyncio.to_thread(device_manager.get_connected_devices, force_refresh)
 
-    # Clean up removed device source records
+    # Keep USB/IP source records for disconnected devices. They are needed for
+    # server-side auto reconnect after device reboot; manual USB/IP disconnect
+    # is responsible for clearing them.
     current_device_set = set(devices)
-    devices_to_remove = [
-        dev_id
-        for dev_id in global_state.usbip_devices_source.keys()
-        if dev_id not in current_device_set
-    ]
-    if devices_to_remove:
-        logger.info(f"[Devices API] Cleaning up removed devices: {devices_to_remove}")
-        with global_state.usbip_devices_source_lock:
-            for dev_id in devices_to_remove:
-                del global_state.usbip_devices_source[dev_id]
 
     # Check cache
     now = datetime.now().timestamp()
@@ -404,21 +407,6 @@ def _build_devices_management_payload(
     ubuntu_user = config_manager.get_ubuntu_user(config)
 
     all_usbip_sources = {**global_state.usbip_devices_source, **usbip_manager.device_sources}
-    current_device_set = set(device_ids)
-    devices_to_remove = [
-        dev_id for dev_id in all_usbip_sources if dev_id not in current_device_set
-    ]
-
-    if devices_to_remove:
-        logger.info(
-            f"[Device Management] Cleaning up removed devices from memory: {devices_to_remove}"
-        )
-        with global_state.usbip_devices_source_lock:
-            for dev_id in devices_to_remove:
-                global_state.usbip_devices_source.pop(dev_id, None)
-        for dev_id in devices_to_remove:
-            usbip_manager.device_sources.pop(dev_id, None)
-
     for device_id in device_ids:
         props = device_data.get(device_id, {})
         lock_info = locks.get(device_id, {})
@@ -533,16 +521,24 @@ async def reboot_devices(req: DeviceActionRequest):
     """Reboot devices."""
     from core.api_response import ApiResponse
 
-    with SSHConnection() as ssh:
-        async def reboot_single_device(device_id: str) -> Dict:
-            result = device_manager.reboot_device(device_id, ssh)
-            result["device"] = device_id
-            return result
+    usbip_device_ids = _known_usbip_device_ids()
 
-        results = await asyncio.gather(
-            *[reboot_single_device(d) for d in req.devices]
+    async def reboot_single_device(device_id: str) -> Dict:
+        wait_for_online = device_id not in usbip_device_ids
+        result = await asyncio.to_thread(
+            device_manager.reboot_device,
+            device_id,
+            None,
+            wait_for_online,
         )
-        return ApiResponse.device_results(results, "Device reboot")
+        result["device"] = device_id
+        result["usbip_reconnect_expected"] = not wait_for_online
+        return result
+
+    results = await asyncio.gather(
+        *[reboot_single_device(d) for d in req.devices]
+    )
+    return ApiResponse.device_results(results, "Device reboot")
 
 
 @router.post("/api/devices/remount")

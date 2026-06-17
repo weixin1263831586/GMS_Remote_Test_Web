@@ -928,7 +928,7 @@ async function saveSettings() {
     hideSettings();
     await init();
   } catch (e) {
-    alert(e.message);
+    notifyUser('保存设置失败', e.message, 'error');
   }
 }
 function fillSelect(id, items) {
@@ -956,6 +956,22 @@ function showModal(id) {
 function hideModal(id) {
   const el = document.getElementById(id);
   if (el) el.classList.remove('show');
+}
+function notifyUser(title, message, level) {
+  level = level || 'info';
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({type:'gms-dashboard-notification', title:title, message:message, level:level}, '*');
+    }
+  } catch (_) {}
+  var old = document.getElementById('gerrit-local-toast');
+  if (old) old.remove();
+  var toast = document.createElement('div');
+  toast.id = 'gerrit-local-toast';
+  toast.textContent = title + (message ? ': ' + message : '');
+  toast.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:10000;max-width:min(460px,calc(100vw - 32px));padding:10px 12px;border-radius:6px;background:#111827;color:#f8fafc;border:1px solid #334155;box-shadow:0 8px 24px rgba(0,0,0,.28);font-size:12px;';
+  document.body.appendChild(toast);
+  setTimeout(function(){ if (toast.parentNode) toast.remove(); }, 3600);
 }
 function switchTab(tab) {
   currentTab = tab;
@@ -1020,9 +1036,9 @@ function displayTrendRange(range) {
 }
 async function showGerritTrendDetail(granularity, label) {
   var owners = (trendOwners && trendOwners.length) ? trendOwners : (trendOwner ? [trendOwner] : []);
-  if (!owners.length) { alert('未获取到当前看板的 owner'); return; }
+  if (!owners.length) { notifyUser('无法查看提交明细', '未获取到当前看板的 owner', 'warning'); return; }
   var range = trendLabelToDateRange(granularity, label);
-  if (!range) { alert('无法解析时段：' + label); return; }
+  if (!range) { notifyUser('无法解析时段', label, 'warning'); return; }
   var modal = document.getElementById('trendDetailModal');
   var title = document.getElementById('trendDetailTitle');
   var body = document.getElementById('trendDetailBody');
@@ -1247,7 +1263,7 @@ async function saveTrendStartDate() {
     hideTrendStartModal();
     if (currentTab === 'department') await loadDepartment(false);
     else await loadPersonal(false);
-  } catch (e) { alert(e.message); }
+  } catch (e) { notifyUser('保存统计日期失败', e.message, 'error'); }
 }
 function renderLists(lists, prefix) {
   const idPrefix = prefix || 'sec';
@@ -1351,7 +1367,7 @@ async function savePersonalProfile() {
     hideAddPersonalModal();
     await init();
     if (currentTab === 'department') await loadDepartment(true);
-  } catch (e) { alert(e.message); }
+  } catch (e) { notifyUser('保存成员失败', e.message, 'error'); }
 }
 function showAddDepartmentModal(targetSelectId) {
   pendingDepartmentTargetSelect = targetSelectId || 'departmentProfile';
@@ -1374,7 +1390,7 @@ async function saveDepartmentProfile() {
       await init();
       switchTab('department');
     }
-  } catch (e) { alert(e.message); }
+  } catch (e) { notifyUser('添加部门看板失败', e.message, 'error'); }
 }
 function showAddDepartmentOwnerModal() { document.getElementById('addDepartmentOwnerValue').value=''; showModal('addDepartmentOwnerModal'); }
 function hideAddDepartmentOwnerModal() { hideModal('addDepartmentOwnerModal'); }
@@ -1386,14 +1402,14 @@ async function saveDepartmentOwner() {
     config = result.dashboard || config;
     hideAddDepartmentOwnerModal();
     await loadDepartment(true);
-  } catch (e) { alert(e.message); }
+  } catch (e) { notifyUser('添加部门成员失败', e.message, 'error'); }
 }
 async function removeDepartmentOwner(owner, btn) {
   const profileSelect = document.getElementById('departmentProfile');
   const profileId = currentDepartmentProfileId || (profileSelect ? profileSelect.value : '') || '';
   if (!profileId || !owner) return;
   if (profileId === 'all') {
-    alert('请先选择具体部门，再移出成员。');
+    notifyUser('无法移出成员', '请先选择具体部门，再移出成员。', 'warning');
     return;
   }
   if (!confirm('确认从当前部门移出 ' + owner + '？')) return;
@@ -1403,7 +1419,7 @@ async function removeDepartmentOwner(owner, btn) {
     config = result.dashboard || config;
     await loadDepartment(true);
   } catch (e) {
-    alert(e.message);
+    notifyUser('移出部门成员失败', e.message, 'error');
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -1414,7 +1430,7 @@ async function syncRedmineMembers(btn) {
     config = await api('/api/gerrit-dashboard/sync-redmine-members', {method:'POST'});
     await loadDepartment(true);
   } catch (e) {
-    alert(e.message);
+    notifyUser('同步成员失败', e.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '同步成员'; }
   }

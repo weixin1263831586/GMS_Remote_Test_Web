@@ -11,6 +11,34 @@ from typing import Any, Dict, List, Optional
 from core.agent_executor import ToolResult
 
 
+PAGE_DISPLAY_NAMES: Dict[str, str] = {
+    "test": "测试界面",
+    "desktop": "主机桌面",
+    "terminal": "主机终端",
+    "users": "用户管理",
+    "devices": "设备管理",
+    "reports": "报告管理",
+    "report-analysis": "报告分析",
+    "apk-analysis": "APK分析",
+    "test-suites": "测试套件",
+    "api-docs": "系统接口",
+    "architecture": "系统架构",
+    "websites": "常用网址",
+    "tools": "常用工具",
+    "security-audit": "安全审计",
+    "gms-assistant": "GMS助手",
+    "automation": "GMS ATS",
+    "redmine-agent": "Redmine看板",
+    "gerrit-dashboard": "Gerrit看板",
+    "agent": "对话Agent",
+}
+
+
+def page_quick_actions() -> List[Dict[str, str]]:
+    """Return one navigation quick action per first-class sidebar page."""
+    return [{"label": label, "page": page} for page, label in PAGE_DISPLAY_NAMES.items()]
+
+
 # ==================== Response ====================
 
 from dataclasses import dataclass
@@ -92,7 +120,7 @@ def generate_capability_overview() -> str:
         "- 查询状态：设备/型号、空闲占用、测试状态、测试套件、报告、APK任务、在线用户、系统健康、VPN、USB/IP、配置摘要。\n"
         "- 执行操作：启动/停止测试、失败 retry、连接 WiFi、重启/remount/投屏设备、VPN/USB-IP 操作、报告下载/删除等；有风险或会改状态的操作会先让你确认。\n"
         "- 分析问题：报告分析、失败用例诊断、APK/JAR 反编译、套件 APK 源码分析、OpenGrok 代码搜索。\n"
-        "- 页面导航：打开测试界面、设备管理、报告管理、报告分析、APK分析、测试套件、终端、桌面、常用网址、常用工具、安全审计。\n\n"
+        "- 页面导航：打开测试界面、设备管理、报告管理、报告分析、APK分析、测试套件、GMS ATS、Redmine看板、Gerrit看板、终端、桌面、常用网址、常用工具、安全审计。\n\n"
         "你可以直接这样说：\n"
         "- 「rk3572设备」或「空闲设备」\n"
         "- 「最近报告」或「分析最新失败报告」\n"
@@ -120,7 +148,10 @@ def generate_page_overview() -> str:
         "- 常用工具：维护可下载工具条目，从服务器白名单工具目录下载脚本或二进制工具。\n"
         "- 安全审计：查看页面访问、API 调用、请求摘要、响应摘要和耗时，辅助追踪操作记录。\n"
         "- GMS助手：打开外部/内置 GMS 知识助手入口。\n"
-        "- 对话Agent：用自然语言查询设备/报告/套件，生成测试计划，执行确认类操作并跟踪分析流程。"
+        "- GMS ATS：把 Gerrit 触发、构建产物、设备选择、烧写、测试执行和结果回写串成自动化测试站流程。\n"
+        "- Redmine看板：查看个人/部门/项目 Redmine 统计、待回复、超阈值未回复、解决趋势和问题明细。\n"
+        "- Gerrit看板：查看个人/部门 Gerrit 提交统计、查询变更、趋势明细和成员配置。\n"
+        "- 对话Agent：用自然语言查询设备/报告/套件，生成测试计划，打开项目页面，执行确认类操作并跟踪分析流程。"
     )
 
 
@@ -128,13 +159,4 @@ def generate_page_overview() -> str:
 
 def _page_display_name(page: str) -> str:
     """页面标识 → 中文显示名。"""
-    names = {
-        "test": "测试界面", "desktop": "主机桌面", "terminal": "主机终端",
-        "users": "用户管理", "devices": "设备管理", "reports": "报告管理",
-        "report-analysis": "报告分析", "apk-analysis": "APK分析",
-        "test-suites": "测试套件", "api-docs": "系统接口",
-        "architecture": "系统架构", "websites": "常用网址", "tools": "常用工具",
-        "security-audit": "安全审计", "gms-assistant": "GMS助手",
-        "agent": "对话Agent",
-    }
-    return names.get(page, page)
+    return PAGE_DISPLAY_NAMES.get(page, page)

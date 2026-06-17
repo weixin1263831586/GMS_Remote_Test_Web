@@ -27,6 +27,7 @@ from core.agent_response import (
     generate_capability_overview,
     generate_clarification,
     generate_page_overview,
+    page_quick_actions,
 )
 from core.agent_tools import registry
 from core.clients import get_client_id_from_request
@@ -218,7 +219,13 @@ def _parse_user_intent(message: str) -> Dict[str, Any]:
     module, case = _extract_module_and_case(text)
     test_type = _extract_test_type(text)
     retry_count = _extract_retry_count(text)
-    explicit_devices = _extract_device_ids(text)
+    module_case_tokens = set(
+        re.findall(r"[A-Za-z0-9_.:-]{2,}", f"{module} {case}".replace("/", " "))
+    )
+    explicit_devices = [
+        device_id for device_id in _extract_device_ids(text)
+        if device_id not in module_case_tokens
+    ]
 
     return {
         "raw": text,
@@ -935,13 +942,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             generate_page_overview(),
             data={
                 "page": "agent",
-                "quick_actions": [
-                    {"label": "测试界面", "page": "test"},
-                    {"label": "设备管理", "page": "devices"},
-                    {"label": "报告分析", "page": "report-analysis"},
-                    {"label": "APK分析", "page": "apk-analysis"},
-                    {"label": "常用工具", "page": "tools"},
-                ],
+                "quick_actions": page_quick_actions(),
             },
         )
         session["status"] = "idle"

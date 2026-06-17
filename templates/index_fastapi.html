@@ -22,7 +22,7 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/app-notifications.js?v=20260601-01"></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/app.js?v=20260609-report-reset" defer crossorigin="anonymous"></script>
+    <script src="/static/js/app.js?v=20260617-usbip-reconnect" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -64,7 +64,7 @@
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
-            const sidebarAllPages = ['test', 'desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant', 'redmine-agent', 'gerrit-dashboard', 'agent'];
+            const sidebarAllPages = ['test', 'desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant', 'automation', 'redmine-agent', 'gerrit-dashboard', 'agent'];
 
             // 确定要显示的页面（在页面渲染前）
             const hash = window.location.hash.substring(1);
@@ -330,17 +330,22 @@
                     <span class="sidebar-icon">🎓</span>
                     <span class="sidebar-text">GMS助手</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="redmine-agent" data-page-order="15" onclick="switchPage('redmine-agent', event)">
+                <a href="#" class="sidebar-item" data-page="automation" data-page-order="15" onclick="switchPage('automation', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">⚙️</span>
+                    <span class="sidebar-text">GMS ATS</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="redmine-agent" data-page-order="16" onclick="switchPage('redmine-agent', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🧭</span>
                     <span class="sidebar-text">Redmine</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="gerrit-dashboard" data-page-order="16" onclick="switchPage('gerrit-dashboard', event)">
+                <a href="#" class="sidebar-item" data-page="gerrit-dashboard" data-page-order="17" onclick="switchPage('gerrit-dashboard', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🔀</span>
                     <span class="sidebar-text">Gerrit看板</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="agent" data-page-order="17" onclick="switchPage('agent', event)">
+                <a href="#" class="sidebar-item" data-page="agent" data-page-order="18" onclick="switchPage('agent', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">💬</span>
                     <span class="sidebar-text">对话Agent</span>
@@ -1201,7 +1206,15 @@
         <!-- GMS助手页面 -->
         <div class="container page-content" id="page-gms-assistant">
             <div class="section-title">🎓 GMS助手</div>
-            <iframe id="gms-assistant-frame" src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
+            <iframe id="gms-assistant-frame" data-src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
+                    style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
+            </iframe>
+        </div>
+
+        <!-- GMS ATS页面 -->
+        <div class="container page-content" id="page-automation">
+            <div class="section-title" style="text-transform:none">⚙️ GMS ATS</div>
+            <iframe id="automation-frame" data-src="/automation"
                     style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
         </div>
@@ -1209,7 +1222,7 @@
         <!-- RedmineAgent页面 -->
         <div class="container page-content" id="page-redmine-agent">
             <div class="section-title" style="text-transform:none">🧭 Redmine</div>
-            <iframe id="redmine-agent-frame" src="/redmine-agent"
+            <iframe id="redmine-agent-frame" data-src="/redmine-agent"
                     style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
         </div>
@@ -1217,7 +1230,7 @@
         <!-- Gerrit看板页面 -->
         <div class="container page-content" id="page-gerrit-dashboard">
             <div class="section-title" style="text-transform:none">🔀 Gerrit看板</div>
-            <iframe id="gerrit-dashboard-frame" src="/gerrit-dashboard"
+            <iframe id="gerrit-dashboard-frame" data-src="/gerrit-dashboard"
                     style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
         </div>
@@ -2716,6 +2729,7 @@
             'tools': '常用工具 - GMS远程测试',
             'security-audit': '安全审计 - GMS 远程测试',
             'gms-assistant': 'GMS助手 - GMS 远程测试',
+            'automation': 'GMS ATS - GMS 远程测试',
             'redmine-agent': 'RedmineAgent - GMS 远程测试',
             'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
             'agent': '对话Agent - GMS 远程测试'
@@ -2818,15 +2832,23 @@
                 </label>`;
             }).join('');
 
-            modal.style.display = 'flex';
-            modal.classList.add('show');
+            if (typeof ModalManager !== 'undefined') {
+                ModalManager.open('sidebar-visibility-modal');
+            } else {
+                modal.style.display = 'flex';
+                modal.classList.add('show');
+            }
         }
 
         function closeSidebarVisibilityModal() {
             const modal = document.getElementById('sidebar-visibility-modal');
             if (!modal) return;
-            modal.classList.remove('show');
-            modal.style.display = 'none';
+            if (typeof ModalManager !== 'undefined') {
+                ModalManager.close('sidebar-visibility-modal');
+            } else {
+                modal.classList.remove('show');
+                modal.style.display = 'none';
+            }
         }
 
         function selectAllSidebarVisibility() {
@@ -2843,7 +2865,7 @@
                 if (typeof showToast === 'function') {
                     showToast('至少保留一个导航页面', 'warning');
                 } else {
-                    alert('至少保留一个导航页面');
+                    console.warn('至少保留一个导航页面');
                 }
                 return;
             }
@@ -2908,6 +2930,22 @@
         }
 
         // 页面切换函数
+        function ensureLazyFrameLoaded(pageName) {
+            const frameMap = {
+                'gms-assistant': 'gms-assistant-frame',
+                'automation': 'automation-frame',
+                'redmine-agent': 'redmine-agent-frame',
+                'gerrit-dashboard': 'gerrit-dashboard-frame'
+            };
+            const frameId = frameMap[pageName];
+            if (!frameId) return;
+            const frame = document.getElementById(frameId);
+            if (frame && !frame.getAttribute('src')) {
+                const src = frame.getAttribute('data-src');
+                if (src) frame.setAttribute('src', src);
+            }
+        }
+
         function switchPage(pageName, event) {
             if (event) {
                 event.preventDefault();
@@ -2930,6 +2968,7 @@
 
             // 显示目标页面
             pageEl.classList.add('active');
+            ensureLazyFrameLoaded(pageName);
 
             // 清除DOM缓存，避免保留已隐藏页面的元素引用
             if (typeof clearDomCache === 'function') clearDomCache();
@@ -6494,9 +6533,15 @@
         window.open(url, '_blank');
     }
 
-    // Listen for RedmineAgent notifications from iframe
+    // Listen for embedded dashboard notifications from iframes
     window.addEventListener('message', function(e) {
-        if (e.data && e.data.type === 'redmine-agent-notification') {
+        const allowedTypes = new Set([
+            'redmine-agent-notification',
+            'gms-dashboard-notification',
+            'gms-update-monitor-notification',
+            'automation-notification'
+        ]);
+        if (e.data && allowedTypes.has(e.data.type)) {
             if (typeof notifyOperationResult === 'function') {
                 notifyOperationResult(e.data.title, e.data.message, e.data.level || 'info');
             }

@@ -778,6 +778,15 @@ async def gms_update_monitor_page():
       clearTimeout(showToast._timer);
       showToast._timer = setTimeout(() => { el.style.display = 'none'; }, 3600);
     }
+    function notifyUser(title, message, level) {
+      level = level || 'info';
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({type:'gms-update-monitor-notification', title:title, message:message, level:level}, '*');
+        }
+      } catch (_) {}
+      showToast(title + (message ? ': ' + message : ''), level);
+    }
     function setTab(next) {
       tab = next; offset = 0;
       document.querySelectorAll('.tabs button').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
@@ -813,6 +822,7 @@ async def gms_update_monitor_page():
       }
       frame.src = url;
       showToast('已开始下载套件');
+      notifyUser('GMS套件下载已开始', '浏览器已开始下载套件', 'info');
     }
     async function startSync(mode) {
       const buttons = document.querySelectorAll('header button');
@@ -823,7 +833,7 @@ async def gms_update_monitor_page():
         if (!r.ok || !data.success) throw new Error(data.error || '启动失败');
         pollSync();
       } catch (e) {
-        showToast(e.message, 'error');
+        notifyUser('GMS更新扫描启动失败', e.message, 'error');
         buttons.forEach(b => b.disabled = false);
       }
     }
@@ -837,7 +847,11 @@ async def gms_update_monitor_page():
         return;
       }
       document.querySelectorAll('header button').forEach(b => b.disabled = false);
-      if (status.error) showToast('扫描失败: ' + status.error, 'error');
+      if (status.error) {
+        notifyUser('GMS更新扫描失败', status.error, 'error');
+      } else {
+        notifyUser('GMS更新扫描完成', status.finished_at ? ('完成时间: ' + status.finished_at) : '扫描已完成', 'success');
+      }
       loadAll();
     }
     function paramsBase() {
