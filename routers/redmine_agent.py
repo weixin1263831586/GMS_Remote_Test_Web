@@ -1564,8 +1564,27 @@ async function onStatsUserChange() {
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') document.querySelectorAll('.modal.show').forEach(function(m) { m.classList.remove('show'); });
 });
+document.addEventListener('click', function(e) {
+  if (e.target && e.target.classList && e.target.classList.contains('modal')) e.target.classList.remove('show');
+});
 function showModal(id) { document.getElementById(id).classList.add('show'); }
 function hideModal(id) { document.getElementById(id).classList.remove('show'); }
+function notifyUser(title, message, level) {
+  level = level || 'info';
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({type:'redmine-agent-notification', title:title, message:message, level:level}, '*');
+    }
+  } catch (_) {}
+  var old = document.getElementById('redmine-local-toast');
+  if (old) old.remove();
+  var toast = document.createElement('div');
+  toast.id = 'redmine-local-toast';
+  toast.textContent = title + (message ? ': ' + message : '');
+  toast.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:10000;max-width:min(460px,calc(100vw - 32px));padding:10px 12px;border-radius:6px;background:#111827;color:#f8fafc;border:1px solid #334155;box-shadow:0 8px 24px rgba(0,0,0,.28);font-size:12px;';
+  document.body.appendChild(toast);
+  setTimeout(function(){ if (toast.parentNode) toast.remove(); }, 3600);
+}
 
 // 趋势柱状图点击：粒度+标签 → 日期范围 [start, end)（ISO，闭开区间）
 function utcDateText(date) {
@@ -1616,7 +1635,7 @@ async function showRedmineTrendDetail(granularity, label, namesCsv, profileId) {
   var range = trendLabelToDateRange(granularity, label);
   var title = document.getElementById('trendDetailTitle');
   var body = document.getElementById('trendDetailBody');
-  if (!range || !title || !body) { alert('无法解析时段：' + label); return; }
+  if (!range || !title || !body) { notifyUser('无法解析时段', label, 'warning'); return; }
   title.textContent = '解决Redmine问题明细：' + label + '（' + displayTrendRange(range) + '）';
   body.innerHTML = '<div class="muted">查询中…</div>';
   showModal('trendDetailModal');
@@ -1665,7 +1684,7 @@ async function submitAddUser() {
   var name = document.getElementById('addUserName').value.trim();
   var email = document.getElementById('addUserEmail').value.trim();
   var profileId = (document.getElementById('addUserDepartment') || {}).value || '';
-  if (!id || !name) { alert('请输入用户 ID 和姓名'); return; }
+  if (!id || !name) { notifyUser('添加用户失败', '请输入用户 ID 和姓名', 'warning'); return; }
   try {
     await api('/api/redmine-agent/users', {
       method: 'POST',
@@ -1679,7 +1698,7 @@ async function submitAddUser() {
     document.getElementById('statsUserSelect').value = name;
     if (currentTab === 'department') loadDepartmentOverdue(true);
     else onStatsUserChange();
-  } catch (e) { alert('添加失败: ' + e.message); }
+  } catch (e) { notifyUser('添加用户失败', e.message, 'error'); }
 }
 
 // ---- Add Department Modal ----
@@ -1694,7 +1713,7 @@ function hideAddDepartmentModal() { hideModal('addDepartmentModal'); }
 async function submitAddDepartment() {
   var name = document.getElementById('addDepartmentName').value.trim();
   var id = document.getElementById('addDepartmentId').value.trim();
-  if (!name) { alert('请输入部门名称'); return; }
+  if (!name) { notifyUser('添加部门失败', '请输入部门名称', 'warning'); return; }
   try {
     var result = await api('/api/redmine-agent/dashboard/profiles', {
       method: 'POST',
@@ -1711,7 +1730,7 @@ async function submitAddDepartment() {
       departmentProfileId = profile.id || departmentProfileId;
       loadDepartmentOverdue(true);
     }
-  } catch (e) { alert('添加部门失败: ' + e.message); }
+  } catch (e) { notifyUser('添加部门失败', e.message, 'error'); }
 }
 
 // ---- Add Project Modal ----
@@ -1725,7 +1744,7 @@ function hideAddProjectModal() { hideModal('addProjectModal'); }
 async function submitAddProject() {
   var name = document.getElementById('addProjectName').value.trim();
   var projectId = document.getElementById('addProjectId').value.trim();
-  if (!projectId) { alert('请输入项目标识或 URL'); return; }
+  if (!projectId) { notifyUser('添加项目失败', '请输入项目标识或 URL', 'warning'); return; }
   try {
     var result = await api('/api/redmine-agent/dashboard/projects', {
       method: 'POST',
@@ -1737,7 +1756,7 @@ async function submitAddProject() {
     await loadStatsConfig();
     projectProfileId = (result.profile || {}).id || projectProfileId;
     loadProjectDashboard(true);
-  } catch (e) { alert('添加项目失败: ' + e.message); }
+  } catch (e) { notifyUser('添加项目失败', e.message, 'error'); }
 }
 
 // ---- Settings Modal ----
@@ -1787,7 +1806,7 @@ async function saveSettings() {
     _statsConfigCacheTs = 0; // force reload
     hideSettingsModal();
     refreshCurrentTab();
-  } catch (e) { alert('保存失败: ' + e.message); }
+  } catch (e) { notifyUser('保存设置失败', e.message, 'error'); }
 }
 
 // ---- Smart search: detect issue ID and fetch from Redmine ----
@@ -1833,7 +1852,7 @@ async function fetchIssueFromRedmine(issueId) {
     document.getElementById('searchInput').value = '';
     loadIssues();
   } catch (e) {
-    alert('拉取工单失败: ' + e.message);
+    notifyUser('拉取工单失败', e.message, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = origText;
@@ -2131,7 +2150,7 @@ async function saveTrendStartDate() {
     hideTrendStartModal();
     refreshCurrentTab();
   } catch (e) {
-    alert('保存起始时间失败: ' + e.message);
+    notifyUser('保存起始时间失败', e.message, 'error');
   }
 }
 function renderTrend(title, items, keyName, chartKey, detailNames, detailProfileId) {
@@ -2221,7 +2240,7 @@ async function sendDepartmentReminder(userId, btn) {
   var user = (window._departmentUsers || []).find(function(item) { return String(item.id || '') === String(userId || ''); });
   var ids = redmineIssueIds((user || {}).overdue_issues || []);
   if (!ids.length) {
-    alert('该人员没有超过阈值未回复的 Redmine 问题。');
+    notifyUser('没有可发送的问题', '该人员没有超过阈值未回复的 Redmine 问题。', 'info');
     return;
   }
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
@@ -2231,9 +2250,9 @@ async function sendDepartmentReminder(userId, btn) {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({user_id: userId, issue_ids: ids})
     });
-    alert('✅ 已发送到 ' + (data.to || '绑定邮箱'));
+    notifyUser('提醒邮件已发送', '已发送到 ' + (data.to || '绑定邮箱'), 'success');
   } catch (e) {
-    alert('❌ ' + (e.message || '发送失败'));
+    notifyUser('提醒邮件发送失败', e.message || '发送失败', 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '邮箱'; }
   }
@@ -2242,7 +2261,7 @@ async function sendProjectReminder(userId, btn) {
   var user = (window._projectUsers || []).find(function(item) { return String(item.id || '') === String(userId || ''); });
   var ids = redmineIssueIds((user || {}).issues || []);
   if (!ids.length) {
-    alert('该人员没有项目未关闭 Redmine 问题。');
+    notifyUser('没有可发送的问题', '该人员没有项目未关闭 Redmine 问题。', 'info');
     return;
   }
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
@@ -2257,9 +2276,9 @@ async function sendProjectReminder(userId, btn) {
         intro: '以下 Redmine 问题在项目看板中仍未关闭，请及时处理：'
       })
     });
-    alert('✅ 已发送到 ' + (data.to || '绑定邮箱'));
+    notifyUser('提醒邮件已发送', '已发送到 ' + (data.to || '绑定邮箱'), 'success');
   } catch (e) {
-    alert('❌ ' + (e.message || '发送失败'));
+    notifyUser('提醒邮件发送失败', e.message || '发送失败', 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '邮箱'; }
   }
@@ -2572,13 +2591,6 @@ async function loadProjectDashboard(force) {
   }
 }
 
-// ---- Actions ----
-function _sendParentNotification(title, message, level) {
-  try {
-    window.parent.postMessage({type:'redmine-agent-notification', title, message, level}, '*');
-  } catch(_) {}
-}
-
 async function startScan() {
   const btn = document.getElementById('scanBtn');
   btn.disabled = true; btn.textContent = '⏳ 扫描中...';
@@ -2587,7 +2599,7 @@ async function startScan() {
     const rid = started.run_id || '';
     btn.textContent = '⏳ 等待结果...';
     await waitForRun(rid, '扫描');
-  } catch (e) { alert('扫描失败: ' + e.message); }
+  } catch (e) { notifyUser('扫描失败', e.message, 'error'); }
   finally { btn.disabled = false; btn.textContent = '🔍 扫描'; }
 }
 
@@ -2598,7 +2610,7 @@ async function triggerSync() {
     const started = await api('/api/redmine-agent/sync?max_analyze=30', {method:'POST'});
     if (btn) { btn.disabled = true; btn.textContent = '⏳ 同步中...'; }
     await waitForRun(started.run_id, '同步');
-  } catch (e) { alert('同步失败: ' + e.message); }
+  } catch (e) { notifyUser('同步失败', e.message, 'error'); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '🔍 扫描'; } }
 }
 
@@ -2609,13 +2621,13 @@ async function waitForRun(runId, label) {
       const status = await api('/api/redmine-agent/status');
       if (!status.running) {
         refreshCurrentTab();
-        _sendParentNotification('RedmineAgent ' + label + '完成', '任务 ' + runId + ' 已完成', 'success');
+        notifyUser('RedmineAgent ' + label + '完成', '任务 ' + runId + ' 已完成', 'success');
         return;
       }
     } catch (_) {}
   }
   refreshCurrentTab();
-  _sendParentNotification('RedmineAgent ' + label + '超时', '任务 ' + runId + ' 等待超时，请检查状态', 'warning');
+  notifyUser('RedmineAgent ' + label + '超时', '任务 ' + runId + ' 等待超时，请检查状态', 'warning');
 }
 
 // ---- Init ----

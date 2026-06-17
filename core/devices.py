@@ -179,7 +179,8 @@ class DeviceManager:
     def reboot_device(
         self,
         device_id: str,
-        ssh=None
+        ssh=None,
+        wait_for_online: bool = True,
     ) -> Dict[str, Any]:
         """
         重启设备
@@ -213,6 +214,14 @@ class DeviceManager:
                 return {
                     'success': False,
                     'error': error or '重启命令执行失败'
+                }
+
+            if not wait_for_online:
+                return {
+                    'success': True,
+                    'back_online': False,
+                    'wait_time': 0.0,
+                    'message': '重启命令已发送，设备恢复由后台监控确认'
                 }
 
             # 等待设备重新上线（最多60秒）

@@ -114,6 +114,7 @@ def wait_for_adb_serial_ready(ssh, serial_no: str, timeout: int = 30) -> Dict[st
 # Shared USB/IP parsing constants
 DEFAULT_ANDROID_USBIP_VID_PIDS = ('2207:0006',)
 ANDROID_USBIP_MARKERS = ('android', 'adb', 'rk356', 'rockchip')
+USBIPD_BUSID_RE = re.compile(r'^\d+(?:-\d+)+$')
 
 
 def _strip_ansi(text: str) -> str:
@@ -152,7 +153,7 @@ def parse_usbipd_android_busids(output: str, vid_pid: Optional[str] = None) -> L
         lowered = stripped.lower()
         if any(pid in lowered for pid in vid_pids) or any(marker in lowered for marker in ANDROID_USBIP_MARKERS):
             parts = stripped.split()
-            if parts and '-' in parts[0]:
+            if parts and USBIPD_BUSID_RE.match(parts[0]):
                 busids.append(parts[0])
     return busids
 
@@ -162,7 +163,7 @@ def parse_usbipd_busid_statuses(output: str) -> Dict[str, str]:
     statuses: Dict[str, str] = {}
     for stripped in _iter_connected_lines(output):
         parts = stripped.split()
-        if parts and '-' in parts[0]:
+        if parts and USBIPD_BUSID_RE.match(parts[0]):
             lowered = stripped.lower()
             if 'not shared' in lowered:
                 statuses[parts[0]] = 'not_shared'
@@ -291,6 +292,15 @@ class USBIPManager:
                         usbip_attach_host,
                         busids
                     )
+
+                    if not attached:
+                        self.ssh_manager.return_connection(ubuntu_ssh)
+                        return {
+                            'success': False,
+                            'error': 'USB/IP attach 失败，未成功连接任何设备',
+                            'devices': [],
+                            'device_list': []
+                        }
 
                     # 更新设备来源记录
                     for device_id in device_list:
@@ -482,8 +492,8 @@ class USBIPManager:
                     logger.warning(f"Attach {busid} failed (code={attach_code}): {attach_err or attach_out}")
                 else:
                     logger.info(f"Attach {busid} succeeded")
+                    attached.append(busid)
                 time.sleep(2)
-                attached.append(busid)
 
             # 等待设备稳定（Tailscale 等远程网络需要更长等待时间）
             time.sleep(5)

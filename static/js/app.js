@@ -81,6 +81,11 @@ const HTTP_METHODS = {
 
 const CURL_SPECIAL_PARAMS = ['force_refresh', 'log_type', 'report_timestamp'];
 const VIEWPORT_HEIGHT_OFFSET = 150;
+let pendingUsbipDeviceHost = '';
+let usbipReconnectTimer = null;
+let usbipReconnectAttempts = 0;
+const USBIP_RECONNECT_MAX_ATTEMPTS = 30;
+const USBIP_RECONNECT_INTERVAL_MS = 10000;
 
 const PARAM_TYPES = {
     STRING: 'string',
@@ -299,13 +304,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 延迟执行耗时操作，不阻塞页面加载
     setTimeout(async () => {
-
-        // 自动启动 VNC 服务
-        try {
-            await initAndStartVnc();
-        } catch (error) {
-            console.warn('[Init] Failed to auto-start VNC:', error);
-        }
 
         // 加载用户列表
         try {
@@ -553,15 +551,9 @@ function initWebSocket() {
                             }
                             showToast(message, 'success');
 
-                            // 检查 USB/IP 设备是否断开，如果是则重置按钮状态
+                            // USB/IP 设备重启会短暂断开，优先自动重连，不立即把连接状态清掉。
                             if (state.usbipConnected && disconnected.length > 0) {
-                                const btn = $('usbip-btn');
-                                if (btn) {
-                                    btn.textContent = '📱 本地设备';
-                                    btn.disabled = false;
-                                    state.usbipConnected = false;
-                                    debugLog('[USB/IP] Button reset due to device disconnect');
-                                }
+                                scheduleUsbipReconnect('检测到 USB/IP 设备断开: ' + disconnected.join(' '));
                             }
                         }).catch(err => {
                             console.error('Failed to refresh devices:', err);
@@ -2322,6 +2314,9 @@ async function rebootDevices() {
         });
         addLogEntry(`正在重启 ${state.selectedDevices.size} 台设备...`, 'info');
         showToast('设备正在重启', 'success');
+        if (state.usbipConnected) {
+            scheduleUsbipReconnect('USB/IP 设备正在重启');
+        }
     } catch (error) {
         addLogEntry('重启设备失败: ' + error.message, 'error');
     }
@@ -3064,6 +3059,7 @@ async function setupUsbipForward() {
             // 检查是否成功（支持多种响应格式）
             if (result.success || result.devices || (result.message && result.message.includes('成功连接'))) {
                 state.usbipConnected = true;
+                pendingUsbipDeviceHost = result.device_host || pendingUsbipDeviceHost || '';
                 btn.textContent = '📱 断开设备';
                 btn.disabled = false;
                 addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
@@ -3102,8 +3098,56 @@ async function setupUsbipForward() {
     }
 }
 
+function scheduleUsbipReconnect(reason) {
+    if (usbipReconnectTimer) return;
+    usbipReconnectAttempts = 0;
+    const btn = $('usbip-btn');
+    if (btn) {
+        btn.textContent = '📱 重连中...';
+        btn.disabled = true;
+    }
+    addLogEntry((reason || '检测到 USB/IP 设备断开') + '，等待设备重启后自动重连...', 'warning');
+    usbipReconnectTimer = setTimeout(attemptUsbipReconnect, USBIP_RECONNECT_INTERVAL_MS);
+}
+
+async function attemptUsbipReconnect() {
+    const btn = $('usbip-btn');
+    usbipReconnectAttempts += 1;
+    try {
+        usbipReconnectTimer = null;
+        const payload = pendingUsbipDeviceHost ? { device_host: pendingUsbipDeviceHost } : {};
+        const result = await apiCall('/api/usbip/connect', 'POST', payload);
+        if (result.success || result.devices || (result.message && result.message.includes('成功连接'))) {
+            state.usbipConnected = true;
+            pendingUsbipDeviceHost = result.device_host || pendingUsbipDeviceHost || '';
+            if (btn) {
+                btn.textContent = '📱 断开设备';
+                btn.disabled = false;
+            }
+            addLogEntry(result.message || 'USB/IP 已自动重连', 'success');
+            setTimeout(() => debouncedRefreshDevices(), 3500);
+            return;
+        }
+        throw new Error(result.error || result.message || '自动重连失败');
+    } catch (error) {
+        if (usbipReconnectAttempts < USBIP_RECONNECT_MAX_ATTEMPTS) {
+            addLogEntry(`USB/IP 自动重连第 ${usbipReconnectAttempts} 次未成功，继续等待设备恢复...`, 'warning');
+            usbipReconnectTimer = setTimeout(attemptUsbipReconnect, USBIP_RECONNECT_INTERVAL_MS);
+            return;
+        }
+        if (btn) {
+            btn.textContent = '📱 本地设备';
+            btn.disabled = false;
+        }
+        state.usbipConnected = false;
+        addLogEntry('USB/IP 自动重连失败: ' + error.message, 'error');
+        showToast('USB/IP 自动重连失败', 'error');
+    }
+}
+
 // ==================== 设备主机密码输入 ====================
 function showDevicePasswordModal(deviceHost) {
+    pendingUsbipDeviceHost = deviceHost || pendingUsbipDeviceHost || '';
     document.getElementById('device-host-display').value = deviceHost;
     document.getElementById('device-pswd').value = '';
     ModalManager.open('device-password-modal');
@@ -3278,6 +3322,7 @@ function handleDevicePasswordKeyPress(event) {
 
 async function submitDevicePassword() {
     const password = document.getElementById('device-pswd').value;
+    const deviceHost = document.getElementById('device-host-display').value.trim() || pendingUsbipDeviceHost;
     if (!password) {
         showToast('请输入密码', 'warning');
         return;
@@ -3292,6 +3337,7 @@ async function submitDevicePassword() {
         closeDevicePasswordModal();
 
         const result = await apiCall('/api/usbip/connect', 'POST', {
+            device_host: deviceHost,
             device_password: password
         });
 
@@ -3306,6 +3352,7 @@ async function submitDevicePassword() {
         const btn = $('usbip-btn');
         if (btn) {
             state.usbipConnected = true;
+            pendingUsbipDeviceHost = result.device_host || deviceHost || pendingUsbipDeviceHost;
             btn.textContent = '📱 断开设备';
             btn.disabled = false;
         }
@@ -3722,6 +3769,9 @@ async function submitVpnCredential() {
 async function checkUsbipStatus() {
     try {
         const result = await apiCall('/api/usbip/status', 'GET');
+        if (result.device_host) {
+            pendingUsbipDeviceHost = result.device_host;
+        }
         updateUsbipButtonStatus(result.connected);
     } catch (error) {
         console.error('Failed to check USB/IP status:', error);

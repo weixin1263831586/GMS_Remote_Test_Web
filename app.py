@@ -93,6 +93,13 @@ def _start_usb_monitor(app):
         try:
             previous_devices = set(device_manager.get_connected_devices())
             logger.info(f"[USB Monitor] Initialized with devices: {previous_devices}")
+            from core.usbip_reconnect import schedule_usbip_reconnect_for_missing_devices
+            scheduled = schedule_usbip_reconnect_for_missing_devices(
+                previous_devices,
+                reason="startup persisted USB/IP source check",
+            )
+            if scheduled:
+                logger.info("[USB Monitor] Startup scheduled USB/IP reconnect for hosts: %s", scheduled)
         except Exception as e:
             logger.error(f"[USB Monitor] Failed to get initial devices: {e}")
             previous_devices = set()
@@ -103,6 +110,18 @@ def _start_usb_monitor(app):
             connected = list(current_devices - previous_devices)
             disconnected = list(previous_devices - current_devices)
             previous_devices = current_devices
+
+            if disconnected:
+                try:
+                    from core.usbip_reconnect import schedule_usbip_reconnect_for_removed_devices
+                    scheduled = schedule_usbip_reconnect_for_removed_devices(
+                        disconnected,
+                        reason="USB monitor detected disconnect",
+                    )
+                    if scheduled:
+                        logger.info("[USB Monitor] Scheduled USB/IP reconnect for hosts: %s", scheduled)
+                except Exception as e:
+                    logger.error("[USB Monitor] Failed to schedule USB/IP reconnect: %s", e)
 
             with global_state.device_cache_lock:
                 global_state.device_cache = {'devices': [], 'timestamp': 0}

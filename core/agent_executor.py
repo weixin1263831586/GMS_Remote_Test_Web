@@ -1151,6 +1151,10 @@ class ActionExecutor:
         for name in sig.parameters:
             if name == "request":
                 kwargs[name] = shim
+            elif name == "help":
+                kwargs[name] = False
+            elif name == "h":
+                kwargs[name] = None
             elif name in ("req", "body"):
                 model = model_by_tool.get(tool.name)
                 if model:
@@ -1206,7 +1210,14 @@ def _json_body(response) -> Dict[str, Any]:
         if isinstance(body, bytes):
             body = body.decode("utf-8")
         if isinstance(body, str) and body.strip():
-            return json.loads(body)
+            try:
+                return json.loads(body)
+            except json.JSONDecodeError:
+                return {
+                    "success": False,
+                    "error": body.strip(),
+                    "message": body.strip(),
+                }
     except Exception as e:
         logger.warning("[Agent] Failed to parse JSON response from %s: %s", type(response).__name__, e)
     return {"success": False, "error": f"Invalid JSON response: {type(response).__name__}"}

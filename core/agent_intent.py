@@ -81,6 +81,8 @@ _NAV_ALIASES: Dict[str, str] = {
     "常用工具": "tools", "工具下载": "tools", "下载工具": "tools",
     "审计": "security-audit", "安全审计": "security-audit",
     "gms助手": "gms-assistant",
+    "gms ats": "automation", "ats": "automation", "自动化": "automation", "自动化测试": "automation",
+    "gms自动化": "automation", "自动化链路": "automation",
     "redmine": "redmine-agent", "redmine看板": "redmine-agent", "部门看板": "redmine-agent",
     "gerrit": "gerrit-dashboard", "gerrit看板": "gerrit-dashboard", "代码评审": "gerrit-dashboard",
     "agent": "agent", "对话agent": "agent",
@@ -100,7 +102,7 @@ def _extract_test_type(text: str) -> str:
 def _extract_module_and_case(text: str) -> tuple:
     module, case = "", ""
     m = None
-    hash_match = re.search(r"([A-Za-z0-9_.-]+)#([A-Za-z0-9_.$-]+)", text)
+    hash_match = re.search(r"([A-Za-z0-9_./$-]+)#([A-Za-z0-9_./$-]+)", text)
     if hash_match:
         module, case = hash_match.group(1), hash_match.group(2)
     if not module:
@@ -225,6 +227,9 @@ def _extract_query_text(text: str) -> str:
 def _is_run_test_request(text: str) -> bool:
     lowered = text.lower()
     if re.search(r"\b(run|start|retry)\b|启动|开始|执行|重试|再跑|跑测试|跑\s*[a-z0-9_.-]*_test", lowered):
+        return True
+    module, case = _extract_module_and_case(text)
+    if (module or case) and re.search(r"测试|test|用例", text, re.IGNORECASE):
         return True
     if re.search(r"(^|[，,。;\s])跑\s*[A-Za-z0-9_.-]*(?:TestCases|Tests|Test|Cases|_test)", text, re.IGNORECASE):
         return True
@@ -399,7 +404,13 @@ def _resolve_run_test(text: str, session: Dict[str, Any]) -> ResolvedIntent:
     """解析测试启动请求为特殊 intent。"""
     test_type = _extract_test_type(text)
     module, case = _extract_module_and_case(text)
-    device_ids = _extract_device_ids(text)
+    module_case_tokens = set(
+        re.findall(r"[A-Za-z0-9_.:-]{2,}", f"{module} {case}".replace("/", " "))
+    )
+    device_ids = [
+        device_id for device_id in _extract_device_ids(text)
+        if device_id not in module_case_tokens
+    ]
     retry_count = _extract_retry_count(text)
     analyze_on_failure = bool(re.search(r"报告分析|分析报告|失败|fail|analy", text.lower()))
     apk_source = bool(re.search(r"apk|反编译|源码|source", text.lower()))

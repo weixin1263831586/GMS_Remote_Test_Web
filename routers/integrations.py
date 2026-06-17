@@ -662,7 +662,11 @@ async def get_usbip_status(request: Request, device_host: Optional[str] = None):
                 connected = True
 
     logger.info(f"[USB/IP Status] client_id={client_id}, connected={connected}, device_count={len(global_state.usbip_devices_source)}")
-    return JSONResponse(content={"connected": connected})
+    return JSONResponse(content={
+        "connected": connected,
+        "device_host": client_id,
+        "device_count": len(global_state.usbip_devices_source),
+    })
 
 
 # ==================== USB/IP Connect ====================
@@ -704,7 +708,8 @@ async def start_usbip(
 
         windows_device_host = device_host
 
-        device_password = request_data.get("device_password") or find_device_host_password(device_host, config) or config.get("device_pswd", "")
+        submitted_device_password = request_data.get("device_password") or ""
+        device_password = submitted_device_password or find_device_host_password(device_host, config) or config.get("device_pswd", "")
         if not device_password:
             return ApiResponse.error(
                 f"SSH credentials for {device_host} not found, please enter SSH password on login page",
@@ -713,14 +718,32 @@ async def start_usbip(
                 device_host=device_host,
             )
 
-        result = usbip_manager.start_usbip(device_host, device_password, usbip_attach_host=usbip_attach_host)
+        result = await asyncio.to_thread(
+            usbip_manager.start_usbip,
+            device_host,
+            device_password,
+            usbip_attach_host=usbip_attach_host,
+        )
+        result["device_host"] = device_host
 
         if result.get("success"):
+            device_list = result.get("device_list", [])
+            if not device_list:
+                result["success"] = False
+                result["error"] = result.get("error") or "USB/IP attach 成功但尚未识别到 ADB 设备，继续等待设备恢复"
+                return JSONResponse(content=result)
+
+            if submitted_device_password:
+                try:
+                    if config_manager.upsert_device_host_password(device_host, submitted_device_password):
+                        logger.info(f"[USB/IP Start] Saved SSH credential for {device_host}")
+                except Exception as e:
+                    logger.warning(f"[USB/IP Start] Failed to save SSH credential for {device_host}: {e}")
+
             with global_state.usbip_states_lock:
                 global_state.usbip_states[device_host] = {"connected": True, "timestamp": time.time()}
             logger.info(f"[USB/IP Start] Set connected=True for device_host={device_host}")
 
-            device_list = result.get("device_list", [])
             if device_list:
                 with global_state.usbip_devices_source_lock:
                     for device_id in device_list:
