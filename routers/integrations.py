@@ -705,6 +705,17 @@ async def start_usbip(
                 device_host = config.get("usbip_device_host") or config.get("device_host") or client_id
 
         logger.info(f"[USB/IP] Using device_host: {device_host}")
+        try:
+            from core.usbip_reconnect import is_usbip_reconnect_suppressed
+            if is_usbip_reconnect_suppressed(device_host) and not request_data.get("manual_connect"):
+                return JSONResponse(content={
+                    "success": False,
+                    "manual_disconnect_suppressed": True,
+                    "device_host": device_host,
+                    "error": "USB/IP 已手动断开，自动重连已暂停；如需重新连接请点击本地设备。",
+                })
+        except Exception as e:
+            logger.warning("[USB/IP] Failed to check reconnect suppression for %s: %s", device_host, e)
 
         windows_device_host = device_host
 
@@ -732,6 +743,13 @@ async def start_usbip(
                 result["success"] = False
                 result["error"] = result.get("error") or "USB/IP attach 成功但尚未识别到 ADB 设备，继续等待设备恢复"
                 return JSONResponse(content=result)
+
+            if request_data.get("manual_connect"):
+                try:
+                    from core.usbip_reconnect import clear_usbip_reconnect_suppression
+                    clear_usbip_reconnect_suppression(device_host, device_list)
+                except Exception as e:
+                    logger.warning("[USB/IP] Failed to clear reconnect suppression for devices %s: %s", device_list, e)
 
             if submitted_device_password:
                 try:
@@ -792,6 +810,42 @@ def _persist_device_source_removal(devices_to_remove: list):
         logger.warning(f"[USB/IP Stop] Failed to persist device source removal: {e}")
 
 
+def _usbip_devices_for_host(device_host: str) -> List[str]:
+    """Return known USB/IP device ids for a host from memory and runtime config."""
+    devices = set()
+    with global_state.usbip_devices_source_lock:
+        for device_id, device_info in global_state.usbip_devices_source.items():
+            if (device_info or {}).get("source") == device_host:
+                devices.add(device_id)
+    for device_id, source in (getattr(usbip_manager, "device_sources", {}) or {}).items():
+        if (source or {}).get("source") == device_host:
+            devices.add(device_id)
+    try:
+        runtime_sources = (config_manager.get_runtime_config() or {}).get("usbip_devices_source") or {}
+        if isinstance(runtime_sources, dict):
+            for device_id, device_info in runtime_sources.items():
+                if (device_info or {}).get("source") == device_host:
+                    devices.add(device_id)
+    except Exception as e:
+        logger.warning("[USB/IP Stop] Failed to read runtime USB/IP sources: %s", e)
+    return list(devices)
+
+
+def _clear_usbip_device_sources(device_host: str, devices_to_remove: List[str]) -> None:
+    devices_to_remove = list(dict.fromkeys(devices_to_remove or []))
+    with global_state.usbip_devices_source_lock:
+        for device_id in devices_to_remove:
+            if device_id in global_state.usbip_devices_source:
+                del global_state.usbip_devices_source[device_id]
+                logger.info(f"[USB/IP Stop] Removed device source: {device_id} from {device_host}")
+
+    for device_id in devices_to_remove:
+        if device_id in usbip_manager.device_sources:
+            del usbip_manager.device_sources[device_id]
+
+    _persist_device_source_removal(devices_to_remove)
+
+
 # ==================== USB/IP Disconnect ====================
 
 @router.post("/api/usbip/disconnect")
@@ -822,6 +876,11 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
     usbip_attach_host = config.get("usbip_attach_host")
 
     try:
+        from core.usbip_reconnect import suppress_usbip_reconnect
+
+        devices_to_remove = _usbip_devices_for_host(config["device_host"])
+        suppress_usbip_reconnect(config["device_host"], devices_to_remove)
+
         if tailscale_mode:
             ubuntu_ssh = usbip_manager.ssh_manager.get_connection(config)
             if ubuntu_ssh:
@@ -833,32 +892,13 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
                     logger.warning(f"[USB/IP Stop] detach Ubuntu usbip ports failed: {e}")
             logger.info("[USB/IP Stop] Public mode keeps Windows usbipd bindings; only Ubuntu attach is detached")
             await asyncio.sleep(1)
-            with global_state.usbip_devices_source_lock:
-                devices_to_remove = [
-                    device_id for device_id, device_info in global_state.usbip_devices_source.items()
-                    if device_info.get("source") == config["device_host"]
-                ]
-                for device_id in devices_to_remove:
-                    del global_state.usbip_devices_source[device_id]
-                    logger.info(f"[USB/IP Stop] Removed device source: {device_id} from {config['device_host']}")
+            _clear_usbip_device_sources(config["device_host"], devices_to_remove)
         else:
             with DeviceSSHConnection(config) as win_ssh:
                 ssh_manager.execute_command(win_ssh, "usbipd unbind --all", timeout=10)
                 await asyncio.sleep(2)
 
-            with global_state.usbip_devices_source_lock:
-                devices_to_remove = [
-                    device_id for device_id, device_info in global_state.usbip_devices_source.items()
-                    if device_info.get("source") == config["device_host"]
-                ]
-                for device_id in devices_to_remove:
-                    del global_state.usbip_devices_source[device_id]
-
-            for device_id in devices_to_remove:
-                if device_id in usbip_manager.device_sources:
-                    del usbip_manager.device_sources[device_id]
-
-            _persist_device_source_removal(devices_to_remove)
+            _clear_usbip_device_sources(config["device_host"], devices_to_remove)
 
         with global_state.usbip_states_lock:
             global_state.usbip_states[config["device_host"]] = {"connected": False, "timestamp": time.time()}
@@ -872,19 +912,14 @@ async def stop_usbip(request: Request, req: Optional[USBIPDisconnectRequest] = B
 
     except HTTPException:
         # Cannot connect to Windows, just clear connection state and device source records
-        with global_state.usbip_devices_source_lock:
-            devices_to_remove = [
-                device_id for device_id, device_info in global_state.usbip_devices_source.items()
-                if device_info.get("source") == config["device_host"]
-            ]
-            for device_id in devices_to_remove:
-                del global_state.usbip_devices_source[device_id]
-
-        for device_id in devices_to_remove:
-            if device_id in usbip_manager.device_sources:
-                del usbip_manager.device_sources[device_id]
-
-        _persist_device_source_removal(devices_to_remove)
+        if not devices_to_remove:
+            devices_to_remove = _usbip_devices_for_host(config["device_host"])
+        try:
+            from core.usbip_reconnect import suppress_usbip_reconnect
+            suppress_usbip_reconnect(config["device_host"], devices_to_remove)
+        except Exception:
+            pass
+        _clear_usbip_device_sources(config["device_host"], devices_to_remove)
 
         with global_state.usbip_states_lock:
             global_state.usbip_states[config["device_host"]] = {"connected": False, "timestamp": time.time()}

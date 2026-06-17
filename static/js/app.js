@@ -84,8 +84,11 @@ const VIEWPORT_HEIGHT_OFFSET = 150;
 let pendingUsbipDeviceHost = '';
 let usbipReconnectTimer = null;
 let usbipReconnectAttempts = 0;
+let usbipManualDisconnectUntil = 0;
 const USBIP_RECONNECT_MAX_ATTEMPTS = 30;
-const USBIP_RECONNECT_INTERVAL_MS = 10000;
+const USBIP_RECONNECT_INTERVAL_MS = 5000;
+const USBIP_RECONNECT_INITIAL_DELAY_MS = 1500;
+const USBIP_MANUAL_DISCONNECT_SUPPRESS_MS = 5 * 60 * 1000;
 
 const PARAM_TYPES = {
     STRING: 'string',
@@ -552,7 +555,12 @@ function initWebSocket() {
                             showToast(message, 'success');
 
                             // USB/IP 设备重启会短暂断开，优先自动重连，不立即把连接状态清掉。
-                            if (state.usbipConnected && disconnected.length > 0) {
+                            if (
+                                data.source !== 'usbip_disconnect'
+                                && state.usbipConnected
+                                && disconnected.length > 0
+                                && Date.now() > usbipManualDisconnectUntil
+                            ) {
                                 scheduleUsbipReconnect('检测到 USB/IP 设备断开: ' + disconnected.join(' '));
                             }
                         }).catch(err => {
@@ -3035,6 +3043,11 @@ async function setupUsbipForward() {
         try {
             btn.textContent = '📱 断开中...';
             btn.disabled = true;
+            usbipManualDisconnectUntil = Date.now() + USBIP_MANUAL_DISCONNECT_SUPPRESS_MS;
+            if (usbipReconnectTimer) {
+                clearTimeout(usbipReconnectTimer);
+                usbipReconnectTimer = null;
+            }
 
             const result = await apiCall('/api/usbip/disconnect', 'POST', {});
             state.usbipConnected = false;
@@ -3053,11 +3066,12 @@ async function setupUsbipForward() {
         try {
             btn.textContent = '📱 连接中...';
             btn.disabled = true;
+            usbipManualDisconnectUntil = 0;
 
-            const result = await apiCall('/api/usbip/connect', 'POST', {});
+            const result = await apiCall('/api/usbip/connect', 'POST', { manual_connect: true });
 
             // 检查是否成功（支持多种响应格式）
-            if (result.success || result.devices || (result.message && result.message.includes('成功连接'))) {
+            if (isUsbipAdbReady(result)) {
                 state.usbipConnected = true;
                 pendingUsbipDeviceHost = result.device_host || pendingUsbipDeviceHost || '';
                 btn.textContent = '📱 断开设备';
@@ -3099,6 +3113,7 @@ async function setupUsbipForward() {
 }
 
 function scheduleUsbipReconnect(reason) {
+    if (Date.now() <= usbipManualDisconnectUntil) return;
     if (usbipReconnectTimer) return;
     usbipReconnectAttempts = 0;
     const btn = $('usbip-btn');
@@ -3107,7 +3122,11 @@ function scheduleUsbipReconnect(reason) {
         btn.disabled = true;
     }
     addLogEntry((reason || '检测到 USB/IP 设备断开') + '，等待设备重启后自动重连...', 'warning');
-    usbipReconnectTimer = setTimeout(attemptUsbipReconnect, USBIP_RECONNECT_INTERVAL_MS);
+    usbipReconnectTimer = setTimeout(attemptUsbipReconnect, USBIP_RECONNECT_INITIAL_DELAY_MS);
+}
+
+function isUsbipAdbReady(result) {
+    return !!(result && result.success && Array.isArray(result.device_list) && result.device_list.length > 0);
 }
 
 async function attemptUsbipReconnect() {
@@ -3117,7 +3136,7 @@ async function attemptUsbipReconnect() {
         usbipReconnectTimer = null;
         const payload = pendingUsbipDeviceHost ? { device_host: pendingUsbipDeviceHost } : {};
         const result = await apiCall('/api/usbip/connect', 'POST', payload);
-        if (result.success || result.devices || (result.message && result.message.includes('成功连接'))) {
+        if (isUsbipAdbReady(result)) {
             state.usbipConnected = true;
             pendingUsbipDeviceHost = result.device_host || pendingUsbipDeviceHost || '';
             if (btn) {
@@ -3338,8 +3357,12 @@ async function submitDevicePassword() {
 
         const result = await apiCall('/api/usbip/connect', 'POST', {
             device_host: deviceHost,
-            device_password: password
+            device_password: password,
+            manual_connect: true
         });
+        if (!isUsbipAdbReady(result)) {
+            throw new Error(result.error || result.message || 'USB/IP 连接后尚未识别到 ADB 设备');
+        }
 
         // 不在这里设置状态，让主按钮处理
         addLogEntry(result.message || 'USB/IP 连接已启动', 'success');

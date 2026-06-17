@@ -445,7 +445,7 @@ async def notify_device_change(devices_to_remove: List[str], context: str = "USB
         # 使用 asyncio.to_thread 避免阻塞事件循环
         current_devices = await asyncio.to_thread(device_manager.get_connected_devices)
         logger.info(f"[{context}] Notifying device change: {current_devices}")
-        await broadcast_device_change(current_devices, disconnected=devices_to_remove)
+        await broadcast_device_change(current_devices, disconnected=devices_to_remove, source='usbip_disconnect')
     except Exception as e:
         logger.warning(f"[{context}] Failed to notify device change: {e}")
 

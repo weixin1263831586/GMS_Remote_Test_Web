@@ -56,6 +56,7 @@ class ADBForwardStartRequest(BaseModel):
 class USBIPStartRequest(BaseModel):
     device_host: Optional[str] = None
     device_password: Optional[str] = Field(default="", description="设备主机SSH密码")
+    manual_connect: bool = Field(default=False, description="用户显式点击连接")
 
 
 class USBIPDisconnectRequest(BaseModel):
