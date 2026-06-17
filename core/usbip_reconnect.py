@@ -12,10 +12,14 @@ from core.usbip import find_device_host_password, usbip_manager
 logger = logging.getLogger(__name__)
 
 USBIP_RECONNECT_ATTEMPTS = 30
-USBIP_RECONNECT_INTERVAL_SECONDS = 10
+USBIP_RECONNECT_INTERVAL_SECONDS = 5
 
 _tasks: Dict[str, threading.Thread] = {}
 _tasks_lock = threading.Lock()
+_suppressed_hosts: Dict[str, float] = {}
+_suppressed_devices: Dict[str, float] = {}
+_suppression_lock = threading.Lock()
+USBIP_MANUAL_DISCONNECT_SUPPRESS_SECONDS = 300
 
 
 def _runtime_usbip_sources() -> Dict[str, Dict[str, Any]]:
@@ -32,6 +36,46 @@ def _known_usbip_sources() -> Dict[str, Dict[str, Any]]:
     return sources
 
 
+def suppress_usbip_reconnect(
+    device_host: str = "",
+    device_ids: Iterable[str] = (),
+    ttl_seconds: int = USBIP_MANUAL_DISCONNECT_SUPPRESS_SECONDS,
+) -> None:
+    """Temporarily suppress auto reconnect after an explicit user disconnect."""
+    expires_at = time.time() + max(1, ttl_seconds)
+    with _suppression_lock:
+        if device_host:
+            _suppressed_hosts[str(device_host).strip()] = expires_at
+        for device_id in device_ids or []:
+            if device_id:
+                _suppressed_devices[str(device_id).strip()] = expires_at
+
+
+def clear_usbip_reconnect_suppression(device_host: str = "", device_ids: Iterable[str] = ()) -> None:
+    """Clear manual-disconnect suppression when the user explicitly reconnects."""
+    with _suppression_lock:
+        if device_host:
+            _suppressed_hosts.pop(str(device_host).strip(), None)
+        for device_id in device_ids or []:
+            if device_id:
+                _suppressed_devices.pop(str(device_id).strip(), None)
+
+
+def is_usbip_reconnect_suppressed(device_host: str = "", device_id: str = "") -> bool:
+    now = time.time()
+    with _suppression_lock:
+        for table, key in ((_suppressed_hosts, device_host), (_suppressed_devices, device_id)):
+            key = str(key or "").strip()
+            if not key:
+                continue
+            expires_at = table.get(key)
+            if expires_at and expires_at > now:
+                return True
+            if expires_at:
+                table.pop(key, None)
+    return False
+
+
 def schedule_usbip_reconnect_for_removed_devices(
     removed_devices: Iterable[str],
     reason: str = "USB/IP device removed",
@@ -43,6 +87,14 @@ def schedule_usbip_reconnect_for_removed_devices(
         source_info = known_sources.get(device_id) or {}
         device_host = str(source_info.get("source") or "").strip()
         if not device_host:
+            continue
+        if is_usbip_reconnect_suppressed(device_host, device_id):
+            logger.info(
+                "[USB/IP Reconnect] suppressed for %s/%s (%s)",
+                device_host,
+                device_id,
+                reason,
+            )
             continue
         if schedule_usbip_reconnect(device_host, reason=f"{reason}: {device_id}"):
             scheduled_hosts.append(device_host)
@@ -62,6 +114,14 @@ def schedule_usbip_reconnect_for_missing_devices(
         device_host = str((source_info or {}).get("source") or "").strip()
         if not device_host:
             continue
+        if is_usbip_reconnect_suppressed(device_host, device_id):
+            logger.info(
+                "[USB/IP Reconnect] startup/missing reconnect suppressed for %s/%s (%s)",
+                device_host,
+                device_id,
+                reason,
+            )
+            continue
         if schedule_usbip_reconnect(device_host, reason=f"{reason}: {device_id}"):
             scheduled_hosts.append(device_host)
     return scheduled_hosts
@@ -71,6 +131,9 @@ def schedule_usbip_reconnect(device_host: str, reason: str = "") -> bool:
     """Start a background reconnect worker for a device host if one is not running."""
     device_host = str(device_host or "").strip()
     if not device_host:
+        return False
+    if is_usbip_reconnect_suppressed(device_host):
+        logger.info("[USB/IP Reconnect] suppressed for %s (%s)", device_host, reason)
         return False
 
     with _tasks_lock:
@@ -110,6 +173,9 @@ def _reconnect_worker(device_host: str, reason: str = ""):
                 device_host,
                 reason,
             )
+            if is_usbip_reconnect_suppressed(device_host):
+                logger.info("[USB/IP Reconnect] stopped by manual disconnect suppression for %s", device_host)
+                return
             result = usbip_manager.start_usbip(device_host, device_password)
             device_list = result.get("device_list") or []
             if result.get("success") and device_list:

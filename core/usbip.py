@@ -493,17 +493,31 @@ class USBIPManager:
                 else:
                     logger.info(f"Attach {busid} succeeded")
                     attached.append(busid)
-                time.sleep(2)
 
-            # 等待设备稳定（Tailscale 等远程网络需要更长等待时间）
-            time.sleep(5)
-            self.ssh_manager.execute_command(ssh, 'sudo udevadm trigger')
-            self.ssh_manager.execute_command(ssh, 'sudo udevadm settle')
+            if not attached:
+                return [], []
 
-            # 获取attach后的设备列表
-            stdout_after, _, _ = self.ssh_manager.execute_command(ssh, 'adb devices')
-            devices_after = set(DeviceUtils.parse_adb_devices(stdout_after))
-            logger.info(f"Devices after attach: {devices_after}")
+            self.ssh_manager.execute_command(ssh, 'sudo udevadm trigger', timeout=8)
+            self.ssh_manager.execute_command(ssh, 'sudo udevadm settle', timeout=8)
+
+            devices_after = set()
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                stdout_after, _, _ = self.ssh_manager.execute_command(ssh, 'adb devices', timeout=8)
+                devices_after = set(DeviceUtils.parse_adb_devices(stdout_after))
+                logger.info(f"Devices after attach: {devices_after}")
+
+                new_devices = list(devices_after - devices_before)
+                if new_devices:
+                    logger.info(f"New devices via USB/IP: {new_devices}")
+                    return attached, new_devices
+
+                for device_id in devices_after:
+                    if device_id in self.device_sources:
+                        logger.info(f"Found existing USB/IP device still online: {device_id}")
+                        return attached, [device_id]
+
+                time.sleep(1)
 
             # 计算新增设备
             new_devices = list(devices_after - devices_before)
