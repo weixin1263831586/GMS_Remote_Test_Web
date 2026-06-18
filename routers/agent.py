@@ -35,15 +35,15 @@ from core.api_response import error_response, success_response
 from core.clients import get_client_id_from_request
 from core.config import config_manager
 from core.schemas import ReportDiagnosisRequest, SuiteApkAnalyzeRequest
-from core.test_suite_utils import (
-    detect_test_type_from_suite_path,
-    get_default_suites_path,
-    is_config_host_local,
-)
 from features.devices.locks import device_lock_manager
 from features.devices.manager import device_manager
 from features.devices.support import get_or_create_user_state
 from features.reports.repository import test_report_db
+from features.test_execution.suites import (
+    detect_test_type_from_suite_path,
+    get_default_suites_path,
+    is_config_host_local,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -282,7 +282,7 @@ def _score_suite(suite: dict[str, Any], test_type: str, module: str) -> int:
 
 
 def _list_suites() -> list[dict[str, Any]]:
-    from routers.tests import _get_available_test_suites
+    from features.test_execution.api import _get_available_test_suites
 
     config = config_manager.load_config()
     base_path = config.get("suites_path") or get_default_suites_path(config)
@@ -545,8 +545,8 @@ async def _read_apk_source_snippet(task_id: str, diagnosis: dict[str, Any], fail
 
 async def _run_apk_source_analysis(session: dict[str, Any], plan: dict[str, Any], diagnosis: dict[str, Any], failure: dict[str, Any]) -> dict[str, Any] | None:
     """Import a suite APK/JAR, decompile it, and read a likely source snippet."""
+    from features.test_execution.api import create_suite_apk_analysis_task
     from routers.apk import analyze_apk
-    from routers.tests import create_suite_apk_analysis_task
 
     suite_target = diagnosis.get("suite_target") or {}
     artifact = suite_target.get("artifact") or {}
@@ -649,8 +649,8 @@ async def _run_failure_analysis_pipeline(session: dict[str, Any], plan: dict[str
 
 
 async def _start_test_with_plan(session: dict[str, Any], request_shim: AgentRequestShim, plan: dict[str, Any], retry_timestamp: str = "") -> dict[str, Any]:
-    from core.schemas import TestStartRequest
-    from routers.tests import start_test
+    from features.test_execution.api import start_test
+    from features.test_execution.models import TestStartRequest
 
     req_data = dict(plan.get("request") or {})
     if retry_timestamp:

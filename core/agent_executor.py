@@ -108,15 +108,17 @@ def _get_model_by_tool() -> dict[str, type]:
             DeviceShellRequest,
             ReportDiagnosisRequest,
             SNBurnRequest,
-            SuiteApkAnalyzeRequest,
-            TestParseArgsRequest,
-            TestStartRequest,
-            TradefedListResultsRequest,
             USBIPDisconnectRequest,
             USBIPStartRequest,
             VNCStartRequest,
             VPNConnectRequest,
             WifiConnectRequest,
+        )
+        from features.test_execution.models import (
+            SuiteApkAnalyzeRequest,
+            TestParseArgsRequest,
+            TestStartRequest,
+            TradefedListResultsRequest,
         )
         _MODEL_BY_TOOL = {
             "users_detect": ClientInfoRequest,
@@ -449,8 +451,8 @@ class ActionExecutor:
 
     async def _query_suites(self, session, request, params) -> ToolResult:
         """查询测试套件。"""
-        from core.test_suite_utils import get_default_suites_path
-        from routers.tests import _get_available_test_suites
+        from features.test_execution.api import _get_available_test_suites
+        from features.test_execution.suites import get_default_suites_path
 
         config = config_manager.load_config()
         base_path = config.get("suites_path") or get_default_suites_path(config)

@@ -29,9 +29,16 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.api_help import generate_help_or_continue
+from core.apk import (
+    _cleanup_files,
+    _create_apk_task,
+    _normalize_apk_filename,
+    _safe_join,
+)
 from core.clients import (
     get_client_id_from_request,
     get_client_ip,
+    parse_client_id,
     probe_windows_usbipd,
     resolve_tailscale_device_host,
 )
@@ -40,10 +47,13 @@ from core.notifications import safe_websocket_send, store_notification
 from core.security_audit import classify_request_source
 from core.security_audit_utils import should_audit_request, summarize_audit_request, summarize_audit_response
 from core.settings import (
+    APK_MAX_FILE_SIZE,
+    APK_UPLOAD_DIR,
     CLEANUP_INTERVAL_SECONDS,
     DEVICE_CACHE_TTL,
     FORWARDED_ALLOW_IPS,
     GMS_ENV,
+    MAX_LOG_ENTRIES,
     PROJECT_ROOT,
     PROXY_HEADERS_ENABLED,
     SERVER_HOST,
@@ -63,9 +73,16 @@ from features.devices.network import run_local_shell_command
 from features.devices.reconnect import stop_usbip_reconnect_tasks
 from features.redmine.api import redmine_service
 from features.redmine.scheduler import start_redmine_agent_scheduler, stop_redmine_agent_scheduler
+from features.test_execution.dependencies import (
+    configure_test_execution_dependencies,
+)
 from modules.client_manager import client_manager
 from routers import ALL_ROUTERS
 from routers.system import init_templates
+from workflows.device_test_execution import (
+    acquire_test_devices,
+    release_test_devices,
+)
 
 
 configure_device_dependencies(
@@ -83,6 +100,26 @@ configure_device_dependencies(
     run_local_shell_command=run_local_shell_command,
     project_root=PROJECT_ROOT,
     device_cache_ttl=DEVICE_CACHE_TTL,
+)
+configure_test_execution_dependencies(
+    config_manager=config_manager,
+    ssh_manager=ssh_manager,
+    global_state=global_state,
+    project_root=PROJECT_ROOT,
+    safe_websocket_send=safe_websocket_send,
+    generate_help_or_continue=generate_help_or_continue,
+    get_client_id_from_request=get_client_id_from_request,
+    parse_client_id=parse_client_id,
+    store_notification=store_notification,
+    apk_max_file_size=APK_MAX_FILE_SIZE,
+    apk_upload_dir=APK_UPLOAD_DIR,
+    max_log_entries=MAX_LOG_ENTRIES,
+    create_apk_task=_create_apk_task,
+    normalize_apk_filename=_normalize_apk_filename,
+    safe_join=_safe_join,
+    cleanup_files=_cleanup_files,
+    acquire_test_devices=acquire_test_devices,
+    release_test_devices=release_test_devices,
 )
 
 # Logging

@@ -133,7 +133,7 @@ _CONFIRM_PATHS = {
 # category → routers 模块名映射（当两者不一致时需要）
 _CATEGORY_MODULE_MAP: dict[str, str] = {
     "device": "devices",      # category="device" → features.devices.api
-    "test": "tests",          # category="test" → routers.tests
+    "test": "tests",          # category="test" → features.test_execution.api
     "report": "reports",      # category="report" → features.reports.api
     "burn": "firmware",       # category="burn" → routers.firmware
     "ssh": "integrations",    # category="ssh" → routers.integrations
@@ -183,13 +183,13 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/devices/wifi": "features.devices.api:connect_wifi",
     "/api/devices/shell": "features.devices.api:open_device_shell",
     "/api/devices/scrcpy": "features.devices.api:show_device_screens",
-    "/api/test/start": "routers.tests:start_test",
-    "/api/test/stop": "routers.tests:stop_test",
-    "/api/test/clean": "routers.tests:clean_test_logs",
-    "/api/test/suites": "routers.tests:list_suites",
-    "/api/test/suites/result": "routers.tests:list_tradefed_results",
-    "/api/test/status": "routers.tests:get_status",
-    "/api/test/logs/save": "routers.tests:save_current_log",
+    "/api/test/start": "features.test_execution.api:start_test",
+    "/api/test/stop": "features.test_execution.api:stop_test",
+    "/api/test/clean": "features.test_execution.api:clean_test_logs",
+    "/api/test/suites": "features.test_execution.api:list_suites",
+    "/api/test/suites/result": "features.test_execution.api:list_tradefed_results",
+    "/api/test/status": "features.test_execution.api:get_status",
+    "/api/test/logs/save": "features.test_execution.api:save_current_log",
     "/api/reports/list": "features.reports.api:list_reports",
     "/api/reports/analyze": "features.reports.api:analyze_reports",
     "/api/reports/download": "features.reports.api:download_report",
@@ -230,11 +230,11 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/knowledgebase/search": "features.reports.api:knowledgebase_search",
     "/api/knowledgebase/stats": "features.reports.api:knowledgebase_stats",
     # --- 补充：测试日志/套件 ---
-    "/api/test/logs/list": "routers.tests:list_test_logs",
-    "/api/test/logs/get": "routers.tests:get_test_logs",
-    "/api/test/logs/batch": "routers.tests:download_test_logs",
-    "/api/test/suites/archives": "routers.tests:list_test_suite_archives",
-    "/api/test/suites/diagnose-target": "routers.tests:diagnose_suite_target",
+    "/api/test/logs/list": "features.test_execution.api:list_test_logs",
+    "/api/test/logs/get": "features.test_execution.api:get_test_logs",
+    "/api/test/logs/batch": "features.test_execution.api:download_test_logs",
+    "/api/test/suites/archives": "features.test_execution.api:list_test_suite_archives",
+    "/api/test/suites/diagnose-target": "features.test_execution.api:diagnose_suite_target",
     # --- 补充：通知 ---
     "/api/notifications": "routers.notifications:get_notifications",
     "/api/notifications/mark-read": "routers.notifications:mark_notifications_read",
@@ -259,15 +259,15 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/apk/definition/{task_id}": "routers.apk:find_apk_symbol_definition",
     "/api/apk/analyze/{task_id}": "routers.apk:analyze_apk",
     # --- 补充：测试套件 ---
-    "/api/test/parse-args": "routers.tests:parse_test_args",
-    "/api/test/suites/files": "routers.tests:list_suite_files",
-    "/api/test/suites/download": "routers.tests:download_suite_file",
-    "/api/test/suites/extract": "routers.tests:extract_test_suite_archive",
-    "/api/test/suites/download-url": "routers.tests:download_test_suite_from_url",
-    "/api/test/suites/extract-start": "routers.tests:start_test_suite_extract",
-    "/api/test/suites/add-local": "routers.tests:add_local_test_suite",
-    "/api/test/suites/download-status/{task_id}": "routers.tests:get_test_suite_download_status",
-    "/api/test/suites/extract-status/{task_id}": "routers.tests:get_test_suite_extract_status",
+    "/api/test/parse-args": "features.test_execution.api:parse_test_args",
+    "/api/test/suites/files": "features.test_execution.api:list_suite_files",
+    "/api/test/suites/download": "features.test_execution.api:download_suite_file",
+    "/api/test/suites/extract": "features.test_execution.api:extract_test_suite_archive",
+    "/api/test/suites/download-url": "features.test_execution.api:download_test_suite_from_url",
+    "/api/test/suites/extract-start": "features.test_execution.api:start_test_suite_extract",
+    "/api/test/suites/add-local": "features.test_execution.api:add_local_test_suite",
+    "/api/test/suites/download-status/{task_id}": "features.test_execution.api:get_test_suite_download_status",
+    "/api/test/suites/extract-status/{task_id}": "features.test_execution.api:get_test_suite_extract_status",
     # --- 补充：安全审计详情 ---
     "/api/security-audit/detail/{event_id}": "routers.audit:get_security_audit_detail",
     # --- 补充：VPN 连接 ---
@@ -656,7 +656,7 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             is_readonly=False,
             is_dangerous=False,
             requires_confirm=True,
-            executor_ref="routers.tests:download_suite_file",
+            executor_ref="features.test_execution.api:download_suite_file",
             response_type="file",
         ),
         AgentTool(
@@ -670,7 +670,7 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             is_readonly=False,
             is_dangerous=False,
             requires_confirm=False,
-            executor_ref="routers.tests:extract_test_suite_archive",
+            executor_ref="features.test_execution.api:extract_test_suite_archive",
             response_type="status",
         ),
         AgentTool(
@@ -684,7 +684,7 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             is_readonly=False,
             is_dangerous=False,
             requires_confirm=False,
-            executor_ref="routers.tests:create_suite_apk_analysis_task",
+            executor_ref="features.test_execution.api:create_suite_apk_analysis_task",
             response_type="detail",
         ),
         AgentTool(
@@ -698,7 +698,7 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             is_readonly=True,
             is_dangerous=False,
             requires_confirm=False,
-            executor_ref="routers.tests:parse_test_args",
+            executor_ref="features.test_execution.api:parse_test_args",
             response_type="detail",
         ),
         AgentTool(

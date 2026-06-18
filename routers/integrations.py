@@ -17,7 +17,7 @@ from core.config import config_manager
 from core.error_handling import handle_api_errors
 from core.schemas import VPNConnectRequest
 from core.ssh import SSHD_INSTALL_GUIDE, ssh_manager
-from core.test_suite_utils import is_config_host_local
+from features.test_execution.suites import is_config_host_local
 from features.devices.support import (
     DeviceSSHConnection,
 )

@@ -8,6 +8,7 @@ from features.redmine import api as redmine
 from features.reports import api as reports
 from features.system.mainline_issues import api as mainline_known_issues
 from features.system.update_monitor import api as gms_update_monitor
+from features.test_execution import api as tests
 
 from . import (
     agent,
@@ -21,7 +22,6 @@ from . import (
     notifications,
     system,
     terminal,
-    tests,
     users,
 )
 

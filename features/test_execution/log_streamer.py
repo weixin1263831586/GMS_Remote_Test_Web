@@ -6,11 +6,13 @@
 """
 
 import asyncio
-from collections import deque
-from typing import Dict
-from datetime import datetime
-from fastapi import WebSocket
+import contextlib
 import logging
+from collections import deque
+from datetime import datetime
+
+from fastapi import WebSocket
+
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +38,13 @@ class LogStreamer:
             batch_timeout: 批量发送超时时间（秒）
         """
         # 客户端连接 {client_id: WebSocket}
-        self.connections: Dict[str, WebSocket] = {}
+        self.connections: dict[str, WebSocket] = {}
 
         # 日志队列 {client_id: deque}
-        self.client_queues: Dict[str, deque] = {}
+        self.client_queues: dict[str, deque] = {}
 
         # 后台发送任务 {client_id: Task}
-        self._sender_tasks: Dict[str, asyncio.Task] = {}
+        self._sender_tasks: dict[str, asyncio.Task] = {}
 
         # 配置
         self.max_queue_size = max_queue_size
@@ -96,18 +98,14 @@ class LogStreamer:
         # 取消发送任务
         if client_id in self._sender_tasks:
             self._sender_tasks[client_id].cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._sender_tasks[client_id]
-            except asyncio.CancelledError:
-                pass
             del self._sender_tasks[client_id]
 
         # 关闭 WebSocket
         if client_id in self.connections:
-            try:
+            with contextlib.suppress(Exception):
                 await self.connections[client_id].close()
-            except Exception:
-                pass
             del self.connections[client_id]
 
         # 清理队列

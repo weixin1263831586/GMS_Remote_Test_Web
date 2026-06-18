@@ -3,10 +3,12 @@
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from core.common_utils import CommonUtils
-from core.config import config_manager
+from foundation.networking import is_local_host
+
+from . import runtime
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ def get_test_type_from_binary(binary_name: str) -> str:
     return binary_name.replace('-tradefed', '')
 
 
-def detect_test_type_from_suite_path(suite_path: str) -> Optional[str]:
+def detect_test_type_from_suite_path(suite_path: str) -> str | None:
     """Detect suite type from a suite tools path."""
     if not suite_path:
         return None
@@ -53,7 +55,7 @@ def detect_test_type_from_suite_path(suite_path: str) -> Optional[str]:
     return None
 
 
-def detect_test_type_from_dir_path(dir_path: str) -> Optional[str]:
+def detect_test_type_from_dir_path(dir_path: str) -> str | None:
     """Detect suite type from a result or retry directory path."""
     if not dir_path:
         return None
@@ -67,15 +69,15 @@ def detect_test_type_from_dir_path(dir_path: str) -> Optional[str]:
     return None
 
 
-def get_default_suites_path(config: Dict[str, Any]) -> str:
+def get_default_suites_path(config: dict[str, Any]) -> str:
     """Get default suites path from config or environment."""
-    ubuntu_user = config_manager.get_ubuntu_user(config)
+    ubuntu_user = runtime.config_manager.get_ubuntu_user(config)
     return config.get('suites_path', f"/home/{ubuntu_user}/GMS-Suite")
 
 
-def is_config_host_local(config: Dict[str, Any]) -> bool:
+def is_config_host_local(config: dict[str, Any]) -> bool:
     """Return whether the configured Ubuntu host is local."""
-    return CommonUtils.is_local_host(config_manager.get_ubuntu_host(config))
+    return is_local_host(runtime.config_manager.get_ubuntu_host(config))
 
 
 def get_effective_local_server(client_id: str, requested_local_server: str = "") -> str:
@@ -83,7 +85,7 @@ def get_effective_local_server(client_id: str, requested_local_server: str = "")
     if requested_local_server:
         return requested_local_server
 
-    runtime_config = config_manager.get_runtime_config()
+    runtime_config = runtime.config_manager.get_runtime_config()
     runtime_local_server = runtime_config.get('local_server')
     if runtime_local_server:
         return runtime_local_server
@@ -91,7 +93,7 @@ def get_effective_local_server(client_id: str, requested_local_server: str = "")
     return client_id
 
 
-def build_suite_info(full_path: str) -> Optional[Dict[str, str]]:
+def build_suite_info(full_path: str) -> dict[str, str] | None:
     """Build suite info from a tradefed binary path."""
     full_path = full_path.strip()
     if not full_path:
@@ -147,7 +149,7 @@ def ensure_tradefed_executable(full_path: str) -> bool:
         return False
 
 
-def list_local_test_suites(base_path: str) -> List[Dict[str, str]]:
+def list_local_test_suites(base_path: str) -> list[dict[str, str]]:
     """Discover locally available test suites below base_path."""
     suites = []
     if not os.path.isdir(base_path):

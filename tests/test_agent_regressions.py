@@ -7,7 +7,7 @@ from core.agent_executor import ActionExecutor, _json_body
 from core.agent_intent import resolve
 from core.agent_tools import registry
 from routers.agent import _parse_user_intent
-from routers.tests import get_status
+from features.test_execution.api import get_status
 
 
 class AgentRegressionTests(unittest.TestCase):
