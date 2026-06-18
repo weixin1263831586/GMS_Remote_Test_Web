@@ -5,6 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_OLD_IMPORT_EXEMPTIONS = {
+    'bootstrap/application.py',
+    'bootstrap/dependencies.py',
+    'bootstrap/lifecycle.py',
     'bootstrap/routes.py',
 }
 
