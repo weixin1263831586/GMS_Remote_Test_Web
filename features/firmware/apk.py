@@ -8,13 +8,13 @@ import shutil
 import subprocess
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
+from foundation.uploads import safe_upload_target_path
 
-from core.api_response import ApiResponse
-from core.settings import APK_MAX_TASKS, APK_UPLOAD_DIR, JADX_PATH, JADX_TIMEOUT
-from core.state import global_state
-from core.upload_utils import safe_upload_target_path
+from . import runtime
+from .responses import ApiResponse
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +34,14 @@ APK_SYMBOL_INDEX_MAX_FILE_SIZE = 2 * 1024 * 1024
 
 def _create_apk_task(task_id, apk_path, filename):
     """创建APK分析任务并限制总数"""
-    os.makedirs(APK_UPLOAD_DIR, exist_ok=True)
-    with global_state.apk_analysis_tasks_lock:
-        if len(global_state.apk_analysis_tasks) >= APK_MAX_TASKS:
-            oldest = min(global_state.apk_analysis_tasks.items(), key=lambda t: t[1].get('timestamp', 0))
-            old_dir = os.path.join(APK_UPLOAD_DIR, oldest[0])
+    os.makedirs(runtime.apk_upload_dir, exist_ok=True)
+    with runtime.global_state.apk_analysis_tasks_lock:
+        if len(runtime.global_state.apk_analysis_tasks) >= runtime.apk_max_tasks:
+            oldest = min(runtime.global_state.apk_analysis_tasks.items(), key=lambda t: t[1].get('timestamp', 0))
+            old_dir = os.path.join(runtime.apk_upload_dir, oldest[0])
             shutil.rmtree(old_dir, ignore_errors=True)
-            del global_state.apk_analysis_tasks[oldest[0]]
-        global_state.apk_analysis_tasks[task_id] = {
+            del runtime.global_state.apk_analysis_tasks[oldest[0]]
+        runtime.global_state.apk_analysis_tasks[task_id] = {
             'status': 'uploaded', 'progress': 0,
             'apk_path': apk_path, 'output_dir': None,
             'filename': filename, 'timestamp': time.time(), 'error': None
@@ -49,8 +49,8 @@ def _create_apk_task(task_id, apk_path, filename):
 
 
 def _get_apk_upload_lock(task_id: str) -> asyncio.Lock:
-    with global_state.apk_upload_locks_lock:
-        return global_state.apk_upload_locks.setdefault(task_id, asyncio.Lock())
+    with runtime.global_state.apk_upload_locks_lock:
+        return runtime.global_state.apk_upload_locks.setdefault(task_id, asyncio.Lock())
 
 
 def _safe_join(base_dir: str, *parts: str) -> str:
@@ -58,7 +58,7 @@ def _safe_join(base_dir: str, *parts: str) -> str:
     return safe_upload_target_path(base_dir, os.path.join(*parts) if parts else '.', allow_nested=True)
 
 
-def _normalize_apk_filename(filename: Optional[str]) -> str:
+def _normalize_apk_filename(filename: str | None) -> str:
     """Normalize upload filenames to a safe APK/JAR basename."""
     raw_name = (filename or '').replace('\\', '/')
     basename = os.path.basename(raw_name).strip()
@@ -72,17 +72,17 @@ def _normalize_apk_filename(filename: Optional[str]) -> str:
     return f"{stem}{ext.lower()}"
 
 
-def _normalize_apk_task_id(upload_id: Optional[str]) -> str:
+def _normalize_apk_task_id(upload_id: str | None) -> str:
     """Use UUID task directories only; never trust path-like upload IDs."""
     if not upload_id:
         return str(uuid.uuid4())
     try:
         return str(uuid.UUID(str(upload_id)))
-    except (TypeError, ValueError):
-        raise ValueError("非法上传ID")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("非法上传ID") from exc
 
 
-def _cleanup_files(paths: List[str]):
+def _cleanup_files(paths: list[str]):
     for path in paths:
         try:
             os.remove(path)
@@ -94,8 +94,8 @@ def _cleanup_files(paths: List[str]):
 
 def _get_apk_task(task_id: str, require_completed: bool = True):
     """获取APK分析任务，返回 (task, error_response)"""
-    with global_state.apk_analysis_tasks_lock:
-        task = global_state.apk_analysis_tasks.get(task_id)
+    with runtime.global_state.apk_analysis_tasks_lock:
+        task = runtime.global_state.apk_analysis_tasks.get(task_id)
     if not task:
         return None, ApiResponse.error("任务不存在", status_code=404)
     if require_completed and task['status'] != 'completed':
@@ -108,7 +108,7 @@ def _read_manifest_xml(task):
     manifest_path = os.path.join(task.get('output_dir', ''), 'resources', 'AndroidManifest.xml')
     if not os.path.exists(manifest_path):
         return None, "AndroidManifest.xml 未找到"
-    with open(manifest_path, 'r', encoding='utf-8') as f:
+    with open(manifest_path, encoding='utf-8') as f:
         return f.read(), None
 
 
@@ -116,7 +116,7 @@ def _get_apk_sources_dir(task) -> str:
     return _safe_join(task.get('output_dir', ''), 'sources')
 
 
-def _add_apk_symbol(symbols: Dict[str, List[Dict[str, Any]]], name: str, kind: str, path: str, line: int, column: int):
+def _add_apk_symbol(symbols: dict[str, list[dict[str, Any]]], name: str, kind: str, path: str, line: int, column: int):
     if not name or name in JAVA_CONTROL_WORDS:
         return
     symbols.setdefault(name, []).append({
@@ -124,13 +124,13 @@ def _add_apk_symbol(symbols: Dict[str, List[Dict[str, Any]]], name: str, kind: s
     })
 
 
-def _index_java_source_file(sources_dir: str, file_path: str, symbols: Dict[str, List[Dict[str, Any]]]):
+def _index_java_source_file(sources_dir: str, file_path: str, symbols: dict[str, list[dict[str, Any]]]):
     if os.path.getsize(file_path) > APK_SYMBOL_INDEX_MAX_FILE_SIZE:
         return
 
     rel_path = os.path.relpath(file_path, sources_dir)
     try:
-        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(file_path, encoding='utf-8', errors='replace') as f:
             for line_no, line in enumerate(f, start=1):
                 stripped = line.strip()
                 if not stripped or stripped.startswith('//') or stripped.startswith('*') or stripped.startswith('/*'):
@@ -159,14 +159,14 @@ def _index_java_source_file(sources_dir: str, file_path: str, symbols: Dict[str,
         logger.warning(f"Failed to decode Java source for APK symbol index: {file_path}")
 
 
-def _build_apk_symbol_index(task_id: str, task: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
-    with global_state.apk_analysis_tasks_lock:
-        cached = global_state.apk_analysis_tasks.get(task_id, {}).get('symbol_index')
+def _build_apk_symbol_index(task_id: str, task: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    with runtime.global_state.apk_analysis_tasks_lock:
+        cached = runtime.global_state.apk_analysis_tasks.get(task_id, {}).get('symbol_index')
         if cached is not None:
             return cached
 
     sources_dir = _get_apk_sources_dir(task)
-    symbols: Dict[str, List[Dict[str, Any]]] = {}
+    symbols: dict[str, list[dict[str, Any]]] = {}
     if not os.path.isdir(sources_dir):
         return symbols
 
@@ -175,13 +175,13 @@ def _build_apk_symbol_index(task_id: str, task: Dict[str, Any]) -> Dict[str, Lis
             if filename.endswith('.java'):
                 _index_java_source_file(sources_dir, os.path.join(root, filename), symbols)
 
-    with global_state.apk_analysis_tasks_lock:
-        if task_id in global_state.apk_analysis_tasks:
-            global_state.apk_analysis_tasks[task_id]['symbol_index'] = symbols
+    with runtime.global_state.apk_analysis_tasks_lock:
+        if task_id in runtime.global_state.apk_analysis_tasks:
+            runtime.global_state.apk_analysis_tasks[task_id]['symbol_index'] = symbols
     return symbols
 
 
-def _score_apk_symbol_candidate(candidate: Dict[str, Any], current_path: str, current_line: int) -> Tuple[int, int]:
+def _score_apk_symbol_candidate(candidate: dict[str, Any], current_path: str, current_line: int) -> tuple[int, int]:
     score = 0
     if candidate.get('path') == current_path:
         score += 100
@@ -195,15 +195,15 @@ def _score_apk_symbol_candidate(candidate: Dict[str, Any], current_path: str, cu
 async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
     """后台运行 jadx 反编译"""
     try:
-        with global_state.apk_analysis_tasks_lock:
-            if task_id in global_state.apk_analysis_tasks:
-                global_state.apk_analysis_tasks[task_id]['status'] = 'analyzing'
-                global_state.apk_analysis_tasks[task_id]['progress'] = 10
-                global_state.apk_analysis_tasks[task_id]['error'] = None
+        with runtime.global_state.apk_analysis_tasks_lock:
+            if task_id in runtime.global_state.apk_analysis_tasks:
+                runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'analyzing'
+                runtime.global_state.apk_analysis_tasks[task_id]['progress'] = 10
+                runtime.global_state.apk_analysis_tasks[task_id]['error'] = None
 
         jadx_threads = min(max(os.cpu_count() or 2, 2), 8)
         cmd = [
-            JADX_PATH,
+            runtime.jadx_path,
             '-d', output_dir,
             '-j', str(jadx_threads),
             '-m', 'simple',
@@ -214,28 +214,28 @@ async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
             apk_path
         ]
         result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True, timeout=JADX_TIMEOUT
+            subprocess.run, cmd, capture_output=True, text=True, timeout=runtime.jadx_timeout
         )
 
         if result.returncode != 0:
-            with global_state.apk_analysis_tasks_lock:
-                if task_id in global_state.apk_analysis_tasks:
-                    global_state.apk_analysis_tasks[task_id]['status'] = 'error'
-                    global_state.apk_analysis_tasks[task_id]['error'] = result.stderr[-500:] if result.stderr else 'jadx 反编译失败'
+            with runtime.global_state.apk_analysis_tasks_lock:
+                if task_id in runtime.global_state.apk_analysis_tasks:
+                    runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
+                    runtime.global_state.apk_analysis_tasks[task_id]['error'] = result.stderr[-500:] if result.stderr else 'jadx 反编译失败'
             return
 
-        with global_state.apk_analysis_tasks_lock:
-            if task_id in global_state.apk_analysis_tasks:
-                global_state.apk_analysis_tasks[task_id]['status'] = 'completed'
-                global_state.apk_analysis_tasks[task_id]['progress'] = 100
-                global_state.apk_analysis_tasks[task_id]['output_dir'] = output_dir
+        with runtime.global_state.apk_analysis_tasks_lock:
+            if task_id in runtime.global_state.apk_analysis_tasks:
+                runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'completed'
+                runtime.global_state.apk_analysis_tasks[task_id]['progress'] = 100
+                runtime.global_state.apk_analysis_tasks[task_id]['output_dir'] = output_dir
     except subprocess.TimeoutExpired:
-        with global_state.apk_analysis_tasks_lock:
-            if task_id in global_state.apk_analysis_tasks:
-                global_state.apk_analysis_tasks[task_id]['status'] = 'error'
-                global_state.apk_analysis_tasks[task_id]['error'] = 'jadx 反编译超时（超过600秒）'
+        with runtime.global_state.apk_analysis_tasks_lock:
+            if task_id in runtime.global_state.apk_analysis_tasks:
+                runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
+                runtime.global_state.apk_analysis_tasks[task_id]['error'] = 'jadx 反编译超时（超过600秒）'
     except Exception as e:
-        with global_state.apk_analysis_tasks_lock:
-            if task_id in global_state.apk_analysis_tasks:
-                global_state.apk_analysis_tasks[task_id]['status'] = 'error'
-                global_state.apk_analysis_tasks[task_id]['error'] = str(e)
+        with runtime.global_state.apk_analysis_tasks_lock:
+            if task_id in runtime.global_state.apk_analysis_tasks:
+                runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
+                runtime.global_state.apk_analysis_tasks[task_id]['error'] = str(e)

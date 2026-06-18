@@ -308,6 +308,63 @@ class RuntimeUiSmokeTests(unittest.TestCase):
         finally:
             page.close()
 
+    def test_firmware_and_apk_actions_send_expected_requests(self):
+        page = self.new_page()
+        requests = []
+
+        def handle_request(route):
+            request = route.request
+            requests.append((request.method, request.url.split(self.base_url, 1)[-1]))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"task_id":"apk-task","status":"completed"}',
+            )
+
+        try:
+            self.goto_shell(page)
+            page.route("**/api/burn/**", handle_request)
+            page.route("**/api/apk/**", handle_request)
+            page.evaluate(
+                """
+                state.selectedDevices = new Set(['D1']);
+                window.apkCurrentTaskId = 'apk-task';
+                executeBurnOperation = async (endpoint, data) => {
+                    await apiCall(endpoint, 'POST', {
+                        devices: Array.from(state.selectedDevices),
+                        ...data
+                    });
+                };
+                document.getElementById('gsi-script').value = '/tmp/burn.sh';
+                document.getElementById('gsi-system').value = '/tmp/system.img';
+                document.getElementById('gsi-vendor').value = '';
+                document.getElementById('sn-code').value = 'SN001';
+                """
+            )
+
+            page.evaluate("submitGsiBurn()")
+            page.evaluate("submitSnBurn()")
+            page.evaluate("startApkAnalysis()")
+            page.evaluate(
+                """Promise.all([
+                    fetch('/api/burn/firmware', {method:'POST'}),
+                    fetch('/api/apk/download/apk-task'),
+                    fetch('/api/apk/task/apk-task', {method:'DELETE'})
+                ])"""
+            )
+
+            for expected in (
+                ("POST", "/api/burn/gsi"),
+                ("POST", "/api/burn/serial"),
+                ("POST", "/api/apk/analyze/apk-task"),
+                ("POST", "/api/burn/firmware"),
+                ("GET", "/api/apk/download/apk-task"),
+                ("DELETE", "/api/apk/task/apk-task"),
+            ):
+                self.assertIn(expected, requests)
+        finally:
+            page.close()
+
     def test_sidebar_visibility_modal_closes_with_escape(self):
         page = self.new_page()
         try:

@@ -3,6 +3,7 @@
 from features.automation import api as automation
 from features.devices import api as devices
 from features.devices import integrations_api as device_integrations
+from features.firmware import api as firmware
 from features.gerrit import api as gerrit_dashboard
 from features.redmine import api as redmine
 from features.reports import api as reports
@@ -12,12 +13,10 @@ from features.test_execution import api as tests
 
 from . import (
     agent,
-    apk,
     assets,
     audit,
     config,
     desktop,
-    firmware,
     integrations,
     notifications,
     system,
@@ -28,7 +27,6 @@ from . import (
 
 ALL_ROUTERS = [
     agent.router,
-    apk.router,
     assets.router,
     audit.router,
     automation.router,
