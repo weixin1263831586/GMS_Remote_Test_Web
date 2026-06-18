@@ -17,7 +17,7 @@ from typing import Dict, Any, List, Optional
 from .ssh import ssh_manager
 from .config import config_manager, get_ubuntu_user
 from .common_utils import CommonUtils
-from .device_utils import DeviceUtils
+from features.devices.utils import DeviceUtils
 
 logger = logging.getLogger(__name__)
 

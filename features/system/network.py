@@ -4,16 +4,27 @@ import asyncio
 import ipaddress
 import logging
 import os
+import re
 import subprocess
-from typing import Any, Dict, Tuple
+from typing import Any
 
-from core.ssh import ssh_manager
-from core.state import _PING_RTT_PATTERN, _PING_AVG_PATTERN, _PING_LOSS_PATTERN
+
+_PING_RTT_PATTERN = re.compile(r"time[=<]([\d.]+)\s*ms")
+_PING_AVG_PATTERN = re.compile(r"=\s*[\d.]+/([\d.]+)/")
+_PING_LOSS_PATTERN = re.compile(r"(\d+)%\s*packet loss")
+_ssh_manager = None
+_is_config_host_local = None
 
 logger = logging.getLogger(__name__)
 
 
-def get_primary_vpn_target(config: Dict[str, Any]) -> str:
+def configure_network_dependencies(*, ssh_manager, is_config_host_local) -> None:
+    global _ssh_manager, _is_config_host_local
+    _ssh_manager = ssh_manager
+    _is_config_host_local = is_config_host_local
+
+
+def get_primary_vpn_target(config: dict[str, Any]) -> str:
     """获取主要VPN目标地址"""
     vpn_target = config.get('vpn_target', 'www.google.com')
     if isinstance(vpn_target, list):
@@ -47,7 +58,7 @@ def check_local_vpn_connected(vpn_target: str) -> bool:
         return False
 
 
-def get_configured_vpn_connection_name(config: Dict[str, Any]) -> str:
+def get_configured_vpn_connection_name(config: dict[str, Any]) -> str:
     """获取配置的VPN连接名称"""
     return str(config.get('vpn_connection_name') or os.getenv('GMS_VPN_CONNECTION_NAME', '')).strip()
 
@@ -62,16 +73,23 @@ def parse_vpn_connection_names(nmcli_output: str) -> list:
     return names
 
 
-async def execute_config_host_command(config: Dict[str, Any], ssh, command: str, timeout: int) -> Tuple[str, str, int]:
+async def execute_config_host_command(
+    config: dict[str, Any],
+    ssh,
+    command: str,
+    timeout: int,
+) -> tuple[str, str, int]:
     """在配置主机上执行命令（本地或远程）"""
-    from core.test_suite_utils import is_config_host_local
-
-    if is_config_host_local(config):
+    if _is_config_host_local(config):
         return await asyncio.to_thread(run_local_shell_command, command, timeout)
-    return ssh_manager.execute_command(ssh, command, timeout=timeout)
+    return _ssh_manager.execute_command(ssh, command, timeout=timeout)
 
 
-async def resolve_vpn_connection_name(config: Dict[str, Any], ssh=None, active_only: bool = False) -> str:
+async def resolve_vpn_connection_name(
+    config: dict[str, Any],
+    ssh=None,
+    active_only: bool = False,
+) -> str:
     """解析VPN连接名称"""
     vpn_name = get_configured_vpn_connection_name(config)
     if vpn_name:
@@ -86,7 +104,10 @@ async def resolve_vpn_connection_name(config: Dict[str, Any], ssh=None, active_o
     return names[0] if names else ""
 
 
-def run_local_shell_command(command: str, timeout: int = 30) -> Tuple[str, str, int]:
+def run_local_shell_command(
+    command: str,
+    timeout: int = 30,
+) -> tuple[str, str, int]:
     """在本地执行 shell 命令"""
     try:
         result = subprocess.run(

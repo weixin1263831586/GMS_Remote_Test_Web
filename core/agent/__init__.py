@@ -1,6 +1,6 @@
 """Agent capabilities for specialized local analysis tasks."""
 
-from .report_analysis_agent import ReportAnalysisAgent
+from features.reports import ReportAnalysisAgent
 
 
 __all__ = ["ReportAnalysisAgent"]

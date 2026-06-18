@@ -24,7 +24,7 @@ from core.ssh import ssh_manager
 from core.state import global_state
 from core.test_suite_utils import is_config_host_local
 from core.common_utils import CommonUtils
-from modules.device_lock_manager import device_lock_manager
+from features.devices.locks import device_lock_manager
 
 logger = logging.getLogger(__name__)
 

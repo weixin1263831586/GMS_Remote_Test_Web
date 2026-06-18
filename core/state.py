@@ -25,7 +25,7 @@ from core.settings import (
     USBIP_STATE_MAX_AGE_SECONDS,
     USER_STATE_MAX_AGE_HOURS,
 )
-from core.usbip import split_host_port
+from features.devices.usbip import split_host_port
 
 logger = logging.getLogger(__name__)
 

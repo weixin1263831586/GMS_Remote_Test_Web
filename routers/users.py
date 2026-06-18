@@ -15,7 +15,7 @@ from core.clients import (
     parse_client_id,
 )
 from core.config import config_manager
-from core.devices import get_or_create_user_state
+from features.devices.support import get_or_create_user_state
 from core.error_handling import handle_api_errors
 from core.schemas import ClientInfoRequest
 from core.state import global_state

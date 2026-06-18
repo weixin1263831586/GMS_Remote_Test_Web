@@ -1,13 +1,13 @@
 """
 核心业务逻辑包
 """
-from .adb_forward import ADBForwardManager
 from .config import ConfigManager
-from .devices import DeviceManager
 from .ssh import SSHManager
+from features.devices.adb_forward import ADBForwardManager
+from features.devices.manager import DeviceManager
+from features.devices.usbip import USBIPManager
 from features.reports import TestReportManager
 from .test_runner import TestRunner
-from .usbip import USBIPManager
 from .vnc import VNCManager
 
 __all__ = [

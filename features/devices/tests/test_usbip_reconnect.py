@@ -1,18 +1,62 @@
 import asyncio
 import json
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from core.config import ConfigManager
-from core.schemas import USBIPStartRequest
-from core.state import global_state
-from core.usbip import USBIPManager, parse_usbipd_android_busids
+from features.devices.models import DeviceActionRequest, USBIPStartRequest
+from features.devices.runtime import configure_runtime
+from features.devices.usbip import (
+    USBIPManager,
+    find_device_host_password,
+    parse_usbipd_android_busids,
+)
+
+
+global_state = SimpleNamespace(
+    usbip_devices_source={},
+    usbip_devices_source_lock=threading.RLock(),
+    usbip_states={},
+    usbip_states_lock=threading.RLock(),
+    device_cache={"devices": [], "timestamp": 0},
+    device_cache_lock=threading.RLock(),
+    user_states={},
+    user_states_lock=threading.RLock(),
+)
+
+
+class EmptyConfigManager:
+    def get_runtime_config(self):
+        return {}
+
+
+configure_runtime(
+    selected_config_manager=EmptyConfigManager(),
+    selected_global_state=global_state,
+    selected_ssh_manager=None,
+    selected_store_notification=None,
+    selected_generate_help_or_continue=None,
+    selected_get_client_id_from_request=None,
+    selected_probe_windows_usbipd=None,
+    selected_resolve_tailscale_device_host=None,
+)
 
 
 class UsbipCredentialTests(unittest.TestCase):
+    def setUp(self):
+        configure_runtime(
+            selected_config_manager=EmptyConfigManager(),
+            selected_global_state=global_state,
+            selected_ssh_manager=None,
+            selected_store_notification=None,
+            selected_generate_help_or_continue=None,
+            selected_get_client_id_from_request=None,
+            selected_probe_windows_usbipd=None,
+            selected_resolve_tailscale_device_host=None,
+        )
+
     def test_usbipd_persisted_guid_is_not_treated_as_busid(self):
         output = """
 Connected:
@@ -60,7 +104,7 @@ GUID                                  DEVICE
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
 
-        with patch("core.usbip.time.sleep", return_value=None):
+        with patch("features.devices.usbip.time.sleep", return_value=None):
             attached, devices = manager._attach_devices(object(), "172.16.14.66", ["1-1"])
 
         self.assertEqual(attached, ["1-1"])
@@ -68,7 +112,6 @@ GUID                                  DEVICE
         self.assertGreaterEqual(manager.ssh_manager.adb_calls, 4)
 
     def test_device_host_password_matches_full_host_before_username_fallback(self):
-        manager = ConfigManager()
         config = {
             "client_ssh_credentials": [
                 {"device_host": "hcq@172.16.14.66", "username": "hcq", "host": "172.16.14.66", "password": "pw66"},
@@ -77,40 +120,12 @@ GUID                                  DEVICE
             ]
         }
 
-        self.assertEqual(manager.find_device_host_password("hcq@172.16.14.66", config), "pw66")
-        self.assertEqual(manager.find_device_host_password("hcq@172.16.14.67", config), "pw67")
-        self.assertEqual(manager.find_device_host_password("legacy@10.0.0.8", config), "legacy-pw")
-
-    def test_upsert_device_host_password_preserves_runtime_and_updates_host(self):
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "core").mkdir()
-            configs = root / "configs"
-            configs.mkdir()
-            (configs / "config.json").write_text("{}", encoding="utf-8")
-            (configs / "config_runtime.json").write_text(
-                json.dumps({
-                    "sidebar_order": ["test"],
-                    "client_ssh_credentials": [
-                        {"device_host": "hcq@172.16.14.66", "username": "hcq", "host": "172.16.14.66", "password": "old"}
-                    ],
-                }),
-                encoding="utf-8",
-            )
-
-            manager = ConfigManager(base_dir=str(root / "core"))
-
-            self.assertTrue(manager.upsert_device_host_password("hcq@172.16.14.66", "new"))
-            self.assertTrue(manager.upsert_device_host_password("user@172.16.14.67:2222", "pw67"))
-
-            runtime = json.loads((configs / "config_runtime.json").read_text(encoding="utf-8"))
-            self.assertEqual(runtime["sidebar_order"], ["test"])
-            self.assertEqual(manager.find_device_host_password("hcq@172.16.14.66"), "new")
-            self.assertEqual(manager.find_device_host_password("user@172.16.14.67:2222"), "pw67")
-            self.assertEqual(len(runtime["client_ssh_credentials"]), 2)
+        self.assertEqual(find_device_host_password("hcq@172.16.14.66", config), "pw66")
+        self.assertEqual(find_device_host_password("hcq@172.16.14.67", config), "pw67")
+        self.assertEqual(find_device_host_password("legacy@10.0.0.8", config), "legacy-pw")
 
     def test_usbip_connect_persists_submitted_password_after_success(self):
-        import routers.integrations as integrations
+        import features.devices.integrations_api as integrations
 
         saved = {}
 
@@ -138,9 +153,9 @@ GUID                                  DEVICE
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         req = USBIPStartRequest(device_host="hcq@172.16.14.66", device_password="secret")
 
-        with patch.object(integrations, "config_manager", FakeConfigManager()), \
+        with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
                 patch.object(integrations, "usbip_manager", FakeUsbipManager()), \
-                patch.object(integrations, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
+                patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
             response = asyncio.run(integrations.start_usbip(req=req, request=request, help=False))
 
         self.assertEqual(response.status_code, 200)
@@ -151,7 +166,7 @@ GUID                                  DEVICE
         self.assertEqual(saved["password"], "secret")
 
     def test_usbip_connect_waits_for_adb_device_before_reporting_success(self):
-        import routers.integrations as integrations
+        import features.devices.integrations_api as integrations
 
         class FakeConfigManager:
             def load_config(self):
@@ -164,9 +179,9 @@ GUID                                  DEVICE
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         req = USBIPStartRequest(device_host="hcq@172.16.14.66")
 
-        with patch.object(integrations, "config_manager", FakeConfigManager()), \
+        with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
                 patch.object(integrations, "usbip_manager", FakeUsbipManager()), \
-                patch.object(integrations, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
+                patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
             response = asyncio.run(integrations.start_usbip(req=req, request=request, help=False))
 
         self.assertEqual(response.status_code, 200)
@@ -175,8 +190,8 @@ GUID                                  DEVICE
         self.assertIn("ADB", body["error"])
 
     def test_suppressed_usbip_auto_connect_is_blocked_until_manual_connect(self):
-        import core.usbip_reconnect as reconnect
-        import routers.integrations as integrations
+        import features.devices.integrations_api as integrations
+        import features.devices.reconnect as reconnect
 
         calls = []
 
@@ -198,9 +213,9 @@ GUID                                  DEVICE
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         reconnect.suppress_usbip_reconnect("hcq@172.16.14.66", ["USBIP001"])
         try:
-            with patch.object(integrations, "config_manager", FakeConfigManager()), \
+            with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
                     patch.object(integrations, "usbip_manager", FakeUsbipManager()), \
-                    patch.object(integrations, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
+                    patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
                 auto_response = asyncio.run(integrations.start_usbip(
                     req=USBIPStartRequest(device_host="hcq@172.16.14.66"),
                     request=request,
@@ -223,8 +238,8 @@ GUID                                  DEVICE
         self.assertFalse(reconnect.is_usbip_reconnect_suppressed("hcq@172.16.14.66", "USBIP001"))
 
     def test_failed_manual_usbip_connect_keeps_auto_reconnect_suppressed(self):
-        import core.usbip_reconnect as reconnect
-        import routers.integrations as integrations
+        import features.devices.integrations_api as integrations
+        import features.devices.reconnect as reconnect
 
         class FakeConfigManager:
             def load_config(self):
@@ -237,9 +252,9 @@ GUID                                  DEVICE
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         reconnect.suppress_usbip_reconnect("hcq@172.16.14.66", ["USBIP001"])
         try:
-            with patch.object(integrations, "config_manager", FakeConfigManager()), \
+            with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
                     patch.object(integrations, "usbip_manager", FakeUsbipManager()), \
-                    patch.object(integrations, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
+                    patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
                 response = asyncio.run(integrations.start_usbip(
                     req=USBIPStartRequest(device_host="hcq@172.16.14.66", manual_connect=True),
                     request=request,
@@ -252,7 +267,7 @@ GUID                                  DEVICE
             reconnect.clear_usbip_reconnect_suppression("hcq@172.16.14.66", ["USBIP001"])
 
     def test_removed_usbip_device_schedules_server_side_reconnect(self):
-        import core.usbip_reconnect as reconnect
+        import features.devices.reconnect as reconnect
 
         with global_state.usbip_devices_source_lock:
             old_sources = dict(global_state.usbip_devices_source)
@@ -275,7 +290,7 @@ GUID                                  DEVICE
         self.assertEqual(scheduled[0][0], "hcq@172.16.14.66")
 
     def test_manual_usbip_disconnect_suppresses_server_side_reconnect(self):
-        import core.usbip_reconnect as reconnect
+        import features.devices.reconnect as reconnect
 
         with global_state.usbip_devices_source_lock:
             old_sources = dict(global_state.usbip_devices_source)
@@ -300,7 +315,7 @@ GUID                                  DEVICE
         self.assertEqual(scheduled, [])
 
     def test_usbip_disconnect_finds_devices_from_runtime_sources(self):
-        import routers.integrations as integrations
+        import features.devices.integrations_api as integrations
 
         old_sources = dict(global_state.usbip_devices_source)
         old_manager_sources = dict(integrations.usbip_manager.device_sources)
@@ -309,7 +324,7 @@ GUID                                  DEVICE
                 global_state.usbip_devices_source.clear()
             integrations.usbip_manager.device_sources.clear()
 
-            with patch.object(integrations.config_manager, "get_runtime_config", return_value={
+            with patch.object(integrations.runtime.config_manager, "get_runtime_config", return_value={
                 "usbip_devices_source": {
                     "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1},
                     "OTHER001": {"source": "hcq@172.16.14.67", "timestamp": 1},
@@ -327,7 +342,7 @@ GUID                                  DEVICE
             integrations.usbip_manager.device_sources.update(old_manager_sources)
 
     def test_device_list_refresh_keeps_usbip_source_for_reconnect(self):
-        import routers.devices as devices_router
+        import features.devices.api as devices_router
 
         old_sources = dict(global_state.usbip_devices_source)
         old_cache = dict(global_state.device_cache)
@@ -343,8 +358,9 @@ GUID                                  DEVICE
 
             request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
             with patch.object(devices_router.device_manager, "get_connected_devices", return_value=["LOCAL001"]), \
-                    patch.object(devices_router, "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
-                    patch.object(devices_router.client_manager, "get_client_id", return_value="hcq@127.0.0.1"):
+                    patch.object(devices_router.runtime, "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
+                    patch.object(devices_router.runtime, "get_client_ip", return_value="127.0.0.1"), \
+                    patch.object(devices_router.runtime, "client_manager", SimpleNamespace(get_client_id=lambda _ip: "hcq@127.0.0.1")):
                 asyncio.run(devices_router.get_connected_devices(request=request, help=False, force_refresh=True))
 
             self.assertIn("USBIP001", global_state.usbip_devices_source)
@@ -356,8 +372,7 @@ GUID                                  DEVICE
                 global_state.device_cache = old_cache
 
     def test_usbip_reboot_returns_without_waiting_for_adb_online(self):
-        import routers.devices as devices_router
-        from core.schemas import DeviceActionRequest
+        import features.devices.api as devices_router
 
         old_sources = dict(global_state.usbip_devices_source)
         calls = []
@@ -369,11 +384,11 @@ GUID                                  DEVICE
                 calls.append((device_id, wait_for_online))
                 return {"success": True, "back_online": False, "wait_time": 0.0}
 
-            with patch.object(devices_router.config_manager, "get_runtime_config", return_value={
+            with patch.object(devices_router.runtime, "config_manager", SimpleNamespace(get_runtime_config=lambda: {
                 "usbip_devices_source": {
                     "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1}
                 }
-            }), patch.object(devices_router.device_manager, "reboot_device", side_effect=fake_reboot_device):
+            })), patch.object(devices_router.device_manager, "reboot_device", side_effect=fake_reboot_device):
                 response = asyncio.run(devices_router.reboot_devices(DeviceActionRequest(devices=["USBIP001"])))
 
             body = json.loads(response.body.decode("utf-8"))

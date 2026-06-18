@@ -2,6 +2,7 @@ import os
 import re
 import socket
 import subprocess
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -40,11 +41,24 @@ class RuntimeUiSmokeTests(unittest.TestCase):
             stderr=subprocess.STDOUT,
             text=True,
         )
+        cls.server_output = []
+
+        def drain_server_output():
+            if cls.server.stdout:
+                for line in cls.server.stdout:
+                    cls.server_output.append(line)
+
+        cls.server_output_thread = threading.Thread(
+            target=drain_server_output,
+            name="runtime-ui-server-output",
+            daemon=True,
+        )
+        cls.server_output_thread.start()
         deadline = time.time() + 30
         last_error = None
         while time.time() < deadline:
             if cls.server.poll() is not None:
-                output = cls.server.stdout.read() if cls.server.stdout else ""
+                output = "".join(cls.server_output)
                 raise RuntimeError(f"test server exited early:\n{output}")
             try:
                 with urlopen(f"{cls.base_url}/api/system/health", timeout=1) as response:
@@ -79,6 +93,9 @@ class RuntimeUiSmokeTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 server.kill()
                 server.wait(timeout=5)
+        output_thread = getattr(cls, "server_output_thread", None)
+        if output_thread:
+            output_thread.join(timeout=2)
         if server and server.stdout:
             server.stdout.close()
         Path("data/automation_runs.sqlite3").unlink(missing_ok=True)
@@ -86,6 +103,7 @@ class RuntimeUiSmokeTests(unittest.TestCase):
     def new_page(self):
         page = self.browser.new_page(viewport={"width": 1440, "height": 960})
         page.set_default_timeout(8000)
+        page.set_default_navigation_timeout(15000)
         page.route(
             "**/api/websites/load",
             lambda route: route.fulfill(
@@ -217,6 +235,76 @@ class RuntimeUiSmokeTests(unittest.TestCase):
             self.assertEqual(gerrit_src, "/gerrit-dashboard")
 
             self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_device_actions_send_expected_requests(self):
+        page = self.new_page()
+        requests = []
+
+        def handle_device_request(route):
+            request = route.request
+            requests.append(
+                {
+                    "method": request.method,
+                    "path": request.url.split(self.base_url, 1)[-1],
+                    "body": request.post_data_json if request.post_data else None,
+                }
+            )
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"message":"ok","device_list":["D1"]}',
+            )
+
+        try:
+            self.goto_shell(page)
+            page.route("**/api/devices/**", handle_device_request)
+            page.route("**/api/usbip/**", handle_device_request)
+            page.route("**/api/adb-forward/**", handle_device_request)
+            page.evaluate(
+                """
+                state.devices = [{device_id: 'D1'}];
+                state.selectedDevices = new Set(['D1']);
+                state.adbForwardRunning = false;
+                state.usbipConnected = false;
+                showConfirmDialog = async () => true;
+                initAndStartVnc = async () => true;
+                document.getElementById('wifi-ssid').value = 'LabWifi';
+                document.getElementById('wifi-password').value = 'secret';
+                """
+            )
+
+            page.evaluate("rebootDevices()")
+            page.evaluate("remountDevices()")
+            page.evaluate("submitWifiConfig()")
+            page.evaluate("lockSelectedDevices('lock')")
+            page.evaluate("showDeviceScreen()")
+            page.evaluate("setupUsbipForward()")
+            page.evaluate("setupAdbPortForward()")
+
+            self.assertEqual(
+                [(item["method"], item["path"]) for item in requests],
+                [
+                    ("POST", "/api/devices/reboot"),
+                    ("POST", "/api/devices/remount"),
+                    ("POST", "/api/devices/wifi"),
+                    ("POST", "/api/devices/bootloader-lock"),
+                    ("POST", "/api/devices/scrcpy"),
+                    ("POST", "/api/usbip/connect"),
+                    ("POST", "/api/adb-forward/start"),
+                ],
+            )
+            self.assertEqual(requests[0]["body"], {"devices": ["D1"]})
+            self.assertEqual(requests[1]["body"], {"devices": ["D1"]})
+            self.assertEqual(
+                requests[2]["body"],
+                {"devices": ["D1"], "ssid": "LabWifi", "password": "secret"},
+            )
+            self.assertEqual(requests[3]["body"], {"devices": ["D1"]})
+            self.assertEqual(requests[4]["body"], {"devices": ["D1"]})
+            self.assertEqual(requests[5]["body"], {"manual_connect": True})
+            self.assertIsNone(requests[6]["body"])
         finally:
             page.close()
 

@@ -1,6 +1,7 @@
 """设备工具类 - 提供设备解析、窗口计算、进程管理等通用工具函数。"""
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 
 logger = logging.getLogger(__name__)
 
@@ -9,17 +10,17 @@ class DeviceUtils:
     """设备工具类"""
 
     @staticmethod
-    def parse_adb_devices(output: str) -> List[str]:
+    def parse_adb_devices(output: str) -> list[str]:
         """解析 `adb devices` 命令输出，返回设备ID列表。"""
         return [line.split('\t')[0] for line in output.split('\n')[1:] if line.strip() and '\tdevice' in line]
 
     @staticmethod
     def calculate_window_positions(
-        devices: List[str],
+        devices: list[str],
         screen_width: int = 1920,
         screen_height: int = 1080,
         max_window_width: int = 350,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """计算投屏窗口的位置和大小。返回 window_width/height, start_x/y, horizontal_gap。"""
         total = len(devices)
         gap = 20
@@ -50,7 +51,7 @@ class DeviceUtils:
         screen_width: int = 1920,
         screen_height: int = 1080,
         vertical_margin: int = 50,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """计算单个设备的窗口位置，含边界检查。返回 {'x_offset', 'y_offset'}。"""
         x = start_x + device_index * (window_width + horizontal_gap)
         y = start_y
@@ -71,7 +72,7 @@ class DeviceUtils:
             return False
 
     @staticmethod
-    def check_scrcpy_healthy(ssh, device_id: str) -> tuple[bool, Optional[str]]:
+    def check_scrcpy_healthy(ssh, device_id: str) -> tuple[bool, str | None]:
         """检查 scrcpy 是否健康运行。单命令检查进程 + 状态 + 日志 Connected。返回 (is_healthy, pid_or_error)。"""
         try:
             cmd = (

@@ -8,13 +8,12 @@ ADB转发 - 核心业务逻辑
 """
 
 import logging
-import time
 import shlex
-from typing import Dict, Any
+import time
+from typing import Any
 
-from .ssh import ssh_manager
-from .config import config_manager
-from .device_utils import DeviceUtils
+from .utils import DeviceUtils
+
 
 logger = logging.getLogger(__name__)
 
@@ -29,17 +28,17 @@ class ADBForwardManager:
     - 设备连接监控
     """
 
-    def __init__(self):
+    def __init__(self, ssh_manager=None, config_manager=None):
         """初始化ADB转发管理器"""
         self.ssh_manager = ssh_manager
         self.config_manager = config_manager
-        self.active_tunnels: Dict[str, Any] = {}  # {client_id: tunnel_info}
+        self.active_tunnels: dict[str, Any] = {}  # {client_id: tunnel_info}
 
     def start_forward(
         self,
         device_host: str,
-        device_password: str = None
-    ) -> Dict[str, Any]:
+        device_password: str | None = None
+    ) -> dict[str, Any]:
         """
         启动ADB端口转发
 
@@ -101,7 +100,7 @@ class ADBForwardManager:
                     time.sleep(3)
 
                     # 测试连接
-                    test_output, test_error, test_code = self.ssh_manager.execute_command(
+                    test_output, _test_error, _test_code = self.ssh_manager.execute_command(
                         ssh,
                         "adb devices",
                         timeout=10
@@ -130,7 +129,7 @@ class ADBForwardManager:
             logger.error(f"Error in start_forward: {e}")
             return {'success': False, 'error': str(e)}
 
-    def stop_forward(self, client_id: str = None) -> Dict[str, Any]:
+    def stop_forward(self, client_id: str | None = None) -> dict[str, Any]:
         """
         停止ADB端口转发
 

@@ -3,34 +3,36 @@
 import logging
 import threading
 import time
-from typing import Any, Dict, Iterable
+from collections.abc import Iterable
+from typing import Any
 
-from core.config import config_manager
-from core.state import global_state
-from core.usbip import find_device_host_password, usbip_manager
+from . import runtime
+from .usbip import find_device_host_password, usbip_manager
+
 
 logger = logging.getLogger(__name__)
 
 USBIP_RECONNECT_ATTEMPTS = 30
 USBIP_RECONNECT_INTERVAL_SECONDS = 5
 
-_tasks: Dict[str, threading.Thread] = {}
+_tasks: dict[str, threading.Thread] = {}
+_stop_events: dict[str, threading.Event] = {}
 _tasks_lock = threading.Lock()
-_suppressed_hosts: Dict[str, float] = {}
-_suppressed_devices: Dict[str, float] = {}
+_suppressed_hosts: dict[str, float] = {}
+_suppressed_devices: dict[str, float] = {}
 _suppression_lock = threading.Lock()
 USBIP_MANUAL_DISCONNECT_SUPPRESS_SECONDS = 300
 
 
-def _runtime_usbip_sources() -> Dict[str, Dict[str, Any]]:
-    runtime = config_manager.get_runtime_config()
-    sources = runtime.get("usbip_devices_source", {})
+def _runtime_usbip_sources() -> dict[str, dict[str, Any]]:
+    runtime_config = runtime.config_manager.get_runtime_config()
+    sources = runtime_config.get("usbip_devices_source", {})
     return sources if isinstance(sources, dict) else {}
 
 
-def _known_usbip_sources() -> Dict[str, Dict[str, Any]]:
-    with global_state.usbip_devices_source_lock:
-        sources = dict(global_state.usbip_devices_source)
+def _known_usbip_sources() -> dict[str, dict[str, Any]]:
+    with runtime.global_state.usbip_devices_source_lock:
+        sources = dict(runtime.global_state.usbip_devices_source)
     sources.update(getattr(usbip_manager, "device_sources", {}) or {})
     sources.update(_runtime_usbip_sources())
     return sources
@@ -142,25 +144,59 @@ def schedule_usbip_reconnect(device_host: str, reason: str = "") -> bool:
             logger.info("[USB/IP Reconnect] already running for %s", device_host)
             return False
 
+        stop_event = threading.Event()
         worker = threading.Thread(
             target=_reconnect_worker,
-            args=(device_host, reason),
+            args=(device_host, reason, stop_event),
             name=f"USBIPReconnect-{device_host}",
             daemon=True,
         )
         _tasks[device_host] = worker
+        _stop_events[device_host] = stop_event
         worker.start()
         logger.info("[USB/IP Reconnect] scheduled for %s (%s)", device_host, reason)
         return True
 
 
-def _reconnect_worker(device_host: str, reason: str = ""):
+def active_usbip_reconnect_hosts() -> list[str]:
+    with _tasks_lock:
+        return sorted(
+            host for host, task in _tasks.items() if task.is_alive()
+        )
+
+
+def stop_usbip_reconnect_tasks(timeout: float = 5) -> None:
+    with _tasks_lock:
+        tasks = list(_tasks.items())
+        for stop_event in _stop_events.values():
+            stop_event.set()
+
+    deadline = time.monotonic() + max(0, timeout)
+    for _, task in tasks:
+        remaining = max(0, deadline - time.monotonic())
+        task.join(timeout=remaining)
+
+    with _tasks_lock:
+        for host, task in list(_tasks.items()):
+            if not task.is_alive():
+                _tasks.pop(host, None)
+                _stop_events.pop(host, None)
+
+
+def _reconnect_worker(
+    device_host: str,
+    reason: str = "",
+    stop_event: threading.Event | None = None,
+):
+    stop_event = stop_event or threading.Event()
     try:
         for attempt in range(1, USBIP_RECONNECT_ATTEMPTS + 1):
-            if attempt > 1:
-                time.sleep(USBIP_RECONNECT_INTERVAL_SECONDS)
+            if stop_event.is_set():
+                return
+            if attempt > 1 and stop_event.wait(USBIP_RECONNECT_INTERVAL_SECONDS):
+                return
 
-            config = config_manager.load_config(force_reload=True)
+            config = runtime.config_manager.load_config(force_reload=True)
             device_password = find_device_host_password(device_host, config) or config.get("device_pswd", "")
             if not device_password:
                 logger.warning("[USB/IP Reconnect] no SSH credential for %s", device_host)
@@ -175,6 +211,8 @@ def _reconnect_worker(device_host: str, reason: str = ""):
             )
             if is_usbip_reconnect_suppressed(device_host):
                 logger.info("[USB/IP Reconnect] stopped by manual disconnect suppression for %s", device_host)
+                return
+            if stop_event.is_set():
                 return
             result = usbip_manager.start_usbip(device_host, device_password)
             device_list = result.get("device_list") or []
@@ -201,31 +239,32 @@ def _reconnect_worker(device_host: str, reason: str = ""):
             current = _tasks.get(device_host)
             if current is threading.current_thread():
                 _tasks.pop(device_host, None)
+                _stop_events.pop(device_host, None)
 
 
 def _record_reconnected_devices(device_host: str, device_list: list[str]):
     now = time.time()
-    with global_state.usbip_states_lock:
-        global_state.usbip_states[device_host] = {"connected": True, "timestamp": now}
+    with runtime.global_state.usbip_states_lock:
+        runtime.global_state.usbip_states[device_host] = {"connected": True, "timestamp": now}
 
-    with global_state.usbip_devices_source_lock:
+    with runtime.global_state.usbip_devices_source_lock:
         for device_id in device_list:
-            global_state.usbip_devices_source[device_id] = {
+            runtime.global_state.usbip_devices_source[device_id] = {
                 "source": device_host,
                 "timestamp": now,
             }
 
-    with global_state.device_cache_lock:
-        global_state.device_cache = {"devices": [], "timestamp": 0}
+    with runtime.global_state.device_cache_lock:
+        runtime.global_state.device_cache = {"devices": [], "timestamp": 0}
 
     try:
-        runtime = config_manager.get_runtime_config()
-        sources = runtime.get("usbip_devices_source", {})
+        runtime_config = runtime.config_manager.get_runtime_config()
+        sources = runtime_config.get("usbip_devices_source", {})
         if not isinstance(sources, dict):
             sources = {}
         for device_id in device_list:
             sources[device_id] = {"source": device_host, "timestamp": now}
-        runtime["usbip_devices_source"] = sources
-        config_manager.save_runtime_config(runtime)
+        runtime_config["usbip_devices_source"] = sources
+        runtime.config_manager.save_runtime_config(runtime_config)
     except Exception as exc:
         logger.warning("[USB/IP Reconnect] failed to persist sources: %s", exc)

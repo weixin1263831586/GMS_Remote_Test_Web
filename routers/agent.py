@@ -7,14 +7,13 @@ import time
 import uuid
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, Field
 
-from core.api_response import error_response, success_response
 from core.agent_context import _parse_chinese_number, record_user_message, update_context
-from core.agent_executor import executor, _json_body
+from core.agent_executor import _json_body, executor
 from core.agent_intent import (
     _extract_device_ids,
     _extract_module_and_case,
@@ -24,23 +23,28 @@ from core.agent_intent import (
 )
 from core.agent_response import (
     generate as gen_response,
+)
+from core.agent_response import (
     generate_capability_overview,
     generate_clarification,
     generate_page_overview,
     page_quick_actions,
 )
 from core.agent_tools import registry
+from core.api_response import error_response, success_response
 from core.clients import get_client_id_from_request
 from core.config import config_manager
-from core.devices import device_manager, get_or_create_user_state
-from features.reports.repository import test_report_db
+from core.schemas import ReportDiagnosisRequest, SuiteApkAnalyzeRequest
 from core.test_suite_utils import (
     detect_test_type_from_suite_path,
     get_default_suites_path,
     is_config_host_local,
 )
-from core.schemas import ReportDiagnosisRequest, SuiteApkAnalyzeRequest
-from modules.device_lock_manager import device_lock_manager
+from features.devices.locks import device_lock_manager
+from features.devices.manager import device_manager
+from features.devices.support import get_or_create_user_state
+from features.reports.repository import test_report_db
+
 
 logger = logging.getLogger(__name__)
 
@@ -69,25 +73,25 @@ WEBAPP_PAGES = {
     "agent": ("对话Agent", "自然语言操作 Web_app"),
 }
 
-_agent_sessions: Dict[str, Dict[str, Any]] = {}
+_agent_sessions: dict[str, dict[str, Any]] = {}
 _agent_sessions_lock = asyncio.Lock()
-_agent_monitor_tasks: Dict[str, asyncio.Task] = {}
+_agent_monitor_tasks: dict[str, asyncio.Task] = {}
 
 
 class AgentChatRequest(BaseModel):
     """Request body for Agent chat messages."""
 
     message: str = Field(default="", max_length=4000)
-    session_id: Optional[str] = None
+    session_id: str | None = None
     execute: bool = False
-    action: Optional[str] = None
-    params: Dict[str, Any] = Field(default_factory=dict)
+    action: str | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentRequestShim:
     """Minimal request object for reusing existing route handlers."""
 
-    def __init__(self, request: Request, query_params: Optional[Dict[str, Any]] = None):
+    def __init__(self, request: Request, query_params: dict[str, Any] | None = None):
         self.headers = request.headers
         self.client = request.client
         self.method = getattr(request, "method", "POST")
@@ -102,7 +106,7 @@ def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def _new_message(role: str, content: str, kind: str = "text", data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _new_message(role: str, content: str, kind: str = "text", data: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "id": str(uuid.uuid4()),
         "role": role,
@@ -128,11 +132,11 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
-def _session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
+def _session_payload(session: dict[str, Any]) -> dict[str, Any]:
     return _jsonable(session)
 
 
-def _expired_session_payload(session_id: str) -> Dict[str, Any]:
+def _expired_session_payload(session_id: str) -> dict[str, Any]:
     return {
         "expired": True,
         "session": {
@@ -146,7 +150,7 @@ def _expired_session_payload(session_id: str) -> Dict[str, Any]:
     }
 
 
-async def _get_or_create_session(session_id: Optional[str], client_id: str) -> Dict[str, Any]:
+async def _get_or_create_session(session_id: str | None, client_id: str) -> dict[str, Any]:
     async with _agent_sessions_lock:
         existing = _agent_sessions.get(session_id or "")
         sid = session_id if existing and existing.get("client_id") == client_id else str(uuid.uuid4())
@@ -183,7 +187,7 @@ async def _cleanup_sessions() -> None:
             _agent_sessions.pop(sid, None)
 
 
-def _append_step(session: Dict[str, Any], title: str, status: str = "done", detail: str = "", data: Optional[Dict[str, Any]] = None) -> None:
+def _append_step(session: dict[str, Any], title: str, status: str = "done", detail: str = "", data: dict[str, Any] | None = None) -> None:
     session.setdefault("steps", []).append({
         "id": str(uuid.uuid4()),
         "title": title,
@@ -195,7 +199,7 @@ def _append_step(session: Dict[str, Any], title: str, status: str = "done", deta
     session["updated_at"] = _now_iso()
 
 
-def _append_message(session: Dict[str, Any], role: str, content: str, kind: str = "text", data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _append_message(session: dict[str, Any], role: str, content: str, kind: str = "text", data: dict[str, Any] | None = None) -> dict[str, Any]:
     msg = _new_message(role, content, kind=kind, data=data)
     session.setdefault("messages", []).append(msg)
     session["updated_at"] = _now_iso()
@@ -213,7 +217,7 @@ def _extract_device_count(text: str) -> int:
     return 1
 
 
-def _parse_user_intent(message: str) -> Dict[str, Any]:
+def _parse_user_intent(message: str) -> dict[str, Any]:
     text = message.strip()
     lowered = text.lower()
     module, case = _extract_module_and_case(text)
@@ -242,7 +246,7 @@ def _parse_user_intent(message: str) -> Dict[str, Any]:
     }
 
 
-def _select_devices(intent: Dict[str, Any]) -> tuple[List[str], List[Dict[str, Any]]]:
+def _select_devices(intent: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
     device_ids = device_manager.get_connected_devices(force_refresh=True)
     details = []
     for device_id in device_ids:
@@ -263,7 +267,7 @@ def _select_devices(intent: Dict[str, Any]) -> tuple[List[str], List[Dict[str, A
     return unlocked if count <= 0 else unlocked[:count], details
 
 
-def _score_suite(suite: Dict[str, Any], test_type: str, module: str) -> int:
+def _score_suite(suite: dict[str, Any], test_type: str, module: str) -> int:
     score = 0
     haystack = " ".join(str(suite.get(key, "")) for key in ("test_type", "version", "tools_path", "binary")).lower()
     if test_type and test_type.lower() in haystack:
@@ -277,7 +281,7 @@ def _score_suite(suite: Dict[str, Any], test_type: str, module: str) -> int:
     return score
 
 
-def _list_suites() -> List[Dict[str, Any]]:
+def _list_suites() -> list[dict[str, Any]]:
     from routers.tests import _get_available_test_suites
 
     config = config_manager.load_config()
@@ -285,7 +289,7 @@ def _list_suites() -> List[Dict[str, Any]]:
     return _get_available_test_suites(config, base_path)
 
 
-def _select_suite(intent: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _select_suite(intent: dict[str, Any]) -> dict[str, Any] | None:
     suites = _list_suites()
     test_type = intent.get("test_type") or ""
     module = intent.get("test_module") or ""
@@ -294,7 +298,7 @@ def _select_suite(intent: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return max(suites, key=lambda suite: _score_suite(suite, test_type, module))
 
 
-def _build_plan(intent: Dict[str, Any], selected_devices: List[str], device_details: List[Dict[str, Any]], suite: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_plan(intent: dict[str, Any], selected_devices: list[str], device_details: list[dict[str, Any]], suite: dict[str, Any] | None) -> dict[str, Any]:
     test_suite = suite.get("tools_path", "") if suite else ""
     test_type = intent.get("test_type") or (suite.get("test_type", "") if suite else "")
     if not test_type and test_suite:
@@ -345,7 +349,7 @@ def _build_plan(intent: Dict[str, Any], selected_devices: List[str], device_deta
     }
 
 
-def _summarize_plan(plan: Dict[str, Any]) -> str:
+def _summarize_plan(plan: dict[str, Any]) -> str:
     req = plan.get("request", {})
     policy = plan.get("policy", {})
     lines = [
@@ -367,7 +371,7 @@ def _summarize_plan(plan: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _latest_report_for_client(client_id: str, exclude_timestamp: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def _latest_report_for_client(client_id: str, exclude_timestamp: str | None = None) -> dict[str, Any] | None:
     reports = test_report_db.get_reports(limit=20, user_only=client_id)
     if not reports:
         reports = test_report_db.get_reports(limit=20)
@@ -380,7 +384,7 @@ def _latest_report_for_client(client_id: str, exclude_timestamp: Optional[str] =
     return reports[0] if reports else None
 
 
-def _report_failed(report: Optional[Dict[str, Any]]) -> bool:
+def _report_failed(report: dict[str, Any] | None) -> bool:
     if not report:
         return False
     fail_count = report.get("fail", report.get("fail_count", 0)) or 0
@@ -390,7 +394,7 @@ def _report_failed(report: Optional[Dict[str, Any]]) -> bool:
         return False
 
 
-def _normalize_failure(raw_failure: Dict[str, Any], index: int = 0) -> Dict[str, Any]:
+def _normalize_failure(raw_failure: dict[str, Any], index: int = 0) -> dict[str, Any]:
     """Return one failure in the shape expected by diagnosis APIs."""
     raw_failure = raw_failure or {}
     test_name = raw_failure.get("name") or raw_failure.get("test_name") or raw_failure.get("test") or ""
@@ -405,7 +409,7 @@ def _normalize_failure(raw_failure: Dict[str, Any], index: int = 0) -> Dict[str,
     }
 
 
-async def _analyze_saved_report(session: Dict[str, Any], report_timestamp: str) -> Optional[Dict[str, Any]]:
+async def _analyze_saved_report(session: dict[str, Any], report_timestamp: str) -> dict[str, Any] | None:
     """Analyze a saved report and append an Agent step."""
     from features.reports.service import test_report_manager
 
@@ -417,7 +421,7 @@ async def _analyze_saved_report(session: Dict[str, Any], report_timestamp: str) 
             return None
 
         summary = analysis.get("summary") or {}
-        failures = analysis.get("failures") or []
+        analysis.get("failures") or []
         detail = f"总计 {summary.get('total', 0)}，通过 {summary.get('pass', 0)}，失败 {summary.get('fail', summary.get('failed', 0))}"
         _append_step(session, "报告分析", "done", detail, {"report_analysis": analysis})
         return analysis
@@ -427,7 +431,7 @@ async def _analyze_saved_report(session: Dict[str, Any], report_timestamp: str) 
         return None
 
 
-async def _diagnose_report_failure(session: Dict[str, Any], report: Dict[str, Any], analysis: Dict[str, Any], failure: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+async def _diagnose_report_failure(session: dict[str, Any], report: dict[str, Any], analysis: dict[str, Any], failure: dict[str, Any]) -> dict[str, Any] | None:
     """Run the existing report diagnosis pipeline for one failure."""
     from features.reports.api import diagnose_report_failure
 
@@ -473,8 +477,8 @@ async def _diagnose_report_failure(session: Dict[str, Any], report: Dict[str, An
         return None
 
 
-def _extract_symbols_for_apk_lookup(diagnosis: Dict[str, Any], failure: Dict[str, Any]) -> List[str]:
-    symbols: List[str] = []
+def _extract_symbols_for_apk_lookup(diagnosis: dict[str, Any], failure: dict[str, Any]) -> list[str]:
+    symbols: list[str] = []
     for class_name in diagnosis.get("class_names") or []:
         simple = str(class_name).split(".")[-1].split("$")[0]
         if simple and simple not in symbols:
@@ -488,7 +492,7 @@ def _extract_symbols_for_apk_lookup(diagnosis: Dict[str, Any], failure: Dict[str
     return symbols[:5]
 
 
-async def _wait_for_apk_analysis(task_id: str, timeout_seconds: int = 180) -> Optional[Dict[str, Any]]:
+async def _wait_for_apk_analysis(task_id: str, timeout_seconds: int = 180) -> dict[str, Any] | None:
     from routers.apk import get_apk_status
 
     deadline = time.time() + timeout_seconds
@@ -505,7 +509,7 @@ async def _wait_for_apk_analysis(task_id: str, timeout_seconds: int = 180) -> Op
     return last_status
 
 
-async def _read_apk_source_snippet(task_id: str, diagnosis: Dict[str, Any], failure: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+async def _read_apk_source_snippet(task_id: str, diagnosis: dict[str, Any], failure: dict[str, Any]) -> dict[str, Any] | None:
     """Find a likely decompiled source file and read a short snippet."""
     from routers.apk import find_apk_symbol_definition, get_apk_source
 
@@ -539,7 +543,7 @@ async def _read_apk_source_snippet(task_id: str, diagnosis: Dict[str, Any], fail
     return {"definition": definition, "path": path, "line": line, "snippet": snippet}
 
 
-async def _run_apk_source_analysis(session: Dict[str, Any], plan: Dict[str, Any], diagnosis: Dict[str, Any], failure: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+async def _run_apk_source_analysis(session: dict[str, Any], plan: dict[str, Any], diagnosis: dict[str, Any], failure: dict[str, Any]) -> dict[str, Any] | None:
     """Import a suite APK/JAR, decompile it, and read a likely source snippet."""
     from routers.apk import analyze_apk
     from routers.tests import create_suite_apk_analysis_task
@@ -590,7 +594,7 @@ async def _run_apk_source_analysis(session: Dict[str, Any], plan: Dict[str, Any]
         return None
 
 
-async def _run_failure_analysis_pipeline(session: Dict[str, Any], plan: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
+async def _run_failure_analysis_pipeline(session: dict[str, Any], plan: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
     """Analyze report failures, diagnose the first failure, and optionally inspect APK source."""
     report_timestamp = report.get("timestamp", "")
     analysis = await _analyze_saved_report(session, report_timestamp)
@@ -644,7 +648,7 @@ async def _run_failure_analysis_pipeline(session: Dict[str, Any], plan: Dict[str
     return result
 
 
-async def _start_test_with_plan(session: Dict[str, Any], request_shim: AgentRequestShim, plan: Dict[str, Any], retry_timestamp: str = "") -> Dict[str, Any]:
+async def _start_test_with_plan(session: dict[str, Any], request_shim: AgentRequestShim, plan: dict[str, Any], retry_timestamp: str = "") -> dict[str, Any]:
     from core.schemas import TestStartRequest
     from routers.tests import start_test
 
@@ -669,7 +673,7 @@ async def _start_test_with_plan(session: Dict[str, Any], request_shim: AgentRequ
     return payload
 
 
-async def _run_pre_actions(session: Dict[str, Any], plan: Dict[str, Any]) -> Dict[str, Any]:
+async def _run_pre_actions(session: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
     actions = plan.get("pre_actions") or []
     if not actions:
         return {"success": True}
@@ -679,8 +683,8 @@ async def _run_pre_actions(session: Dict[str, Any], plan: Dict[str, Any]) -> Dic
     for action in actions:
         if action.get("type") != "connect_wifi":
             continue
-        from core.schemas import WifiConnectRequest
-        from routers.devices import connect_wifi
+        from features.devices.api import connect_wifi
+        from features.devices.models import WifiConnectRequest
 
         wifi_req = WifiConnectRequest(
             devices=devices,
@@ -776,7 +780,7 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
         _agent_monitor_tasks.pop(session_id, None)
 
 
-async def _execute_plan(session: Dict[str, Any], request: Request, plan: Dict[str, Any]) -> Dict[str, Any]:
+async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[str, Any]) -> dict[str, Any]:
     req = plan.get("request", {})
     if not req.get("devices"):
         return {"success": False, "error": "没有可用设备"}
@@ -959,7 +963,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     if intent.tool_name == "navigate":
         page = intent.params.get("page", "")
         if page:
-            name, desc = WEBAPP_PAGES.get(page, (page, ""))
+            name, _desc = WEBAPP_PAGES.get(page, (page, ""))
             _append_message(session, "assistant", f"已打开「{name}」页面。", data={"page": page, "auto_open": True})
         else:
             _append_message(session, "assistant", "没有识别到要打开的页面。", data={"page": "agent"})
@@ -1011,7 +1015,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
         tool_name=tool_result.tool_name,
         category=intent.tool.category if intent.tool else "",
         entities=tool_result.entities,
-        result_count=len(tool_result.entities.get(list(tool_result.entities.keys())[0], [])) if tool_result.entities else 0,
+        result_count=len(tool_result.entities.get(next(iter(tool_result.entities.keys())), [])) if tool_result.entities else 0,
         result_summary=tool_result.formatted_text[:200] if tool_result.formatted_text else "",
     )
 
@@ -1024,7 +1028,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     return success_response({"session": _session_payload(session)}, "Agent updated")
 
 
-def _format_params(params: Dict[str, Any]) -> str:
+def _format_params(params: dict[str, Any]) -> str:
     """格式化参数为可读文本。"""
     if not params:
         return "无"

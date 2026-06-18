@@ -6,14 +6,14 @@
 
 import threading
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Any
 
 
 class DeviceLockManager:
     """设备锁定管理器"""
 
     def __init__(self):
-        self.locks: Dict[str, Dict[str, Any]] = {}  # {device_id: lock_info}
+        self.locks: dict[str, dict[str, Any]] = {}  # {device_id: lock_info}
         self.lock = threading.Lock()
 
     def lock_device(
@@ -21,7 +21,7 @@ class DeviceLockManager:
         device_id: str,
         client_id: str,
         username: str = 'unknown'
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """
         锁定设备
 
@@ -50,7 +50,7 @@ class DeviceLockManager:
 
             return True, f"设备 {device_id} 锁定成功"
 
-    def unlock_device(self, device_id: str, client_id: str) -> tuple[bool, Optional[str]]:
+    def unlock_device(self, device_id: str, client_id: str) -> tuple[bool, str | None]:
         """
         解锁设备
 
@@ -69,7 +69,7 @@ class DeviceLockManager:
             del self.locks[device_id]
             return True, f"设备 {device_id} 解锁成功"
 
-    def get_lock_status(self, device_id: str) -> Optional[Dict[str, Any]]:
+    def get_lock_status(self, device_id: str) -> dict[str, Any] | None:
         """获取设备锁定状态"""
         with self.lock:
             if device_id not in self.locks:
@@ -92,7 +92,7 @@ class DeviceLockManager:
                 'locked_at': lock_info['timestamp'],
             }
 
-    def get_all_locks(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_locks(self) -> dict[str, dict[str, Any]]:
         """获取所有设备锁定状态"""
         with self.lock:
             # 清理过期锁定
