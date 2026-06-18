@@ -25,14 +25,14 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from core.config import config_manager
 from core.ssh import ssh_manager
-from core.devices import (
+from features.devices.support import (
     get_or_create_user_state,
     update_user_state_field,
     release_device_locks,
     broadcast_device_lock_update,
-    safe_websocket_send,
     ssh_connection_failed_response,
 )
+from core.notifications import safe_websocket_send
 from core.error_handling import handle_api_errors
 from core.api_help import generate_help_or_continue
 from core.test_suite_utils import (
@@ -76,7 +76,7 @@ from core.settings import (
     MAX_LOG_ENTRIES,
     PROJECT_ROOT,
 )
-from modules.device_lock_manager import device_lock_manager
+from features.devices.locks import device_lock_manager
 from modules.test_logs_manager import test_logs_manager
 from features.reports.repository import test_report_db
 from core.enums import LogLevel
@@ -1910,7 +1910,7 @@ async def get_status(
         response = {"running": user_state.get("running", False), "devices": user_state.get("devices", [])}
 
         try:
-            from core.usb_monitor import get_usb_monitor
+            from features.devices.monitor import get_usb_monitor
             usb_monitor = get_usb_monitor()
             if usb_monitor:
                 response["usb_monitor"] = {"mode": usb_monitor.mode, "running": usb_monitor.is_running, "pyudev_available": usb_monitor.pyudev_available}

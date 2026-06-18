@@ -12,16 +12,21 @@ import inspect
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
 from core.agent_tools import AgentTool, registry
 from core.config import config_manager
-from core.devices import device_manager, get_or_create_user_state
+from features.devices.locks import device_lock_manager
+from features.devices.manager import device_manager
+from features.devices.support import get_or_create_user_state
 from features.redmine.repository import (
-    find_user_mapping, display_names_from_mapping, load_redmine_user_map,
-    _name_keys, _norm_name,
+    _name_keys,
+    _norm_name,
+    display_names_from_mapping,
+    find_user_mapping,
+    load_redmine_user_map,
 )
-from modules.device_lock_manager import device_lock_manager
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +85,7 @@ _MODEL_BY_TOOL = None  # lazily initialized to avoid circular imports
 
 # Cache of inspect.signature(func) — a function's signature never changes, so the
 # repeated signature introspection on every tool call (now ~40+ generic tools) is pure waste.
-_SIGNATURE_CACHE: Dict[Any, inspect.Signature] = {}
+_SIGNATURE_CACHE: dict[Any, inspect.Signature] = {}
 
 
 def _cached_signature(func: Any) -> inspect.Signature:
@@ -91,7 +96,7 @@ def _cached_signature(func: Any) -> inspect.Signature:
     return sig
 
 
-def _get_model_by_tool() -> Dict[str, type]:
+def _get_model_by_tool() -> dict[str, type]:
     """Lazy-initialised mapping of tool names to Pydantic request models."""
     global _MODEL_BY_TOOL
     if _MODEL_BY_TOOL is None:
@@ -150,13 +155,13 @@ class ToolResult:
     tool_name: str
     data: Any = None
     formatted_text: str = ""
-    quick_actions: List[Dict[str, Any]] = field(default_factory=list)
+    quick_actions: list[dict[str, Any]] = field(default_factory=list)
     page: str = ""
     kind: str = "text"  # text / table / status / file / code
-    entities: Dict[str, List[str]] = field(default_factory=dict)
+    entities: dict[str, list[str]] = field(default_factory=dict)
     error: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "success": self.success,
             "tool_name": self.tool_name,
@@ -208,10 +213,10 @@ class ActionExecutor:
 
     async def execute(
         self,
-        session: Dict[str, Any],
+        session: dict[str, Any],
         request: Any,
         tool_name: str,
-        params: Dict[str, Any],
+        params: dict[str, Any],
     ) -> ToolResult:
         """执行工具调用。"""
         tool = registry.get(tool_name)
@@ -305,7 +310,7 @@ class ActionExecutor:
         prefix = f"匹配「{query}」的设备" if query and query not in {"available", "locked"} else "当前设备"
         text = (
             f"{prefix} {len(details)} 台，空闲 {len(unlocked)} 台，占用 {len(locked)} 台。\n"
-            + ("\n".join(f"- {l}" for l in lines) if lines else "- 未找到匹配设备")
+            + ("\n".join(f"- {line}" for line in lines) if lines else "- 未找到匹配设备")
         )
 
         return ToolResult(
@@ -318,15 +323,19 @@ class ActionExecutor:
             ],
         )
 
-    async def _load_device_summaries(self) -> List[Dict[str, Any]]:
+    async def _load_device_summaries(self) -> list[dict[str, Any]]:
         """Load device summaries, preferring management payload when available."""
         try:
-            from routers.devices import _build_devices_management_payload, _build_management_props_command, _parse_management_device_props
             from core.ssh import ssh_manager
+            from features.devices.api import (
+                _build_devices_management_payload,
+                _build_management_props_command,
+                _parse_management_device_props,
+            )
 
             config = config_manager.load_config()
             device_ids = await asyncio.to_thread(device_manager.get_connected_devices, True)
-            device_data: Dict[str, Dict[str, str]] = {}
+            device_data: dict[str, dict[str, str]] = {}
             ssh = ssh_manager.get_connection(config)
             if ssh and device_ids:
                 try:
@@ -359,8 +368,8 @@ class ActionExecutor:
 
     async def _connect_wifi(self, session, request, params) -> ToolResult:
         """连接设备到 WiFi。未指定设备时默认选择一台空闲设备。"""
-        from core.schemas import WifiConnectRequest
-        from routers.devices import connect_wifi
+        from features.devices.api import connect_wifi
+        from features.devices.models import WifiConnectRequest
 
         devices = list(params.get("devices") or [])
         if not devices:
@@ -481,7 +490,7 @@ class ActionExecutor:
             f"测试状态：{'🔴 运行中' if running else '⚪ 未运行'}\n"
             f"占用设备：{', '.join(devices) or '无'}\n"
             f"日志条数：{len(logs)}\n"
-            + (f"\n最近日志：\n" + "\n".join(f"- {l}" for l in tail) if tail else "")
+            + ("\n最近日志：\n" + "\n".join(f"- {line}" for line in tail) if tail else "")
         )
         return ToolResult(
             success=True, tool_name="test_status",
@@ -614,7 +623,7 @@ class ActionExecutor:
 
     async def _query_usbip_status(self, session, request, params) -> ToolResult:
         """查询 USB/IP 状态。"""
-        result, payload = await self._fetch_router_json("routers.integrations", "get_usbip_status")
+        result, payload = await self._fetch_router_json("features.devices.integrations_api", "get_usbip_status")
         if result is not None:
             return result
         return ToolResult(
@@ -860,7 +869,7 @@ class ActionExecutor:
 
     async def _query_redmine_workload_stats(self, session, request, params) -> ToolResult:
         """统计一个或多个人员的 Redmine 工作量。"""
-        from features.redmine.api import redmine_service, _resolve_owner_names
+        from features.redmine.api import _resolve_owner_names, redmine_service
 
         raw_names = params.get("names") or []
         if isinstance(raw_names, str):
@@ -960,7 +969,7 @@ class ActionExecutor:
 
     async def _resolve_user_stats(
         self, agent: Any, db: Any, requested_name: str,
-        resolved: Dict[str, List[str]], user_map: List[Dict], stale_days: int,
+        resolved: dict[str, list[str]], user_map: list[dict], stale_days: int,
         window_days: int = 0,
     ) -> tuple:
         """Resolve a single user's Redmine stats: name matching → live counts → workload.
@@ -998,7 +1007,7 @@ class ActionExecutor:
             stats.update(live_counts)
         return matched_names, stats
 
-    async def _count_redmine_user_for_stats(self, agent: Any, user: Dict[str, Any]) -> Dict[str, int]:
+    async def _count_redmine_user_for_stats(self, agent: Any, user: dict[str, Any]) -> dict[str, int]:
         client = agent._make_client()
         try:
             data = await client.count_issues_by_assignee(int(user["id"]))
@@ -1008,7 +1017,7 @@ class ActionExecutor:
             logger.info("[Agent] Redmine user count failed for %s: %s", user.get("id"), exc)
             return {}
 
-    async def _sync_redmine_user_for_stats(self, agent: Any, requested_name: str) -> List[str]:
+    async def _sync_redmine_user_for_stats(self, agent: Any, requested_name: str) -> list[str]:
         """Try to find and sync a Redmine user by name. Returns display names on success."""
         client = agent._make_client()
         mapped_user = find_user_mapping(requested_name)
@@ -1047,14 +1056,14 @@ class ActionExecutor:
 
         return []
 
-    async def _sync_redmine_user_issues(self, agent: Any, client: Any, user: Dict[str, Any]) -> None:
+    async def _sync_redmine_user_issues(self, agent: Any, client: Any, user: dict[str, Any]) -> None:
         from features.redmine.agent import RESOLVED_STATUSES
 
         issues = await client.fetch_issues_by_assignee(int(user["id"]), status_id="*", limit=2000)
         display_names = display_names_from_mapping(user)
         detail_refreshed = 0
         for issue_stub in issues:
-            issue_id = int(getattr(issue_stub, "id"))
+            issue_id = int(issue_stub.id)
             existing = agent.db.get_issue(issue_id)
             payload = agent._stub_to_dict(issue_stub, f"agent-user-{user['id']}")
             status_name = payload.get("status_name") or ""
@@ -1078,7 +1087,7 @@ class ActionExecutor:
             agent.db.upsert_issue(payload)
 
     @staticmethod
-    def _format_redmine_issue_lines(label: str, issues: List[Dict[str, Any]]) -> str:
+    def _format_redmine_issue_lines(label: str, issues: list[dict[str, Any]]) -> str:
         if not issues:
             return f"- {label}: 无"
         parts = []
@@ -1094,7 +1103,7 @@ class ActionExecutor:
     # ==================== Router Function Caller ====================
 
     async def _call_router_function(
-        self, tool: AgentTool, session: Any, request: Any, params: Dict[str, Any]
+        self, tool: AgentTool, session: Any, request: Any, params: dict[str, Any]
     ) -> ToolResult:
         """通过 executor_ref 调用 router 函数。"""
         if tool.name in _UNSUPPORTED_DIRECT_TOOLS:
@@ -1147,7 +1156,7 @@ class ActionExecutor:
                 page=_TOOL_PAGES.get(tool.category, ""),
             )
 
-    def _build_call_kwargs(self, func: Any, tool: AgentTool, request: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_call_kwargs(self, func: Any, tool: AgentTool, request: Any, params: dict[str, Any]) -> dict[str, Any]:
         from routers.agent import AgentRequestShim
 
         model_by_tool = _get_model_by_tool()
@@ -1155,7 +1164,7 @@ class ActionExecutor:
         query_params = self._query_params_for_tool(tool, params)
         shim = AgentRequestShim(request, query_params=query_params) if request else None
         sig = _cached_signature(func)
-        kwargs: Dict[str, Any] = {}
+        kwargs: dict[str, Any] = {}
 
         for name in sig.parameters:
             if name == "request":
@@ -1178,7 +1187,7 @@ class ActionExecutor:
         return kwargs
 
     @staticmethod
-    def _body_params_for_tool(tool: AgentTool, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _body_params_for_tool(tool: AgentTool, params: dict[str, Any]) -> dict[str, Any]:
         body = dict(params or {})
         if tool.name == "devices_shell" and "serial_no" not in body:
             devices = body.get("devices") or []
@@ -1191,7 +1200,7 @@ class ActionExecutor:
         return body
 
     @staticmethod
-    def _query_params_for_tool(tool: AgentTool, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _query_params_for_tool(tool: AgentTool, params: dict[str, Any]) -> dict[str, Any]:
         query = dict(params or {})
         if tool.name == "reports_delete" and "timestamp" not in query:
             query["timestamp"] = query.get("report_timestamp", "")
@@ -1202,7 +1211,7 @@ class ActionExecutor:
 
 # ==================== Helpers ====================
 
-def _json_body(response) -> Dict[str, Any]:
+def _json_body(response) -> dict[str, Any]:
     """Extract JSON body from a FastAPI JSONResponse or similar object."""
     if isinstance(response, dict):
         return response
@@ -1232,7 +1241,7 @@ def _json_body(response) -> Dict[str, Any]:
     return {"success": False, "error": f"Invalid JSON response: {type(response).__name__}"}
 
 
-def _format_payload(tool: AgentTool, payload: Dict[str, Any]) -> str:
+def _format_payload(tool: AgentTool, payload: dict[str, Any]) -> str:
     if payload.get("error"):
         return str(payload["error"])
     if tool.name == "devices_info":
@@ -1265,7 +1274,7 @@ def _format_payload(tool: AgentTool, payload: Dict[str, Any]) -> str:
     return f"{tool.display_name}已完成。"
 
 
-def _format_device_info_payload(payload: Dict[str, Any]) -> str:
+def _format_device_info_payload(payload: dict[str, Any]) -> str:
     data = payload.get("data") or payload
     results = data.get("results") if isinstance(data, dict) else None
     if not results and isinstance(data, dict):
@@ -1305,10 +1314,10 @@ def _format_device_info_payload(payload: Dict[str, Any]) -> str:
         device_id = item.get("device") or item.get("device_id") or item.get("serial_no") or "Unknown"
         props = item.get("properties") or {}
         lines = [f"设备 {device_id} 详情："]
-        for field in preferred_fields:
-            value = props.get(field)
+        for field_name in preferred_fields:
+            value = props.get(field_name)
             if value not in (None, ""):
-                lines.append(f"- {field}: {value}")
+                lines.append(f"- {field_name}: {value}")
         extra_fields = [
             (key, value)
             for key, value in props.items()

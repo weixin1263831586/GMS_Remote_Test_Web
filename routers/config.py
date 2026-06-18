@@ -15,7 +15,7 @@ from core.clients import (
     hide_sensitive_info,
 )
 from core.config import config_manager
-from core.devices import get_or_create_user_state
+from features.devices.support import get_or_create_user_state
 from core.test_suite_utils import get_effective_local_server
 
 logger = logging.getLogger(__name__)

@@ -11,12 +11,13 @@ import logging
 import re
 import shlex
 import time
-from typing import Dict, Any, List, Optional
+from typing import Any
 
-from .ssh import ssh_manager
-from .config import config_manager
-from .common_utils import CommonUtils
-from .device_utils import DeviceUtils
+from .usb import (
+    parse_usbipd_android_busids,
+)
+from .utils import DeviceUtils
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,13 @@ USBIPD_INSTALL_CMD = 'winget install dorssel.usbipd-win --source winget'
 USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行PowerShell执行：
 {install_cmd}
 验证安装：usbipd --version'''
+
+
+def _parse_host_address(host: str) -> tuple[str | None, str]:
+    if '@' in host:
+        username, hostname = host.split('@', 1)
+        return username, hostname
+    return None, host
 
 
 def split_host_port(hostname: str, default_port: int = 22) -> tuple[str, int]:
@@ -39,22 +47,48 @@ def split_host_port(hostname: str, default_port: int = 22) -> tuple[str, int]:
     return hostname, default_port
 
 
-def find_device_host_password(device_host: str, config: Optional[Dict[str, Any]] = None) -> Optional[str]:
+def find_device_host_password(device_host: str, config: dict[str, Any] | None = None) -> str | None:
     """Compatibility wrapper for callers that import the USB/IP helper directly."""
-    return config_manager.find_device_host_password(device_host, config)
+    if config is not None:
+        username, hostname = _parse_host_address(device_host)
+        for credential in config.get('client_ssh_credentials', []):
+            credential_host = str(
+                credential.get('device_host') or ''
+            ).strip()
+            credential_username = str(
+                credential.get('username') or ''
+            ).strip()
+            credential_hostname = str(
+                credential.get('host')
+                or credential.get('hostname')
+                or ''
+            ).strip()
+            if credential_host == device_host or (
+                credential_username == username
+                and credential_hostname == hostname
+            ):
+                return credential.get('password')
+        for credential in config.get('client_ssh_credentials', []):
+            if credential.get('username') == username:
+                return credential.get('password')
+        return None
+    return usbip_manager.config_manager.find_device_host_password(
+        device_host,
+        config,
+    )
 
 
-def detach_ubuntu_usbip_ports(ssh, remote_host: Optional[str] = '127.0.0.1', detach_all: bool = False) -> List[str]:
+def detach_ubuntu_usbip_ports(ssh, remote_host: str | None = '127.0.0.1', detach_all: bool = False) -> list[str]:
     """Detach Ubuntu usbip ports that point to a remote USB/IP host."""
-    detached: List[str] = []
+    detached: list[str] = []
     stdout, stderr, code = usbip_manager.ssh_manager.execute_command(ssh, 'usbip port', timeout=10)
     if code != 0:
         logger.info(f"[USB/IP] usbip port returned {code}: {stderr or stdout}")
         return detached
 
-    current_port: Optional[str] = None
-    current_block: List[str] = []
-    for line in (stdout or '').splitlines() + ['Port 999999:']:
+    current_port: str | None = None
+    current_block: list[str] = []
+    for line in [*(stdout or '').splitlines(), 'Port 999999:']:
         port_match = re.match(r'\s*Port\s+(\d+):', line)
         if port_match:
             block_text = '\n'.join(current_block)
@@ -77,7 +111,7 @@ def detach_ubuntu_usbip_ports(ssh, remote_host: Optional[str] = '127.0.0.1', det
     return detached
 
 
-def wait_for_adb_serial_ready(ssh, serial_no: str, timeout: int = 30) -> Dict[str, Any]:
+def wait_for_adb_serial_ready(ssh, serial_no: str, timeout: int = 30) -> dict[str, Any]:
     """Wait until a specific ADB serial is in device state and shell responds."""
     quoted_serial = shlex.quote(serial_no)
     deadline = time.time() + timeout
@@ -111,71 +145,6 @@ def wait_for_adb_serial_ready(ssh, serial_no: str, timeout: int = 30) -> Dict[st
         'devices': (devices_out or devices_err or '').strip(),
     }
 
-# Shared USB/IP parsing constants
-DEFAULT_ANDROID_USBIP_VID_PIDS = ('2207:0006',)
-ANDROID_USBIP_MARKERS = ('android', 'adb', 'rk356', 'rockchip')
-USBIPD_BUSID_RE = re.compile(r'^\d+(?:-\d+)+$')
-
-
-def _strip_ansi(text: str) -> str:
-    """Remove ANSI escape sequences (VT100 control codes) from Windows PTY output."""
-    from .common_utils import strip_ansi_codes
-    return strip_ansi_codes(text or '')
-
-
-def _iter_connected_lines(output: str):
-    """Yield stripped lines from the 'Connected:' section of usbipd list output."""
-    # Strip ANSI escape sequences from PTY output (Windows Terminal VT codes)
-    output = _strip_ansi(output)
-    in_connected = False
-    for line in (output or '').splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith('Connected:'):
-            in_connected = True
-            continue
-        if stripped.startswith('Persisted:'):
-            break
-        if not in_connected:
-            continue
-        yield stripped
-
-
-def parse_usbipd_android_busids(output: str, vid_pid: Optional[str] = None) -> List[str]:
-    """从 usbipd list 输出中提取 Android 设备 BUSID。"""
-    vid_pids = {pid.lower() for pid in DEFAULT_ANDROID_USBIP_VID_PIDS}
-    if vid_pid:
-        vid_pids.add(vid_pid.lower())
-
-    busids: List[str] = []
-    for stripped in _iter_connected_lines(output):
-        lowered = stripped.lower()
-        if any(pid in lowered for pid in vid_pids) or any(marker in lowered for marker in ANDROID_USBIP_MARKERS):
-            parts = stripped.split()
-            if parts and USBIPD_BUSID_RE.match(parts[0]):
-                busids.append(parts[0])
-    return busids
-
-
-def parse_usbipd_busid_statuses(output: str) -> Dict[str, str]:
-    """Parse usbipd list Connected section into BUSID -> status."""
-    statuses: Dict[str, str] = {}
-    for stripped in _iter_connected_lines(output):
-        parts = stripped.split()
-        if parts and USBIPD_BUSID_RE.match(parts[0]):
-            lowered = stripped.lower()
-            if 'not shared' in lowered:
-                statuses[parts[0]] = 'not_shared'
-            elif 'attached' in lowered:
-                statuses[parts[0]] = 'attached'
-            elif 'shared' in lowered:
-                statuses[parts[0]] = 'shared'
-            else:
-                statuses[parts[0]] = 'unknown'
-    return statuses
-
-
 class USBIPManager:
     """
     USB/IP管理器
@@ -186,19 +155,19 @@ class USBIPManager:
     - 设备绑定/解绑/attach
     """
 
-    def __init__(self):
+    def __init__(self, ssh_manager=None, config_manager=None):
         """初始化USB/IP管理器"""
         self.ssh_manager = ssh_manager
         self.config_manager = config_manager
-        self.active_connections: Dict[str, Any] = {}  # {client_id: connection_info}
-        self.device_sources: Dict[str, Dict[str, Any]] = {}  # {device_id: source_info}
+        self.active_connections: dict[str, Any] = {}  # {client_id: connection_info}
+        self.device_sources: dict[str, dict[str, Any]] = {}  # {device_id: source_info}
 
     def start_usbip(
         self,
         device_host: str,
-        device_password: str = None,
-        usbip_attach_host: str = None
-    ) -> Dict[str, Any]:
+        device_password: str | None = None,
+        usbip_attach_host: str | None = None
+    ) -> dict[str, Any]:
         """
         启动USB/IP转发
 
@@ -236,7 +205,7 @@ class USBIPManager:
                 }
 
             # 连接Windows主机
-            username, hostname = CommonUtils.parse_host_address(device_host)
+            username, hostname = _parse_host_address(device_host)
             ssh_hostname, ssh_port = split_host_port(hostname)
             usbip_attach_host = usbip_attach_host or config.get('usbip_attach_host') or ssh_hostname
             win_ssh = self._create_windows_ssh(ssh_hostname, username, device_password, ssh_port)
@@ -252,7 +221,7 @@ class USBIPManager:
                     return {'success': False, 'error': 'USB/IP仅支持Windows主机'}
 
                 # 检查usbipd是否已安装
-                installed, version = self.check_usbipd_installed(win_ssh)
+                installed, _version = self.check_usbipd_installed(win_ssh)
                 if not installed:
                     win_ssh.close()
                     return {
@@ -332,7 +301,7 @@ class USBIPManager:
             logger.error(f"Error in start_usbip: {e}")
             return {'success': False, 'error': str(e)}
 
-    def stop_usbip(self, client_id: str = None) -> Dict[str, Any]:
+    def stop_usbip(self, client_id: str | None = None) -> dict[str, Any]:
         """
         停止USB/IP转发
 
@@ -356,7 +325,7 @@ class USBIPManager:
             logger.error(f"Error in stop_usbip: {e}")
             return {'success': True, 'message': '✅ USB/IP连接已断开'}
 
-    def get_usbip_status(self, client_id: str = None) -> Dict[str, Any]:
+    def get_usbip_status(self, client_id: str | None = None) -> dict[str, Any]:
         """
         获取USB/IP状态
 
@@ -404,16 +373,16 @@ class USBIPManager:
     def _is_windows_host(self, ssh) -> bool:
         """检查是否为Windows主机"""
         try:
-            stdout, stderr, code = self.ssh_manager.execute_command(ssh, 'ver 2>&1')
+            stdout, _stderr, _code = self.ssh_manager.execute_command(ssh, 'ver 2>&1')
             return 'microsoft' in stdout.lower() or 'windows' in stdout.lower()
         except Exception:
             return False
 
-    def _find_android_devices(self, ssh, config: Dict[str, Any]) -> List[str]:
+    def _find_android_devices(self, ssh, config: dict[str, Any]) -> list[str]:
         """查找Android设备的BUSID"""
         try:
             # 使用 get_pty=True 获取完整的设备列表（需要交互式会话环境）
-            stdout, stderr, code = self.ssh_manager.execute_command(
+            stdout, _stderr, _code = self.ssh_manager.execute_command(
                 ssh,
                 'usbipd list',
                 timeout=15,
@@ -430,7 +399,7 @@ class USBIPManager:
             logger.error(f"Error finding Android devices: {e}")
             return []
 
-    def _bind_devices(self, ssh, busids: List[str]) -> List[str]:
+    def _bind_devices(self, ssh, busids: list[str]) -> list[str]:
         """绑定设备到USB/IP"""
         bound = []
         for busid in busids:
@@ -473,7 +442,7 @@ class USBIPManager:
         self,
         ssh,
         device_ip: str,
-        busids: List[str]
+        busids: list[str]
     ) -> tuple[list[str], list[str]]:
         """在Ubuntu上attach设备，返回已attach的BUSID和新设备ID列表"""
         try:
@@ -551,7 +520,7 @@ class USBIPManager:
             (是否安装, 版本信息)
         """
         try:
-            stdout, stderr, code = self.ssh_manager.execute_command(ssh, 'usbipd --version')
+            stdout, _stderr, code = self.ssh_manager.execute_command(ssh, 'usbipd --version')
             if code == 0 and stdout.strip():
                 return True, stdout.strip()
             return False, ''
@@ -559,7 +528,7 @@ class USBIPManager:
             logger.error(f"Error checking usbipd: {e}")
             return False, ''
 
-    def install_usbipd(self, ssh, config: Dict[str, Any]) -> Dict[str, Any]:
+    def install_usbipd(self, ssh, config: dict[str, Any]) -> dict[str, Any]:
         """
         自动安装 usbipd 到 Windows 主机
 

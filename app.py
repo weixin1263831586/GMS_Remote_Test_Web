@@ -12,39 +12,78 @@ import os
 import queue
 import sys
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import JSONResponse
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from core.api_help import generate_help_or_continue
+from core.clients import (
+    get_client_id_from_request,
+    get_client_ip,
+    probe_windows_usbipd,
+    resolve_tailscale_device_host,
+)
+from core.config import config_manager
+from core.notifications import safe_websocket_send, store_notification
+from core.security_audit import classify_request_source
+from core.security_audit_utils import should_audit_request, summarize_audit_request, summarize_audit_response
 from core.settings import (
     CLEANUP_INTERVAL_SECONDS,
+    DEVICE_CACHE_TTL,
     FORWARDED_ALLOW_IPS,
     GMS_ENV,
+    PROJECT_ROOT,
     PROXY_HEADERS_ENABLED,
     SERVER_HOST,
     SERVER_PORT,
     _parse_csv_env,
 )
-from core.security_audit import classify_request_source
-from core.security_audit_utils import should_audit_request, summarize_audit_request, summarize_audit_response
+from core.ssh import ssh_manager
 from core.state import global_state
-from core.usb_monitor import init_usb_monitor, start_usb_monitor, stop_usb_monitor
-from features.redmine.scheduler import start_redmine_agent_scheduler, stop_redmine_agent_scheduler
+from features.devices.dependencies import configure_device_dependencies
+from features.devices.monitor import (
+    init_usb_monitor,
+    invalidate_device_cache,
+    start_usb_monitor,
+    stop_usb_monitor,
+)
+from features.devices.network import run_local_shell_command
+from features.devices.reconnect import stop_usbip_reconnect_tasks
 from features.redmine.api import redmine_service
-
+from features.redmine.scheduler import start_redmine_agent_scheduler, stop_redmine_agent_scheduler
+from modules.client_manager import client_manager
 from routers import ALL_ROUTERS
 from routers.system import init_templates
+
+
+configure_device_dependencies(
+    ssh_manager=ssh_manager,
+    config_manager=config_manager,
+    global_state=global_state,
+    store_notification=store_notification,
+    generate_help_or_continue=generate_help_or_continue,
+    get_client_id_from_request=get_client_id_from_request,
+    probe_windows_usbipd=probe_windows_usbipd,
+    resolve_tailscale_device_host=resolve_tailscale_device_host,
+    safe_websocket_send=safe_websocket_send,
+    get_client_ip=get_client_ip,
+    client_manager=client_manager,
+    run_local_shell_command=run_local_shell_command,
+    project_root=PROJECT_ROOT,
+    device_cache_ttl=DEVICE_CACHE_TTL,
+)
 
 # Logging
 logging.basicConfig(
@@ -89,12 +128,14 @@ def _start_usb_monitor(app):
     try:
         app.state.usb_event_queue = queue.Queue()
 
-        from core.devices import device_manager
+        from features.devices.manager import device_manager
 
         try:
             previous_devices = set(device_manager.get_connected_devices())
             logger.info(f"[USB Monitor] Initialized with devices: {previous_devices}")
-            from core.usbip_reconnect import schedule_usbip_reconnect_for_missing_devices
+            from features.devices.reconnect import (
+                schedule_usbip_reconnect_for_missing_devices,
+            )
             scheduled = schedule_usbip_reconnect_for_missing_devices(
                 previous_devices,
                 reason="startup persisted USB/IP source check",
@@ -114,7 +155,9 @@ def _start_usb_monitor(app):
 
             if disconnected:
                 try:
-                    from core.usbip_reconnect import schedule_usbip_reconnect_for_removed_devices
+                    from features.devices.reconnect import (
+                        schedule_usbip_reconnect_for_removed_devices,
+                    )
                     scheduled = schedule_usbip_reconnect_for_removed_devices(
                         disconnected,
                         reason="USB monitor detected disconnect",
@@ -124,8 +167,7 @@ def _start_usb_monitor(app):
                 except Exception as e:
                     logger.error("[USB Monitor] Failed to schedule USB/IP reconnect: %s", e)
 
-            with global_state.device_cache_lock:
-                global_state.device_cache = {'devices': [], 'timestamp': 0}
+            invalidate_device_cache(global_state)
             app.state.usb_event_queue.put({
                 'type': 'devices_changed',
                 'devices': devices,
@@ -174,17 +216,13 @@ async def _shutdown(cleanup_task, usb_dispatch_task, redmine_agent_scheduler_tas
     """Graceful shutdown of all background tasks"""
     logger.info("Application shutdown")
     cleanup_task.cancel()
-    try:
+    with suppress(asyncio.CancelledError):
         await cleanup_task
-    except asyncio.CancelledError:
-        pass
 
     if usb_dispatch_task:
         usb_dispatch_task.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await usb_dispatch_task
-        except asyncio.CancelledError:
-            pass
 
     if redmine_agent_scheduler_task:
         try:
@@ -193,6 +231,7 @@ async def _shutdown(cleanup_task, usb_dispatch_task, redmine_agent_scheduler_tas
             logger.error(f"Error stopping RedmineAgent scheduler: {e}")
 
     try:
+        stop_usbip_reconnect_tasks()
         stop_usb_monitor()
     except Exception as e:
         logger.error(f"Error stopping USB monitor: {e}")
@@ -243,7 +282,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 # Audit middleware
 @app.middleware("http")
 async def add_headers_middleware(request, call_next):
-    from core.clients import get_client_id_from_request, parse_client_id, get_client_ip
+    from core.clients import get_client_id_from_request, get_client_ip, parse_client_id
     from core.security_audit import security_audit_logger
     from core.security_audit_utils import can_audit_path, get_audit_operation
 
@@ -269,10 +308,8 @@ async def add_headers_middleware(request, call_next):
         status_code = response.status_code if response else 500
         final_audit = should_audit or (status_code >= 400 and can_audit_path(path))
         if final_audit and response:
-            try:
+            with suppress(Exception):
                 response, response_summary = await summarize_audit_response(response)
-            except Exception:
-                pass
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         if final_audit:
             try:
@@ -282,7 +319,7 @@ async def add_headers_middleware(request, call_next):
                 client_ip = get_client_ip(request)
                 username = 'unknown'
                 client_id = f'{username}@{client_ip}'
-            try:
+            with suppress(Exception):
                 security_audit_logger.log_event({
                     'action_type': 'api' if path.startswith('/api/') else 'page_visit',
                     'source': request_source,
@@ -300,8 +337,6 @@ async def add_headers_middleware(request, call_next):
                     'user_agent': request.headers.get('user-agent', '')[:300],
                     'error': error_text,
                 })
-            except Exception:
-                pass
 
     # Security headers
     response.headers["X-Content-Type-Options"] = "nosniff"

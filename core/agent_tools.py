@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 # ==================== Data Structures ====================
@@ -22,12 +22,12 @@ class AgentTool:
     description: str                # 中文描述
     api_path: str                   # "/api/devices/list"
     method: str                     # GET / POST / DELETE / WebSocket
-    params: List[Dict[str, Any]]    # 参数定义
-    keywords: List[str]             # 匹配关键词 (中英文)
+    params: list[dict[str, Any]]    # 参数定义
+    keywords: list[str]             # 匹配关键词 (中英文)
     is_readonly: bool               # True=查询类，无副作用
     is_dangerous: bool              # True=烧写/删除等破坏性操作
     requires_confirm: bool          # True=执行前需确认
-    executor_ref: str               # "routers.devices:function_name"
+    executor_ref: str               # "features.devices.api:function_name"
     response_type: str              # list / detail / status / file / stream
 
     @property
@@ -40,13 +40,13 @@ class ScoredTool:
     """带分数的工具匹配结果。"""
     tool: AgentTool
     score: float
-    matched_keywords: List[str]
+    matched_keywords: list[str]
 
 
 # ==================== Keyword Supplements ====================
 # api_docs_list 只有 description，这里按 category 补充高频关键词
 
-_CATEGORY_KEYWORDS: Dict[str, List[str]] = {
+_CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "device": ["设备", "device", "adb", "设备列表", "设备管理", "设备信息", "连接设备",
                "手机", "安卓设备", "device list", "device info"],
     "test": ["测试", "test", "跑测试", "启动测试", "运行测试", "CTS", "VTS", "GTS", "STS", "GSI",
@@ -77,7 +77,7 @@ _CATEGORY_KEYWORDS: Dict[str, List[str]] = {
 }
 
 # 按 API path 模式补充额外关键词
-_PATH_KEYWORDS: Dict[str, List[str]] = {
+_PATH_KEYWORDS: dict[str, list[str]] = {
     "/api/devices/bootloader": ["bootloader", "锁定", "解锁", "lock", "unlock"],
     "/api/devices/reboot": ["重启", "reboot", "重启设备"],
     "/api/devices/remount": ["remount", "挂载", "读写"],
@@ -131,8 +131,8 @@ _CONFIRM_PATHS = {
 }
 
 # category → routers 模块名映射（当两者不一致时需要）
-_CATEGORY_MODULE_MAP: Dict[str, str] = {
-    "device": "devices",      # category="device" → routers.devices
+_CATEGORY_MODULE_MAP: dict[str, str] = {
+    "device": "devices",      # category="device" → features.devices.api
     "test": "tests",          # category="test" → routers.tests
     "report": "reports",      # category="report" → features.reports.api
     "burn": "firmware",       # category="burn" → routers.firmware
@@ -163,7 +163,7 @@ _RESPONSE_TYPE_MAP = {
     "/api/files/list": "list",
 }
 
-_EXECUTOR_REF_OVERRIDES: Dict[str, str] = {
+_EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/system/health": "routers.system:health_check",
     "/api/config/read": "routers.config:get_config",
     "/api/config/update": "routers.config:update_config",
@@ -171,18 +171,18 @@ _EXECUTOR_REF_OVERRIDES: Dict[str, str] = {
     "/api/users/detect": "routers.users:detect_client",
     "/api/users/set-username": "routers.users:set_client_username",
     "/api/users/list": "routers.users:list_users",
-    "/api/devices/list": "routers.devices:get_connected_devices",
-    "/api/devices/management": "routers.devices:devices_management",
-    "/api/devices/user-locked": "routers.devices:list_user_locks",
-    "/api/devices/bootloader-lock": "routers.devices:lock_bootloader",
-    "/api/devices/bootloader-unlock": "routers.devices:unlock_bootloader",
-    "/api/devices/bootloader-status": "routers.devices:check_bootloader_status",
-    "/api/devices/info": "routers.devices:get_device_info",
-    "/api/devices/reboot": "routers.devices:reboot_devices",
-    "/api/devices/remount": "routers.devices:remount_devices",
-    "/api/devices/wifi": "routers.devices:connect_wifi",
-    "/api/devices/shell": "routers.devices:open_device_shell",
-    "/api/devices/scrcpy": "routers.devices:show_device_screens",
+    "/api/devices/list": "features.devices.api:get_connected_devices",
+    "/api/devices/management": "features.devices.api:devices_management",
+    "/api/devices/user-locked": "features.devices.api:list_user_locks",
+    "/api/devices/bootloader-lock": "features.devices.api:lock_bootloader",
+    "/api/devices/bootloader-unlock": "features.devices.api:unlock_bootloader",
+    "/api/devices/bootloader-status": "features.devices.api:check_bootloader_status",
+    "/api/devices/info": "features.devices.api:get_device_info",
+    "/api/devices/reboot": "features.devices.api:reboot_devices",
+    "/api/devices/remount": "features.devices.api:remount_devices",
+    "/api/devices/wifi": "features.devices.api:connect_wifi",
+    "/api/devices/shell": "features.devices.api:open_device_shell",
+    "/api/devices/scrcpy": "features.devices.api:show_device_screens",
     "/api/test/start": "routers.tests:start_test",
     "/api/test/stop": "routers.tests:stop_test",
     "/api/test/clean": "routers.tests:clean_test_logs",
@@ -204,12 +204,12 @@ _EXECUTOR_REF_OVERRIDES: Dict[str, str] = {
     "/api/vpn/status": "routers.integrations:get_vpn_status",
     "/api/vpn/connect": "routers.integrations:connect_vpn",
     "/api/vpn/disconnect": "routers.integrations:disconnect_vpn",
-    "/api/adb-forward/start": "routers.integrations:start_adb_forward",
-    "/api/adb-forward/stop": "routers.integrations:stop_adb_forward",
-    "/api/usbip/status": "routers.integrations:get_usbip_status",
-    "/api/usbip/connect": "routers.integrations:start_usbip",
-    "/api/usbip/disconnect": "routers.integrations:stop_usbip",
-    "/api/usbip/install": "routers.integrations:install_usbipd",
+    "/api/adb-forward/start": "features.devices.integrations_api:start_adb_forward",
+    "/api/adb-forward/stop": "features.devices.integrations_api:stop_adb_forward",
+    "/api/usbip/status": "features.devices.integrations_api:get_usbip_status",
+    "/api/usbip/connect": "features.devices.integrations_api:start_usbip",
+    "/api/usbip/disconnect": "features.devices.integrations_api:stop_usbip",
+    "/api/usbip/install": "features.devices.integrations_api:install_usbipd",
     "/api/files/progress": "routers.assets:get_upload_progress",
     "/api/files/list": "routers.assets:list_files",
     "/api/opengrok/search": "routers.assets:search_opengrok",
@@ -292,10 +292,10 @@ class ToolRegistry:
     """Agent 工具注册表。"""
 
     def __init__(self) -> None:
-        self._tools: Dict[str, AgentTool] = {}
-        self._keyword_index: Dict[str, List[str]] = {}  # keyword -> [tool_name, ...]
-        self._category_index: Dict[str, List[str]] = {}  # category -> [tool_name, ...]
-        self._path_index: Dict[str, str] = {}            # api_path -> tool_name
+        self._tools: dict[str, AgentTool] = {}
+        self._keyword_index: dict[str, list[str]] = {}  # keyword -> [tool_name, ...]
+        self._category_index: dict[str, list[str]] = {}  # category -> [tool_name, ...]
+        self._path_index: dict[str, str] = {}            # api_path -> tool_name
 
     # ---------- Registration ----------
 
@@ -307,7 +307,7 @@ class ToolRegistry:
             kw_lower = kw.lower()
             self._keyword_index.setdefault(kw_lower, []).append(tool.name)
 
-    def register_from_api_docs(self, api_docs: List[Dict[str, Any]]) -> None:
+    def register_from_api_docs(self, api_docs: list[dict[str, Any]]) -> None:
         """从 API_DOCS_LIST 批量注册工具。"""
         for entry in api_docs:
             path = entry.get("path", "")
@@ -377,28 +377,28 @@ class ToolRegistry:
 
     # ---------- Lookup ----------
 
-    def get(self, name: str) -> Optional[AgentTool]:
+    def get(self, name: str) -> AgentTool | None:
         return self._tools.get(name)
 
-    def get_by_path(self, api_path: str) -> Optional[AgentTool]:
+    def get_by_path(self, api_path: str) -> AgentTool | None:
         name = self._path_index.get(api_path)
         return self._tools.get(name) if name else None
 
-    def get_by_category(self, category: str) -> List[AgentTool]:
+    def get_by_category(self, category: str) -> list[AgentTool]:
         names = self._category_index.get(category, [])
         return [self._tools[n] for n in names if n in self._tools]
 
-    def get_all_categories(self) -> Dict[str, List[AgentTool]]:
+    def get_all_categories(self) -> dict[str, list[AgentTool]]:
         return {cat: self.get_by_category(cat) for cat in sorted(self._category_index)}
 
-    def get_all_tools(self) -> List[AgentTool]:
+    def get_all_tools(self) -> list[AgentTool]:
         return list(self._tools.values())
 
-    def find(self, text: str, top_k: int = 5, min_score: float = 0.1) -> List[ScoredTool]:
+    def find(self, text: str, top_k: int = 5, min_score: float = 0.1) -> list[ScoredTool]:
         """关键词匹配评分，返回按分数排序的工具列表。"""
         lowered = text.lower().strip()
-        scores: Dict[str, float] = {}
-        matched: Dict[str, List[str]] = {}
+        scores: dict[str, float] = {}
+        matched: dict[str, list[str]] = {}
 
         # 对每个关键词做匹配
         for keyword, tool_names in self._keyword_index.items():
@@ -414,7 +414,7 @@ class ToolRegistry:
 
         # 排序
         ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        results: List[ScoredTool] = []
+        results: list[ScoredTool] = []
         for tn, score in ranked[:top_k]:
             tool = self._tools.get(tn)
             if tool and score >= min_score:
@@ -443,7 +443,7 @@ class ToolRegistry:
         return name if name else ""
 
     @staticmethod
-    def _extract_desc_keywords(description: str) -> List[str]:
+    def _extract_desc_keywords(description: str) -> list[str]:
         """从 description 提取中文关键词（简单分词：按标点和括号分割）。"""
         # 去除括号内容
         clean = re.sub(r"[（(].*?[）)]", "", description)
@@ -481,7 +481,7 @@ def _build_registry() -> ToolRegistry:
 def _register_extra_tools(registry: ToolRegistry) -> None:
     """注册 API_DOCS_LIST 未覆盖但 Agent 需要的工具。"""
     # Helper: merge tool-specific keywords with category keywords
-    def _kw(category: str, *extra: str) -> List[str]:
+    def _kw(category: str, *extra: str) -> list[str]:
         kws = list(_CATEGORY_KEYWORDS.get(category, []))
         kws.extend(extra)
         return list(dict.fromkeys(kws))

@@ -8,10 +8,16 @@ USB设备监控模块 - 监听USB插拔事件并自动刷新设备列表
 import logging
 import threading
 import time
-from typing import Callable, Optional, Set, List
+from collections.abc import Callable
 from datetime import datetime
 
+
 logger = logging.getLogger(__name__)
+
+
+def invalidate_device_cache(global_state) -> None:
+    with global_state.device_cache_lock:
+        global_state.device_cache = {"devices": [], "timestamp": 0}
 
 
 class USBMonitor:
@@ -32,8 +38,8 @@ class USBMonitor:
 
     def __init__(
         self,
-        device_getter: Callable[[], List[str]],
-        on_devices_changed: Optional[Callable[[List[str]], None]] = None,
+        device_getter: Callable[[], list[str]],
+        on_devices_changed: Callable[[list[str]], None] | None = None,
         check_interval: float = 2.0,
         use_udev: bool = True,
         debounce_count: int = 2  # 需要连续检测到变化的次数
@@ -55,13 +61,13 @@ class USBMonitor:
         self.debounce_count = max(1, debounce_count)  # 至少为1
 
         self._running = False
-        self._thread: Optional[threading.Thread] = None
-        self._current_devices: Set[str] = set()
+        self._thread: threading.Thread | None = None
+        self._current_devices: set[str] = set()
 
         # 防抖相关
-        self._pending_changes: Optional[Set[str]] = None  # 待确认的变化
+        self._pending_changes: set[str] | None = None  # 待确认的变化
         self._debounce_counter = 0  # 防抖计数器
-        self._last_check_time: Optional[datetime] = None  # 上次检查时间
+        self._last_check_time: datetime | None = None  # 上次检查时间
 
         # 尝试导入pyudev
         self._pyudev_context = None
@@ -294,17 +300,17 @@ class USBMonitor:
 
 
 # 全局USB监控器实例
-_usb_monitor: Optional[USBMonitor] = None
+_usb_monitor: USBMonitor | None = None
 
 
-def get_usb_monitor() -> Optional[USBMonitor]:
+def get_usb_monitor() -> USBMonitor | None:
     """获取全局USB监控器实例"""
     return _usb_monitor
 
 
 def init_usb_monitor(
-    device_getter: Callable[[], List[str]],
-    on_devices_changed: Optional[Callable[[List[str]], None]] = None,
+    device_getter: Callable[[], list[str]],
+    on_devices_changed: Callable[[list[str]], None] | None = None,
     check_interval: float = 2.0,
     use_udev: bool = True
 ) -> USBMonitor:
