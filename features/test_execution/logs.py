@@ -4,11 +4,11 @@
 处理日志文件列表、下载、保存等功能
 """
 
-import zipfile
 import os
+import zipfile
 from datetime import datetime
-from typing import Dict, List, Optional, Any
 from pathlib import Path
+from typing import Any
 
 
 class TestLogsManager:
@@ -29,7 +29,7 @@ class TestLogsManager:
             web_app_dir / 'data' / 'logs'
         ]
 
-    def list_log_files(self) -> Dict[str, Any]:
+    def list_log_files(self) -> dict[str, Any]:
         """列出所有日志文件"""
         log_files = []
 
@@ -56,7 +56,7 @@ class TestLogsManager:
             'files': log_files[:100]
         }
 
-    def get_log_file(self, file_path: str, max_lines: int = 1000) -> Dict[str, Any]:
+    def get_log_file(self, file_path: str, max_lines: int = 1000) -> dict[str, Any]:
         """读取日志文件内容"""
         log_path = Path(file_path)
 
@@ -93,7 +93,7 @@ class TestLogsManager:
         self,
         log_content: str,
         client_id: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """保存当前日志"""
         try:
             save_dir = Path('/tmp/test-logs/saved')
@@ -119,9 +119,9 @@ class TestLogsManager:
 
     def download_logs(
         self,
-        file_paths: List[str],
-        output_path: Optional[str] = None
-    ) -> Dict[str, Any]:
+        file_paths: list[str],
+        output_path: str | None = None
+    ) -> dict[str, Any]:
         """打包下载日志文件"""
         if not file_paths:
             return {
@@ -153,7 +153,7 @@ class TestLogsManager:
                 'error': str(e)
             }
 
-    def clean_old_logs(self, days: int = 7) -> Dict[str, Any]:
+    def clean_old_logs(self, days: int = 7) -> dict[str, Any]:
         """清理旧日志"""
         cleaned = 0
         total_size = 0

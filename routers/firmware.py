@@ -22,7 +22,7 @@ from core.schemas import SNBurnRequest
 from core.settings import GSI_PROGRESS_INCREMENT, GSI_PROGRESS_MAX, GSI_PROGRESS_POLL_INTERVAL, PROJECT_ROOT
 from core.ssh import ssh_manager
 from core.state import global_state
-from core.test_suite_utils import get_default_suites_path
+from features.test_execution.suites import get_default_suites_path
 from features.devices.support import release_device_locks
 from workflows.firmware_device import lock_firmware_devices
 

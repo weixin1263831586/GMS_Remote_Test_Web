@@ -22,7 +22,7 @@ from starlette.websockets import WebSocketDisconnect
 from core.config import config_manager
 from core.ssh import ssh_manager
 from core.state import global_state
-from core.test_suite_utils import is_config_host_local
+from features.test_execution.suites import is_config_host_local
 from core.common_utils import CommonUtils
 from features.devices.locks import device_lock_manager
 
@@ -464,7 +464,7 @@ async def refresh_devices_websocket(client_id: str, websocket: WebSocket):
 
 async def handle_tradefed_list_results(client_id: str, websocket: WebSocket, data: dict):
     """处理 tradefed list results 命令"""
-    from core.tradefed import execute_tradefed_command, parse_tradefed_list_results
+    from features.test_execution.tradefed import execute_tradefed_command, parse_tradefed_list_results
 
     try:
         config = config_manager.load_config()

@@ -1,27 +1,33 @@
 """Tradefed 命令辅助函数 - 查找、解析、执行 tradefed 命令"""
 
+import contextlib
 import logging
 import os
 import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from core.config import config_manager
-from core.ssh import ssh_manager
-from core.common_utils import strip_ansi_codes
+from . import runtime
+
+
+ANSI_ESCAPE_PATTERN = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+
+def strip_ansi_codes(text: str) -> str:
+    return ANSI_ESCAPE_PATTERN.sub("", text or "")
 
 logger = logging.getLogger(__name__)
 
 
-def find_tradefed_binary(ssh, suite_path: str) -> Optional[str]:
+def find_tradefed_binary(ssh, suite_path: str) -> str | None:
     """在指定目录中查找 tradefed 二进制文件"""
     find_cmd = f"find '{suite_path}' -maxdepth 1 -type f -executable -name '*-tradefed' 2>/dev/null | head -1"
-    output, _, _ = ssh_manager.execute_command(ssh, find_cmd, timeout=10)
+    output, _, _ = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=10)
     result = output.strip()
     return result if result else None
 
 
-def parse_tradefed_list_results(output: str) -> List[Dict[str, Any]]:
+def parse_tradefed_list_results(output: str) -> list[dict[str, Any]]:
     """解析 tradefed list results 命令输出，支持 STS 和 VTS/CTS 两种格式"""
     cleaned_output = strip_ansi_codes(output)
 
@@ -89,10 +95,10 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
     性能优化：使用智能等待替代固定延迟，大幅减少查询时间
     """
     # 常量定义
-    config = config_manager.load_config()
+    config = runtime.config_manager.load_config()
     default_platform_tools = os.path.join(
         "/home",
-        config_manager.get_ubuntu_user(config),
+        runtime.config_manager.get_ubuntu_user(config),
         "Software",
         "platform-tools"
     )
@@ -143,10 +149,8 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
         shell = ssh.invoke_shell()
         shell.settimeout(3)
 
-        try:
+        with contextlib.suppress(Exception):
             shell.recv(1024)
-        except Exception:
-            pass
 
         shell.send(f"export PATH={platform_tools_path}:$PATH\n")
         wait_for_prompt(shell, [r'\$ ', r'\# ', '> '], timeout=2, poll_interval=0.05)
@@ -178,10 +182,8 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
             except Exception:
                 break
 
-        try:
+        with contextlib.suppress(Exception):
             shell.close()
-        except Exception:
-            pass
 
         return output, "", 0
 

@@ -8,26 +8,30 @@
 - 支持多种测试类型（CTS/GTS/VTS/STS）
 """
 
-import os
-import time
-import logging
-import shlex
 import asyncio
-from typing import Dict, Any, Optional, Callable
+import logging
+import os
+import shlex
+import time
+from collections.abc import Callable
 from datetime import datetime
+from typing import Any
+
 import paramiko
 
-from .ssh import ssh_manager
-from .config import config_manager, get_ubuntu_user
-from .common_utils import CommonUtils
-from .settings import PROJECT_ROOT
-from .state import global_state
+from foundation.networking import parse_host_address
+
+from . import runtime
+
 
 logger = logging.getLogger(__name__)
 
 
-def default_suites_path(config: Dict[str, Any]) -> str:
-    ubuntu_user = config.get('ubuntu_user') or get_ubuntu_user()
+def default_suites_path(config: dict[str, Any]) -> str:
+    ubuntu_user = (
+        config.get("ubuntu_user")
+        or runtime.config_manager.get_ubuntu_user(config)
+    )
     return f"/home/{ubuntu_user}/GMS-Suite"
 
 
@@ -44,13 +48,13 @@ class TestRunner:
 
     def __init__(self):
         """初始化测试运行器"""
-        self.ssh_manager = ssh_manager
-        self.config_manager = config_manager
-        self.running_tests: Dict[str, Dict[str, Any]] = {}  # {client_id: test_info}
+        self.ssh_manager = runtime.ssh_manager
+        self.config_manager = runtime.config_manager
+        self.running_tests: dict[str, dict[str, Any]] = {}  # {client_id: test_info}
 
     async def start_test(
         self,
-        test_params: Dict[str, Any],
+        test_params: dict[str, Any],
         client_id: str,
         log_callback: Callable[[str, str], None]
     ) -> bool:
@@ -77,7 +81,7 @@ class TestRunner:
             # 获取主机配置
             device_host = test_params.get('device_host', '')
             if '@' in device_host:
-                username, host_ip = CommonUtils.parse_host_address(device_host)
+                username, host_ip = parse_host_address(device_host)
                 host_config = {
                     'host': host_ip,
                     'username': username,
@@ -85,7 +89,10 @@ class TestRunner:
             else:
                 host_config = {
                     'host': config.get('ubuntu_host', ''),
-                    'username': config.get('ubuntu_user') or get_ubuntu_user(),
+                    "username": (
+                        config.get("ubuntu_user")
+                        or self.config_manager.get_ubuntu_user(config)
+                    ),
                 }
 
             # 建立SSH连接
@@ -135,8 +142,8 @@ class TestRunner:
             task = asyncio.create_task(
                 self._execute_test_async(ssh, command, client_id, log_callback, test_params.get('test_type', 'cts'))
             )
-            global_state.background_tasks.add(task)
-            task.add_done_callback(global_state.background_tasks.discard)
+            runtime.global_state.background_tasks.add(task)
+            task.add_done_callback(runtime.global_state.background_tasks.discard)
 
             return True
 
@@ -156,14 +163,14 @@ class TestRunner:
     async def _upload_test_script(
         self,
         ssh: paramiko.SSHClient,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         log_callback: Callable[[str, str], None]
     ) -> bool:
         """上传测试脚本到远程服务器"""
         try:
             # 检查本地脚本
             local_script = os.path.realpath(os.path.join(
-                PROJECT_ROOT,
+                runtime.project_root,
                 'scripts',
                 'run_GMS_Test_Auto.sh')
             )
@@ -196,17 +203,17 @@ class TestRunner:
 
         except Exception as e:
             logger.error(f"Error uploading script: {e}")
-            await log_callback(f"⚠️ 脚本上传失败: {str(e)}", 'warning')
+            await log_callback(f"⚠️ 脚本上传失败: {e!s}", 'warning')
             # 继续执行，可能脚本已存在
             return True
 
     def _build_test_command(
         self,
-        test_params: Dict[str, Any],
-        config: Dict[str, Any],
+        test_params: dict[str, Any],
+        config: dict[str, Any],
         process_group_id: str,
         log_callback: Callable[[str, str], None]
-    ) -> Optional[str]:
+    ) -> str | None:
         """构建测试命令"""
         try:
             test_type = test_params.get('test_type', 'cts')
@@ -276,7 +283,7 @@ class TestRunner:
         """异步执行测试命令"""
         try:
             # 执行命令（使用PTY获取实时输出）
-            stdin, stdout, stderr = ssh.exec_command(command, get_pty=True)
+            _, stdout, stderr = ssh.exec_command(command, get_pty=True)
 
             # 实时读取输出
             while not stdout.channel.exit_status_ready():
@@ -323,7 +330,7 @@ class TestRunner:
 
         except Exception as e:
             logger.error(f"Error in _execute_test_async: {e}")
-            await log_callback(f"❌ 执行测试时出错: {str(e)}", 'error')
+            await log_callback(f"❌ 执行测试时出错: {e!s}", 'error')
 
             # 归还SSH连接
             self.ssh_manager.return_connection(ssh)
@@ -378,7 +385,11 @@ class TestRunner:
             # 方法1: 使用进程组ID杀死进程
             if process_group_id:
                 find_cmd = f"ps eww -e | grep 'GMS_TEST_PGID={process_group_id}' | grep -v grep | awk '{{print $1}}'"
-                stdout, stderr, code = self.ssh_manager.execute_command(ssh, find_cmd, timeout=10)
+                stdout, _, code = self.ssh_manager.execute_command(
+                    ssh,
+                    find_cmd,
+                    timeout=10,
+                )
 
                 if stdout.strip():
                     killed = _kill_and_finish(stdout.strip().split('\n'), '')
@@ -387,7 +398,11 @@ class TestRunner:
 
                 # 回退：尝试通过命令行参数查找
                 fallback_cmd = f"ps aux | grep -- '--pgid {process_group_id}' | grep -v grep | awk '{{print $2}}'"
-                stdout, stderr, code = self.ssh_manager.execute_command(ssh, fallback_cmd, timeout=10)
+                stdout, _, code = self.ssh_manager.execute_command(
+                    ssh,
+                    fallback_cmd,
+                    timeout=10,
+                )
 
                 if stdout.strip():
                     killed = _kill_and_finish(stdout.strip().split('\n'), '')
@@ -406,7 +421,11 @@ class TestRunner:
             tradefed_bin = binary_map.get(test_type, 'tradefed')
             kill_cmd = f"pkill -f '[./]?{tradefed_bin}.*run commandAndExit'"
 
-            stdout, stderr, code = self.ssh_manager.execute_command(ssh, kill_cmd, timeout=10)
+            stdout, _, code = self.ssh_manager.execute_command(
+                ssh,
+                kill_cmd,
+                timeout=10,
+            )
             self.ssh_manager.return_connection(ssh)
 
             if code == 0:
@@ -420,10 +439,10 @@ class TestRunner:
 
         except Exception as e:
             logger.error(f"Error in stop_test: {e}")
-            await log_callback(f"❌ 停止测试失败: {str(e)}", 'error')
+            await log_callback(f"❌ 停止测试失败: {e!s}", 'error')
             return False
 
-    def get_test_status(self, client_id: str) -> Optional[Dict[str, Any]]:
+    def get_test_status(self, client_id: str) -> dict[str, Any] | None:
         """
         获取测试状态
 
@@ -435,7 +454,7 @@ class TestRunner:
         """
         return self.running_tests.get(client_id)
 
-    def get_all_tests_status(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_tests_status(self) -> dict[str, dict[str, Any]]:
         """获取所有测试状态"""
         return self.running_tests.copy()
 
