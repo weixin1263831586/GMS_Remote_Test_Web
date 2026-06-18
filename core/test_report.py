@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Optional
 
 from .test_report_db import test_report_db
 from .report_analyzer import ReportAnalyzer, HostLogParser
+from .agent import ReportAnalysisAgent
 
 logger = logging.getLogger(__name__)
 
@@ -142,14 +143,15 @@ class TestReportManager:
                 logger.warning(f"Report directory not found: {result_dir}")
                 return None
 
-            result_xml = os.path.join(result_dir, 'test_result.xml')
-            if not os.path.exists(result_xml):
-                logger.warning(f"test_result.xml not found: {result_xml}")
-                return None
+            related_paths = [result_dir]
+            android_suite_dir = os.path.dirname(os.path.dirname(result_dir))
+            log_dir_candidate = os.path.join(android_suite_dir, 'logs', report_timestamp)
+            if os.path.exists(log_dir_candidate):
+                related_paths.append(log_dir_candidate)
 
-            result = self.report_analyzer.analyze_file(result_xml)
+            result = ReportAnalysisAgent(temp_dir='/tmp').analyze_paths(related_paths)
             if not result:
-                logger.error("Failed to analyze test_result.xml")
+                logger.error("Failed to analyze report bundle")
                 return None
 
             analysis = {
@@ -160,10 +162,15 @@ class TestReportManager:
                     'suite_version': result.get('details', {}).get('suite_version', ''),       # 套件版本（如 16.1_r2）
                     'android_version': result.get('details', {}).get('android_version', ''),   # Android版本（build_version_release）
                     'start_time': result.get('details', {}).get('start_time', ''),
-                    'test_type': result.get('details', {}).get('test_type', '')
+                    'test_type': result.get('details', {}).get('test_type', ''),
+                    'soc_platform': result.get('details', {}).get('soc_platform', '')
                 },
                 'failures': result.get('failures', [])
             }
+
+            for key in ('analysis_sources', 'failures_html', 'host_log_errors', 'device_log_errors'):
+                if key in result:
+                    analysis[key] = result[key]
 
             # 读取 invocation_summary.txt 获取 log 目录路径
             summary_content = ""

@@ -828,6 +828,14 @@ class ReportAnalyzer:
         lower_path = file_path.lower()
 
         if lower_path.endswith(ARCHIVE_EXTENSIONS):
+            try:
+                from core.agent.report_analysis_agent import ReportAnalysisAgent
+
+                result = ReportAnalysisAgent(temp_dir=self.temp_dir).analyze_path(file_path)
+                if result:
+                    return result
+            except Exception as e:
+                logger.warning("ReportAnalysisAgent failed, falling back to legacy archive parser: %s", e)
             report = self._analyze_archive(file_path)
         elif lower_path.endswith('.xml'):
             report = self.parser.parse_file(file_path)

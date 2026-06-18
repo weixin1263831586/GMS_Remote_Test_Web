@@ -982,14 +982,6 @@ async def analyze_reports(
             if not result_dir:
                 return error_response("Report directory not found", 404)
 
-            result_xml = os.path.join(result_dir, "test_result.xml")
-            if not await asyncio.to_thread(os.path.exists, result_xml):
-                result = await asyncio.to_thread(ReportAnalyzer().analyze_log_dir, result_dir)
-                if not result:
-                    return error_response("test_result.xml not found and host_log parsing failed", 404)
-                result["report_name"] = report_timestamp
-                return JSONResponse(content={"success": True, "data": result, "mode": "saved"})
-
             result = await asyncio.to_thread(test_report_manager.analyze_report, report_timestamp)
             if not result:
                 return error_response("Report analysis failed", 500)
