@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -14,8 +15,9 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from core.archive_utils import ARCHIVE_EXTENSIONS, safe_extract_member_path
-from core.report_analyzer import HostLogParser, TestReport, XMLReportParser
+from foundation.archives import ARCHIVE_EXTENSIONS, safe_extract_member_path
+
+from .analyzer import HostLogParser, TestReport, XMLReportParser
 
 
 logger = logging.getLogger(__name__)
@@ -137,6 +139,11 @@ class ReportAnalysisAgent:
     def _extract_zip(self, archive_path: str, target_dir: str) -> None:
         with zipfile.ZipFile(archive_path, "r") as zf:
             for member in zf.infolist():
+                mode = member.external_attr >> 16
+                if stat.S_ISLNK(mode):
+                    raise ValueError(
+                        f"压缩包包含不安全符号链接: {member.filename}"
+                    )
                 target = safe_extract_member_path(target_dir, member.filename)
                 if member.is_dir():
                     os.makedirs(target, exist_ok=True)

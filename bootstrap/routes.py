@@ -3,17 +3,32 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from core.config import config_manager
+from core.file_utils import FileUtils
+from core.ssh import ssh_manager
+from core.universal_ai import get_universal_analyzer
 from features.automation.api import configure_automation_service
 from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
 from features.redmine.api import configure_redmine_service
+from features.reports.dependencies import configure_report_dependencies
 from routers import ALL_ROUTERS
 from routers.gerrit_dashboard import _query_gerrit_dual_mode
 from routers.system import init_templates
+from routers.tests import (
+    _make_empty_suite_target,
+    _resolve_suite_diagnosis_target,
+)
 
 
 def include_routes(app: FastAPI, templates, services=None) -> None:
     if services is not None:
+        configure_report_dependencies(
+            ssh_manager=ssh_manager,
+            file_utils=FileUtils,
+            universal_analyzer_factory=get_universal_analyzer,
+            resolve_suite_target=_resolve_suite_diagnosis_target,
+            make_empty_suite_target=_make_empty_suite_target,
+        )
         configure_redmine_service(services.redmine)
         profiles_path = (
             services.settings.project_root
