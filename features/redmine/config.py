@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import base64
+import hashlib
+import time
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any
 
@@ -68,9 +72,29 @@ class RedmineConfig:
         config = self.load_config()
         redmine = dict(config.get("redmine") or {})
         redmine["base_url"] = self.get_redmine_base_url(config)
+        redmine.setdefault("domain", urlparse(redmine["base_url"]).netloc)
         return redmine
 
     def load_redmine_credentials(self) -> dict[str, str]:
+        runtime = self.manager._read_json(self.runtime_config_path)
+        saved = runtime.get("redmine_auth") or {}
+        encrypted = saved.get("encrypted_password")
+        if encrypted:
+            try:
+                from cryptography.fernet import Fernet
+
+                key = base64.urlsafe_b64encode(
+                    hashlib.sha256(b"gms_remote_test_redmine_2024").digest()
+                )
+                password = Fernet(key).decrypt(
+                    str(encrypted).encode()
+                ).decode()
+                return {
+                    "username": str(saved.get("username") or ""),
+                    "password": password,
+                }
+            except Exception:
+                return {}
         config = self.load_config()
         redmine = config.get("redmine") or {}
         credentials = config.get("redmine_credentials") or {}
@@ -85,6 +109,26 @@ class RedmineConfig:
             or ""
         )
         return {"username": username, "password": password}
+
+    def save_redmine_credentials(
+        self,
+        username: str,
+        password: str,
+    ) -> bool:
+        from cryptography.fernet import Fernet
+
+        key = base64.urlsafe_b64encode(
+            hashlib.sha256(b"gms_remote_test_redmine_2024").digest()
+        )
+        runtime = self.manager._read_json(self.runtime_config_path)
+        runtime["redmine_auth"] = {
+            "username": username,
+            "encrypted_password": Fernet(key).encrypt(
+                password.encode()
+            ).decode(),
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        return self.manager.save_runtime(runtime)
 
     def get_redmine_stats_config(self) -> dict[str, Any]:
         return normalize_redmine_stats_config(

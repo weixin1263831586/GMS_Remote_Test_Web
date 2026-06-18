@@ -8,14 +8,15 @@
 - 失败用例提取
 """
 
-import os
 import logging
+import os
 import re
-from typing import Dict, Any, List, Optional
+from typing import Any
 
-from .test_report_db import test_report_db
-from .report_analyzer import ReportAnalyzer, HostLogParser
-from .agent import ReportAnalysisAgent
+from .analysis_agent import ReportAnalysisAgent
+from .analyzer import HostLogParser, ReportAnalyzer
+from .repository import test_report_db
+
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class TestReportManager:
         self,
         client_id: str,
         limit: int = 100
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         获取报告列表 (当前用户的报告)
 
@@ -63,7 +64,7 @@ class TestReportManager:
     def get_report_files(
         self,
         report_timestamp: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取报告文件列表"""
         try:
             report = self.test_report_db.get_report_by_timestamp(report_timestamp)
@@ -77,7 +78,7 @@ class TestReportManager:
                 return []
 
             files = []
-            for root, dirs, filenames in os.walk(result_dir):
+            for root, _dirs, filenames in os.walk(result_dir):
                 for filename in filenames:
                     file_path = os.path.join(root, filename)
                     rel_path = os.path.relpath(file_path, result_dir)
@@ -102,13 +103,13 @@ class TestReportManager:
             logger.error(f"Error listing report files: {e}")
             return []
 
-    def view_report_file(self, file_path: str) -> Optional[Dict[str, Any]]:
+    def view_report_file(self, file_path: str) -> dict[str, Any] | None:
         """查看报告文件内容"""
         try:
             if not os.path.exists(file_path):
                 return None
 
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8') as f:
                 content = f.read()
 
             file_ext = os.path.splitext(file_path)[1].lower()
@@ -130,7 +131,7 @@ class TestReportManager:
             logger.error(f"Error viewing report file: {e}")
             return None
 
-    def analyze_report(self, report_timestamp: str) -> Optional[Dict[str, Any]]:
+    def analyze_report(self, report_timestamp: str) -> dict[str, Any] | None:
         """分析测试报告"""
         try:
             report = self.test_report_db.get_report_by_timestamp(report_timestamp)
@@ -179,7 +180,7 @@ class TestReportManager:
             inv_summary = os.path.join(result_dir, 'invocation_summary.txt')
             if os.path.exists(inv_summary):
                 try:
-                    with open(inv_summary, 'r') as f:
+                    with open(inv_summary) as f:
                         summary_content = f.read()
                 except Exception as e:
                     logger.error(f"Error reading invocation summary: {e}")
@@ -213,7 +214,7 @@ class TestReportManager:
             failures_html = os.path.join(result_dir, 'test_result_failures_suite.html')
             if os.path.exists(failures_html):
                 try:
-                    with open(failures_html, 'r', encoding='utf-8') as f:
+                    with open(failures_html, encoding='utf-8') as f:
                         failures_content = f.read()
                     analysis['failures_html'] = self._parse_failures_html(failures_content)
                 except Exception as e:
@@ -233,7 +234,7 @@ class TestReportManager:
                 # 读取并分析 host_log
                 if host_log_path:
                     try:
-                        with open(host_log_path, 'r', encoding='utf-8') as f:
+                        with open(host_log_path, encoding='utf-8') as f:
                             host_log_content = f.read()
                         analysis['host_log_errors'] = self._extract_log_errors(host_log_content, 'host')
                     except Exception as e:
@@ -242,7 +243,7 @@ class TestReportManager:
                 # 读取并分析 device_log
                 if device_log_path:
                     try:
-                        with open(device_log_path, 'r', encoding='utf-8') as f:
+                        with open(device_log_path, encoding='utf-8') as f:
                             device_log_content = f.read()
                         analysis['device_log_errors'] = self._extract_log_errors(device_log_content, 'device')
                     except Exception as e:
@@ -253,7 +254,7 @@ class TestReportManager:
             logger.error(f"Error analyzing report: {e}")
             return None
 
-    def _parse_failures_html(self, html_content: str) -> Dict[str, Any]:
+    def _parse_failures_html(self, html_content: str) -> dict[str, Any]:
         """解析失败用例 HTML"""
         try:
             failures = []
@@ -281,7 +282,7 @@ class TestReportManager:
             logger.error(f"Error parsing failures HTML: {e}")
             return {'failures': []}
 
-    def _extract_log_errors(self, log_content: str, log_type: str) -> Dict[str, Any]:
+    def _extract_log_errors(self, log_content: str, log_type: str) -> dict[str, Any]:
         """从日志中提取错误"""
         try:
             stack_traces = []
@@ -338,10 +339,10 @@ class TestReportManager:
     def save_test_report(
         self,
         client_id: str,
-        config: Dict[str, Any],
-        test_params: Dict[str, Any],
-        user_logs: List[str]
-    ) -> Optional[str]:
+        config: dict[str, Any],
+        test_params: dict[str, Any],
+        user_logs: list[str]
+    ) -> str | None:
         """保存测试报告到数据库"""
         try:
             result_dir = None

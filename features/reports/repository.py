@@ -5,9 +5,11 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 from collections import defaultdict
+from datetime import datetime, timedelta
+
+from foundation.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ def _empty_indexes() -> dict:
 class TestReportDB:
     """测试报告数据库 - 使用 JSON 文件存储 + 内存索引"""
 
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str | None = None):
         """
         初始化数据库
 
@@ -34,8 +36,7 @@ class TestReportDB:
             db_path: 数据库文件路径，默认为 reports/test_reports.json
         """
         if db_path is None:
-            base_dir = os.path.dirname(os.path.dirname(__file__))
-            db_path = os.path.join(base_dir, 'data', 'test_reports.json')
+            db_path = str(settings.data_root / 'reports/test_reports.json')
 
         self.db_path = db_path
         self.lock = threading.Lock()
@@ -57,14 +58,14 @@ class TestReportDB:
         if not os.path.exists(self.db_path):
             self._save_data({'reports': [], 'last_update': None})
 
-    def _load_data(self) -> Dict:
+    def _load_data(self) -> dict:
         """加载数据(带缓存)"""
         # 如果缓存有效,直接返回
         if not self._cache_dirty and self._cache is not None:
             return self._cache
 
         try:
-            with open(self.db_path, 'r', encoding='utf-8') as f:
+            with open(self.db_path, encoding='utf-8') as f:
                 data = json.load(f)
                 self._cache = data
                 self._cache_dirty = False
@@ -76,7 +77,7 @@ class TestReportDB:
             self._cache_dirty = False
             return data
 
-    def _save_data(self, data: Dict, invalidate_indexes: bool = True):
+    def _save_data(self, data: dict, invalidate_indexes: bool = True):
         """保存数据"""
         try:
             with open(self.db_path, 'w', encoding='utf-8') as f:
@@ -143,7 +144,7 @@ class TestReportDB:
         self._cache_dirty = True
         self._indexes_dirty = True
 
-    def add_report(self, report_info: Dict) -> bool:
+    def add_report(self, report_info: dict) -> bool:
         """
         添加测试报告记录
 
@@ -195,11 +196,11 @@ class TestReportDB:
     def get_reports(
         self,
         limit: int = 50,
-        test_type: str = None,
-        client_id: str = None,
-        status: str = None,
-        user_only: str = None
-    ) -> List[Dict]:
+        test_type: str | None = None,
+        client_id: str | None = None,
+        status: str | None = None,
+        user_only: str | None = None,
+    ) -> list[dict]:
         """
         获取测试报告列表
 
@@ -257,7 +258,7 @@ class TestReportDB:
             logger.error(f"获取报告列表失败: {e}")
             return []
 
-    def get_report_by_timestamp(self, timestamp: str) -> Optional[Dict]:
+    def get_report_by_timestamp(self, timestamp: str) -> dict | None:
         """
         根据时间戳获取报告
 
@@ -349,7 +350,7 @@ class TestReportDB:
             logger.error(f"删除报告失败: {e}")
             return False
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """
         获取统计信息
 
@@ -394,7 +395,7 @@ class TestReportDB:
             logger.error(f"获取统计信息失败: {e}")
             return {'total_reports': 0, 'type_counts': {}, 'recent_week': 0}
 
-    def scan_and_sync_remote_reports(self, result_dirs: List[str]) -> int:
+    def scan_and_sync_remote_reports(self, result_dirs: list[str]) -> int:
         """
         扫描远程测试套件 results 目录并同步到本地数据库
 
@@ -443,7 +444,7 @@ class TestReportDB:
                         if os.path.exists(xml_path):
                             # 解析 XML 获取详细信息
                             try:
-                                from .report_analyzer import analyzer
+                                from .archive import analyzer
                                 result = analyzer.analyze_file(xml_path)
                                 if result:
                                     report_info.update({

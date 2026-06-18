@@ -495,7 +495,7 @@ class ActionExecutor:
 
     async def _query_reports(self, session, request, params) -> ToolResult:
         """查询测试报告。"""
-        from core.test_report_db import test_report_db
+        from features.reports.repository import test_report_db
 
         reports = test_report_db.get_reports(limit=10)
         stats = test_report_db.get_statistics()
@@ -795,7 +795,7 @@ class ActionExecutor:
         except (TypeError, ValueError):
             limit = 8
         result, payload = await self._fetch_router_json(
-            "routers.reports", "knowledgebase_search",
+            "features.reports.api", "knowledgebase_search",
             tool_name_for_error="knowledgebase_search", query=query, limit=limit,
         )
         if result is not None:
@@ -815,7 +815,10 @@ class ActionExecutor:
 
     async def _query_knowledgebase_stats(self, session, request, params) -> ToolResult:
         """知识库统计。"""
-        result, payload = await self._fetch_router_json("routers.reports", "knowledgebase_stats")
+        result, payload = await self._fetch_router_json(
+            "features.reports.api",
+            "knowledgebase_stats",
+        )
         if result is not None:
             return result
         stats = (payload.get("data") or payload).get("stats") or {}

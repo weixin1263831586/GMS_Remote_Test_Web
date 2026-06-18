@@ -134,7 +134,7 @@ _CONFIRM_PATHS = {
 _CATEGORY_MODULE_MAP: Dict[str, str] = {
     "device": "devices",      # category="device" → routers.devices
     "test": "tests",          # category="test" → routers.tests
-    "report": "reports",      # category="report" → routers.reports
+    "report": "reports",      # category="report" → features.reports.api
     "burn": "firmware",       # category="burn" → routers.firmware
     "ssh": "integrations",    # category="ssh" → routers.integrations
     "vpn": "integrations",    # category="vpn" → routers.integrations
@@ -190,10 +190,10 @@ _EXECUTOR_REF_OVERRIDES: Dict[str, str] = {
     "/api/test/suites/result": "routers.tests:list_tradefed_results",
     "/api/test/status": "routers.tests:get_status",
     "/api/test/logs/save": "routers.tests:save_current_log",
-    "/api/reports/list": "routers.reports:list_reports",
-    "/api/reports/analyze": "routers.reports:analyze_reports",
-    "/api/reports/download": "routers.reports:download_report",
-    "/api/reports/delete": "routers.reports:delete_report",
+    "/api/reports/list": "features.reports.api:list_reports",
+    "/api/reports/analyze": "features.reports.api:analyze_reports",
+    "/api/reports/download": "features.reports.api:download_report",
+    "/api/reports/delete": "features.reports.api:delete_report",
     "/api/desktop/vnc/status": "routers.desktop:get_desktop_vnc_status",
     "/api/desktop/vnc/start": "routers.desktop:start_desktop_vnc",
     "/api/desktop/vnc/stop": "routers.desktop:stop_desktop_vnc",
@@ -223,12 +223,12 @@ _EXECUTOR_REF_OVERRIDES: Dict[str, str] = {
     "/api/system/docs": "routers.system:get_api_docs",
     "/api/system/help": "routers.system:get_api_help",
     # --- 补充：报告 ---
-    "/api/reports/diagnose": "routers.reports:diagnose_report_failure",
-    "/api/reports/analyze-url": "routers.reports:analyze_report_from_url",
-    "/api/reports/extract-redmine-attachment": "routers.reports:extract_redmine_attachment",
+    "/api/reports/diagnose": "features.reports.api:diagnose_report_failure",
+    "/api/reports/analyze-url": "features.reports.api:analyze_report_from_url",
+    "/api/reports/extract-redmine-attachment": "features.reports.api:extract_redmine_attachment",
     # --- 补充：知识库 ---
-    "/api/knowledgebase/search": "routers.reports:knowledgebase_search",
-    "/api/knowledgebase/stats": "routers.reports:knowledgebase_stats",
+    "/api/knowledgebase/search": "features.reports.api:knowledgebase_search",
+    "/api/knowledgebase/stats": "features.reports.api:knowledgebase_stats",
     # --- 补充：测试日志/套件 ---
     "/api/test/logs/list": "routers.tests:list_test_logs",
     "/api/test/logs/get": "routers.tests:get_test_logs",
@@ -248,7 +248,7 @@ _EXECUTOR_REF_OVERRIDES: Dict[str, str] = {
     # --- 补充：配置 ---
     "/api/config/ai": "routers.config:get_ai_config",
     "/api/config/opengrok": "routers.config:get_opengrok_config",
-    "/api/config/redmine": "routers.reports:get_redmine_config",
+    "/api/config/redmine": "features.reports.api:get_redmine_config",
     "/api/tailscale/status": "routers.config:get_tailscale_status",
     # --- 补充：APK（路径参数 task_id 作为函数参数） ---
     "/api/apk/status/{task_id}": "routers.apk:get_apk_status",
@@ -354,7 +354,10 @@ class ToolRegistry:
             module_name = _CATEGORY_MODULE_MAP.get(category, category)
             executor_ref = _EXECUTOR_REF_OVERRIDES.get(path, "")
             if path not in _AGENT_UNSUPPORTED_DIRECT_PATHS and not executor_ref:
-                executor_ref = f"routers.{module_name}:{name}" if category != "other" else ""
+                if category == "report":
+                    executor_ref = f"features.reports.api:{name}"
+                else:
+                    executor_ref = f"routers.{module_name}:{name}" if category != "other" else ""
 
             tool = AgentTool(
                 name=name,
@@ -582,7 +585,7 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             is_readonly=True,
             is_dangerous=False,
             requires_confirm=False,
-            executor_ref="routers.reports:diagnose_report_failure",
+            executor_ref="features.reports.api:diagnose_report_failure",
             response_type="detail",
         ),
         AgentTool(

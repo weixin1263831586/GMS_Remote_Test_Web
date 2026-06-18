@@ -66,7 +66,7 @@ from core.schemas import (
     SuiteDiagnosisTargetRequest,
 )
 from core.state import global_state
-from core.reports import save_test_report_to_db
+from features.reports.report_store import save_test_report_to_db
 from core.api_response import ApiResponse, success_response, error_response
 from core.clients import get_client_id_from_request, parse_client_id
 from core.notifications import store_notification
@@ -78,7 +78,7 @@ from core.settings import (
 )
 from modules.device_lock_manager import device_lock_manager
 from modules.test_logs_manager import test_logs_manager
-from core.test_report_db import test_report_db
+from features.reports.repository import test_report_db
 from core.enums import LogLevel
 
 logger = logging.getLogger(__name__)

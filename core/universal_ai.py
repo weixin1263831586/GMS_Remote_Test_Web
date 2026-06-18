@@ -857,7 +857,7 @@ class UniversalAIAnalyzer:
                 return None
 
             # 使用本地的 rk_codesearch 技能来查找源码
-            from core.report_analyzer import ReportAnalyzer
+            from features.reports import ReportAnalyzer
 
             # 创建临时分析器实例
             temp_analyzer = ReportAnalyzer()
@@ -891,7 +891,7 @@ class UniversalAIAnalyzer:
                 return None
 
         except ImportError:
-            logger.error("无法导入 ReportAnalyzer，请检查 core.report_analyzer 模块")
+            logger.error("无法导入 Reports 功能包分析器")
             return None
         except Exception as e:
             logger.error(f"获取Android源码失败: {e}")

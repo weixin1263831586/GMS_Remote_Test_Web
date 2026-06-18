@@ -5,7 +5,7 @@ from .adb_forward import ADBForwardManager
 from .config import ConfigManager
 from .devices import DeviceManager
 from .ssh import SSHManager
-from .test_report import TestReportManager
+from features.reports import TestReportManager
 from .test_runner import TestRunner
 from .usbip import USBIPManager
 from .vnc import VNCManager

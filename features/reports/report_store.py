@@ -4,18 +4,25 @@ import os
 import re
 from datetime import datetime
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 logger = logging.getLogger(__name__)
 
 
+def _parse_client_id(client_id: str) -> tuple[str, str]:
+    if not client_id or '@' not in client_id:
+        return client_id or 'unknown', 'unknown'
+    username, client_ip = client_id.rsplit('@', 1)
+    return username or 'unknown', client_ip or 'unknown'
+
+
 # ==================== XML 分析缓存 ====================
 
 @lru_cache(maxsize=128)
-def cached_xml_analysis(xml_path: str, mtime: float) -> Dict:
+def cached_xml_analysis(xml_path: str, mtime: float) -> dict:
     """带缓存的XML分析结果"""
-    from core.report_analyzer import ReportAnalyzer
+    from .analyzer import ReportAnalyzer
     return ReportAnalyzer().analyze_file(xml_path)
 
 
@@ -31,7 +38,7 @@ def _normalize_path(path: str) -> str:
     return os.path.normpath(path.strip().strip('"').strip("'"))
 
 
-def _extract_result_dir_from_text(text: str) -> Optional[str]:
+def _extract_result_dir_from_text(text: str) -> str | None:
     for match in _RESULT_PATH_RE.finditer(text or ''):
         candidate = _normalize_path(match.group(1))
         if os.path.isdir(candidate):
@@ -39,18 +46,18 @@ def _extract_result_dir_from_text(text: str) -> Optional[str]:
     return None
 
 
-def _extract_result_dir_from_host_log(path: str) -> Optional[str]:
+def _extract_result_dir_from_host_log(path: str) -> str | None:
     if not path or not os.path.isfile(path):
         return None
     try:
-        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(path, encoding='utf-8', errors='replace') as f:
             return _extract_result_dir_from_text(f.read())
     except Exception as e:
         logger.debug(f"[ReportDB] 读取 host log 失败: {path}, {e}")
     return None
 
 
-def _extract_result_dir_from_inv_dir(path: str) -> Optional[str]:
+def _extract_result_dir_from_inv_dir(path: str) -> str | None:
     if not path or not os.path.isdir(path):
         return None
     try:
@@ -64,7 +71,7 @@ def _extract_result_dir_from_inv_dir(path: str) -> Optional[str]:
     return None
 
 
-def _extract_result_dir_from_logs(user_logs: List[str]) -> Optional[str]:
+def _extract_result_dir_from_logs(user_logs: list[str]) -> str | None:
     """Extract a report/log directory from Tradefed output.
 
     CTS/GGS commonly print RESULT DIRECTORY, while some VTS paths only appear
@@ -106,7 +113,7 @@ def _extract_result_dir_from_logs(user_logs: List[str]) -> Optional[str]:
     return None
 
 
-def _apply_report_stats(report_info: Dict, details: Dict, summary: Dict, report_type: str = ''):
+def _apply_report_stats(report_info: dict, details: dict, summary: dict, report_type: str = ''):
     """Update report_info with pass/fail/total/pass_rate and optional extras from analysis."""
     report_info.update({
         'pass': summary.get('pass', 0),
@@ -134,7 +141,7 @@ def _build_report_timestamp(result_dir: str) -> str:
     return datetime.now().strftime('%Y.%m.%d_%H.%M.%S')
 
 
-def _suite_root_from_test_suite(test_suite: str) -> Optional[str]:
+def _suite_root_from_test_suite(test_suite: str) -> str | None:
     if not test_suite:
         return None
     path = test_suite.rstrip('/')
@@ -143,7 +150,7 @@ def _suite_root_from_test_suite(test_suite: str) -> Optional[str]:
     return path
 
 
-def _result_dir_from_logs_dir(result_dir: str, test_suite: str) -> Optional[str]:
+def _result_dir_from_logs_dir(result_dir: str, test_suite: str) -> str | None:
     """Map suite logs/<timestamp>/... or temp inv_* dirs back to suite results/<timestamp>."""
     normalized = os.path.normpath(result_dir)
     result_from_inv = _extract_result_dir_from_inv_dir(normalized)
@@ -163,7 +170,7 @@ def _result_dir_from_logs_dir(result_dir: str, test_suite: str) -> Optional[str]
     return None
 
 
-def _normalize_result_dir(result_dir: str, test_params: Dict[str, Any]) -> str:
+def _normalize_result_dir(result_dir: str, test_params: dict[str, Any]) -> str:
     """Prefer the real Tradefed results/<timestamp> directory over temp/log inv_* dirs."""
     if not result_dir:
         return result_dir
@@ -182,10 +189,10 @@ def _normalize_result_dir(result_dir: str, test_params: Dict[str, Any]) -> str:
 
 def save_test_report_to_db(
     client_id: str,
-    config: Dict[str, Any],
-    test_params: Dict[str, Any],
-    user_logs: List[str]
-) -> Optional[str]:
+    config: dict[str, Any],
+    test_params: dict[str, Any],
+    user_logs: list[str]
+) -> str | None:
     """
     从测试日志中提取 RESULT DIRECTORY 并记录测试报告到数据库
 
@@ -198,9 +205,8 @@ def save_test_report_to_db(
     Returns:
         报告时间戳，如果失败则返回 None
     """
-    from core.clients import parse_client_id
-    from core.report_analyzer import ReportAnalyzer
-    from core.test_report_db import test_report_db
+    from .analyzer import ReportAnalyzer
+    from .repository import test_report_db
 
     try:
         result_dir = _extract_result_dir_from_logs(user_logs)
@@ -236,7 +242,7 @@ def save_test_report_to_db(
 
         # 提取用户名
         if '@' in client_id:
-            report_info['user'] = parse_client_id(client_id)[0]
+            report_info['user'] = _parse_client_id(client_id)[0]
 
         # 解析 XML 获取测试结果统计（使用缓存）；VTS 可能没有 test_result.xml，回退解析 host log。
         if os.path.exists(xml_path):

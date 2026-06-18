@@ -33,7 +33,7 @@ from core.agent_tools import registry
 from core.clients import get_client_id_from_request
 from core.config import config_manager
 from core.devices import device_manager, get_or_create_user_state
-from core.test_report_db import test_report_db
+from features.reports.repository import test_report_db
 from core.test_suite_utils import (
     detect_test_type_from_suite_path,
     get_default_suites_path,
@@ -407,7 +407,7 @@ def _normalize_failure(raw_failure: Dict[str, Any], index: int = 0) -> Dict[str,
 
 async def _analyze_saved_report(session: Dict[str, Any], report_timestamp: str) -> Optional[Dict[str, Any]]:
     """Analyze a saved report and append an Agent step."""
-    from core.test_report import test_report_manager
+    from features.reports.service import test_report_manager
 
     _append_step(session, "报告分析", "running", f"正在分析报告 {report_timestamp}")
     try:
@@ -429,7 +429,7 @@ async def _analyze_saved_report(session: Dict[str, Any], report_timestamp: str) 
 
 async def _diagnose_report_failure(session: Dict[str, Any], report: Dict[str, Any], analysis: Dict[str, Any], failure: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Run the existing report diagnosis pipeline for one failure."""
-    from routers.reports import diagnose_report_failure
+    from features.reports.api import diagnose_report_failure
 
     report_timestamp = report.get("timestamp", "")
     details = analysis.get("details") or {}

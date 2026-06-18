@@ -2,6 +2,7 @@
 
 from features.automation import api as automation
 from features.redmine import api as redmine
+from features.reports import api as reports
 
 from . import (
     agent,
@@ -17,7 +18,6 @@ from . import (
     integrations,
     mainline_known_issues,
     notifications,
-    reports,
     system,
     terminal,
     tests,

@@ -1,4 +1,6 @@
 import io
+import stat
+import tarfile
 import unittest
 import zipfile
 from pathlib import Path
@@ -57,6 +59,62 @@ java.lang.IllegalStateException: second device crash
 
 
 class ReportAnalysisAgentTests(unittest.TestCase):
+    def test_zip_rejects_parent_absolute_and_symlink_members(self):
+        from features.reports import ReportAnalysisAgent
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("../escape.txt", "/absolute.txt"):
+                archive = root / "unsafe.zip"
+                with zipfile.ZipFile(archive, "w") as zf:
+                    zf.writestr(name, "escape")
+                with self.assertRaises(ValueError):
+                    ReportAnalysisAgent(temp_dir=tmp)._extract_zip(
+                        str(archive),
+                        str(root / "extract"),
+                    )
+
+            archive = root / "symlink.zip"
+            link = zipfile.ZipInfo("link")
+            link.create_system = 3
+            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr(link, "../outside")
+            with self.assertRaises(ValueError):
+                ReportAnalysisAgent(temp_dir=tmp)._extract_zip(
+                    str(archive),
+                    str(root / "extract"),
+                )
+
+    def test_tar_rejects_parent_absolute_and_symlink_members(self):
+        from features.reports import ReportAnalysisAgent
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("../escape.txt", "/absolute.txt"):
+                archive = root / "unsafe.tar"
+                with tarfile.open(archive, "w") as tf:
+                    member = tarfile.TarInfo(name)
+                    member.size = 1
+                    tf.addfile(member, io.BytesIO(b"x"))
+                with self.assertRaises(ValueError):
+                    ReportAnalysisAgent(temp_dir=tmp)._extract_tar(
+                        str(archive),
+                        str(root / "extract"),
+                    )
+
+            archive = root / "symlink.tar"
+            with tarfile.open(archive, "w") as tf:
+                member = tarfile.TarInfo("link")
+                member.type = tarfile.SYMTYPE
+                member.linkname = "../outside"
+                tf.addfile(member)
+            ReportAnalysisAgent(temp_dir=tmp)._extract_tar(
+                str(archive),
+                str(root / "extract"),
+            )
+            self.assertFalse((root / "extract/link").exists())
+
     def _make_nested_report_zip(self, target: Path) -> None:
         inner_buffer = io.BytesIO()
         with zipfile.ZipFile(inner_buffer, "w", zipfile.ZIP_DEFLATED) as inner:
@@ -86,7 +144,7 @@ class ReportAnalysisAgentTests(unittest.TestCase):
             outer.writestr("outer/report_payload.zip", inner_buffer.getvalue())
 
     def test_agent_recursively_analyzes_nested_report_archives_and_logs(self):
-        from core.agent.report_analysis_agent import ReportAnalysisAgent
+        from features.reports import ReportAnalysisAgent
 
         with TemporaryDirectory() as tmp:
             archive_path = Path(tmp) / "redmine_attachment.zip"
@@ -110,7 +168,7 @@ class ReportAnalysisAgentTests(unittest.TestCase):
         self.assertEqual(len(result["failures_html"]["failures"]), 1)
 
     def test_legacy_report_analyzer_uses_agent_for_nested_archives(self):
-        from core.report_analyzer import ReportAnalyzer
+        from features.reports import ReportAnalyzer
 
         with TemporaryDirectory() as tmp:
             archive_path = Path(tmp) / "uploaded_report.zip"
@@ -124,7 +182,7 @@ class ReportAnalysisAgentTests(unittest.TestCase):
         self.assertEqual(len(result["analysis_sources"]["host_logs"]), 2)
 
     def test_saved_report_manager_analyzes_related_logs_with_agent(self):
-        from core.test_report import TestReportManager
+        from features.reports import TestReportManager
 
         timestamp = "2026.03.07_08.49.59.870_8298"
         with TemporaryDirectory() as tmp:
