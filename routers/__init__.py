@@ -1,11 +1,12 @@
 """GMS Remote Test - API 路由注册"""
 
+from features.automation import api as automation
+
 from . import (
     agent,
     apk,
     assets,
     audit,
-    automation,
     config,
     desktop,
     devices,

@@ -175,5 +175,5 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             f'/static/{filename}' if endpoint == 'static' else f'/{endpoint}'
         )
     )
-    include_routes(app, templates)
+    include_routes(app, templates, services)
     return app

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GMS ATS</title>
+    <style>
+{{AUTOMATION_CSS}}
+    </style>
+</head>
+<body>
+    <main class="ats-shell">
+<section class="ats-toolbar">
+    <div>
+        <h1 class="ats-title">GMS ATS</h1>
+        <div class="ats-subtitle">Gerrit -> Jenkins -> 刷机 -> GMS 测试 -> 报告分析</div>
+    </div>
+    <div class="ats-actions">
+        <button type="button" onclick="loadAll()">刷新</button>
+        <button type="button" onclick="pollGerrit()">Gerrit Poll</button>
+        <button type="button" onclick="tickWorker('stub')">Worker Tick</button>
+        <button type="button" class="primary" onclick="tickWorker('http')">真实 API Tick</button>
+    </div>
+</section>
+
+<section class="ats-grid">
+    <div class="stack">
+        <section class="panel">
+            <div class="panel-header">手动创建运行</div>
+            <div class="panel-body stack">
+                <label>Profile
+                    <select id="automation-profile"></select>
+                </label>
+                <label>固件路径或 URL
+                    <input id="automation-artifact" placeholder="/path/to/update.img 或 http://...">
+                </label>
+                <label>设备序列号
+                    <input id="automation-devices" placeholder="ABC123,DEF456">
+                </label>
+                <div class="form-row">
+                    <label>测试类型
+                        <input id="automation-test-type" value="CTS">
+                    </label>
+                    <label>测试套件
+                        <input id="automation-test-suite" placeholder="android-cts">
+                    </label>
+                </div>
+                <label>测试模块
+                    <input id="automation-test-module" placeholder="CtsAppSecurityHostTestCases">
+                </label>
+                <label>附加 test_plan JSON
+                    <textarea id="automation-test-plan" placeholder='{"retry": false}'></textarea>
+                </label>
+                <button type="button" id="automation-create-run" class="primary" onclick="createRun()">创建运行</button>
+                <div id="automation-toast" class="toast"></div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header">Profiles</div>
+            <div class="panel-body">
+                <div id="automation-profiles" class="stack"></div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header">事件</div>
+            <div class="panel-body">
+                <div id="automation-events" class="events muted">选择一条运行查看事件。</div>
+            </div>
+        </section>
+    </div>
+
+    <section class="panel">
+        <div class="panel-header">
+            <span>Runs</span>
+            <div class="tabs">
+                <button type="button" class="tab active" data-status="" onclick="setStatusFilter('')">全部</button>
+                <button type="button" class="tab" data-status="queued" onclick="setStatusFilter('queued')">Queued</button>
+                <button type="button" class="tab" data-status="testing" onclick="setStatusFilter('testing')">Testing</button>
+                <button type="button" class="tab" data-status="completed" onclick="setStatusFilter('completed')">Completed</button>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table id="automation-runs">
+                <thead>
+                    <tr>
+                        <th>状态</th>
+                        <th>Profile</th>
+                        <th>来源</th>
+                        <th>Gerrit</th>
+                        <th>固件</th>
+                        <th>设备</th>
+                        <th>报告</th>
+                        <th>更新时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody><tr><td colspan="9" class="muted">加载中...</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+</section>
+    </main>
+
+    <script>
+{{AUTOMATION_JS}}
+    </script>
+</body>
+</html>

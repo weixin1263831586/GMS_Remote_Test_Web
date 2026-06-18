@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -48,7 +48,7 @@ def utc_now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
-def normalize_devices(devices: List[Any]) -> List[Dict[str, Any]]:
+def normalize_devices(devices: list[Any]) -> list[dict[str, Any]]:
     normalized = []
     for item in devices or []:
         if isinstance(item, str):
@@ -74,10 +74,10 @@ class AutomationRunCreateRequest(BaseModel):
     owner: str = ""
     artifact_url: str = ""
     artifact_path: str = ""
-    devices: List[Any] = Field(default_factory=list)
-    test_plan: Dict[str, Any] = Field(default_factory=dict)
+    devices: list[Any] = Field(default_factory=list)
+    test_plan: dict[str, Any] = Field(default_factory=dict)
 
-    def to_run_dict(self, run_id: str) -> Dict[str, Any]:
+    def to_run_dict(self, run_id: str) -> dict[str, Any]:
         now = utc_now_iso()
         return {
             "id": run_id,
@@ -115,4 +115,4 @@ class AutomationEventCreate(BaseModel):
     stage: str
     level: str = "info"
     message: str
-    payload: Optional[Dict[str, Any]] = None
+    payload: dict[str, Any] | None = None

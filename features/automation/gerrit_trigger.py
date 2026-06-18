@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 
 def _first_text(*values: Any) -> str:
@@ -16,7 +16,7 @@ def _first_text(*values: Any) -> str:
     return ""
 
 
-def normalize_gerrit_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_gerrit_event(payload: dict[str, Any]) -> dict[str, Any]:
     payload = payload or {}
     change = payload.get("change") if isinstance(payload.get("change"), dict) else {}
     patchset = payload.get("patchSet") or payload.get("patchset") or {}
@@ -52,7 +52,7 @@ def _regex_matches(pattern: str, value: str) -> bool:
         return False
 
 
-def profile_matches_event(profile: Dict[str, Any], event: Dict[str, Any]) -> bool:
+def profile_matches_event(profile: dict[str, Any], event: dict[str, Any]) -> bool:
     if not profile.get("enabled", True):
         return False
     gerrit = profile.get("gerrit") if isinstance(profile.get("gerrit"), dict) else {}
@@ -64,5 +64,5 @@ def profile_matches_event(profile: Dict[str, Any], event: Dict[str, Any]) -> boo
     )
 
 
-def match_profiles(event: Dict[str, Any], profiles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def match_profiles(event: dict[str, Any], profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [profile for profile in profiles or [] if profile_matches_event(profile, event)]

@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 
 class AutomationExecutorTests(unittest.TestCase):
     def test_stub_executor_returns_deterministic_stage_results(self):
-        from core.automation.executors import StubAutomationExecutor
+        from features.automation.executors import StubAutomationExecutor
 
         executor = StubAutomationExecutor()
         run = {
@@ -23,10 +23,10 @@ class AutomationExecutorTests(unittest.TestCase):
 
 class AutomationOrchestratorTests(unittest.TestCase):
     def test_orchestrator_advances_manual_run_to_completed(self):
-        from core.automation.executors import StubAutomationExecutor
-        from core.automation.models import AutomationRunCreateRequest, RUN_STATUS_COMPLETED
-        from core.automation.orchestrator import AutomationOrchestrator
-        from core.automation.store import AutomationStore
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import RUN_STATUS_COMPLETED, AutomationRunCreateRequest
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
 
         with TemporaryDirectory() as tmp:
             store = AutomationStore(Path(tmp) / "automation.sqlite3")
@@ -50,10 +50,10 @@ class AutomationOrchestratorTests(unittest.TestCase):
             self.assertTrue(any(event["stage"] == "completed" for event in events))
 
     def test_orchestrator_records_flash_failure(self):
-        from core.automation.executors import StubAutomationExecutor
-        from core.automation.models import AutomationRunCreateRequest, RUN_STATUS_FLASH_FAILED
-        from core.automation.orchestrator import AutomationOrchestrator
-        from core.automation.store import AutomationStore
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import RUN_STATUS_FLASH_FAILED, AutomationRunCreateRequest
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
 
         with TemporaryDirectory() as tmp:
             store = AutomationStore(Path(tmp) / "automation.sqlite3")
@@ -74,10 +74,10 @@ class AutomationOrchestratorTests(unittest.TestCase):
             self.assertIn("flash failed by stub", run["error"])
 
     def test_orchestrator_runs_jenkins_stages_before_device_stages(self):
-        from core.automation.executors import StubAutomationExecutor
-        from core.automation.models import AutomationRunCreateRequest, RUN_STATUS_WAITING_DEVICE
-        from core.automation.orchestrator import AutomationOrchestrator
-        from core.automation.store import AutomationStore
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import RUN_STATUS_WAITING_DEVICE, AutomationRunCreateRequest
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
 
         with TemporaryDirectory() as tmp:
             store = AutomationStore(Path(tmp) / "automation.sqlite3")

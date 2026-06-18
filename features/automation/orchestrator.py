@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any
 
-from core.automation.executors import AutomationExecutor
-from core.automation.models import (
+from features.automation.executors import AutomationExecutor
+from features.automation.models import (
+    RUN_STATUS_ANALYZING,
     RUN_STATUS_ARTIFACT_MISSING,
     RUN_STATUS_ARTIFACT_READY,
-    RUN_STATUS_ANALYZING,
     RUN_STATUS_CANCELLED,
     RUN_STATUS_COMPLETED,
     RUN_STATUS_DEVICE_LOCKED,
@@ -30,7 +30,7 @@ from core.automation.models import (
     TERMINAL_STATUSES,
     utc_now_iso,
 )
-from core.automation.store import AutomationStore
+from features.automation.repository import AutomationStore
 
 
 class AutomationOrchestrator:
@@ -38,13 +38,13 @@ class AutomationOrchestrator:
         self.store = store
         self.executor = executor
 
-    def advance_next(self) -> Optional[Dict[str, Any]]:
+    def advance_next(self) -> dict[str, Any] | None:
         for run in self.store.list_runs(limit=100):
             if run["status"] not in TERMINAL_STATUSES:
                 return self.advance_run(run["id"])
         return None
 
-    def advance_run(self, run_id: str) -> Dict[str, Any]:
+    def advance_run(self, run_id: str) -> dict[str, Any]:
         run = self.store.get_run(run_id)
         if not run:
             raise ValueError(f"automation run not found: {run_id}")
@@ -156,7 +156,7 @@ class AutomationOrchestrator:
 
         return self._fail(run, RUN_STATUS_FAILED, f"unsupported status: {status}", {})
 
-    def cancel_run(self, run_id: str, reason: str = "cancelled by user") -> Dict[str, Any]:
+    def cancel_run(self, run_id: str, reason: str = "cancelled by user") -> dict[str, Any]:
         run = self.store.get_run(run_id)
         if not run:
             raise ValueError(f"automation run not found: {run_id}")
@@ -164,7 +164,7 @@ class AutomationOrchestrator:
             return run
         return self._transition(run, RUN_STATUS_CANCELLED, reason, {}, finished_at=utc_now_iso())
 
-    def _transition(self, run: Dict[str, Any], status: str, message: str, payload: Optional[Dict[str, Any]] = None, **updates: Any) -> Dict[str, Any]:
+    def _transition(self, run: dict[str, Any], status: str, message: str, payload: dict[str, Any] | None = None, **updates: Any) -> dict[str, Any]:
         update_payload = {"status": status, "current_stage": status, **updates}
         if run["started_at"] == "" and status != RUN_STATUS_QUEUED:
             update_payload["started_at"] = utc_now_iso()
@@ -172,7 +172,7 @@ class AutomationOrchestrator:
         self.store.append_event(run["id"], status, "success" if status == RUN_STATUS_COMPLETED else "info", message, payload or {})
         return updated
 
-    def _fail(self, run: Dict[str, Any], status: str, error: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _fail(self, run: dict[str, Any], status: str, error: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         updated = self.store.update_run(
             run["id"],
             status=status,

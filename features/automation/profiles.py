@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 
-def normalize_profile(raw: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_profile(raw: dict[str, Any]) -> dict[str, Any]:
     profile_id = str(raw.get("id") or "").strip()
     name = str(raw.get("name") or profile_id).strip()
     return {
@@ -23,7 +23,7 @@ def normalize_profile(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def load_profiles(path: str | Path, enabled_only: bool = False) -> List[Dict[str, Any]]:
+def load_profiles(path: str | Path, enabled_only: bool = False) -> list[dict[str, Any]]:
     profile_path = Path(path)
     if not profile_path.exists():
         return []
@@ -44,7 +44,7 @@ def load_profiles(path: str | Path, enabled_only: bool = False) -> List[Dict[str
     return profiles
 
 
-def save_profiles(path: str | Path, profiles: List[Dict[str, Any]]) -> Dict[str, Any]:
+def save_profiles(path: str | Path, profiles: list[dict[str, Any]]) -> dict[str, Any]:
     profile_path = Path(path)
     profile_path.parent.mkdir(parents=True, exist_ok=True)
     normalized = []
@@ -62,7 +62,7 @@ def save_profiles(path: str | Path, profiles: List[Dict[str, Any]]) -> Dict[str,
     return data
 
 
-def upsert_profile(path: str | Path, raw_profile: Dict[str, Any]) -> Dict[str, Any]:
+def upsert_profile(path: str | Path, raw_profile: dict[str, Any]) -> dict[str, Any]:
     profile = normalize_profile(raw_profile or {})
     if not profile["id"]:
         raise ValueError("profile id is required")
