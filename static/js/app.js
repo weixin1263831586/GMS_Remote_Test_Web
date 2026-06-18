@@ -6331,7 +6331,7 @@ function ensureReportAnalysisResultStructure() {
                     <div style="font-size: 16px; font-weight: 600;">📊 分析结果</div>
                     <button class="btn-xs" onclick="resetReportAnalysis()">清除</button>
                 </div>
-                <div id="report-summary" style="display: grid; grid-template-columns: 160px 160px 160px 160px 160px 160px 160px 1fr; gap: 8px; margin-bottom: 20px;"></div>
+                <div id="report-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 20px;"></div>
                 <div id="report-details" style="font-size: 12px; color: var(--text-primary);"></div>
             </div>
             <div id="report-failures" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; display: none;">
@@ -6407,6 +6407,12 @@ function displayReportAnalysis(data) {
                 <div>
                     <span class="summary-label">Android版本：</span>
                     <span class="summary-value">${data.details.android_version}</span>
+                </div>
+            ` : ''}
+            ${data.details && data.details.soc_platform ? `
+                <div>
+                    <span class="summary-label">SOC平台：</span>
+                    <span class="summary-value">${data.details.soc_platform}</span>
                 </div>
             ` : ''}
             <div>
