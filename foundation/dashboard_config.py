@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+
 # 用于把任意字符串压成合法的 profile/project id（仅保留字母数字、下划线、连字符）。
 PROFILE_ID_RE = re.compile(r"[^a-zA-Z0-9_-]+")
 

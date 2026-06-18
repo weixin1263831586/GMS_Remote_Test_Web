@@ -753,7 +753,7 @@ class ActionExecutor:
 
     async def _query_gerrit_dashboard_changes(self, session, request, params) -> ToolResult:
         result, payload = await self._fetch_router_json(
-            "routers.gerrit_dashboard", "list_gerrit_changes",
+            "features.gerrit.api", "list_gerrit_changes",
             tool_name_for_error="gerrit_dashboard_changes",
             profile_id=str(params.get("profile_id") or ""),
             query=str(params.get("query") or ""),

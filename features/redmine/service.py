@@ -8,6 +8,7 @@ from foundation.tasks import SingleFlightTask
 
 from .agent import RedmineAgent
 from .repository import RedmineAgentDB
+from .users import load_redmine_user_map
 
 
 class RedmineService:
@@ -116,3 +117,7 @@ class RedmineService:
             "active_run_id": self.active_run_id,
             "last_result": last_result,
         }
+
+    def list_user_mappings(self) -> list[dict[str, Any]]:
+        """Return configured Redmine users through the public service API."""
+        return list(load_redmine_user_map() or [])

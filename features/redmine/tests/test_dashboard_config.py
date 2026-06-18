@@ -438,7 +438,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
 
     def test_gerrit_dashboard_config_has_runtime_safe_defaults(self):
         normalize_gerrit_dashboard_config = import_module(
-            "core.gerrit_dashboard_config"
+            "features.gerrit.config"
         ).normalize_gerrit_dashboard_config
 
         cfg = normalize_gerrit_dashboard_config({
@@ -470,7 +470,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
         self.assertEqual(cfg["dashboard_profiles"][0]["query"], "owner:self status:open")
 
     def test_gerrit_profile_helpers_add_people_and_departments(self):
-        module = import_module("core.gerrit_dashboard_config")
+        module = import_module("features.gerrit.config")
         add_gerrit_department_profile = module.add_gerrit_department_profile
         add_gerrit_personal_profile = module.add_gerrit_personal_profile
         assign_owner_to_gerrit_department = (
@@ -490,7 +490,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
         self.assertEqual(cfg["department_profiles"][-1]["owners"], ["a@example.com", "b@example.com"])
 
     def test_gerrit_personal_profile_can_be_assigned_to_department(self):
-        module = import_module("core.gerrit_dashboard_config")
+        module = import_module("features.gerrit.config")
         add_gerrit_department_profile = module.add_gerrit_department_profile
         add_gerrit_personal_profile = module.add_gerrit_personal_profile
         normalize_gerrit_dashboard_config = (
@@ -507,10 +507,10 @@ class RedmineDashboardConfigTests(unittest.TestCase):
 
     def test_gerrit_can_create_missing_department_before_adding_member(self):
         _ensure_gerrit_department_profile = import_module(
-            "routers.gerrit_dashboard"
+            "features.gerrit.api"
         )._ensure_gerrit_department_profile
         normalize_gerrit_dashboard_config = import_module(
-            "core.gerrit_dashboard_config"
+            "features.gerrit.config"
         ).normalize_gerrit_dashboard_config
 
         cfg = normalize_gerrit_dashboard_config({"personal_profiles": [], "department_profiles": []})
@@ -520,7 +520,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
         self.assertEqual(cfg["department_profiles"][-1]["name"], "系统二部")
 
     def test_gerrit_syncs_members_from_redmine_user_map_and_can_remove_owner(self):
-        module = import_module("core.gerrit_dashboard_config")
+        module = import_module("features.gerrit.config")
         normalize_gerrit_dashboard_config = (
             module.normalize_gerrit_dashboard_config
         )
@@ -550,7 +550,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
 
     def test_gerrit_chart_date_ranges_are_normalized(self):
         normalize_gerrit_dashboard_config = import_module(
-            "core.gerrit_dashboard_config"
+            "features.gerrit.config"
         ).normalize_gerrit_dashboard_config
 
         cfg = normalize_gerrit_dashboard_config({

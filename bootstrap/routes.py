@@ -9,10 +9,11 @@ from core.universal_ai import get_universal_analyzer
 from features.automation.api import configure_automation_service
 from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
+from features.gerrit.dependencies import configure_redmine_users_provider
+from features.gerrit.service import _query_gerrit_dual_mode
 from features.redmine.api import configure_redmine_service
 from features.reports.dependencies import configure_report_dependencies
 from routers import ALL_ROUTERS
-from routers.gerrit_dashboard import _query_gerrit_dual_mode
 from routers.system import init_templates
 from routers.tests import (
     _make_empty_suite_target,
@@ -30,6 +31,9 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             make_empty_suite_target=_make_empty_suite_target,
         )
         configure_redmine_service(services.redmine)
+        configure_redmine_users_provider(
+            services.redmine.list_user_mappings,
+        )
         profiles_path = (
             services.settings.project_root
             / 'configs/automation_profiles.json'
