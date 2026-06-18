@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
 from collections.abc import Iterable
+from datetime import date, datetime, timezone
 from typing import Any
+
+from foundation.dashboard_config import (
+    bounded_int as _bounded_int,
+)
+from foundation.dashboard_config import (
+    profile_id as _profile_id,
+)
 
 
 # Gerrit 分页查询每页大小上限。默认 500，可调高以减少翻页次数；
@@ -41,8 +48,6 @@ DEFAULT_GERRIT_DASHBOARD = {
         {"id": "all", "name": "全部部门", "owners": ["chaoqun.huang@rock-chips.com"]},
     ],
 }
-
-from core.dashboard_config_utils import bounded_int as _bounded_int, profile_id as _profile_id  # noqa: E402
 
 
 def normalize_gerrit_dashboard_config(raw: dict[str, Any] | None) -> dict[str, Any]:

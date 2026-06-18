@@ -451,13 +451,13 @@ class ConfigManager:
 
     def get_gerrit_dashboard_config(self) -> Dict[str, Any]:
         """Return normalized Gerrit dashboard configuration."""
-        from core.gerrit_dashboard_config import normalize_gerrit_dashboard_config
+        from features.gerrit.config import normalize_gerrit_dashboard_config
 
         return self._get_section('gerrit_dashboard', normalize_gerrit_dashboard_config)
 
     def save_gerrit_dashboard_config(self, dashboard_config: Dict[str, Any]) -> bool:
         """Save Gerrit dashboard settings to runtime config."""
-        from core.gerrit_dashboard_config import denormalize_gerrit_dashboard_config
+        from features.gerrit.config import denormalize_gerrit_dashboard_config
 
         return self._save_section('gerrit_dashboard', dashboard_config, denormalize_gerrit_dashboard_config)
 

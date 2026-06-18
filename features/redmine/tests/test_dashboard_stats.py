@@ -319,7 +319,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertIn('target="_blank">#', source)
 
     def test_gerrit_week_trend_click_uses_iso_week_start(self):
-        source = Path("routers/gerrit_dashboard.py").read_text(encoding="utf-8")
+        source = Path("features/gerrit/ui/page.html").read_text(encoding="utf-8")
         match = re.search(r"function utcDateText\(date\) \{.*?function trendLabelToDateRange\(granularity, label\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = match.group(0) + "\nconsole.log(JSON.stringify(trendLabelToDateRange('week', '2026-W24')));"
@@ -327,7 +327,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, '["2026-06-08","2026-06-15"]')
 
     def test_gerrit_trend_detail_title_displays_inclusive_end_date(self):
-        source = Path("routers/gerrit_dashboard.py").read_text(encoding="utf-8")
+        source = Path("features/gerrit/ui/page.html").read_text(encoding="utf-8")
         match = re.search(r"function utcDateText\(date\) \{.*?function displayTrendRange\(range\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = match.group(0) + "\nconsole.log(displayTrendRange(['2026-06-08', '2026-06-15']));"
@@ -335,7 +335,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, "2026-06-08 至 2026-06-14")
 
     def test_gerrit_trend_detail_uses_created_date_endpoint(self):
-        source = Path("routers/gerrit_dashboard.py").read_text(encoding="utf-8")
+        source = Path("features/gerrit/ui/page.html").read_text(encoding="utf-8")
         self.assertIn("/api/gerrit-dashboard/changes-by-date?", source)
         self.assertIn("owners: owners.join(',')", source)
         self.assertIn("scope: trendScope || currentTab || ''", source)
@@ -433,7 +433,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_gerrit_change_stats_group_statuses_and_trends(self):
         summarize_gerrit_changes = import_module(
-            "core.gerrit_dashboard_config"
+            "features.gerrit.config"
         ).summarize_gerrit_changes
 
         changes = [
@@ -487,7 +487,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_gerrit_created_date_detail_filter_matches_trend_buckets(self):
         filter_gerrit_changes_by_created_date = import_module(
-            "core.gerrit_dashboard_config"
+            "features.gerrit.config"
         ).filter_gerrit_changes_by_created_date
 
         changes = [
@@ -513,7 +513,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_gerrit_department_stats_merge_members(self):
         summarize_gerrit_department_results = import_module(
-            "core.gerrit_dashboard_config"
+            "features.gerrit.config"
         ).summarize_gerrit_department_results
 
         data = summarize_gerrit_department_results([
@@ -535,7 +535,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_gerrit_ssh_query_removes_status_any_and_adds_start(self):
         _query_for_ssh = import_module(
-            "routers.gerrit_dashboard"
+            "features.gerrit.service"
         )._query_for_ssh
 
         self.assertEqual(
@@ -545,7 +545,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_gerrit_effective_limits_support_unbounded_history(self):
         _effective_history_limit = import_module(
-            "routers.gerrit_dashboard"
+            "features.gerrit.api"
         )._effective_history_limit
 
         self.assertIsNone(_effective_history_limit({"max_history_changes": 0, "query_limit": 500}, {"max_history_changes": 0}))
@@ -553,7 +553,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_gerrit_all_department_uses_all_department_owners(self):
         _owners_for_department_profile = import_module(
-            "routers.gerrit_dashboard"
+            "features.gerrit.api"
         )._owners_for_department_profile
 
         cfg = {

@@ -79,9 +79,9 @@ class FrontendIntegrityTests(unittest.TestCase):
                     "features/redmine/ui/page.js",
                 ],
             ),
-            ("gerrit", ["routers/gerrit_dashboard.py"]),
-            ("update-monitor", ["routers/gms_update_monitor.py"]),
-            ("mainline", ["routers/mainline_known_issues.py"]),
+            ("gerrit", ["features/gerrit/ui/page.html"]),
+            ("update-monitor", ["features/system/update_monitor/ui/page.html"]),
+            ("mainline", ["features/system/mainline_issues/ui/page.html"]),
             (
                 "automation",
                 [
@@ -107,7 +107,7 @@ class FrontendIntegrityTests(unittest.TestCase):
                     "features/redmine/ui/page.js",
                 ],
             ),
-            ("gerrit", ["routers/gerrit_dashboard.py"]),
+            ("gerrit", ["features/gerrit/ui/page.html"]),
         ]:
             with self.subTest(page=label):
                 text = "\n".join(read_text(path) for path in paths)
@@ -121,7 +121,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("redmine-agent-notification", main_text)
         self.assertIn("gms-update-monitor-notification", main_text)
 
-        for path in ["features/redmine/ui/page.js", "routers/gerrit_dashboard.py", "routers/gms_update_monitor.py"]:
+        for path in ["features/redmine/ui/page.js", "features/gerrit/ui/page.html", "features/system/update_monitor/ui/page.html"]:
             with self.subTest(path=path):
                 text = read_text(path)
                 self.assertIn("function notifyUser", text)
@@ -135,9 +135,9 @@ class FrontendIntegrityTests(unittest.TestCase):
             "templates/index_fastapi.html",
             "features/redmine/ui/page.html",
             "features/redmine/ui/page.js",
-            "routers/gerrit_dashboard.py",
-            "routers/gms_update_monitor.py",
-            "routers/mainline_known_issues.py",
+            "features/gerrit/ui/page.html",
+            "features/system/update_monitor/ui/page.html",
+            "features/system/mainline_issues/ui/page.html",
             "features/automation/ui/page.html",
             "features/automation/ui/page.js",
             *[str(path) for path in Path("static/js").glob("*.js")],

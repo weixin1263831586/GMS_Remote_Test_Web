@@ -89,9 +89,9 @@ def ui_source_groups() -> dict[str, list[Path]]:
             ]
         ),
         'redmine-agent': sorted(redmine_ui.glob('*.*')),
-        'gerrit-dashboard': [ROOT / 'routers/gerrit_dashboard.py'],
-        'gms-update-monitor': [ROOT / 'routers/gms_update_monitor.py'],
-        'mainline-known-issues': [ROOT / 'routers/mainline_known_issues.py'],
+        'gerrit-dashboard': [ROOT / 'features/gerrit/ui/page.html'],
+        'gms-update-monitor': [ROOT / 'features/system/update_monitor/ui/page.html'],
+        'mainline-known-issues': [ROOT / 'features/system/mainline_issues/ui/page.html'],
         'automation': (
             sorted(automation_ui.glob('*.*'))
             if automation_ui.exists()

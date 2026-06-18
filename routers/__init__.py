@@ -1,8 +1,11 @@
 """GMS Remote Test - API 路由注册"""
 
 from features.automation import api as automation
+from features.gerrit import api as gerrit_dashboard
 from features.redmine import api as redmine
 from features.reports import api as reports
+from features.system.mainline_issues import api as mainline_known_issues
+from features.system.update_monitor import api as gms_update_monitor
 
 from . import (
     agent,
@@ -13,10 +16,7 @@ from . import (
     desktop,
     devices,
     firmware,
-    gerrit_dashboard,
-    gms_update_monitor,
     integrations,
-    mainline_known_issues,
     notifications,
     system,
     terminal,
