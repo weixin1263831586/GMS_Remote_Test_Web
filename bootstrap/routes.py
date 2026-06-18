@@ -3,12 +3,6 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from core.api_help import generate_help_or_continue
-from core.apk import (
-    _cleanup_files,
-    _create_apk_task,
-    _normalize_apk_filename,
-    _safe_join,
-)
 from core.clients import (
     get_client_id_from_request,
     get_client_ip,
@@ -21,8 +15,15 @@ from core.file_utils import FileUtils
 from core.notifications import safe_websocket_send, store_notification
 from core.settings import (
     APK_MAX_FILE_SIZE,
+    APK_MAX_SOURCE_FILE_SIZE,
+    APK_MAX_TASKS,
     APK_UPLOAD_DIR,
     DEVICE_CACHE_TTL,
+    GSI_PROGRESS_INCREMENT,
+    GSI_PROGRESS_MAX,
+    GSI_PROGRESS_POLL_INTERVAL,
+    JADX_PATH,
+    JADX_TIMEOUT,
     MAX_LOG_ENTRIES,
     PROJECT_ROOT,
 )
@@ -34,6 +35,13 @@ from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
 from features.devices.dependencies import configure_device_dependencies
 from features.devices.network import run_local_shell_command
+from features.firmware.apk import (
+    _cleanup_files,
+    _create_apk_task,
+    _normalize_apk_filename,
+    _safe_join,
+)
+from features.firmware.dependencies import configure_firmware_dependencies
 from features.gerrit.dependencies import configure_redmine_users_provider
 from features.gerrit.service import _query_gerrit_dual_mode
 from features.redmine.api import configure_redmine_service
@@ -52,10 +60,35 @@ from workflows.device_test_execution import (
     acquire_test_devices,
     release_test_devices,
 )
+from workflows.firmware_device import (
+    lock_firmware_devices,
+    release_firmware_devices,
+)
 
 
 def include_routes(app: FastAPI, templates, services=None) -> None:
     if services is not None:
+        configure_firmware_dependencies(
+            config_manager=config_manager,
+            ssh_manager=ssh_manager,
+            global_state=global_state,
+            safe_websocket_send=safe_websocket_send,
+            store_notification=store_notification,
+            generate_help_or_continue=generate_help_or_continue,
+            get_client_id_from_request=get_client_id_from_request,
+            project_root=PROJECT_ROOT,
+            apk_upload_dir=APK_UPLOAD_DIR,
+            apk_max_tasks=APK_MAX_TASKS,
+            apk_max_file_size=APK_MAX_FILE_SIZE,
+            apk_max_source_file_size=APK_MAX_SOURCE_FILE_SIZE,
+            jadx_path=JADX_PATH,
+            jadx_timeout=JADX_TIMEOUT,
+            gsi_progress_increment=GSI_PROGRESS_INCREMENT,
+            gsi_progress_max=GSI_PROGRESS_MAX,
+            gsi_progress_poll_interval=GSI_PROGRESS_POLL_INTERVAL,
+            lock_firmware_devices=lock_firmware_devices,
+            release_firmware_devices=release_firmware_devices,
+        )
         configure_device_dependencies(
             ssh_manager=ssh_manager,
             config_manager=config_manager,

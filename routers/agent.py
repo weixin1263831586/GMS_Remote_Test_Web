@@ -493,7 +493,7 @@ def _extract_symbols_for_apk_lookup(diagnosis: dict[str, Any], failure: dict[str
 
 
 async def _wait_for_apk_analysis(task_id: str, timeout_seconds: int = 180) -> dict[str, Any] | None:
-    from routers.apk import get_apk_status
+    from features.firmware.apk_api import get_apk_status
 
     deadline = time.time() + timeout_seconds
     last_status = None
@@ -511,7 +511,7 @@ async def _wait_for_apk_analysis(task_id: str, timeout_seconds: int = 180) -> di
 
 async def _read_apk_source_snippet(task_id: str, diagnosis: dict[str, Any], failure: dict[str, Any]) -> dict[str, Any] | None:
     """Find a likely decompiled source file and read a short snippet."""
-    from routers.apk import find_apk_symbol_definition, get_apk_source
+    from features.firmware.apk_api import find_apk_symbol_definition, get_apk_source
 
     symbols = _extract_symbols_for_apk_lookup(diagnosis, failure)
     definition = None
@@ -545,8 +545,8 @@ async def _read_apk_source_snippet(task_id: str, diagnosis: dict[str, Any], fail
 
 async def _run_apk_source_analysis(session: dict[str, Any], plan: dict[str, Any], diagnosis: dict[str, Any], failure: dict[str, Any]) -> dict[str, Any] | None:
     """Import a suite APK/JAR, decompile it, and read a likely source snippet."""
+    from features.firmware.apk_api import analyze_apk
     from features.test_execution.api import create_suite_apk_analysis_task
-    from routers.apk import analyze_apk
 
     suite_target = diagnosis.get("suite_target") or {}
     artifact = suite_target.get("artifact") or {}

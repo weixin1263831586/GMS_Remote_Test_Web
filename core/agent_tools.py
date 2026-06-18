@@ -135,7 +135,7 @@ _CATEGORY_MODULE_MAP: dict[str, str] = {
     "device": "devices",      # category="device" → features.devices.api
     "test": "tests",          # category="test" → features.test_execution.api
     "report": "reports",      # category="report" → features.reports.api
-    "burn": "firmware",       # category="burn" → routers.firmware
+    "burn": "firmware",       # category="burn" → features.firmware.firmware_api
     "ssh": "integrations",    # category="ssh" → routers.integrations
     "vpn": "integrations",    # category="vpn" → routers.integrations
     "usbip": "integrations",  # category="usbip" → routers.integrations
@@ -213,10 +213,10 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/files/progress": "routers.assets:get_upload_progress",
     "/api/files/list": "routers.assets:list_files",
     "/api/opengrok/search": "routers.assets:search_opengrok",
-    "/api/burn/upload-progress": "routers.firmware:get_firmware_upload_progress",
-    "/api/burn/firmware": "routers.firmware:burn_firmware",
-    "/api/burn/gsi": "routers.firmware:burn_gsi",
-    "/api/burn/serial": "routers.firmware:burn_sn",
+    "/api/burn/upload-progress": "features.firmware.firmware_api:get_firmware_upload_progress",
+    "/api/burn/firmware": "features.firmware.firmware_api:burn_firmware",
+    "/api/burn/gsi": "features.firmware.firmware_api:burn_gsi",
+    "/api/burn/serial": "features.firmware.firmware_api:burn_sn",
     "/api/terminal/open": "routers.terminal:get_ssh_terminal_info",
     "/api/terminal/push": "routers.terminal:upload_file",
     "/api/system/skills": "routers.system:download_skills_zip",
@@ -251,13 +251,13 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/config/redmine": "features.reports.api:get_redmine_config",
     "/api/tailscale/status": "routers.config:get_tailscale_status",
     # --- 补充：APK（路径参数 task_id 作为函数参数） ---
-    "/api/apk/status/{task_id}": "routers.apk:get_apk_status",
-    "/api/apk/manifest/{task_id}": "routers.apk:get_apk_manifest",
-    "/api/apk/permissions/{task_id}": "routers.apk:get_apk_permissions",
-    "/api/apk/source/{task_id}": "routers.apk:get_apk_source",
-    "/api/apk/search/{task_id}": "routers.apk:search_apk_source_files",
-    "/api/apk/definition/{task_id}": "routers.apk:find_apk_symbol_definition",
-    "/api/apk/analyze/{task_id}": "routers.apk:analyze_apk",
+    "/api/apk/status/{task_id}": "features.firmware.apk_api:get_apk_status",
+    "/api/apk/manifest/{task_id}": "features.firmware.apk_api:get_apk_manifest",
+    "/api/apk/permissions/{task_id}": "features.firmware.apk_api:get_apk_permissions",
+    "/api/apk/source/{task_id}": "features.firmware.apk_api:get_apk_source",
+    "/api/apk/search/{task_id}": "features.firmware.apk_api:search_apk_source_files",
+    "/api/apk/definition/{task_id}": "features.firmware.apk_api:find_apk_symbol_definition",
+    "/api/apk/analyze/{task_id}": "features.firmware.apk_api:analyze_apk",
     # --- 补充：测试套件 ---
     "/api/test/parse-args": "features.test_execution.api:parse_test_args",
     "/api/test/suites/files": "features.test_execution.api:list_suite_files",
@@ -599,7 +599,7 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             is_readonly=False,
             is_dangerous=False,
             requires_confirm=False,
-            executor_ref="routers.apk:upload_apk",
+            executor_ref="features.firmware.apk_api:upload_apk",
             response_type="detail",
         ),
         AgentTool(
@@ -613,7 +613,7 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             is_readonly=True,
             is_dangerous=False,
             requires_confirm=False,
-            executor_ref="routers.apk:list_apk_tasks",
+            executor_ref="features.firmware.apk_api:list_apk_tasks",
             response_type="list",
         ),
         AgentTool(
@@ -627,7 +627,7 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             is_readonly=True,
             is_dangerous=False,
             requires_confirm=False,
-            executor_ref="routers.apk:get_apk_status",
+            executor_ref="features.firmware.apk_api:get_apk_status",
             response_type="status",
         ),
         AgentTool(

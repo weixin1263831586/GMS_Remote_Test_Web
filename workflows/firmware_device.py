@@ -52,3 +52,10 @@ async def lock_firmware_devices(
 
     await broadcast_device_lock_update(locked_devices)
     return locked_devices, None
+
+
+async def release_firmware_devices(
+    client_id: str,
+    devices: list[str],
+) -> None:
+    await release_device_locks(client_id, devices)

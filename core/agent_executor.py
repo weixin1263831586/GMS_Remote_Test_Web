@@ -636,7 +636,7 @@ class ActionExecutor:
 
     async def _query_apk_tasks(self, session, request, params) -> ToolResult:
         """查询 APK 反编译任务。"""
-        result, payload = await self._fetch_router_json("routers.apk", "list_apk_tasks")
+        result, payload = await self._fetch_router_json("features.firmware.apk_api", "list_apk_tasks")
         if result is not None:
             return result
         tasks = (payload.get("data") or {}).get("tasks", [])

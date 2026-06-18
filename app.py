@@ -29,12 +29,6 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.api_help import generate_help_or_continue
-from core.apk import (
-    _cleanup_files,
-    _create_apk_task,
-    _normalize_apk_filename,
-    _safe_join,
-)
 from core.clients import (
     get_client_id_from_request,
     get_client_ip,
@@ -48,11 +42,18 @@ from core.security_audit import classify_request_source
 from core.security_audit_utils import should_audit_request, summarize_audit_request, summarize_audit_response
 from core.settings import (
     APK_MAX_FILE_SIZE,
+    APK_MAX_SOURCE_FILE_SIZE,
+    APK_MAX_TASKS,
     APK_UPLOAD_DIR,
     CLEANUP_INTERVAL_SECONDS,
     DEVICE_CACHE_TTL,
     FORWARDED_ALLOW_IPS,
     GMS_ENV,
+    GSI_PROGRESS_INCREMENT,
+    GSI_PROGRESS_MAX,
+    GSI_PROGRESS_POLL_INTERVAL,
+    JADX_PATH,
+    JADX_TIMEOUT,
     MAX_LOG_ENTRIES,
     PROJECT_ROOT,
     PROXY_HEADERS_ENABLED,
@@ -71,6 +72,13 @@ from features.devices.monitor import (
 )
 from features.devices.network import run_local_shell_command
 from features.devices.reconnect import stop_usbip_reconnect_tasks
+from features.firmware.apk import (
+    _cleanup_files,
+    _create_apk_task,
+    _normalize_apk_filename,
+    _safe_join,
+)
+from features.firmware.dependencies import configure_firmware_dependencies
 from features.redmine.api import redmine_service
 from features.redmine.scheduler import start_redmine_agent_scheduler, stop_redmine_agent_scheduler
 from features.test_execution.dependencies import (
@@ -83,8 +91,33 @@ from workflows.device_test_execution import (
     acquire_test_devices,
     release_test_devices,
 )
+from workflows.firmware_device import (
+    lock_firmware_devices,
+    release_firmware_devices,
+)
 
 
+configure_firmware_dependencies(
+    config_manager=config_manager,
+    ssh_manager=ssh_manager,
+    global_state=global_state,
+    safe_websocket_send=safe_websocket_send,
+    store_notification=store_notification,
+    generate_help_or_continue=generate_help_or_continue,
+    get_client_id_from_request=get_client_id_from_request,
+    project_root=PROJECT_ROOT,
+    apk_upload_dir=APK_UPLOAD_DIR,
+    apk_max_tasks=APK_MAX_TASKS,
+    apk_max_file_size=APK_MAX_FILE_SIZE,
+    apk_max_source_file_size=APK_MAX_SOURCE_FILE_SIZE,
+    jadx_path=JADX_PATH,
+    jadx_timeout=JADX_TIMEOUT,
+    gsi_progress_increment=GSI_PROGRESS_INCREMENT,
+    gsi_progress_max=GSI_PROGRESS_MAX,
+    gsi_progress_poll_interval=GSI_PROGRESS_POLL_INTERVAL,
+    lock_firmware_devices=lock_firmware_devices,
+    release_firmware_devices=release_firmware_devices,
+)
 configure_device_dependencies(
     ssh_manager=ssh_manager,
     config_manager=config_manager,

@@ -1,40 +1,37 @@
 """APK router - APK upload, analysis, decompilation, and source browsing APIs."""
 
+import asyncio
+import contextlib
+import logging
 import os
 import re
 import shutil
-import asyncio
-import logging
 import xml.etree.ElementTree as ET
-from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import StreamingResponse
 
-from core.apk import (
-    _create_apk_task,
-    _get_apk_upload_lock,
-    _safe_join,
-    _normalize_apk_filename,
-    _normalize_apk_task_id,
-    _cleanup_files,
-    _get_apk_task,
-    _read_manifest_xml,
-    _build_apk_symbol_index,
-    _score_apk_symbol_candidate,
-    _run_jadx_analysis,
+from features.firmware.apk import (
     ANDROID_NS,
     JAVA_IDENTIFIER_RE,
+    _build_apk_symbol_index,
+    _cleanup_files,
+    _create_apk_task,
+    _get_apk_task,
+    _get_apk_upload_lock,
+    _normalize_apk_filename,
+    _normalize_apk_task_id,
+    _read_manifest_xml,
+    _run_jadx_analysis,
+    _safe_join,
+    _score_apk_symbol_candidate,
 )
-from core.settings import (
-    APK_MAX_FILE_SIZE,
-    APK_MAX_SOURCE_FILE_SIZE,
-    APK_UPLOAD_DIR,
-)
-from core.state import global_state
-from core.api_response import ApiResponse
-from core.error_handling import handle_api_errors
-from core.upload_utils import save_upload_to_path, merge_files_to_path
+from foundation.errors import handle_api_errors
+from foundation.uploads import merge_files_to_path, save_upload_to_path
+
+from . import runtime
+from .responses import ApiResponse
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +41,11 @@ router = APIRouter()
 @router.post("/api/apk/upload")
 @handle_api_errors
 async def upload_apk(
-    file: Optional[UploadFile] = File(None),
-    chunk_index: Optional[int] = Form(None),
-    total_chunks: Optional[int] = Form(None),
-    upload_id: Optional[str] = Form(None),
-    file_name: Optional[str] = Form(None),
+    file: UploadFile | None = File(None),
+    chunk_index: int | None = Form(None),
+    total_chunks: int | None = Form(None),
+    upload_id: str | None = Form(None),
+    file_name: str | None = Form(None),
 ):
     """Upload APK file for analysis."""
     if not file:
@@ -57,7 +54,7 @@ async def upload_apk(
     try:
         filename = _normalize_apk_filename(file_name or file.filename)
         task_id = _normalize_apk_task_id(upload_id)
-        task_dir = _safe_join(APK_UPLOAD_DIR, task_id)
+        task_dir = _safe_join(runtime.apk_upload_dir, task_id)
         apk_path = _safe_join(task_dir, filename)
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)
@@ -73,7 +70,7 @@ async def upload_apk(
 
         chunk_path = _safe_join(task_dir, f"{filename}.part{chunk_index}")
         try:
-            await save_upload_to_path(file, chunk_path, APK_MAX_FILE_SIZE)
+            await save_upload_to_path(file, chunk_path, runtime.apk_max_file_size)
         except ValueError as e:
             _cleanup_files([chunk_path])
             return ApiResponse.error(str(e), status_code=400)
@@ -93,23 +90,23 @@ async def upload_apk(
                 })
 
             total_size = sum(os.path.getsize(path) for path in chunk_paths)
-            if total_size > APK_MAX_FILE_SIZE:
-                _cleanup_files(chunk_paths + [apk_path])
-                return ApiResponse.error(f"File too large, max {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
+            if total_size > runtime.apk_max_file_size:
+                _cleanup_files([*chunk_paths, apk_path])
+                return ApiResponse.error(f"File too large, max {runtime.apk_max_file_size // (1024*1024)}MB", status_code=400)
 
             await asyncio.to_thread(merge_files_to_path, chunk_paths, apk_path)
             _cleanup_files(chunk_paths)
 
             file_size = os.path.getsize(apk_path)
-            if file_size > APK_MAX_FILE_SIZE:
+            if file_size > runtime.apk_max_file_size:
                 _cleanup_files([apk_path])
-                return ApiResponse.error(f"File too large, max {APK_MAX_FILE_SIZE // (1024*1024)}MB", status_code=400)
+                return ApiResponse.error(f"File too large, max {runtime.apk_max_file_size // (1024*1024)}MB", status_code=400)
 
             _create_apk_task(task_id, apk_path, filename)
             return ApiResponse.success({"task_id": task_id, "filename": filename, "size": file_size, "uploaded": True})
     else:
         try:
-            file_size = await save_upload_to_path(file, apk_path, APK_MAX_FILE_SIZE)
+            file_size = await save_upload_to_path(file, apk_path, runtime.apk_max_file_size)
         except ValueError as e:
             _cleanup_files([apk_path])
             return ApiResponse.error(str(e), status_code=400)
@@ -139,15 +136,15 @@ async def analyze_apk(task_id: str):
     if not os.path.exists(apk_path):
         return ApiResponse.error("APK file not found, please re-upload", status_code=404)
 
-    output_dir = os.path.join(APK_UPLOAD_DIR, task_id, "jadx_output")
+    output_dir = os.path.join(runtime.apk_upload_dir, task_id, "jadx_output")
 
-    with global_state.apk_analysis_tasks_lock:
-        t = global_state.apk_analysis_tasks[task_id]
+    with runtime.global_state.apk_analysis_tasks_lock:
+        t = runtime.global_state.apk_analysis_tasks[task_id]
         t.update({"status": "analyzing", "progress": 5, "output_dir": output_dir, "error": None})
 
     task = asyncio.create_task(_run_jadx_analysis(task_id, apk_path, output_dir))
-    global_state.background_tasks.add(task)
-    task.add_done_callback(global_state.background_tasks.discard)
+    runtime.global_state.background_tasks.add(task)
+    task.add_done_callback(runtime.global_state.background_tasks.discard)
     return ApiResponse.success({"task_id": task_id, "status": "analyzing"})
 
 
@@ -252,11 +249,11 @@ async def get_apk_source(task_id: str, path: str = "", view: bool = False):
         if not os.path.isfile(file_path):
             return ApiResponse.error("File not found", status_code=404)
         file_size = os.path.getsize(file_path)
-        if file_size > APK_MAX_SOURCE_FILE_SIZE:
-            return ApiResponse.error(f"File too large ({file_size // 1024}KB), exceeds {APK_MAX_SOURCE_FILE_SIZE // (1024*1024)}MB limit", status_code=400)
+        if file_size > runtime.apk_max_source_file_size:
+            return ApiResponse.error(f"File too large ({file_size // 1024}KB), exceeds {runtime.apk_max_source_file_size // (1024*1024)}MB limit", status_code=400)
 
         try:
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            with open(file_path, encoding="utf-8", errors="replace") as f:
                 content = f.read()
             return ApiResponse.success({"path": path, "content": content, "size": file_size})
         except Exception as e:
@@ -355,7 +352,7 @@ async def download_apk_source(task_id: str):
 
     filename = task.get("filename", "app.apk").replace(".apk", "_decompiled")
     zip_path = shutil.make_archive(
-        os.path.join(APK_UPLOAD_DIR, task_id, filename),
+        os.path.join(runtime.apk_upload_dir, task_id, filename),
         "zip",
         output_dir,
     )
@@ -363,10 +360,8 @@ async def download_apk_source(task_id: str):
     def iterfile():
         with open(zip_path, "rb") as f:
             yield from f
-        try:
+        with contextlib.suppress(Exception):
             os.remove(zip_path)
-        except Exception:
-            pass
 
     return StreamingResponse(
         iterfile(),
@@ -379,7 +374,7 @@ async def download_apk_source(task_id: str):
 @handle_api_errors
 async def list_apk_tasks():
     """List all APK analysis tasks."""
-    with global_state.apk_analysis_tasks_lock:
+    with runtime.global_state.apk_analysis_tasks_lock:
         tasks = [
             {
                 "task_id": tid,
@@ -389,7 +384,7 @@ async def list_apk_tasks():
                 "timestamp": task.get("timestamp", 0),
                 "error": task.get("error"),
             }
-            for tid, task in global_state.apk_analysis_tasks.items()
+            for tid, task in runtime.global_state.apk_analysis_tasks.items()
         ]
 
     tasks.sort(key=lambda t: t["timestamp"], reverse=True)
@@ -400,14 +395,14 @@ async def list_apk_tasks():
 @handle_api_errors
 async def delete_apk_task(task_id: str):
     """Delete APK analysis task and its files."""
-    with global_state.apk_analysis_tasks_lock:
-        if task_id not in global_state.apk_analysis_tasks:
+    with runtime.global_state.apk_analysis_tasks_lock:
+        if task_id not in runtime.global_state.apk_analysis_tasks:
             return ApiResponse.error("Task not found", status_code=404)
-        global_state.apk_analysis_tasks.pop(task_id)
+        runtime.global_state.apk_analysis_tasks.pop(task_id)
 
-    task_dir = os.path.join(APK_UPLOAD_DIR, task_id)
+    task_dir = os.path.join(runtime.apk_upload_dir, task_id)
     await asyncio.to_thread(shutil.rmtree, task_dir, ignore_errors=True)
-    with global_state.apk_upload_locks_lock:
-        global_state.apk_upload_locks.pop(task_id, None)
+    with runtime.global_state.apk_upload_locks_lock:
+        runtime.global_state.apk_upload_locks.pop(task_id, None)
 
     return ApiResponse.success(message="Task deleted")
