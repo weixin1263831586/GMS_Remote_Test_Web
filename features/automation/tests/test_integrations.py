@@ -38,7 +38,7 @@ class FakeSession:
 
 class JenkinsClientTests(unittest.TestCase):
     def test_trigger_build_uses_jenkins_queue_location(self):
-        from core.automation.jenkins_client import JenkinsClient
+        from features.automation.jenkins_client import JenkinsClient
 
         session = FakeSession()
         session.queue(FakeResponse(json_data={"crumbRequestField": "Jenkins-Crumb", "crumb": "abc"}))
@@ -58,7 +58,7 @@ class JenkinsClientTests(unittest.TestCase):
         self.assertIn("/job/GMS_JOB/buildWithParameters", session.calls[1][1])
 
     def test_poll_build_and_select_artifact(self):
-        from core.automation.jenkins_client import JenkinsClient
+        from features.automation.jenkins_client import JenkinsClient
 
         session = FakeSession()
         session.queue(FakeResponse(json_data={
@@ -82,7 +82,7 @@ class JenkinsClientTests(unittest.TestCase):
 
 class GerritTriggerTests(unittest.TestCase):
     def test_normalize_patchset_created_event_and_match_profile(self):
-        from core.automation.gerrit_trigger import match_profiles, normalize_gerrit_event
+        from features.automation.gerrit_trigger import match_profiles, normalize_gerrit_event
 
         event = normalize_gerrit_event({
             "type": "patchset-created",
@@ -110,7 +110,7 @@ class GerritTriggerTests(unittest.TestCase):
 
 class HttpAutomationExecutorTests(unittest.TestCase):
     def test_http_executor_uses_embedded_jenkins_config_and_selects_artifact(self):
-        from core.automation.executors import HttpAutomationExecutor
+        from features.automation.executors import HttpAutomationExecutor
 
         executor = HttpAutomationExecutor(base_url="http://127.0.0.1:5001")
         run = {
@@ -153,7 +153,7 @@ class HttpAutomationExecutorTests(unittest.TestCase):
             def select_artifact(build, artifact_pattern):
                 return {"success": True, "url": "http://jenkins/job/GMS_BUILD/12/artifact/out/update.img"}
 
-        import core.automation.executors as executors
+        import features.automation.executors as executors
         old_client = executors.JenkinsClient
         executors.JenkinsClient = FakeJenkinsClient
         try:
@@ -168,7 +168,7 @@ class HttpAutomationExecutorTests(unittest.TestCase):
         self.assertEqual(polled["artifact_url"], "http://jenkins/job/GMS_BUILD/12/artifact/out/update.img")
 
     def test_http_executor_calls_existing_burn_and_test_apis(self):
-        from core.automation.executors import HttpAutomationExecutor
+        from features.automation.executors import HttpAutomationExecutor
 
         session = FakeSession()
         session.queue(FakeResponse(json_data={"success": True, "message": "burn ok"}))

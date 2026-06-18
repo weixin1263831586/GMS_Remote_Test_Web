@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 from urllib.parse import quote, urljoin
 
 import requests
 
 
 class JenkinsClient:
-    def __init__(self, config: Dict[str, Any], session: Optional[Any] = None):
+    def __init__(self, config: dict[str, Any], session: Any | None = None):
         self.config = config or {}
         self.base_url = str(self.config.get("base_url") or "").rstrip("/") + "/"
         self.session = session or requests.Session()
@@ -25,7 +25,7 @@ class JenkinsClient:
         job_path = "/".join(f"job/{part}" for part in parts)
         return urljoin(self.base_url, f"{job_path}/{suffix.lstrip('/')}")
 
-    def _crumb_headers(self) -> Dict[str, str]:
+    def _crumb_headers(self) -> dict[str, str]:
         if self.config.get("crumb", True) is False:
             return {}
         try:
@@ -42,7 +42,7 @@ class JenkinsClient:
             return {}
         return {}
 
-    def trigger_build(self, job_name: str, parameters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def trigger_build(self, job_name: str, parameters: dict[str, Any] | None = None) -> dict[str, Any]:
         parameters = parameters or {}
         suffix = "buildWithParameters" if parameters else "build"
         url = self._job_url(job_name, suffix)
@@ -56,7 +56,7 @@ class JenkinsClient:
             "status_code": response.status_code,
         }
 
-    def get_queue_item(self, queue_url: str) -> Dict[str, Any]:
+    def get_queue_item(self, queue_url: str) -> dict[str, Any]:
         response = self.session.get(urljoin(queue_url.rstrip("/") + "/", "api/json"), timeout=20)
         response.raise_for_status()
         data = response.json()
@@ -70,7 +70,7 @@ class JenkinsClient:
             "raw": data,
         }
 
-    def get_build(self, job_name: str, build_number: str | int) -> Dict[str, Any]:
+    def get_build(self, job_name: str, build_number: str | int) -> dict[str, Any]:
         response = self.session.get(self._job_url(job_name, f"{build_number}/api/json"), timeout=20)
         response.raise_for_status()
         data = response.json()
@@ -86,7 +86,7 @@ class JenkinsClient:
         }
 
     @staticmethod
-    def select_artifact(build: Dict[str, Any], artifact_pattern: str) -> Dict[str, Any]:
+    def select_artifact(build: dict[str, Any], artifact_pattern: str) -> dict[str, Any]:
         pattern = re.compile(artifact_pattern or r".*")
         build_url = str(build.get("url") or "").rstrip("/") + "/"
         for artifact in build.get("artifacts") or []:

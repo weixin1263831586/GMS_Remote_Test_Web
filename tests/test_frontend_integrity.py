@@ -71,15 +71,21 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertEqual(missing, [])
 
     def test_embedded_dashboard_inline_handlers_resolve_locally(self):
-        for path in [
-            "routers/redmine_agent.py",
-            "routers/gerrit_dashboard.py",
-            "routers/gms_update_monitor.py",
-            "routers/mainline_known_issues.py",
-            "routers/automation.py",
+        for label, paths in [
+            ("redmine", ["routers/redmine_agent.py"]),
+            ("gerrit", ["routers/gerrit_dashboard.py"]),
+            ("update-monitor", ["routers/gms_update_monitor.py"]),
+            ("mainline", ["routers/mainline_known_issues.py"]),
+            (
+                "automation",
+                [
+                    "features/automation/ui/page.html",
+                    "features/automation/ui/page.js",
+                ],
+            ),
         ]:
-            with self.subTest(path=path):
-                text = read_text(path)
+            with self.subTest(page=label):
+                text = "\n".join(read_text(path) for path in paths)
                 funcs = declared_functions(text)
                 missing = sorted({f"{name}: {body}" for name, body in inline_handler_calls(text) if name not in funcs})
 
@@ -119,7 +125,8 @@ class FrontendIntegrityTests(unittest.TestCase):
             "routers/gerrit_dashboard.py",
             "routers/gms_update_monitor.py",
             "routers/mainline_known_issues.py",
-            "routers/automation.py",
+            "features/automation/ui/page.html",
+            "features/automation/ui/page.js",
             *[str(path) for path in Path("static/js").glob("*.js")],
         ]
         for path in checked_paths:

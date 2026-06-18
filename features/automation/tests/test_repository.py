@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 
 class AutomationModelTests(unittest.TestCase):
     def test_manual_run_request_defaults_to_queued_manual_source(self):
-        from core.automation.models import AutomationRunCreateRequest, RUN_STATUS_QUEUED
+        from features.automation.models import RUN_STATUS_QUEUED, AutomationRunCreateRequest
 
         req = AutomationRunCreateRequest(
             profile_id="manual-smoke",
@@ -29,8 +29,8 @@ class AutomationModelTests(unittest.TestCase):
 
 class AutomationStoreTests(unittest.TestCase):
     def test_store_creates_run_and_appends_events(self):
-        from core.automation.models import AutomationRunCreateRequest
-        from core.automation.store import AutomationStore
+        from features.automation.models import AutomationRunCreateRequest
+        from features.automation.repository import AutomationStore
 
         with TemporaryDirectory() as tmp:
             store = AutomationStore(Path(tmp) / "automation.sqlite3")
@@ -50,8 +50,8 @@ class AutomationStoreTests(unittest.TestCase):
             self.assertEqual(store.list_events("ats_test_001")[0]["message"], "Run queued")
 
     def test_store_updates_status_and_lists_runs_newest_first(self):
-        from core.automation.models import AutomationRunCreateRequest
-        from core.automation.store import AutomationStore
+        from features.automation.models import AutomationRunCreateRequest
+        from features.automation.repository import AutomationStore
 
         with TemporaryDirectory() as tmp:
             store = AutomationStore(Path(tmp) / "automation.sqlite3")
@@ -64,8 +64,8 @@ class AutomationStoreTests(unittest.TestCase):
             self.assertEqual([run["id"] for run in store.list_runs(limit=10)], ["run_2", "run_1"])
 
     def test_store_can_find_run_by_source_key(self):
-        from core.automation.models import AutomationRunCreateRequest
-        from core.automation.store import AutomationStore
+        from features.automation.models import AutomationRunCreateRequest
+        from features.automation.repository import AutomationStore
 
         with TemporaryDirectory() as tmp:
             store = AutomationStore(Path(tmp) / "automation.sqlite3")
@@ -82,7 +82,7 @@ class AutomationStoreTests(unittest.TestCase):
 
 class AutomationProfileTests(unittest.TestCase):
     def test_profile_loader_reads_enabled_profiles(self):
-        from core.automation.profiles import load_profiles
+        from features.automation.profiles import load_profiles
 
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "profiles.json"
@@ -98,7 +98,7 @@ class AutomationProfileTests(unittest.TestCase):
             self.assertEqual([profile["id"] for profile in profiles], ["p1"])
 
     def test_profile_loader_can_save_and_update_profiles(self):
-        from core.automation.profiles import load_profiles, save_profiles, upsert_profile
+        from features.automation.profiles import load_profiles, save_profiles, upsert_profile
 
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "profiles.json"

@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from core.automation.models import utc_now_iso
+from features.automation.models import utc_now_iso
 
 
 RUN_COLUMNS = [
@@ -81,7 +81,7 @@ class AutomationStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_automation_events_run ON automation_run_events(run_id, id)")
 
     @staticmethod
-    def _row_to_dict(row: sqlite3.Row | None) -> Optional[Dict[str, Any]]:
+    def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return dict(row) if row else None
 
     @staticmethod
@@ -90,7 +90,7 @@ class AutomationStore:
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
-    def create_run(self, run: Dict[str, Any]) -> Dict[str, Any]:
+    def create_run(self, run: dict[str, Any]) -> dict[str, Any]:
         values = {column: str(run.get(column, "")) for column in RUN_COLUMNS}
         placeholders = ", ".join("?" for _ in RUN_COLUMNS)
         columns_sql = ", ".join(RUN_COLUMNS)
@@ -101,19 +101,19 @@ class AutomationStore:
             )
         return self.get_run(values["id"])
 
-    def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM automation_runs WHERE id = ?", (run_id,)).fetchone()
         return self._row_to_dict(row)
 
-    def get_run_by_source_key(self, source_key: str) -> Optional[Dict[str, Any]]:
+    def get_run_by_source_key(self, source_key: str) -> dict[str, Any] | None:
         if not source_key:
             return None
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM automation_runs WHERE source_key = ?", (source_key,)).fetchone()
         return self._row_to_dict(row)
 
-    def list_runs(self, status: str = "", limit: int = 50) -> List[Dict[str, Any]]:
+    def list_runs(self, status: str = "", limit: int = 50) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit or 50), 500))
         with self._connect() as conn:
             if status:
@@ -128,7 +128,7 @@ class AutomationStore:
                 ).fetchall()
         return [dict(row) for row in rows]
 
-    def update_run(self, run_id: str, **updates: Any) -> Dict[str, Any]:
+    def update_run(self, run_id: str, **updates: Any) -> dict[str, Any]:
         allowed = set(RUN_COLUMNS) - {"id", "created_at"}
         clean = {key: str(value) for key, value in updates.items() if key in allowed}
         clean["updated_at"] = utc_now_iso()
@@ -140,7 +140,7 @@ class AutomationStore:
             )
         return self.get_run(run_id)
 
-    def append_event(self, run_id: str, stage: str, level: str, message: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def append_event(self, run_id: str, stage: str, level: str, message: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         created_at = utc_now_iso()
         payload_json = json.dumps(payload or {}, ensure_ascii=False, separators=(",", ":"))
         with self._connect() as conn:
@@ -155,7 +155,7 @@ class AutomationStore:
             row = conn.execute("SELECT * FROM automation_run_events WHERE id = ?", (event_id,)).fetchone()
         return dict(row)
 
-    def list_events(self, run_id: str) -> List[Dict[str, Any]]:
+    def list_events(self, run_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM automation_run_events WHERE run_id = ? ORDER BY id ASC",

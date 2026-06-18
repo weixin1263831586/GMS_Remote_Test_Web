@@ -74,32 +74,28 @@ def config_shape(value: Any) -> Any:
 
 def ui_source_groups() -> dict[str, list[Path]]:
     new_shell = ROOT / 'web/shell/shell.html'
-    if new_shell.exists():
-        return {
-            'shell': [
+    automation_ui = ROOT / 'features/automation/ui'
+    return {
+        'shell': (
+            [
                 new_shell,
                 *sorted((ROOT / 'web/static/js').glob('*.js')),
-            ],
-            'redmine-agent': sorted((ROOT / 'features/redmine/ui').glob('*.*')),
-            'gerrit-dashboard': sorted((ROOT / 'features/gerrit/ui').glob('*.*')),
-            'gms-update-monitor': sorted(
-                (ROOT / 'features/system/update_monitor/ui').glob('*.*')
-            ),
-            'mainline-known-issues': sorted(
-                (ROOT / 'features/system/mainline_issues/ui').glob('*.*')
-            ),
-            'automation': sorted((ROOT / 'features/automation/ui').glob('*.*')),
-        }
-    return {
-        'shell': [
-            ROOT / 'templates/index_fastapi.html',
-            *sorted((ROOT / 'static/js').glob('*.js')),
-        ],
+            ]
+            if new_shell.exists()
+            else [
+                ROOT / 'templates/index_fastapi.html',
+                *sorted((ROOT / 'static/js').glob('*.js')),
+            ]
+        ),
         'redmine-agent': [ROOT / 'routers/redmine_agent.py'],
         'gerrit-dashboard': [ROOT / 'routers/gerrit_dashboard.py'],
         'gms-update-monitor': [ROOT / 'routers/gms_update_monitor.py'],
         'mainline-known-issues': [ROOT / 'routers/mainline_known_issues.py'],
-        'automation': [ROOT / 'routers/automation.py'],
+        'automation': (
+            sorted(automation_ui.glob('*.*'))
+            if automation_ui.exists()
+            else [ROOT / 'routers/automation.py']
+        ),
     }
 
 
