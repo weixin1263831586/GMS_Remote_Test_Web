@@ -75,6 +75,7 @@ def config_shape(value: Any) -> Any:
 def ui_source_groups() -> dict[str, list[Path]]:
     new_shell = ROOT / 'web/shell/shell.html'
     automation_ui = ROOT / 'features/automation/ui'
+    redmine_ui = ROOT / 'features/redmine/ui'
     return {
         'shell': (
             [
@@ -87,7 +88,7 @@ def ui_source_groups() -> dict[str, list[Path]]:
                 *sorted((ROOT / 'static/js').glob('*.js')),
             ]
         ),
-        'redmine-agent': [ROOT / 'routers/redmine_agent.py'],
+        'redmine-agent': sorted(redmine_ui.glob('*.*')),
         'gerrit-dashboard': [ROOT / 'routers/gerrit_dashboard.py'],
         'gms-update-monitor': [ROOT / 'routers/gms_update_monitor.py'],
         'mainline-known-issues': [ROOT / 'routers/mainline_known_issues.py'],

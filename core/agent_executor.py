@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 from core.agent_tools import AgentTool, registry
 from core.config import config_manager
 from core.devices import device_manager, get_or_create_user_state
-from core.redmine_agent_db import (
+from features.redmine.repository import (
     find_user_mapping, display_names_from_mapping, load_redmine_user_map,
     _name_keys, _norm_name,
 )
@@ -697,7 +697,7 @@ class ActionExecutor:
 
     async def _query_redmine_department_stats(self, session, request, params) -> ToolResult:
         result, payload = await self._fetch_router_json(
-            "routers.redmine_agent", "get_department_overdue_statistics",
+            "features.redmine.api", "get_department_overdue_statistics",
             tool_name_for_error="redmine_department_stats",
             stale_days=params.get("stale_days"),
             list_limit=None,
@@ -857,7 +857,7 @@ class ActionExecutor:
 
     async def _query_redmine_workload_stats(self, session, request, params) -> ToolResult:
         """统计一个或多个人员的 Redmine 工作量。"""
-        from routers.redmine_agent import _db, _agent, _resolve_owner_names
+        from features.redmine.api import redmine_service, _resolve_owner_names
 
         raw_names = params.get("names") or []
         if isinstance(raw_names, str):
@@ -880,7 +880,7 @@ class ActionExecutor:
             )
 
         user_map = load_redmine_user_map()
-        resolved = _db.resolve_assignee_names(names)
+        resolved = redmine_service.repository.resolve_assignee_names(names)
         try:
             window_days = int((config_manager.load_config().get("redmine_stats") or {}).get("window_days") or 0)
         except Exception:
@@ -888,7 +888,13 @@ class ActionExecutor:
         rows = []
         for requested_name in names:
             matched_names, stats = await self._resolve_user_stats(
-                _agent, _db, requested_name, resolved, user_map, stale_days, window_days,
+                redmine_service.agent,
+                redmine_service.repository,
+                requested_name,
+                resolved,
+                user_map,
+                stale_days,
+                window_days,
             )
             rows.append({
                 "requested_name": requested_name,
@@ -1039,7 +1045,7 @@ class ActionExecutor:
         return []
 
     async def _sync_redmine_user_issues(self, agent: Any, client: Any, user: Dict[str, Any]) -> None:
-        from core.redmine_agent import RESOLVED_STATUSES
+        from features.redmine.agent import RESOLVED_STATUSES
 
         issues = await client.fetch_issues_by_assignee(int(user["id"]), status_id="*", limit=2000)
         display_names = display_names_from_mapping(user)

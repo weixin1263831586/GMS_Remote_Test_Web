@@ -41,7 +41,7 @@ from core.state import global_state
 from core.test_suite_utils import is_config_host_local
 from core.usbip import usbip_manager, USBIPD_INSTALL_CMD, USBIPD_INSTALL_GUIDE
 from core.usbip import detach_ubuntu_usbip_ports, find_device_host_password
-from core.redmine_client import RedmineClient
+from features.redmine.client import RedmineClient
 
 logger = logging.getLogger(__name__)
 

@@ -1,0 +1,257 @@
+
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RedmineAgent</title>
+  <style>
+{{REDMINE_CSS}}
+  </style>
+</head>
+<body>
+<header>
+  <div class="tabs">
+    <div class="tab" data-tab="department" onclick="switchTab('department')">🏢 部门看板</div>
+    <div class="tab active" data-tab="stats" onclick="switchTab('stats')">📈 个人看板</div>
+    <div class="tab" data-tab="project" onclick="switchTab('project')">🧩 项目看板</div>
+    <div class="tab" data-tab="issues" onclick="switchTab('issues')">📋 工单列表</div>
+    <div class="tab" data-tab="runs" onclick="switchTab('runs')">📊 扫描记录</div>
+  </div>
+  <div class="header-spacer"></div>
+  <div class="filter-bar" style="margin:0">
+    <input type="text" id="searchInput" placeholder="搜索工单 / 输入 #工单号查询Redmine..." onkeydown="if(event.key==='Enter')smartSearch()" style="width:260px">
+    <select id="statusFilter" onchange="loadIssues()">
+      <option value="">全部状态</option>
+      <option value="新建">新建</option>
+      <option value="进行中">进行中</option>
+      <option value="已解决">已解决</option>
+      <option value="已关闭">已关闭</option>
+      <option value="反馈">反馈</option>
+    </select>
+    <select id="priorityFilter" onchange="loadIssues()">
+      <option value="">全部优先级</option>
+      <option value="紧急">紧急</option>
+      <option value="高">高</option>
+      <option value="正常">正常</option>
+      <option value="低">低</option>
+    </select>
+  </div>
+  <div class="btn-group">
+    <button id="scanBtn" onclick="startScan()">🔍 扫描</button>
+    <button class="secondary" onclick="triggerSync()">🔄 同步</button>
+    <button class="secondary" onclick="refreshCurrentTab()">刷新</button>
+    <button class="secondary" onclick="showSettingsModal()" title="设置">⚙️</button>
+  </div>
+</header>
+
+<div id="tab-issues" class="tab-content">
+  <div id="issuesList"></div>
+  <div id="issuesPagination" class="pagination"></div>
+</div>
+
+<div id="tab-runs" class="tab-content">
+  <div class="two-col">
+    <section class="panel">
+      <h2>扫描记录</h2>
+      <div id="runsList" class="scroll"></div>
+    </section>
+    <section class="panel">
+      <h2 id="runDetailTitle">日报详情</h2>
+      <div id="runDetail" class="scroll" style="padding:14px;"><div class="muted">选择一次扫描记录查看结果。</div></div>
+    </section>
+  </div>
+</div>
+
+<div id="tab-stats" class="tab-content active">
+  <div id="statsContent"><div class="muted">加载中...</div></div>
+</div>
+
+<div id="tab-department" class="tab-content">
+  <div id="departmentContent"><div class="muted">加载中...</div></div>
+</div>
+
+<div id="tab-project" class="tab-content">
+  <div id="projectContent"><div class="muted">加载中...</div></div>
+</div>
+
+<!-- Add User Modal -->
+<div id="addUserModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">添加用户</span>
+      <span class="modal-close" onclick="hideAddUserModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div>
+        <label>Redmine 用户 ID</label>
+        <input type="number" id="addUserId" placeholder="例如：8912">
+      </div>
+      <div>
+        <label>用户姓名</label>
+        <input type="text" id="addUserName" placeholder="例如：张三">
+      </div>
+      <div>
+        <label>邮箱</label>
+        <input type="email" id="addUserEmail" placeholder="例如：zhangsan@example.com">
+      </div>
+      <div>
+        <label>所属部门</label>
+        <div class="select-with-add" style="width:100%">
+          <select id="addUserDepartment" style="width:100%"></select>
+          <button class="select-add-btn" type="button" onclick="showAddDepartmentModal('addUserDepartment')" title="添加部门">＋</button>
+        </div>
+      </div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="hideAddUserModal()">取消</button>
+        <button onclick="submitAddUser()">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Department Modal -->
+<div id="addDepartmentModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">添加部门</span>
+      <span class="modal-close" onclick="hideAddDepartmentModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div>
+        <label>部门名称</label>
+        <input type="text" id="addDepartmentName" placeholder="例如：系统三部">
+      </div>
+      <div>
+        <label>部门 ID</label>
+        <input type="text" id="addDepartmentId" placeholder="可选，例如：system-3">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">留空时自动生成 dept-N</div>
+      </div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="hideAddDepartmentModal()">取消</button>
+        <button onclick="submitAddDepartment()">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Project Modal -->
+<div id="addProjectModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">添加项目</span>
+      <span class="modal-close" onclick="hideAddProjectModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div>
+        <label>项目名称</label>
+        <input type="text" id="addProjectName" placeholder="例如：RK3572 Android 16 SDK">
+      </div>
+      <div>
+        <label>项目标识或 URL</label>
+        <input type="text" id="addProjectId" placeholder="例如：https://redmine.rock-chips.com/projects/rk3572-android-16-sdk">
+      </div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="hideAddProjectModal()">取消</button>
+        <button onclick="submitAddProject()">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settingsModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header" style="background:linear-gradient(135deg,#3b82f6,#6366f1)">
+      <span class="modal-title">⚙️ 统计设置</span>
+      <span class="modal-close" onclick="hideSettingsModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div>
+        <label>未回复天数阈值 (stale_days)</label>
+        <input type="number" id="settingStaleDays" min="1" max="30" placeholder="默认 20">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">超过/达到此天数未回复的工单标记为过期</div>
+      </div>
+      <div>
+        <label>统计时间窗口 (window_days)</label>
+        <input type="number" id="settingWindowDays" min="0" max="365" placeholder="0 = 不限制">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">只统计最近 N 天内有活动的工单，0 表示不限制</div>
+      </div>
+      <div>
+        <label>缓存有效期 (秒)</label>
+        <input type="number" id="settingCacheTtl" min="0" max="3600" placeholder="600">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">统计数据缓存时间，期间内重复访问直接返回缓存</div>
+      </div>
+      <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+      <div>
+        <label>SMTP 服务器</label>
+        <input type="text" id="settingSmtpHost" placeholder="例如：smtphz.qiye.163.com">
+      </div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1">
+          <label>端口</label>
+          <input type="number" id="settingSmtpPort" placeholder="465">
+        </div>
+        <div style="flex:1">
+          <label>发件人地址</label>
+          <input type="text" id="settingFromAddr" placeholder="留空则使用默认发件人">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1">
+          <label>SMTP 用户名</label>
+          <input type="text" id="settingSmtpUser" placeholder="chaoqun.huang@rock-chips.com">
+        </div>
+        <div style="flex:1">
+          <label>SMTP授权码/密码</label>
+          <input type="password" id="settingSmtpPass" placeholder="企业邮箱SMTP授权码或密码">
+        </div>
+      </div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="hideSettingsModal()">取消</button>
+        <button onclick="saveSettings()">保存并刷新</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Trend Start Date Modal -->
+<div id="trendStartModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header" style="background:linear-gradient(135deg,#2563eb,#4f46e5)">
+      <span class="modal-title" id="trendStartModalTitle">设置统计日期范围</span>
+      <span class="modal-close" onclick="hideTrendStartModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div>
+        <label>起始日期</label>
+        <input type="date" id="trendStartDateInput">
+      </div>
+      <div>
+        <label>结束日期</label>
+        <input type="date" id="trendEndDateInput">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">清空后表示不限；仅填一侧日期也可以</div>
+      </div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="clearTrendStartDate()">不限</button>
+        <button class="secondary" onclick="hideTrendStartModal()">取消</button>
+        <button onclick="saveTrendStartDate()">保存并刷新</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="trendDetailModal" class="modal">
+  <div class="modal-content" style="max-width:900px">
+    <div class="modal-header" style="background:linear-gradient(135deg,#2563eb,#4f46e5)">
+      <span class="modal-title" id="trendDetailTitle">解决Redmine问题明细</span>
+      <span class="modal-close" onclick="hideModal('trendDetailModal')">&times;</span>
+    </div>
+    <div class="modal-body" id="trendDetailBody"><div class="muted">加载中…</div></div>
+  </div>
+</div>
+
+<script>
+{{REDMINE_JS}}
+</script>
+</body>
+</html>

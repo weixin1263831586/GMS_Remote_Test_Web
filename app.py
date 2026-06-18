@@ -40,7 +40,8 @@ from core.security_audit import classify_request_source
 from core.security_audit_utils import should_audit_request, summarize_audit_request, summarize_audit_response
 from core.state import global_state
 from core.usb_monitor import init_usb_monitor, start_usb_monitor, stop_usb_monitor
-from modules.redmine_agent_scheduler import start_redmine_agent_scheduler, stop_redmine_agent_scheduler
+from features.redmine.scheduler import start_redmine_agent_scheduler, stop_redmine_agent_scheduler
+from features.redmine.api import redmine_service
 
 from routers import ALL_ROUTERS
 from routers.system import init_templates
@@ -205,7 +206,7 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
 
     cleanup_task = asyncio.create_task(_periodic_cleanup())
-    redmine_agent_scheduler_task = start_redmine_agent_scheduler()
+    redmine_agent_scheduler_task = start_redmine_agent_scheduler(redmine_service)
 
     # USB monitor
     usb_dispatch_task = _start_usb_monitor(app)

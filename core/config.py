@@ -426,26 +426,26 @@ class ConfigManager:
 
     def get_redmine_stats_config(self) -> Dict[str, int]:
         """Return normalized Redmine stats settings after static/runtime merge."""
-        from core.redmine_dashboard_config import normalize_redmine_stats_config
+        from features.redmine.dashboard import normalize_redmine_stats_config
 
         return self._get_section('redmine_stats', normalize_redmine_stats_config)
 
     def save_redmine_stats_config(self, stats_config: Dict[str, Any]) -> bool:
         """Save Redmine stats settings to runtime config so UI changes take effect immediately."""
-        from core.redmine_dashboard_config import normalize_redmine_stats_config
+        from features.redmine.dashboard import normalize_redmine_stats_config
 
         # redmine_stats 只在 runtime 维护，current 从 runtime 取，故 merge_from_runtime=True
         return self._save_section('redmine_stats', stats_config, normalize_redmine_stats_config, merge_from_runtime=True)
 
     def get_redmine_dashboard_config(self) -> Dict[str, Any]:
         """Return normalized Redmine dashboard profile configuration."""
-        from core.redmine_dashboard_config import normalize_redmine_dashboard_profiles
+        from features.redmine.dashboard import normalize_redmine_dashboard_profiles
 
         return self._get_section('redmine_dashboard', normalize_redmine_dashboard_profiles)
 
     def save_redmine_dashboard_config(self, dashboard_config: Dict[str, Any]) -> bool:
         """Save Redmine dashboard profiles to runtime config."""
-        from core.redmine_dashboard_config import denormalize_redmine_dashboard_config
+        from features.redmine.dashboard import denormalize_redmine_dashboard_config
 
         return self._save_section('redmine_dashboard', dashboard_config, denormalize_redmine_dashboard_config)
 

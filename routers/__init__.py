@@ -1,6 +1,7 @@
 """GMS Remote Test - API 路由注册"""
 
 from features.automation import api as automation
+from features.redmine import api as redmine
 
 from . import (
     agent,
@@ -16,7 +17,6 @@ from . import (
     integrations,
     mainline_known_issues,
     notifications,
-    redmine_agent,
     reports,
     system,
     terminal,
@@ -42,8 +42,8 @@ ALL_ROUTERS = [
     integrations.router,
     mainline_known_issues.router,
     notifications.router,
-    redmine_agent.router,
-    redmine_agent.page_router,
+    redmine.router,
+    redmine.page_router,
     reports.router,
     system.router,
     terminal.router,

@@ -72,7 +72,13 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_embedded_dashboard_inline_handlers_resolve_locally(self):
         for label, paths in [
-            ("redmine", ["routers/redmine_agent.py"]),
+            (
+                "redmine",
+                [
+                    "features/redmine/ui/page.html",
+                    "features/redmine/ui/page.js",
+                ],
+            ),
             ("gerrit", ["routers/gerrit_dashboard.py"]),
             ("update-monitor", ["routers/gms_update_monitor.py"]),
             ("mainline", ["routers/mainline_known_issues.py"]),
@@ -92,13 +98,19 @@ class FrontendIntegrityTests(unittest.TestCase):
                 self.assertEqual(missing, [])
 
     def test_modal_pages_support_escape_close(self):
-        for path in [
-            "templates/index_fastapi.html",
-            "routers/redmine_agent.py",
-            "routers/gerrit_dashboard.py",
+        for label, paths in [
+            ("main", ["templates/index_fastapi.html"]),
+            (
+                "redmine",
+                [
+                    "features/redmine/ui/page.html",
+                    "features/redmine/ui/page.js",
+                ],
+            ),
+            ("gerrit", ["routers/gerrit_dashboard.py"]),
         ]:
-            with self.subTest(path=path):
-                text = read_text(path)
+            with self.subTest(page=label):
+                text = "\n".join(read_text(path) for path in paths)
                 self.assertIn('class="modal', text)
                 self.assertTrue("Escape" in text or "ModalManager" in text)
 
@@ -109,19 +121,20 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("redmine-agent-notification", main_text)
         self.assertIn("gms-update-monitor-notification", main_text)
 
-        for path in ["routers/redmine_agent.py", "routers/gerrit_dashboard.py", "routers/gms_update_monitor.py"]:
+        for path in ["features/redmine/ui/page.js", "routers/gerrit_dashboard.py", "routers/gms_update_monitor.py"]:
             with self.subTest(path=path):
                 text = read_text(path)
                 self.assertIn("function notifyUser", text)
                 self.assertIn("postMessage", text)
                 self.assertNotIn("alert(", text)
 
-        self.assertNotIn("_sendParentNotification", read_text("routers/redmine_agent.py"))
+        self.assertNotIn("_sendParentNotification", read_text("features/redmine/ui/page.js"))
 
     def test_modal_ids_and_function_declarations_are_not_duplicated(self):
         checked_paths = [
             "templates/index_fastapi.html",
-            "routers/redmine_agent.py",
+            "features/redmine/ui/page.html",
+            "features/redmine/ui/page.js",
             "routers/gerrit_dashboard.py",
             "routers/gms_update_monitor.py",
             "routers/mainline_known_issues.py",

@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+from foundation.config import ConfigManager, settings
+
+from .dashboard import (
+    denormalize_redmine_dashboard_config,
+    normalize_redmine_dashboard_profiles,
+    normalize_redmine_stats_config,
+)
+
+
+DEFAULT_REDMINE_BASE_URL = "https://redmine.rock-chips.com"
+
+
+class RedmineConfig:
+    """Feature-owned configuration facade backed by runtime config files."""
+
+    def __init__(
+        self,
+        project_root: Path | None = None,
+        *,
+        base_dir: str | None = None,
+    ):
+        if base_dir is not None:
+            project_root = Path(base_dir).resolve().parent
+        self.manager = ConfigManager(project_root=project_root)
+        self.project_root = self.manager.project_root
+
+    @property
+    def config_path(self) -> Path:
+        return self.manager.config_path
+
+    @config_path.setter
+    def config_path(self, value: Path) -> None:
+        self.manager.config_path = Path(value)
+
+    @property
+    def runtime_config_path(self) -> Path:
+        return self.manager.runtime_config_path
+
+    @runtime_config_path.setter
+    def runtime_config_path(self, value: Path) -> None:
+        self.manager.runtime_config_path = Path(value)
+
+    def invalidate_cache(self) -> None:
+        self.manager.invalidate_cache()
+
+    def load_config(self, force_reload: bool = False) -> dict[str, Any]:
+        return self.manager.load_config(force_reload=force_reload)
+
+    def get_redmine_base_url(
+        self,
+        config: dict[str, Any] | None = None,
+    ) -> str:
+        config = config or self.load_config()
+        redmine = config.get("redmine") or {}
+        return str(
+            redmine.get("base_url")
+            or config.get("redmine_base_url")
+            or DEFAULT_REDMINE_BASE_URL
+        ).rstrip("/")
+
+    def get_redmine_config(self) -> dict[str, Any]:
+        config = self.load_config()
+        redmine = dict(config.get("redmine") or {})
+        redmine["base_url"] = self.get_redmine_base_url(config)
+        return redmine
+
+    def load_redmine_credentials(self) -> dict[str, str]:
+        config = self.load_config()
+        redmine = config.get("redmine") or {}
+        credentials = config.get("redmine_credentials") or {}
+        username = str(
+            credentials.get("username")
+            or redmine.get("username")
+            or ""
+        )
+        password = str(
+            credentials.get("password")
+            or redmine.get("password")
+            or ""
+        )
+        return {"username": username, "password": password}
+
+    def get_redmine_stats_config(self) -> dict[str, Any]:
+        return normalize_redmine_stats_config(
+            self.load_config().get("redmine_stats") or {}
+        )
+
+    def save_redmine_stats_config(self, payload: dict[str, Any]) -> bool:
+        return self._save_runtime_section(
+            "redmine_stats",
+            normalize_redmine_stats_config(payload),
+        )
+
+    def get_redmine_dashboard_config(self) -> dict[str, Any]:
+        return normalize_redmine_dashboard_profiles(
+            self.load_config().get("redmine_dashboard") or {}
+        )
+
+    def save_redmine_dashboard_config(
+        self,
+        payload: dict[str, Any],
+    ) -> bool:
+        return self._save_runtime_section(
+            "redmine_dashboard",
+            denormalize_redmine_dashboard_config(payload),
+        )
+
+    def get_gerrit_dashboard_config(self) -> dict[str, Any]:
+        return dict(self.load_config().get("gerrit_dashboard") or {})
+
+    def save_gerrit_dashboard_config(
+        self,
+        payload: dict[str, Any],
+    ) -> bool:
+        normalized = dict(payload)
+        if normalized.get("base_url"):
+            normalized["base_url"] = str(normalized["base_url"]).rstrip("/")
+        return self._save_runtime_section("gerrit_dashboard", normalized)
+
+    def _save_runtime_section(
+        self,
+        name: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        runtime_path = self.project_root / "configs/config_runtime.json"
+        try:
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            runtime = {}
+        if not isinstance(runtime, dict):
+            runtime = {}
+        runtime[name] = payload
+        self.manager.save_runtime(runtime)
+        return True
+
+
+config_manager = RedmineConfig(settings.project_root)
