@@ -6,6 +6,7 @@ from core.config import config_manager
 from features.automation.api import configure_automation_service
 from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
+from features.redmine.api import configure_redmine_service
 from routers import ALL_ROUTERS
 from routers.gerrit_dashboard import _query_gerrit_dual_mode
 from routers.system import init_templates
@@ -13,6 +14,7 @@ from routers.system import init_templates
 
 def include_routes(app: FastAPI, templates, services=None) -> None:
     if services is not None:
+        configure_redmine_service(services.redmine)
         profiles_path = (
             services.settings.project_root
             / 'configs/automation_profiles.json'

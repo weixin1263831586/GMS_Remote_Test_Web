@@ -20,8 +20,23 @@ DEFAULT_DEPARTMENT_DASHBOARD = {
     "issue_limit": 500,
 }
 
-from core.dashboard_config_utils import bounded_int as _bounded_int, profile_id as _profile_id  # noqa: E402
-from core.config import DEFAULT_REDMINE_BASE_URL
+DEFAULT_REDMINE_BASE_URL = "https://redmine.rock-chips.com"
+
+
+def _bounded_int(value, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _profile_id(value: Any, fallback: str = "") -> str:
+    text = str(value or fallback).strip().lower()
+    return "".join(
+        char if char.isalnum() or char in "-_" else "-"
+        for char in text
+    ).strip("-")
 
 
 def normalize_redmine_stats_config(raw: dict[str, Any] | None) -> dict[str, int]:

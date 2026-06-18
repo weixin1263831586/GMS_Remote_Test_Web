@@ -1,13 +1,14 @@
 import unittest
 import re
 import subprocess
+from importlib import import_module
 from datetime import datetime
 from types import SimpleNamespace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from core.redmine_agent_db import RedmineAgentDB
+from features.redmine.repository import RedmineAgentDB
 
 
 def _issue(issue_id, assigned_to_name, status_name="新建", closed_on="", journals=None):
@@ -36,7 +37,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             db.upsert_issue(_issue(1, "张三", journals=[{"user": "客户", "created_on": "2026-06-01T00:00:00", "notes": "请处理"}]))
             db.upsert_issue(_issue(2, "张三", journals=[{"user": "客户", "created_on": "2026-06-12T00:00:00", "notes": "请处理"}]))
 
-            with patch("core.redmine_agent_db.datetime") as mocked_datetime:
+            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -64,7 +65,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 ],
             ))
 
-            with patch("core.redmine_agent_db.datetime") as mocked_datetime:
+            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -93,7 +94,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 ],
             ))
 
-            with patch("core.redmine_agent_db.datetime") as mocked_datetime:
+            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -105,12 +106,12 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             self.assertEqual(stats["lists"]["customer_no_reply_3_days"][0]["last_owner_reply_by"], "未配置RK同事")
 
     def test_redmine_user_map_name_with_site_suffix_marks_last_replier_as_rk_colleague(self):
-        from core.redmine_agent_db import _looks_like_rk_actor
+        from features.redmine.repository import _looks_like_rk_actor
 
         self.assertTrue(_looks_like_rk_actor({"user": "吴 良清（福州）", "user_email": ""}))
 
     def test_display_names_from_mapping_generates_spaced_chinese_variant(self):
-        from core.redmine_agent_db import display_names_from_mapping
+        from features.redmine.repository import display_names_from_mapping
 
         self.assertEqual(
             display_names_from_mapping({"name": "韩金锋", "email": "jinfeng.han@rock-chips.com"}),
@@ -118,7 +119,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         )
 
     def test_unknown_chinese_person_actor_without_email_defaults_to_customer(self):
-        from core.redmine_agent_db import _looks_like_rk_actor
+        from features.redmine.repository import _looks_like_rk_actor
 
         self.assertFalse(_looks_like_rk_actor({"user": "谢 娟红", "user_email": ""}))
         self.assertFalse(_looks_like_rk_actor({"user": "李 测试（福州）", "user_email": ""}))
@@ -126,7 +127,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_department_user_stats_exposes_owner_names_for_trend_detail(self):
         import asyncio
-        from core.redmine_agent_db import compute_user_overdue_stats
+        from features.redmine.repository import compute_user_overdue_stats
 
         class Client:
             async def count_issues_by_assignee(self, user_id):
@@ -145,7 +146,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_department_user_stats_uses_live_open_issue_snapshots_when_local_db_empty(self):
         import asyncio
-        from core.redmine_agent_db import compute_user_overdue_stats
+        from features.redmine.repository import compute_user_overdue_stats
 
         class Client:
             async def count_issues_by_assignee(self, user_id):
@@ -179,7 +180,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_resolved_by_date_profile_id_fetches_all_department_members_live(self):
         import asyncio
-        import routers.redmine_agent as redmine_router
+        import features.redmine.api as redmine_router
 
         class Client:
             def __init__(self):
@@ -204,7 +205,18 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         }), patch.object(redmine_router, "load_redmine_user_map", return_value=[
             {"id": 1, "name": "韩金锋", "department_id": "system-2", "department": "系统二部"},
             {"id": 2, "name": "黄超群", "department_id": "system-2", "department": "系统二部"},
-        ]), patch.object(redmine_router._agent, "_make_client", return_value=client):
+        ]), patch.object(
+            redmine_router._statistics_api,
+            "load_redmine_user_map",
+            return_value=[
+                {"id": 1, "name": "韩金锋", "department_id": "system-2", "department": "系统二部"},
+                {"id": 2, "name": "黄超群", "department_id": "system-2", "department": "系统二部"},
+            ],
+        ), patch.object(
+            redmine_router._statistics_api.redmine_service.agent,
+            "_make_client",
+            return_value=client,
+        ):
             result = asyncio.run(redmine_router.get_resolved_issues_by_date(
                 start="2026-06-12",
                 end="2026-06-13",
@@ -244,7 +256,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             self.assertEqual(issues[0]["resolved_on"][:10], "2026-06-12")
 
     def test_redmine_week_trend_click_uses_iso_week_start(self):
-        source = Path("routers/redmine_agent.py").read_text(encoding="utf-8")
+        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
         match = re.search(r"function utcDateText\(date\) \{.*?function trendLabelToDateRange\(granularity, label\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = match.group(0) + "\nconsole.log(JSON.stringify(trendLabelToDateRange('week', '2026-W24')));"
@@ -252,7 +264,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, '["2026-06-08","2026-06-15"]')
 
     def test_redmine_daily_trend_click_uses_next_day_as_exclusive_end(self):
-        source = Path("routers/redmine_agent.py").read_text(encoding="utf-8")
+        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
         match = re.search(r"function utcDateText\(date\) \{.*?function trendLabelToDateRange\(granularity, label\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = match.group(0) + "\nconsole.log(JSON.stringify(trendLabelToDateRange('date', '2026-06-12')));"
@@ -260,7 +272,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, '["2026-06-12","2026-06-13"]')
 
     def test_redmine_trend_detail_title_displays_inclusive_end_date(self):
-        source = Path("routers/redmine_agent.py").read_text(encoding="utf-8")
+        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
         match = re.search(r"function utcDateText\(date\) \{.*?function displayTrendRange\(range\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = match.group(0) + "\nconsole.log(displayTrendRange(['2026-06-12', '2026-06-13']));"
@@ -268,7 +280,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, "2026-06-12 至 2026-06-12")
 
     def test_personal_trend_uses_meta_owner_names_when_selected_name_is_empty(self):
-        source = Path("routers/redmine_agent.py").read_text(encoding="utf-8")
+        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
         match = re.search(r"function updateRedmineTrendNames\(selectedName, meta\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = (
@@ -281,7 +293,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, '["黄 超群","chaoqun.huang@rock-chips.com"]')
 
     def test_redmine_department_trend_binds_department_names_in_click_handler(self):
-        source = Path("routers/redmine_agent.py").read_text(encoding="utf-8")
+        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
         match = re.search(r"function renderTrend\(title, items, keyName, chartKey, detailNames, detailProfileId\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = (
@@ -297,12 +309,12 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, "true")
 
     def test_redmine_department_trend_detail_uses_profile_id(self):
-        source = Path("routers/redmine_agent.py").read_text(encoding="utf-8")
+        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
         self.assertIn("profile_id=' + encodeURIComponent(profileId)", source)
         self.assertIn("departmentProfileId)", source)
 
     def test_redmine_trend_detail_issue_number_links_to_redmine(self):
-        source = Path("routers/redmine_agent.py").read_text(encoding="utf-8")
+        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
         self.assertIn("redmineIssueUrl(issueId)", source)
         self.assertIn('target="_blank">#', source)
 
@@ -329,7 +341,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertIn("scope: trendScope || currentTab || ''", source)
 
     def test_department_trends_merge_daily_weekly_monthly_yearly(self):
-        from core.redmine_dashboard_config import merge_resolved_trends
+        from features.redmine.dashboard import merge_resolved_trends
 
         merged = merge_resolved_trends([
             {
@@ -381,7 +393,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             self.assertEqual(stats["unresolved"], 0)
 
     def test_project_issue_stats_group_by_assignee_name(self):
-        from core.redmine_dashboard_config import summarize_project_issues
+        from features.redmine.dashboard import summarize_project_issues
 
         issues = [
             SimpleNamespace(
@@ -420,7 +432,9 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(data["assignees"][0]["closed_count"], 1)
 
     def test_gerrit_change_stats_group_statuses_and_trends(self):
-        from core.gerrit_dashboard_config import summarize_gerrit_changes
+        summarize_gerrit_changes = import_module(
+            "core.gerrit_dashboard_config"
+        ).summarize_gerrit_changes
 
         changes = [
             {
@@ -472,7 +486,9 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual([item["number"] for item in data["lists"]["pending_review"]], ["102"])
 
     def test_gerrit_created_date_detail_filter_matches_trend_buckets(self):
-        from core.gerrit_dashboard_config import filter_gerrit_changes_by_created_date
+        filter_gerrit_changes_by_created_date = import_module(
+            "core.gerrit_dashboard_config"
+        ).filter_gerrit_changes_by_created_date
 
         changes = [
             {
@@ -496,7 +512,9 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual([item["number"] for item in items], ["101"])
 
     def test_gerrit_department_stats_merge_members(self):
-        from core.gerrit_dashboard_config import summarize_gerrit_department_results
+        summarize_gerrit_department_results = import_module(
+            "core.gerrit_dashboard_config"
+        ).summarize_gerrit_department_results
 
         data = summarize_gerrit_department_results([
             {
@@ -516,7 +534,9 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(data["trends"]["daily"], [{"date": "2026-06-01", "count": 3}])
 
     def test_gerrit_ssh_query_removes_status_any_and_adds_start(self):
-        from routers.gerrit_dashboard import _query_for_ssh
+        _query_for_ssh = import_module(
+            "routers.gerrit_dashboard"
+        )._query_for_ssh
 
         self.assertEqual(
             _query_for_ssh("owner:a@example.com status:any limit:500", limit=200, start=400),
@@ -524,13 +544,17 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         )
 
     def test_gerrit_effective_limits_support_unbounded_history(self):
-        from routers.gerrit_dashboard import _effective_history_limit
+        _effective_history_limit = import_module(
+            "routers.gerrit_dashboard"
+        )._effective_history_limit
 
         self.assertIsNone(_effective_history_limit({"max_history_changes": 0, "query_limit": 500}, {"max_history_changes": 0}))
         self.assertEqual(_effective_history_limit({"max_history_changes": 300, "query_limit": 500}, {}), 300)
 
     def test_gerrit_all_department_uses_all_department_owners(self):
-        from routers.gerrit_dashboard import _owners_for_department_profile
+        _owners_for_department_profile = import_module(
+            "routers.gerrit_dashboard"
+        )._owners_for_department_profile
 
         cfg = {
             "department_profiles": [

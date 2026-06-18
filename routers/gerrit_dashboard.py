@@ -28,7 +28,7 @@ from core.gerrit_dashboard_config import (
     sync_gerrit_members_from_redmine_users,
     MAX_QUERY_PAGE_SIZE,
 )
-from core.redmine_agent_db import load_redmine_user_map
+from features.redmine.repository import load_redmine_user_map
 
 
 router = APIRouter(prefix="/api/gerrit-dashboard")

@@ -15,7 +15,7 @@ from core.usbip_reconnect import (
     schedule_usbip_reconnect_for_missing_devices,
     schedule_usbip_reconnect_for_removed_devices,
 )
-from modules.redmine_agent_scheduler import (
+from features.redmine.scheduler import (
     start_redmine_agent_scheduler,
     stop_redmine_agent_scheduler,
 )
@@ -111,7 +111,7 @@ def create_lifespan(services: AppServices):
     async def lifespan(app):
         app.state.services = services
         cleanup_task = asyncio.create_task(_periodic_cleanup())
-        redmine_task = start_redmine_agent_scheduler()
+        redmine_task = start_redmine_agent_scheduler(services.redmine)
         try:
             usb_dispatch_task = _start_usb_monitor(app)
         except Exception:

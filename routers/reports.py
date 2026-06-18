@@ -18,7 +18,7 @@ from core.config import config_manager
 from core.ssh import ssh_manager
 from core.report_analyzer import ReportAnalyzer
 from core.test_report_db import test_report_db
-from core.redmine_utils import (
+from features.redmine.utils import (
     COMPILED_REDMINE_ATTACHMENT_PATTERN,
     COMPILED_REDMINE_ISSUE_PATTERN,
     COMPILED_REPORT_NAME_PATTERN,
@@ -28,7 +28,7 @@ from core.redmine_utils import (
     extract_redmine_issue_id_from_text,
     strip_redmine_report_prefix,
 )
-from core.redmine_client import RedmineClient
+from features.redmine.client import RedmineClient
 from core.api_response import error_response, success_response
 from core.state import REDMINE_ISSUE_ID_CACHE
 from core.settings import REDMINE_ISSUE_ID_CACHE_MAX_SIZE

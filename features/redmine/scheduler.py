@@ -8,7 +8,8 @@ import os
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from core.config import config_manager
+from features.redmine.config import config_manager
+from features.redmine.service import RedmineService
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ def _load_scheduler_config() -> Dict[str, Any]:
     }
 
 
-async def _loop() -> None:
+async def _loop(service: RedmineService) -> None:
     global _last_run_day
     while True:
         try:
@@ -41,8 +42,7 @@ async def _loop() -> None:
                     sc["scan_hour"], sc["scan_minute"], sc["scan_hours_window"], sc["scan_max_issues"],
                 )
                 try:
-                    from routers.redmine_agent import start_redmine_agent_run
-                    result = await start_redmine_agent_run(
+                    result = await service.start_run(
                         hours=sc["scan_hours_window"],
                         max_issues=sc["scan_max_issues"],
                         mode="scheduled",
@@ -58,11 +58,13 @@ async def _loop() -> None:
             await asyncio.sleep(60)
 
 
-def start_redmine_agent_scheduler() -> Optional[asyncio.Task]:
+def start_redmine_agent_scheduler(
+    service: RedmineService,
+) -> Optional[asyncio.Task]:
     global _task
     if _task and not _task.done():
         return _task
-    _task = asyncio.create_task(_loop())
+    _task = asyncio.create_task(_loop(service))
     sc = _load_scheduler_config()
     logger.info(
         "[RedmineAgentScheduler] started (scan at %02d:%02d, window=%dh, max=%d)",
