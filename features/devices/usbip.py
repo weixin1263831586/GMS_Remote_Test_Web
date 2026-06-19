@@ -13,6 +13,8 @@ import shlex
 import time
 from typing import Any
 
+from foundation.networking import split_host_port
+
 from .usb import (
     parse_usbipd_android_busids,
 )
@@ -34,17 +36,6 @@ def _parse_host_address(host: str) -> tuple[str | None, str]:
         username, hostname = host.split('@', 1)
         return username, hostname
     return None, host
-
-
-def split_host_port(hostname: str, default_port: int = 22) -> tuple[str, int]:
-    """Parse host[:port] for IPv4/hostname targets."""
-    if not hostname:
-        return hostname, default_port
-    if hostname.count(':') == 1:
-        host, port_text = hostname.rsplit(':', 1)
-        if port_text.isdigit():
-            return host, int(port_text)
-    return hostname, default_port
 
 
 def find_device_host_password(device_host: str, config: dict[str, Any] | None = None) -> str | None:

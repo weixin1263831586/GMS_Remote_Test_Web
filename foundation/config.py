@@ -11,6 +11,7 @@ import re
 import socket
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -170,6 +171,8 @@ class ConfigManager:
         # 文件修改时间追踪
         self._static_mtime: float = 0
         self._runtime_mtime: float = 0
+        self._section_normalizers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+        self._section_denormalizers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
 
     def load_config(self, force_reload: bool = False) -> dict[str, Any]:
         """
@@ -513,11 +516,30 @@ class ConfigManager:
         """Public read-only access to the runtime configuration."""
         return self._load_runtime_config() or {}
 
-    def _get_section(self, key: str, normalizer) -> dict[str, Any]:
-        """读取并规范化配置中的某个区段（如 redmine_dashboard / gerrit_dashboard）。"""
-        return normalizer(self.load_config().get(key) or {})
+    def configure_section_normalizer(
+        self,
+        key: str,
+        *,
+        normalizer: Callable[[dict[str, Any]], dict[str, Any]],
+        denormalizer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    ) -> None:
+        self._section_normalizers[key] = normalizer
+        if denormalizer is not None:
+            self._section_denormalizers[key] = denormalizer
 
-    def _save_section(self, key: str, payload: dict[str, Any], denormalizer, *, merge_from_runtime: bool = False) -> bool:
+    def _normalize_section(self, key: str, raw: dict[str, Any]) -> dict[str, Any]:
+        normalizer = self._section_normalizers.get(key)
+        return normalizer(raw) if normalizer else dict(raw)
+
+    def _denormalize_section(self, key: str, raw: dict[str, Any]) -> dict[str, Any]:
+        denormalizer = self._section_denormalizers.get(key)
+        return denormalizer(raw) if denormalizer else dict(raw)
+
+    def _get_section(self, key: str) -> dict[str, Any]:
+        """读取并规范化配置中的某个区段（如 redmine_dashboard / gerrit_dashboard）。"""
+        return self._normalize_section(key, self.load_config().get(key) or {})
+
+    def _save_section(self, key: str, payload: dict[str, Any], *, merge_from_runtime: bool = False) -> bool:
         """合并并持久化某个配置区段到运行时配置文件。
 
         merge_from_runtime=True 时优先从已加载的 runtime 取 current（用于 stats 这类
@@ -526,7 +548,7 @@ class ConfigManager:
         try:
             runtime = self._load_runtime_config() or {}
             current = (runtime.get(key) if merge_from_runtime else None) or self.load_config().get(key) or {}
-            runtime[key] = denormalizer({**current, **(payload or {})})
+            runtime[key] = self._denormalize_section(key, {**current, **(payload or {})})
             return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
         except Exception as e:
             logger.error(f"Error saving {key} config: {e}")
@@ -534,40 +556,28 @@ class ConfigManager:
 
     def get_redmine_stats_config(self) -> dict[str, int]:
         """Return normalized Redmine stats settings after static/runtime merge."""
-        from features.redmine.dashboard import normalize_redmine_stats_config
-
-        return self._get_section('redmine_stats', normalize_redmine_stats_config)
+        return self._get_section('redmine_stats')
 
     def save_redmine_stats_config(self, stats_config: dict[str, Any]) -> bool:
         """Save Redmine stats settings to runtime config so UI changes take effect immediately."""
-        from features.redmine.dashboard import normalize_redmine_stats_config
-
         # redmine_stats 只在 runtime 维护，current 从 runtime 取，故 merge_from_runtime=True
-        return self._save_section('redmine_stats', stats_config, normalize_redmine_stats_config, merge_from_runtime=True)
+        return self._save_section('redmine_stats', stats_config, merge_from_runtime=True)
 
     def get_redmine_dashboard_config(self) -> dict[str, Any]:
         """Return normalized Redmine dashboard profile configuration."""
-        from features.redmine.dashboard import normalize_redmine_dashboard_profiles
-
-        return self._get_section('redmine_dashboard', normalize_redmine_dashboard_profiles)
+        return self._get_section('redmine_dashboard')
 
     def save_redmine_dashboard_config(self, dashboard_config: dict[str, Any]) -> bool:
         """Save Redmine dashboard profiles to runtime config."""
-        from features.redmine.dashboard import denormalize_redmine_dashboard_config
-
-        return self._save_section('redmine_dashboard', dashboard_config, denormalize_redmine_dashboard_config)
+        return self._save_section('redmine_dashboard', dashboard_config)
 
     def get_gerrit_dashboard_config(self) -> dict[str, Any]:
         """Return normalized Gerrit dashboard configuration."""
-        from features.gerrit.config import normalize_gerrit_dashboard_config
-
-        return self._get_section('gerrit_dashboard', normalize_gerrit_dashboard_config)
+        return self._get_section('gerrit_dashboard')
 
     def save_gerrit_dashboard_config(self, dashboard_config: dict[str, Any]) -> bool:
         """Save Gerrit dashboard settings to runtime config."""
-        from features.gerrit.config import denormalize_gerrit_dashboard_config
-
-        return self._save_section('gerrit_dashboard', dashboard_config, denormalize_gerrit_dashboard_config)
+        return self._save_section('gerrit_dashboard', dashboard_config)
 
     def save_client_ssh_credentials(self, credentials: list) -> bool:
         """保存客户端 SSH 凭据到运行时配置文件。"""

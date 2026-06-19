@@ -21,6 +21,17 @@ def parse_host_address(host: str) -> tuple[str | None, str]:
     return tuple(host.split('@', 1))
 
 
+def split_host_port(hostname: str, default_port: int = 22) -> tuple[str, int]:
+    """Parse host[:port] for IPv4/hostname targets."""
+    if not hostname:
+        return hostname, default_port
+    if hostname.count(':') == 1:
+        host, port_text = hostname.rsplit(':', 1)
+        if port_text.isdigit():
+            return host, int(port_text)
+    return hostname, default_port
+
+
 def is_local_host(host: str) -> bool:
     if not host:
         return False

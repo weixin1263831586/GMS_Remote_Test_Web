@@ -23,10 +23,19 @@ from features.firmware.apk import (
 )
 from features.firmware.dependencies import configure_firmware_dependencies
 from features.gerrit import api as gerrit_dashboard
+from features.gerrit.config import (
+    denormalize_gerrit_dashboard_config,
+    normalize_gerrit_dashboard_config,
+)
 from features.gerrit.dependencies import configure_redmine_users_provider
 from features.gerrit.service import _query_gerrit_dual_mode
 from features.redmine import api as redmine
 from features.redmine.api import configure_redmine_service
+from features.redmine.dashboard import (
+    denormalize_redmine_dashboard_config,
+    normalize_redmine_dashboard_profiles,
+    normalize_redmine_stats_config,
+)
 from features.reports import api as reports
 from features.reports.dependencies import configure_report_dependencies
 from features.system import api as system
@@ -113,8 +122,27 @@ ALL_ROUTERS = [
 ]
 
 
+def configure_config_sections() -> None:
+    config_manager.configure_section_normalizer(
+        'redmine_stats',
+        normalizer=normalize_redmine_stats_config,
+        denormalizer=normalize_redmine_stats_config,
+    )
+    config_manager.configure_section_normalizer(
+        'redmine_dashboard',
+        normalizer=normalize_redmine_dashboard_profiles,
+        denormalizer=denormalize_redmine_dashboard_config,
+    )
+    config_manager.configure_section_normalizer(
+        'gerrit_dashboard',
+        normalizer=normalize_gerrit_dashboard_config,
+        denormalizer=denormalize_gerrit_dashboard_config,
+    )
+
+
 def include_routes(app: FastAPI, templates, services=None) -> None:
     if services is not None:
+        configure_config_sections()
         configure_user_dependencies(
             config_manager=config_manager,
             global_state=global_state,
