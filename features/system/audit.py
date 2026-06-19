@@ -9,13 +9,13 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
 
-from core.api_response import ApiResponse
-from core.clients import get_client_id_from_request, parse_client_id
-from core.error_handling import handle_api_errors
-from core.schemas import SecurityPageViewRequest
-from core.security_audit import security_audit_logger
-from core.security_audit_utils import AUDIT_PAGE_VIEW_SKIP_PAGES
-from core.state import global_state
+from foundation.responses import ApiResponse
+from features.users import get_client_id_from_request, parse_client_id
+from foundation.errors import handle_api_errors
+from features.system.models import SecurityPageViewRequest
+from features.system.security_audit import security_audit_logger
+from features.system.security_audit_utils import AUDIT_PAGE_VIEW_SKIP_PAGES
+from features.system.state import global_state
 
 logger = logging.getLogger(__name__)
 

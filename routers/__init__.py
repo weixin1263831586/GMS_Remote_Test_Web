@@ -1,37 +1,29 @@
 """GMS Remote Test - API 路由注册"""
 
 from features.automation import api as automation
+from features.assistant import api as assistant
 from features.devices import api as devices
 from features.devices import integrations_api as device_integrations
 from features.firmware import api as firmware
 from features.gerrit import api as gerrit_dashboard
 from features.redmine import api as redmine
 from features.reports import api as reports
+from features.system import api as system
+from features.system import assets, audit, desktop, integrations
 from features.system.mainline_issues import api as mainline_known_issues
+from features.system import notifications_api as notifications
+from features.system import terminal_api as terminal
 from features.system.update_monitor import api as gms_update_monitor
 from features.test_execution import api as tests
-
-from . import (
-    agent,
-    assets,
-    audit,
-    config,
-    desktop,
-    integrations,
-    notifications,
-    system,
-    terminal,
-    users,
-)
+from features.users import api as users
 
 
 ALL_ROUTERS = [
-    agent.router,
+    assistant.router,
     assets.router,
     audit.router,
     automation.router,
     automation.page_router,
-    config.router,
     desktop.router,
     devices.router,
     device_integrations.router,

@@ -4,10 +4,9 @@
 处理客户端IP检测、用户识别等功能
 """
 
+from typing import Any
+
 import paramiko
-from typing import Dict, Optional, Any
-from core.config import config_manager
-from core.common_utils import CommonUtils
 
 
 class ClientManager:
@@ -19,19 +18,20 @@ class ClientManager:
     SSH_AUTH_TIMEOUT = 3
 
     def __init__(self):
-        self.client_hosts: Dict[str, str] = {}  # {client_ip: username}
+        self.config_manager = None
+        self.client_hosts: dict[str, str] = {}  # {client_ip: username}
         self.ssh_credentials: list = []  # 保存的SSH凭据
 
-    def load_client_info(self) -> Dict[str, Any]:
+    def load_client_info(self) -> dict[str, Any]:
         """加载客户端信息"""
-        config = config_manager.load_config()
+        config = self.config_manager.load_config()
         self.client_hosts = config.get('client_hosts', {})
         self.ssh_credentials = config.get('client_ssh_credentials', [])
         return config
 
     def _save_client_runtime(self) -> bool:
         """保存客户端运行时配置"""
-        return config_manager.save_runtime_config({
+        return self.config_manager.save_runtime_config({
             'client_hosts': self.client_hosts,
             'client_ssh_credentials': self.ssh_credentials
         })
@@ -50,11 +50,11 @@ class ClientManager:
                 auth_timeout=self.SSH_AUTH_TIMEOUT
             )
             raw = ssh.exec_command('whoami')[1].read()
-            return CommonUtils.decode_ssh_output(raw).strip().split('\\')[-1]
+            return raw.decode("utf-8", errors="ignore").strip().split("\\")[-1]
         finally:
             ssh.close()
 
-    def get_client_ip(self, headers: Dict[str, str], remote_addr: str) -> str:
+    def get_client_ip(self, headers: dict[str, str], remote_addr: str) -> str:
         """获取客户端IP地址"""
         client_ip = (
             headers.get('X-Forwarded-For', '').split(',')[0].strip() or
@@ -66,9 +66,9 @@ class ClientManager:
     def detect_username(
         self,
         client_ip: str,
-        username: Optional[str] = None,
-        password: Optional[str] = None
-    ) -> tuple[bool, str, Optional[str]]:
+        username: str | None = None,
+        password: str | None = None
+    ) -> tuple[bool, str, str | None]:
         """
         自动检测客户端用户名
 

@@ -7,7 +7,7 @@ import asyncio
 import paramiko
 from typing import Dict, Callable
 import logging
-from core.common_utils import CommonUtils
+from foundation.common_utils import CommonUtils
 
 logger = logging.getLogger(__name__)
 

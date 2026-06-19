@@ -27,7 +27,7 @@ EXPECTED_SIDEBAR_PAGES = {
 
 class AgentIntentTests(unittest.TestCase):
     def test_agent_can_navigate_to_automation_page(self):
-        from core.agent_intent import resolve
+        from features.assistant.intent import resolve
 
         intent = resolve("打开 GMS ATS", {})
 
@@ -36,7 +36,7 @@ class AgentIntentTests(unittest.TestCase):
         self.assertGreaterEqual(intent.confidence, 0.9)
 
     def test_agent_navigation_aliases_cover_all_sidebar_pages(self):
-        from core.agent_intent import _NAV_ALIASES, resolve
+        from features.assistant.intent import _NAV_ALIASES, resolve
 
         template = Path("templates/index_fastapi.html").read_text(encoding="utf-8", errors="ignore")
         for page, label in EXPECTED_SIDEBAR_PAGES.items():
@@ -49,7 +49,7 @@ class AgentIntentTests(unittest.TestCase):
                 self.assertEqual(intent.params["page"], page)
 
     def test_page_overview_and_display_names_cover_all_sidebar_pages(self):
-        from core.agent_response import _page_display_name, generate_page_overview, page_quick_actions
+        from features.assistant.response import _page_display_name, generate_page_overview, page_quick_actions
 
         overview = generate_page_overview()
         quick_actions = page_quick_actions()

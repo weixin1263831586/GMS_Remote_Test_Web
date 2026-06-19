@@ -10,12 +10,12 @@ import paramiko
 from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse, Response
 
-from core.api_response import error_response, success_response
-from core.common_utils import CommonUtils
-from core.config import config_manager
-from core.schemas import VNCStartRequest
-from core.ssh import ssh_manager
-from core.vnc import vnc_manager
+from foundation.responses import error_response, success_response
+from foundation.common_utils import CommonUtils
+from foundation.config import config_manager
+from features.system.models import VNCStartRequest
+from features.system.ssh import ssh_manager
+from features.system.vnc import vnc_manager
 
 logger = logging.getLogger(__name__)
 

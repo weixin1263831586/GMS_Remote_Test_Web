@@ -3,10 +3,10 @@ from types import SimpleNamespace
 
 from fastapi.responses import PlainTextResponse
 
-from core.agent_executor import ActionExecutor, _json_body
-from core.agent_intent import resolve
-from core.agent_tools import registry
-from routers.agent import _parse_user_intent
+from features.assistant.executor import ActionExecutor, _json_body
+from features.assistant.intent import resolve
+from features.assistant.tools import registry
+from features.assistant.api import _parse_user_intent
 from features.test_execution.api import get_status
 
 

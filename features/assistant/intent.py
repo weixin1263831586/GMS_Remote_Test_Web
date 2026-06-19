@@ -14,8 +14,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from core.agent_context import resolve_reference
-from core.agent_tools import AgentTool, registry
+from features.assistant.context import resolve_reference
+from features.assistant.tools import AgentTool, registry
 
 
 # ==================== Result ====================

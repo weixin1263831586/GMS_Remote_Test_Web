@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.universal_ai import UniversalAIAnalyzer
+from features.assistant.universal_ai import UniversalAIAnalyzer
 from features.reports import ReportAnalyzer
 from features.redmine.agent import RedmineAgent
 from features.redmine.repository import RedmineAgentDB

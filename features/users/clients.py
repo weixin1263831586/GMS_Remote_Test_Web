@@ -3,12 +3,13 @@
 import ipaddress
 import logging
 import urllib.parse
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
-from core.common_utils import CommonUtils
-from core.config import config_manager
-from modules.client_manager import client_manager
-from modules.ssh_async import ssh_async_manager
+from foundation.networking import parse_host_address
+
+from . import runtime
+from .sessions import client_manager
+
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ def get_client_id_from_request(request) -> str:
     """从请求中获取client_id（优先从配置文件读取用户名）"""
     client_ip = get_client_ip(request)
 
-    config = config_manager.load_config()
+    config = runtime.config_manager.load_config()
     client_hosts = config.get('client_hosts', {})
 
     if client_ip in client_hosts:
@@ -32,7 +33,7 @@ def get_client_id_from_request(request) -> str:
     return client_manager.get_client_id(client_ip, username)
 
 
-def get_client_ip(request, fallback_ip: Optional[str] = None) -> str:
+def get_client_ip(request, fallback_ip: str | None = None) -> str:
     """提取客户端真实IP地址（支持代理）。"""
     if fallback_ip:
         return fallback_ip
@@ -51,7 +52,7 @@ def parse_client_id(client_id: str) -> tuple[str, str]:
     return username or 'unknown', client_ip or 'unknown'
 
 
-def get_client_source(ip: str) -> Dict[str, str]:
+def get_client_source(ip: str) -> dict[str, str]:
     """按客户端 IP 判断来源类型。"""
     try:
         ip_obj = ipaddress.ip_address(ip)
@@ -79,7 +80,7 @@ def is_public_origin_request(request) -> bool:
     return 'tailscale.com' in origin
 
 
-def resolve_tailscale_device_host(request, client_id: str) -> Tuple[Optional[str], Optional[str]]:
+def resolve_tailscale_device_host(request, client_id: str) -> tuple[str | None, str | None]:
     """Return (device_host, usbip_attach_host) for Tailscale-origin requests."""
     if not is_public_origin_request(request):
         return None, None
@@ -92,15 +93,15 @@ def resolve_tailscale_device_host(request, client_id: str) -> Tuple[Optional[str
 
 async def run_windows_command_via_ssh(device_host: str, command: str, timeout: int = 30) -> dict:
     """Execute a command on a Windows client via direct SSH over Tailscale."""
-    config = config_manager.load_config()
-    password = config_manager.find_device_host_password(device_host, config) or config.get('device_pswd', '')
+    config = runtime.config_manager.load_config()
+    password = runtime.config_manager.find_device_host_password(device_host, config) or config.get('device_pswd', '')
     if not password:
         return {'returncode': -1, 'stdout': '', 'stderr': f'No SSH credentials for {device_host}'}
-    username, hostname = CommonUtils.parse_host_address(device_host)
+    username, hostname = parse_host_address(device_host)
     if not username or not hostname:
         return {'returncode': -1, 'stdout': '', 'stderr': f'Invalid device_host: {device_host}'}
     try:
-        exit_code, stdout, stderr = await ssh_async_manager.execute_command_simple(
+        exit_code, stdout, stderr = await runtime.ssh_async_manager.execute_command_simple(
             hostname, username, password, command, timeout=timeout
         )
         return {'returncode': exit_code, 'stdout': stdout, 'stderr': stderr}
@@ -108,7 +109,7 @@ async def run_windows_command_via_ssh(device_host: str, command: str, timeout: i
         return {'returncode': -1, 'stdout': '', 'stderr': str(e)}
 
 
-async def probe_windows_usbipd(device_host: str) -> Dict[str, Any]:
+async def probe_windows_usbipd(device_host: str) -> dict[str, Any]:
     """Check if usbipd is installed on the Windows client via SSH."""
     result = await run_windows_command_via_ssh(device_host, 'usbipd --version', timeout=15)
     output = (result.get('stdout') or '').strip() or (result.get('stderr') or '').strip()
@@ -119,7 +120,7 @@ async def probe_windows_usbipd(device_host: str) -> Dict[str, Any]:
     }
 
 
-def is_manual_username_fallback_error(error: Optional[str]) -> bool:
+def is_manual_username_fallback_error(error: str | None) -> bool:
     """判断用户名识别失败是否属于可手动保存的网络不可达场景。"""
     if not error:
         return True

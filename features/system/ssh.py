@@ -8,8 +8,8 @@ from typing import Tuple, Dict, Any, Optional
 from contextlib import contextmanager
 import queue
 
-from .config import get_ubuntu_user
-from .common_utils import CommonUtils
+from foundation.config import get_ubuntu_user
+from foundation.common_utils import CommonUtils
 
 logger = logging.getLogger(__name__)
 

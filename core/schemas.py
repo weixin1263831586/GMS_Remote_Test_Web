@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from core.config import DEFAULT_WIFI_SSID, DEFAULT_WIFI_PASSWORD
+from foundation.config import DEFAULT_WIFI_SSID, DEFAULT_WIFI_PASSWORD
 
 
 class ClientInfoRequest(BaseModel):

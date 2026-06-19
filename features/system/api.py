@@ -16,13 +16,13 @@ from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, HTTPExce
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.background import BackgroundTask
 
-from core.api_docs_list import API_DOCS_LIST
-from core.config import config_manager
-from core.settings import DEFAULT_SERVER_URL, PROJECT_ROOT
-from core.error_handling import handle_api_errors
-from core.file_utils import FileUtils
-from core.state import global_state
-from core.terminal import (
+from features.system.api_docs_list import API_DOCS_LIST
+from foundation.config import config_manager
+from foundation.config import DEFAULT_SERVER_URL, PROJECT_ROOT
+from foundation.errors import handle_api_errors
+from foundation.files import FileUtils
+from features.system.state import global_state
+from features.system.terminal_service import (
     refresh_devices_websocket,
     handle_tradefed_list_results,
     handle_terminal_connect,

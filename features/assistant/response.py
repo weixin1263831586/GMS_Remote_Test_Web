@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from core.agent_executor import ToolResult
+from features.assistant.executor import ToolResult
 
 
 PAGE_DISPLAY_NAMES: Dict[str, str] = {

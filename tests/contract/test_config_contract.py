@@ -1,6 +1,6 @@
 import unittest
 
-from core.config import config_manager
+from foundation.config import config_manager
 from tests.contract.snapshot_tools import config_shape, read_json
 
 

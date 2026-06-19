@@ -30,3 +30,29 @@ def error_response(
         content['detail'] = detail
     content.update(extra_fields)
     return JSONResponse(content=content, status_code=status_code)
+
+
+class ApiResponse:
+    @staticmethod
+    def success(data=None, message="操作成功"):
+        return success_response(data=data, message=message)
+
+    @staticmethod
+    def error(error_message, status_code=500, **extra_fields):
+        return error_response(error=error_message, status_code=status_code, **extra_fields)
+
+    @staticmethod
+    def device_results(results, operation_name):
+        success_count = sum(result.get('success', False) for result in results)
+        fail_count = len(results) - success_count
+        return ApiResponse.success(
+            {
+                'results': results,
+                'summary': {
+                    'total': len(results),
+                    'success': success_count,
+                    'failed': fail_count,
+                },
+            },
+            f"{operation_name}完成: 成功 {success_count} 台, 失败 {fail_count} 台",
+        )
