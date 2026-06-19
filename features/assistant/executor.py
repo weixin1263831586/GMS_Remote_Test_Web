@@ -15,10 +15,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from features.assistant.tools import AgentTool, registry
-from features.devices.locks import device_lock_manager
-from features.devices.manager import device_manager
-from features.devices.support import get_or_create_user_state
-from features.redmine.repository import (
+from features.devices import device_lock_manager, device_manager, get_or_create_user_state
+from features.redmine import (
     _name_keys,
     _norm_name,
     display_names_from_mapping,
@@ -100,7 +98,7 @@ def _get_model_by_tool() -> dict[str, type]:
     """Lazy-initialised mapping of tool names to Pydantic request models."""
     global _MODEL_BY_TOOL
     if _MODEL_BY_TOOL is None:
-        from features.devices.models import (
+        from features.devices import (
             ADBForwardStartRequest,
             DeviceActionRequest,
             DeviceLockRequest,
@@ -109,16 +107,16 @@ def _get_model_by_tool() -> dict[str, type]:
             USBIPStartRequest,
             WifiConnectRequest,
         )
-        from features.firmware.models import SNBurnRequest
-        from features.reports.api_models import ReportDiagnosisRequest
-        from features.system.models import VNCStartRequest, VPNConnectRequest
-        from features.test_execution.models import (
+        from features.firmware import SNBurnRequest
+        from features.reports import ReportDiagnosisRequest
+        from features.system import VNCStartRequest, VPNConnectRequest
+        from features.test_execution import (
             SuiteApkAnalyzeRequest,
             TestParseArgsRequest,
             TestStartRequest,
             TradefedListResultsRequest,
         )
-        from features.users.models import ClientInfoRequest
+        from features.users import ClientInfoRequest
         _MODEL_BY_TOOL = {
             "users_detect": ClientInfoRequest,
             "users_set_username": ClientInfoRequest,
@@ -327,12 +325,12 @@ class ActionExecutor:
     async def _load_device_summaries(self) -> list[dict[str, Any]]:
         """Load device summaries, preferring management payload when available."""
         try:
-            from features.devices.api import (
+            from features.devices import (
                 _build_devices_management_payload,
                 _build_management_props_command,
                 _parse_management_device_props,
             )
-            from features.system.ssh import ssh_manager
+            from features.system import ssh_manager
 
             config = config_manager.load_config()
             device_ids = await asyncio.to_thread(device_manager.get_connected_devices, True)
@@ -369,8 +367,7 @@ class ActionExecutor:
 
     async def _connect_wifi(self, session, request, params) -> ToolResult:
         """连接设备到 WiFi。未指定设备时默认选择一台空闲设备。"""
-        from features.devices.api import connect_wifi
-        from features.devices.models import WifiConnectRequest
+        from features.devices import WifiConnectRequest, connect_wifi
 
         devices = list(params.get("devices") or [])
         if not devices:
@@ -450,8 +447,7 @@ class ActionExecutor:
 
     async def _query_suites(self, session, request, params) -> ToolResult:
         """查询测试套件。"""
-        from features.test_execution.api import _get_available_test_suites
-        from features.test_execution.suites import get_default_suites_path
+        from features.test_execution import _get_available_test_suites, get_default_suites_path
 
         config = config_manager.load_config()
         base_path = config.get("suites_path") or get_default_suites_path(config)
@@ -505,7 +501,7 @@ class ActionExecutor:
 
     async def _query_reports(self, session, request, params) -> ToolResult:
         """查询测试报告。"""
-        from features.reports.repository import test_report_db
+        from features.reports import test_report_db
 
         reports = test_report_db.get_reports(limit=10)
         stats = test_report_db.get_statistics()
@@ -530,7 +526,7 @@ class ActionExecutor:
 
     async def _query_users(self, session, request, params) -> ToolResult:
         """查询在线用户。"""
-        from features.users.users_api import list_users
+        from features.users import list_users
 
         response = await list_users()
         payload = _json_body(response)
@@ -549,7 +545,7 @@ class ActionExecutor:
 
     async def _query_health(self, session, request, params) -> ToolResult:
         """查询系统健康。"""
-        from features.system.api import health_check
+        from features.system import health_check
 
         response = await health_check()
         payload = _json_body(response)
@@ -870,7 +866,7 @@ class ActionExecutor:
 
     async def _query_redmine_workload_stats(self, session, request, params) -> ToolResult:
         """统计一个或多个人员的 Redmine 工作量。"""
-        from features.redmine.api import _resolve_owner_names, redmine_service
+        from features.redmine import _resolve_owner_names, redmine_service
 
         raw_names = params.get("names") or []
         if isinstance(raw_names, str):
@@ -1058,7 +1054,7 @@ class ActionExecutor:
         return []
 
     async def _sync_redmine_user_issues(self, agent: Any, client: Any, user: dict[str, Any]) -> None:
-        from features.redmine.agent import RESOLVED_STATUSES
+        from features.redmine import RESOLVED_STATUSES
 
         issues = await client.fetch_issues_by_assignee(int(user["id"]), status_id="*", limit=2000)
         display_names = display_names_from_mapping(user)
