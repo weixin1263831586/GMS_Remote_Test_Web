@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import queue
+import sqlite3
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
@@ -28,6 +29,33 @@ from features.redmine.scheduler import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def initialize_runtime_data(services: AppServices) -> None:
+    data_root = services.settings.data_root
+    data_root.mkdir(parents=True, exist_ok=True)
+
+    # Redmine repository owns its schema, documents, and attachment workspace.
+    services.redmine.repository.init_db()
+    (data_root / 'redmine/attachments').mkdir(parents=True, exist_ok=True)
+
+    from features.automation.repository import AutomationStore
+    from features.reports.repository import TestReportDB
+    from features.system.mainline_issues.repository import init_db as init_mainline_db
+    from features.system.update_monitor.repository import init_db as init_update_monitor_db
+
+    AutomationStore(data_root / 'automation/automation.sqlite3')
+    TestReportDB(str(data_root / 'reports/test_reports.json'))
+
+    update_monitor_db = data_root / 'gms_update_monitor.sqlite3'
+    update_monitor_db.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(update_monitor_db) as conn:
+        init_update_monitor_db(conn)
+
+    mainline_db = data_root / 'mainline_known_issues.sqlite3'
+    mainline_db.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(mainline_db) as conn:
+        init_mainline_db(conn)
 
 
 async def _periodic_cleanup() -> None:
@@ -115,6 +143,7 @@ def create_lifespan(services: AppServices):
     @asynccontextmanager
     async def lifespan(app):
         app.state.services = services
+        initialize_runtime_data(services)
         cleanup_task = asyncio.create_task(_periodic_cleanup())
         redmine_task = start_redmine_agent_scheduler(services.redmine)
         try:
