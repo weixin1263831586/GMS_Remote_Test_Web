@@ -468,7 +468,7 @@ class ToolRegistry:
 
 def _build_registry() -> ToolRegistry:
     """构建并返回全局工具注册表。"""
-    from features.system.api_docs_list import API_DOCS_LIST
+    from features.system import API_DOCS_LIST
 
     registry = ToolRegistry()
     registry.register_from_api_docs(API_DOCS_LIST)
