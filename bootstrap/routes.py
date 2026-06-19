@@ -30,6 +30,7 @@ from features.gerrit.config import (
 from features.gerrit.dependencies import configure_redmine_users_provider
 from features.gerrit.service import _query_gerrit_dual_mode
 from features.redmine import api as redmine
+from features.redmine import reply_api as redmine_reply
 from features.redmine.api import configure_redmine_service
 from features.redmine.dashboard import (
     denormalize_redmine_dashboard_config,
@@ -114,6 +115,7 @@ ALL_ROUTERS = [
     notifications.router,
     redmine.router,
     redmine.page_router,
+    redmine_reply.router,
     reports.router,
     system.router,
     terminal.router,

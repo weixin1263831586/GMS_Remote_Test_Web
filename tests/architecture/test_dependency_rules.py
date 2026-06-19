@@ -9,7 +9,6 @@ MIGRATION_FEATURE_IMPORT_EXEMPTIONS = {
     # before final cutover.
     'features/assistant/api.py',
     'features/assistant/executor.py',
-    'features/system/integrations.py',
 }
 MIGRATION_FOUNDATION_IMPORT_EXEMPTIONS = set()
 
