@@ -12,7 +12,6 @@ MIGRATION_FEATURE_IMPORT_EXEMPTIONS = {
     'features/assistant/tools.py',
     'features/system/integrations.py',
     'features/system/terminal_service.py',
-    'features/system/vnc.py',
 }
 MIGRATION_FOUNDATION_IMPORT_EXEMPTIONS = set()
 
