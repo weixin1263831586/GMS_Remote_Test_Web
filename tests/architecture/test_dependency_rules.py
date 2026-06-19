@@ -9,7 +9,6 @@ MIGRATION_FEATURE_IMPORT_EXEMPTIONS = {
     # before final cutover.
     'features/assistant/api.py',
     'features/assistant/executor.py',
-    'features/assistant/tools.py',
     'features/system/integrations.py',
     'features/system/terminal_service.py',
 }
