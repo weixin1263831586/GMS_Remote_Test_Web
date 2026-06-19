@@ -2,6 +2,7 @@ from .locks import device_lock_manager
 from .monitor import get_usb_monitor
 from .service import DeviceService
 from .support import (
+    DeviceSSHConnection,
     broadcast_device_lock_update,
     get_or_create_user_state,
     release_device_locks,
@@ -11,6 +12,7 @@ from .support import (
 
 
 __all__ = [
+    "DeviceSSHConnection",
     "DeviceService",
     "broadcast_device_lock_update",
     "device_lock_manager",

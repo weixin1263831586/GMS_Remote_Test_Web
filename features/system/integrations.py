@@ -7,13 +7,10 @@ import re
 import shlex
 import subprocess
 
-from fastapi import APIRouter, Body, Query, Request, UploadFile
+from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.devices.support import (
-    DeviceSSHConnection,
-)
-from features.redmine.client import RedmineClient
+from features.devices import DeviceSSHConnection
 from features.system.models import VPNConnectRequest
 from features.system.network import (
     _extract_network,
@@ -33,7 +30,7 @@ from features.users import get_client_id_from_request, get_client_ip, resolve_ta
 from foundation.common_utils import CommonUtils
 from foundation.config import config_manager
 from foundation.errors import handle_api_errors
-from foundation.responses import error_response, success_response
+from foundation.responses import error_response
 
 
 logger = logging.getLogger(__name__)
@@ -536,74 +533,4 @@ async def disconnect_vpn():
         return JSONResponse(
             content={"success": False, "error": str(e)},
             status_code=500
-        )
-
-
-@router.post("/api/redmine/reply")
-async def redmine_reply(request: Request):
-    """
-    向 Redmine Issue 发送回复（支持附件）
-
-    参数：
-        issue_id: Redmine Issue ID
-        reply_text: 回复内容
-        files: 可选附件列表
-
-    返回：
-        success: 是否成功
-        message: 成功消息
-        error: 错误信息（如果失败）
-    """
-    try:
-        content_type = (request.headers.get("content-type") or "").lower()
-        files: list[UploadFile] = []
-        if content_type.startswith("multipart/form-data"):
-            form = await request.form()
-            issue_id = str(form.get("issue_id") or "").strip()
-            reply_text = str(form.get("reply_text") or "").strip()
-            files = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
-        else:
-            body = await request.json()
-            issue_id = str(body.get("issue_id") or "").strip()
-            reply_text = str(body.get("reply_text") or "").strip()
-
-        if not issue_id:
-            return error_response('缺少 issue_id 参数', status_code=400)
-
-        if not reply_text:
-            return error_response('缺少 reply_text 参数', status_code=400)
-
-        logger.info(f"[Redmine Reply] 准备发送回复到 Issue #{issue_id}，附件数: {len(files)}")
-
-        stored_creds = config_manager.load_redmine_credentials()
-        if not stored_creds:
-            return error_response('未配置 Redmine 凭证', status_code=401)
-
-        try:
-            redmine_config = config_manager.get_redmine_config()
-            base_url = redmine_config['base_url']
-        except ValueError as e:
-            return error_response(str(e), status_code=404)
-
-        attachment_files = []
-        for f in files:
-            content = await f.read()
-            if not content:
-                continue
-            file_content_type = f.content_type or 'application/octet-stream'
-            filename = f.filename or 'attachment'
-            logger.info(f"[Redmine Reply] 上传附件: {filename} ({len(content)} bytes)")
-            attachment_files.append({'content': content, 'filename': filename, 'content_type': file_content_type})
-
-        client = RedmineClient(base_url, stored_creds.get('username'), stored_creds.get('password'))
-        result = await client.reply_issue(issue_id, reply_text, attachment_files)
-        attachment_info = f"，携带 {result.get('attachments', 0)} 个附件" if result.get('attachments') else ''
-        logger.info(f"[Redmine Reply] 回复已成功发送到 Issue #{issue_id}{attachment_info}")
-        return success_response(result, message=f'回复已发送到 Redmine Issue #{issue_id}{attachment_info}')
-
-    except Exception as e:
-        logger.error(f"[Redmine Reply] 发送回复失败：{e}")
-        return error_response(
-            f'发送失败：{e!s}',
-            status_code=500,
         )
