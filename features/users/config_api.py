@@ -18,13 +18,16 @@ from .clients import (
 )
 
 
+config_manager = runtime.config_manager
+
+
 def get_effective_local_server(
     client_id: str,
     requested_local_server: str = "",
 ) -> str:
     if requested_local_server:
         return requested_local_server
-    runtime_config = runtime.config_manager.get_runtime_config()
+    runtime_config = config_manager.get_runtime_config()
     return runtime_config.get("local_server") or client_id
 
 logger = logging.getLogger(__name__)
@@ -141,7 +144,7 @@ async def get_config(request: Request):
     client_id = get_client_id_from_request(request)
     runtime.get_or_create_user_state(client_id)
 
-    config = runtime.config_manager.load_config()
+    config = config_manager.load_config()
     # local_server 是客户端回传地址；没有显式动态配置时，按当前请求用户/IP 展示。
     config['local_server'] = get_effective_local_server(client_id)
 
@@ -153,7 +156,7 @@ async def get_config(request: Request):
 @router.get("/api/config/opengrok")
 async def get_opengrok_config(request: Request):
     """获取OpenGrok配置 - 供前端源码链接使用"""
-    config = runtime.config_manager.load_config()
+    config = config_manager.load_config()
     opengrok_config = config.get('opengrok', {})
 
     if not opengrok_config or 'base_url' not in opengrok_config:
@@ -165,7 +168,7 @@ async def get_opengrok_config(request: Request):
 @router.get("/api/config/ai")
 async def get_ai_config(request: Request):
     """获取 AI 配置 - 供前端 AI 分析功能使用"""
-    ai_config = runtime.config_manager.get_ai_config()
+    ai_config = config_manager.get_ai_config()
 
     if not ai_config:
         return error_response('AI 未配置或未启用，请在 configs/config.json 中配置 ai_models 段并设置 enabled: true', status_code=404)
@@ -249,7 +252,7 @@ async def ensure_tailscale_url(request: Request):
 @router.post("/api/config/update")
 async def update_config(req: dict):
     """更新配置 - 只修改运行时配置，禁止修改config.json"""
-    existing_runtime = runtime.config_manager.get_runtime_config()
+    existing_runtime = config_manager.get_runtime_config()
 
     # 运行时配置字段（保存在 config_runtime.json）
     # 注意：client_ip 和 client_username 是运行时状态，不应保存到配置文件
@@ -273,7 +276,7 @@ async def update_config(req: dict):
     }
 
     # 保存运行时配置
-    if runtime.config_manager.save_runtime_config(runtime_updates):
+    if config_manager.save_runtime_config(runtime_updates):
         return success_response()
     else:
         return error_response("保存配置失败", status_code=500)
@@ -282,7 +285,7 @@ async def update_config(req: dict):
 @router.get("/api/sidebar-order")
 async def get_sidebar_order():
     """获取侧边栏导航顺序。"""
-    existing_runtime = runtime.config_manager.get_runtime_config()
+    existing_runtime = config_manager.get_runtime_config()
     order = existing_runtime.get('sidebar_order', [])
     if not isinstance(order, list):
         order = []
@@ -293,7 +296,7 @@ async def get_sidebar_order():
 @router.post("/api/sidebar-order")
 async def save_sidebar_order(req: dict = Body(default={})):
     """保存侧边栏导航顺序和可见页面。"""
-    existing_runtime = runtime.config_manager.get_runtime_config()
+    existing_runtime = config_manager.get_runtime_config()
     order = existing_runtime.get('sidebar_order', [])
 
     if 'order' in req:
@@ -309,7 +312,7 @@ async def save_sidebar_order(req: dict = Body(default={})):
     if 'order' not in req and 'visible_pages' not in req:
         return error_response("缺少可保存的侧边栏配置", status_code=400)
 
-    if runtime.config_manager.save_runtime_config(existing_runtime):
+    if config_manager.save_runtime_config(existing_runtime):
         return success_response({
             'order': order if isinstance(order, list) else [],
             'visible_pages': existing_runtime.get('sidebar_visible_pages', []),
