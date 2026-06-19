@@ -14,7 +14,6 @@ import aiohttp
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from features.devices.support import ssh_connection_failed_response
 from features.system.icon_fetcher import IconFetcher
 from features.system.ssh import ssh_manager
 from features.users import get_client_id_from_request
@@ -26,6 +25,13 @@ from foundation.responses import error_response, success_response
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def ssh_connection_failed_response():
+    return JSONResponse(
+        content={'success': False, 'error': 'SSH connection failed'},
+        status_code=500,
+    )
 
 
 @router.get("/api/files/progress")

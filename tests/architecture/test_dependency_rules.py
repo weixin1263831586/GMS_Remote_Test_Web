@@ -10,17 +10,11 @@ MIGRATION_FEATURE_IMPORT_EXEMPTIONS = {
     'features/assistant/api.py',
     'features/assistant/executor.py',
     'features/assistant/tools.py',
-    'features/system/assets.py',
     'features/system/integrations.py',
-    'features/system/state.py',
     'features/system/terminal_service.py',
     'features/system/vnc.py',
 }
-MIGRATION_FOUNDATION_IMPORT_EXEMPTIONS = {
-    # 2026-06-19: full legacy ConfigManager is temporarily hosted here while
-    # dashboard normalizers are split back out of feature modules.
-    'foundation/config.py',
-}
+MIGRATION_FOUNDATION_IMPORT_EXEMPTIONS = set()
 
 
 def imports(path: Path) -> set[str]:
