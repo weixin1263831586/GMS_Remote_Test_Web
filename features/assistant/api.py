@@ -40,7 +40,6 @@ from features.test_execution.models import SuiteApkAnalyzeRequest
 from features.test_execution.suites import (
     detect_test_type_from_suite_path,
     get_default_suites_path,
-    is_config_host_local,
 )
 from features.users import get_client_id_from_request
 from foundation.config import config_manager
@@ -1092,5 +1091,5 @@ async def get_agent_capabilities():
         "tool_catalog": tools_by_category,
         "total_tools": len(registry),
         "limits": {"max_retries": MAX_AGENT_RETRIES},
-        "suite_source": "local" if is_config_host_local(config) else "ssh",
+            "suite_source": "local" if config_manager.is_config_host_local(config) else "ssh",
     })

@@ -10,7 +10,6 @@ MIGRATION_FEATURE_IMPORT_EXEMPTIONS = {
     'features/assistant/api.py',
     'features/assistant/executor.py',
     'features/system/integrations.py',
-    'features/system/terminal_service.py',
 }
 MIGRATION_FOUNDATION_IMPORT_EXEMPTIONS = set()
 

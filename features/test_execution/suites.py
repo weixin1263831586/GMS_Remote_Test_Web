@@ -5,8 +5,6 @@ import os
 import re
 from typing import Any
 
-from foundation.networking import is_local_host
-
 from . import runtime
 
 
@@ -77,7 +75,7 @@ def get_default_suites_path(config: dict[str, Any]) -> str:
 
 def is_config_host_local(config: dict[str, Any]) -> bool:
     """Return whether the configured Ubuntu host is local."""
-    return is_local_host(runtime.config_manager.get_ubuntu_host(config))
+    return runtime.config_manager.is_config_host_local(config)
 
 
 def get_effective_local_server(client_id: str, requested_local_server: str = "") -> str:

@@ -29,7 +29,6 @@ from features.system.network import (
     resolve_vpn_connection_name,
 )
 from features.system.ssh import SSHD_INSTALL_GUIDE, ssh_manager
-from features.test_execution.suites import is_config_host_local
 from features.users import get_client_id_from_request, get_client_ip, resolve_tailscale_device_host
 from foundation.common_utils import CommonUtils
 from foundation.config import config_manager
@@ -43,7 +42,7 @@ router = APIRouter()
 
 configure_network_dependencies(
     ssh_manager=ssh_manager,
-    is_config_host_local=is_config_host_local,
+    is_config_host_local=config_manager.is_config_host_local,
 )
 
 
@@ -329,9 +328,9 @@ async def get_vpn_connections():
     config = config_manager.load_config()
     ssh = None
     try:
-        if not is_config_host_local(config):
+        if not config_manager.is_config_host_local(config):
             ssh = ssh_manager.get_connection(config)
-        if not is_config_host_local(config) and not ssh:
+        if not config_manager.is_config_host_local(config) and not ssh:
             return error_response("SSH连接失败", status_code=500)
 
         cmd = "nmcli -t -f NAME,TYPE connection show 2>/dev/null"
@@ -355,7 +354,7 @@ async def get_vpn_status():
     config = config_manager.load_config()
     vpn_target = get_primary_vpn_target(config)
 
-    if is_config_host_local(config):
+    if config_manager.is_config_host_local(config):
         connected = await asyncio.to_thread(check_local_vpn_connected, vpn_target)
         return JSONResponse(content={
             "success": True,
@@ -411,10 +410,10 @@ async def connect_vpn(
     try:
         config = config_manager.load_config()
         ssh = None
-        if not is_config_host_local(config):
+        if not config_manager.is_config_host_local(config):
             ssh = ssh_manager.get_connection(config)
 
-        if not is_config_host_local(config) and not ssh:
+        if not config_manager.is_config_host_local(config) and not ssh:
             return JSONResponse(
                 content={"success": False, "error": "SSH连接失败"},
                 status_code=500
@@ -492,10 +491,10 @@ async def disconnect_vpn():
     try:
         config = config_manager.load_config()
         ssh = None
-        if not is_config_host_local(config):
+        if not config_manager.is_config_host_local(config):
             ssh = ssh_manager.get_connection(config)
 
-        if not is_config_host_local(config) and not ssh:
+        if not config_manager.is_config_host_local(config) and not ssh:
             return JSONResponse(
                 content={"success": False, "error": "SSH连接失败"},
                 status_code=500
