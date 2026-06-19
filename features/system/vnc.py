@@ -14,18 +14,14 @@ import subprocess
 import time
 from typing import Any
 
-from features.devices.utils import DeviceUtils
 from foundation.common_utils import CommonUtils
 from foundation.config import config_manager, get_ubuntu_user
+from foundation.window_layout import calculate_window_positions
 
 from .ssh import ssh_manager
 
 
 logger = logging.getLogger(__name__)
-
-# 导出窗口计算函数供外部使用
-calculate_window_positions = DeviceUtils.calculate_window_positions
-
 
 class VNCManager:
     """

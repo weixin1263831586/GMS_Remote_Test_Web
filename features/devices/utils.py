@@ -2,6 +2,11 @@
 import logging
 from typing import Any
 
+from foundation.window_layout import (
+    calculate_device_window_position,
+    calculate_window_positions,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -22,23 +27,12 @@ class DeviceUtils:
         max_window_width: int = 350,
     ) -> dict[str, Any]:
         """计算投屏窗口的位置和大小。返回 window_width/height, start_x/y, horizontal_gap。"""
-        total = len(devices)
-        gap = 20
-
-        max_available = screen_width - gap * (total + 1)
-        w = min(max_window_width, max_available // total) if total else max_window_width
-        h = int(w * 16 / 9)
-
-        max_h = int(screen_height * 0.7)
-        if h > max_h:
-            h = max_h
-            w = int(h * 9 / 16)
-
-        total_w = total * w + (total - 1) * gap
-        start_x = max(gap, (screen_width - total_w) // 2)
-        start_y = max(50, (screen_height - h) // 2)
-
-        return {'window_width': w, 'window_height': h, 'start_x': start_x, 'start_y': start_y, 'horizontal_gap': gap}
+        return calculate_window_positions(
+            devices,
+            screen_width=screen_width,
+            screen_height=screen_height,
+            max_window_width=max_window_width,
+        )
 
     @staticmethod
     def calculate_device_window_position(
@@ -53,13 +47,17 @@ class DeviceUtils:
         vertical_margin: int = 50,
     ) -> dict[str, int]:
         """计算单个设备的窗口位置，含边界检查。返回 {'x_offset', 'y_offset'}。"""
-        x = start_x + device_index * (window_width + horizontal_gap)
-        y = start_y
-        if x + window_width > screen_width:
-            x = max(0, screen_width - window_width - horizontal_gap)
-        if y + window_height > screen_height:
-            y = max(0, screen_height - window_height - vertical_margin)
-        return {'x_offset': x, 'y_offset': y}
+        return calculate_device_window_position(
+            device_index,
+            window_width,
+            window_height,
+            start_x,
+            start_y,
+            horizontal_gap,
+            screen_width=screen_width,
+            screen_height=screen_height,
+            vertical_margin=vertical_margin,
+        )
 
     @staticmethod
     def kill_process(ssh, process_pattern: str) -> bool:
