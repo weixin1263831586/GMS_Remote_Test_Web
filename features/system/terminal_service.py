@@ -18,10 +18,9 @@ import paramiko
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from features.devices.locks import device_lock_manager
+from features.devices import device_lock_manager
 from features.system.ssh import ssh_manager
 from features.system.state import global_state
-from features.test_execution.suites import is_config_host_local
 from foundation.common_utils import CommonUtils
 from foundation.config import config_manager
 
@@ -130,7 +129,7 @@ def create_local_terminal_channel(command: list[str] | None = None) -> LocalPtyC
 async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_no: str, config: dict):
     """处理ADB Shell连接 - 通过SSH执行adb shell命令"""
     try:
-        if is_config_host_local(config):
+        if config_manager.is_config_host_local(config):
             ssh = None
             channel = create_local_terminal_channel()
             backend_mode = 'local_adb'
@@ -464,7 +463,7 @@ async def refresh_devices_websocket(client_id: str, websocket: WebSocket):
 
 async def handle_tradefed_list_results(client_id: str, websocket: WebSocket, data: dict):
     """处理 tradefed list results 命令"""
-    from features.test_execution.tradefed import execute_tradefed_command, parse_tradefed_list_results
+    from features.test_execution import execute_tradefed_command, parse_tradefed_list_results
 
     try:
         config = config_manager.load_config()

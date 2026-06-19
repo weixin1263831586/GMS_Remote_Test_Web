@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from foundation.networking import is_local_host
+
 
 logger = logging.getLogger(__name__)
 
@@ -760,6 +762,12 @@ class ConfigManager:
         if config is None:
             config = self.load_config()
         return config.get('ubuntu_host') or get_ubuntu_host()
+
+    def is_config_host_local(self, config: dict[str, Any] = None) -> bool:
+        """Return whether the configured Ubuntu host resolves to this machine."""
+        if config is None:
+            config = self.load_config()
+        return is_local_host(self.get_ubuntu_host(config))
 
     def _split_device_host(self, device_host: str) -> tuple[str, str]:
         if not device_host or '@' not in device_host:
