@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional
 
 from starlette.websockets import WebSocketState
 
-from core.settings import MAX_NOTIFICATIONS_PER_CLIENT, VALID_NOTIFICATION_LEVELS
-from core.state import global_state
+from foundation.config import MAX_NOTIFICATIONS_PER_CLIENT, VALID_NOTIFICATION_LEVELS
+from features.system.state import global_state
 
 logger = logging.getLogger(__name__)
 

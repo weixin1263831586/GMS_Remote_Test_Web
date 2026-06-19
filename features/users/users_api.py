@@ -5,21 +5,21 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from core.api_response import error_response
 
-from core.clients import (
+from foundation.errors import handle_api_errors
+from foundation.responses import error_response
+
+from . import runtime
+from .clients import (
     get_client_id_from_request,
     get_client_ip,
     get_client_source,
     is_manual_username_fallback_error,
     parse_client_id,
 )
-from core.config import config_manager
-from features.devices.support import get_or_create_user_state
-from core.error_handling import handle_api_errors
-from core.schemas import ClientInfoRequest
-from core.state import global_state
-from modules.client_manager import client_manager
+from .models import ClientInfoRequest
+from .sessions import client_manager
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def get_client_info(request: Request):
     client_id = get_client_id_from_request(request)
 
     # 确保用户状态存在
-    get_or_create_user_state(client_id)
+    runtime.get_or_create_user_state(client_id)
 
     username, client_ip = parse_client_id(client_id)
 
@@ -85,37 +85,37 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
         return error_response("用户名不能为空或unknown", 400)
 
     # 加载现有动态配置
-    existing_runtime = config_manager.get_runtime_config()
+    existing_runtime = runtime.config_manager.get_runtime_config()
     client_hosts = existing_runtime.get('client_hosts', {})
     client_hosts[client_ip] = username
 
     # 只保存客户端相关配置
-    runtime_config = config_manager.prepare_client_config({'client_hosts': client_hosts})
+    runtime_config = runtime.config_manager.prepare_client_config({'client_hosts': client_hosts})
 
     # 保存到配置文件
-    if config_manager.save_runtime_config(runtime_config):
+    if runtime.config_manager.save_runtime_config(runtime_config):
         # 更新内存中的映射
         client_manager.client_hosts = client_hosts
 
-        # 同时更新 global_state.user_states 中的用户名
+        # 同时更新 runtime.global_state.user_states 中的用户名
         old_client_id = f"unknown@{client_ip}"
         new_client_id = f"{username}@{client_ip}"
 
-        with global_state.user_states_lock:
+        with runtime.global_state.user_states_lock:
             # 如果存在 unknown@IP 的记录，更新为新用户名
-            if old_client_id in global_state.user_states:
-                old_state = global_state.user_states.pop(old_client_id)
+            if old_client_id in runtime.global_state.user_states:
+                old_state = runtime.global_state.user_states.pop(old_client_id)
                 old_state['client_username'] = username
-                global_state.user_states[new_client_id] = old_state
+                runtime.global_state.user_states[new_client_id] = old_state
             # 或者更新已存在的 client_id 的用户名
-            elif client_ip in [parse_client_id(k)[1] for k in global_state.user_states.keys()]:
-                for key in list(global_state.user_states.keys()):
+            elif client_ip in [parse_client_id(k)[1] for k in runtime.global_state.user_states]:
+                for key in list(runtime.global_state.user_states.keys()):
                     if key.endswith(f"@{client_ip}"):
-                        global_state.user_states[key]['client_username'] = username
+                        runtime.global_state.user_states[key]['client_username'] = username
                         # 如果需要，也可以更新 client_id
                         if key != new_client_id:
-                            state = global_state.user_states.pop(key)
-                            global_state.user_states[new_client_id] = state
+                            state = runtime.global_state.user_states.pop(key)
+                            runtime.global_state.user_states[new_client_id] = state
                         break
 
         logger.info(f"[Set Username] {client_ip} -> {username}")
@@ -134,18 +134,16 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
 @handle_api_errors
 async def list_users():
     """获取所有在线用户列表"""
-    from core.common_utils import CommonUtils
-
     now = datetime.now()
-    config = config_manager.load_config()
+    config = runtime.config_manager.load_config()
 
     # 本地地址列表，不显示在用户列表中
-    local_addresses = set(CommonUtils.LOCAL_HOSTS) | {'0.0.0.0'}
+    local_addresses = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
     vpn_gateway_addresses = set(config.get('vpn_gateways', []))
 
-    with global_state.user_states_lock:
+    with runtime.global_state.user_states_lock:
         temp_users = {}
-        for client_id, state in global_state.user_states.items():
+        for client_id, state in runtime.global_state.user_states.items():
             # 检查会话是否活跃（最近24小时内有活动）
             if 'last_seen' in state:
                 try:

@@ -9,11 +9,11 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import JSONResponse
-from core.api_response import error_response
+from foundation.responses import error_response
 
-from core.config import config_manager
-from core.ssh import ssh_manager
-from core.upload_utils import safe_upload_target_path, save_upload_to_path, merge_files_to_path
+from foundation.config import config_manager
+from features.system.ssh import ssh_manager
+from foundation.uploads import safe_upload_target_path, save_upload_to_path, merge_files_to_path
 
 logger = logging.getLogger(__name__)
 

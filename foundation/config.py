@@ -1,16 +1,21 @@
-from __future__ import annotations
-
-import copy
+"""
+配置管理器 - 核心业务逻辑
+"""
+import base64
+import hashlib
 import json
 import os
-import tempfile
-import threading
+import logging
+import re
 import time
-from collections.abc import Mapping
-from contextlib import suppress
+import threading
+import socket
+import getpass
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _env_bool(value: str) -> bool:
@@ -39,14 +44,10 @@ class RuntimeSettings:
         cls,
         *,
         project_root: Path | None = None,
-        environ: Mapping[str, str] | None = None,
-    ) -> RuntimeSettings:
+        environ: dict[str, str] | None = None,
+    ) -> "RuntimeSettings":
         env = os.environ if environ is None else environ
-        root = (
-            Path(__file__).resolve().parents[1]
-            if project_root is None
-            else Path(project_root).resolve()
-        )
+        root = Path(project_root).resolve() if project_root else Path(__file__).resolve().parents[1]
         environment = env.get('GMS_ENV', 'development').strip().lower()
         return cls(
             project_root=root,
@@ -58,110 +59,856 @@ class RuntimeSettings:
             server_port=_env_int(env.get('GMS_PORT', '5001'), 5001),
             environment=environment,
             proxy_headers_enabled=_env_bool(
-                env.get(
-                    'GMS_PROXY_HEADERS',
-                    'true' if environment == 'production' else 'false',
-                )
+                env.get('GMS_PROXY_HEADERS', 'true' if environment == 'production' else 'false')
             ),
-            forwarded_allow_ips=env.get(
-                'GMS_FORWARDED_ALLOW_IPS',
-                '127.0.0.1',
-            ),
+            forwarded_allow_ips=env.get('GMS_FORWARDED_ALLOW_IPS', '127.0.0.1'),
         )
 
 
 settings = RuntimeSettings.from_environment()
 
+PROJECT_ROOT = str(settings.project_root)
+SERVER_PORT = settings.server_port
+GMS_ENV = settings.environment
+SERVER_HOST = settings.server_host
+DEFAULT_SERVER_URL = os.getenv('GMS_SERVER_URL', f'http://server:{SERVER_PORT}')
+PROXY_HEADERS_ENABLED = settings.proxy_headers_enabled
+FORWARDED_ALLOW_IPS = settings.forwarded_allow_ips
+
+
+def _parse_csv_env(env_name: str, default: str) -> list[str]:
+    items = [item.strip() for item in os.getenv(env_name, default).split(',') if item.strip()]
+    return items or [default]
+
+
+CORS_ORIGINS = _parse_csv_env('CORS_ORIGINS', '*')
+TRUSTED_HOSTS = _parse_csv_env('TRUSTED_HOSTS', '*')
+
+UPLOAD_PROGRESS_QUERY_TIMEOUT = 5
+UPLOAD_PROGRESS_EXPIRATION = 10
+UPLOAD_PROGRESS_CLEANUP_INTERVAL = 60
+GSI_PROGRESS_POLL_INTERVAL = 0.5
+DEFAULT_FAVICON_TIMEOUT = 10
+MAX_BATCH_SIZE = 20
+GSI_PROGRESS_INCREMENT = 5
+GSI_PROGRESS_MAX = 95
+MAX_LOG_ENTRIES = 1000
+CLEANUP_INTERVAL_SECONDS = 3600
+USER_STATE_MAX_AGE_HOURS = 24
+UPLOAD_PROGRESS_MAX_AGE_SECONDS = 600
+USBIP_STATE_MAX_AGE_SECONDS = 86400
+APK_TASK_MAX_AGE_SECONDS = 86400
+TERMINAL_SESSION_MAX_AGE_SECONDS = 3600
+FIRMWARE_UPLOAD_PROGRESS_MAX_ITEMS_PER_CLIENT = 1
+DEVICE_CACHE_TTL = 3
+DEVICE_SSH_POOLS_MAX = 10
+VALID_NOTIFICATION_LEVELS = {'info', 'success', 'warning', 'error'}
+MAX_NOTIFICATIONS_PER_CLIENT = 200
+JADX_PATH = os.path.join(PROJECT_ROOT, 'tools', 'jadx', 'bin', 'jadx')
+APK_UPLOAD_DIR = os.path.join(PROJECT_ROOT, 'data', 'apk_uploads')
+APK_MAX_FILE_SIZE = 500 * 1024 * 1024
+APK_MAX_SOURCE_FILE_SIZE = 2 * 1024 * 1024
+APK_MAX_TASKS = 50
+JADX_TIMEOUT = 600
+REDMINE_ISSUE_ID_CACHE_MAX_SIZE = 100
+TOOLS_DATA_FILE = os.path.join(PROJECT_ROOT, 'data', 'user_tools_data.json')
+
+# 测试用 WiFi 默认值（CTS/GTS 等要求连接 AndroidWifi 热点）。
+# 各处不要再直接写字面量，统一经 config_manager.get_wifi_defaults() 读取，
+# 以便在 config_runtime.json 的 "wifi" 段覆盖。
+DEFAULT_WIFI_SSID = "AndroidWifi"
+DEFAULT_WIFI_PASSWORD = "1234567890"
+
+# Redmine 默认 base URL。各处不要再直接写字面量，
+# 统一经 config_manager.get_redmine_base_url() 读取（config.redmine.base_url 覆盖此默认）。
+DEFAULT_REDMINE_BASE_URL = "https://redmine.rock-chips.com"
+
+# Precompile regex pattern for placeholder replacement (efficiency)
+PLACEHOLDER_PATTERN = re.compile(r'\$\{([^}]+)\}')
+
 
 class ConfigManager:
-    """Read and atomically update the existing static/runtime configuration."""
+    """
+    配置管理器
 
-    def __init__(self, project_root: Path | str | None = None, cache_ttl: float = 5):
-        self.project_root = (
-            settings.project_root
-            if project_root is None
-            else Path(project_root).resolve()
-        )
-        self.config_path = self.project_root / 'configs/config.json'
-        self.runtime_config_path = self.project_root / 'configs/config_runtime.json'
-        self._cache_ttl = cache_ttl
-        self._cache: dict[str, Any] | None = None
-        self._cache_timestamp = 0.0
-        self._static_mtime = 0.0
-        self._runtime_mtime = 0.0
-        self._lock = threading.RLock()
+    管理配置文件的读取和保存，支持静态配置和动态配置
+    支持TTL缓存机制，减少磁盘I/O操作
+    """
 
-    def load_config(self, force_reload: bool = False) -> dict[str, Any]:
-        with self._lock:
-            now = time.monotonic()
-            if not force_reload and self._cache_valid(now):
-                return copy.deepcopy(self._cache)
-            static = self._read_json(self.config_path)
-            runtime = self._read_json(self.runtime_config_path)
-            merged = dict(static)
-            static_ai = merged.get('ai_models')
-            merged.update(runtime)
-            if static_ai:
-                merged['ai_models'] = static_ai
-            self._cache = merged
-            self._cache_timestamp = now
-            self._static_mtime = self._mtime(self.config_path)
-            self._runtime_mtime = self._mtime(self.runtime_config_path)
-            return copy.deepcopy(merged)
+    def __init__(
+        self,
+        base_dir: str = None,
+        cache_ttl: int = 5,
+        project_root: str | Path | None = None,
+    ):
+        """
+        初始化配置管理器
 
-    def save_runtime(self, updates: Mapping[str, Any]) -> bool:
-        with self._lock:
-            runtime = self._read_json(self.runtime_config_path)
-            runtime.update(copy.deepcopy(dict(updates)))
-            self._atomic_write_json(self.runtime_config_path, runtime)
+        Args:
+            base_dir: 基础目录（默认为当前文件所在目录）
+            cache_ttl: 缓存生存时间（秒），默认5秒
+        """
+        if project_root is not None:
+            root = Path(project_root).resolve()
+            base_dir = str(root / 'foundation')
+        if base_dir is None:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+
+        self.base_dir = base_dir
+        self.project_root = Path(base_dir).resolve().parent
+        # 配置文件已移动到 configs/ 目录
+        self.config_path = os.path.join(base_dir, '..', 'configs', 'config.json')
+        self.runtime_config_path = os.path.join(base_dir, '..', 'configs', 'config_runtime.json')
+
+        # 缓存相关
+        self._cache: Optional[Dict[str, Any]] = None
+        self._cache_timestamp: float = 0
+        self._cache_ttl: int = cache_ttl
+        self._cache_lock: threading.Lock = threading.Lock()
+
+        # 文件修改时间追踪
+        self._static_mtime: float = 0
+        self._runtime_mtime: float = 0
+
+    def load_config(self, force_reload: bool = False) -> Dict[str, Any]:
+        """
+        加载配置（静态 + 动态）
+
+        Args:
+            force_reload: 强制重新加载，忽略缓存
+
+        Returns:
+            配置字典
+        """
+        with self._cache_lock:
+            current_time = time.time()
+
+            # 检查是否需要重新加载
+            if not force_reload and self._is_cache_valid(current_time):
+                return self._cache.copy() if self._cache else {}
+
+            # 加载配置
+            config = self._load_and_merge_config()
+
+            # 更新缓存
+            self._cache = config
+            self._cache_timestamp = current_time
+
+            return config.copy() if config else {}
+
+    def _is_cache_valid(self, current_time: float) -> bool:
+        """
+        检查缓存是否有效
+
+        Args:
+            current_time: 当前时间戳
+
+        Returns:
+            缓存是否有效
+        """
+        # 检查缓存是否存在
+        if self._cache is None:
+            return False
+
+        # 检查TTL是否过期
+        if current_time - self._cache_timestamp > self._cache_ttl:
+            return False
+
+        # 检查文件是否被修改
+        try:
+            static_mtime = os.path.getmtime(self.config_path)
+            try:
+                runtime_mtime = os.path.getmtime(self.runtime_config_path)
+            except FileNotFoundError:
+                runtime_mtime = 0
+
+            # 如果文件修改时间变化，缓存失效
+            if (
+                static_mtime != self._static_mtime
+                or runtime_mtime != self._runtime_mtime
+            ):
+                return False
+
+        except Exception as e:
+            logger.warning(f"Error checking file mtime: {e}")
+            return False
+
+        return True
+
+    def _load_and_merge_config(self) -> Dict[str, Any]:
+        """
+        加载并合并配置
+
+        Returns:
+            合并后的配置字典
+        """
+        # 更新文件修改时间
+        try:
+            self._static_mtime = os.path.getmtime(self.config_path)
+            try:
+                self._runtime_mtime = os.path.getmtime(self.runtime_config_path)
+            except FileNotFoundError:
+                self._runtime_mtime = 0
+        except Exception as e:
+            logger.warning(f"Error updating file mtime: {e}")
+
+        # 加载静态配置
+        config = self._load_static_config()
+
+        # 加载运行时配置并合并。config_runtime.json 保存部署身份和用户操作数据，
+        # 需要覆盖随源码携带的静态默认值。
+        runtime_config = self._load_runtime_config()
+        if runtime_config:
+            ai_config = config.get('ai_models', {})
+            config.update(runtime_config)
+            if ai_config:
+                config['ai_models'] = ai_config
+
+        return config
+
+    def invalidate_cache(self):
+        """使缓存失效，下次调用load_config时将重新加载"""
+        with self._cache_lock:
+            self._cache = None
+            self._cache_timestamp = 0
+
+    def get_ai_config(self) -> Dict[str, Any]:
+        """
+        获取 AI 配置（统一的配置访问接口）
+
+        Returns:
+            AI 配置字典，如果未配置或未启用则返回空字典
+        """
+        config = self.load_config()
+        ai_models = config.get('ai_models', {})
+
+        # 如果 AI 未启用，返回空配置
+        if not ai_models.get('enabled', False):
+            return {}
+
+        return ai_models
+
+    def get_redmine_config(self) -> Dict[str, Any]:
+        """
+        获取 Redmine 配置（统一的配置访问接口）
+
+        Returns:
+            Redmine 配置字典，包含 domain 和 base_url
+
+        Raises:
+            ValueError: 如果 Redmine 未配置或配置不完整
+        """
+        config = self.load_config()
+        redmine_config = config.get('redmine', {})
+
+        # 如果配置为空或不完整，抛出异常
+        if not redmine_config or 'base_url' not in redmine_config:
+            raise ValueError(
+                'Redmine 未配置或配置不完整，请在 configs/config.json 中配置 redmine 段，'
+                '包含 domain 和 base_url 字段'
+            )
+
+        # 验证必需字段
+        if 'domain' not in redmine_config:
+            # 如果domain字段缺失，从base_url中提取
+            from urllib.parse import urlparse
+            parsed = urlparse(redmine_config['base_url'])
+            redmine_config['domain'] = parsed.netloc
+
+        return redmine_config
+
+    def get_redmine_base_url(self, config: Dict[str, Any] = None) -> str:
+        """读取 Redmine base_url，未配置时返回 DEFAULT_REDMINE_BASE_URL（不抛异常）。
+
+        集中管理曾经散落在多处的 'https://redmine.rock-chips.com' 默认值。
+        """
+        try:
+            redmine_config = (config if config is not None else self.load_config()).get("redmine") or {}
+        except Exception:
+            redmine_config = {}
+        return str(redmine_config.get("base_url") or "").strip().rstrip("/") or DEFAULT_REDMINE_BASE_URL
+
+    def get_ai_provider_config(self, provider_name: str) -> Optional[Dict[str, Any]]:
+        """
+        获取指定 AI provider 的配置
+
+        Args:
+            provider_name: provider 名称（如 'qwen', 'zhipu'）
+
+        Returns:
+            provider 配置字典，如果不存在则返回 None
+        """
+        ai_config = self.get_ai_config()
+        if not ai_config:
+            return None
+
+        providers = ai_config.get('providers', {})
+        return providers.get(provider_name)
+
+    def is_ai_enabled(self) -> bool:
+        """
+        检查 AI 功能是否已启用
+
+        Returns:
+            AI 是否已启用
+        """
+        ai_config = self.get_ai_config()
+        return ai_config.get('enabled', False)
+
+    def _load_static_config(self) -> Dict[str, Any]:
+        """加载静态配置"""
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+                # 递归替换所有占位符（支持 ${ubuntu_user} 和环境变量 ${VAR_NAME}）
+                config_copy = self._replace_placeholders(config)
+
+                # 验证替换后的 AI 配置
+                self._validate_ai_config(config_copy)
+
+                return config_copy
+
+        except FileNotFoundError:
+            logger.warning(f"Config file not found: {self.config_path}")
+            return {}
+        except Exception as e:
+            logger.error(f"Error loading static config: {e}")
+            return {}
+
+    def _validate_ai_config(self, config: Dict[str, Any]) -> None:
+        """
+        验证 AI 配置的有效性
+
+        Args:
+            config: 配置字典
+
+        Raises:
+            ValueError: 如果配置无效
+        """
+        ai_models = config.get('ai_models', {})
+        if not ai_models or not ai_models.get('enabled', False):
+            return
+
+        primary_provider = ai_models.get('primary_provider')
+        providers = ai_models.get('providers', {})
+
+        if primary_provider and primary_provider not in providers:
+            available = list(providers.keys())
+            raise ValueError(
+                f"AI 配置错误: primary_provider '{primary_provider}' 不存在。"
+                f"可用的 providers: {available if available else '(无)'}"
+            )
+
+    def _replace_placeholders(self, value: Any, config: Dict = None) -> Any:
+        """
+        递归替换配置中的占位符
+
+        支持的占位符格式：
+        - ${ubuntu_user} -> 配置中的 ubuntu_user 值
+        - ${ENV_VAR} -> 环境变量值
+        - ${VAR:default} -> 环境变量值，如果不存在则使用默认值
+
+        Args:
+            value: 配置值（可以是 dict, list, str 等）
+            config: 原始配置对象（用于获取配置值）
+
+        Returns:
+            替换后的值
+        """
+        if isinstance(value, dict):
+            # 第一次遍历时保存配置引用
+            if config is None:
+                config = value
+            return {k: self._replace_placeholders(v, config) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [self._replace_placeholders(item, config) for item in value]
+        elif isinstance(value, str):
+            # 递归处理嵌套占位符，最多 3 层嵌套
+            for _ in range(3):
+                if '${' not in value:
+                    break
+                new_value = self._replace_single_placeholder(value, config)
+                if new_value == value:
+                    break
+                value = new_value
+            return value
+        else:
+            return value
+
+    def _replace_single_placeholder(self, value: str, config: Dict = None) -> str:
+        """替换字符串中的单个占位符"""
+        full_placeholder_match = PLACEHOLDER_PATTERN.fullmatch(value)
+
+        def replace_var(match):
+            var_expr = match.group(1)
+            # 检查是否有默认值
+            if ':' in var_expr:
+                var_name, default_val = var_expr.split(':', 1)
+                # 优先使用环境变量
+                if var_name in os.environ:
+                    return os.environ[var_name]
+                # 其次使用配置中的值
+                elif config and var_name in config:
+                    return str(config[var_name])
+                else:
+                    # 默认值可能也是占位符（如 ${USER}），需要进一步处理
+                    if '${' in default_val:
+                        return self._replace_single_placeholder(default_val, config)
+                    return default_val
+            else:
+                var_name = var_expr
+                placeholder = match.group(0)
+
+                # 优先使用环境变量
+                if var_name in os.environ:
+                    return os.environ[var_name]
+
+                # 常见部署占位符允许在环境变量缺失时兜底，避免 UI 显示 ${...}
+                if var_name == 'UBUNTU_HOST':
+                    return ''
+                if var_name == 'UBUNTU_USER':
+                    detected_user = get_ubuntu_user()
+                    if detected_user:
+                        return detected_user
+
+                # 其次使用配置中的值，但不要把同一个占位符原样递归替回去
+                if config and var_name in config:
+                    config_value = str(config[var_name])
+                    if config_value != placeholder:
+                        return config_value
+
+                # 保留原样（未找到替换值）
+                logger.warning(f"Placeholder ${{{var_name}}} not found in config or environment")
+                return placeholder
+
+        # 使用预编译的 regex pattern 替换所有 ${...} 格式的占位符
+        replaced = PLACEHOLDER_PATTERN.sub(replace_var, value)
+        if full_placeholder_match:
+            normalized = replaced.strip().lower()
+            if normalized in ('true', 'false'):
+                return normalized == 'true'
+        return replaced
+
+    def _load_runtime_config(self) -> Optional[Dict[str, Any]]:
+        """加载运行时配置。
+
+        config_runtime.json 保存安装脚本写入的部署身份和用户操作产生的数据，
+        覆盖随源码携带的静态默认值（config.json）。
+        """
+        try:
+            with open(self.runtime_config_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+            logger.warning(f"Runtime config {self.runtime_config_path} is not a dict: {type(data).__name__}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.error(f"Error loading runtime config {self.runtime_config_path}: {e}")
+        return None
+
+    def get_runtime_config(self) -> Dict[str, Any]:
+        """Public read-only access to the runtime configuration."""
+        return self._load_runtime_config() or {}
+
+    def _get_section(self, key: str, normalizer) -> Dict[str, Any]:
+        """读取并规范化配置中的某个区段（如 redmine_dashboard / gerrit_dashboard）。"""
+        return normalizer(self.load_config().get(key) or {})
+
+    def _save_section(self, key: str, payload: Dict[str, Any], denormalizer, *, merge_from_runtime: bool = False) -> bool:
+        """合并并持久化某个配置区段到运行时配置文件。
+
+        merge_from_runtime=True 时优先从已加载的 runtime 取 current（用于 stats 这类
+        只在 runtime 维护、静态配置不持有的区段），否则从合并后的 load_config 取。
+        """
+        try:
+            runtime = self._load_runtime_config() or {}
+            current = (runtime.get(key) if merge_from_runtime else None) or self.load_config().get(key) or {}
+            runtime[key] = denormalizer({**current, **(payload or {})})
+            return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
+        except Exception as e:
+            logger.error(f"Error saving {key} config: {e}")
+            return False
+
+    def get_redmine_stats_config(self) -> Dict[str, int]:
+        """Return normalized Redmine stats settings after static/runtime merge."""
+        from features.redmine.dashboard import normalize_redmine_stats_config
+
+        return self._get_section('redmine_stats', normalize_redmine_stats_config)
+
+    def save_redmine_stats_config(self, stats_config: Dict[str, Any]) -> bool:
+        """Save Redmine stats settings to runtime config so UI changes take effect immediately."""
+        from features.redmine.dashboard import normalize_redmine_stats_config
+
+        # redmine_stats 只在 runtime 维护，current 从 runtime 取，故 merge_from_runtime=True
+        return self._save_section('redmine_stats', stats_config, normalize_redmine_stats_config, merge_from_runtime=True)
+
+    def get_redmine_dashboard_config(self) -> Dict[str, Any]:
+        """Return normalized Redmine dashboard profile configuration."""
+        from features.redmine.dashboard import normalize_redmine_dashboard_profiles
+
+        return self._get_section('redmine_dashboard', normalize_redmine_dashboard_profiles)
+
+    def save_redmine_dashboard_config(self, dashboard_config: Dict[str, Any]) -> bool:
+        """Save Redmine dashboard profiles to runtime config."""
+        from features.redmine.dashboard import denormalize_redmine_dashboard_config
+
+        return self._save_section('redmine_dashboard', dashboard_config, denormalize_redmine_dashboard_config)
+
+    def get_gerrit_dashboard_config(self) -> Dict[str, Any]:
+        """Return normalized Gerrit dashboard configuration."""
+        from features.gerrit.config import normalize_gerrit_dashboard_config
+
+        return self._get_section('gerrit_dashboard', normalize_gerrit_dashboard_config)
+
+    def save_gerrit_dashboard_config(self, dashboard_config: Dict[str, Any]) -> bool:
+        """Save Gerrit dashboard settings to runtime config."""
+        from features.gerrit.config import denormalize_gerrit_dashboard_config
+
+        return self._save_section('gerrit_dashboard', dashboard_config, denormalize_gerrit_dashboard_config)
+
+    def save_client_ssh_credentials(self, credentials: list) -> bool:
+        """保存客户端 SSH 凭据到运行时配置文件。"""
+        try:
+            if credentials is None:
+                credentials = []
+            if not isinstance(credentials, list):
+                raise ValueError("client_ssh_credentials must be a list")
+
+            runtime = self._load_runtime_config() or {}
+            runtime['client_ssh_credentials'] = credentials
+            return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
+        except Exception as e:
+            logger.error(f"Error saving client SSH credentials: {e}")
+            return False
+
+    def save_config(self, config: Dict[str, Any]) -> bool:
+        """
+        保存静态配置
+
+        Args:
+            config: 配置字典
+
+        Returns:
+            是否保存成功
+        """
+        try:
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=4, ensure_ascii=False)
+            logger.info(f"Saved config to {self.config_path}")
             self.invalidate_cache()
             return True
+        except Exception as e:
+            logger.error(f"Error saving config: {e}")
+            return False
 
-    def invalidate_cache(self) -> None:
-        self._cache = None
-        self._cache_timestamp = 0.0
+    def save_runtime_config(self, runtime_config: Dict[str, Any]) -> bool:
+        """
+        保存运行时配置到 config_runtime.json（包含部署身份和 SSH 凭据）
 
-    def _cache_valid(self, now: float) -> bool:
-        return (
-            self._cache is not None
-            and now - self._cache_timestamp <= self._cache_ttl
-            and self._mtime(self.config_path) == self._static_mtime
-            and self._mtime(self.runtime_config_path) == self._runtime_mtime
+        Args:
+            runtime_config: 运行时配置字典
+
+        Returns:
+            是否保存成功
+        """
+        try:
+            runtime_config = dict(runtime_config or {})
+            return self._write_runtime_config_file(runtime_config)
+        except Exception as e:
+            logger.error(f"Error saving runtime config: {e}")
+            return False
+
+    def _write_runtime_config_file(self, runtime_config: Dict[str, Any], preserve_redmine_auth: bool = True) -> bool:
+        """保存运行时配置到文件
+
+        Args:
+            runtime_config: 完整的运行时配置字典
+            preserve_redmine_auth: 是否自动保留已有的 redmine_auth（调用方已加载时可传 False 避免重复读文件）
+        """
+        try:
+            # 仅在调用方未包含 redmine_auth 且未明确跳过时，从文件读取保留
+            if preserve_redmine_auth and 'redmine_auth' not in runtime_config:
+                existing = self._load_runtime_config()
+                if existing and 'redmine_auth' in existing:
+                    runtime_config['redmine_auth'] = existing['redmine_auth']
+
+            os.makedirs(os.path.dirname(self.runtime_config_path), exist_ok=True)
+            with open(self.runtime_config_path, 'w', encoding='utf-8') as f:
+                json.dump(runtime_config, f, indent=4, ensure_ascii=False)
+            logger.info(f"Saved runtime config to {self.runtime_config_path}")
+            self.invalidate_cache()
+            return True
+        except Exception as e:
+            logger.error(f"Error writing runtime config: {e}")
+            return False
+
+    def prepare_client_config(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        准备客户端相关配置，保留现有client_hosts和client_ssh_credentials
+
+        Args:
+            updates: 要更新的字段字典
+
+        Returns:
+            完整的客户端配置字典
+        """
+        existing = self._load_runtime_config() or {}
+        existing_credentials = existing.get('client_ssh_credentials', [])
+
+        runtime_config = existing.copy()
+        runtime_config['client_hosts'] = updates.get('client_hosts', existing.get('client_hosts', {}))
+        runtime_config['client_ssh_credentials'] = updates.get(
+            'client_ssh_credentials',
+            existing_credentials
         )
 
-    @staticmethod
-    def _mtime(path: Path) -> float:
-        try:
-            return path.stat().st_mtime
-        except FileNotFoundError:
-            return 0.0
+        # 只有在明确提供local_server时才保存（避免空值覆盖）
+        if 'local_server' in updates and updates['local_server']:
+            runtime_config['local_server'] = updates['local_server']
+        elif 'local_server' in existing:
+            runtime_config['local_server'] = existing['local_server']
 
-    @staticmethod
-    def _read_json(path: Path) -> dict[str, Any]:
-        try:
-            value = json.loads(path.read_text(encoding='utf-8'))
-        except FileNotFoundError:
-            return {}
-        if not isinstance(value, dict):
-            raise ValueError(f'configuration root must be an object: {path}')
-        return value
+        return runtime_config
 
-    @staticmethod
-    def _atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temp_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=f'.{path.name}.',
-            suffix='.tmp',
-        )
+    def get_device_hosts(self, config: Dict[str, Any] = None) -> list:
+        """
+        获取设备主机列表
+
+        Args:
+            config: 配置字典（如果不提供则重新加载）
+
+        Returns:
+            设备主机配置列表
+        """
+        if config is None:
+            config = self.load_config()
+        return config.get('device_hosts', [])
+
+    def get_device_host_config(self, host: str, config: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+        """
+        获取指定主机的配置
+
+        Args:
+            host: 主机地址
+            config: 配置字典（如果不提供则重新加载）
+
+        Returns:
+            主机配置字典
+        """
+        device_hosts = self.get_device_hosts(config)
+        for device_host in device_hosts:
+            if device_host.get('host') == host:
+                return device_host
+        return None
+
+    def get_ubuntu_user(self, config: Dict[str, Any] = None) -> str:
+        """
+        获取 Ubuntu 用户名
+
+        Args:
+            config: 配置字典（如果不提供则重新加载）
+
+        Returns:
+            Ubuntu 用户名
+        """
+        if config is None:
+            config = self.load_config()
+        return config.get('ubuntu_user') or get_ubuntu_user()
+
+    def get_wifi_defaults(self, config: Dict[str, Any] = None) -> Dict[str, str]:
+        """读取测试用 WiFi 默认 SSID/密码（config.wifi 覆盖内置默认值）。
+
+        集中管理曾经散落在多处的 'AndroidWifi' / '1234567890' 硬编码，
+        便于在 config_runtime.json 的 "wifi" 段统一覆盖。
+        """
+        if config is None:
+            config = self.load_config()
+        wifi_cfg = config.get("wifi") or {}
+        return {
+            "ssid": str(wifi_cfg.get("ssid") or DEFAULT_WIFI_SSID),
+            "password": str(wifi_cfg.get("password") or DEFAULT_WIFI_PASSWORD),
+        }
+
+    def get_ubuntu_host(self, config: Dict[str, Any] = None) -> str:
+        """
+        获取 Ubuntu 主机地址
+
+        Args:
+            config: 配置字典（如果不提供则重新加载）
+
+        Returns:
+            Ubuntu 主机地址
+        """
+        if config is None:
+            config = self.load_config()
+        return config.get('ubuntu_host') or get_ubuntu_host()
+
+    def _split_device_host(self, device_host: str) -> tuple[str, str]:
+        if not device_host or '@' not in device_host:
+            return "", ""
+        username, hostname = device_host.split('@', 1)
+        return username.strip(), hostname.strip()
+
+    def find_device_host_password(self, device_host: str, config: Dict[str, Any] = None) -> Optional[str]:
+        """
+        从 client_ssh_credentials 中查找对应 device_host 的密码
+
+        Args:
+            device_host: 设备主机地址（格式: username@ip）
+            config: 配置字典（如果不提供则重新加载）
+
+        Returns:
+            密码字符串，如果找不到则返回 None
+        """
+        if config is None:
+            config = self.load_config()
+
+        if '@' not in device_host:
+            return None
+
+        username, hostname = self._split_device_host(device_host)
+
+        # 优先用完整 device_host 或 username+host 匹配，避免同一用户名多台客户端串用密码。
+        for cred in config.get('client_ssh_credentials', []):
+            cred_device_host = str(cred.get('device_host') or '').strip()
+            cred_host = str(cred.get('host') or cred.get('hostname') or '').strip()
+            cred_username = str(cred.get('username') or '').strip()
+            if cred_device_host and cred_device_host == device_host:
+                logger.debug(f"[Config] Found SSH credential for device_host={device_host}")
+                return cred.get('password')
+            if cred_username == username and cred_host == hostname:
+                logger.debug(f"[Config] Found SSH credential for username={username}, host={hostname}")
+                return cred.get('password')
+
+        # 兼容旧配置：只保存 username 的凭据仍可用于同名用户。
+        for cred in config.get('client_ssh_credentials', []):
+            if cred.get('username') == username:
+                logger.debug(f"[Config] Found SSH credential for username={username}")
+                return cred.get('password')
+
+        logger.debug(f"[Config] No SSH credential found for {device_host}")
+        return None
+
+    def upsert_device_host_password(self, device_host: str, password: str) -> bool:
+        """Insert or update one Windows client SSH password in runtime config."""
+        device_host = str(device_host or '').strip()
+        password = str(password or '')
+        username, hostname = self._split_device_host(device_host)
+        if not username or not hostname or not password:
+            return False
+
+        runtime = self._load_runtime_config() or {}
+        credentials = runtime.get('client_ssh_credentials') or []
+        if not isinstance(credentials, list):
+            credentials = []
+
+        updated = False
+        next_credentials = []
+        for cred in credentials:
+            if not isinstance(cred, dict):
+                continue
+            cred_device_host = str(cred.get('device_host') or '').strip()
+            cred_host = str(cred.get('host') or cred.get('hostname') or '').strip()
+            cred_username = str(cred.get('username') or '').strip()
+            is_same_host = cred_device_host == device_host or (cred_username == username and cred_host == hostname)
+            if is_same_host:
+                cred = {**cred, "device_host": device_host, "username": username, "host": hostname, "password": password}
+                updated = True
+            next_credentials.append(cred)
+
+        if not updated:
+            next_credentials.append({
+                "device_host": device_host,
+                "username": username,
+                "host": hostname,
+                "password": password,
+            })
+
+        runtime['client_ssh_credentials'] = next_credentials
+        return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
+
+    def _get_redmine_cipher_suite(self):
+        """获取 Redmine 凭证加密用的 Fernet 实例"""
+        from cryptography.fernet import Fernet
+        encryption_key = base64.urlsafe_b64encode(hashlib.sha256(b'gms_remote_test_redmine_2024').digest())
+        return Fernet(encryption_key)
+
+    def save_redmine_credentials(self, username: str, password: str) -> bool:
+        """加密保存 Redmine 凭证到 config_runtime.json"""
         try:
-            with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
-                json.dump(value, stream, ensure_ascii=False, indent=2)
-                stream.write('\n')
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temp_name, path)
-        except BaseException:
-            with suppress(FileNotFoundError):
-                os.unlink(temp_name)
-            raise
+            cipher_suite = self._get_redmine_cipher_suite()
+            encrypted_password = cipher_suite.encrypt(password.encode()).decode()
+
+            runtime = self._load_runtime_config() or {}
+            runtime['redmine_auth'] = {
+                'username': username,
+                'encrypted_password': encrypted_password,
+                'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S')
+            }
+            if self._write_runtime_config_file(runtime, preserve_redmine_auth=False):
+                logger.info(f"[Redmine Auth] Saved credentials for {username}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"[Redmine Auth] Failed to save credentials: {e}")
+            return False
+
+    def load_redmine_credentials(self) -> Optional[Dict[str, str]]:
+        """从 config_runtime.json 加载并解密 Redmine 凭证"""
+        try:
+            runtime = self._load_runtime_config()
+            if not runtime:
+                return None
+            data = runtime.get('redmine_auth')
+            if not data or 'encrypted_password' not in data:
+                return None
+
+            cipher_suite = self._get_redmine_cipher_suite()
+            decrypted_password = cipher_suite.decrypt(data['encrypted_password'].encode()).decode()
+            return {
+                'username': data['username'],
+                'password': decrypted_password
+            }
+        except Exception as e:
+            logger.warning(f"[Redmine Auth] Failed to load credentials: {e}")
+            return None
+
+
+# 全局配置管理器实例
+config_manager = ConfigManager()
+
+
+# ==================== 本地主机信息自动获取 ====================
+
+# Cache for local host info (avoid repeated system calls)
+_cached_ubuntu_user: Optional[str] = None
+_cached_ubuntu_host: Optional[str] = None
+
+def get_ubuntu_user() -> str:
+    """自动获取 Ubuntu 用户名（带缓存）"""
+    global _cached_ubuntu_user
+    if _cached_ubuntu_user is None:
+        _cached_ubuntu_user = os.environ.get('UBUNTU_USER') or os.environ.get('USER') or getpass.getuser() or 'gms'
+    return _cached_ubuntu_user
+
+
+def get_ubuntu_host() -> str:
+    """自动获取 Ubuntu 主机 IP 地址（带缓存）"""
+    global _cached_ubuntu_host
+    if _cached_ubuntu_host is None:
+        # 优先使用环境变量
+        env_host = os.environ.get('UBUNTU_HOST')
+        if env_host:
+            _cached_ubuntu_host = env_host
+        else:
+            # 自动检测本地 IP
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                    s.settimeout(2)
+                    s.connect(('8.8.8.8', 53))
+                    _cached_ubuntu_host = s.getsockname()[0]
+            except Exception:
+                _cached_ubuntu_host = ''
+    return _cached_ubuntu_host

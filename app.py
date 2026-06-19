@@ -28,19 +28,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.api_help import generate_help_or_continue
-from core.clients import (
-    get_client_id_from_request,
-    get_client_ip,
-    parse_client_id,
-    probe_windows_usbipd,
-    resolve_tailscale_device_host,
-)
-from core.config import config_manager
-from core.notifications import safe_websocket_send, store_notification
-from core.security_audit import classify_request_source
-from core.security_audit_utils import should_audit_request, summarize_audit_request, summarize_audit_response
-from core.settings import (
+from features.system.api_help import generate_help_or_continue
+from foundation.config import config_manager
+from features.system.notifications import safe_websocket_send, store_notification
+from features.system.security_audit import classify_request_source
+from features.system.security_audit_utils import should_audit_request, summarize_audit_request, summarize_audit_response
+from foundation.config import (
     APK_MAX_FILE_SIZE,
     APK_MAX_SOURCE_FILE_SIZE,
     APK_MAX_TASKS,
@@ -61,8 +54,9 @@ from core.settings import (
     SERVER_PORT,
     _parse_csv_env,
 )
-from core.ssh import ssh_manager
-from core.state import global_state
+from features.system.ssh import ssh_manager
+from features.system.state import global_state
+from features.devices import get_or_create_user_state
 from features.devices.dependencies import configure_device_dependencies
 from features.devices.monitor import (
     init_usb_monitor,
@@ -84,9 +78,18 @@ from features.redmine.scheduler import start_redmine_agent_scheduler, stop_redmi
 from features.test_execution.dependencies import (
     configure_test_execution_dependencies,
 )
-from modules.client_manager import client_manager
+from features.users import (
+    client_manager,
+    get_client_id_from_request,
+    get_client_ip,
+    parse_client_id,
+    probe_windows_usbipd,
+    resolve_tailscale_device_host,
+)
+from features.users.dependencies import configure_user_dependencies
+from features.system.ssh_async import ssh_async_manager
 from routers import ALL_ROUTERS
-from routers.system import init_templates
+from features.system.api import init_templates
 from workflows.device_test_execution import (
     acquire_test_devices,
     release_test_devices,
@@ -97,6 +100,12 @@ from workflows.firmware_device import (
 )
 
 
+configure_user_dependencies(
+    config_manager=config_manager,
+    global_state=global_state,
+    ssh_async_manager=ssh_async_manager,
+    get_or_create_user_state=get_or_create_user_state,
+)
 configure_firmware_dependencies(
     config_manager=config_manager,
     ssh_manager=ssh_manager,
@@ -352,9 +361,9 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 # Audit middleware
 @app.middleware("http")
 async def add_headers_middleware(request, call_next):
-    from core.clients import get_client_id_from_request, get_client_ip, parse_client_id
-    from core.security_audit import security_audit_logger
-    from core.security_audit_utils import can_audit_path, get_audit_operation
+    from features.system.security_audit import security_audit_logger
+    from features.system.security_audit_utils import can_audit_path, get_audit_operation
+    from features.users import get_client_id_from_request, get_client_ip, parse_client_id
 
     path = request.url.path
     request_source = classify_request_source(request.headers.get('user-agent', ''), path)

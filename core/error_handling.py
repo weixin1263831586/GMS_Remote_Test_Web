@@ -6,7 +6,7 @@ from functools import wraps
 
 from fastapi import HTTPException
 
-from core.api_response import error_response
+from foundation.responses import error_response
 
 logger = logging.getLogger(__name__)
 

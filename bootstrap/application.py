@@ -16,9 +16,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from bootstrap.dependencies import AppServices, build_services
 from bootstrap.lifecycle import create_lifespan
 from bootstrap.routes import include_routes
-from core.clients import get_client_id_from_request, get_client_ip, parse_client_id
-from core.security_audit import classify_request_source, security_audit_logger
-from core.security_audit_utils import (
+from features.users import get_client_id_from_request, get_client_ip, parse_client_id
+from features.system.security_audit import classify_request_source, security_audit_logger
+from features.system.security_audit_utils import (
     can_audit_path,
     get_audit_operation,
     should_audit_request,

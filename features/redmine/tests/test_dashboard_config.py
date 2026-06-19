@@ -11,7 +11,7 @@ from features.redmine.config import RedmineConfig as ConfigManager
 class SidebarNavigationConfigTests(unittest.TestCase):
     def test_sidebar_visible_pages_are_normalized(self):
         normalize_sidebar_visible_pages = import_module(
-            "routers.config"
+            "features.users.config_api"
         ).normalize_sidebar_visible_pages
 
         visible_pages = normalize_sidebar_visible_pages([
@@ -27,7 +27,7 @@ class SidebarNavigationConfigTests(unittest.TestCase):
 
     def test_sidebar_order_endpoint_persists_visible_pages(self):
         import asyncio
-        config_router = import_module("routers.config")
+        config_router = import_module("features.users.config_api")
 
         runtime = {"sidebar_order": ["test", "redmine-agent"]}
 

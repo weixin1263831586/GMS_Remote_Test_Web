@@ -12,29 +12,30 @@ from typing import Any
 from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, Field
 
-from core.agent_context import _parse_chinese_number, record_user_message, update_context
-from core.agent_executor import _json_body, executor
-from core.agent_intent import (
+from features.assistant.context import _parse_chinese_number, record_user_message, update_context
+from features.assistant.executor import _json_body, executor
+from features.assistant.intent import (
     _extract_device_ids,
     _extract_module_and_case,
     _extract_retry_count,
     _extract_test_type,
     _is_run_test_request,
 )
-from core.agent_response import (
+from features.assistant.response import (
     generate as gen_response,
 )
-from core.agent_response import (
+from features.assistant.response import (
     generate_capability_overview,
     generate_clarification,
     generate_page_overview,
     page_quick_actions,
 )
-from core.agent_tools import registry
-from core.api_response import error_response, success_response
-from core.clients import get_client_id_from_request
-from core.config import config_manager
-from core.schemas import ReportDiagnosisRequest, SuiteApkAnalyzeRequest
+from features.assistant.tools import registry
+from foundation.responses import error_response, success_response
+from features.users import get_client_id_from_request
+from foundation.config import config_manager
+from features.reports.api_models import ReportDiagnosisRequest
+from features.test_execution.models import SuiteApkAnalyzeRequest
 from features.devices.locks import device_lock_manager
 from features.devices.manager import device_manager
 from features.devices.support import get_or_create_user_state
@@ -872,7 +873,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
     # --- 2. Resolve intent through multi-stage router ---
-    from core.agent_intent import resolve as resolve_intent
+    from features.assistant.intent import resolve as resolve_intent
 
     if req.action:
         tool = registry.get(req.action)

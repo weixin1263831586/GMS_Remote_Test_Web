@@ -904,7 +904,7 @@ _universal_analyzer = None
 def get_universal_analyzer() -> UniversalAIAnalyzer:
     """获取通用AI分析器实例"""
     global _universal_analyzer
-    from core.config import config_manager
+    from foundation.config import config_manager
 
     ai_config = config_manager.get_ai_config()
 

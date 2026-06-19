@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, Tuple
 from fastapi import Request
 from fastapi.responses import Response
 
-from core.security_audit import security_audit_logger
+from features.system.security_audit import security_audit_logger
 
 AUDIT_SKIP_PREFIXES = (
     '/static/',

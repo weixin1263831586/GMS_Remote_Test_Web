@@ -4,19 +4,28 @@ import asyncio
 import logging
 import os
 import subprocess
-from typing import Any, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from core.api_response import error_response, success_response
-from core.clients import (
+from foundation.responses import error_response, success_response
+
+from . import runtime
+from .clients import (
     get_client_id_from_request,
     hide_sensitive_info,
 )
-from core.config import config_manager
-from features.devices.support import get_or_create_user_state
-from features.test_execution.suites import get_effective_local_server
+
+
+def get_effective_local_server(
+    client_id: str,
+    requested_local_server: str = "",
+) -> str:
+    if requested_local_server:
+        return requested_local_server
+    runtime_config = runtime.config_manager.get_runtime_config()
+    return runtime_config.get("local_server") or client_id
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +76,7 @@ def _get_tailscale_status() -> dict:
     return {'ip': None, 'connected': False, 'error': error}
 
 
-def _build_tailscale_url(ip: str, request: Optional[Request] = None) -> str:
+def _build_tailscale_url(ip: str, request: Request | None = None) -> str:
     """Build Tailscale access URL from IP and GMS port."""
     port = os.environ.get('GMS_PORT', '5001')
     scheme = (
@@ -83,7 +92,7 @@ def _build_tailscale_url(ip: str, request: Optional[Request] = None) -> str:
     return f'{scheme}://{ip}:{port}'
 
 
-def normalize_sidebar_order(raw_order: Any) -> List[str]:
+def normalize_sidebar_order(raw_order: Any) -> list[str]:
     """校验并去重侧边栏排序。"""
     if not isinstance(raw_order, list):
         raise HTTPException(status_code=400, detail="order 必须是数组")
@@ -103,7 +112,7 @@ def normalize_sidebar_order(raw_order: Any) -> List[str]:
     return order
 
 
-def normalize_sidebar_visible_pages(raw_pages: Any) -> List[str]:
+def normalize_sidebar_visible_pages(raw_pages: Any) -> list[str]:
     """校验并去重侧边栏可见页面。空数组表示使用默认全量可见。"""
     if not isinstance(raw_pages, list):
         return []
@@ -130,9 +139,9 @@ async def get_config(request: Request):
     """获取配置 - 隐藏敏感信息后返回配置对象"""
     # 跟踪用户访问
     client_id = get_client_id_from_request(request)
-    get_or_create_user_state(client_id)
+    runtime.get_or_create_user_state(client_id)
 
-    config = config_manager.load_config()
+    config = runtime.config_manager.load_config()
     # local_server 是客户端回传地址；没有显式动态配置时，按当前请求用户/IP 展示。
     config['local_server'] = get_effective_local_server(client_id)
 
@@ -144,7 +153,7 @@ async def get_config(request: Request):
 @router.get("/api/config/opengrok")
 async def get_opengrok_config(request: Request):
     """获取OpenGrok配置 - 供前端源码链接使用"""
-    config = config_manager.load_config()
+    config = runtime.config_manager.load_config()
     opengrok_config = config.get('opengrok', {})
 
     if not opengrok_config or 'base_url' not in opengrok_config:
@@ -156,7 +165,7 @@ async def get_opengrok_config(request: Request):
 @router.get("/api/config/ai")
 async def get_ai_config(request: Request):
     """获取 AI 配置 - 供前端 AI 分析功能使用"""
-    ai_config = config_manager.get_ai_config()
+    ai_config = runtime.config_manager.get_ai_config()
 
     if not ai_config:
         return error_response('AI 未配置或未启用，请在 configs/config.json 中配置 ai_models 段并设置 enabled: true', status_code=404)
@@ -170,7 +179,7 @@ async def get_tailscale_status(request: Request):
     try:
         status = await asyncio.to_thread(_get_tailscale_status)
     except Exception as e:
-        return error_response(f'无法获取 Tailscale 信息：{str(e)}', status_code=503)
+        return error_response(f'无法获取 Tailscale 信息：{e!s}', status_code=503)
 
     if status.get('ip'):
         url = _build_tailscale_url(status['ip'], request)
@@ -234,13 +243,13 @@ async def ensure_tailscale_url(request: Request):
                 status_code=503
             )
         except Exception as e:
-            return error_response(f'Tailscale 启动失败：{str(e)}', status_code=503)
+            return error_response(f'Tailscale 启动失败：{e!s}', status_code=503)
 
 
 @router.post("/api/config/update")
 async def update_config(req: dict):
     """更新配置 - 只修改运行时配置，禁止修改config.json"""
-    existing_runtime = config_manager.get_runtime_config()
+    existing_runtime = runtime.config_manager.get_runtime_config()
 
     # 运行时配置字段（保存在 config_runtime.json）
     # 注意：client_ip 和 client_username 是运行时状态，不应保存到配置文件
@@ -264,7 +273,7 @@ async def update_config(req: dict):
     }
 
     # 保存运行时配置
-    if config_manager.save_runtime_config(runtime_updates):
+    if runtime.config_manager.save_runtime_config(runtime_updates):
         return success_response()
     else:
         return error_response("保存配置失败", status_code=500)
@@ -273,7 +282,7 @@ async def update_config(req: dict):
 @router.get("/api/sidebar-order")
 async def get_sidebar_order():
     """获取侧边栏导航顺序。"""
-    existing_runtime = config_manager.get_runtime_config()
+    existing_runtime = runtime.config_manager.get_runtime_config()
     order = existing_runtime.get('sidebar_order', [])
     if not isinstance(order, list):
         order = []
@@ -284,7 +293,7 @@ async def get_sidebar_order():
 @router.post("/api/sidebar-order")
 async def save_sidebar_order(req: dict = Body(default={})):
     """保存侧边栏导航顺序和可见页面。"""
-    existing_runtime = config_manager.get_runtime_config()
+    existing_runtime = runtime.config_manager.get_runtime_config()
     order = existing_runtime.get('sidebar_order', [])
 
     if 'order' in req:
@@ -300,7 +309,7 @@ async def save_sidebar_order(req: dict = Body(default={})):
     if 'order' not in req and 'visible_pages' not in req:
         return error_response("缺少可保存的侧边栏配置", status_code=400)
 
-    if config_manager.save_runtime_config(existing_runtime):
+    if runtime.config_manager.save_runtime_config(existing_runtime):
         return success_response({
             'order': order if isinstance(order, list) else [],
             'visible_pages': existing_runtime.get('sidebar_visible_pages', []),

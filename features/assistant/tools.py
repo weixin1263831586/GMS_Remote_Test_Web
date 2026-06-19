@@ -164,13 +164,13 @@ _RESPONSE_TYPE_MAP = {
 }
 
 _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
-    "/api/system/health": "routers.system:health_check",
-    "/api/config/read": "routers.config:get_config",
-    "/api/config/update": "routers.config:update_config",
-    "/api/users/current": "routers.users:get_client_info",
-    "/api/users/detect": "routers.users:detect_client",
-    "/api/users/set-username": "routers.users:set_client_username",
-    "/api/users/list": "routers.users:list_users",
+    "/api/system/health": "features.system.api:health_check",
+    "/api/config/read": "features.users.config_api:get_config",
+    "/api/config/update": "features.users.config_api:update_config",
+    "/api/users/current": "features.users.users_api:get_client_info",
+    "/api/users/detect": "features.users.users_api:detect_client",
+    "/api/users/set-username": "features.users.users_api:set_client_username",
+    "/api/users/list": "features.users.users_api:list_users",
     "/api/devices/list": "features.devices.api:get_connected_devices",
     "/api/devices/management": "features.devices.api:devices_management",
     "/api/devices/user-locked": "features.devices.api:list_user_locks",
@@ -194,34 +194,34 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/reports/analyze": "features.reports.api:analyze_reports",
     "/api/reports/download": "features.reports.api:download_report",
     "/api/reports/delete": "features.reports.api:delete_report",
-    "/api/desktop/vnc/status": "routers.desktop:get_desktop_vnc_status",
-    "/api/desktop/vnc/start": "routers.desktop:start_desktop_vnc",
-    "/api/desktop/vnc/stop": "routers.desktop:stop_desktop_vnc",
-    "/api/desktop/validate": "routers.desktop:validate_desktop_host",
-    "/api/ssh/sshd": "routers.integrations:check_ssh_sshd",
-    "/api/ssh/ping": "routers.integrations:ping_route_test",
-    "/api/ssh/route": "routers.integrations:check_ssh_route",
-    "/api/vpn/status": "routers.integrations:get_vpn_status",
-    "/api/vpn/connect": "routers.integrations:connect_vpn",
-    "/api/vpn/disconnect": "routers.integrations:disconnect_vpn",
+    "/api/desktop/vnc/status": "features.system.desktop:get_desktop_vnc_status",
+    "/api/desktop/vnc/start": "features.system.desktop:start_desktop_vnc",
+    "/api/desktop/vnc/stop": "features.system.desktop:stop_desktop_vnc",
+    "/api/desktop/validate": "features.system.desktop:validate_desktop_host",
+    "/api/ssh/sshd": "features.system.integrations:check_ssh_sshd",
+    "/api/ssh/ping": "features.system.integrations:ping_route_test",
+    "/api/ssh/route": "features.system.integrations:check_ssh_route",
+    "/api/vpn/status": "features.system.integrations:get_vpn_status",
+    "/api/vpn/connect": "features.system.integrations:connect_vpn",
+    "/api/vpn/disconnect": "features.system.integrations:disconnect_vpn",
     "/api/adb-forward/start": "features.devices.integrations_api:start_adb_forward",
     "/api/adb-forward/stop": "features.devices.integrations_api:stop_adb_forward",
     "/api/usbip/status": "features.devices.integrations_api:get_usbip_status",
     "/api/usbip/connect": "features.devices.integrations_api:start_usbip",
     "/api/usbip/disconnect": "features.devices.integrations_api:stop_usbip",
     "/api/usbip/install": "features.devices.integrations_api:install_usbipd",
-    "/api/files/progress": "routers.assets:get_upload_progress",
-    "/api/files/list": "routers.assets:list_files",
-    "/api/opengrok/search": "routers.assets:search_opengrok",
+    "/api/files/progress": "features.system.assets:get_upload_progress",
+    "/api/files/list": "features.system.assets:list_files",
+    "/api/opengrok/search": "features.system.assets:search_opengrok",
     "/api/burn/upload-progress": "features.firmware.firmware_api:get_firmware_upload_progress",
     "/api/burn/firmware": "features.firmware.firmware_api:burn_firmware",
     "/api/burn/gsi": "features.firmware.firmware_api:burn_gsi",
     "/api/burn/serial": "features.firmware.firmware_api:burn_sn",
-    "/api/terminal/open": "routers.terminal:get_ssh_terminal_info",
-    "/api/terminal/push": "routers.terminal:upload_file",
-    "/api/system/skills": "routers.system:download_skills_zip",
-    "/api/system/docs": "routers.system:get_api_docs",
-    "/api/system/help": "routers.system:get_api_help",
+    "/api/terminal/open": "features.system.terminal_api:get_ssh_terminal_info",
+    "/api/terminal/push": "features.system.terminal_api:upload_file",
+    "/api/system/skills": "features.system.api:download_skills_zip",
+    "/api/system/docs": "features.system.api:get_api_docs",
+    "/api/system/help": "features.system.api:get_api_help",
     # --- 补充：报告 ---
     "/api/reports/diagnose": "features.reports.api:diagnose_report_failure",
     "/api/reports/analyze-url": "features.reports.api:analyze_report_from_url",
@@ -236,20 +236,20 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/test/suites/archives": "features.test_execution.api:list_test_suite_archives",
     "/api/test/suites/diagnose-target": "features.test_execution.api:diagnose_suite_target",
     # --- 补充：通知 ---
-    "/api/notifications": "routers.notifications:get_notifications",
-    "/api/notifications/mark-read": "routers.notifications:mark_notifications_read",
-    "/api/notifications/clear": "routers.notifications:clear_notifications",
+    "/api/notifications": "features.system.notifications_api:get_notifications",
+    "/api/notifications/mark-read": "features.system.notifications_api:mark_notifications_read",
+    "/api/notifications/clear": "features.system.notifications_api:clear_notifications",
     # --- 补充：安全审计 ---
-    "/api/security-audit/logs": "routers.audit:list_security_audit_logs",
-    "/api/security-audit/export": "routers.audit:export_security_audit_logs",
+    "/api/security-audit/logs": "features.system.audit:list_security_audit_logs",
+    "/api/security-audit/export": "features.system.audit:export_security_audit_logs",
     # --- 补充：网址/工具 ---
-    "/api/websites/load": "routers.assets:load_user_tools",
-    "/api/tools/list": "routers.assets:list_utility_tools",
+    "/api/websites/load": "features.system.assets:load_user_tools",
+    "/api/tools/list": "features.system.assets:list_utility_tools",
     # --- 补充：配置 ---
-    "/api/config/ai": "routers.config:get_ai_config",
-    "/api/config/opengrok": "routers.config:get_opengrok_config",
+    "/api/config/ai": "features.users.config_api:get_ai_config",
+    "/api/config/opengrok": "features.users.config_api:get_opengrok_config",
     "/api/config/redmine": "features.reports.api:get_redmine_config",
-    "/api/tailscale/status": "routers.config:get_tailscale_status",
+    "/api/tailscale/status": "features.users.config_api:get_tailscale_status",
     # --- 补充：APK（路径参数 task_id 作为函数参数） ---
     "/api/apk/status/{task_id}": "features.firmware.apk_api:get_apk_status",
     "/api/apk/manifest/{task_id}": "features.firmware.apk_api:get_apk_manifest",
@@ -269,9 +269,9 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/test/suites/download-status/{task_id}": "features.test_execution.api:get_test_suite_download_status",
     "/api/test/suites/extract-status/{task_id}": "features.test_execution.api:get_test_suite_extract_status",
     # --- 补充：安全审计详情 ---
-    "/api/security-audit/detail/{event_id}": "routers.audit:get_security_audit_detail",
+    "/api/security-audit/detail/{event_id}": "features.system.audit:get_security_audit_detail",
     # --- 补充：VPN 连接 ---
-    "/api/vpn/connections": "routers.integrations:get_vpn_connections",
+    "/api/vpn/connections": "features.system.integrations:get_vpn_connections",
 }
 
 _AGENT_UNSUPPORTED_DIRECT_PATHS = {
@@ -468,7 +468,7 @@ class ToolRegistry:
 
 def _build_registry() -> ToolRegistry:
     """构建并返回全局工具注册表。"""
-    from core.api_docs_list import API_DOCS_LIST
+    from features.system.api_docs_list import API_DOCS_LIST
 
     registry = ToolRegistry()
     registry.register_from_api_docs(API_DOCS_LIST)

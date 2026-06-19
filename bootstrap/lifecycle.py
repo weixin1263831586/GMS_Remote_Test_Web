@@ -7,8 +7,8 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
 from bootstrap.dependencies import AppServices
-from core.settings import CLEANUP_INTERVAL_SECONDS
-from core.state import global_state
+from foundation.config import CLEANUP_INTERVAL_SECONDS
+from features.system.state import global_state
 from features.devices.manager import device_manager
 from features.devices.monitor import (
     init_usb_monitor,

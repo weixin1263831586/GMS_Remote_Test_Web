@@ -8,7 +8,7 @@ def generate_help_or_continue(help_flag: bool, method: str, path: str):
     if not help_flag:
         return None
     try:
-        from routers.system import generate_per_api_help_text
+        from features.system.api import generate_per_api_help_text
         help_text = generate_per_api_help_text(method, path)
     except ImportError:
         return None

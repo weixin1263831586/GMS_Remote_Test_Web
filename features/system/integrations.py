@@ -10,13 +10,13 @@ import subprocess
 from fastapi import APIRouter, Body, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 
-from core.api_response import error_response, success_response
-from core.clients import get_client_id_from_request, get_client_ip, resolve_tailscale_device_host
-from core.common_utils import CommonUtils
-from core.config import config_manager
-from core.error_handling import handle_api_errors
-from core.schemas import VPNConnectRequest
-from core.ssh import SSHD_INSTALL_GUIDE, ssh_manager
+from foundation.responses import error_response, success_response
+from features.users import get_client_id_from_request, get_client_ip, resolve_tailscale_device_host
+from foundation.common_utils import CommonUtils
+from foundation.config import config_manager
+from foundation.errors import handle_api_errors
+from features.system.models import VPNConnectRequest
+from features.system.ssh import SSHD_INSTALL_GUIDE, ssh_manager
 from features.test_execution.suites import is_config_host_local
 from features.devices.support import (
     DeviceSSHConnection,

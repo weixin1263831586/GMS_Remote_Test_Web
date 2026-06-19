@@ -14,8 +14,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.agent_tools import AgentTool, registry
-from core.config import config_manager
+from features.assistant.tools import AgentTool, registry
+from foundation.config import config_manager
 from features.devices.locks import device_lock_manager
 from features.devices.manager import device_manager
 from features.devices.support import get_or_create_user_state
@@ -100,26 +100,25 @@ def _get_model_by_tool() -> dict[str, type]:
     """Lazy-initialised mapping of tool names to Pydantic request models."""
     global _MODEL_BY_TOOL
     if _MODEL_BY_TOOL is None:
-        from core.schemas import (
+        from features.devices.models import (
             ADBForwardStartRequest,
-            ClientInfoRequest,
             DeviceActionRequest,
             DeviceLockRequest,
             DeviceShellRequest,
-            ReportDiagnosisRequest,
-            SNBurnRequest,
             USBIPDisconnectRequest,
             USBIPStartRequest,
-            VNCStartRequest,
-            VPNConnectRequest,
             WifiConnectRequest,
         )
+        from features.firmware.models import SNBurnRequest
+        from features.reports.api_models import ReportDiagnosisRequest
+        from features.system.models import VNCStartRequest, VPNConnectRequest
         from features.test_execution.models import (
             SuiteApkAnalyzeRequest,
             TestParseArgsRequest,
             TestStartRequest,
             TradefedListResultsRequest,
         )
+        from features.users.models import ClientInfoRequest
         _MODEL_BY_TOOL = {
             "users_detect": ClientInfoRequest,
             "users_set_username": ClientInfoRequest,
@@ -328,7 +327,7 @@ class ActionExecutor:
     async def _load_device_summaries(self) -> list[dict[str, Any]]:
         """Load device summaries, preferring management payload when available."""
         try:
-            from core.ssh import ssh_manager
+            from features.system.ssh import ssh_manager
             from features.devices.api import (
                 _build_devices_management_payload,
                 _build_management_props_command,
@@ -531,7 +530,7 @@ class ActionExecutor:
 
     async def _query_users(self, session, request, params) -> ToolResult:
         """查询在线用户。"""
-        from routers.users import list_users
+        from features.users.users_api import list_users
 
         response = await list_users()
         payload = _json_body(response)
@@ -550,7 +549,7 @@ class ActionExecutor:
 
     async def _query_health(self, session, request, params) -> ToolResult:
         """查询系统健康。"""
-        from routers.system import health_check
+        from features.system.api import health_check
 
         response = await health_check()
         payload = _json_body(response)
@@ -586,7 +585,7 @@ class ActionExecutor:
 
     async def _query_vpn_status(self, session, request, params) -> ToolResult:
         """查询 VPN 状态。"""
-        result, payload = await self._fetch_router_json("routers.integrations", "get_vpn_status")
+        result, payload = await self._fetch_router_json("features.system.integrations", "get_vpn_status")
         if result is not None:
             return result
         text = f"VPN 状态：{payload.get('status', 'unknown')}"
@@ -601,7 +600,7 @@ class ActionExecutor:
 
     async def _query_vnc_status(self, session, request, params) -> ToolResult:
         """查询 VNC 状态。"""
-        result, payload = await self._fetch_router_json("routers.desktop", "get_desktop_vnc_status")
+        result, payload = await self._fetch_router_json("features.system.desktop", "get_desktop_vnc_status")
         if result is not None:
             return result
         text = f"VNC 状态：{payload.get('status', 'unknown')}"
@@ -613,7 +612,7 @@ class ActionExecutor:
 
     async def _query_terminal(self, session, request, params) -> ToolResult:
         """查询终端连接信息。"""
-        result, payload = await self._fetch_router_json("routers.terminal", "get_ssh_terminal_info")
+        result, payload = await self._fetch_router_json("features.system.terminal_api", "get_ssh_terminal_info")
         if result is not None:
             return result
         text = f"终端连接：{payload.get('connection_command', 'ssh ' + payload.get('host', ''))}"
@@ -849,7 +848,7 @@ class ActionExecutor:
         if params.get("q"):
             kwargs["q"] = str(params.get("q"))
         result, payload = await self._fetch_router_json(
-            "routers.audit", "list_security_audit_logs",
+            "features.system.audit", "list_security_audit_logs",
             tool_name_for_error="security_audit_logs", **kwargs,
         )
         if result is not None:
@@ -1159,7 +1158,7 @@ class ActionExecutor:
             )
 
     def _build_call_kwargs(self, func: Any, tool: AgentTool, request: Any, params: dict[str, Any]) -> dict[str, Any]:
-        from routers.agent import AgentRequestShim
+        from features.assistant.api import AgentRequestShim
 
         model_by_tool = _get_model_by_tool()
 

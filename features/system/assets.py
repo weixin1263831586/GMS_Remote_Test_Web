@@ -15,14 +15,14 @@ import aiohttp
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from core.api_response import error_response, success_response
-from core.clients import get_client_id_from_request
-from core.config import config_manager
+from foundation.responses import error_response, success_response
+from features.users import get_client_id_from_request
+from foundation.config import config_manager
 from features.devices.support import ssh_connection_failed_response
-from core.error_handling import handle_api_errors
-from core.settings import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, TOOLS_DATA_FILE
-from core.ssh import ssh_manager
-from modules.icon_fetcher import IconFetcher
+from foundation.errors import handle_api_errors
+from foundation.config import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, TOOLS_DATA_FILE
+from features.system.ssh import ssh_manager
+from features.system.icon_fetcher import IconFetcher
 
 logger = logging.getLogger(__name__)
 

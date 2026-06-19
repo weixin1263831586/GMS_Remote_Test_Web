@@ -15,8 +15,8 @@ import time
 from typing import Dict, Any, List, Optional
 
 from .ssh import ssh_manager
-from .config import config_manager, get_ubuntu_user
-from .common_utils import CommonUtils
+from foundation.config import config_manager, get_ubuntu_user
+from foundation.common_utils import CommonUtils
 from features.devices.utils import DeviceUtils
 
 logger = logging.getLogger(__name__)

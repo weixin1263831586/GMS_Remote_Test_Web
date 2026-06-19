@@ -19,11 +19,11 @@ import paramiko
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from core.config import config_manager
-from core.ssh import ssh_manager
-from core.state import global_state
+from foundation.config import config_manager
+from features.system.ssh import ssh_manager
+from features.system.state import global_state
 from features.test_execution.suites import is_config_host_local
-from core.common_utils import CommonUtils
+from foundation.common_utils import CommonUtils
 from features.devices.locks import device_lock_manager
 
 logger = logging.getLogger(__name__)

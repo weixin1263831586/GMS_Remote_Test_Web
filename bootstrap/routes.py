@@ -2,18 +2,11 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from core.api_help import generate_help_or_continue
-from core.clients import (
-    get_client_id_from_request,
-    get_client_ip,
-    parse_client_id,
-    probe_windows_usbipd,
-    resolve_tailscale_device_host,
-)
-from core.config import config_manager
-from core.file_utils import FileUtils
-from core.notifications import safe_websocket_send, store_notification
-from core.settings import (
+from features.system.api_help import generate_help_or_continue
+from foundation.config import config_manager
+from foundation.files import FileUtils
+from features.system.notifications import safe_websocket_send, store_notification
+from foundation.config import (
     APK_MAX_FILE_SIZE,
     APK_MAX_SOURCE_FILE_SIZE,
     APK_MAX_TASKS,
@@ -27,12 +20,13 @@ from core.settings import (
     MAX_LOG_ENTRIES,
     PROJECT_ROOT,
 )
-from core.ssh import ssh_manager
-from core.state import global_state
-from core.universal_ai import get_universal_analyzer
+from features.system.ssh import ssh_manager
+from features.system.state import global_state
+from features.assistant.universal_ai import get_universal_analyzer
 from features.automation.api import configure_automation_service
 from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
+from features.devices import get_or_create_user_state
 from features.devices.dependencies import configure_device_dependencies
 from features.devices.network import run_local_shell_command
 from features.firmware.apk import (
@@ -53,9 +47,18 @@ from features.test_execution.api import (
 from features.test_execution.dependencies import (
     configure_test_execution_dependencies,
 )
-from modules.client_manager import client_manager
+from features.users import (
+    client_manager,
+    get_client_id_from_request,
+    get_client_ip,
+    parse_client_id,
+    probe_windows_usbipd,
+    resolve_tailscale_device_host,
+)
+from features.users.dependencies import configure_user_dependencies
+from features.system.ssh_async import ssh_async_manager
 from routers import ALL_ROUTERS
-from routers.system import init_templates
+from features.system.api import init_templates
 from workflows.device_test_execution import (
     acquire_test_devices,
     release_test_devices,
@@ -68,6 +71,12 @@ from workflows.firmware_device import (
 
 def include_routes(app: FastAPI, templates, services=None) -> None:
     if services is not None:
+        configure_user_dependencies(
+            config_manager=config_manager,
+            global_state=global_state,
+            ssh_async_manager=ssh_async_manager,
+            get_or_create_user_state=get_or_create_user_state,
+        )
         configure_firmware_dependencies(
             config_manager=config_manager,
             ssh_manager=ssh_manager,

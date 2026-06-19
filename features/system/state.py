@@ -16,8 +16,8 @@ from datetime import datetime, timedelta
 import paramiko
 from starlette.websockets import WebSocketState
 
-from core.common_utils import CommonUtils
-from core.settings import (
+from foundation.common_utils import CommonUtils
+from foundation.config import (
     APK_TASK_MAX_AGE_SECONDS,
     DEVICE_SSH_POOLS_MAX,
     FIRMWARE_UPLOAD_PROGRESS_MAX_ITEMS_PER_CLIENT,

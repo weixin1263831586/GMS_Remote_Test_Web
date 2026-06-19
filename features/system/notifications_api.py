@@ -4,16 +4,16 @@ import logging
 
 from fastapi import APIRouter, Query, Request
 
-from core.api_response import ApiResponse
-from core.clients import get_client_id_from_request
-from core.error_handling import handle_api_errors
-from core.notifications import (
+from foundation.responses import ApiResponse
+from features.users import get_client_id_from_request
+from foundation.errors import handle_api_errors
+from features.system.notifications import (
     clear_client_notifications,
     list_client_notifications,
     mark_client_notifications_read,
     store_notification,
 )
-from core.schemas import NotificationCreateRequest, NotificationReadRequest
+from features.system.models import NotificationCreateRequest, NotificationReadRequest
 
 logger = logging.getLogger(__name__)
 
