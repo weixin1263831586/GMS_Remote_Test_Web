@@ -31,13 +31,10 @@ from features.assistant.response import (
     page_quick_actions,
 )
 from features.assistant.tools import registry
-from features.devices.locks import device_lock_manager
-from features.devices.manager import device_manager
-from features.devices.support import get_or_create_user_state
-from features.reports.api_models import ReportDiagnosisRequest
-from features.reports.repository import test_report_db
-from features.test_execution.models import SuiteApkAnalyzeRequest
-from features.test_execution.suites import (
+from features.devices import device_lock_manager, device_manager, get_or_create_user_state
+from features.reports import ReportDiagnosisRequest, test_report_db
+from features.test_execution import (
+    SuiteApkAnalyzeRequest,
     detect_test_type_from_suite_path,
     get_default_suites_path,
 )
@@ -282,7 +279,7 @@ def _score_suite(suite: dict[str, Any], test_type: str, module: str) -> int:
 
 
 def _list_suites() -> list[dict[str, Any]]:
-    from features.test_execution.api import _get_available_test_suites
+    from features.test_execution import _get_available_test_suites
 
     config = config_manager.load_config()
     base_path = config.get("suites_path") or get_default_suites_path(config)
@@ -411,7 +408,7 @@ def _normalize_failure(raw_failure: dict[str, Any], index: int = 0) -> dict[str,
 
 async def _analyze_saved_report(session: dict[str, Any], report_timestamp: str) -> dict[str, Any] | None:
     """Analyze a saved report and append an Agent step."""
-    from features.reports.service import test_report_manager
+    from features.reports import test_report_manager
 
     _append_step(session, "报告分析", "running", f"正在分析报告 {report_timestamp}")
     try:
@@ -433,7 +430,7 @@ async def _analyze_saved_report(session: dict[str, Any], report_timestamp: str) 
 
 async def _diagnose_report_failure(session: dict[str, Any], report: dict[str, Any], analysis: dict[str, Any], failure: dict[str, Any]) -> dict[str, Any] | None:
     """Run the existing report diagnosis pipeline for one failure."""
-    from features.reports.api import diagnose_report_failure
+    from features.reports import diagnose_report_failure
 
     report_timestamp = report.get("timestamp", "")
     details = analysis.get("details") or {}
@@ -493,7 +490,7 @@ def _extract_symbols_for_apk_lookup(diagnosis: dict[str, Any], failure: dict[str
 
 
 async def _wait_for_apk_analysis(task_id: str, timeout_seconds: int = 180) -> dict[str, Any] | None:
-    from features.firmware.apk_api import get_apk_status
+    from features.firmware import get_apk_status
 
     deadline = time.time() + timeout_seconds
     last_status = None
@@ -511,7 +508,7 @@ async def _wait_for_apk_analysis(task_id: str, timeout_seconds: int = 180) -> di
 
 async def _read_apk_source_snippet(task_id: str, diagnosis: dict[str, Any], failure: dict[str, Any]) -> dict[str, Any] | None:
     """Find a likely decompiled source file and read a short snippet."""
-    from features.firmware.apk_api import find_apk_symbol_definition, get_apk_source
+    from features.firmware import find_apk_symbol_definition, get_apk_source
 
     symbols = _extract_symbols_for_apk_lookup(diagnosis, failure)
     definition = None
@@ -545,8 +542,8 @@ async def _read_apk_source_snippet(task_id: str, diagnosis: dict[str, Any], fail
 
 async def _run_apk_source_analysis(session: dict[str, Any], plan: dict[str, Any], diagnosis: dict[str, Any], failure: dict[str, Any]) -> dict[str, Any] | None:
     """Import a suite APK/JAR, decompile it, and read a likely source snippet."""
-    from features.firmware.apk_api import analyze_apk
-    from features.test_execution.api import create_suite_apk_analysis_task
+    from features.firmware import analyze_apk
+    from features.test_execution import create_suite_apk_analysis_task
 
     suite_target = diagnosis.get("suite_target") or {}
     artifact = suite_target.get("artifact") or {}
@@ -649,8 +646,7 @@ async def _run_failure_analysis_pipeline(session: dict[str, Any], plan: dict[str
 
 
 async def _start_test_with_plan(session: dict[str, Any], request_shim: AgentRequestShim, plan: dict[str, Any], retry_timestamp: str = "") -> dict[str, Any]:
-    from features.test_execution.api import start_test
-    from features.test_execution.models import TestStartRequest
+    from features.test_execution import TestStartRequest, start_test
 
     req_data = dict(plan.get("request") or {})
     if retry_timestamp:
@@ -683,8 +679,7 @@ async def _run_pre_actions(session: dict[str, Any], plan: dict[str, Any]) -> dic
     for action in actions:
         if action.get("type") != "connect_wifi":
             continue
-        from features.devices.api import connect_wifi
-        from features.devices.models import WifiConnectRequest
+        from features.devices import WifiConnectRequest, connect_wifi
 
         wifi_req = WifiConnectRequest(
             devices=devices,

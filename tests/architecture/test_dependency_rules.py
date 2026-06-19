@@ -4,12 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_FEATURE_IMPORT_EXEMPTIONS = {
-    # 2026-06-19 Task 12/13 migration: these are being moved behind workflows
-    # before final cutover.
-    'features/assistant/api.py',
-    'features/assistant/executor.py',
-}
+MIGRATION_FEATURE_IMPORT_EXEMPTIONS = set()
 MIGRATION_FOUNDATION_IMPORT_EXEMPTIONS = set()
 
 
