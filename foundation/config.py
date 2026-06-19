@@ -620,6 +620,11 @@ class ConfigManager:
             logger.error(f"Error saving runtime config: {e}")
             return False
 
+    def save_runtime(self, updates: Dict[str, Any]) -> bool:
+        runtime = self._load_runtime_config() or {}
+        runtime.update(dict(updates or {}))
+        return self.save_runtime_config(runtime)
+
     def _write_runtime_config_file(self, runtime_config: Dict[str, Any], preserve_redmine_auth: bool = True) -> bool:
         """保存运行时配置到文件
 
