@@ -9,6 +9,7 @@ from features.automation.api import configure_automation_service
 from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
 from features.devices import api as devices
+from features.devices import config_explorer_api as device_config_explorer
 from features.devices import get_or_create_user_state
 from features.devices import integrations_api as device_integrations
 from features.devices.dependencies import configure_device_dependencies
@@ -92,6 +93,7 @@ ALL_ROUTERS = [
     automation.page_router,
     desktop.router,
     devices.router,
+    device_config_explorer.router,
     device_integrations.router,
     firmware.router,
     gerrit_dashboard.router,
@@ -155,6 +157,13 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             run_local_shell_command=run_local_shell_command,
             project_root=PROJECT_ROOT,
             device_cache_ttl=DEVICE_CACHE_TTL,
+        )
+        device_config_explorer.configure_config_explorer_dependencies(
+            generate_help_or_continue=generate_help_or_continue,
+            create_apk_task=_create_apk_task,
+            normalize_apk_filename=_normalize_apk_filename,
+            safe_join=_safe_join,
+            cleanup_files=_cleanup_files,
         )
         configure_report_dependencies(
             ssh_manager=ssh_manager,

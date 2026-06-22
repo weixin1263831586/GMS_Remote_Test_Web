@@ -501,6 +501,24 @@
         "title": "ClientInfoRequest",
         "type": "object"
       },
+      "DecompileRequest": {
+        "properties": {
+          "device_id": {
+            "default": "",
+            "title": "Device Id",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "DecompileRequest",
+        "type": "object"
+      },
       "DeviceActionRequest": {
         "properties": {
           "devices": {
@@ -2581,6 +2599,452 @@
           }
         },
         "summary": "Get Firmware Upload Progress"
+      }
+    },
+    "/api/config-explorer": {
+      "get": {
+        "description": "List config resources of a package with default (+optional effective) values.",
+        "parameters": [
+          {
+            "description": "包名，如 android",
+            "in": "query",
+            "name": "package",
+            "required": false,
+            "schema": {
+              "default": "android",
+              "description": "包名，如 android",
+              "title": "Package",
+              "type": "string"
+            }
+          },
+          {
+            "description": "adb serial；为空时用默认设备",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial；为空时用默认设备",
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "资源名子串过滤（忽略大小写）",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "资源名子串过滤（忽略大小写）",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "类型过滤：bool/integer/string/dimen/array",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "类型过滤：bool/integer/string/dimen/array",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          {
+            "description": "只显示 config_* 资源",
+            "in": "query",
+            "name": "config_only",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "只显示 config_* 资源",
+              "title": "Config Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "同时计算 overlay 生效值（每资源一次 adb 调用，并发执行）",
+            "in": "query",
+            "name": "with_effective",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "同时计算 overlay 生效值（每资源一次 adb 调用，并发执行）",
+              "title": "With Effective",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "生效值查询上限；0=不限（计算全部）。仅在 with_effective 时生效",
+            "in": "query",
+            "name": "effective_limit",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "生效值查询上限；0=不限（计算全部）。仅在 with_effective 时生效",
+              "title": "Effective Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "help",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Help",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Explore"
+      }
+    },
+    "/api/config-explorer/decompile": {
+      "post": {
+        "description": "Pull an on-device APK/JAR and register it as an APK-analysis task.\n\nThe file is pulled into the APK upload dir (so the existing APK-analysis\npipeline can decompile it), then a task is created. Returns ``task_id`` /\n``filename`` / ``size``; the frontend then switches to the APK-analysis\npage and starts the analysis (same flow as suite→APK).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecompileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decompile Device Apk"
+      }
+    },
+    "/api/config-explorer/devices": {
+      "get": {
+        "description": "List adb devices available for config exploration.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "help",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Help",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api List Devices"
+      }
+    },
+    "/api/config-explorer/features": {
+      "get": {
+        "description": "``pm list features`` → [{name, version?}] (device info: features tab).",
+        "parameters": [
+          {
+            "description": "adb serial; empty = default device",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial; empty = default device",
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "help",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Help",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api List Features"
+      }
+    },
+    "/api/config-explorer/packages": {
+      "get": {
+        "description": "List packages that typically carry config_* resources.",
+        "parameters": [
+          {
+            "description": "adb serial; empty = default device",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial; empty = default device",
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "help",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Help",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api List Packages"
+      }
+    },
+    "/api/config-explorer/packages-with-path": {
+      "get": {
+        "description": "``pm list packages -f`` → [{path, package}] (device info: packages tab).",
+        "parameters": [
+          {
+            "description": "adb serial; empty = default device",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial; empty = default device",
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "help",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Help",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api List Packages With Path"
+      }
+    },
+    "/api/config-explorer/packages/all": {
+      "get": {
+        "description": "List ALL packages on the device (pm list packages) for the package picker.",
+        "parameters": [
+          {
+            "description": "adb serial; empty = default device",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial; empty = default device",
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "help",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Help",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api List All Packages"
+      }
+    },
+    "/api/config-explorer/props": {
+      "get": {
+        "description": "``getprop`` → [{name, value}] (device info: props tab).",
+        "parameters": [
+          {
+            "description": "adb serial; empty = default device",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial; empty = default device",
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "help",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Help",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api List Props"
       }
     },
     "/api/config/ai": {
@@ -8466,6 +8930,24 @@
           }
         },
         "summary": "Automation Page"
+      }
+    },
+    "/config-explorer": {
+      "get": {
+        "description": "Self-contained HTML page for the config explorer tool card.",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Config Explorer Page"
       }
     },
     "/gerrit-dashboard": {
