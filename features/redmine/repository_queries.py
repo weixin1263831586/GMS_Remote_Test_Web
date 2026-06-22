@@ -1,19 +1,24 @@
 from __future__ import annotations
 
-import json
-import sqlite3
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .users import (
-    DB_PATH, DOCS_DIR, RESOLVED_STATUS_NAMES,
-    _looks_like_report_attachment, _looks_like_rk_actor, _name_keys,
-    _name_matches_keys, _now, _parse_dt, _sorted_slice, _time_key,
+    RESOLVED_STATUS_NAMES,
+    _looks_like_report_attachment,
+    _looks_like_rk_actor,
+    _name_keys,
+    _name_matches_keys,
+    _norm_name,
+    _now,
+    _parse_dt,
+    _sorted_slice,
+    _time_key,
 )
 
+
 class RepositoryQueryMixin:
-    def upsert_issue(self, issue: Dict[str, Any]) -> None:
+    def upsert_issue(self, issue: dict[str, Any]) -> None:
         payload = dict(issue)
         payload["last_scanned_at"] = payload.get("last_scanned_at") or _now()
         json_fields = {"journals_json", "attachments_json", "failures_json", "references_json", "ai_json"}
@@ -43,7 +48,7 @@ class RepositoryQueryMixin:
             )
             self._replace_fts(conn, payload)
 
-    def get_issue(self, issue_id: int) -> Optional[Dict[str, Any]]:
+    def get_issue(self, issue_id: int) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM redmine_agent_issues WHERE issue_id=?", (issue_id,)).fetchone()
         return self._decode_row(row) if row else None
@@ -58,7 +63,7 @@ class RepositoryQueryMixin:
         search: str = "",
         sort: str = "updated_on",
         order: str = "desc",
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Paginated listing with optional filters."""
         where, params = self._build_issue_where(status, priority, category, search)
         allowed_sorts = {"updated_on", "created_on", "priority_name", "issue_id", "subject", "analysis_status"}
@@ -83,7 +88,7 @@ class RepositoryQueryMixin:
             row = conn.execute(f"SELECT COUNT(*) AS cnt FROM redmine_agent_issues {where}", params).fetchone()
         return int(row["cnt"]) if row else 0
 
-    def get_issue_statistics(self) -> Dict[str, Any]:
+    def get_issue_statistics(self) -> dict[str, Any]:
         with self.connect() as conn:
             # Single query for total, unresolved, and all group-by counts
             total = conn.execute("SELECT COUNT(*) AS c FROM redmine_agent_issues").fetchone()["c"]
@@ -113,12 +118,12 @@ class RepositoryQueryMixin:
 
     def get_workload_statistics(
         self,
-        owner_names: Optional[List[str]] = None,
+        owner_names: list[str] | None = None,
         stale_days: int = 3,
         list_limit: int = 30,
-        display_names: Optional[List[str]] = None,
+        display_names: list[str] | None = None,
         window_days: int = 0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Return Redmine workload metrics for the statistics dashboard.
 
         The database stores Redmine snapshots, so journal-based metrics are as
@@ -159,14 +164,14 @@ class RepositoryQueryMixin:
             issue for issue in issues
             if self._is_assigned_to_owner(issue, owner_keys)
         ]
-        open_issues: List[Dict[str, Any]] = []
-        waiting_my_reply: List[Dict[str, Any]] = []
-        stale_my_reply: List[Dict[str, Any]] = []
-        waiting_customer_reply: List[Dict[str, Any]] = []
-        stale_customer_reply: List[Dict[str, Any]] = []
-        stale_rk_colleague_reply: List[Dict[str, Any]] = []
-        missing_test_report: List[Dict[str, Any]] = []
-        resolved_counts: Dict[str, Dict[str, int]] = {
+        open_issues: list[dict[str, Any]] = []
+        waiting_my_reply: list[dict[str, Any]] = []
+        stale_my_reply: list[dict[str, Any]] = []
+        waiting_customer_reply: list[dict[str, Any]] = []
+        stale_customer_reply: list[dict[str, Any]] = []
+        stale_rk_colleague_reply: list[dict[str, Any]] = []
+        missing_test_report: list[dict[str, Any]] = []
+        resolved_counts: dict[str, dict[str, int]] = {
             "day": {}, "week": {}, "month": {}, "year": {},
         }
 
@@ -251,7 +256,7 @@ class RepositoryQueryMixin:
             },
         }
 
-    def list_assignee_names(self) -> List[str]:
+    def list_assignee_names(self) -> list[str]:
         with self.connect() as conn:
             rows = conn.execute(
                 """
@@ -264,13 +269,13 @@ class RepositoryQueryMixin:
             ).fetchall()
         return [str(row["assigned_to_name"] or "") for row in rows if row["assigned_to_name"]]
 
-    def resolve_assignee_names(self, query_names: List[str]) -> Dict[str, List[str]]:
+    def resolve_assignee_names(self, query_names: list[str]) -> dict[str, list[str]]:
         assignees = self.list_assignee_names()
         assignee_keys = {
             name: _name_keys(name)
             for name in assignees
         }
-        resolved: Dict[str, List[str]] = {}
+        resolved: dict[str, list[str]] = {}
         for raw_name in query_names:
             name = str(raw_name or "").strip()
             if not name:
@@ -286,17 +291,17 @@ class RepositoryQueryMixin:
         return resolved
 
     @staticmethod
-    def _is_issue_resolved(issue: Dict[str, Any]) -> bool:
+    def _is_issue_resolved(issue: dict[str, Any]) -> bool:
         return bool(issue.get("is_resolved")) or str(issue.get("status_name") or "") in RESOLVED_STATUS_NAMES
 
     @staticmethod
-    def _is_assigned_to_owner(issue: Dict[str, Any], owner_keys: set) -> bool:
+    def _is_assigned_to_owner(issue: dict[str, Any], owner_keys: set) -> bool:
         if not owner_keys:
             return True
         return _name_matches_keys(issue.get("assigned_to_name"), owner_keys)
 
     @staticmethod
-    def _last_note_journal(issue: Dict[str, Any]) -> Dict[str, Any]:
+    def _last_note_journal(issue: dict[str, Any]) -> dict[str, Any]:
         journals = issue.get("journals_json") or []
         note_journals = [j for j in journals if str(j.get("notes") or "").strip()]
         if not note_journals:
@@ -304,7 +309,7 @@ class RepositoryQueryMixin:
         return max(note_journals, key=lambda item: _parse_dt(item.get("created_on")) or datetime.min)
 
     @staticmethod
-    def _last_activity_journal(issue: Dict[str, Any]) -> Dict[str, Any]:
+    def _last_activity_journal(issue: dict[str, Any]) -> dict[str, Any]:
         journals = issue.get("journals_json") or []
         activity_journals = [
             j for j in journals
@@ -315,7 +320,7 @@ class RepositoryQueryMixin:
         return max(activity_journals, key=lambda item: _parse_dt(item.get("created_on")) or datetime.min)
 
     @classmethod
-    def _reply_wait_info(cls, issue: Dict[str, Any], owner_keys: set) -> Dict[str, Any]:
+    def _reply_wait_info(cls, issue: dict[str, Any], owner_keys: set) -> dict[str, Any]:
         last_activity = cls._last_activity_journal(issue)
         if not last_activity:
             return {"waiting": False, "reason": "no_journal_notes"}
@@ -338,7 +343,7 @@ class RepositoryQueryMixin:
         }
 
     @staticmethod
-    def _is_missing_test_report(issue: Dict[str, Any]) -> bool:
+    def _is_missing_test_report(issue: dict[str, Any]) -> bool:
         attachments = issue.get("attachments_json") or []
         if any(_looks_like_report_attachment(att) for att in attachments if isinstance(att, dict)):
             return False
@@ -351,7 +356,7 @@ class RepositoryQueryMixin:
         return True
 
     @staticmethod
-    def _resolved_at_from_journals(issue: Dict[str, Any]) -> str:
+    def _resolved_at_from_journals(issue: dict[str, Any]) -> str:
         journals = issue.get("journals_json") or []
         for journal in reversed(journals):
             for detail in journal.get("details") or []:
@@ -362,7 +367,7 @@ class RepositoryQueryMixin:
         return ""
 
     @staticmethod
-    def _issue_summary(issue: Dict[str, Any], reply_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _issue_summary(issue: dict[str, Any], reply_info: dict[str, Any] | None = None) -> dict[str, Any]:
         reply_info = reply_info or {}
         return {
             "issue_id": issue.get("issue_id"),

@@ -7,23 +7,13 @@ import json
 import logging
 import os
 import re
-import tempfile
-import uuid
-import zipfile
-from datetime import datetime, timedelta
-from pathlib import Path
-from collections.abc import Callable
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any
 
 import requests
 
 from features.redmine.config import config_manager
-from features.redmine.client import RedmineAttachment, RedmineClient
-from features.redmine.repository import (
-    RESOLVED_STATUS_NAMES as RESOLVED_STATUSES,
-    RedmineAgentDB,
-)
-from foundation.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +54,7 @@ MAX_REFERENCES = 5              # max similar references to return
 TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
 
 
-def _load_agent_config() -> Dict[str, Any]:
+def _load_agent_config() -> dict[str, Any]:
     """Load redmine_agent section from config.json, with env overrides."""
     cfg = config_manager.load_config().get("redmine_agent", {})
     return {
@@ -126,7 +116,7 @@ def _truncate(text: str, limit: int) -> str:
 
 
 class AiAnalysisMixin:
-    async def _summarize_with_model(self, issue_payload: Dict[str, Any], failures: List[Dict[str, Any]], references: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def _summarize_with_model(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> dict[str, Any]:
         config = self._load_ai_config()
         if self.ai_analyzer_factory is None:
             return {"success": False, "error": "AI model not configured"}
@@ -141,7 +131,7 @@ class AiAnalysisMixin:
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
-    def _load_ai_config(self) -> Dict[str, Any]:
+    def _load_ai_config(self) -> dict[str, Any]:
         if self._ai_config_cache is not None:
             return self._ai_config_cache
 
@@ -175,7 +165,7 @@ class AiAnalysisMixin:
         self._ai_config_cache = result
         return result
 
-    def _call_model(self, analyzer: Any, provider_name: str, provider: Dict[str, Any], prompt: str) -> Dict[str, Any]:
+    def _call_model(self, analyzer: Any, provider_name: str, provider: dict[str, Any], prompt: str) -> dict[str, Any]:
         """Call the AI model and parse the structured seven-field JSON response."""
         raw = self._call_model_raw(analyzer, provider_name, provider, prompt)
         try:
@@ -195,7 +185,7 @@ class AiAnalysisMixin:
         except Exception:
             return {"success": False, "provider": provider_name, "summary": raw[:1200], "reply_draft": ""}
 
-    def _call_model_raw(self, analyzer: Any, provider_name: str, provider: Dict[str, Any], prompt: str) -> str:
+    def _call_model_raw(self, analyzer: Any, provider_name: str, provider: dict[str, Any], prompt: str) -> str:
         """Call the AI model and return raw text response.
 
         Reuses UniversalAIAnalyzer's HTTP request logic to avoid duplicating
@@ -235,7 +225,7 @@ class AiAnalysisMixin:
     # AI Prompt — structured seven-field output
     # ------------------------------------------------------------------
 
-    def _build_ai_prompt(self, issue_payload: Dict[str, Any], failures: List[Dict[str, Any]], references: List[Dict[str, Any]]) -> str:
+    def _build_ai_prompt(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> str:
         journals = issue_payload.get("journals_json") or []
         journals_text = "\n".join(
             f"[{j.get('created_on', '')}] {j.get('user', '')}: {j.get('notes', '')}"

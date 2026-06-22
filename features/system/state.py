@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 import paramiko
 from starlette.websockets import WebSocketState
 
+from features.devices.usbip import split_host_port
 from foundation.common_utils import CommonUtils
 from foundation.config import (
     APK_TASK_MAX_AGE_SECONDS,
@@ -25,7 +26,7 @@ from foundation.config import (
     USBIP_STATE_MAX_AGE_SECONDS,
     USER_STATE_MAX_AGE_HOURS,
 )
-from features.devices.usbip import split_host_port
+
 
 logger = logging.getLogger(__name__)
 

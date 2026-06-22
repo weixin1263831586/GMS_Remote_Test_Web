@@ -3,13 +3,14 @@
 
 整合重复的主机地址解析、本地检查等逻辑
 """
-import socket
 import logging
 import re
+import socket
 import subprocess
 import time
-from typing import Tuple, Optional, Dict, Any
+from typing import Any
 from urllib.parse import urlparse
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class CommonUtils:
     _LOCAL_IPS_TTL = 60.0  # seconds
 
     @classmethod
-    def get_local_ip(cls) -> Optional[str]:
+    def get_local_ip(cls) -> str | None:
         """
         获取本机IP地址
 
@@ -161,7 +162,7 @@ class CommonUtils:
         return url
 
     @classmethod
-    def parse_host_address(cls, host: str) -> Tuple[Optional[str], str]:
+    def parse_host_address(cls, host: str) -> tuple[str | None, str]:
         """
         解析主机地址
 
@@ -190,7 +191,7 @@ class CommonUtils:
         message: str = '',
         error: str = '',
         data: Any = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         创建标准结果字典
 
@@ -223,7 +224,7 @@ class CommonUtils:
         cls,
         message: str = '',
         data: Any = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         创建成功结果字典
 
@@ -241,7 +242,7 @@ class CommonUtils:
         cls,
         error: str,
         data: Any = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         创建错误结果字典
 
@@ -294,7 +295,7 @@ class StackTraceUtils:
     ]
 
     @classmethod
-    def extract_failure_location(cls, stack_trace: str) -> Optional[Dict[str, str]]:
+    def extract_failure_location(cls, stack_trace: str) -> dict[str, str] | None:
         """
         从堆栈跟踪中提取失败位置信息（优先提取测试类，排除工具类）
 

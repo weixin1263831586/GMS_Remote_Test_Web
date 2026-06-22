@@ -3,10 +3,10 @@ from types import SimpleNamespace
 
 from fastapi.responses import PlainTextResponse
 
+from features.assistant.api import _parse_user_intent
 from features.assistant.executor import ActionExecutor, _json_body
 from features.assistant.intent import resolve
 from features.assistant.tools import registry
-from features.assistant.api import _parse_user_intent
 from features.test_execution.api import get_status
 
 

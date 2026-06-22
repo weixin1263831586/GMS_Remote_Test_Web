@@ -38,7 +38,7 @@ class AgentIntentTests(unittest.TestCase):
     def test_agent_navigation_aliases_cover_all_sidebar_pages(self):
         from features.assistant.intent import _NAV_ALIASES, resolve
 
-        template = Path("templates/index_fastapi.html").read_text(encoding="utf-8", errors="ignore")
+        template = Path("web/shell/shell.html").read_text(encoding="utf-8", errors="ignore")
         for page, label in EXPECTED_SIDEBAR_PAGES.items():
             with self.subTest(page=page):
                 self.assertIn(f'data-page="{page}"', template)

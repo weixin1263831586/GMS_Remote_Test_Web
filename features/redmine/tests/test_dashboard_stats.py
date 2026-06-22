@@ -1,11 +1,11 @@
-import unittest
 import re
 import subprocess
-from importlib import import_module
+import unittest
 from datetime import datetime
-from types import SimpleNamespace
+from importlib import import_module
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from features.redmine.repository import RedmineAgentDB
@@ -127,6 +127,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_department_user_stats_exposes_owner_names_for_trend_detail(self):
         import asyncio
+
         from features.redmine.repository import compute_user_overdue_stats
 
         class Client:
@@ -146,6 +147,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_department_user_stats_uses_live_open_issue_snapshots_when_local_db_empty(self):
         import asyncio
+
         from features.redmine.repository import compute_user_overdue_stats
 
         class Client:
@@ -180,6 +182,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_resolved_by_date_profile_id_fetches_all_department_members_live(self):
         import asyncio
+
         import features.redmine.api as redmine_router
 
         class Client:

@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from features.assistant.tools import AgentTool, registry
-from foundation.config import config_manager
 from features.devices.locks import device_lock_manager
 from features.devices.manager import device_manager
 from features.devices.support import get_or_create_user_state
@@ -26,6 +25,7 @@ from features.redmine.repository import (
     find_user_mapping,
     load_redmine_user_map,
 )
+from foundation.config import config_manager
 
 
 logger = logging.getLogger(__name__)
@@ -327,12 +327,12 @@ class ActionExecutor:
     async def _load_device_summaries(self) -> list[dict[str, Any]]:
         """Load device summaries, preferring management payload when available."""
         try:
-            from features.system.ssh import ssh_manager
             from features.devices.api import (
                 _build_devices_management_payload,
                 _build_management_props_command,
                 _parse_management_device_props,
             )
+            from features.system.ssh import ssh_manager
 
             config = config_manager.load_config()
             device_ids = await asyncio.to_thread(device_manager.get_connected_devices, True)

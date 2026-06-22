@@ -2,24 +2,38 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Query
+from fastapi.responses import JSONResponse
 
 from .api import (
-    _DEPARTMENT_OVERDUE_CACHE, _PROJECT_STATS_CACHE, _WORKLOAD_STATS_CACHE,
-    _check_ttl_cache, _empty_user_stats, _get_redmine_base_url,
-    _get_redmine_stats_config, _resolve_owner_names, _update_ttl_cache,
-    config_manager, redmine_service,
+    _DEPARTMENT_OVERDUE_CACHE,
+    _PROJECT_STATS_CACHE,
+    _WORKLOAD_STATS_CACHE,
+    _check_ttl_cache,
+    _empty_user_stats,
+    _get_redmine_stats_config,
+    _resolve_owner_names,
+    _update_ttl_cache,
+    config_manager,
+    redmine_service,
 )
 from .dashboard import (
-    filter_users_for_profile, merge_resolved_trends,
-    select_redmine_dashboard_profile, summarize_project_issues,
+    filter_users_for_profile,
+    issue_id_list,
+    merge_resolved_trends,
+    select_redmine_dashboard_profile,
+    summarize_project_issues,
 )
 from .repository import (
-    USER_MAP_PATH, compute_user_overdue_stats, display_names_from_mapping,
+    USER_MAP_PATH,
+    compute_user_overdue_stats,
+    display_names_from_mapping,
+    find_user_mapping,
     load_redmine_user_map,
 )
+
 
 router = APIRouter()
 
@@ -39,7 +53,7 @@ async def get_workload_statistics(
 
     owner_names = []
     display_names = []
-    live_counts: Dict[str, int] = {}
+    live_counts: dict[str, int] = {}
     if name:
         mapped = find_user_mapping(name)
         if mapped:
@@ -84,7 +98,7 @@ async def get_workload_statistics(
     return {"success": True, "data": data}
 
 
-async def _department_user_overdue(client, user: Dict[str, Any], stale_days: int, issue_limit: int, window_days: int = 0) -> Dict[str, Any]:
+async def _department_user_overdue(client, user: dict[str, Any], stale_days: int, issue_limit: int, window_days: int = 0) -> dict[str, Any]:
     try:
         return await compute_user_overdue_stats(client, redmine_service.repository, user, stale_days, issue_limit, window_days)
     except Exception as exc:
@@ -102,7 +116,7 @@ async def get_resolved_issues_by_date(
     """按日期范围查询已解决的 Redmine issue（供趋势柱状图点击查看明细）。"""
     owner_names = [n.strip() for n in names.split(",") if n.strip()] if names else []
     profile_key = str(profile_id or "").strip()
-    profile_users: List[Dict[str, Any]] = []
+    profile_users: list[dict[str, Any]] = []
     if profile_key:
         dashboard_cfg = config_manager.get_redmine_dashboard_config()
         profile = select_redmine_dashboard_profile(dashboard_cfg, profile_key)
@@ -119,7 +133,7 @@ async def get_resolved_issues_by_date(
             client = redmine_service.agent._make_client()
             semaphore = asyncio.Semaphore(4)
 
-            async def _user_issues(user: Dict[str, Any]) -> List[Dict[str, Any]]:
+            async def _user_issues(user: dict[str, Any]) -> list[dict[str, Any]]:
                 async with semaphore:
                     return await client.fetch_resolved_issues_by_assignee(
                         assignee_id=int(user["id"]),
@@ -133,7 +147,7 @@ async def get_resolved_issues_by_date(
             finally:
                 await client.close()
             seen: set[int] = set()
-            issues: List[Dict[str, Any]] = []
+            issues: list[dict[str, Any]] = []
             for batch in batches:
                 for item in batch:
                     iid = int(item.get("issue_id") or 0)
@@ -168,9 +182,9 @@ async def get_resolved_issues_by_date(
 
 @router.get("/statistics/department-overdue")
 async def get_department_overdue_statistics(
-    stale_days: Optional[int] = Query(None, ge=1, le=30),
-    list_limit: Optional[int] = Query(None, ge=1, le=500),
-    issue_limit: Optional[int] = Query(None, ge=1, le=2000),
+    stale_days: int | None = Query(None, ge=1, le=30),
+    list_limit: int | None = Query(None, ge=1, le=500),
+    issue_limit: int | None = Query(None, ge=1, le=2000),
     profile_id: str = Query(""),
     refresh: bool = Query(False),
 ):
@@ -194,7 +208,7 @@ async def get_department_overdue_statistics(
     window_days = int(profile.get("window_days") or stats_cfg["window_days"])
     semaphore = asyncio.Semaphore(4)
 
-    async def _safe_user(user: Dict[str, Any]) -> Dict[str, Any]:
+    async def _safe_user(user: dict[str, Any]) -> dict[str, Any]:
         async with semaphore:
             return await _department_user_overdue(client, user, effective_stale_days, effective_issue_limit, window_days)
 

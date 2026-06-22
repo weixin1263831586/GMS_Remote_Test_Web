@@ -73,21 +73,13 @@ def config_shape(value: Any) -> Any:
 
 
 def ui_source_groups() -> dict[str, list[Path]]:
-    new_shell = ROOT / 'web/shell/shell.html'
     automation_ui = ROOT / 'features/automation/ui'
     redmine_ui = ROOT / 'features/redmine/ui'
     return {
-        'shell': (
-            [
-                new_shell,
-                *sorted((ROOT / 'web/static/js').glob('*.js')),
-            ]
-            if new_shell.exists()
-            else [
-                ROOT / 'templates/index_fastapi.html',
-                *sorted((ROOT / 'static/js').glob('*.js')),
-            ]
-        ),
+        'shell': [
+            ROOT / 'web/shell/shell.html',
+            *sorted((ROOT / 'web/static/js').glob('*.js')),
+        ],
         'redmine-agent': sorted(redmine_ui.glob('*.*')),
         'gerrit-dashboard': [ROOT / 'features/gerrit/ui/page.html'],
         'gms-update-monitor': [ROOT / 'features/system/update_monitor/ui/page.html'],
@@ -95,7 +87,7 @@ def ui_source_groups() -> dict[str, list[Path]]:
         'automation': (
             sorted(automation_ui.glob('*.*'))
             if automation_ui.exists()
-            else [ROOT / 'routers/automation.py']
+            else []
         ),
     }
 

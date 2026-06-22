@@ -2,12 +2,13 @@
 通用AI模型管理器
 """
 
-import requests
-import logging
 import json
+import logging
 import re
 import time
-from typing import Dict, Optional
+
+import requests
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ EMOJI_CHECK = "✅"
 class UniversalAIAnalyzer:
     """通用AI模型分析器"""
 
-    def __init__(self, config: Dict = None):
+    def __init__(self, config: dict = None):
         """
         初始化通用AI分析器
 
@@ -33,7 +34,7 @@ class UniversalAIAnalyzer:
         self.API_FORMAT_OPENAI = 'openai'  # /v1/chat/completions 端点
 
 
-    def _get_api_format(self, provider_name: str, config: Dict) -> str:
+    def _get_api_format(self, provider_name: str, config: dict) -> str:
         """
         获取提供商的 API 格式
 
@@ -57,7 +58,7 @@ class UniversalAIAnalyzer:
         # 默认使用 OpenAI 格式
         return self.API_FORMAT_OPENAI
 
-    def get_primary_provider(self) -> Optional[str]:
+    def get_primary_provider(self) -> str | None:
         """获取主要提供商"""
         if not self.config.get('enabled', False):
             return None
@@ -80,12 +81,12 @@ class UniversalAIAnalyzer:
     def analyze_test_failure(
         self,
         class_name: str,
-        method_name: Optional[str],
+        method_name: str | None,
         error_message: str,
-        stack_trace: Optional[str] = None,
-        source_code: Optional[str] = None,
+        stack_trace: str | None = None,
+        source_code: str | None = None,
         auto_fetch_source: bool = True
-    ) -> Dict:
+    ) -> dict:
         """
         使用AI模型分析测试失败（自动获取源码）
 
@@ -145,12 +146,12 @@ class UniversalAIAnalyzer:
 
         except Exception as e:
             logger.error(f"AI分析失败: {e}")
-            result['error'] = f'分析失败: {str(e)}'
+            result['error'] = f'分析失败: {e!s}'
 
         return result
 
-    def _call_aimodel(self, provider_name: str, config: Dict, class_name: str, method_name: Optional[str],
-                                error_message: str, stack_trace: Optional[str], source_code: Optional[str]) -> Dict:
+    def _call_aimodel(self, provider_name: str, config: dict, class_name: str, method_name: str | None,
+                                error_message: str, stack_trace: str | None, source_code: str | None) -> dict:
         """
         Args:
             provider_name: 提供商名称
@@ -237,14 +238,14 @@ class UniversalAIAnalyzer:
                         time.sleep(retry_delay)
                         retry_delay *= 2  # 指数退避
                     else:
-                        return {'success': False, 'error': f'连接失败: {str(e)}'}
+                        return {'success': False, 'error': f'连接失败: {e!s}'}
                 except requests.exceptions.Timeout as e:
                     if attempt < max_retries - 1:
                         logger.warning(f"[{provider_name}] 请求超时，{retry_delay}秒后重试 ({attempt+1}/{max_retries})")
                         time.sleep(retry_delay)
                         retry_delay *= 2
                     else:
-                        return {'success': False, 'error': f'请求超时: {str(e)}'}
+                        return {'success': False, 'error': f'请求超时: {e!s}'}
 
             if response.status_code == 200:
                 result = response.json()
@@ -335,7 +336,7 @@ class UniversalAIAnalyzer:
                 return {'success': False, 'error': f'{provider_name} API错误: {error_msg}'}
 
         except Exception as e:
-            return {'success': False, 'error': f'{provider_name}调用失败: {str(e)}'}
+            return {'success': False, 'error': f'{provider_name}调用失败: {e!s}'}
 
     def _parse_response_raw(self, payload: dict, api_format: str) -> str:
         """Extract raw text content from an AI model response JSON.
@@ -362,8 +363,8 @@ class UniversalAIAnalyzer:
 
         return str(payload)
 
-    def _build_prompt(self, class_name: str, method_name: Optional[str],
-                      error_message: str, stack_trace: Optional[str], source_code: Optional[str]) -> str:
+    def _build_prompt(self, class_name: str, method_name: str | None,
+                      error_message: str, stack_trace: str | None, source_code: str | None) -> str:
         """构造分析提示词"""
         prompt = f"""你是一个专业的Android测试代码分析专家。请分析以下测试失败信息：
 
@@ -450,7 +451,7 @@ class UniversalAIAnalyzer:
 """
         return prompt
 
-    def _extract_json_from_reasoning(self, reasoning: str) -> Optional[str]:
+    def _extract_json_from_reasoning(self, reasoning: str) -> str | None:
         """从 reasoning 字段中提取最终的 JSON 输出
 
         推理模型可能在 reasoning 的最后部分输出最终的 JSON，
@@ -525,7 +526,7 @@ class UniversalAIAnalyzer:
             logger.error(f"[AI Parse] 提取 JSON 时出错: {e}")
             return None
 
-    def _parse_response(self, response_text: str) -> Dict:
+    def _parse_response(self, response_text: str) -> dict:
         """解析LLM响应"""
         try:
             # 检查输入是否为空或None
@@ -568,10 +569,7 @@ class UniversalAIAnalyzer:
                         continue
 
                     # 如果已经找到 JSON，收集后续内容
-                    if found_json:
-                        result_lines.append(line)
-                    # 如果不在推理过程中，也收集内容
-                    elif not in_thinking:
+                    if found_json or not in_thinking:
                         result_lines.append(line)
 
                 if found_json and result_lines:
@@ -698,10 +696,10 @@ class UniversalAIAnalyzer:
                 return self._parse_text_response(response_text)
 
         except Exception as e:
-            logger.error(f"解析响应时发生异常: {str(e)}，回退到文本解析")
+            logger.error(f"解析响应时发生异常: {e!s}，回退到文本解析")
             return self._parse_text_response(response_text)
 
-    def _parse_text_response(self, text: str) -> Dict:
+    def _parse_text_response(self, text: str) -> dict:
         """解析文本格式响应（回退方案）"""
         try:
             logger.info("[AI Parse] 使用文本解析回退方案")
@@ -818,10 +816,10 @@ class UniversalAIAnalyzer:
                 }
             }
         except Exception as e:
-            logger.error(f"[AI Parse] 文本解析也失败: {str(e)}，返回默认分析")
+            logger.error(f"[AI Parse] 文本解析也失败: {e!s}，返回默认分析")
             return self._get_fallback_analysis()
 
-    def _get_fallback_analysis(self) -> Dict:
+    def _get_fallback_analysis(self) -> dict:
         """获取回退分析结果"""
         return {
             'root_cause': '🎯 AI响应格式异常，无法解析',
@@ -840,7 +838,7 @@ class UniversalAIAnalyzer:
             }
         }
 
-    def _fetch_source_code_android(self, class_name: str) -> Optional[Dict]:
+    def _fetch_source_code_android(self, class_name: str) -> dict | None:
         """
         使用OpenGrok获取Android源码
 

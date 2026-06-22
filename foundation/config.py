@@ -2,18 +2,19 @@
 配置管理器 - 核心业务逻辑
 """
 import base64
+import getpass
 import hashlib
 import json
-import os
 import logging
+import os
 import re
-import time
-import threading
 import socket
-import getpass
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,7 @@ class ConfigManager:
         self.runtime_config_path = os.path.join(base_dir, '..', 'configs', 'config_runtime.json')
 
         # 缓存相关
-        self._cache: Optional[Dict[str, Any]] = None
+        self._cache: dict[str, Any] | None = None
         self._cache_timestamp: float = 0
         self._cache_ttl: int = cache_ttl
         self._cache_lock: threading.Lock = threading.Lock()
@@ -170,7 +171,7 @@ class ConfigManager:
         self._static_mtime: float = 0
         self._runtime_mtime: float = 0
 
-    def load_config(self, force_reload: bool = False) -> Dict[str, Any]:
+    def load_config(self, force_reload: bool = False) -> dict[str, Any]:
         """
         加载配置（静态 + 动态）
 
@@ -235,7 +236,7 @@ class ConfigManager:
 
         return True
 
-    def _load_and_merge_config(self) -> Dict[str, Any]:
+    def _load_and_merge_config(self) -> dict[str, Any]:
         """
         加载并合并配置
 
@@ -272,7 +273,7 @@ class ConfigManager:
             self._cache = None
             self._cache_timestamp = 0
 
-    def get_ai_config(self) -> Dict[str, Any]:
+    def get_ai_config(self) -> dict[str, Any]:
         """
         获取 AI 配置（统一的配置访问接口）
 
@@ -288,7 +289,7 @@ class ConfigManager:
 
         return ai_models
 
-    def get_redmine_config(self) -> Dict[str, Any]:
+    def get_redmine_config(self) -> dict[str, Any]:
         """
         获取 Redmine 配置（统一的配置访问接口）
 
@@ -317,7 +318,7 @@ class ConfigManager:
 
         return redmine_config
 
-    def get_redmine_base_url(self, config: Dict[str, Any] = None) -> str:
+    def get_redmine_base_url(self, config: dict[str, Any] = None) -> str:
         """读取 Redmine base_url，未配置时返回 DEFAULT_REDMINE_BASE_URL（不抛异常）。
 
         集中管理曾经散落在多处的 'https://redmine.rock-chips.com' 默认值。
@@ -328,7 +329,7 @@ class ConfigManager:
             redmine_config = {}
         return str(redmine_config.get("base_url") or "").strip().rstrip("/") or DEFAULT_REDMINE_BASE_URL
 
-    def get_ai_provider_config(self, provider_name: str) -> Optional[Dict[str, Any]]:
+    def get_ai_provider_config(self, provider_name: str) -> dict[str, Any] | None:
         """
         获取指定 AI provider 的配置
 
@@ -355,10 +356,10 @@ class ConfigManager:
         ai_config = self.get_ai_config()
         return ai_config.get('enabled', False)
 
-    def _load_static_config(self) -> Dict[str, Any]:
+    def _load_static_config(self) -> dict[str, Any]:
         """加载静态配置"""
         try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
+            with open(self.config_path, encoding='utf-8') as f:
                 config = json.load(f)
 
                 # 递归替换所有占位符（支持 ${ubuntu_user} 和环境变量 ${VAR_NAME}）
@@ -376,7 +377,7 @@ class ConfigManager:
             logger.error(f"Error loading static config: {e}")
             return {}
 
-    def _validate_ai_config(self, config: Dict[str, Any]) -> None:
+    def _validate_ai_config(self, config: dict[str, Any]) -> None:
         """
         验证 AI 配置的有效性
 
@@ -400,7 +401,7 @@ class ConfigManager:
                 f"可用的 providers: {available if available else '(无)'}"
             )
 
-    def _replace_placeholders(self, value: Any, config: Dict = None) -> Any:
+    def _replace_placeholders(self, value: Any, config: dict = None) -> Any:
         """
         递归替换配置中的占位符
 
@@ -436,7 +437,7 @@ class ConfigManager:
         else:
             return value
 
-    def _replace_single_placeholder(self, value: str, config: Dict = None) -> str:
+    def _replace_single_placeholder(self, value: str, config: dict = None) -> str:
         """替换字符串中的单个占位符"""
         full_placeholder_match = PLACEHOLDER_PATTERN.fullmatch(value)
 
@@ -490,14 +491,14 @@ class ConfigManager:
                 return normalized == 'true'
         return replaced
 
-    def _load_runtime_config(self) -> Optional[Dict[str, Any]]:
+    def _load_runtime_config(self) -> dict[str, Any] | None:
         """加载运行时配置。
 
         config_runtime.json 保存安装脚本写入的部署身份和用户操作产生的数据，
         覆盖随源码携带的静态默认值（config.json）。
         """
         try:
-            with open(self.runtime_config_path, 'r', encoding='utf-8') as f:
+            with open(self.runtime_config_path, encoding='utf-8') as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 return data
@@ -508,15 +509,15 @@ class ConfigManager:
             logger.error(f"Error loading runtime config {self.runtime_config_path}: {e}")
         return None
 
-    def get_runtime_config(self) -> Dict[str, Any]:
+    def get_runtime_config(self) -> dict[str, Any]:
         """Public read-only access to the runtime configuration."""
         return self._load_runtime_config() or {}
 
-    def _get_section(self, key: str, normalizer) -> Dict[str, Any]:
+    def _get_section(self, key: str, normalizer) -> dict[str, Any]:
         """读取并规范化配置中的某个区段（如 redmine_dashboard / gerrit_dashboard）。"""
         return normalizer(self.load_config().get(key) or {})
 
-    def _save_section(self, key: str, payload: Dict[str, Any], denormalizer, *, merge_from_runtime: bool = False) -> bool:
+    def _save_section(self, key: str, payload: dict[str, Any], denormalizer, *, merge_from_runtime: bool = False) -> bool:
         """合并并持久化某个配置区段到运行时配置文件。
 
         merge_from_runtime=True 时优先从已加载的 runtime 取 current（用于 stats 这类
@@ -531,38 +532,38 @@ class ConfigManager:
             logger.error(f"Error saving {key} config: {e}")
             return False
 
-    def get_redmine_stats_config(self) -> Dict[str, int]:
+    def get_redmine_stats_config(self) -> dict[str, int]:
         """Return normalized Redmine stats settings after static/runtime merge."""
         from features.redmine.dashboard import normalize_redmine_stats_config
 
         return self._get_section('redmine_stats', normalize_redmine_stats_config)
 
-    def save_redmine_stats_config(self, stats_config: Dict[str, Any]) -> bool:
+    def save_redmine_stats_config(self, stats_config: dict[str, Any]) -> bool:
         """Save Redmine stats settings to runtime config so UI changes take effect immediately."""
         from features.redmine.dashboard import normalize_redmine_stats_config
 
         # redmine_stats 只在 runtime 维护，current 从 runtime 取，故 merge_from_runtime=True
         return self._save_section('redmine_stats', stats_config, normalize_redmine_stats_config, merge_from_runtime=True)
 
-    def get_redmine_dashboard_config(self) -> Dict[str, Any]:
+    def get_redmine_dashboard_config(self) -> dict[str, Any]:
         """Return normalized Redmine dashboard profile configuration."""
         from features.redmine.dashboard import normalize_redmine_dashboard_profiles
 
         return self._get_section('redmine_dashboard', normalize_redmine_dashboard_profiles)
 
-    def save_redmine_dashboard_config(self, dashboard_config: Dict[str, Any]) -> bool:
+    def save_redmine_dashboard_config(self, dashboard_config: dict[str, Any]) -> bool:
         """Save Redmine dashboard profiles to runtime config."""
         from features.redmine.dashboard import denormalize_redmine_dashboard_config
 
         return self._save_section('redmine_dashboard', dashboard_config, denormalize_redmine_dashboard_config)
 
-    def get_gerrit_dashboard_config(self) -> Dict[str, Any]:
+    def get_gerrit_dashboard_config(self) -> dict[str, Any]:
         """Return normalized Gerrit dashboard configuration."""
         from features.gerrit.config import normalize_gerrit_dashboard_config
 
         return self._get_section('gerrit_dashboard', normalize_gerrit_dashboard_config)
 
-    def save_gerrit_dashboard_config(self, dashboard_config: Dict[str, Any]) -> bool:
+    def save_gerrit_dashboard_config(self, dashboard_config: dict[str, Any]) -> bool:
         """Save Gerrit dashboard settings to runtime config."""
         from features.gerrit.config import denormalize_gerrit_dashboard_config
 
@@ -583,7 +584,7 @@ class ConfigManager:
             logger.error(f"Error saving client SSH credentials: {e}")
             return False
 
-    def save_config(self, config: Dict[str, Any]) -> bool:
+    def save_config(self, config: dict[str, Any]) -> bool:
         """
         保存静态配置
 
@@ -603,7 +604,7 @@ class ConfigManager:
             logger.error(f"Error saving config: {e}")
             return False
 
-    def save_runtime_config(self, runtime_config: Dict[str, Any]) -> bool:
+    def save_runtime_config(self, runtime_config: dict[str, Any]) -> bool:
         """
         保存运行时配置到 config_runtime.json（包含部署身份和 SSH 凭据）
 
@@ -620,12 +621,12 @@ class ConfigManager:
             logger.error(f"Error saving runtime config: {e}")
             return False
 
-    def save_runtime(self, updates: Dict[str, Any]) -> bool:
+    def save_runtime(self, updates: dict[str, Any]) -> bool:
         runtime = self._load_runtime_config() or {}
         runtime.update(dict(updates or {}))
         return self.save_runtime_config(runtime)
 
-    def _write_runtime_config_file(self, runtime_config: Dict[str, Any], preserve_redmine_auth: bool = True) -> bool:
+    def _write_runtime_config_file(self, runtime_config: dict[str, Any], preserve_redmine_auth: bool = True) -> bool:
         """保存运行时配置到文件
 
         Args:
@@ -649,7 +650,7 @@ class ConfigManager:
             logger.error(f"Error writing runtime config: {e}")
             return False
 
-    def prepare_client_config(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+    def prepare_client_config(self, updates: dict[str, Any]) -> dict[str, Any]:
         """
         准备客户端相关配置，保留现有client_hosts和client_ssh_credentials
 
@@ -670,14 +671,14 @@ class ConfigManager:
         )
 
         # 只有在明确提供local_server时才保存（避免空值覆盖）
-        if 'local_server' in updates and updates['local_server']:
+        if updates.get('local_server'):
             runtime_config['local_server'] = updates['local_server']
         elif 'local_server' in existing:
             runtime_config['local_server'] = existing['local_server']
 
         return runtime_config
 
-    def get_device_hosts(self, config: Dict[str, Any] = None) -> list:
+    def get_device_hosts(self, config: dict[str, Any] = None) -> list:
         """
         获取设备主机列表
 
@@ -691,7 +692,7 @@ class ConfigManager:
             config = self.load_config()
         return config.get('device_hosts', [])
 
-    def get_device_host_config(self, host: str, config: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+    def get_device_host_config(self, host: str, config: dict[str, Any] = None) -> dict[str, Any] | None:
         """
         获取指定主机的配置
 
@@ -708,7 +709,7 @@ class ConfigManager:
                 return device_host
         return None
 
-    def get_ubuntu_user(self, config: Dict[str, Any] = None) -> str:
+    def get_ubuntu_user(self, config: dict[str, Any] = None) -> str:
         """
         获取 Ubuntu 用户名
 
@@ -722,7 +723,7 @@ class ConfigManager:
             config = self.load_config()
         return config.get('ubuntu_user') or get_ubuntu_user()
 
-    def get_wifi_defaults(self, config: Dict[str, Any] = None) -> Dict[str, str]:
+    def get_wifi_defaults(self, config: dict[str, Any] = None) -> dict[str, str]:
         """读取测试用 WiFi 默认 SSID/密码（config.wifi 覆盖内置默认值）。
 
         集中管理曾经散落在多处的 'AndroidWifi' / '1234567890' 硬编码，
@@ -736,7 +737,7 @@ class ConfigManager:
             "password": str(wifi_cfg.get("password") or DEFAULT_WIFI_PASSWORD),
         }
 
-    def get_ubuntu_host(self, config: Dict[str, Any] = None) -> str:
+    def get_ubuntu_host(self, config: dict[str, Any] = None) -> str:
         """
         获取 Ubuntu 主机地址
 
@@ -756,7 +757,7 @@ class ConfigManager:
         username, hostname = device_host.split('@', 1)
         return username.strip(), hostname.strip()
 
-    def find_device_host_password(self, device_host: str, config: Dict[str, Any] = None) -> Optional[str]:
+    def find_device_host_password(self, device_host: str, config: dict[str, Any] = None) -> str | None:
         """
         从 client_ssh_credentials 中查找对应 device_host 的密码
 
@@ -860,7 +861,7 @@ class ConfigManager:
             logger.error(f"[Redmine Auth] Failed to save credentials: {e}")
             return False
 
-    def load_redmine_credentials(self) -> Optional[Dict[str, str]]:
+    def load_redmine_credentials(self) -> dict[str, str] | None:
         """从 config_runtime.json 加载并解密 Redmine 凭证"""
         try:
             runtime = self._load_runtime_config()
@@ -888,8 +889,8 @@ config_manager = ConfigManager()
 # ==================== 本地主机信息自动获取 ====================
 
 # Cache for local host info (avoid repeated system calls)
-_cached_ubuntu_user: Optional[str] = None
-_cached_ubuntu_host: Optional[str] = None
+_cached_ubuntu_user: str | None = None
+_cached_ubuntu_host: str | None = None
 
 def get_ubuntu_user() -> str:
     """自动获取 Ubuntu 用户名（带缓存）"""

@@ -6,12 +6,13 @@ Agent Response Generator — 将 ToolResult 转为前端可渲染的消息。
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any
 
 from features.assistant.executor import ToolResult
 
 
-PAGE_DISPLAY_NAMES: Dict[str, str] = {
+PAGE_DISPLAY_NAMES: dict[str, str] = {
     "test": "测试界面",
     "desktop": "主机桌面",
     "terminal": "主机终端",
@@ -34,14 +35,9 @@ PAGE_DISPLAY_NAMES: Dict[str, str] = {
 }
 
 
-def page_quick_actions() -> List[Dict[str, str]]:
+def page_quick_actions() -> list[dict[str, str]]:
     """Return one navigation quick action per first-class sidebar page."""
     return [{"label": label, "page": page} for page, label in PAGE_DISPLAY_NAMES.items()]
-
-
-# ==================== Response ====================
-
-from dataclasses import dataclass
 
 
 @dataclass
@@ -49,11 +45,11 @@ class AgentResponse:
     """Agent 回复消息。"""
     content: str                       # 纯文本回退
     kind: str                          # text / table / status / plan / action_menu / code / error
-    data: Dict[str, Any]               # 结构化数据
-    quick_actions: List[Dict[str, Any]]  # 快捷操作按钮
+    data: dict[str, Any]               # 结构化数据
+    quick_actions: list[dict[str, Any]]  # 快捷操作按钮
     page: str                          # 关联页面
 
-    def to_message_data(self) -> Dict[str, Any]:
+    def to_message_data(self) -> dict[str, Any]:
         """转为 _append_message 的 data 参数。"""
         result = dict(self.data or {})
         if self.quick_actions:
@@ -81,7 +77,7 @@ def generate(result: ToolResult) -> AgentResponse:
     )
 
 
-def generate_error(error: str, suggestions: Optional[List[str]] = None) -> AgentResponse:
+def generate_error(error: str, suggestions: list[str] | None = None) -> AgentResponse:
     """生成错误响应。"""
     content = f"❌ {error}"
     if suggestions:
@@ -95,7 +91,7 @@ def generate_error(error: str, suggestions: Optional[List[str]] = None) -> Agent
     )
 
 
-def generate_clarification(suggestions: List[Dict[str, str]]) -> AgentResponse:
+def generate_clarification(suggestions: list[dict[str, str]]) -> AgentResponse:
     """生成澄清响应（当意图置信度低时）。"""
     lines = ["我不太确定您想要做什么。您是想要："]
     for i, s in enumerate(suggestions[:4], 1):

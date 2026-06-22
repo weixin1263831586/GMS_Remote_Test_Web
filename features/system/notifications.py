@@ -4,12 +4,13 @@ import logging
 import uuid
 from collections import deque
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from starlette.websockets import WebSocketState
 
-from foundation.config import MAX_NOTIFICATIONS_PER_CLIENT, VALID_NOTIFICATION_LEVELS
 from features.system.state import global_state
+from foundation.config import MAX_NOTIFICATIONS_PER_CLIENT, VALID_NOTIFICATION_LEVELS
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,8 @@ def store_notification(
     message: str = "",
     level: str = "info",
     category: str = "system",
-    data: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """保存通知到内存历史，供页面通知中心读取。
 
     前端同步通知时会通过 data._synced_id 和 data._synced_read
@@ -83,8 +84,8 @@ async def push_notification(
     message: str = "",
     level: str = "info",
     category: str = "system",
-    data: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """保存并通过 WebSocket 推送通知。"""
     record = store_notification(client_id, title, message, level, category, data)
     await safe_websocket_send(client_id, {
@@ -94,7 +95,7 @@ async def push_notification(
     return record
 
 
-def list_client_notifications(client_id: str, limit: int = 100) -> Dict[str, Any]:
+def list_client_notifications(client_id: str, limit: int = 100) -> dict[str, Any]:
     """获取客户端通知列表"""
     limit = max(1, min(int(limit or 100), MAX_NOTIFICATIONS_PER_CLIENT))
     key = client_id or 'unknown'
@@ -105,7 +106,7 @@ def list_client_notifications(client_id: str, limit: int = 100) -> Dict[str, Any
     return {'records': records, 'unread_count': unread_count}
 
 
-def mark_client_notifications_read(client_id: str, ids: Optional[List[str]] = None) -> Dict[str, Any]:
+def mark_client_notifications_read(client_id: str, ids: list[str] | None = None) -> dict[str, Any]:
     """标记客户端通知为已读"""
     key = client_id or 'unknown'
     id_set = set(ids or [])
@@ -121,7 +122,7 @@ def mark_client_notifications_read(client_id: str, ids: Optional[List[str]] = No
     return {'updated': updated, 'unread_count': unread_count}
 
 
-def clear_client_notifications(client_id: str) -> Dict[str, Any]:
+def clear_client_notifications(client_id: str) -> dict[str, Any]:
     """清除客户端所有通知"""
     key = client_id or 'unknown'
     with global_state.notifications_lock:

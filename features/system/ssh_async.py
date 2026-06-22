@@ -4,10 +4,13 @@ SSH 异步管理器 - 异步执行 SSH 命令并实时推送日志
 """
 
 import asyncio
-import paramiko
-from typing import Dict, Callable
 import logging
+from collections.abc import Callable
+
+import paramiko
+
 from foundation.common_utils import CommonUtils
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +29,7 @@ class SSHAsyncManager:
     def __init__(self):
         """初始化 SSH 异步管理器"""
         # SSH 连接池 {host: paramiko.SSHClient}
-        self.connections: Dict[str, paramiko.SSHClient] = {}
+        self.connections: dict[str, paramiko.SSHClient] = {}
         self._lock = asyncio.Lock()
 
     async def connect(
@@ -112,7 +115,7 @@ class SSHAsyncManager:
 
         try:
             # 执行命令
-            stdin, stdout, stderr = ssh.exec_command(
+            _stdin, stdout, stderr = ssh.exec_command(
                 command,
                 get_pty=True,
                 timeout=timeout
@@ -139,7 +142,7 @@ class SSHAsyncManager:
 
         except Exception as e:
             logger.error(f"[SSH] Error executing command: {e}")
-            await log_callback(f"SSH 执行错误: {str(e)}", 'error')
+            await log_callback(f"SSH 执行错误: {e!s}", 'error')
             return -1
 
     async def _read_stream(
@@ -198,7 +201,7 @@ class SSHAsyncManager:
         ssh = await self.connect(host, username, password, timeout=timeout)
 
         def _exec():
-            stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
+            _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
             exit_code = stdout.channel.recv_exit_status()
             stdout_text = CommonUtils.decode_ssh_output(stdout.read())
             stderr_text = CommonUtils.decode_ssh_output(stderr.read())

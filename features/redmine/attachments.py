@@ -1,12 +1,25 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import asyncio
+import logging
+from typing import Any
+
+import aiohttp
 
 from .models import RedmineAttachment
+from .utils import (
+    COMPILED_ISSUE_LINK_PATTERN,
+    build_redmine_download_url,
+    create_basic_auth_header,
+    extract_redmine_issue_id_from_text,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 class RedmineAttachmentMixin:
-    def auth_headers(self) -> Dict[str, str]:
+    def auth_headers(self) -> dict[str, str]:
         if not (self.username and self.password):
             return {}
         return create_basic_auth_header(self.username, self.password)
@@ -14,10 +27,10 @@ class RedmineAttachmentMixin:
     def download_url(self, attachment_id: str) -> str:
         return build_redmine_download_url(self.base_url, str(attachment_id))
 
-    async def list_issue_attachments(self, issue_id: str) -> List[RedmineAttachment]:
+    async def list_issue_attachments(self, issue_id: str) -> list[RedmineAttachment]:
         return await asyncio.to_thread(self._list_issue_attachments_redminelib, issue_id)
 
-    def _list_issue_attachments_redminelib(self, issue_id: str) -> List[RedmineAttachment]:
+    def _list_issue_attachments_redminelib(self, issue_id: str) -> list[RedmineAttachment]:
         issue = self._redmine.issue.get(int(issue_id), include=["attachments"])
         attachments = []
         for item in getattr(issue, "attachments", []) or []:
@@ -35,7 +48,7 @@ class RedmineAttachmentMixin:
             )
         return attachments
 
-    async def first_issue_attachment(self, issue_id: str) -> Optional[RedmineAttachment]:
+    async def first_issue_attachment(self, issue_id: str) -> RedmineAttachment | None:
         attachments = await self.list_issue_attachments(issue_id)
         return attachments[0] if attachments else None
 
@@ -77,7 +90,7 @@ class RedmineAttachmentMixin:
                     total += len(chunk)
         return total
 
-    async def reply_issue(self, issue_id: str, notes: str, files: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    async def reply_issue(self, issue_id: str, notes: str, files: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         uploads = []
         for item in files or []:
             content = item.get("content") or b""
@@ -88,7 +101,7 @@ class RedmineAttachmentMixin:
             token = await self.upload_file(content, filename, content_type)
             uploads.append({"token": token, "filename": filename, "content_type": content_type})
 
-        payload_issue: Dict[str, Any] = {"notes": notes}
+        payload_issue: dict[str, Any] = {"notes": notes}
         if uploads:
             payload_issue["uploads"] = uploads
         payload = {"issue": payload_issue}
@@ -104,7 +117,7 @@ class RedmineAttachmentMixin:
             error_body = await response.text()
             raise RuntimeError(f"Redmine API returned HTTP {response.status}: {error_body}")
 
-    async def find_attachment_issue_id(self, attachment_id: str) -> Optional[str]:
+    async def find_attachment_issue_id(self, attachment_id: str) -> str | None:
         detail_url = f"{self.base_url}/attachments/{attachment_id}"
         headers = self.auth_headers()
         headers.setdefault("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")

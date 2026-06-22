@@ -381,7 +381,6 @@ def classify_match(line, info):
 
 def classify_result(path, matches, original_query):
     info = analyze_query(original_query)
-    lower_path = path.lower()
     if info["class_name"] and path_matches_class_file(path, info["class_name"]) and not info["member_name"]:
         return "definition"
 

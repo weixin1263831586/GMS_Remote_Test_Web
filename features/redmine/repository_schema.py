@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .users import (
-    DB_PATH, DOCS_DIR, RESOLVED_STATUS_NAMES,
-    _looks_like_report_attachment, _looks_like_rk_actor, _name_keys,
-    _name_matches_keys, _now, _parse_dt, _sorted_slice, _time_key,
+    DB_PATH,
+    DOCS_DIR,
+    _now,
 )
+
 
 class RepositorySchemaMixin:
     def __init__(self, db_path: Path = DB_PATH, docs_dir: Path = DOCS_DIR):
@@ -228,7 +228,7 @@ class RepositorySchemaMixin:
             )
             return cursor.rowcount
 
-    def list_runs(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def list_runs(self, limit: int = 20) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM redmine_agent_runs ORDER BY started_at DESC LIMIT ?",
@@ -236,19 +236,19 @@ class RepositorySchemaMixin:
             ).fetchall()
         return [self._decode_row(row) for row in rows]
 
-    def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM redmine_agent_runs WHERE run_id=?", (run_id,)).fetchone()
         return self._decode_row(row) if row else None
 
-    def get_latest_run(self) -> Optional[Dict[str, Any]]:
+    def get_latest_run(self) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
                 "SELECT * FROM redmine_agent_runs WHERE status='done' ORDER BY finished_at DESC LIMIT 1"
             ).fetchone()
         return self._decode_row(row) if row else None
 
-    def list_run_issues(self, run_id: str) -> List[Dict[str, Any]]:
+    def list_run_issues(self, run_id: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM redmine_agent_issues WHERE run_id=? ORDER BY priority_name, issue_id DESC",

@@ -6,18 +6,19 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 from features.redmine.config import config_manager
 from features.redmine.service import RedmineService
 
+
 logger = logging.getLogger(__name__)
 
-_task: Optional[asyncio.Task] = None
+_task: asyncio.Task | None = None
 _last_run_day: str = ""
 
 
-def _load_scheduler_config() -> Dict[str, Any]:
+def _load_scheduler_config() -> dict[str, Any]:
     """Load scheduler settings from config.json redmine_agent section, with env overrides."""
     cfg = config_manager.load_config().get("redmine_agent", {})
     return {
@@ -60,7 +61,7 @@ async def _loop(service: RedmineService) -> None:
 
 def start_redmine_agent_scheduler(
     service: RedmineService,
-) -> Optional[asyncio.Task]:
+) -> asyncio.Task | None:
     global _task
     if _task and not _task.done():
         return _task

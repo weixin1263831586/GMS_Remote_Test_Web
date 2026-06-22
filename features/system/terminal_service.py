@@ -8,23 +8,23 @@ import pty
 import select
 import shlex
 import signal
-import socket
 import struct
 import termios
 import threading
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import paramiko
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from foundation.config import config_manager
+from features.devices.locks import device_lock_manager
 from features.system.ssh import ssh_manager
 from features.system.state import global_state
 from features.test_execution.suites import is_config_host_local
 from foundation.common_utils import CommonUtils
-from features.devices.locks import device_lock_manager
+from foundation.config import config_manager
+
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class LocalPtyChannel:
     """Minimal Paramiko-like PTY channel for local terminal sessions."""
 
-    def __init__(self, command: List[str], cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None):
+    def __init__(self, command: list[str], cwd: str | None = None, env: dict[str, str] | None = None):
         self.command = command
         self.cwd = cwd or os.path.expanduser("~")
         self.env = env or os.environ.copy()
@@ -66,7 +66,7 @@ class LocalPtyChannel:
             self.closed = True
             return b""
 
-    def send(self, data: Union[str, bytes]) -> int:
+    def send(self, data: str | bytes) -> int:
         if self.closed:
             return 0
         if isinstance(data, str):
@@ -97,7 +97,7 @@ class LocalPtyChannel:
             pass
 
 
-def close_terminal_session_resources(session_info: Dict[str, Any]):
+def close_terminal_session_resources(session_info: dict[str, Any]):
     """关闭终端会话资源"""
     mode = session_info.get('mode')
     channel = session_info.get('channel')
@@ -118,7 +118,7 @@ def close_terminal_session_resources(session_info: Dict[str, Any]):
         pass
 
 
-def create_local_terminal_channel(command: Optional[List[str]] = None) -> LocalPtyChannel:
+def create_local_terminal_channel(command: list[str] | None = None) -> LocalPtyChannel:
     """创建本地终端通道"""
     shell = os.environ.get("SHELL") or "/bin/bash"
     terminal_command = command or [shell, "-l"]
@@ -212,7 +212,7 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
                         else:
                             time.sleep(0.01)
 
-                    except socket.timeout:
+                    except TimeoutError:
                         continue
                     except Exception as e:
                         logger.error(f"[TERMINAL] ADB read error: {e}")
@@ -230,7 +230,7 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
         logger.error(f"[TERMINAL] ADB Shell connection error: {e}")
         await websocket.send_json({
             'type': 'terminal_error',
-            'error': f'ADB Shell连接失败: {str(e)}'
+            'error': f'ADB Shell连接失败: {e!s}'
         })
 
 
@@ -367,7 +367,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                                 break
                         else:
                             time.sleep(0.01)
-                    except socket.timeout:
+                    except TimeoutError:
                         continue
                     except Exception as e:
                         logger.error(f"[TERMINAL] Read error: {e}")
@@ -393,10 +393,10 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
     except paramiko.AuthenticationException:
         await websocket.send_json({'type': 'terminal_error', 'error': 'SSH认证失败：用户名或密码错误'})
     except paramiko.SSHException as e:
-        await websocket.send_json({'type': 'terminal_error', 'error': f'SSH连接错误：{str(e)}'})
+        await websocket.send_json({'type': 'terminal_error', 'error': f'SSH连接错误：{e!s}'})
     except Exception as e:
         logger.error(f"[TERMINAL] Connection error: {e}")
-        await websocket.send_json({'type': 'terminal_error', 'error': f'连接失败：{str(e)}'})
+        await websocket.send_json({'type': 'terminal_error', 'error': f'连接失败：{e!s}'})
 
 
 async def handle_terminal_input(client_id: str, websocket: WebSocket, data: dict):
@@ -409,7 +409,7 @@ async def handle_terminal_input(client_id: str, websocket: WebSocket, data: dict
                 global_state.terminal_ssh_sessions[session_id]['channel'].send(input_data)
             except Exception as e:
                 logger.error(f"[TERMINAL] Input error for {session_id}: {e}")
-                await websocket.send_json({'type': 'terminal_error', 'error': f'发送数据失败：{str(e)}'})
+                await websocket.send_json({'type': 'terminal_error', 'error': f'发送数据失败：{e!s}'})
 
 
 async def handle_terminal_resize(client_id: str, websocket: WebSocket, data: dict):
@@ -433,7 +433,7 @@ async def refresh_devices_websocket(client_id: str, websocket: WebSocket):
 
         if ssh:
             try:
-                stdout, stderr, code = ssh_manager.execute_command(ssh, "adb devices", timeout=5)
+                stdout, _stderr, code = ssh_manager.execute_command(ssh, "adb devices", timeout=5)
                 if code == 0:
                     lines = stdout.strip().split('\n')[1:]
                     devices_info = []

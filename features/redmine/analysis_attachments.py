@@ -3,27 +3,22 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import re
 import tempfile
-import uuid
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from collections.abc import Callable
-from typing import Any, Dict, List, Optional
-
-import requests
+from typing import TYPE_CHECKING, Any
 
 from features.redmine.config import config_manager
-from features.redmine.client import RedmineAttachment, RedmineClient
-from features.redmine.repository import (
-    RESOLVED_STATUS_NAMES as RESOLVED_STATUSES,
-    RedmineAgentDB,
-)
-from foundation.config import settings
+from features.redmine.models import RedmineAttachment
+
+
+if TYPE_CHECKING:
+    from features.redmine.client import RedmineClient
+
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +59,7 @@ MAX_REFERENCES = 5              # max similar references to return
 TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
 
 
-def _load_agent_config() -> Dict[str, Any]:
+def _load_agent_config() -> dict[str, Any]:
     """Load redmine_agent section from config.json, with env overrides."""
     cfg = config_manager.load_config().get("redmine_agent", {})
     return {
@@ -130,14 +125,14 @@ class AttachmentAnalysisMixin:
     # Attachment processing
     # ------------------------------------------------------------------
 
-    async def _process_attachment(self, client: RedmineClient, issue_id: int, attachment: RedmineAttachment) -> Dict[str, Any]:
+    async def _process_attachment(self, client: RedmineClient, issue_id: int, attachment: RedmineAttachment) -> dict[str, Any]:
         issue_dir = self.attachments_dir / str(issue_id)
         issue_dir.mkdir(parents=True, exist_ok=True)
         safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", attachment.filename or f"attachment_{attachment.id}")
         local_path = issue_dir / f"{attachment.id}-{safe_name}"
         status = "skipped"
         error = ""
-        analysis: Dict[str, Any] = {"filename": attachment.filename, "failures": []}
+        analysis: dict[str, Any] = {"filename": attachment.filename, "failures": []}
 
         if PROCESS_ATTACHMENT_RE.search(attachment.filename or ""):
             try:
@@ -162,7 +157,7 @@ class AttachmentAnalysisMixin:
         self.db.insert_attachment(item)
         return item
 
-    def _analyze_local_attachment(self, path: str) -> Dict[str, Any]:
+    def _analyze_local_attachment(self, path: str) -> dict[str, Any]:
         lower_path = path.lower()
         if lower_path.endswith((".txt", ".log")):
             return self._analyze_text_attachment(path)
@@ -201,7 +196,7 @@ class AttachmentAnalysisMixin:
             "failures": failures,
         }
 
-    def _analyze_text_attachment(self, path: str) -> Dict[str, Any]:
+    def _analyze_text_attachment(self, path: str) -> dict[str, Any]:
         try:
             content = Path(path).read_text(encoding="utf-8", errors="ignore")
         except Exception:
@@ -225,8 +220,8 @@ class AttachmentAnalysisMixin:
             "failures": failures,
         }
 
-    def _analyze_image_attachment(self, path: str) -> Dict[str, Any]:
-        details: Dict[str, Any] = {"type": "image"}
+    def _analyze_image_attachment(self, path: str) -> dict[str, Any]:
+        details: dict[str, Any] = {"type": "image"}
         try:
             from PIL import Image
 
@@ -249,7 +244,7 @@ class AttachmentAnalysisMixin:
             "failures": [],
         }
 
-    def _analyze_docx_attachment(self, path: str) -> Dict[str, Any]:
+    def _analyze_docx_attachment(self, path: str) -> dict[str, Any]:
         content = ""
         try:
             from docx import Document
@@ -287,7 +282,7 @@ class AttachmentAnalysisMixin:
     # Error extraction
     # ------------------------------------------------------------------
 
-    def _extract_failure_like_lines(self, content: str, limit: int = MAX_FAILURE_LINES) -> List[str]:
+    def _extract_failure_like_lines(self, content: str, limit: int = MAX_FAILURE_LINES) -> list[str]:
         """Extract individual error lines from content."""
         return [
             line.strip()
@@ -295,9 +290,9 @@ class AttachmentAnalysisMixin:
             if _ERROR_LINE_RE.search(line)
         ][:limit]
 
-    def _extract_error_blocks(self, content: str, max_blocks: int = MAX_ERROR_BLOCKS) -> List[str]:
+    def _extract_error_blocks(self, content: str, max_blocks: int = MAX_ERROR_BLOCKS) -> list[str]:
         """Group consecutive error lines into logical blocks."""
-        current_block: List[str] = []
+        current_block: list[str] = []
         blocks = []
         for line in str(content or "").splitlines():
             stripped = line.strip()

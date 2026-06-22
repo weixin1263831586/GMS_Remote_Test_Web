@@ -1,12 +1,13 @@
 """Helpers for request/response security audit summarization."""
 
 import json
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from fastapi import Request
 from fastapi.responses import Response
 
 from features.system.security_audit import security_audit_logger
+
 
 AUDIT_SKIP_PREFIXES = (
     '/static/',
@@ -81,14 +82,14 @@ def get_audit_operation(path: str, method: str) -> str:
     return f"{method} {path}"
 
 
-def safe_int(value: Optional[str], default: int = 0) -> int:
+def safe_int(value: str | None, default: int = 0) -> int:
     try:
         return int(value or default)
     except (TypeError, ValueError):
         return default
 
 
-async def summarize_audit_request(request: Request, should_audit: bool) -> Dict[str, Any]:
+async def summarize_audit_request(request: Request, should_audit: bool) -> dict[str, Any]:
     """Build a safe request summary without recording file contents or secrets."""
     if not should_audit:
         return {}
@@ -134,7 +135,7 @@ async def summarize_audit_request(request: Request, should_audit: bool) -> Dict[
     return summary
 
 
-async def summarize_audit_response(response) -> Tuple[Any, Dict[str, Any]]:
+async def summarize_audit_response(response) -> tuple[Any, dict[str, Any]]:
     """Capture small JSON responses for audit detail and rebuild the response."""
     if response is None:
         return response, {}

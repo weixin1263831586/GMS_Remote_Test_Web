@@ -92,7 +92,7 @@ class AutomationApiTests(unittest.TestCase):
         self.assertIn('/automation', paths)
 
     def test_index_template_has_gms_ats_nav_entry(self):
-        template = Path('templates/index_fastapi.html').read_text(
+        template = Path('web/shell/shell.html').read_text(
             encoding='utf-8'
         )
         self.assertIn('data-page="automation"', template)

@@ -2,28 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import os
 import re
-import tempfile
-import uuid
-import zipfile
-from datetime import datetime, timedelta
-from pathlib import Path
-from collections.abc import Callable
-from typing import Any, Dict, List, Optional
-
-import requests
+from datetime import datetime
+from typing import Any
 
 from features.redmine.config import config_manager
-from features.redmine.client import RedmineAttachment, RedmineClient
-from features.redmine.repository import (
-    RESOLVED_STATUS_NAMES as RESOLVED_STATUSES,
-    RedmineAgentDB,
-)
-from foundation.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +50,7 @@ MAX_REFERENCES = 5              # max similar references to return
 TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
 
 
-def _load_agent_config() -> Dict[str, Any]:
+def _load_agent_config() -> dict[str, Any]:
     """Load redmine_agent section from config.json, with env overrides."""
     cfg = config_manager.load_config().get("redmine_agent", {})
     return {
@@ -126,43 +112,43 @@ def _truncate(text: str, limit: int) -> str:
 
 
 class IssueAnalysisMixin:
-    def _issue_payload(self, issue: Any, run_id: str, journals: List[Dict[str, Any]], attachment_records: List[Dict[str, Any]], failures: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _issue_payload(self, issue: Any, run_id: str, journals: list[dict[str, Any]], attachment_records: list[dict[str, Any]], failures: list[dict[str, Any]]) -> dict[str, Any]:
         fixed_version = _obj_name(getattr(issue, "fixed_version", None))
         return {
-            "issue_id": int(getattr(issue, "id")),
+            "issue_id": int(issue.id),
             "run_id": run_id,
-            "subject": str(getattr(issue, "subject") or ""),
+            "subject": str(issue.subject or ""),
             "status_name": _obj_name(getattr(issue, "status", None)),
             "priority_name": _obj_name(getattr(issue, "priority", None)),
             "project_name": _obj_name(getattr(issue, "project", None)),
             "tracker_name": _obj_name(getattr(issue, "tracker", None)),
             "author_name": _obj_name(getattr(issue, "author", None)),
             "assigned_to_name": _obj_name(getattr(issue, "assigned_to", None)),
-            "created_on": _iso(getattr(issue, "created_on")),
-            "updated_on": _iso(getattr(issue, "updated_on")),
-            "description": str(getattr(issue, "description") or ""),
+            "created_on": _iso(issue.created_on),
+            "updated_on": _iso(issue.updated_on),
+            "description": str(issue.description or ""),
             "fixed_version": fixed_version,
             "component": self._extract_custom_field(issue, "Component_fae"),
             "soc_platform": self._parse_soc_platform(
-                str(getattr(issue, "subject") or ""),
-                str(getattr(issue, "description") or ""),
+                str(issue.subject or ""),
+                str(issue.description or ""),
                 fixed_version,
             ),
             "android_version": self._parse_android_version(
-                str(getattr(issue, "subject") or ""),
-                str(getattr(issue, "description") or ""),
+                str(issue.subject or ""),
+                str(issue.description or ""),
                 fixed_version,
             ),
-            "start_date": _iso(getattr(issue, "start_date")),
-            "due_date": _iso(getattr(issue, "due_date")),
-            "closed_on": _iso(getattr(issue, "closed_on")),
+            "start_date": _iso(issue.start_date),
+            "due_date": _iso(issue.due_date),
+            "closed_on": _iso(issue.closed_on),
             "done_ratio": int(getattr(issue, "done_ratio", 0) or 0),
             "journals_json": journals,
             "attachments_json": attachment_records,
             "failures_json": failures[:50],
         }
 
-    def _extract_journals(self, journals: List[Any]) -> List[Dict[str, Any]]:
+    def _extract_journals(self, journals: list[Any]) -> list[dict[str, Any]]:
         result = []
         for item in journals:
             details = []

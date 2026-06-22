@@ -53,7 +53,7 @@ class SidebarNavigationConfigTests(unittest.TestCase):
         self.assertIn('"visible_pages":["redmine-agent"]', get_result.body.decode("utf-8"))
 
     def test_sidebar_visibility_modal_is_wired_in_template(self):
-        template = Path("templates/index_fastapi.html").read_text(encoding="utf-8")
+        template = Path("web/shell/shell.html").read_text(encoding="utf-8")
 
         self.assertIn('onclick="openSidebarVisibilityModal()"', template)
         self.assertIn('id="sidebar-visibility-modal"', template)
@@ -310,14 +310,16 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 manager.runtime_config_path = str(configs / "config_runtime.json")
                 manager.invalidate_cache()
                 # 即便 Redmine 凭证里有登录密码，也不应被用作 SMTP 授权码
-                with patch.object(manager, "load_redmine_credentials", return_value={"username": "chaoqun.huang@rock-chips.com", "password": "redmine-login-secret"}):
-                    with patch("features.redmine.api.smtplib.SMTP_SSL") as smtp_cls:
-                        result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
+                with (
+                    patch.object(manager, "load_redmine_credentials", return_value={"username": "chaoqun.huang@rock-chips.com", "password": "redmine-login-secret"}),
+                    patch("features.redmine.api.smtplib.SMTP_SSL") as smtp_cls,
+                ):
+                    result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
 
-                        self.assertFalse(result["sent"])
-                        self.assertEqual(result["mode"], "unconfigured")
-                        # 没有发起任何 SMTP 登录
-                        smtp_cls.return_value.__enter__.return_value.login.assert_not_called()
+                    self.assertFalse(result["sent"])
+                    self.assertEqual(result["mode"], "unconfigured")
+                    # 没有发起任何 SMTP 登录
+                    smtp_cls.return_value.__enter__.return_value.login.assert_not_called()
 
                 # 配置了专用 SMTP 授权码后应正常发送
                 (configs / "config.json").write_text(
@@ -395,6 +397,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
 
     def test_smtp_disconnect_is_reported_as_configuration_error(self):
         import smtplib
+
         import features.redmine.api as redmine_router
 
         with TemporaryDirectory() as tmp:

@@ -7,12 +7,12 @@ Agent Context Manager — 多轮对话上下文管理。
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 # ==================== Context Structure ====================
 
-def new_context() -> Dict[str, Any]:
+def new_context() -> dict[str, Any]:
     """创建新的空上下文。"""
     return {
         "last_tool": "",
@@ -24,7 +24,7 @@ def new_context() -> Dict[str, Any]:
     }
 
 
-def get_context(session: Dict[str, Any]) -> Dict[str, Any]:
+def get_context(session: dict[str, Any]) -> dict[str, Any]:
     """获取会话上下文，如果不存在则创建。"""
     if "context" not in session:
         session["context"] = new_context()
@@ -34,11 +34,11 @@ def get_context(session: Dict[str, Any]) -> Dict[str, Any]:
 # ==================== Update Context ====================
 
 def update_context(
-    session: Dict[str, Any],
+    session: dict[str, Any],
     *,
     tool_name: str = "",
     category: str = "",
-    entities: Optional[Dict[str, List[str]]] = None,
+    entities: dict[str, list[str]] | None = None,
     result_count: int = 0,
     result_summary: str = "",
     user_summary: str = "",
@@ -75,7 +75,7 @@ def update_context(
     ctx["turns"] = turns[-20:]
 
 
-def record_user_message(session: Dict[str, Any], message: str) -> None:
+def record_user_message(session: dict[str, Any], message: str) -> None:
     """记录用户消息到上下文轮次。"""
     ctx = get_context(session)
     turns = ctx.get("turns", [])
@@ -85,16 +85,15 @@ def record_user_message(session: Dict[str, Any], message: str) -> None:
 
 # ==================== Reference Resolution ====================
 
-def resolve_reference(session: Dict[str, Any], text: str) -> Dict[str, Any]:
+def resolve_reference(session: dict[str, Any], text: str) -> dict[str, Any]:
     """解析代词和引用（"它"、"第一个"、"那个报告"等）为具体实体。
 
     返回 {"resolved": True/False, "entities": {...}, "intent_hint": "..."}
     """
     ctx = get_context(session)
-    result: Dict[str, Any] = {"resolved": False, "entities": {}, "intent_hint": ""}
+    result: dict[str, Any] = {"resolved": False, "entities": {}, "intent_hint": ""}
 
     entities = ctx.get("last_entities", {})
-    last_tool = ctx.get("last_tool", "")
     last_category = ctx.get("last_category", "")
 
     # --- 代词解析 ---
@@ -158,14 +157,14 @@ def resolve_reference(session: Dict[str, Any], text: str) -> Dict[str, Any]:
 
     # --- "下载" 解析（针对上次的报告/文件） ---
     if re.search(r"下载|download", text) and not result["resolved"]:
-        if "reports" in entities and entities["reports"]:
+        if entities.get("reports"):
             result["resolved"] = True
             result["entities"] = {"reports": entities["reports"][:1]}
             result["intent_hint"] = "report_download"
 
     # --- "删除" 解析 ---
     if re.search(r"删除|删掉|移除|delete|remove", text) and not result["resolved"]:
-        if "reports" in entities and entities["reports"]:
+        if entities.get("reports"):
             result["resolved"] = True
             result["entities"] = {"reports": entities["reports"][:1]}
             result["intent_hint"] = "report_delete"
@@ -175,13 +174,13 @@ def resolve_reference(session: Dict[str, Any], text: str) -> Dict[str, Any]:
 
 # ==================== Context Queries ====================
 
-def get_last_entities(session: Dict[str, Any], entity_type: str) -> List[str]:
+def get_last_entities(session: dict[str, Any], entity_type: str) -> list[str]:
     """获取上次记录的某类实体。"""
     ctx = get_context(session)
     return ctx.get("last_entities", {}).get(entity_type, [])
 
 
-def get_conversation_summary(session: Dict[str, Any], last_n: int = 4) -> str:
+def get_conversation_summary(session: dict[str, Any], last_n: int = 4) -> str:
     """获取最近 N 轮对话的文本摘要。"""
     ctx = get_context(session)
     turns = ctx.get("turns", [])[-last_n:]
@@ -192,7 +191,7 @@ def get_conversation_summary(session: Dict[str, Any], last_n: int = 4) -> str:
     return "\n".join(lines)
 
 
-def get_last_tool(session: Dict[str, Any]) -> str:
+def get_last_tool(session: dict[str, Any]) -> str:
     """获取上次执行的工具名。"""
     ctx = get_context(session)
     return ctx.get("last_tool", "")

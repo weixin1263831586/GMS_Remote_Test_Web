@@ -16,7 +16,6 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from bootstrap.dependencies import AppServices, build_services
 from bootstrap.lifecycle import create_lifespan
 from bootstrap.routes import include_routes
-from features.users import get_client_id_from_request, get_client_ip, parse_client_id
 from features.system.security_audit import classify_request_source, security_audit_logger
 from features.system.security_audit_utils import (
     can_audit_path,
@@ -25,6 +24,7 @@ from features.system.security_audit_utils import (
     summarize_audit_request,
     summarize_audit_response,
 )
+from features.users import get_client_id_from_request, get_client_ip, parse_client_id
 
 
 class UTF8JSONResponse(JSONResponse):
@@ -164,11 +164,11 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             )
         return response
 
-    static_dir = services.settings.project_root / 'static'
+    static_dir = services.settings.project_root / 'web/static'
     if static_dir.exists():
         app.mount('/static', StaticFiles(directory=static_dir), name='static')
     templates = Jinja2Templates(
-        directory=services.settings.project_root / 'templates'
+        directory=services.settings.project_root / 'web/shell'
     )
     templates.env.globals['url_for'] = (
         lambda endpoint, filename='': (

@@ -10,18 +10,11 @@ import subprocess
 from fastapi import APIRouter, Body, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 
-from foundation.responses import error_response, success_response
-from features.users import get_client_id_from_request, get_client_ip, resolve_tailscale_device_host
-from foundation.common_utils import CommonUtils
-from foundation.config import config_manager
-from foundation.errors import handle_api_errors
-from features.system.models import VPNConnectRequest
-from features.system.ssh import SSHD_INSTALL_GUIDE, ssh_manager
-from features.test_execution.suites import is_config_host_local
 from features.devices.support import (
     DeviceSSHConnection,
 )
 from features.redmine.client import RedmineClient
+from features.system.models import VPNConnectRequest
 from features.system.network import (
     _extract_network,
     _generate_route_commands,
@@ -35,6 +28,13 @@ from features.system.network import (
     parse_vpn_connection_names,
     resolve_vpn_connection_name,
 )
+from features.system.ssh import SSHD_INSTALL_GUIDE, ssh_manager
+from features.test_execution.suites import is_config_host_local
+from features.users import get_client_id_from_request, get_client_ip, resolve_tailscale_device_host
+from foundation.common_utils import CommonUtils
+from foundation.config import config_manager
+from foundation.errors import handle_api_errors
+from foundation.responses import error_response, success_response
 
 
 logger = logging.getLogger(__name__)

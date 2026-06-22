@@ -1,7 +1,6 @@
 from typing import Any
 
-from . import config_api
-from . import runtime
+from . import config_api, runtime
 from .sessions import client_manager
 
 
