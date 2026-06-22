@@ -1,0 +1,1 @@
+"""Business-neutral application foundations."""
