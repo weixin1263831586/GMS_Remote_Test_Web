@@ -2,28 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import os
 import re
-import tempfile
-import uuid
-import zipfile
-from datetime import datetime, timedelta
-from pathlib import Path
-from collections.abc import Callable
-from typing import Any, Dict, List, Optional
-
-import requests
+from datetime import datetime
+from typing import Any
 
 from features.redmine.config import config_manager
-from features.redmine.client import RedmineAttachment, RedmineClient
-from features.redmine.repository import (
-    RESOLVED_STATUS_NAMES as RESOLVED_STATUSES,
-    RedmineAgentDB,
-)
-from foundation.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +50,7 @@ MAX_REFERENCES = 5              # max similar references to return
 TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
 
 
-def _load_agent_config() -> Dict[str, Any]:
+def _load_agent_config() -> dict[str, Any]:
     """Load redmine_agent section from config.json, with env overrides."""
     cfg = config_manager.load_config().get("redmine_agent", {})
     return {
@@ -140,7 +126,7 @@ class ReportingAnalysisMixin:
     # Document generation
     # ------------------------------------------------------------------
 
-    def _build_issue_document(self, item: Dict[str, Any]) -> str:
+    def _build_issue_document(self, item: dict[str, Any]) -> str:
         failures = item.get("failures_json") or []
         references = item.get("references_json") or []
         attachments = item.get("attachments_json") or []
@@ -253,7 +239,7 @@ class ReportingAnalysisMixin:
 
         return "\n".join(lines).strip() + "\n"
 
-    def _build_run_report(self, run_id: str, issues: List[Dict[str, Any]]) -> str:
+    def _build_run_report(self, run_id: str, issues: list[dict[str, Any]]) -> str:
         lines = [
             f"# RedmineAgent 日报 {run_id}",
             "",

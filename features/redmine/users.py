@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any
 
 from foundation.config import settings
 
@@ -38,7 +36,7 @@ REPORT_ATTACHMENT_RE = (
 REPORT_ATTACHMENT_EXTENSIONS = (".zip", ".7z", ".rar", ".tar", ".tgz", ".gz", ".xml", ".html", ".htm", ".log", ".txt")
 
 
-def _parse_dt(value: Any) -> Optional[datetime]:
+def _parse_dt(value: Any) -> datetime | None:
     text = str(value or "").strip()
     if not text:
         return None
@@ -130,7 +128,7 @@ def _name_matches_keys(value: Any, owner_keys: set) -> bool:
 _user_map_cache: tuple = (0.0, [])  # (mtime, parsed_list)
 
 
-def _name_display_variants(value: Any) -> List[str]:
+def _name_display_variants(value: Any) -> list[str]:
     text = str(value or "").strip()
     if not text:
         return []
@@ -143,7 +141,7 @@ def _name_display_variants(value: Any) -> List[str]:
     return list(dict.fromkeys(item for item in variants if item))
 
 
-def _flatten_departments(payload: Any) -> List[Dict[str, Any]]:
+def _flatten_departments(payload: Any) -> list[dict[str, Any]]:
     """Flatten the on-disk departments layout into flat user dicts.
 
     On disk the map is grouped by department:
@@ -154,7 +152,7 @@ def _flatten_departments(payload: Any) -> List[Dict[str, Any]]:
     """
     if not isinstance(payload, dict):
         return []
-    result: List[Dict[str, Any]] = []
+    result: list[dict[str, Any]] = []
     for dept in payload.get("departments") or []:
         if not isinstance(dept, dict):
             continue
@@ -174,9 +172,9 @@ def _flatten_departments(payload: Any) -> List[Dict[str, Any]]:
     return result
 
 
-def _departments_payload_from_flat_users(users: List[Dict[str, Any]]) -> Dict[str, Any]:
-    departments: List[Dict[str, Any]] = []
-    by_key: Dict[str, Dict[str, Any]] = {}
+def _departments_payload_from_flat_users(users: list[dict[str, Any]]) -> dict[str, Any]:
+    departments: list[dict[str, Any]] = []
+    by_key: dict[str, dict[str, Any]] = {}
     for item in users or []:
         if not isinstance(item, dict) or not item.get("id"):
             continue
@@ -197,7 +195,7 @@ def _departments_payload_from_flat_users(users: List[Dict[str, Any]]) -> Dict[st
     return {"departments": departments}
 
 
-def load_redmine_user_map() -> List[Dict[str, Any]]:
+def load_redmine_user_map() -> list[dict[str, Any]]:
     global _user_map_cache
     if not USER_MAP_PATH.exists():
         _user_map_cache = (0.0, [])
@@ -214,7 +212,7 @@ def load_redmine_user_map() -> List[Dict[str, Any]]:
         return []
 
 
-def load_user_map_payload() -> Dict[str, Any]:
+def load_user_map_payload() -> dict[str, Any]:
     """Load the raw user-map JSON payload (for mutation + save round-trips)."""
     if not USER_MAP_PATH.exists():
         return {"departments": []}
@@ -230,7 +228,7 @@ def load_user_map_payload() -> Dict[str, Any]:
     return {"departments": []}
 
 
-def save_user_map_payload(payload: Dict[str, Any]) -> None:
+def save_user_map_payload(payload: dict[str, Any]) -> None:
     """Write the raw user-map JSON payload to disk."""
     global _user_map_cache
     USER_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -238,7 +236,7 @@ def save_user_map_payload(payload: Dict[str, Any]) -> None:
     _user_map_cache = (0.0, [])
 
 
-def display_names_from_mapping(item: Dict[str, Any]) -> List[str]:
+def display_names_from_mapping(item: dict[str, Any]) -> list[str]:
     values = []
     values.extend(_name_display_variants(item.get("name") or ""))
     for alias in item.get("aliases") or []:
@@ -249,7 +247,7 @@ def display_names_from_mapping(item: Dict[str, Any]) -> List[str]:
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
 
 
-def find_user_mapping(name: str) -> Optional[Dict[str, Any]]:
+def find_user_mapping(name: str) -> dict[str, Any] | None:
     keys = _name_keys(name)
     for item in load_redmine_user_map():
         for value in display_names_from_mapping(item):
@@ -258,12 +256,12 @@ def find_user_mapping(name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _sorted_slice(bucket: Dict[str, int], key_name: str, limit: int) -> List[Dict[str, Any]]:
+def _sorted_slice(bucket: dict[str, int], key_name: str, limit: int) -> list[dict[str, Any]]:
     """Return [{key_name: k, count: v}] sorted by key ascending, last *limit* items."""
     return [{key_name: k, "count": bucket[k]} for k in sorted(bucket.keys())[-limit:]]
 
 
-def _looks_like_report_attachment(attachment: Dict[str, Any]) -> bool:
+def _looks_like_report_attachment(attachment: dict[str, Any]) -> bool:
     filename = str(attachment.get("filename") or "").strip().lower()
     if not filename:
         return False
@@ -307,12 +305,12 @@ def _looks_like_rk_actor(actor: Any) -> bool:
 
 async def compute_user_overdue_stats(
     client: Any,
-    db: "RedmineAgentDB",
-    user: Dict[str, Any],
+    db: Any,
+    user: dict[str, Any],
     stale_days: int = 3,
     issue_limit: int = 500,
     window_days: int = 0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute workload + overdue stats for a single mapped user.
 
     Shared by the router's department-overdue endpoint, the workload endpoint,

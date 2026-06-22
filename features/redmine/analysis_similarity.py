@@ -7,23 +7,12 @@ import json
 import logging
 import os
 import re
-import tempfile
-import uuid
-import zipfile
-from datetime import datetime, timedelta
-from pathlib import Path
-from collections.abc import Callable
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any
 
-import requests
-
+from features.redmine.client import RedmineClient
 from features.redmine.config import config_manager
-from features.redmine.client import RedmineAttachment, RedmineClient
-from features.redmine.repository import (
-    RESOLVED_STATUS_NAMES as RESOLVED_STATUSES,
-    RedmineAgentDB,
-)
-from foundation.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +53,7 @@ MAX_REFERENCES = 5              # max similar references to return
 TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
 
 
-def _load_agent_config() -> Dict[str, Any]:
+def _load_agent_config() -> dict[str, Any]:
     """Load redmine_agent section from config.json, with env overrides."""
     cfg = config_manager.load_config().get("redmine_agent", {})
     return {
@@ -126,9 +115,9 @@ def _truncate(text: str, limit: int) -> str:
 
 
 class SimilarityAnalysisMixin:
-    async def _find_similar_references(self, client: RedmineClient, issue_payload: Dict[str, Any], failures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _find_similar_references(self, client: RedmineClient, issue_payload: dict[str, Any], failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
         terms = self._similar_terms(issue_payload, failures)
-        candidates: Dict[int, Dict[str, Any]] = {}
+        candidates: dict[int, dict[str, Any]] = {}
 
         # 1. Local DB FTS search
         for term in terms[:8]:
@@ -206,7 +195,7 @@ class SimilarityAnalysisMixin:
             reverse=True,
         )[:MAX_REFERENCES]
 
-    def _similar_terms(self, issue_payload: Dict[str, Any], failures: List[Dict[str, Any]]) -> List[str]:
+    def _similar_terms(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]]) -> list[str]:
         terms = [issue_payload.get("subject", "")]
         for failure in failures[:5]:
             for key in ("module", "name"):
@@ -221,8 +210,8 @@ class SimilarityAnalysisMixin:
             terms.append(" ".join(desc_tokens[:8]))
         return [term for term in terms if term.strip()]
 
-    def _redmine_search_terms(self, issue_payload: Dict[str, Any], failures: List[Dict[str, Any]]) -> List[str]:
-        terms: List[str] = []
+    def _redmine_search_terms(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]]) -> list[str]:
+        terms: list[str] = []
         source_text = " ".join([
             issue_payload.get("subject") or "",
             issue_payload.get("description") or "",
@@ -259,14 +248,14 @@ class SimilarityAnalysisMixin:
             deduped.append(term)
         return deduped[:10]
 
-    def _score_reference(self, issue_payload: Dict[str, Any], failures: List[Dict[str, Any]], row: Dict[str, Any]) -> tuple:
+    def _score_reference(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], row: dict[str, Any]) -> tuple:
         """Multi-dimension similarity scoring (total 100).
 
         Returns (score, reason, match_details).
         """
         score = 0.0
         reasons = []
-        details: Dict[str, Any] = {}
+        details: dict[str, Any] = {}
         row_text = " ".join(str(row.get(key) or "") for key in ("subject", "description", "summary", "doc_content"))
 
         def _first_match_score(key: str, max_score: float, label: str) -> float:
@@ -319,7 +308,7 @@ class SimilarityAnalysisMixin:
 
         return score, "；".join(dict.fromkeys(reasons))[:500], details
 
-    async def _ai_semantic_similarity(self, issue_payload: Dict[str, Any], candidates: List[Dict[str, Any]]) -> Dict[int, float]:
+    async def _ai_semantic_similarity(self, issue_payload: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[int, float]:
         """Ask the local model to score semantic similarity between the issue and each candidate.
 
         Returns {issue_id: score_0_to_1}.
@@ -341,7 +330,7 @@ class SimilarityAnalysisMixin:
             500,
         )
 
-        results: Dict[int, float] = {}
+        results: dict[int, float] = {}
         # Batch candidates into a single prompt to reduce API calls
         candidate_descriptions = []
         for i, c in enumerate(candidates[:5]):

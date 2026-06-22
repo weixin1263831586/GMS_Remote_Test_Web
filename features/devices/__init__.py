@@ -1,6 +1,6 @@
-from .service import DeviceService
 from .locks import device_lock_manager
 from .monitor import get_usb_monitor
+from .service import DeviceService
 from .support import (
     broadcast_device_lock_update,
     get_or_create_user_state,

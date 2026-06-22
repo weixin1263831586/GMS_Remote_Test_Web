@@ -2,28 +2,31 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
 import re
-import tempfile
 import uuid
-import zipfile
-from datetime import datetime, timedelta
-from pathlib import Path
 from collections.abc import Callable
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta
+from typing import Any
 
-import requests
-
+from features.redmine.analysis_ai import AiAnalysisMixin
+from features.redmine.analysis_attachments import AttachmentAnalysisMixin
+from features.redmine.analysis_issue import IssueAnalysisMixin
+from features.redmine.analysis_reporting import ReportingAnalysisMixin
+from features.redmine.analysis_resolution import ResolutionAnalysisMixin
+from features.redmine.analysis_similarity import SimilarityAnalysisMixin
+from features.redmine.client import RedmineClient
 from features.redmine.config import config_manager
-from features.redmine.client import RedmineAttachment, RedmineClient
 from features.redmine.repository import (
     RESOLVED_STATUS_NAMES as RESOLVED_STATUSES,
+)
+from features.redmine.repository import (
     RedmineAgentDB,
 )
 from foundation.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +67,7 @@ MAX_REFERENCES = 5              # max similar references to return
 TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
 
 
-def _load_agent_config() -> Dict[str, Any]:
+def _load_agent_config() -> dict[str, Any]:
     """Load redmine_agent section from config.json, with env overrides."""
     cfg = config_manager.load_config().get("redmine_agent", {})
     return {
@@ -123,15 +126,6 @@ def _truncate(text: str, limit: int) -> str:
     text = str(text or "")
     return text if len(text) <= limit else text[:limit] + "\n...[truncated]"
 
-
-
-from .analysis_ai import AiAnalysisMixin
-from .analysis_attachments import AttachmentAnalysisMixin
-from .analysis_issue import IssueAnalysisMixin
-from .analysis_reporting import ReportingAnalysisMixin
-from .analysis_resolution import ResolutionAnalysisMixin
-from .analysis_similarity import SimilarityAnalysisMixin
-
 class RedmineAgent(
     AttachmentAnalysisMixin,
     IssueAnalysisMixin,
@@ -144,7 +138,7 @@ class RedmineAgent(
 
     def __init__(
         self,
-        db: Optional[RedmineAgentDB] = None,
+        db: RedmineAgentDB | None = None,
         *,
         report_analyzer_factory: Callable[..., Any] | None = None,
         ai_analyzer_factory: Callable[..., Any] | None = None,
@@ -152,7 +146,7 @@ class RedmineAgent(
         self.db = db or RedmineAgentDB()
         self.attachments_dir = settings.data_root / "redmine/attachments"
         self.attachments_dir.mkdir(parents=True, exist_ok=True)
-        self._ai_config_cache: Optional[Dict[str, Any]] = None
+        self._ai_config_cache: dict[str, Any] | None = None
         self.report_analyzer_factory = report_analyzer_factory
         self.ai_analyzer_factory = ai_analyzer_factory
 
@@ -165,7 +159,7 @@ class RedmineAgent(
         analyze_new: bool = True,
         max_analyze: int = 20,
         run_id: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetch ALL assigned issues and store them. Optionally analyze unanalyzed ones."""
         run_id = run_id or self._generate_run_id("sync-")
         client = self._make_client()
@@ -184,10 +178,10 @@ class RedmineAgent(
             new_count = 0
             updated_count = 0
             detail_refreshed = 0
-            to_analyze: List[list] = []
+            to_analyze: list[list] = []
 
             for issue_stub in all_issues:
-                issue_id = int(getattr(issue_stub, "id"))
+                issue_id = int(issue_stub.id)
                 existing = self.db.get_issue(issue_id)
                 stub_data = self._stub_to_dict(issue_stub, run_id)
                 status_name = stub_data["status_name"]
@@ -283,9 +277,9 @@ class RedmineAgent(
         self,
         hours: int = 24,
         max_issues: int = 20,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         mode: str = "manual",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run one RedmineAgent scan. Cap is configurable via config.json or REDMINE_AGENT_MAX_ISSUES env."""
         _cap = _load_agent_config()["max_issues_per_run"]
         max_issues = max(1, min(int(max_issues or 20), _cap))
@@ -313,7 +307,7 @@ class RedmineAgent(
             failed = 0
             issue_results = []
             for issue_stub in issues:
-                issue_id = int(getattr(issue_stub, "id"))
+                issue_id = int(issue_stub.id)
                 try:
                     result = await self.analyze_issue(client, issue_id, run_id)
                     issue_results.append(result)
@@ -359,7 +353,7 @@ class RedmineAgent(
     # Single issue analysis
     # ------------------------------------------------------------------
 
-    async def analyze_issue(self, client: RedmineClient, issue_id: int, run_id: str = "") -> Dict[str, Any]:
+    async def analyze_issue(self, client: RedmineClient, issue_id: int, run_id: str = "") -> dict[str, Any]:
         issue = await client.get_issue(str(issue_id), include=["attachments", "journals"])
         attachments = await client.list_issue_attachments(str(issue_id))
         journals = self._extract_journals(getattr(issue, "journals", []))
@@ -403,7 +397,7 @@ class RedmineAgent(
         self.db.replace_references(issue_id, references)
         return {**issue_payload, "doc_path": doc_path}
 
-    async def fetch_issue_snapshot(self, client: RedmineClient, issue_id: int, run_id: str = "") -> Dict[str, Any]:
+    async def fetch_issue_snapshot(self, client: RedmineClient, issue_id: int, run_id: str = "") -> dict[str, Any]:
         """Fetch issue metadata, journals, and attachment names without heavy analysis."""
         issue = await client.get_issue(str(issue_id), include=["attachments", "journals"])
         attachments = await client.list_issue_attachments(str(issue_id))
@@ -429,7 +423,7 @@ class RedmineAgent(
         return issue_payload
 
     @staticmethod
-    def _preserve_existing_analysis_fields(payload: Dict[str, Any], existing: Dict[str, Any]) -> None:
+    def _preserve_existing_analysis_fields(payload: dict[str, Any], existing: dict[str, Any]) -> None:
         for key in SYNC_PRESERVE_FIELDS:
             if payload.get(key) in (None, "", [], {}) and existing.get(key) not in (None, "", [], {}):
                 payload[key] = existing.get(key)
@@ -440,13 +434,13 @@ class RedmineAgent(
             payload["category"] = existing.get("category")
 
     @staticmethod
-    def _merge_attachment_analysis(existing_items: List[Dict[str, Any]], fresh_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _merge_attachment_analysis(existing_items: list[dict[str, Any]], fresh_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         existing_by_id = {
             str(item.get("attachment_id") or item.get("id") or ""): item
             for item in existing_items
             if isinstance(item, dict)
         }
-        merged: List[Dict[str, Any]] = []
+        merged: list[dict[str, Any]] = []
         for fresh in fresh_items:
             if not isinstance(fresh, dict):
                 continue
@@ -482,13 +476,13 @@ class RedmineAgent(
         return datetime.now().strftime("%Y%m%d%H%M%S") + "-" + prefix + uuid.uuid4().hex[:8]
 
     @staticmethod
-    def _stub_to_dict(issue_stub: Any, run_id: str = "") -> Dict[str, Any]:
+    def _stub_to_dict(issue_stub: Any, run_id: str = "") -> dict[str, Any]:
         """Extract common fields from a Redmine issue stub into a dict."""
-        subject = str(getattr(issue_stub, "subject") or "")
-        description = str(getattr(issue_stub, "description") or "")
+        subject = str(issue_stub.subject or "")
+        description = str(issue_stub.description or "")
         fixed_version = _obj_name(getattr(issue_stub, "fixed_version", None))
         return {
-            "issue_id": int(getattr(issue_stub, "id")),
+            "issue_id": int(issue_stub.id),
             "run_id": run_id,
             "subject": subject,
             "status_name": _obj_name(getattr(issue_stub, "status", None)),
@@ -497,16 +491,16 @@ class RedmineAgent(
             "tracker_name": _obj_name(getattr(issue_stub, "tracker", None)),
             "author_name": _obj_name(getattr(issue_stub, "author", None)),
             "assigned_to_name": _obj_name(getattr(issue_stub, "assigned_to", None)),
-            "created_on": _iso(getattr(issue_stub, "created_on")),
-            "updated_on": _iso(getattr(issue_stub, "updated_on")),
+            "created_on": _iso(issue_stub.created_on),
+            "updated_on": _iso(issue_stub.updated_on),
             "description": description,
             "fixed_version": fixed_version,
             "component": RedmineAgent._extract_custom_field(issue_stub, "Component_fae"),
             "soc_platform": RedmineAgent._parse_soc_platform(subject, description, fixed_version),
             "android_version": RedmineAgent._parse_android_version(subject, description, fixed_version),
-            "start_date": _iso(getattr(issue_stub, "start_date")),
-            "due_date": _iso(getattr(issue_stub, "due_date")),
-            "closed_on": _iso(getattr(issue_stub, "closed_on")),
+            "start_date": _iso(issue_stub.start_date),
+            "due_date": _iso(issue_stub.due_date),
+            "closed_on": _iso(issue_stub.closed_on),
             "done_ratio": int(getattr(issue_stub, "done_ratio", 0) or 0),
         }
 
@@ -544,7 +538,7 @@ class RedmineAgent(
         """Extract a custom field value from a Redmine issue object."""
         for field in getattr(issue, "custom_fields", []):
             if getattr(field, "name", "") == field_name:
-                return str(getattr(field, "value") or "")
+                return str(field.value or "")
         return ""
 
     # ------------------------------------------------------------------

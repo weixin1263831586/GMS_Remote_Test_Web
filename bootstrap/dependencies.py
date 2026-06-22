@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from features.assistant.universal_ai import UniversalAIAnalyzer
-from features.reports import ReportAnalyzer
 from features.redmine.agent import RedmineAgent
 from features.redmine.repository import RedmineAgentDB
 from features.redmine.service import RedmineService
+from features.reports import ReportAnalyzer
 from foundation.config import ConfigManager, RuntimeSettings, settings
 
 

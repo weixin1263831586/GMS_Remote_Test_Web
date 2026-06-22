@@ -1,15 +1,17 @@
 """
 SSH管理器 - 同步SSH操作
 """
-import paramiko
 import logging
 import os
-from typing import Tuple, Dict, Any, Optional
-from contextlib import contextmanager
 import queue
+from contextlib import contextmanager
+from typing import Any
 
-from foundation.config import get_ubuntu_user
+import paramiko
+
 from foundation.common_utils import CommonUtils
+from foundation.config import get_ubuntu_user
+
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +75,7 @@ class SSHManager:
         """
         self.pool: queue.Queue = queue.Queue(maxsize=pool_size)
 
-    def _load_ssh_key(self, key_path: str) -> Optional[paramiko.PKey]:
+    def _load_ssh_key(self, key_path: str) -> paramiko.PKey | None:
         """
         加载SSH私钥，尝试多种密钥类型
 
@@ -98,7 +100,7 @@ class SSHManager:
         logger.error(f"[SSH] Failed to load SSH key from {key_path}: {key_error}")
         return None
 
-    def create_connection(self, config: dict) -> Optional[paramiko.SSHClient]:
+    def create_connection(self, config: dict) -> paramiko.SSHClient | None:
         """
         创建SSH连接
 
@@ -147,7 +149,7 @@ class SSHManager:
             logger.error(f"[SSH] Connection error: {e}")
             return None
 
-    def get_connection(self, config: dict) -> Optional[paramiko.SSHClient]:
+    def get_connection(self, config: dict) -> paramiko.SSHClient | None:
         """
         从连接池获取或创建连接（带健康检查）
 
@@ -164,7 +166,7 @@ class SSHManager:
                 ssh = self.pool.get_nowait()
                 # 测试连接是否仍然有效（轻量级检查）
                 try:
-                    stdin, stdout, stderr = ssh.exec_command('true', timeout=2)
+                    _stdin, stdout, _stderr = ssh.exec_command('true', timeout=2)
                     exit_code = stdout.channel.recv_exit_status(timeout=2)
                     if exit_code == 0:
                         logger.debug("[SSH] Reused connection from pool")
@@ -200,7 +202,7 @@ class SSHManager:
         command: str,
         timeout: int = 30,
         get_pty: bool = False
-    ) -> Tuple[str, str, int]:
+    ) -> tuple[str, str, int]:
         """
         执行SSH命令
 
@@ -214,7 +216,7 @@ class SSHManager:
             (stdout, stderr, exit_code)
         """
         try:
-            stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout, get_pty=get_pty)
+            _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout, get_pty=get_pty)
 
             stdout_text = CommonUtils.decode_ssh_output(stdout.read())
             stderr_text = CommonUtils.decode_ssh_output(stderr.read())
@@ -226,7 +228,7 @@ class SSHManager:
             logger.error(f"[SSH] Command execution error: {e}")
             return '', str(e), -1
 
-    def check_sshd_installed(self, ssh) -> Tuple[bool, str]:
+    def check_sshd_installed(self, ssh) -> tuple[bool, str]:
         """
         检查 SSHD 是否已安装
 
@@ -237,7 +239,7 @@ class SSHManager:
             (是否安装, 状态信息)
         """
         try:
-            stdout, stderr, code = self.execute_command(ssh, 'Get-Service sshd')
+            stdout, _stderr, code = self.execute_command(ssh, 'Get-Service sshd')
             if code == 0 and stdout.strip():
                 return True, stdout.strip()
             return False, ''
@@ -245,7 +247,7 @@ class SSHManager:
             logger.error(f"Error checking sshd: {e}")
             return False, ''
 
-    def install_sshd(self, ssh, config: Dict[str, Any]) -> Dict[str, Any]:
+    def install_sshd(self, ssh, config: dict[str, Any]) -> dict[str, Any]:
         """
         自动安装 SSHD 到 Windows 主机
 

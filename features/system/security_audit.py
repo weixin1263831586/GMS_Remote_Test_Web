@@ -2,13 +2,14 @@
 Security audit logging for web and CLI operations.
 """
 import json
-import re
 import os
+import re
 import threading
 import urllib.parse
 from collections import deque
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 from uuid import uuid4
 
 
@@ -30,7 +31,7 @@ _WORD_BOUNDARY_PATTERN = re.compile(r'(?:' + '|'.join(re.escape(kw) for kw in SE
 class SecurityAuditLogger:
     """Append-only JSONL audit log with bounded readback helpers."""
 
-    def __init__(self, log_path: Optional[str] = None, max_read_lines: int = 5000):
+    def __init__(self, log_path: str | None = None, max_read_lines: int = 5000):
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.log_path = log_path or os.path.join(base_dir, 'data', 'security_audit.json')
         self.max_read_lines = max_read_lines
@@ -51,7 +52,7 @@ class SecurityAuditLogger:
             return value[:300] + '...'
         return value
 
-    def sanitize_mapping(self, mapping: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    def sanitize_mapping(self, mapping: dict[str, Any] | None) -> dict[str, Any]:
         if not mapping:
             return {}
         return {
@@ -59,7 +60,7 @@ class SecurityAuditLogger:
             for key, value in mapping.items()
         }
 
-    def summarize_json_body(self, body: bytes) -> Dict[str, Any]:
+    def summarize_json_body(self, body: bytes) -> dict[str, Any]:
         try:
             payload = json.loads(body.decode('utf-8'))
         except Exception as e:
@@ -78,7 +79,7 @@ class SecurityAuditLogger:
             }
         return {'body_type': 'json', 'data': self.sanitize_value('value', payload)}
 
-    def summarize_form_body(self, body: bytes) -> Dict[str, Any]:
+    def summarize_form_body(self, body: bytes) -> dict[str, Any]:
         parsed = urllib.parse.parse_qs(body.decode('utf-8', errors='replace'), keep_blank_values=True)
         flattened = {
             key: values[0] if len(values) == 1 else values
@@ -86,18 +87,17 @@ class SecurityAuditLogger:
         }
         return {'body_type': 'form', 'data': self.sanitize_mapping(flattened)}
 
-    def log_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+    def log_event(self, event: dict[str, Any]) -> dict[str, Any]:
         record = {
             'id': str(uuid4()),
             'timestamp': datetime.now().isoformat(timespec='seconds'),
             **event,
         }
-        with self._lock:
-            with open(self.log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(record, ensure_ascii=False, separators=(',', ':')) + '\n')
+        with self._lock, open(self.log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record, ensure_ascii=False, separators=(',', ':')) + '\n')
         return record
 
-    def compact_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
+    def compact_record(self, record: dict[str, Any]) -> dict[str, Any]:
         keys = (
             'id',
             'timestamp',
@@ -120,10 +120,10 @@ class SecurityAuditLogger:
     def read_events(
         self,
         limit: int = 200,
-        source: Optional[str] = None,
-        action_type: Optional[str] = None,
-        query: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        source: str | None = None,
+        action_type: str | None = None,
+        query: str | None = None,
+    ) -> dict[str, Any]:
         limit = max(1, min(int(limit or 200), 1000))
         records = []
         stats = {'total': 0, 'web': 0, 'cli': 0, 'api': 0, 'page_view': 0, 'errors': 0}
@@ -132,9 +132,8 @@ class SecurityAuditLogger:
             return {'records': [], 'stats': stats}
 
         query_lower = (query or '').strip().lower()
-        with self._lock:
-            with open(self.log_path, 'r', encoding='utf-8') as f:
-                lines: Iterable[str] = deque(f, maxlen=self.max_read_lines)
+        with self._lock, open(self.log_path, encoding='utf-8') as f:
+            lines: Iterable[str] = deque(f, maxlen=self.max_read_lines)
 
         for line in reversed(list(lines)):
             try:
@@ -171,13 +170,12 @@ class SecurityAuditLogger:
 
         return {'records': records, 'stats': stats}
 
-    def get_event(self, event_id: str) -> Optional[Dict[str, Any]]:
+    def get_event(self, event_id: str) -> dict[str, Any] | None:
         if not event_id or not os.path.exists(self.log_path):
             return None
 
-        with self._lock:
-            with open(self.log_path, 'r', encoding='utf-8') as f:
-                lines: Iterable[str] = deque(f, maxlen=self.max_read_lines)
+        with self._lock, open(self.log_path, encoding='utf-8') as f:
+            lines: Iterable[str] = deque(f, maxlen=self.max_read_lines)
 
         for line in reversed(list(lines)):
             try:

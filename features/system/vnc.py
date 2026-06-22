@@ -12,12 +12,14 @@ import os
 import shutil
 import subprocess
 import time
-from typing import Dict, Any, List, Optional
+from typing import Any
+
+from features.devices.utils import DeviceUtils
+from foundation.common_utils import CommonUtils
+from foundation.config import config_manager, get_ubuntu_user
 
 from .ssh import ssh_manager
-from foundation.config import config_manager, get_ubuntu_user
-from foundation.common_utils import CommonUtils
-from features.devices.utils import DeviceUtils
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,7 @@ class VNCManager:
         password: str = None,
         vnc_password: str = None,
         force_restart: bool = False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         启动VNC服务
 
@@ -84,7 +86,7 @@ class VNCManager:
             logger.error(f"Error starting VNC: {e}")
             return {'success': False, 'error': str(e)}
 
-    def _start_local_vnc(self, force_restart: bool = False) -> Dict[str, Any]:
+    def _start_local_vnc(self, force_restart: bool = False) -> dict[str, Any]:
         """启动本地VNC服务
 
         Args:
@@ -226,8 +228,8 @@ class VNCManager:
         return ''
 
     # Cached at class level: websockify availability doesn't change at runtime
-    _websockify_available: Optional[bool] = None
-    _websockify_standalone: Optional[str] = None
+    _websockify_available: bool | None = None
+    _websockify_standalone: str | None = None
 
     @classmethod
     def _detect_websockify(cls) -> bool:
@@ -251,7 +253,7 @@ class VNCManager:
         return cls._websockify_available
 
     @classmethod
-    def _build_local_websockify_cmd(cls, novnc_web_dir: str) -> List[str]:
+    def _build_local_websockify_cmd(cls, novnc_web_dir: str) -> list[str]:
         """Build websockify command, using cached standalone path when available."""
         base = [cls._websockify_standalone or 'python3']
         if not cls._websockify_standalone:
@@ -264,8 +266,8 @@ class VNCManager:
         host: str,
         password: str,
         vnc_password: str,
-        config: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        config: dict[str, Any]
+    ) -> dict[str, Any]:
         """启动远程VNC服务"""
         try:
             ssh = self.ssh_manager.get_connection(config)
@@ -387,7 +389,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             logger.error(f"Error starting remote VNC: {e}")
             return {'success': False, 'error': str(e)}
 
-    def stop_vnc(self, host: str = None) -> Dict[str, Any]:
+    def stop_vnc(self, host: str = None) -> dict[str, Any]:
         """
         停止VNC服务
 
@@ -429,9 +431,9 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
 
     def show_device_screens(
         self,
-        devices: List[str],
+        devices: list[str],
         host: str = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         显示设备屏幕（使用scrcpy）
 
@@ -563,7 +565,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             logger.error(f"Error showing device screens: {e}")
             return {'success': False, 'error': str(e)}
 
-    def get_vnc_status(self) -> Dict[str, Any]:
+    def get_vnc_status(self) -> dict[str, Any]:
         """
         获取VNC状态
 
@@ -608,7 +610,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
         host: str = None,
         password: str = None,
         vnc_password: str = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """启动Ubuntu主机桌面VNC（委托给start_vnc）"""
         return self.start_vnc(host, password, vnc_password)
 

@@ -10,8 +10,7 @@ from foundation.config import RuntimeSettings
 
 class RedmineLifecycleTests(unittest.TestCase):
     def test_application_and_scheduler_share_injected_service(self):
-        from features.redmine import api
-        from features.redmine import scheduler
+        from features.redmine import api, scheduler
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

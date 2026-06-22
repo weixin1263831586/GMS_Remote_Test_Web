@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 网站图标获取器 - Web优化版本
 支持从多种来源获取网站的真实图标，优化了Web环境的使用
 """
 
 import asyncio
-import aiohttp
-import re
-from urllib.parse import urljoin, urlparse
-from typing import List, Dict, Any
-import logging
-from dataclasses import dataclass
-import json
-import os
 import glob
 import hashlib
+import json
+import logging
 import mimetypes
-from datetime import datetime, timedelta
+import os
+import re
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any
+from urllib.parse import urljoin, urlparse
+
+import aiohttp
+
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class IconResult:
     cache_key: str = ""  # 缓存键
     original_icon_url: str = ""  # 原始远程图标地址
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             'success': self.success,
@@ -146,14 +147,14 @@ class IconFetcher:
         if self.session and not self.session.closed:
             await self.session.close()
 
-    def _load_cache(self) -> Dict[str, Any]:
+    def _load_cache(self) -> dict[str, Any]:
         """加载图标缓存"""
         if not self.use_cache:
             return {}
 
         try:
             # 直接尝试打开文件，避免TOCTOU问题
-            with open(self.CACHE_FILE, 'r', encoding='utf-8') as f:
+            with open(self.CACHE_FILE, encoding='utf-8') as f:
                 cache_data = json.load(f)
 
             # 清理过期缓存
@@ -176,7 +177,7 @@ class IconFetcher:
             logger.warning(f"加载图标缓存失败: {e}")
             return {}
 
-    def _save_cache(self, new_entries: Dict[str, Any] = None):
+    def _save_cache(self, new_entries: dict[str, Any] = None):
         """保存图标缓存
 
         Args:
@@ -213,7 +214,7 @@ class IconFetcher:
         except Exception as e:
             logger.warning(f"保存图标缓存失败: {e}")
 
-    def get_cache_stats(self) -> Dict[str, Any]:
+    def get_cache_stats(self) -> dict[str, Any]:
         """获取缓存统计信息"""
         return {
             'size': len(self.cache),
@@ -615,7 +616,7 @@ class IconFetcher:
             logger.error(f"获取图标时出错: {e}")
             return IconResult(success=False, error=str(e))
 
-    async def batch_fetch_icons_async(self, urls: List[str], write_cache: bool = True) -> List[Dict[str, Any]]:
+    async def batch_fetch_icons_async(self, urls: list[str], write_cache: bool = True) -> list[dict[str, Any]]:
         """批量获取图标
 
         Args:
@@ -817,7 +818,7 @@ async def get_icon_fetcher(timeout: int = 10, use_cache: bool = True):
 
 
 # 便捷函数
-async def fetch_website_icon(url: str, timeout: int = 10) -> Dict[str, Any]:
+async def fetch_website_icon(url: str, timeout: int = 10) -> dict[str, Any]:
     """
     获取网站图标的便捷函数
 

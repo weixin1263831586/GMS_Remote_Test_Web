@@ -3,19 +3,19 @@
 import asyncio
 import logging
 import os
-from typing import Optional
 
 import aiohttp
 import paramiko
-from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
+from fastapi import APIRouter, Body, Request, WebSocket
 from fastapi.responses import JSONResponse, Response
 
-from foundation.responses import error_response, success_response
-from foundation.common_utils import CommonUtils
-from foundation.config import config_manager
 from features.system.models import VNCStartRequest
 from features.system.ssh import ssh_manager
 from features.system.vnc import vnc_manager
+from foundation.common_utils import CommonUtils
+from foundation.config import config_manager
+from foundation.responses import error_response, success_response
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +44,11 @@ async def get_desktop_vnc_status():
         return success_response(result)
     except Exception as e:
         logger.error(f"Error getting VNC status: {e}")
-        return error_response(f"{str(e)}. 请检查配置和参数是否正确。", status_code=500)
+        return error_response(f"{e!s}. 请检查配置和参数是否正确。", status_code=500)
 
 
 @router.post("/api/desktop/vnc/start")
-async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None)):
+async def start_desktop_vnc(req: VNCStartRequest | None = Body(default=None)):
     """启动Ubuntu主机桌面VNC（Ubuntu桌面的VNC服务）"""
     config = config_manager.load_config()
     default_host = f"{config_manager.get_ubuntu_user(config)}@{config_manager.get_ubuntu_host(config) or 'localhost'}"
@@ -69,7 +69,7 @@ async def start_desktop_vnc(req: Optional[VNCStartRequest] = Body(default=None))
 
 
 @router.post("/api/vnc/start")
-async def start_desktop_vnc_legacy(req: Optional[VNCStartRequest] = Body(default=None)):
+async def start_desktop_vnc_legacy(req: VNCStartRequest | None = Body(default=None)):
     """/api/vnc/start。"""
     return await start_desktop_vnc(req)
 
@@ -92,37 +92,36 @@ async def novnc_websockify_proxy(websocket: WebSocket):
     upstream_url = f"{NOVNC_UPSTREAM_WS}/websockify"
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(upstream_url) as upstream:
-                async def client_to_upstream():
-                    while True:
-                        message = await websocket.receive()
-                        if message.get("type") == "websocket.disconnect":
-                            await upstream.close()
-                            break
-                        if message.get("bytes") is not None:
-                            await upstream.send_bytes(message["bytes"])
-                        elif message.get("text") is not None:
-                            await upstream.send_str(message["text"])
+        async with aiohttp.ClientSession() as session, session.ws_connect(upstream_url) as upstream:
+            async def client_to_upstream():
+                while True:
+                    message = await websocket.receive()
+                    if message.get("type") == "websocket.disconnect":
+                        await upstream.close()
+                        break
+                    if message.get("bytes") is not None:
+                        await upstream.send_bytes(message["bytes"])
+                    elif message.get("text") is not None:
+                        await upstream.send_str(message["text"])
 
-                async def upstream_to_client():
-                    async for message in upstream:
-                        if message.type == aiohttp.WSMsgType.BINARY:
-                            await websocket.send_bytes(message.data)
-                        elif message.type == aiohttp.WSMsgType.TEXT:
-                            await websocket.send_text(message.data)
-                        elif message.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                            break
+            async def upstream_to_client():
+                async for message in upstream:
+                    if message.type == aiohttp.WSMsgType.BINARY:
+                        await websocket.send_bytes(message.data)
+                    elif message.type == aiohttp.WSMsgType.TEXT:
+                        await websocket.send_text(message.data)
+                    elif message.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                        break
 
-                tasks = [
-                    asyncio.create_task(client_to_upstream()),
-                    asyncio.create_task(upstream_to_client())
-                ]
-                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                for task in pending:
-                    task.cancel()
-                for task in done:
-                    task.result()
+            tasks = [
+                asyncio.create_task(client_to_upstream()),
+                asyncio.create_task(upstream_to_client())
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            for task in done:
+                task.result()
     except Exception as e:
         logger.error(f"[noVNC] WebSocket proxy error: {e}")
         try:
@@ -140,20 +139,19 @@ async def novnc_http_proxy(request: Request, path: str = "vnc.html"):
     upstream_url = build_novnc_upstream_url(path, request.scope.get("query_string", b""))
     try:
         timeout = aiohttp.ClientTimeout(total=30)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(upstream_url) as upstream:
-                body = await upstream.read()
-                return Response(
-                    content=body,
-                    status_code=upstream.status,
-                    media_type=upstream.headers.get("content-type", "application/octet-stream"),
-                    headers={"Cache-Control": "no-store"}
-                )
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(upstream_url) as upstream:
+            body = await upstream.read()
+            return Response(
+                content=body,
+                status_code=upstream.status,
+                media_type=upstream.headers.get("content-type", "application/octet-stream"),
+                headers={"Cache-Control": "no-store"}
+            )
     except aiohttp.ClientConnectorError:
         return error_response("noVNC 服务未运行，请先启动 VNC", status_code=503)
     except Exception as e:
         logger.error(f"[noVNC] HTTP proxy error: {e}")
-        return error_response(f"noVNC 代理失败：{str(e)}", status_code=502)
+        return error_response(f"noVNC 代理失败：{e!s}", status_code=502)
 
 
 # ==================== Host Validation ====================

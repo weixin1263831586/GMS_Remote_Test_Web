@@ -3,7 +3,7 @@
 import base64
 import re
 import urllib.parse
-from typing import Dict, Optional
+
 
 REDMINE_ISSUE_PATTERN = r'/issues/(\d+)'
 REDMINE_ATTACHMENT_PATTERN = r'/attachments/(?:download/)?(\d+)'
@@ -17,7 +17,7 @@ COMPILED_CONTENT_DISPOSITION_PATTERN = re.compile(
 COMPILED_ISSUE_LINK_PATTERN = re.compile(r'href=["\'][^"\']*/issues/(\d+)[^"\']*["\']')
 
 
-def create_basic_auth_header(username: str, password: str) -> Dict[str, str]:
+def create_basic_auth_header(username: str, password: str) -> dict[str, str]:
     """Create a Basic Authentication header."""
     credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
     return {'Authorization': f'Basic {credentials}'}
@@ -28,7 +28,7 @@ def build_redmine_download_url(base_url: str, attachment_id: str) -> str:
     return f"{base_url}/attachments/download/{attachment_id}/"
 
 
-def extract_filename_from_content_disposition(content_disposition: str) -> Optional[str]:
+def extract_filename_from_content_disposition(content_disposition: str) -> str | None:
     """Extract filename from a Content-Disposition header."""
     if not content_disposition:
         return None
@@ -39,7 +39,7 @@ def extract_filename_from_content_disposition(content_disposition: str) -> Optio
     return urllib.parse.unquote(filename) if filename else None
 
 
-def extract_redmine_issue_id_from_text(text: str) -> Optional[str]:
+def extract_redmine_issue_id_from_text(text: str) -> str | None:
     """Extract a Redmine issue id from URL or dropped HTML/text context."""
     if not text:
         return None

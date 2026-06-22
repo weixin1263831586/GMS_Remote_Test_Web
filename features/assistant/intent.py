@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from features.assistant.context import resolve_reference
 from features.assistant.tools import AgentTool, registry
@@ -24,16 +24,16 @@ from features.assistant.tools import AgentTool, registry
 class ResolvedIntent:
     """意图路由结果。"""
     tool_name: str                      # 匹配的工具名
-    tool: Optional[AgentTool]           # 工具对象
+    tool: AgentTool | None           # 工具对象
     confidence: float                   # 0.0 - 1.0
-    params: Dict[str, Any]              # 提取的参数
+    params: dict[str, Any]              # 提取的参数
     needs_confirm: bool                 # 是否需要用户确认
     is_run_test: bool                   # 是否是测试启动请求
-    context_entities: Dict[str, Any]    # 上下文解析出的实体
+    context_entities: dict[str, Any]    # 上下文解析出的实体
     stage: str                          # 匹配阶段: exact/context/keyword/regex/fallback
 
     @staticmethod
-    def unknown() -> "ResolvedIntent":
+    def unknown() -> ResolvedIntent:
         return ResolvedIntent(
             tool_name="", tool=None, confidence=0.0, params={},
             needs_confirm=False, is_run_test=False,
@@ -43,7 +43,7 @@ class ResolvedIntent:
 
 # ==================== Exact Match Patterns ====================
 
-_EXACT_COMMANDS: List[tuple] = [
+_EXACT_COMMANDS: list[tuple] = [
     # (pattern, tool_name, extra_params)
     (r"^(停止|终止|结束|取消)(测试|任务)?$", "test_stop", {}),
     (r"^(停止测试|stop\s*test)$", "test_stop", {}),
@@ -65,7 +65,7 @@ _EXACT_COMMANDS: List[tuple] = [
 ]
 
 # Navigation aliases
-_NAV_ALIASES: Dict[str, str] = {
+_NAV_ALIASES: dict[str, str] = {
     "测试界面": "test", "跑测试": "test", "测试日志": "test",
     "主机桌面": "desktop", "桌面": "desktop", "vnc": "desktop",
     "终端": "terminal", "主机终端": "terminal",
@@ -128,7 +128,7 @@ def _extract_module_and_case(text: str) -> tuple:
     return module, case
 
 
-def _extract_device_ids(text: str) -> List[str]:
+def _extract_device_ids(text: str) -> list[str]:
     ids = []
     for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9_.:-]{5,}\b", text):
         if re.fullmatch(r"RK\d+", token, re.IGNORECASE):
@@ -177,7 +177,7 @@ def _extract_page_name(text: str) -> str:
     return ""
 
 
-def _extract_redmine_names(text: str) -> List[str]:
+def _extract_redmine_names(text: str) -> list[str]:
     cleaned = re.sub(r"(?i)redmine", " Redmine ", text)
     cleaned = re.sub(r"(帮我|帮忙|请|麻烦|查看|查询|统计|看一下|看下|生成|的|Redmine|信息|统计信息|工单|问题单|情况|一下)", " ", cleaned)
     spaced_names = re.findall(r"(?<![\u4e00-\u9fff])([\u4e00-\u9fff]{1,2}\s+[\u4e00-\u9fff]{1,3})(?![\u4e00-\u9fff])", cleaned)
@@ -203,7 +203,7 @@ def _extract_task_id(text: str) -> str:
     return m.group(1) if m else ""
 
 
-def _extract_quoted_value(text: str, labels: List[str]) -> str:
+def _extract_quoted_value(text: str, labels: list[str]) -> str:
     label_pattern = "|".join(re.escape(label) for label in labels)
     m = re.search(rf"(?:{label_pattern})\s*[:：=]?\s*[\"'“”]?([^\"'“”\s，,。;；]+)", text, re.IGNORECASE)
     return m.group(1) if m else ""
@@ -240,7 +240,7 @@ def _is_run_test_request(text: str) -> bool:
 
 # ==================== Intent Router ====================
 
-def resolve(message: str, session: Dict[str, Any]) -> ResolvedIntent:
+def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
     """多阶段意图路由。"""
     text = message.strip()
     lowered = text.lower()
@@ -314,9 +314,9 @@ def resolve(message: str, session: Dict[str, Any]) -> ResolvedIntent:
         if tool_name:
             tool = registry.get(tool_name)
             params = {}
-            if "devices" in entities and entities["devices"]:
+            if entities.get("devices"):
                 params["devices"] = entities["devices"]
-            if "reports" in entities and entities["reports"]:
+            if entities.get("reports"):
                 params["report_timestamp"] = entities["reports"][0]
             return ResolvedIntent(
                 tool_name=tool_name, tool=tool, confidence=0.8,
@@ -400,7 +400,7 @@ def resolve(message: str, session: Dict[str, Any]) -> ResolvedIntent:
 
 # ==================== Run Test Resolution ====================
 
-def _resolve_run_test(text: str, session: Dict[str, Any]) -> ResolvedIntent:
+def _resolve_run_test(text: str, session: dict[str, Any]) -> ResolvedIntent:
     """解析测试启动请求为特殊 intent。"""
     test_type = _extract_test_type(text)
     module, case = _extract_module_and_case(text)
@@ -440,9 +440,9 @@ def _resolve_run_test(text: str, session: Dict[str, Any]) -> ResolvedIntent:
 
 # ==================== Helpers ====================
 
-def _extract_params_for_tool(text: str, tool: AgentTool) -> Dict[str, Any]:
+def _extract_params_for_tool(text: str, tool: AgentTool) -> dict[str, Any]:
     """根据工具参数定义从文本中提取参数。"""
-    params: Dict[str, Any] = {}
+    params: dict[str, Any] = {}
     if not tool:
         return params
 

@@ -1,19 +1,19 @@
 """Terminal router - SSH terminal info and file push/upload APIs."""
 
-import os
 import json
-import shutil
 import logging
+import os
+import shutil
 import tempfile
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
-from foundation.responses import error_response
 
-from foundation.config import config_manager
 from features.system.ssh import ssh_manager
-from foundation.uploads import safe_upload_target_path, save_upload_to_path, merge_files_to_path
+from foundation.config import config_manager
+from foundation.responses import error_response
+from foundation.uploads import merge_files_to_path, safe_upload_target_path, save_upload_to_path
+
 
 logger = logging.getLogger(__name__)
 
@@ -56,15 +56,15 @@ async def get_ssh_terminal_info():
 @router.head("/api/terminal/push")
 async def upload_file(
     request: Request,
-    file: Optional[UploadFile] = File(None),
+    file: UploadFile | None = File(None),
     path: str = Form(""),
-    chunk_index: Optional[int] = Form(None),
-    total_chunks: Optional[int] = Form(None),
-    upload_id: Optional[str] = Form(None),
-    file_name: Optional[str] = Form(None),
-    file_size: Optional[int] = Form(None),
-    resume: Optional[str] = Form(None),
-    check_chunks: Optional[str] = Form(None),
+    chunk_index: int | None = Form(None),
+    total_chunks: int | None = Form(None),
+    upload_id: str | None = Form(None),
+    file_name: str | None = Form(None),
+    file_size: int | None = Form(None),
+    resume: str | None = Form(None),
+    check_chunks: str | None = Form(None),
 ):
     """File upload - supports chunked upload and resume."""
     # HEAD request: check uploaded chunks for resume
@@ -73,7 +73,7 @@ async def upload_file(
         chunks_file = os.path.join(session_dir, "uploaded_chunks.json")
 
         if os.path.exists(chunks_file):
-            with open(chunks_file, "r") as f:
+            with open(chunks_file) as f:
                 uploaded_chunks = json.load(f)
             return JSONResponse(content={"success": True, "uploaded_chunks": uploaded_chunks})
         else:
@@ -121,7 +121,7 @@ async def upload_file(
                             ssh_manager.optimize_sftp_performance(sftp)
                             try:
                                 sftp.stat(target_dir)
-                            except IOError:
+                            except OSError:
                                 sftp.mkdir(target_dir)
                             remote_path = f"{target_dir}/{safe_filename}"
                             sftp.put(temp_path, remote_path)
@@ -157,8 +157,8 @@ async def _upload_file_chunk(
     total_chunks: int,
     upload_id: str,
     file_name: str,
-    file_size: Optional[int] = None,
-    resume: Optional[str] = None,
+    file_size: int | None = None,
+    resume: str | None = None,
 ):
     """Handle chunked file upload."""
     try:
@@ -186,7 +186,7 @@ async def _upload_file_chunk(
 
         if os.path.exists(chunks_file):
             try:
-                with open(chunks_file, "r") as f:
+                with open(chunks_file) as f:
                     uploaded_chunks = set(json.load(f))
                 if resume:
                     logger.info(f"[ChunkUpload] Resuming with {len(uploaded_chunks)} chunks already uploaded")
@@ -267,7 +267,7 @@ async def _upload_file_chunk(
                         pass
                     logger.error(f"Error uploading merged file: {e}")
                     return JSONResponse(content={
-                        "success": False, "error": f"Upload failed: {str(e)}",
+                        "success": False, "error": f"Upload failed: {e!s}",
                         "chunks_uploaded": len(uploaded_chunks), "total_chunks": total_chunks,
                     }, status_code=500)
 

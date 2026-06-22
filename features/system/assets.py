@@ -9,20 +9,19 @@ import re
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from foundation.responses import error_response, success_response
-from features.users import get_client_id_from_request
-from foundation.config import config_manager
 from features.devices.support import ssh_connection_failed_response
-from foundation.errors import handle_api_errors
-from foundation.config import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, TOOLS_DATA_FILE
-from features.system.ssh import ssh_manager
 from features.system.icon_fetcher import IconFetcher
+from features.system.ssh import ssh_manager
+from features.users import get_client_id_from_request
+from foundation.config import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, TOOLS_DATA_FILE, config_manager
+from foundation.errors import handle_api_errors
+from foundation.responses import error_response, success_response
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ router = APIRouter()
 
 
 @router.get("/api/files/progress")
-async def get_upload_progress(upload_id: Optional[str] = None):
+async def get_upload_progress(upload_id: str | None = None):
     """获取上传进度"""
     return JSONResponse(content={
         "success": True,
@@ -58,7 +57,7 @@ async def list_files(req: dict):
                 return ssh_connection_failed_response()
 
             list_cmd = f"ls -la '{path}' 2>/dev/null || echo 'ERROR'"
-            output, error, code = ssh_manager.execute_command(ssh, list_cmd)
+            output, _error, code = ssh_manager.execute_command(ssh, list_cmd)
 
             if 'ERROR' in output or code != 0:
                 return error_response('Failed to list directory', status_code=500)
@@ -177,13 +176,12 @@ async def search_opengrok(req: dict):
 
     try:
         timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(search_url) as response:
-                body = await response.text(errors='replace')
-                if response.status >= 400:
-                    fetch_error = f'OpenGrok HTTP {response.status}'
-                else:
-                    results = _parse_opengrok_results(base_url, project, body, limit)
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(search_url) as response:
+            body = await response.text(errors='replace')
+            if response.status >= 400:
+                fetch_error = f'OpenGrok HTTP {response.status}'
+            else:
+                results = _parse_opengrok_results(base_url, project, body, limit)
     except Exception as e:
         fetch_error = str(e)
 
@@ -338,7 +336,7 @@ def load_tools_data():
     """加载所有用户的工具数据"""
     try:
         if os.path.exists(TOOLS_DATA_FILE):
-            with open(TOOLS_DATA_FILE, 'r', encoding='utf-8') as f:
+            with open(TOOLS_DATA_FILE, encoding='utf-8') as f:
                 return json.load(f)
         return {}
     except Exception as e:
@@ -505,8 +503,8 @@ def _resolve_allowed_utility_tool(file_path: str) -> Path:
     full_path = (UTILITY_TOOLS_DIR / normalized).resolve()
     try:
         full_path.relative_to(UTILITY_TOOLS_DIR.resolve())
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Access denied")
+    except ValueError as err:
+        raise HTTPException(status_code=403, detail="Access denied") from err
 
     if not full_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")

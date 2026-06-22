@@ -3,35 +3,15 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from features.assistant import api as assistant
-from features.automation import api as automation
-from features.system.api_help import generate_help_or_continue
-from foundation.config import config_manager
-from foundation.files import FileUtils
-from features.system.notifications import safe_websocket_send, store_notification
-from foundation.config import (
-    APK_MAX_FILE_SIZE,
-    APK_MAX_SOURCE_FILE_SIZE,
-    APK_MAX_TASKS,
-    APK_UPLOAD_DIR,
-    DEVICE_CACHE_TTL,
-    GSI_PROGRESS_INCREMENT,
-    GSI_PROGRESS_MAX,
-    GSI_PROGRESS_POLL_INTERVAL,
-    JADX_PATH,
-    JADX_TIMEOUT,
-    MAX_LOG_ENTRIES,
-    PROJECT_ROOT,
-)
-from features.system.ssh import ssh_manager
-from features.system.state import global_state
 from features.assistant.universal_ai import get_universal_analyzer
+from features.automation import api as automation
 from features.automation.api import configure_automation_service
 from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
 from features.devices import api as devices
 from features.devices import get_or_create_user_state
-from features.devices.dependencies import configure_device_dependencies
 from features.devices import integrations_api as device_integrations
+from features.devices.dependencies import configure_device_dependencies
 from features.devices.network import run_local_shell_command
 from features.firmware import api as firmware
 from features.firmware.apk import (
@@ -50,9 +30,15 @@ from features.reports import api as reports
 from features.reports.dependencies import configure_report_dependencies
 from features.system import api as system
 from features.system import assets, audit, desktop, integrations
-from features.system.mainline_issues import api as mainline_known_issues
 from features.system import notifications_api as notifications
 from features.system import terminal_api as terminal
+from features.system.api import init_templates
+from features.system.api_help import generate_help_or_continue
+from features.system.mainline_issues import api as mainline_known_issues
+from features.system.notifications import safe_websocket_send, store_notification
+from features.system.ssh import ssh_manager
+from features.system.ssh_async import ssh_async_manager
+from features.system.state import global_state
 from features.system.update_monitor import api as gms_update_monitor
 from features.test_execution import api as tests
 from features.test_execution.api import (
@@ -62,6 +48,7 @@ from features.test_execution.api import (
 from features.test_execution.dependencies import (
     configure_test_execution_dependencies,
 )
+from features.users import api as users
 from features.users import (
     client_manager,
     get_client_id_from_request,
@@ -70,13 +57,30 @@ from features.users import (
     probe_windows_usbipd,
     resolve_tailscale_device_host,
 )
-from features.users import api as users
 from features.users.dependencies import configure_user_dependencies
-from features.system.ssh_async import ssh_async_manager
-from features.system.api import init_templates
+from foundation.config import (
+    APK_MAX_FILE_SIZE,
+    APK_MAX_SOURCE_FILE_SIZE,
+    APK_MAX_TASKS,
+    APK_UPLOAD_DIR,
+    DEVICE_CACHE_TTL,
+    GSI_PROGRESS_INCREMENT,
+    GSI_PROGRESS_MAX,
+    GSI_PROGRESS_POLL_INTERVAL,
+    JADX_PATH,
+    JADX_TIMEOUT,
+    MAX_LOG_ENTRIES,
+    PROJECT_ROOT,
+    config_manager,
+)
+from foundation.files import FileUtils
 from workflows.device_test_execution import (
     acquire_test_devices,
     release_test_devices,
+)
+from workflows.firmware_device import (
+    lock_firmware_devices,
+    release_firmware_devices,
 )
 
 
@@ -105,10 +109,6 @@ ALL_ROUTERS = [
     tests.router,
     users.router,
 ]
-from workflows.firmware_device import (
-    lock_firmware_devices,
-    release_firmware_devices,
-)
 
 
 def include_routes(app: FastAPI, templates, services=None) -> None:

@@ -4,37 +4,37 @@ from __future__ import annotations
 
 import asyncio
 import smtplib
-from datetime import datetime
 from email.message import EmailMessage
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from features.redmine.agent import RedmineAgent
-from features.redmine.repository import (
-    RedmineAgentDB, USER_MAP_PATH, find_user_mapping, display_names_from_mapping, load_redmine_user_map,
-    load_user_map_payload, save_user_map_payload,
-    compute_user_overdue_stats, _name_keys as _nk,
-)
+from features.redmine.config import config_manager
 from features.redmine.dashboard import (
     add_department_profile,
+    add_project_profile,
     assign_user_to_profiles,
     denormalize_redmine_dashboard_config,
-    filter_users_for_profile,
-    issue_id_list,
     issue_url_text,
-    add_project_profile,
-    merge_resolved_trends,
-    select_redmine_dashboard_profile,
-    summarize_project_issues,
 )
-from features.redmine.config import config_manager
+from features.redmine.page import page_router
+from features.redmine.repository import (
+    RedmineAgentDB,
+    load_redmine_user_map,
+    load_user_map_payload,
+    save_user_map_payload,
+)
+from features.redmine.repository import (
+    _name_keys as _nk,
+)
 from features.redmine.scheduler import get_scheduler_config
 from features.redmine.service import RedmineService
-from features.redmine.page import page_router
 from foundation.config import settings
 
+
+__all__ = ["page_router", "router"]
 
 router = APIRouter(prefix="/api/redmine-agent")
 
@@ -44,9 +44,9 @@ redmine_service = RedmineService(
         docs_dir=settings.data_root / "redmine/docs",
     )
 )
-_DEPARTMENT_OVERDUE_CACHE: Dict[str, Any] = {}
-_WORKLOAD_STATS_CACHE: Dict[str, Any] = {}
-_PROJECT_STATS_CACHE: Dict[str, Any] = {}
+_DEPARTMENT_OVERDUE_CACHE: dict[str, Any] = {}
+_WORKLOAD_STATS_CACHE: dict[str, Any] = {}
+_PROJECT_STATS_CACHE: dict[str, Any] = {}
 
 
 def configure_redmine_service(service: RedmineService) -> None:
@@ -58,7 +58,7 @@ def configure_redmine_service(service: RedmineService) -> None:
         pass
 
 
-def _get_redmine_stats_config() -> Dict[str, Any]:
+def _get_redmine_stats_config() -> dict[str, Any]:
     """Read redmine_stats config (stale_days, window_days, cache_ttl) with defaults."""
     return config_manager.get_redmine_stats_config()
 
@@ -75,7 +75,7 @@ def _get_redmine_base_url() -> str:
 
 
 
-def _profile_ids_from_body(body: Dict[str, Any]) -> List[str]:
+def _profile_ids_from_body(body: dict[str, Any]) -> list[str]:
     raw = body.get("profile_ids")
     if raw is None:
         raw = body.get("department_ids")
@@ -86,7 +86,7 @@ def _profile_ids_from_body(body: Dict[str, Any]) -> List[str]:
     return [str(item or "").strip() for item in raw if str(item or "").strip() and str(item or "").strip() != "all"]
 
 
-def _department_from_profiles(profile_ids: List[str]) -> Dict[str, str]:
+def _department_from_profiles(profile_ids: list[str]) -> dict[str, str]:
     if not profile_ids:
         return {}
     dashboard = config_manager.get_redmine_dashboard_config()
@@ -99,7 +99,7 @@ def _department_from_profiles(profile_ids: List[str]) -> Dict[str, str]:
     return {"department_id": profile_ids[0], "department": ""}
 
 
-def _send_reminder_email(to_addr: str, subject: str, body: str) -> Dict[str, Any]:
+def _send_reminder_email(to_addr: str, subject: str, body: str) -> dict[str, Any]:
     dashboard_cfg = config_manager.load_config().get("redmine_dashboard") or {}
     email_cfg = dashboard_cfg.get("email") or {}
     smtp_host = str(email_cfg.get("smtp_host") or "").strip()
@@ -159,7 +159,7 @@ def _send_reminder_email(to_addr: str, subject: str, body: str) -> Dict[str, Any
     return {"sent": True, "mode": "smtp"}
 
 
-def _check_ttl_cache(cache_dict: Dict, cache_key: str, ttl: int, now_ts: float, refresh: bool = False) -> Optional[Dict]:
+def _check_ttl_cache(cache_dict: dict, cache_key: str, ttl: int, now_ts: float, refresh: bool = False) -> dict | None:
     """Check a TTL cache dict. Returns cached data on hit, None on miss."""
     if refresh:
         return None
@@ -169,7 +169,7 @@ def _check_ttl_cache(cache_dict: Dict, cache_key: str, ttl: int, now_ts: float, 
     return None
 
 
-def _update_ttl_cache(cache_dict: Dict, cache_key: str, now_ts: float, data: Any) -> None:
+def _update_ttl_cache(cache_dict: dict, cache_key: str, now_ts: float, data: Any) -> None:
     """Store data in a TTL cache dict and evict stale keys."""
     cache_dict[cache_key] = {"cached_at_ts": now_ts, "data": data}
     stale_keys = [k for k in cache_dict if k != cache_key]
@@ -277,8 +277,8 @@ async def get_statistics():
     return {"success": True, "data": redmine_service.repository.get_issue_statistics()}
 
 
-async def _resolve_owner_names() -> List[str]:
-    names: List[str] = []
+async def _resolve_owner_names() -> list[str]:
+    names: list[str] = []
     try:
         client = redmine_service.agent._make_client()
         user = await client.get_current_user()
@@ -297,7 +297,7 @@ async def _resolve_owner_names() -> List[str]:
     return list(dict.fromkeys(name for name in names if name))
 
 
-def _empty_user_stats(user: Dict[str, Any], error: str = "") -> Dict[str, Any]:
+def _empty_user_stats(user: dict[str, Any], error: str = "") -> dict[str, Any]:
     return {
         "id": user.get("id"),
         "name": user.get("name") or "",
@@ -497,7 +497,6 @@ async def get_stats_config():
     gerrit_cfg = config_manager.get_gerrit_dashboard_config()
     if gerrit_cfg.get("rest_password"):
         gerrit_cfg = {**gerrit_cfg, "rest_password": "***"}
-    redmine_cfg = config.get("redmine") or {}
     email_cfg = (config.get("redmine_dashboard") or {}).get("email") or {}
     base_url = config_manager.get_redmine_base_url(config)
     return {"success": True, "data": {
@@ -587,7 +586,8 @@ async def update_email_config(request: Request):
     return {"success": True, "data": {"email": email, "email_mode": "smtp" if email.get("smtp_host") else "unconfigured"}}
 
 
-from . import statistics_api as _statistics_api
+from . import statistics_api as _statistics_api  # noqa: E402
+
 
 router.include_router(_statistics_api.router)
 get_workload_statistics = _statistics_api.get_workload_statistics

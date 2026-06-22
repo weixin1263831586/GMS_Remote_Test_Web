@@ -31,20 +31,20 @@ from features.assistant.response import (
     page_quick_actions,
 )
 from features.assistant.tools import registry
-from foundation.responses import error_response, success_response
-from features.users import get_client_id_from_request
-from foundation.config import config_manager
-from features.reports.api_models import ReportDiagnosisRequest
-from features.test_execution.models import SuiteApkAnalyzeRequest
 from features.devices.locks import device_lock_manager
 from features.devices.manager import device_manager
 from features.devices.support import get_or_create_user_state
+from features.reports.api_models import ReportDiagnosisRequest
 from features.reports.repository import test_report_db
+from features.test_execution.models import SuiteApkAnalyzeRequest
 from features.test_execution.suites import (
     detect_test_type_from_suite_path,
     get_default_suites_path,
     is_config_host_local,
 )
+from features.users import get_client_id_from_request
+from foundation.config import config_manager
+from foundation.responses import error_response, success_response
 
 
 logger = logging.getLogger(__name__)

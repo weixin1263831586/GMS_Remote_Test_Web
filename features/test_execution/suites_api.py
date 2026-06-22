@@ -36,7 +36,7 @@ router = APIRouter()
 
 @router.get("/api/test/suites")
 @handle_api_errors
-async def list_suites(base_path: str = None):  # noqa: RUF013
+async def list_suites(base_path: str = None):
     """List all available test suites."""
     config = runtime.config_manager.load_config()
     base_path = base_path or config.get("suites_path") or get_default_suites_path(config)

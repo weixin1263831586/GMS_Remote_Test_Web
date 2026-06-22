@@ -2,28 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import os
 import re
-import tempfile
-import uuid
-import zipfile
-from datetime import datetime, timedelta
-from pathlib import Path
-from collections.abc import Callable
-from typing import Any, Dict, List, Optional
-
-import requests
+from datetime import datetime
+from typing import Any
 
 from features.redmine.config import config_manager
-from features.redmine.client import RedmineAttachment, RedmineClient
-from features.redmine.repository import (
-    RESOLVED_STATUS_NAMES as RESOLVED_STATUSES,
-    RedmineAgentDB,
-)
-from foundation.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +50,7 @@ MAX_REFERENCES = 5              # max similar references to return
 TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
 
 
-def _load_agent_config() -> Dict[str, Any]:
+def _load_agent_config() -> dict[str, Any]:
     """Load redmine_agent section from config.json, with env overrides."""
     cfg = config_manager.load_config().get("redmine_agent", {})
     return {
@@ -127,7 +113,7 @@ def _truncate(text: str, limit: int) -> str:
 
 class ResolutionAnalysisMixin:
     @staticmethod
-    def _extract_patch_from_journals(journals: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    def _extract_patch_from_journals(journals: list[dict[str, Any]]) -> list[dict[str, str]]:
         """Extract existing <pre><code class="diff"> patches from journal notes."""
         patches = []
         for journal in journals:
@@ -150,7 +136,7 @@ class ResolutionAnalysisMixin:
         return patches
 
     @staticmethod
-    def _detect_confirmed_in_journals(journals: List[Dict[str, Any]]) -> Optional[str]:
+    def _detect_confirmed_in_journals(journals: list[dict[str, Any]]) -> str | None:
         """Detect if the issue was confirmed resolved in journal comments."""
         confirm_patterns = ["测试ok", "测试通过", "验证ok", "验证通过", "已解决", "问题已解决", "可以关闭"]
         for journal in reversed(journals):
@@ -162,7 +148,7 @@ class ResolutionAnalysisMixin:
         return None
 
     @staticmethod
-    def _analyze_resolution_from_journals(journals: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _analyze_resolution_from_journals(journals: list[dict[str, Any]]) -> dict[str, Any]:
         """Analyze journal history to determine the correct resolution for a closed issue.
 
         Returns a structured resolution summary:
@@ -267,7 +253,7 @@ class ResolutionAnalysisMixin:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _format_journal_patches(patches: List[Dict[str, str]]) -> str:
+    def _format_journal_patches(patches: list[dict[str, str]]) -> str:
         """Format journal-extracted patches into joined HTML code blocks."""
         if not patches:
             return ""
@@ -275,16 +261,14 @@ class ResolutionAnalysisMixin:
 
     def _extract_structured_fields(
         self,
-        ai_result: Dict[str, Any],
-        issue_payload: Dict[str, Any],
-        failures: List[Dict[str, Any]],
-        references: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        ai_result: dict[str, Any],
+        issue_payload: dict[str, Any],
+        failures: list[dict[str, Any]],
+        references: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         """Map AI output + rule-based extraction to the seven display fields."""
         subject = issue_payload.get("subject") or ""
         journals = issue_payload.get("journals_json") or []
-        is_resolved = bool(issue_payload.get("is_resolved"))
-
         # Analyze resolution from journals (for closed/resolved issues)
         resolution = self._analyze_resolution_from_journals(journals)
 
@@ -361,13 +345,13 @@ class ResolutionAnalysisMixin:
             "ai_json": ai_result,
         }
 
-    def _rule_summary(self, issue_payload: Dict[str, Any], failures: List[Dict[str, Any]], references: List[Dict[str, Any]]) -> str:
+    def _rule_summary(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> str:
         if failures:
             first = failures[0]
             return f"{first.get('module') or '未知模块'} / {first.get('name') or '未知用例'} 失败：{_truncate(first.get('reason') or '', 180)}"
         return _truncate(issue_payload.get("description") or issue_payload.get("subject") or "未提取到描述", 240)
 
-    def _rule_solution(self, issue_payload: Dict[str, Any], failures: List[Dict[str, Any]], references: List[Dict[str, Any]]) -> str:
+    def _rule_solution(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> str:
         lines = []
         if failures:
             first = failures[0]
@@ -379,7 +363,7 @@ class ResolutionAnalysisMixin:
             lines.append(f"4. 可参考历史单: {ref_ids}")
         return "\n".join(lines)
 
-    def _rule_error_analysis(self, issue_payload: Dict[str, Any], failures: List[Dict[str, Any]], references: List[Dict[str, Any]]) -> str:
+    def _rule_error_analysis(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> str:
         """Rule-based error analysis when AI is unavailable."""
         parts = []
         if failures:
@@ -407,7 +391,7 @@ class ResolutionAnalysisMixin:
             parts.append("暂无分析结果")
         return "\n".join(parts)
 
-    def _rule_patch_direction(self, issue_payload: Dict[str, Any], failures: List[Dict[str, Any]], references: List[Dict[str, Any]]) -> str:
+    def _rule_patch_direction(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> str:
         """Rule-based patch direction when AI is unavailable."""
         desc = str(issue_payload.get("description") or "")
         parts = []
@@ -426,7 +410,7 @@ class ResolutionAnalysisMixin:
             parts.append("需要进一步分析具体日志和源码")
         return "\n".join(parts)
 
-    def _reply_draft(self, issue_payload: Dict[str, Any], failures: List[Dict[str, Any]], references: List[Dict[str, Any]], solution: str = "", patch_direction: str = "") -> str:
+    def _reply_draft(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]], solution: str = "", patch_direction: str = "") -> str:
         lines = [
             "Hi，问题已收到，初步分析如下：",
             "",

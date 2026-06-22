@@ -401,7 +401,7 @@ GUID                                  DEVICE
                 global_state.usbip_devices_source.update(old_sources)
 
     def test_frontend_submits_device_host_and_autoreconnects_usbip_disconnects(self):
-        text = Path("static/js/app.js").read_text(encoding="utf-8", errors="ignore")
+        text = Path("web/static/js/navigation.js").read_text(encoding="utf-8", errors="ignore")
 
         self.assertIn("device_host: deviceHost", text)
         self.assertIn("scheduleUsbipReconnect", text)

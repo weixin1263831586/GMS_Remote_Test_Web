@@ -8,8 +8,6 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
 from bootstrap.dependencies import AppServices
-from foundation.config import CLEANUP_INTERVAL_SECONDS
-from features.system.state import global_state
 from features.devices.manager import device_manager
 from features.devices.monitor import (
     init_usb_monitor,
@@ -26,6 +24,8 @@ from features.redmine.scheduler import (
     start_redmine_agent_scheduler,
     stop_redmine_agent_scheduler,
 )
+from features.system.state import global_state
+from foundation.config import CLEANUP_INTERVAL_SECONDS
 
 
 logger = logging.getLogger(__name__)

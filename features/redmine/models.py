@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-_ASSIGNEE_COUNT_CACHE: Dict[int, tuple] = {}
-_ASSIGNEE_TREND_CACHE: Dict[int, tuple] = {}
+
+_ASSIGNEE_COUNT_CACHE: dict[int, tuple] = {}
+_ASSIGNEE_TREND_CACHE: dict[int, tuple] = {}
 _CACHE_TTL_SECONDS = 600
 
 

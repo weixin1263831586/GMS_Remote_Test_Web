@@ -61,8 +61,8 @@ def inline_handler_calls(text: str) -> list[tuple[str, str]]:
 
 class FrontendIntegrityTests(unittest.TestCase):
     def test_main_app_inline_handlers_resolve_to_global_functions(self):
-        main_text = read_text("templates/index_fastapi.html")
-        script_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in Path("static/js").glob("*.js"))
+        main_text = read_text("web/shell/shell.html")
+        script_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in Path("web/static/js").glob("*.js"))
         combined = main_text + "\n" + script_text
         funcs = declared_functions(combined)
 
@@ -99,7 +99,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_modal_pages_support_escape_close(self):
         for label, paths in [
-            ("main", ["templates/index_fastapi.html"]),
+            ("main", ["web/shell/shell.html"]),
             (
                 "redmine",
                 [
@@ -115,7 +115,7 @@ class FrontendIntegrityTests(unittest.TestCase):
                 self.assertTrue("Escape" in text or "ModalManager" in text)
 
     def test_user_facing_result_prompts_avoid_blocking_alerts(self):
-        main_text = read_text("templates/index_fastapi.html")
+        main_text = read_text("web/shell/shell.html")
         self.assertNotIn("alert(", main_text)
         self.assertIn("gms-dashboard-notification", main_text)
         self.assertIn("redmine-agent-notification", main_text)
@@ -132,7 +132,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_modal_ids_and_function_declarations_are_not_duplicated(self):
         checked_paths = [
-            "templates/index_fastapi.html",
+            "web/shell/shell.html",
             "features/redmine/ui/page.html",
             "features/redmine/ui/page.js",
             "features/gerrit/ui/page.html",
@@ -140,7 +140,7 @@ class FrontendIntegrityTests(unittest.TestCase):
             "features/system/mainline_issues/ui/page.html",
             "features/automation/ui/page.html",
             "features/automation/ui/page.js",
-            *[str(path) for path in Path("static/js").glob("*.js")],
+            *[str(path) for path in Path("web/static/js").glob("*.js")],
         ]
         for path in checked_paths:
             with self.subTest(path=path):

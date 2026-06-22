@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .users import (
-    DB_PATH, DOCS_DIR, RESOLVED_STATUS_NAMES,
-    _looks_like_report_attachment, _looks_like_rk_actor, _name_keys,
-    _name_matches_keys, _now, _parse_dt, _sorted_slice, _time_key,
+    _name_keys,
+    _now,
 )
 
+
 class RepositoryStorageMixin:
-    def search_issues(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+    def search_issues(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         query = (query or "").strip()
         if not query:
             return []
@@ -42,7 +41,7 @@ class RepositoryStorageMixin:
                 ).fetchall()
         return [self._decode_row(row) for row in rows]
 
-    def get_unresolved_issues(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_unresolved_issues(self, limit: int = 50) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM redmine_agent_issues WHERE is_resolved = 0 ORDER BY updated_on DESC LIMIT ?",
@@ -52,11 +51,11 @@ class RepositoryStorageMixin:
 
     def get_resolved_issues_by_date(
         self,
-        owner_names: Optional[List[str]] = None,
+        owner_names: list[str] | None = None,
         start: str = "",
         end: str = "",
         limit: int = 500,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """查询某日期范围（按 closed_on，闭区间 [start, end)）内已解决的 issue。
 
         owner_names 为空时不过滤指派人。用于趋势柱状图点击查看该天/周解决的问题单明细。
@@ -74,7 +73,7 @@ class RepositoryStorageMixin:
                 """
             ).fetchall()
         issues = [self._decode_row(row) for row in rows]
-        result: List[Dict[str, Any]] = []
+        result: list[dict[str, Any]] = []
         max_items = max(1, min(int(limit or 500), 2000))
         for issue in issues:
             if owner_keys and not owner_keys.intersection(_name_keys(issue.get("assigned_to_name"))):
@@ -91,7 +90,7 @@ class RepositoryStorageMixin:
         result.sort(key=lambda item: (item.get("resolved_on") or "", item.get("issue_id") or 0), reverse=True)
         return result
 
-    def search_similar(self, query: str, exclude_issue_id: int, limit: int = 5) -> List[Dict[str, Any]]:
+    def search_similar(self, query: str, exclude_issue_id: int, limit: int = 5) -> list[dict[str, Any]]:
         query = (query or "").strip()
         if not query:
             return []
@@ -135,7 +134,7 @@ class RepositoryStorageMixin:
     # Attachments
     # ------------------------------------------------------------------
 
-    def insert_attachment(self, item: Dict[str, Any]) -> None:
+    def insert_attachment(self, item: dict[str, Any]) -> None:
         with self.connect() as conn:
             conn.execute(
                 """
@@ -160,7 +159,7 @@ class RepositoryStorageMixin:
     # References
     # ------------------------------------------------------------------
 
-    def replace_references(self, issue_id: int, references: List[Dict[str, Any]]) -> None:
+    def replace_references(self, issue_id: int, references: list[dict[str, Any]]) -> None:
         with self.connect() as conn:
             conn.execute("DELETE FROM redmine_agent_references WHERE issue_id=?", (issue_id,))
             conn.executemany(
@@ -203,7 +202,7 @@ class RepositoryStorageMixin:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _replace_fts(self, conn: sqlite3.Connection, payload: Dict[str, Any]) -> None:
+    def _replace_fts(self, conn: sqlite3.Connection, payload: dict[str, Any]) -> None:
         try:
             conn.execute("DELETE FROM redmine_agent_issue_fts WHERE issue_id=?", (payload.get("issue_id"),))
             conn.execute(
@@ -256,7 +255,7 @@ class RepositoryStorageMixin:
         return json.dumps(value, ensure_ascii=False)
 
     @staticmethod
-    def _decode_row(row: sqlite3.Row) -> Dict[str, Any]:
+    def _decode_row(row: sqlite3.Row) -> dict[str, Any]:
         item = dict(row)
         for key in ("summary_json", "journals_json", "attachments_json", "failures_json", "references_json", "ai_json", "match_details_json"):
             if key in item:

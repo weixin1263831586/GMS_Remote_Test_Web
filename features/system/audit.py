@@ -4,18 +4,19 @@ import asyncio
 import logging
 import os
 from collections import deque
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
 
-from foundation.responses import ApiResponse
-from features.users import get_client_id_from_request, parse_client_id
-from foundation.errors import handle_api_errors
 from features.system.models import SecurityPageViewRequest
 from features.system.security_audit import security_audit_logger
 from features.system.security_audit_utils import AUDIT_PAGE_VIEW_SKIP_PAGES
 from features.system.state import global_state
+from features.users import get_client_id_from_request, parse_client_id
+from foundation.errors import handle_api_errors
+from foundation.responses import ApiResponse
+
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +55,9 @@ async def record_security_page_view(req: SecurityPageViewRequest, request: Reque
 @handle_api_errors
 async def list_security_audit_logs(
     limit: int = Query(200, ge=1, le=1000),
-    source: Optional[str] = Query(None),
-    action_type: Optional[str] = Query(None),
-    q: Optional[str] = Query(None, max_length=120)
+    source: str | None = Query(None),
+    action_type: str | None = Query(None),
+    q: str | None = Query(None, max_length=120)
 ):
     """查询安全审计记录。"""
     if source and source not in {'web', 'cli'}:
@@ -73,7 +74,7 @@ async def list_security_audit_logs(
     return ApiResponse.success(result)
 
 
-def get_related_logs_for_audit(record: Dict[str, Any], limit: int = 80) -> Dict[str, Any]:
+def get_related_logs_for_audit(record: dict[str, Any], limit: int = 80) -> dict[str, Any]:
     client_id = record.get('client_id') or ''
     related = {
         'client_id': client_id,
@@ -91,7 +92,7 @@ def get_related_logs_for_audit(record: Dict[str, Any], limit: int = 80) -> Dict[
     if saved_log_file and os.path.exists(saved_log_file):
         related['saved_log_file'] = saved_log_file
         try:
-            with open(saved_log_file, 'r', encoding='utf-8', errors='replace') as f:
+            with open(saved_log_file, encoding='utf-8', errors='replace') as f:
                 related['saved_log_tail'] = list(deque(f, maxlen=limit))
         except Exception as e:
             related['saved_log_tail'] = [f'读取关联日志失败: {e}']

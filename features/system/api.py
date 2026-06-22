@@ -8,28 +8,28 @@ import re
 import tarfile
 import tempfile
 from datetime import datetime
-from typing import Optional
 from urllib.parse import urlparse
 
 import aiohttp
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.background import BackgroundTask
 
 from features.system.api_docs_list import API_DOCS_LIST
-from foundation.config import config_manager
-from foundation.config import DEFAULT_SERVER_URL, PROJECT_ROOT
-from foundation.errors import handle_api_errors
-from foundation.files import FileUtils
 from features.system.state import global_state
 from features.system.terminal_service import (
-    refresh_devices_websocket,
-    handle_tradefed_list_results,
+    close_terminal_session_resources,
     handle_terminal_connect,
     handle_terminal_input,
     handle_terminal_resize,
-    close_terminal_session_resources,
+    handle_tradefed_list_results,
+    refresh_devices_websocket,
 )
+from foundation.config import DEFAULT_SERVER_URL, PROJECT_ROOT, config_manager
+from foundation.errors import handle_api_errors
+from foundation.files import FileUtils
+from foundation.responses import error_response
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -54,7 +54,7 @@ async def root(request: Request):
 
     response = _templates.TemplateResponse(
         request=request,
-        name="index_fastapi.html",
+        name="shell.html",
         context={"config": config},
     )
     # HTML页面不缓存（确保用户获取最新版本）
@@ -117,42 +117,41 @@ async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str
 
     try:
         timeout = aiohttp.ClientTimeout(total=60)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.request(
-                request.method,
-                upstream_url,
-                headers=request_headers,
-                data=await request.body(),
-                allow_redirects=False,
-            ) as upstream_response:
-                body = await upstream_response.read()
-                content_type = upstream_response.headers.get("content-type", "")
-                response_headers = {
-                    key: value
-                    for key, value in upstream_response.headers.items()
-                    if key.lower() not in excluded_headers
-                }
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.request(
+            request.method,
+            upstream_url,
+            headers=request_headers,
+            data=await request.body(),
+            allow_redirects=False,
+        ) as upstream_response:
+            body = await upstream_response.read()
+            content_type = upstream_response.headers.get("content-type", "")
+            response_headers = {
+                key: value
+                for key, value in upstream_response.headers.items()
+                if key.lower() not in excluded_headers
+            }
 
-                if upstream_response.status in {301, 302, 303, 307, 308}:
-                    location = response_headers.get("Location") or response_headers.get("location")
-                    if location:
-                        response_headers["Location"] = location.replace(GMS_ASSISTANT_UPSTREAM, "/gms-assistant")
+            if upstream_response.status in {301, 302, 303, 307, 308}:
+                location = response_headers.get("Location") or response_headers.get("location")
+                if location:
+                    response_headers["Location"] = location.replace(GMS_ASSISTANT_UPSTREAM, "/gms-assistant")
 
-                if any(marker in content_type for marker in ("text/", "javascript", "json")):
-                    try:
-                        text = body.decode(upstream_response.charset or "utf-8", errors="replace")
-                        body = _rewrite_gms_assistant_content(text, request, proxy_base=proxy_base).encode("utf-8")
-                        response_headers.pop("Content-Length", None)
-                        response_headers.pop("content-length", None)
-                    except Exception:
-                        logger.debug("[GMS_ASSISTANT_PROXY] 跳过内容重写: %s", upstream_url, exc_info=True)
+            if any(marker in content_type for marker in ("text/", "javascript", "json")):
+                try:
+                    text = body.decode(upstream_response.charset or "utf-8", errors="replace")
+                    body = _rewrite_gms_assistant_content(text, request, proxy_base=proxy_base).encode("utf-8")
+                    response_headers.pop("Content-Length", None)
+                    response_headers.pop("content-length", None)
+                except Exception:
+                    logger.debug("[GMS_ASSISTANT_PROXY] 跳过内容重写: %s", upstream_url, exc_info=True)
 
-                return Response(
-                    content=body,
-                    status_code=upstream_response.status,
-                    media_type=content_type.split(";")[0] if content_type else None,
-                    headers=response_headers,
-                )
+            return Response(
+                content=body,
+                status_code=upstream_response.status,
+                media_type=content_type.split(";")[0] if content_type else None,
+                headers=response_headers,
+            )
     except Exception as e:
         logger.error("[GMS_ASSISTANT_PROXY] 代理失败 %s: %s", upstream_url, e, exc_info=True)
         return JSONResponse(
@@ -305,7 +304,7 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
                 status_code=500
             )
 
-        zip_data, file_count = result
+        zip_data, _file_count = result
 
         return Response(
             content=zip_data,
@@ -344,7 +343,7 @@ async def download_install_sh(request: Request):
                 status_code=404
             )
 
-        with open(install_sh_path, 'r', encoding='utf-8') as f:
+        with open(install_sh_path, encoding='utf-8') as f:
             content = f.read()
 
         base_url = str(request.base_url).rstrip('/')
@@ -377,9 +376,8 @@ async def download_install_package(request: Request):
     tmp = None
     try:
         logger.info("[INSTALL_PACKAGE_DOWNLOAD] 请求下载安装包")
-        tmp = tempfile.NamedTemporaryFile(prefix='gms-web-app-', suffix='.tar.gz', delete=False)
-        tmp_path = tmp.name
-        tmp.close()
+        with tempfile.NamedTemporaryFile(prefix='gms-web-app-', suffix='.tar.gz', delete=False) as tmp:
+            tmp_path = tmp.name
 
         root_name = 'gms-web-app'
         exclude_dirs = {
@@ -450,9 +448,9 @@ async def download_install_package(request: Request):
 @router.get("/templates/architecture.html")
 async def get_architecture():
     """获取系统架构图"""
-    architecture_file = os.path.join(PROJECT_ROOT, 'templates', 'architecture.html')
+    architecture_file = os.path.join(PROJECT_ROOT, 'web', 'templates', 'architecture.html')
     if os.path.exists(architecture_file):
-        with open(architecture_file, 'r', encoding='utf-8') as f:
+        with open(architecture_file, encoding='utf-8') as f:
             content = f.read()
         return HTMLResponse(content=content)
     return JSONResponse(status_code=404, content={"error": "Architecture diagram not found"})
@@ -484,7 +482,7 @@ async def get_api_docs():
 # ==================== API Help ====================
 
 @router.get("/api/system/help")
-async def get_api_help(api_path: Optional[str] = None):
+async def get_api_help(api_path: str | None = None):
     """获取API帮助信息（统一接口）
 
     Args:
@@ -639,7 +637,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
 
 
-def generate_per_api_help_text(method: str, path: str) -> Optional[str]:
+def generate_per_api_help_text(method: str, path: str) -> str | None:
     """为指定API生成详细帮助文本
 
     Args:

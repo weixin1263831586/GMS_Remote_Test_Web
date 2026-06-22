@@ -4,12 +4,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_OLD_IMPORT_EXEMPTIONS = {
-    'bootstrap/application.py',
-    'bootstrap/dependencies.py',
-    'bootstrap/lifecycle.py',
-    'bootstrap/routes.py',
-}
 MIGRATION_FEATURE_IMPORT_EXEMPTIONS = {
     # 2026-06-19 Task 12/13 migration: these are being moved behind workflows
     # before final cutover.
@@ -76,8 +70,6 @@ class DependencyRuleTests(unittest.TestCase):
         for base in ('bootstrap', 'foundation', 'features', 'workflows'):
             for path in (ROOT / base).rglob('*.py'):
                 relative = str(path.relative_to(ROOT))
-                if relative in MIGRATION_OLD_IMPORT_EXEMPTIONS:
-                    continue
                 bad = sorted(
                     name
                     for name in imports(path)
