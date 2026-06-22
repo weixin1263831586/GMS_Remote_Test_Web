@@ -47,7 +47,15 @@ ignore = [
 
 [tool.ruff.lint.isort]
 # import 排序配置
-known-first-party = ["core", "modules", "routers"]
+known-first-party = [
+    "bootstrap",
+    "core",
+    "features",
+    "foundation",
+    "modules",
+    "routers",
+    "workflows",
+]
 force-single-line = false
 lines-after-imports = 2
 

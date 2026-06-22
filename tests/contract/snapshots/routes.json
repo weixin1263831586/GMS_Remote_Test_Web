@@ -1,0 +1,1319 @@
+[
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/@fs/{path:path}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/@id/{path:path}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/@react-refresh"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/@vite/{path:path}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/adb-forward/start"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/adb-forward/stop"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/agent/capabilities"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/agent/chat"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/agent/sessions/{session_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/agent/sessions/{session_id}/cancel"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/apk/analyze/{task_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/apk/definition/{task_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/apk/download/{task_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/apk/manifest/{task_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/apk/permissions/{task_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/apk/search/{task_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/apk/source/{task_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/apk/status/{task_id}"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/apk/task/{task_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/apk/tasks"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/apk/upload"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/gerrit/poll"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/gerrit/webhook"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/automation/profiles"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/profiles"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/automation/profiles/{profile_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/profiles/{profile_id}/dry-run"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/automation/runs"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/runs"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/automation/runs/{run_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/runs/{run_id}/cancel"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/automation/runs/{run_id}/events"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/runs/{run_id}/retry"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/worker/tick"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/burn/firmware"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/burn/gsi"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/burn/serial"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/burn/upload-progress"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/config/ai"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/config/opengrok"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/config/read"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/config/redmine"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/config/update"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/desktop/validate"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/desktop/validate-host"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/desktop/vnc/start"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/desktop/vnc/status"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/desktop/vnc/stop"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/bootloader-lock"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/bootloader-status"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/bootloader-unlock"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/info"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/list"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/management"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/reboot"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/remount"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/scrcpy"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/shell"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/user-locked"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/wifi"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/favicon/batch"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/favicon/fetch"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/favicon/proxy"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/files/list"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/files/progress"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gerrit-dashboard/changes"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gerrit-dashboard/changes-by-date"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gerrit-dashboard/config"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/gerrit-dashboard/config"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/gerrit-dashboard/department-profiles"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/gerrit-dashboard/department-profiles/{profile_id}/owners"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/gerrit-dashboard/department-profiles/{profile_id}/owners"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/gerrit-dashboard/personal-profiles"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gerrit-dashboard/statistics/department"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gerrit-dashboard/statistics/personal"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/gerrit-dashboard/sync-redmine-members"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/artifacts"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/artifacts/new"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/changes"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/packages"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/requirements/sections"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/requirements/table-rows"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/requirements/version-summary"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/requirements/version-tags"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/scan-runs"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/sources"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/summary"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/gms-update-monitor/sync"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/sync/status"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledgebase/search"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledgebase/stats"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/mainline-known-issues"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/mainline-known-issues/summary"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/mainline-known-issues/sync"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/mainline-known-issues/sync/status"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/notifications"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/notifications"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/notifications/clear"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/notifications/mark-read"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/opengrok/search"
+  },
+  {
+    "methods": [
+      "DELETE",
+      "GET",
+      "OPTIONS",
+      "PATCH",
+      "POST",
+      "PUT"
+    ],
+    "path": "/api/public/{path:path}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/config"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/config/email"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/config/stats"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/config/stats"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/dashboard/profiles"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/dashboard/projects"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/issues"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/issues/search"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/document"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/fetch"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/reminders/email"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/reports/latest"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/runs"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/runs"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/runs/{run_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/statistics"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/statistics/department-overdue"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/statistics/project"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/statistics/resolved-by-date"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/statistics/workload"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/status"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/sync"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/users"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/users"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine/reply"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/reports/analyze"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/reports/analyze-url"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/reports/delete"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/reports/diagnose"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/reports/download"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/reports/extract-redmine-attachment"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/reports/list"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/security-audit/detail/{event_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/security-audit/export"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/security-audit/logs"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/security-audit/page-view"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/sidebar-order"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/sidebar-order"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/ssh/ping"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/ssh/route"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/ssh/sshd"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/system/docs"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/system/health"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/system/help"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/system/install-package"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/system/install-sh"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/system/skills"
+  },
+  {
+    "methods": [
+      "WEBSOCKET"
+    ],
+    "path": "/api/system/websocket/{client_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/tailscale/ensure"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/tailscale/status"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/terminal/open"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/terminal/push"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/clean"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/logs/batch"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/logs/get"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/logs/list"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/logs/save"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/logs/stream"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/parse-args"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/start"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/status"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/stop"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/suites"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/suites/add-local"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/suites/apk/analyze"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/suites/archives"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/suites/diagnose-target"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/suites/download"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/suites/download-status/{task_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/suites/download-url"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/suites/extract"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/suites/extract-start"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/suites/extract-status/{task_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/suites/files"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/test/suites/result"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/tools/browse"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/tools/download/{file_path:path}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/tools/list"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/usbip/connect"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/usbip/disconnect"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/usbip/install"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/usbip/status"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/users/current"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/users/detect"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/users/list"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/users/set-username"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/vnc/start"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/vpn/connect"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/vpn/connections"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/vpn/disconnect"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/vpn/status"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/websites/load"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/websites/save"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/websites/sync"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/assets/{path:path}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/automation"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/docs"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/docs/oauth2-redirect"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/gerrit-dashboard"
+  },
+  {
+    "methods": [
+      "DELETE",
+      "GET",
+      "OPTIONS",
+      "PATCH",
+      "POST",
+      "PUT"
+    ],
+    "path": "/gms-assistant/{path:path}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/gms-update-monitor"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/mainline-known-issues"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/node_modules/{path:path}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/novnc"
+  },
+  {
+    "methods": [
+      "WEBSOCKET"
+    ],
+    "path": "/novnc/novnc/websockify"
+  },
+  {
+    "methods": [
+      "WEBSOCKET"
+    ],
+    "path": "/novnc/websockify"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/novnc/{path:path}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/openapi.json"
+  },
+  {
+    "methods": [
+      "DELETE",
+      "GET",
+      "OPTIONS",
+      "PATCH",
+      "POST",
+      "PUT"
+    ],
+    "path": "/public/{path:path}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/redmine-agent"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/redoc"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/src/{path:path}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/templates/architecture.html"
+  },
+  {
+    "methods": [
+      "WEBSOCKET"
+    ],
+    "path": "/websockify"
+  }
+]

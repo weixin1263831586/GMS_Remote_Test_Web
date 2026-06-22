@@ -1,0 +1,146 @@
+{
+  "ai_models": {
+    "enabled": "bool",
+    "primary_provider": "str",
+    "providers": {
+      "glm_local": {
+        "api_format": "str",
+        "api_key": "str",
+        "base_url": "str",
+        "enabled": "bool",
+        "max_tokens": "int",
+        "model": "str",
+        "name": "str",
+        "temperature": "float"
+      },
+      "zhipu": {
+        "api_format": "str",
+        "api_key": "str",
+        "base_url": "str",
+        "enabled": "bool",
+        "max_tokens": "int",
+        "model": "str",
+        "name": "str",
+        "temperature": "float"
+      }
+    }
+  },
+  "client_hosts": {
+    "127.0.0.1": "str",
+    "172.16.14.66": "str"
+  },
+  "client_ssh_credentials": [
+    {
+      "device_host": "str",
+      "host": "str",
+      "password": "str",
+      "username": "str"
+    }
+  ],
+  "gerrit_dashboard": {
+    "base_url": "str",
+    "cache_ttl": "int",
+    "chart_date_ranges": {},
+    "dashboard_profiles": [
+      {
+        "id": "str",
+        "name": "str",
+        "query": "str"
+      }
+    ],
+    "default_owner": "str",
+    "department_defaults": {
+      "list_limit": "int",
+      "max_history_changes": "int",
+      "query_limit": "int",
+      "query_page_size": "int"
+    },
+    "department_profiles": [
+      {
+        "id": "str",
+        "list_limit": "int",
+        "max_history_changes": "int",
+        "name": "str",
+        "owners": [
+          "str"
+        ],
+        "query_limit": "int",
+        "query_page_size": "int"
+      }
+    ],
+    "personal_profiles": [
+      {
+        "department": "str",
+        "department_id": "str",
+        "id": "str",
+        "list_limit": "int",
+        "max_history_changes": "int",
+        "name": "str",
+        "owner": "str",
+        "query_limit": "int",
+        "query_page_size": "int"
+      }
+    ],
+    "query_limit": "int",
+    "rest_password": "str",
+    "rest_username": "str",
+    "rest_verify_ssl": "bool",
+    "ssh_host": "str",
+    "ssh_identity_file": "str",
+    "ssh_port": "int",
+    "ssh_user": "str"
+  },
+  "gsi_scripts": "str",
+  "local_server": "str",
+  "opengrok": {
+    "base_url": "str",
+    "default_project": "str",
+    "project_mapping": {
+      "13": "str",
+      "14": "str",
+      "15": "str",
+      "16": "str",
+      "17": "str",
+      "18": "str"
+    }
+  },
+  "private_key_path": "str",
+  "redmine": {
+    "base_url": "str",
+    "domain": "str"
+  },
+  "redmine_agent": {
+    "detail_sync_limit": "int",
+    "max_issues_per_run": "int",
+    "scan_hour": "int",
+    "scan_hours_window": "int",
+    "scan_minute": "int",
+    "sync_max_issues": "int"
+  },
+  "redmine_auth": {
+    "encrypted_password": "str",
+    "updated_at": "str",
+    "username": "str"
+  },
+  "scrcpy_path": "str",
+  "script_path": "str",
+  "suites_path": "str",
+  "ubuntu_host": "str",
+  "ubuntu_pswd": "str",
+  "ubuntu_user": "str",
+  "usbip_devices_source": {
+    "c3d9b8674f4b94f6": {
+      "source": "str",
+      "timestamp": "float"
+    }
+  },
+  "usbip_vid_pid": "str",
+  "use_key_auth": "bool",
+  "vnc_password": "str",
+  "vpn_gateways": [
+    "str"
+  ],
+  "vpn_target": [
+    "str"
+  ]
+}
