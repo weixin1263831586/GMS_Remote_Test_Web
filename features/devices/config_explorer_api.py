@@ -1,0 +1,292 @@
+"""Android resource config explorer router.
+
+Exposes the "配置资源查看器" tool: list framework (or any package) config
+resources with their APK default value and, optionally, the overlay-effective
+value. Also serves a self-contained HTML page reached via a built-in tool card
+on the 常用工具 page (no sidebar nav entry).
+"""
+
+import logging
+import os
+import uuid
+from collections.abc import Callable
+from typing import Any
+
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+
+from foundation.config import APK_MAX_FILE_SIZE, APK_UPLOAD_DIR
+from foundation.errors import handle_api_errors
+from foundation.responses import error_response, success_response
+
+from .config_explorer import (
+    explore,
+    list_all_packages,
+    list_devices,
+    list_features,
+    list_packages,
+    list_packages_with_path,
+    list_props,
+    pull_device_file,
+)
+from .config_explorer_page import CONFIG_EXPLORER_HTML
+
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+_generate_help_or_continue: Callable[[bool, str, str], Any] | None = None
+_create_apk_task: Callable[[str, str, str], Any] | None = None
+_normalize_apk_filename: Callable[[str], str] | None = None
+_safe_join: Callable[[str, str], str] | None = None
+_cleanup_files: Callable[[list[str]], Any] | None = None
+
+
+def configure_config_explorer_dependencies(
+    *,
+    generate_help_or_continue: Callable[[bool, str, str], Any],
+    create_apk_task: Callable[[str, str, str], Any],
+    normalize_apk_filename: Callable[[str], str],
+    safe_join: Callable[[str, str], str],
+    cleanup_files: Callable[[list[str]], Any],
+) -> None:
+    global _generate_help_or_continue
+    global _create_apk_task
+    global _normalize_apk_filename
+    global _safe_join
+    global _cleanup_files
+
+    _generate_help_or_continue = generate_help_or_continue
+    _create_apk_task = create_apk_task
+    _normalize_apk_filename = normalize_apk_filename
+    _safe_join = safe_join
+    _cleanup_files = cleanup_files
+
+
+def _help_or_continue(help: bool, method: str, path: str):
+    if _generate_help_or_continue is None:
+        return None
+    return _generate_help_or_continue(help, method, path)
+
+
+def _decompile_dependencies_ready() -> bool:
+    return all(
+        dep is not None
+        for dep in (
+            _create_apk_task,
+            _normalize_apk_filename,
+            _safe_join,
+            _cleanup_files,
+        )
+    )
+
+
+@router.get("/api/config-explorer/devices")
+@handle_api_errors
+async def api_list_devices(request: Request, help: bool = Query(False)):
+    """List adb devices available for config exploration."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer/devices")
+    if resp:
+        return resp
+    devices = list_devices()
+    return success_response(data={"devices": devices}, message="Success")
+
+
+@router.get("/api/config-explorer/packages")
+@handle_api_errors
+async def api_list_packages(
+    request: Request,
+    device_id: str = Query("", description="adb serial; empty = default device"),
+    help: bool = Query(False),
+):
+    """List packages that typically carry config_* resources."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer/packages")
+    if resp:
+        return resp
+    packages = list_packages(device_id or None)
+    return success_response(data={"packages": packages}, message="Success")
+
+
+@router.get("/api/config-explorer/packages/all")
+@handle_api_errors
+async def api_list_all_packages(
+    request: Request,
+    device_id: str = Query("", description="adb serial; empty = default device"),
+    help: bool = Query(False),
+):
+    """List ALL packages on the device (pm list packages) for the package picker."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer/packages/all")
+    if resp:
+        return resp
+    packages = list_all_packages(device_id or None)
+    return success_response(
+        data={"packages": packages, "count": len(packages)}, message="Success"
+    )
+
+
+@router.get("/api/config-explorer/packages-with-path")
+@handle_api_errors
+async def api_list_packages_with_path(
+    request: Request,
+    device_id: str = Query("", description="adb serial; empty = default device"),
+    help: bool = Query(False),
+):
+    """``pm list packages -f`` → [{path, package}] (device info: packages tab)."""
+    resp = _help_or_continue(
+        help, "GET", "/api/config-explorer/packages-with-path"
+    )
+    if resp:
+        return resp
+    rows = list_packages_with_path(device_id or None)
+    return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
+
+
+@router.get("/api/config-explorer/features")
+@handle_api_errors
+async def api_list_features(
+    request: Request,
+    device_id: str = Query("", description="adb serial; empty = default device"),
+    help: bool = Query(False),
+):
+    """``pm list features`` → [{name, version?}] (device info: features tab)."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer/features")
+    if resp:
+        return resp
+    rows = list_features(device_id or None)
+    return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
+
+
+@router.get("/api/config-explorer/props")
+@handle_api_errors
+async def api_list_props(
+    request: Request,
+    device_id: str = Query("", description="adb serial; empty = default device"),
+    help: bool = Query(False),
+):
+    """``getprop`` → [{name, value}] (device info: props tab)."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer/props")
+    if resp:
+        return resp
+    rows = list_props(device_id or None)
+    return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
+
+
+@router.get("/api/config-explorer")
+@handle_api_errors
+async def api_explore(
+    request: Request,
+    package: str = Query("android", description="包名，如 android"),
+    device_id: str = Query("", description="adb serial；为空时用默认设备"),
+    name: str = Query("", description="资源名子串过滤（忽略大小写）"),
+    type: str = Query("", description="类型过滤：bool/integer/string/dimen/array"),
+    config_only: bool = Query(True, description="只显示 config_* 资源"),
+    with_effective: bool = Query(
+        False, description="同时计算 overlay 生效值（每资源一次 adb 调用，并发执行）"
+    ),
+    effective_limit: int = Query(
+        0, description="生效值查询上限；0=不限（计算全部）。仅在 with_effective 时生效"
+    ),
+    help: bool = Query(False),
+):
+    """List config resources of a package with default (+optional effective) values."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer")
+    if resp:
+        return resp
+
+    try:
+        result = explore(
+            package=package or "android",
+            device_id=device_id or None,
+            name_filter=name or None,
+            type_filter=type or None,
+            config_only=config_only,
+            with_effective=with_effective,
+            effective_limit=effective_limit,
+        )
+    except Exception as e:
+        logger.error(f"config-explorer explore failed: {e}")
+        return error_response(str(e), status_code=400)
+
+    return success_response(
+        data={
+            "package": result.package,
+            "apk_path": result.apk_path,
+            "total": result.total,
+            "overlayed_count": result.overlayed_count,
+            "resources": result.resources,
+        },
+        message="Success",
+    )
+
+
+@router.get("/config-explorer", response_class=HTMLResponse)
+async def config_explorer_page():
+    """Self-contained HTML page for the config explorer tool card."""
+    return HTMLResponse(content=CONFIG_EXPLORER_HTML)
+
+
+class DecompileRequest(BaseModel):
+    device_id: str = ""
+    path: str
+
+
+@router.post("/api/config-explorer/decompile")
+@handle_api_errors
+async def decompile_device_apk(req: DecompileRequest):
+    """Pull an on-device APK/JAR and register it as an APK-analysis task.
+
+    The file is pulled into the APK upload dir (so the existing APK-analysis
+    pipeline can decompile it), then a task is created. Returns ``task_id`` /
+    ``filename`` / ``size``; the frontend then switches to the APK-analysis
+    page and starts the analysis (same flow as suite→APK).
+    """
+    import asyncio
+
+    if not _decompile_dependencies_ready():
+        return error_response("APK 分析依赖未初始化", status_code=500)
+    if not req.path.strip():
+        return error_response("缺少 APK 路径", status_code=400)
+    on_device_path = req.path.strip()
+
+    # Derive a friendly filename from the package base name or the path tail.
+    base = os.path.basename(on_device_path.rstrip("/")) or "app.apk"
+    if "." not in base:
+        base += ".apk"
+    assert _normalize_apk_filename is not None
+    assert _safe_join is not None
+    assert _cleanup_files is not None
+    assert _create_apk_task is not None
+    filename = _normalize_apk_filename(base)
+    task_id = str(uuid.uuid4())
+    task_dir = _safe_join(APK_UPLOAD_DIR, task_id)
+    os.makedirs(task_dir, exist_ok=True)
+    apk_path = _safe_join(task_dir, filename)
+
+    try:
+        # Pull on a worker thread (blocking adb transfer).
+        await asyncio.to_thread(
+            pull_device_file, req.device_id or None, on_device_path, apk_path
+        )
+    except Exception as e:
+        _cleanup_files([apk_path])
+        logger.error(f"decompile pull failed: {e}")
+        return error_response(f"拉取 APK 失败: {e}", status_code=400)
+
+    if os.path.getsize(apk_path) > APK_MAX_FILE_SIZE:
+        _cleanup_files([apk_path])
+        return error_response(
+            f"文件过大，上限 {APK_MAX_FILE_SIZE // (1024 * 1024)}MB", status_code=400
+        )
+
+    _create_apk_task(task_id, apk_path, filename)
+    return success_response(
+        data={
+            "task_id": task_id,
+            "filename": filename,
+            "size": os.path.getsize(apk_path),
+            "source_path": on_device_path,
+        },
+        message="Success",
+    )
