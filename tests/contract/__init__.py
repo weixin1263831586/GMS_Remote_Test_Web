@@ -1,0 +1,1 @@
+"""Frozen external behavior contracts."""
