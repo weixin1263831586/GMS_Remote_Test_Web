@@ -1,4 +1,7 @@
 import unittest
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 class GerritConfigTests(unittest.TestCase):
@@ -74,6 +77,35 @@ class GerritConfigTests(unittest.TestCase):
         )
         self.assertEqual(department["owners"], ["alice@example.com"])
         self.assertEqual(personal["department_id"], "platform")
+
+    def test_feature_gerrit_config_save_preserves_other_runtime_sections(self):
+        from features.gerrit.settings import GerritConfig
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "foundation").mkdir()
+            configs = root / "configs"
+            configs.mkdir()
+            (configs / "config.json").write_text(
+                json.dumps({"gerrit_dashboard": {"base_url": "https://old.example.com"}}),
+                encoding="utf-8",
+            )
+            (configs / "config_runtime.json").write_text(
+                json.dumps({"redmine_auth": {"username": "u"}, "sidebar_order": ["test"]}),
+                encoding="utf-8",
+            )
+
+            manager = GerritConfig(project_root=root)
+
+            self.assertTrue(manager.save_gerrit_dashboard_config({
+                "base_url": "https://10.10.10.29/",
+                "department_profiles": [{"id": "sys", "name": "系统部", "owners": ["dev@example.com"]}],
+            }))
+
+            runtime = json.loads((configs / "config_runtime.json").read_text(encoding="utf-8"))
+            self.assertEqual(runtime["redmine_auth"]["username"], "u")
+            self.assertEqual(runtime["sidebar_order"], ["test"])
+            self.assertEqual(runtime["gerrit_dashboard"]["base_url"], "https://10.10.10.29")
 
 
 if __name__ == "__main__":

@@ -33,9 +33,7 @@ class GerritConfig:
         normalized = denormalize_gerrit_dashboard_config(
             {**current, **(payload or {})}
         )
-        return self.manager.save_runtime(
-            {"gerrit_dashboard": normalized}
-        )
+        return self.manager.save_runtime({"gerrit_dashboard": normalized})
 
     def get_redmine_dashboard_config(self) -> dict[str, Any]:
         return dict(self.load_config().get("redmine_dashboard") or {})

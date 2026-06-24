@@ -231,12 +231,20 @@ async function init() {
   fillSelect('profile', config.dashboard_profiles || []);
   fillSelect('personalProfile', config.personal_profiles || []);
   fillSelect('departmentProfile', config.department_profiles || []);
+  restoreGerritProfileState();
+  var validTabs = {'personal':1,'department':1,'query':1};
+  if (!validTabs[currentTab]) currentTab = 'personal';
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === currentTab));
+  document.querySelectorAll('.tab-content').forEach(x => x.classList.toggle('active', x.id === 'tab-' + currentTab));
   const first = (config.dashboard_profiles || [])[0] || {};
-  document.getElementById('query').value = first.query || 'status:open';
+  var queryInput = document.getElementById('query');
+  if (queryInput && !queryInput.value) queryInput.value = first.query || 'status:open';
   const person = (config.personal_profiles || [])[0] || {};
   const ownerInput = document.getElementById('owner');
   if (ownerInput) ownerInput.value = person.owner || config.default_owner || 'chaoqun.huang@rock-chips.com';
-  await loadPersonal(false);
+  if (currentTab === 'personal') await loadPersonal(false);
+  else if (currentTab === 'department') await loadDepartment(false);
+  else await loadChanges();
 }
 function showSettings() {
   document.getElementById('settingBaseUrl').value = config.base_url || 'https://10.10.10.29';
@@ -319,10 +327,46 @@ function notifyUser(title, message, level) {
   document.body.appendChild(toast);
   setTimeout(function(){ if (toast.parentNode) toast.remove(); }, 3600);
 }
+function saveGerritProfileState() {
+  try {
+    window.sessionStorage.setItem('gerritCurrentTab', currentTab || 'personal');
+    window.sessionStorage.setItem('gerritPersonalProfileId', currentPersonalProfileId || '');
+    window.sessionStorage.setItem('gerritDepartmentProfileId', currentDepartmentProfileId || '');
+    window.sessionStorage.setItem('gerritQueryProfileId', document.getElementById('profile') ? document.getElementById('profile').value : '');
+    window.sessionStorage.setItem('gerritQueryValue', document.getElementById('query') ? document.getElementById('query').value : '');
+  } catch(_) {}
+  var url = new URL(window.location.href);
+  if (currentTab && currentTab !== 'personal') url.searchParams.set('tab', currentTab);
+  else url.searchParams.delete('tab');
+  if (currentTab === 'personal' && currentPersonalProfileId) url.searchParams.set('personal_profile', currentPersonalProfileId);
+  else url.searchParams.delete('personal_profile');
+  if (currentTab === 'department' && currentDepartmentProfileId) url.searchParams.set('dept_profile', currentDepartmentProfileId);
+  else url.searchParams.delete('dept_profile');
+  window.history.replaceState({}, '', url.toString());
+}
+function restoreGerritProfileState() {
+  var q = new URLSearchParams(window.location.search);
+  var t = q.get('tab');
+  currentTab = t || currentTab || 'personal';
+  currentPersonalProfileId = q.get('personal_profile') || currentPersonalProfileId || '';
+  currentDepartmentProfileId = q.get('dept_profile') || currentDepartmentProfileId || '';
+  try {
+    if (!t) currentTab = window.sessionStorage.getItem('gerritCurrentTab') || currentTab;
+    if (!currentPersonalProfileId) currentPersonalProfileId = window.sessionStorage.getItem('gerritPersonalProfileId') || '';
+    if (!currentDepartmentProfileId) currentDepartmentProfileId = window.sessionStorage.getItem('gerritDepartmentProfileId') || '';
+    var savedQueryProfile = window.sessionStorage.getItem('gerritQueryProfileId') || '';
+    var savedQuery = window.sessionStorage.getItem('gerritQueryValue') || '';
+    var profileEl = document.getElementById('profile');
+    if (profileEl && savedQueryProfile) profileEl.value = savedQueryProfile;
+    var queryEl = document.getElementById('query');
+    if (queryEl && savedQuery) queryEl.value = savedQuery;
+  } catch(_) {}
+}
 function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
   document.querySelectorAll('.tab-content').forEach(x => x.classList.toggle('active', x.id === 'tab-' + tab));
+  saveGerritProfileState();
   if (tab === 'personal') loadPersonal(false);
   if (tab === 'department') loadDepartment(false);
   if (tab === 'query') loadChanges();
@@ -429,6 +473,7 @@ function onPersonalProfileChange() {
   currentPersonalProfileId = id;
   const profile = (config.personal_profiles || []).find(x => x.id === id) || {};
   if (profile.owner) document.getElementById('owner').value = profile.owner;
+  saveGerritProfileState();
   loadPersonal(true);
 }
 async function loadPersonal(refresh) {
@@ -438,6 +483,7 @@ async function loadPersonal(refresh) {
   const profileSelect = document.getElementById('personalProfile');
   const profileId = (profileSelect ? profileSelect.value : '') || currentPersonalProfileId || '';
   currentPersonalProfileId = profileId;
+  saveGerritProfileState();
   document.getElementById('personalStatus').textContent = '统计中...';
   try {
     const data = await api('/api/gerrit-dashboard/statistics/personal?profile_id=' + encodeURIComponent(profileId) + '&owner=' + encodeURIComponent(owner) + '&refresh=' + (refresh ? 'true' : 'false'));
@@ -458,6 +504,7 @@ async function loadDepartment(refresh) {
   const profileSelect = document.getElementById('departmentProfile');
   const profileId = (profileSelect ? profileSelect.value : '') || currentDepartmentProfileId || '';
   currentDepartmentProfileId = profileId;
+  saveGerritProfileState();
   document.getElementById('departmentStatus').textContent = '统计中...';
   try {
     const data = await api('/api/gerrit-dashboard/statistics/department?profile_id=' + encodeURIComponent(profileId) + '&refresh=' + (refresh ? 'true' : 'false'));
@@ -475,6 +522,7 @@ async function loadChanges() {
   if (currentTab !== 'query') return;
   const profileId = document.getElementById('profile').value || '';
   const query = document.getElementById('query').value || '';
+  saveGerritProfileState();
   document.getElementById('status').textContent = '查询中...';
   try {
     const data = await api('/api/gerrit-dashboard/changes?profile_id=' + encodeURIComponent(profileId) + '&query=' + encodeURIComponent(query));
@@ -706,7 +754,7 @@ async function savePersonalProfile() {
   try {
     const departmentSelect = document.getElementById('addPersonalDepartment');
     const departmentOption = departmentSelect && departmentSelect.selectedOptions ? departmentSelect.selectedOptions[0] : null;
-    const result = await api('/api/gerrit-dashboard/personal-profiles', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:document.getElementById('addPersonalName').value, owner:document.getElementById('addPersonalOwner').value, department_id:departmentSelect ? departmentSelect.value : '', department_name:departmentOption ? (departmentOption.dataset.name || departmentOption.textContent || '') : ''})});
+    const result = await api('/api/gerrit-dashboard/personal-profiles', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:document.getElementById('addPersonalName').value, owner:document.getElementById('addPersonalOwner').value, department_id:departmentSelect ? departmentSelect.value : '', department:departmentOption ? (departmentOption.dataset.name || departmentOption.textContent || '') : ''})});
     config = result.dashboard || config;
     currentPersonalProfileId = (result.profile || {}).id || currentPersonalProfileId;
     if ((result.profile || {}).department_id) currentDepartmentProfileId = result.profile.department_id;
@@ -726,7 +774,7 @@ function showAddDepartmentModal(targetSelectId) {
 function hideAddDepartmentModal() { hideModal('addDepartmentModal'); }
 async function saveDepartmentProfile() {
   try {
-    const result = await api('/api/gerrit-dashboard/department-profiles', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:document.getElementById('addDepartmentName').value, profile_id:document.getElementById('addDepartmentId').value, owners:document.getElementById('addDepartmentOwners').value})});
+    const result = await api('/api/gerrit-dashboard/department-profiles', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:document.getElementById('addDepartmentName').value, id:document.getElementById('addDepartmentId').value, owners:document.getElementById('addDepartmentOwners').value})});
     config = result.dashboard || config;
     currentDepartmentProfileId = (result.profile || {}).id || currentDepartmentProfileId;
     hideAddDepartmentModal();

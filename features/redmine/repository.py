@@ -28,7 +28,7 @@ class RedmineAgentDB(
     RepositoryQueryMixin,
     RepositoryStorageMixin,
 ):
-    """SQLite repository preserving the legacy public API."""
+    """SQLite repository for Redmine feature data."""
 
 
 __all__ = [

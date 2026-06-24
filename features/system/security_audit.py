@@ -32,8 +32,16 @@ class SecurityAuditLogger:
     """Append-only JSONL audit log with bounded readback helpers."""
 
     def __init__(self, log_path: str | None = None, max_read_lines: int = 5000):
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.log_path = log_path or os.path.join(base_dir, 'data', 'security_audit.json')
+        # Audit logs belong with the rest of the runtime data under the project
+        # data_root (e.g. data/security_audit.json), not next to the feature
+        # module. The previous base_dir math landed in features/data/ because
+        # this file lives at features/system/, so two dirnames up only reaches
+        # features/.
+        if log_path is None:
+            from foundation.config import settings
+
+            log_path = str(settings.data_root / 'security_audit.json')
+        self.log_path = log_path
         self.max_read_lines = max_read_lines
         self._lock = threading.Lock()
         os.makedirs(os.path.dirname(self.log_path), exist_ok=True)

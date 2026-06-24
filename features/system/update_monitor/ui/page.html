@@ -52,6 +52,7 @@
       <button data-tab="changes" class="active" onclick="setTab('changes')">变更</button>
       <button data-tab="artifacts" onclick="setTab('artifacts')">测试套件</button>
       <button data-tab="packages" onclick="setTab('packages')">GMS包</button>
+      <button data-tab="mainline" onclick="setTab('mainline')">Mainline包</button>
       <button data-tab="requirements" onclick="setTab('requirements')">认证要求章节</button>
     </div>
     <div class="filters">
@@ -82,7 +83,7 @@
   </main>
   <script>
     const initialTab = new URLSearchParams(window.location.search).get('tab');
-    let tab = ['changes', 'artifacts', 'packages', 'requirements'].includes(initialTab) ? initialTab : 'changes';
+    let tab = ['changes', 'artifacts', 'packages', 'mainline', 'requirements'].includes(initialTab) ? initialTab : 'changes';
     let offset = 0;
     const limit = 100;
     let total = 0;
@@ -194,6 +195,10 @@
         endpoint = '/api/gms-update-monitor/packages';
         params.delete('source_key');
         if (type) params.set('android_version', type);
+      } else if (tab === 'mainline') {
+        endpoint = '/api/gms-update-monitor/mainline';
+        params.delete('source_key');
+        if (type) params.set('year', type);
       } else if (tab === 'requirements') {
         endpoint = '/api/gms-update-monitor/requirements/version-tags';
         params.delete('source_key');
@@ -223,6 +228,12 @@
       } else if (tab === 'packages') {
         document.getElementById('thead').innerHTML = '<tr><th style="width:200px">章节</th><th style="width:150px">Android</th><th style="width:30%">文件</th><th style="width:150px">生效日期</th><th>Gerrit Tag</th><th style="width:56px">链接</th></tr>';
         document.getElementById('rows').innerHTML = items.map(x => `<tr><td>${esc(x.section)}</td><td>${esc(x.android_version)}</td><td class="wrap">${esc(x.file_name || x.description)}</td><td>${esc(x.required_from)}</td><td>${esc(x.partner_gerrit_tag)}</td><td>${link(x.download_url)}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">无记录</td></tr>';
+      } else if (tab === 'mainline') {
+        document.getElementById('thead').innerHTML = '<tr><th style="width:80px">年份</th><th style="width:90px">月份</th><th style="width:32%">PRELOAD版本</th><th style="width:140px">Partner Zip</th><th style="width:90px">CI构建</th><th style="width:70px">Notes</th></tr>';
+        document.getElementById('rows').innerHTML = items.map(x => {
+          const zipText = x.partner_zip_build_id || x.partner_zip_label || '';
+          return `<tr><td>${esc(x.year)}</td><td>${esc(x.month_label || x.month)}</td><td class="wrap">${link(x.notes_url, x.preload_version)}</td><td>${esc(zipText)}</td><td>${link(x.ci_build_url, zipText ? '构建' : '')}</td><td>${link(x.notes_url, '查看')}</td></tr>`;
+        }).join('') || '<tr><td colspan="6" class="muted">无记录</td></tr>';
       } else {
         document.getElementById('thead').innerHTML = '<tr><th style="width:90px">Android</th><th style="width:70px">类型</th><th style="width:28%">章节</th><th style="width:150px">Requirement ID</th><th>要求摘要</th></tr>';
         document.getElementById('rows').innerHTML = items.map(x => `<tr><td>${esc(x.android_version)}</td><td>${esc(x.change_kind)}</td><td class="wrap">${esc(x.section_title)}</td><td class="wrap">${esc(x.requirement_ids)}</td><td class="wrap">${esc(x.text_excerpt).slice(0, 700)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">无记录</td></tr>';

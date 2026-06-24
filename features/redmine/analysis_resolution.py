@@ -326,7 +326,6 @@ class ResolutionAnalysisMixin:
         else:
             reference_redmine = "; ".join(f"#{r.get('issue_id')}({r.get('reason', '')[:30]})" for r in ai_refs)
 
-        # summary and reply_draft (keep for backward compat)
         summary = ai_result.get("summary") or self._rule_summary(issue_payload, failures, references)
         reply_draft = ai_result.get("reply_draft") or self._reply_draft(issue_payload, failures, references, solution, patch_direction)
 

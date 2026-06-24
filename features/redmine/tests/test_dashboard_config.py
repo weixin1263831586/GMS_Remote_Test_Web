@@ -84,7 +84,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
 
             runtime = json.loads((configs / "config_runtime.json").read_text(encoding="utf-8"))
             self.assertEqual(runtime["sidebar_order"], ["test"])
-            expected = {"stale_days": 20, "window_days": 60, "cache_ttl": 0, "chart_start_dates": {}, "chart_date_ranges": {}}
+            expected = {"stale_days": 20, "window_days": 60, "cache_ttl": 0, "chart_date_ranges": {}}
             self.assertEqual(runtime["redmine_stats"], expected)
             self.assertEqual(manager.get_redmine_stats_config(), expected)
 
@@ -124,7 +124,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 "department_daily": {"start": "bad", "end": "2026-06-13"},
             }
         })
-        cfg = add_project_profile(cfg, "RK3588 Android 16 SDK", "https://redmine.rock-chips.com/projects/rk3588-android-16-sdk")
+        cfg = add_project_profile(cfg, "RK3588 Android 16 SDK", "rk3588-android-16-sdk")
 
         self.assertEqual(cfg["project_profiles"][0]["project_id"], "rk3572-android-16-sdk")
         self.assertEqual(cfg["project_profiles"][1]["project_id"], "rk3588-android-16-sdk")

@@ -31,6 +31,15 @@ _RESOURCE_RE = re.compile(
 )
 # Default-qualifier value line: '      () 200' / '      () "8.8.8.8"' / '      () (array) size=0'
 _DEFAULT_VALUE_RE = re.compile(r"^\s*\(\)\s(.*)$")
+# Resource-id reference emitted by `cmd overlay lookup` for unresolvable refs,
+# e.g. "@17040222 ->" (a bare decimal resource id, optionally followed by an
+# empty "->" tail). We can't map the id back to a name here, so overlay status
+# is detected by source package (see _lookup_effective / explore) instead of
+# string-equaling these against the named ref from aapt2.
+_RESID_REF_RE = re.compile(r"^@0x[0-9a-fA-F]+\s*(?:->\s*)?$|^@\d+\s*(?:->\s*)?$")
+# The "Best matching is from ... of <pkg>" marker that precedes the value in
+# `cmd overlay lookup --verbose` output. Everything after this line is the value.
+_BEST_MATCH_RE = re.compile(r"Best matching is from .*? of ([\w.]+)\s*$")
 
 # Cache directory for pulled APKs to avoid re-pulling on every request.
 _APK_CACHE_DIR = str(settings.data_root / "config_explorer_cache")
@@ -187,6 +196,34 @@ def _filter_entries(
     return result
 
 
+def _enabled_overlays(device_id: str | None) -> list[str] | None:
+    """Return enabled overlay package names via ``cmd overlay list``.
+
+    Each line looks like ``[x] com.android.vendor.overlay.foo`` where ``[x]``
+    marks an enabled overlay and ``[ ]`` a disabled one. Returns the list of
+    enabled overlay packages. Returns ``None`` when the command itself fails
+    (so callers fall back to per-resource lookups rather than silently skipping
+    them).
+    """
+    adb = _adb_path()
+    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
+    stdout, _stderr, code = run_local_shell_command(
+        f"{adb} {serial}shell cmd overlay list", timeout=15
+    )
+    if code != 0:
+        return None
+    enabled: list[str] = []
+    for ln in stdout.splitlines():
+        ln = ln.strip()
+        # First whitespace-delimited token is the state tag: "[x]" (enabled),
+        # "[ ]" (disabled), "---" (section separators), etc.
+        parts = ln.split(None, 1)
+        if len(parts) < 2 or not parts[0].startswith("[") or "x" not in parts[0].lower():
+            continue
+        enabled.append(parts[1].strip())
+    return enabled
+
+
 def _lookup_effective(
     device_id: str | None, package: str, entry: ResourceEntry
 ) -> None:
@@ -208,19 +245,34 @@ def _lookup_effective(
     if code != 0:
         entry.lookup_error = (stderr or stdout).strip() or "lookup failed"
         return
-    # With --verbose, the last line is the value; before it is the
-    # "Best matching is from default configuration of <source>" line.
-    lines = [ln for ln in stdout.splitlines() if ln.strip()]
+    # `cmd overlay lookup --verbose` output structure:
+    #   <resolution trace lines>
+    #   Best matching is from ... of <source>     <- source marker
+    #   <value lines>                             <- the actual value (0+ lines)
+    # The value lives AFTER the "Best matching" marker. Taking "the last
+    # non-empty line" instead mislabeled empty-valued resources: their trailing
+    # value line is blank, so the marker line itself was captured as the value.
     source_pkg = None
-    for ln in lines:
-        m = re.search(r"Best matching is from .*? of ([\w.]+)\s*$", ln)
-        if m:
-            src = m.group(1).strip()
-            # Source == target package => not overlaid.
-            source_pkg = None if src == package else src
-            break
-    # The value is the last non-empty line.
-    value = lines[-1].strip() if lines else ""
+    value_lines: list[str] = []
+    seen_marker = False
+    for ln in stdout.splitlines():
+        if not seen_marker:
+            m = _BEST_MATCH_RE.search(ln)
+            if m:
+                src = m.group(1).strip()
+                # Source == target package => not overlaid.
+                source_pkg = None if src == package else src
+                seen_marker = True
+            continue
+        if ln.strip():
+            value_lines.append(ln.strip())
+    value = value_lines[-1] if value_lines else ""
+    # `cmd overlay lookup` prints unresolvable resource references as a bare
+    # numeric id (e.g. "@17040222 ->"), which is meaningless to a user. When the
+    # default value is itself a named reference (e.g. "@string/default_browser"),
+    # show that readable form instead of the raw id.
+    if value and _RESID_REF_RE.match(value) and entry.default_value:
+        value = entry.default_value
     if entry.type in {"array", "integer-array", "string-array"} and value:
         items = [line.strip() for line in value.splitlines() if line.strip()]
         if not (len(items) == 1 and items[0].startswith("[")):
@@ -261,26 +313,44 @@ def explore(
     overlayed = 0
     if with_effective:
         targets = entries if effective_limit <= 0 else entries[:effective_limit]
-        # Run adb lookups concurrently to keep full-table queries (1600+ rows)
-        # tractable. Each lookup is an independent `cmd overlay lookup` call.
-        from concurrent.futures import ThreadPoolExecutor
-
-        workers = max(1, min(concurrency, 16))
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            list(pool.map(
-                lambda e: _lookup_effective(device_id, package, e),
-                targets,
-            ))
-        for e in targets:
-            if (
-                e.effective_value is not None
-                and e.default_value is not None
-                and e.effective_value != e.default_value
-            ):
-                e.overlay_changed = True
-                overlayed += 1
-            else:
+        # Short-circuit: if `cmd overlay list` shows no enabled overlay on the
+        # device, every resource's effective value equals its APK default, so we
+        # can skip the expensive per-resource `cmd overlay lookup` calls
+        # entirely (1600+ adb round-trips → 1). If the list call itself fails we
+        # fall back to the full lookup path so results stay correct.
+        enabled_overlays = _enabled_overlays(device_id)
+        if enabled_overlays is not None and not enabled_overlays:
+            for e in targets:
+                e.effective_value = e.default_value
+                e.overlay_source = None
                 e.overlay_changed = False
+        else:
+            # Run adb lookups concurrently to keep full-table queries (1600+ rows)
+            # tractable. Each lookup is an independent `cmd overlay lookup` call.
+            from concurrent.futures import ThreadPoolExecutor
+
+            workers = max(1, min(concurrency, 16))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(
+                    lambda e: _lookup_effective(device_id, package, e),
+                    targets,
+                ))
+            for e in targets:
+                # Authoritative overlay signal: `cmd overlay lookup --verbose`
+                # reports which package supplied the value. A non-None source
+                # (different from the target package) means an overlay overrode
+                # it. Relying on string comparison is unreliable because aapt2's
+                # default (quoted literal / named ref) and lookup's effective
+                # value (bare literal / numeric id) are different surface forms
+                # of the same value, so equal values compared unequal and every
+                # row was mislabeled "已修改".
+                if e.overlay_source is not None:
+                    e.overlay_changed = True
+                    overlayed += 1
+                elif e.lookup_error is None:
+                    e.overlay_changed = False
+                else:
+                    e.overlay_changed = None
 
     result = ExploreResult(package=package, apk_path=on_device_path)
     result.total = len(entries)

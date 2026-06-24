@@ -108,6 +108,26 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS gms_update_mainline_packages (
+            source_key TEXT NOT NULL,
+            item_key TEXT NOT NULL,
+            year TEXT NOT NULL,
+            month TEXT NOT NULL,
+            month_label TEXT NOT NULL,
+            preload_version TEXT NOT NULL,
+            notes_url TEXT NOT NULL,
+            partner_zip_build_id TEXT NOT NULL,
+            ci_build_url TEXT NOT NULL,
+            partner_zip_label TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            PRIMARY KEY (source_key, item_key)
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS gms_update_requirement_sections (
             source_key TEXT NOT NULL,
             section_key TEXT NOT NULL,
@@ -179,6 +199,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute('CREATE INDEX IF NOT EXISTS idx_gms_update_artifacts_suite ON gms_update_artifacts(suite_type, android_version)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_gms_update_packages_version ON gms_update_packages(android_version, section)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_gms_update_mainline_packages_month ON gms_update_mainline_packages(year, month)')
     conn.execute(
         'CREATE INDEX IF NOT EXISTS idx_gms_update_requirement_sections_path '
         'ON gms_update_requirement_sections(level, number, title)'
@@ -362,13 +383,13 @@ def upsert_source(conn: sqlite3.Connection, fetched: FetchedDocument, timestamp:
     return changed
 
 
-def sync_source(conn: sqlite3.Connection, run_id: int, fetched: FetchedDocument, *, force: bool, timestamp: str) -> tuple[bool, int, ParsedSource]:
+def sync_source(conn: sqlite3.Connection, run_id: int, fetched: FetchedDocument, *, force: bool, timestamp: str, session: Any = None) -> tuple[bool, int, ParsedSource]:
     changed = upsert_source(conn, fetched, timestamp)
     if not changed and not force:
         return False, 0, ParsedSource()
 
     parser = PARSERS[fetched.source.parser]
-    parsed = parser(fetched)
+    parsed = parser(fetched, session=session)
     changes = 0
     changes += replace_records(
         conn,
@@ -420,6 +441,29 @@ def sync_source(conn: sqlite3.Connection, run_id: int, fetched: FetchedDocument,
             'content_hash',
         ],
         entity_type='gms_package',
+        timestamp=timestamp,
+    )
+    changes += replace_records(
+        conn,
+        run_id=run_id,
+        source_key=fetched.source.key,
+        table='gms_update_mainline_packages',
+        key_column='item_key',
+        records=parsed.mainline_packages,
+        columns=[
+            'source_key',
+            'item_key',
+            'year',
+            'month',
+            'month_label',
+            'preload_version',
+            'notes_url',
+            'partner_zip_build_id',
+            'ci_build_url',
+            'partner_zip_label',
+            'content_hash',
+        ],
+        entity_type='mainline_package',
         timestamp=timestamp,
     )
     changes += replace_records(

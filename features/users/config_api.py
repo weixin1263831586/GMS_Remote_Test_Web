@@ -50,6 +50,7 @@ SIDEBAR_PAGES = {
     'tools',
     'security-audit',
     'gms-assistant',
+    'automation',
     'redmine-agent',
     'gerrit-dashboard',
     'agent',
@@ -96,7 +97,7 @@ def _build_tailscale_url(ip: str, request: Request | None = None) -> str:
 
 
 def normalize_sidebar_order(raw_order: Any) -> list[str]:
-    """校验并去重侧边栏排序。"""
+    """校验并去重侧边栏排序，丢弃不属于当前页面的历史残留名。"""
     if not isinstance(raw_order, list):
         raise HTTPException(status_code=400, detail="order 必须是数组")
 
@@ -106,7 +107,8 @@ def normalize_sidebar_order(raw_order: Any) -> list[str]:
         if not isinstance(item, str):
             continue
         page = item.strip()
-        if page and page not in seen:
+        # 只保留当前真实存在的页面，过滤掉重构改名前的残留（如 ai-assistant）
+        if page and page in SIDEBAR_PAGES and page not in seen:
             order.append(page)
             seen.add(page)
 
@@ -289,6 +291,9 @@ async def get_sidebar_order():
     order = existing_runtime.get('sidebar_order', [])
     if not isinstance(order, list):
         order = []
+    # 过滤掉重构改名前的历史残留页名（如 ai-assistant），否则前端 F5 重排时
+    # 会把不存在的页面当成排序键，导致真实页面被挤到末尾、导航栏乱跳。
+    order = [page for page in order if isinstance(page, str) and page in SIDEBAR_PAGES]
     visible_pages = normalize_sidebar_visible_pages(existing_runtime.get('sidebar_visible_pages'))
     return success_response({'order': order, 'visible_pages': visible_pages})
 

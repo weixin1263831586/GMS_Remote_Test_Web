@@ -204,7 +204,10 @@ async def get_department_overdue_statistics(
         return {"success": True, "data": {**cached, "cache_hit": True}}
 
     users = filter_users_for_profile(load_redmine_user_map(), profile)
-    client = redmine_service.agent._make_client()
+    try:
+        client = redmine_service.agent._make_client()
+    except Exception as exc:
+        return {"success": False, "error": f"Redmine client unavailable: {exc}"}
     window_days = int(profile.get("window_days") or stats_cfg["window_days"])
     semaphore = asyncio.Semaphore(4)
 
@@ -243,6 +246,8 @@ async def get_department_overdue_statistics(
         }
         _update_ttl_cache(_DEPARTMENT_OVERDUE_CACHE, cache_key, now_ts, data)
         return {"success": True, "data": data}
+    except Exception as exc:
+        return {"success": False, "error": f"department overdue statistics failed: {exc}"}
     finally:
         await client.close()
 
@@ -268,8 +273,9 @@ async def get_project_statistics(
     if cached is not None:
         return {"success": True, "data": {**cached, "cache_hit": True}}
 
-    client = redmine_service.agent._make_client()
+    client = None
     try:
+        client = redmine_service.agent._make_client()
         issues = await client.fetch_project_issues(project_id=project_id, status_id="*", limit=issue_limit)
         data = summarize_project_issues(issues, list_limit=list_limit)
         data.update({
@@ -280,5 +286,8 @@ async def get_project_statistics(
         })
         _update_ttl_cache(_PROJECT_STATS_CACHE, cache_key, now_ts, data)
         return {"success": True, "data": data}
+    except Exception as exc:
+        return {"success": False, "error": f"project statistics failed: {exc}"}
     finally:
-        await client.close()
+        if client is not None:
+            await client.close()

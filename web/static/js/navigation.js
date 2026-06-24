@@ -5873,8 +5873,15 @@ async function handleRedmineAttachment(url, context = {}) {
         // 检测是否为配置中的公网 Redmine URL
         const isRedmineUrl = isConfiguredRedmineUrl;
         if (isRedmineUrl) {
+            // 检查是否是直接的附件 URL (如 /attachments/2604033)
+            const attachmentMatch = url.match(/\/attachments\/(\d+)/);
             const issueMatch = url.match(/\/issues\/(\d+)/);
-            if (issueMatch) {
+
+            if (attachmentMatch && !issueMatch) {
+                // 直接的附件 URL，跳过提取步骤，直接使用 analyze-url
+                showToast('📎 检测到 Redmine 附件 URL，直接分析...', 'info');
+                // 直接跳到 analyze-url 调用，不执行下面的 issue 提取逻辑
+            } else if (issueMatch) {
                 // 是问题页面，尝试获取第一个附件
                 showToast('📋 检测到 Redmine 问题页面，正在提取附件...', 'info');
                 progressFill.style.width = '15%';
