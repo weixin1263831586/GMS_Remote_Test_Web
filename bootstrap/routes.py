@@ -10,6 +10,7 @@ from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
 from features.devices import api as devices
 from features.devices import config_explorer_api as device_config_explorer
+from features.devices import config_override_api as device_config_override
 from features.devices import get_or_create_user_state
 from features.devices import integrations_api as device_integrations
 from features.devices.dependencies import configure_device_dependencies
@@ -104,6 +105,7 @@ ALL_ROUTERS = [
     desktop.router,
     devices.router,
     device_config_explorer.router,
+    device_config_override.router,
     device_integrations.router,
     firmware.router,
     gerrit_dashboard.router,

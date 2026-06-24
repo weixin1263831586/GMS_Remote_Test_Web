@@ -4,11 +4,11 @@
 import logging
 import re
 import subprocess
-import time
 from typing import Any
 
 from foundation.networking import is_local_host
 
+from .adb_ops import reboot_with_runner, root_and_remount
 from .utils import DeviceUtils
 
 
@@ -194,19 +194,23 @@ class DeviceManager:
             created_ssh = False
 
         try:
-            # 执行重启
-            _output, error, code = self.ssh_manager.execute_command(
-                ssh,
-                f"adb -s {device_id} reboot",
-                timeout=30
+            def run_adb(_device_id: str | None, args: str, timeout: int) -> tuple[str, int]:
+                output, error, code = self.ssh_manager.execute_command(
+                    ssh,
+                    f"adb -s {device_id} {args}",
+                    timeout=timeout,
+                )
+                return (output or error or ''), code
+
+            reboot = reboot_with_runner(
+                run_adb,
+                device_id,
+                wait_for_online=wait_for_online,
+                wait_timeout=60,
+                poll_interval=2,
             )
-
-            if code != 0:
-                return {
-                    'success': False,
-                    'error': error or '重启命令执行失败'
-                }
-
+            if not reboot.success:
+                return {'success': False, 'error': reboot.output or '重启命令执行失败'}
             if not wait_for_online:
                 return {
                     'success': True,
@@ -214,28 +218,10 @@ class DeviceManager:
                     'wait_time': 0.0,
                     'message': '重启命令已发送，设备恢复由后台监控确认'
                 }
-
-            # 等待设备重新上线（最多60秒）
-            start_time = time.time()
-            while time.time() - start_time < 60:
-                check_output, _, _ = self.ssh_manager.execute_command(
-                    ssh,
-                    f"adb -s {device_id} get-state",
-                    timeout=10
-                )
-                if 'device' in check_output.lower():
-                    wait_time = time.time() - start_time
-                    return {
-                        'success': True,
-                        'back_online': True,
-                        'wait_time': round(wait_time, 1)
-                    }
-                time.sleep(2)
-
             return {
                 'success': True,
-                'back_online': False,
-                'wait_time': 60.0
+                'back_online': reboot.back_online,
+                'wait_time': reboot.wait_time,
             }
 
         except Exception as e:
@@ -271,20 +257,21 @@ class DeviceManager:
             created_ssh = False
 
         try:
-            # 执行 adb root
-            _output, error, code = self.ssh_manager.execute_command(
-                ssh,
-                f"adb -s {device_id} root",
-                timeout=15
-            )
-            time.sleep(2)
+            def run_adb(_device_id: str | None, args: str, timeout: int) -> tuple[str, int]:
+                output, error, code = self.ssh_manager.execute_command(
+                    ssh,
+                    f"adb -s {device_id} {args}",
+                    timeout=timeout,
+                )
+                return (output or error or ''), code
 
-            # 执行 remount
-            remount_output, error, code = self.ssh_manager.execute_command(
-                ssh,
-                f"adb -s {device_id} remount",
-                timeout=15
+            remount = root_and_remount(
+                run_adb,
+                device_id,
+                root_timeout=15,
+                remount_timeout=15,
             )
+            remount_output = remount.remount_output
 
             # 检查 veritymode
             verity_output, _, _ = self.ssh_manager.execute_command(
@@ -294,23 +281,17 @@ class DeviceManager:
             )
             verity_mode = verity_output.strip()
 
-            # 判断是否需要重启 - 基于实际的 remount 输出
-            # 关键指示：如果输出包含 "Now reboot your device" 则需要重启
-            # 如果输出包含 "Overlayfs enabled" 或 "Remount succeeded" (无重启提示) 则已完成
-            needs_reboot = 'Now reboot your device' in remount_output
-            overlayfs_enabled = 'Overlayfs enabled' in remount_output or 'overlayfs' in remount_output.lower()
-
-            # 如果启用了 overlayfs，说明已经完成 remount，不需要重启
+            needs_reboot = remount.needs_reboot
+            overlayfs_enabled = remount.overlayfs_enabled
             if overlayfs_enabled:
-                needs_reboot = False
                 verity_mode = 'disabled'  # 逻辑上设置为 disabled
 
             result = {
-                'success': code == 0,
+                'success': remount.success,
                 'verity_mode': verity_mode,
                 'needs_reboot': needs_reboot,
                 'overlayfs_enabled': overlayfs_enabled,
-                'output': remount_output[-500:] if remount_output else error
+                'output': remount_output[-500:] if remount_output else remount.root_output[-500:],
             }
 
             if needs_reboot:
@@ -330,5 +311,4 @@ class DeviceManager:
 
 # 全局设备管理器实例
 device_manager = DeviceManager()
-
 
