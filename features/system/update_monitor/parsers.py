@@ -15,11 +15,178 @@ DEFAULT_DB_PATH = Path('data/gms_update_monitor.sqlite3')
 SCHEMA_VERSION = 1
 
 
+from .fetching import MAINLINE_MONTH_DEPTH, build_train_url, fetch_html, recent_month_cutoff
 from .models import *
 from .parsing import *
 
 
-def parse_cts_downloads(fetched: FetchedDocument) -> ParsedSource:
+# Three-letter month abbreviation → (month index, capitalized label).
+_MAINLINE_MONTHS = {
+    'jan': (1, 'January'),
+    'feb': (2, 'February'),
+    'mar': (3, 'March'),
+    'apr': (4, 'April'),
+    'may': (5, 'May'),
+    'jun': (6, 'June'),
+    'jul': (7, 'July'),
+    'aug': (8, 'August'),
+    'sep': (9, 'September'),
+    'oct': (10, 'October'),
+    'nov': (11, 'November'),
+    'dec': (12, 'December'),
+}
+
+# Builds like 15605729 in the "Preload partner zip" row of a PRELOAD notes page.
+_MAINLINE_BUILD_ID_RE = re.compile(r'\b(\d{6,})\b')
+# Matches /release-notes/2026/may/notes-PRELOAD-2026-06-11-v0-1 style links.
+_MAINLINE_PRELOAD_LINK_RE = re.compile(r'/release-notes/(\d{4})/([a-z]{3})/(notes-PRELOAD-[^/?#]+)', re.IGNORECASE)
+
+
+def _extract_mainline_links(doc: html.HtmlElement, base_url: str) -> list[tuple[int, int, str, str]]:
+    """Return ``[(year, month_index, preload_slug, notes_url), ...]`` from index page links."""
+    seen: set[str] = set()
+    found: list[tuple[int, int, str, str]] = []
+    for href in doc.xpath('//a/@href'):
+        match = _MAINLINE_PRELOAD_LINK_RE.search(href or '')
+        if not match:
+            continue
+        year_str, month_str, slug = match.group(1), match.group(2).lower(), match.group(3)
+        month_info = _MAINLINE_MONTHS.get(month_str)
+        if not month_info:
+            continue
+        key = f'{year_str}|{month_str}|{slug}'
+        if key in seen:
+            continue
+        seen.add(key)
+        notes_url = urljoin(base_url, href.split('?')[0] + '?authuser=2')
+        found.append((int(year_str), month_info[0], slug, notes_url))
+    return found
+
+
+def _filter_recent_mainline(
+    entries: list[tuple[int, int, str, str]], depth: int, *, now_year: int | None = None, now_month: int | None = None
+) -> list[tuple[int, int, str, str]]:
+    """Keep only the most recent ``depth`` months, newest first."""
+    cutoff_year, cutoff_month = recent_month_cutoff(depth, now_year=now_year, now_month=now_month)
+    cutoff_total = cutoff_year * 12 + (cutoff_month - 1)
+
+    def keep(entry: tuple[int, int, str, str]) -> bool:
+        return entry[0] * 12 + (entry[1] - 1) >= cutoff_total
+
+    filtered = [entry for entry in entries if keep(entry)]
+    # Newest first by (year, month), stable on preload slug.
+    filtered.sort(key=lambda e: (e[0], e[1], e[2]), reverse=True)
+    return filtered[:depth]
+
+
+def _partner_zip_build_id(doc: html.HtmlElement) -> tuple[str, str]:
+    """Locate the "Preload partner zip" row and return ``(build_id, label)``.
+
+    Defensive: the exact DOM is only visible behind auth at runtime, so we try
+    several heuristics — a table row whose first cell mentions "preload partner
+    zip", then any table row, then a page-wide scan for a build id near that
+    phrase. Returns ``('', '')`` when nothing is found.
+    """
+    # 1. Table row whose label cell mentions "preload partner zip".
+    label_cells = [
+        cell
+        for cell in doc.xpath('//td | //th')
+        if 'preload partner zip' in (text_content(cell) or '').lower()
+    ]
+    for cell in label_cells:
+        row = cell.getparent()
+        if row is None:
+            continue
+        row_text = text_content(row)
+        match = _MAINLINE_BUILD_ID_RE.search(row_text)
+        if match:
+            return match.group(1), row_text.strip()
+
+    # 2. Any table row containing both the phrase and a build id, in order.
+    phrase = 'preload partner zip'
+    for row in doc.xpath('//tr'):
+        row_text = text_content(row)
+        if phrase in row_text.lower():
+            match = _MAINLINE_BUILD_ID_RE.search(row_text)
+            if match:
+                return match.group(1), row_text.strip()
+
+    # 3. Fall back to the first build id anywhere near the phrase in plain text.
+    page_text = text_content(doc)
+    lower = page_text.lower()
+    idx = lower.find(phrase)
+    if idx != -1:
+        window = page_text[idx:idx + 200]
+        match = _MAINLINE_BUILD_ID_RE.search(window)
+        if match:
+            return match.group(1), phrase
+    return '', ''
+
+
+def parse_mainline_release_notes(fetched: FetchedDocument, session=None, *, timeout: float = 30.0, depth: int | None = None) -> ParsedSource:
+    """Crawl the Mainline release-notes index for recent PRELOAD builds.
+
+    The index page lists year/month → ``notes-PRELOAD-...`` links. We keep the
+    most recent ``depth`` months (default ``MAINLINE_MONTH_DEPTH``), fetch each
+    PRELOAD page with the authenticated session, and extract the "Preload
+    partner zip" build number, mapping it to a CI build URL.
+    """
+    from datetime import date
+
+    depth = MAINLINE_MONTH_DEPTH if depth is None else depth
+    packages: list[MainlinePackageRecord] = []
+
+    entries = _filter_recent_mainline(
+        _extract_mainline_links(fetched.doc, fetched.final_url),
+        depth,
+        now_year=date.today().year,
+        now_month=date.today().month,
+    )
+
+    for year, month_index, slug, notes_url in entries:
+        month_key = next(
+            (key for key, (idx, _label) in _MAINLINE_MONTHS.items() if idx == month_index),
+            '',
+        )
+        month_label = _MAINLINE_MONTHS.get(month_key, (month_index, ''))[1]
+
+        build_id, label = '', ''
+        status, _final, text = fetch_html(session, notes_url, timeout)
+        if status == 200 and text:
+            try:
+                child_doc = html.fromstring(text)
+            except Exception:
+                child_doc = None
+            if child_doc is not None:
+                build_id, label = _partner_zip_build_id(child_doc)
+
+        payload = {
+            'source_key': fetched.source.key,
+            'year': str(year),
+            'month': month_key,
+            'preload_version': slug,
+            'partner_zip_build_id': build_id,
+        }
+        packages.append(
+            MainlinePackageRecord(
+                source_key=fetched.source.key,
+                item_key=normalize_key(fetched.source.key, str(year), month_key, slug),
+                year=str(year),
+                month=month_key,
+                month_label=month_label,
+                preload_version=slug,
+                notes_url=notes_url,
+                partner_zip_build_id=build_id,
+                ci_build_url=build_train_url(build_id) if build_id else '',
+                partner_zip_label=label,
+                content_hash=stable_hash(payload),
+            )
+        )
+
+    return ParsedSource(mainline_packages=packages)
+
+
+def parse_cts_downloads(fetched: FetchedDocument, session=None) -> ParsedSource:
     article = article_node(fetched.doc)
     artifacts: list[ArtifactRecord] = []
     for heading in article.xpath('.//h2'):
@@ -63,7 +230,7 @@ def parse_cts_downloads(fetched: FetchedDocument) -> ParsedSource:
     return ParsedSource(artifacts=artifacts)
 
 
-def parse_vts_downloads(fetched: FetchedDocument) -> ParsedSource:
+def parse_vts_downloads(fetched: FetchedDocument, session=None) -> ParsedSource:
     article = article_node(fetched.doc)
     artifacts: list[ArtifactRecord] = []
     for kind_heading in article.xpath('.//h3'):
@@ -118,7 +285,7 @@ def parse_vts_downloads(fetched: FetchedDocument) -> ParsedSource:
     return ParsedSource(artifacts=artifacts)
 
 
-def parse_gts_downloads(fetched: FetchedDocument) -> ParsedSource:
+def parse_gts_downloads(fetched: FetchedDocument, session=None) -> ParsedSource:
     article = article_node(fetched.doc)
     artifacts: list[ArtifactRecord] = []
     for table in article.xpath('.//table'):
@@ -178,7 +345,7 @@ def parse_gts_downloads(fetched: FetchedDocument) -> ParsedSource:
     return ParsedSource(artifacts=artifacts)
 
 
-def parse_gms_downloads(fetched: FetchedDocument) -> ParsedSource:
+def parse_gms_downloads(fetched: FetchedDocument, session=None) -> ParsedSource:
     article = article_node(fetched.doc)
     packages: list[GmsPackageRecord] = []
     for table in article.xpath('.//table'):
@@ -265,7 +432,7 @@ def section_key_from_heading(heading: html.HtmlElement, path: str) -> tuple[str,
     return normalize_key(path or title), number, clean
 
 
-def parse_gms_requirements(fetched: FetchedDocument) -> ParsedSource:
+def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSource:
     article = article_node(fetched.doc)
     sections: list[RequirementSectionRecord] = []
     table_rows_out: list[RequirementTableRowRecord] = []
@@ -381,4 +548,5 @@ PARSERS = {
     'gts_downloads': parse_gts_downloads,
     'gms_downloads': parse_gms_downloads,
     'gms_requirements': parse_gms_requirements,
+    'mainline_release_notes': parse_mainline_release_notes,
 }

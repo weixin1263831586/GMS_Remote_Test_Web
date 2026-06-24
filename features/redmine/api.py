@@ -75,12 +75,10 @@ def _get_redmine_base_url() -> str:
 
 
 
-def _profile_ids_from_body(body: dict[str, Any]) -> list[str]:
-    raw = body.get("profile_ids")
+def _department_ids_from_body(body: dict[str, Any]) -> list[str]:
+    raw = body.get("department_ids")
     if raw is None:
-        raw = body.get("department_ids")
-    if raw is None:
-        raw = [body.get("profile_id") or body.get("department_id") or ""]
+        raw = [body.get("department_id") or ""]
     if not isinstance(raw, list):
         raw = [raw]
     return [str(item or "").strip() for item in raw if str(item or "").strip() and str(item or "").strip() != "all"]
@@ -322,7 +320,7 @@ async def list_stat_users():
             "id": item.get("id"),
             "name": item.get("name") or "",
             "aliases": item.get("aliases") or [],
-            "email": item.get("email") or item.get("eamil") or "",
+            "email": item.get("email") or "",
             "department_id": item.get("department_id") or "",
             "department": item.get("department") or "",
         }
@@ -348,9 +346,9 @@ async def add_stat_user(request: Request):
     body = await request.json()
     uid = body.get("id")
     name = str(body.get("name") or "").strip()
-    email = str(body.get("email") or body.get("eamil") or "").strip()
-    profile_ids = _profile_ids_from_body(body)
-    department = _department_from_profiles(profile_ids)
+    email = str(body.get("email") or "").strip()
+    department_ids = _department_ids_from_body(body)
+    department = _department_from_profiles(department_ids)
     if not uid or not name:
         return {"success": False, "error": "id and name are required"}
     uid_text = str(uid).strip()
@@ -394,19 +392,19 @@ async def add_stat_user(request: Request):
     user_map.pop("users", None)
     save_user_map_payload(user_map)
 
-    if profile_ids:
-        dashboard_cfg = assign_user_to_profiles(config_manager.get_redmine_dashboard_config(), uid_text, profile_ids)
+    if department_ids:
+        dashboard_cfg = assign_user_to_profiles(config_manager.get_redmine_dashboard_config(), uid_text, department_ids)
         if not config_manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
             return JSONResponse(status_code=500, content={"success": False, "error": "failed to save department membership"})
         _clear_stats_caches()
-    return {"success": True, "data": {"created": created, "profile_ids": profile_ids}}
+    return {"success": True, "data": {"created": created, "department_ids": department_ids}}
 
 
 @router.post("/dashboard/profiles")
 async def create_dashboard_profile(request: Request):
     body = await request.json()
     name = str(body.get("name") or "").strip()
-    profile_id = str(body.get("id") or body.get("profile_id") or "").strip()
+    profile_id = str(body.get("id") or "").strip()
     try:
         dashboard_cfg = add_department_profile(config_manager.get_redmine_dashboard_config(), name, profile_id)
     except ValueError as exc:
@@ -421,8 +419,8 @@ async def create_dashboard_profile(request: Request):
 async def create_project_profile(request: Request):
     body = await request.json()
     name = str(body.get("name") or "").strip()
-    project_id = str(body.get("project_id") or body.get("project_url") or "").strip()
-    profile_id = str(body.get("id") or body.get("profile_id") or "").strip()
+    project_id = str(body.get("project_id") or "").strip()
+    profile_id = str(body.get("id") or "").strip()
     try:
         dashboard_cfg = add_project_profile(config_manager.get_redmine_dashboard_config(), name, project_id, profile_id)
     except ValueError as exc:
@@ -445,7 +443,7 @@ async def send_department_reminder_email(request: Request):
     user = next((item for item in load_redmine_user_map() if str(item.get("id") or "").strip() == user_id), None)
     if not user:
         return JSONResponse(status_code=404, content={"success": False, "error": "user not found"})
-    to_addr = str(user.get("email") or user.get("eamil") or "").strip()
+    to_addr = str(user.get("email") or "").strip()
     if not to_addr:
         return JSONResponse(status_code=400, content={"success": False, "error": "user email is not configured"})
 
@@ -498,12 +496,11 @@ async def get_stats_config():
     if gerrit_cfg.get("rest_password"):
         gerrit_cfg = {**gerrit_cfg, "rest_password": "***"}
     email_cfg = (config.get("redmine_dashboard") or {}).get("email") or {}
-    base_url = config_manager.get_redmine_base_url(config)
     return {"success": True, "data": {
         **stats_cfg,
         "dashboard": dashboard_cfg,
         "gerrit_dashboard": gerrit_cfg,
-        "redmine_base_url": base_url,
+        "redmine": {"base_url": config_manager.get_redmine_base_url(config)},
         "email_mode": "smtp" if email_cfg.get("smtp_host") else "smtp_unconfigured",
     }}
 
@@ -520,18 +517,6 @@ async def update_stats_config(request: Request):
         stats["window_days"] = max(0, min(365, int(body["window_days"])))
     if "cache_ttl" in body:
         stats["cache_ttl"] = max(0, min(3600, int(body["cache_ttl"])))
-    if "chart_start_dates" in body and isinstance(body.get("chart_start_dates"), dict):
-        current_dates = dict(stats.get("chart_start_dates") or {})
-        for key, value in body.get("chart_start_dates", {}).items():
-            clean_key = str(key or "").strip()
-            clean_value = str(value or "").strip()
-            if not clean_key:
-                continue
-            if clean_value:
-                current_dates[clean_key] = clean_value
-            else:
-                current_dates.pop(clean_key, None)
-        stats["chart_start_dates"] = current_dates
     if "chart_date_ranges" in body and isinstance(body.get("chart_date_ranges"), dict):
         current_ranges = dict(stats.get("chart_date_ranges") or {})
         for key, value in body.get("chart_date_ranges", {}).items():

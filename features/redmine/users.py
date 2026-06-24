@@ -142,14 +142,7 @@ def _name_display_variants(value: Any) -> list[str]:
 
 
 def _flatten_departments(payload: Any) -> list[dict[str, Any]]:
-    """Flatten the on-disk departments layout into flat user dicts.
-
-    On disk the map is grouped by department:
-        {"departments": [ {"department_id", "department", "members": [ {id,name,aliases,email}, ... ]} ]}
-    Each member is returned with its parent department fields merged in, so callers
-    keep speaking the legacy flat-user shape ({id,name,aliases,email,department_id,department}).
-    Also tolerates a legacy flat {"users": [...]} payload as a safety net.
-    """
+    """Return department member rows from the current departments user-map."""
     if not isinstance(payload, dict):
         return []
     result: list[dict[str, Any]] = []
@@ -164,35 +157,7 @@ def _flatten_departments(payload: Any) -> list[dict[str, Any]]:
                 flat.setdefault("department_id", dept_id)
                 flat.setdefault("department", dept_name)
                 result.append(flat)
-    # Legacy fallback: a flat {"users": [...]} payload.
-    if not result:
-        for item in payload.get("users") or []:
-            if isinstance(item, dict) and item.get("id"):
-                result.append(item)
     return result
-
-
-def _departments_payload_from_flat_users(users: list[dict[str, Any]]) -> dict[str, Any]:
-    departments: list[dict[str, Any]] = []
-    by_key: dict[str, dict[str, Any]] = {}
-    for item in users or []:
-        if not isinstance(item, dict) or not item.get("id"):
-            continue
-        dept_id = str(item.get("department_id") or "").strip()
-        dept_name = str(item.get("department") or "").strip()
-        key = dept_id or dept_name or "default"
-        department = by_key.get(key)
-        if not department:
-            department = {"department_id": dept_id, "department": dept_name, "members": []}
-            by_key[key] = department
-            departments.append(department)
-        member = {
-            "id": item.get("id"),
-            "name": item.get("name") or "",
-            "email": item.get("email") or item.get("eamil") or "",
-        }
-        department["members"].append({k: v for k, v in member.items() if v not in ("", None)})
-    return {"departments": departments}
 
 
 def load_redmine_user_map() -> list[dict[str, Any]]:
@@ -219,8 +184,6 @@ def load_user_map_payload() -> dict[str, Any]:
     try:
         payload = json.loads(USER_MAP_PATH.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
-            if not payload.get("departments") and payload.get("users"):
-                return _departments_payload_from_flat_users(payload.get("users") or [])
             payload.setdefault("departments", [])
             return payload
     except Exception:
@@ -241,7 +204,7 @@ def display_names_from_mapping(item: dict[str, Any]) -> list[str]:
     values.extend(_name_display_variants(item.get("name") or ""))
     for alias in item.get("aliases") or []:
         values.extend(_name_display_variants(alias))
-    email = str(item.get("email") or item.get("eamil") or "").strip()
+    email = str(item.get("email") or "").strip()
     if email:
         values.append(email)
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))

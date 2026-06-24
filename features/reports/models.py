@@ -73,8 +73,11 @@ class TestReport:
     failures: list[TestFailure]
 
 
-# Reusable XML parser — avoids re-creating etree.XMLParser on every call
-_LXML_PARSER = etree.XMLParser(remove_blank_text=True, huge_tree=True) if USE_LXML else None
+# Reusable XML parser — avoids re-creating etree.XMLParser on every call.
+# recover=True: CTS/GTS/VTS 报告里常含未转义的 &、控制字符等不规范 XML，
+# 严格解析会整份报告判废（→ 空结果 → 前端「分析失败」）。开启 recover 让
+# lxml 跳过这些坏实体继续解析，与重构前的行为一致。
+_LXML_PARSER = etree.XMLParser(remove_blank_text=True, huge_tree=True, recover=True) if USE_LXML else None
 
 
 

@@ -64,7 +64,6 @@ class RedmineConfig:
         redmine = config.get("redmine") or {}
         return str(
             redmine.get("base_url")
-            or config.get("redmine_base_url")
             or DEFAULT_REDMINE_BASE_URL
         ).rstrip("/")
 
@@ -76,7 +75,7 @@ class RedmineConfig:
         return redmine
 
     def load_redmine_credentials(self) -> dict[str, str]:
-        runtime = self.manager._read_json(self.runtime_config_path)
+        runtime = self.manager.get_runtime_config()
         saved = runtime.get("redmine_auth") or {}
         encrypted = saved.get("encrypted_password")
         if encrypted:
@@ -95,20 +94,7 @@ class RedmineConfig:
                 }
             except Exception:
                 return {}
-        config = self.load_config()
-        redmine = config.get("redmine") or {}
-        credentials = config.get("redmine_credentials") or {}
-        username = str(
-            credentials.get("username")
-            or redmine.get("username")
-            or ""
-        )
-        password = str(
-            credentials.get("password")
-            or redmine.get("password")
-            or ""
-        )
-        return {"username": username, "password": password}
+        return {"username": "", "password": ""}
 
     def save_redmine_credentials(
         self,
@@ -120,7 +106,7 @@ class RedmineConfig:
         key = base64.urlsafe_b64encode(
             hashlib.sha256(b"gms_remote_test_redmine_2024").digest()
         )
-        runtime = self.manager._read_json(self.runtime_config_path)
+        runtime = self.manager.get_runtime_config()
         runtime["redmine_auth"] = {
             "username": username,
             "encrypted_password": Fernet(key).encrypt(

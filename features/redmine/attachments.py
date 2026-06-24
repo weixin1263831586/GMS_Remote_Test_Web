@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 import aiohttp
@@ -118,6 +119,13 @@ class RedmineAttachmentMixin:
             raise RuntimeError(f"Redmine API returned HTTP {response.status}: {error_body}")
 
     async def find_attachment_issue_id(self, attachment_id: str) -> str | None:
+        """Find the issue ID that owns this attachment by querying the attachment detail page.
+
+        Strategy:
+        1. First try to get it from the final redirected URL (most reliable if Redmine redirects to issue page)
+        2. Then parse HTML content to find the "parent" issue link
+        3. Use multiple patterns to match common Redmine HTML structures
+        """
         detail_url = f"{self.base_url}/attachments/{attachment_id}"
         headers = self.auth_headers()
         headers.setdefault("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
@@ -127,12 +135,29 @@ class RedmineAttachmentMixin:
             async with session.get(detail_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True) as response:
                 final_url_issue_id = extract_redmine_issue_id_from_text(str(response.url))
                 if final_url_issue_id:
+                    logger.debug("[RedmineClient] Found issue ID from redirect URL: %s", final_url_issue_id)
                     return final_url_issue_id
                 content_type = response.headers.get("Content-Type", "")
                 if response.status != 200 or "html" not in content_type.lower():
                     logger.info("[RedmineClient] Attachment detail did not return HTML: %s status=%s type=%s", detail_url, response.status, content_type)
                     return None
                 text = await response.text(errors="ignore")
+
+                # Try multiple patterns to find the correct issue link
+                # Pattern 1: Look for specific parent issue link patterns
+                patterns = [
+                    r'href=["\'][^"\']*/issues/(\d+)["\'][^>]*>\s*Show\s*<',  # "Show" link
+                    r'<a[^>]+href=["\'][^"\']*/issues/(\d+)["\'][^>]*class=["\']*issue[^"\']*["\']',  # link with issue class
+                    r'href=["\'][^"\']*/issues/(\d+)["\']',  # any issue link (fallback)
+                ]
+                for pattern in patterns:
+                    match = re.search(pattern, text, re.IGNORECASE)
+                    if match:
+                        issue_id = match.group(1)
+                        logger.debug("[RedmineClient] Found issue ID from HTML pattern %s: %s", pattern[:30] + "...", issue_id)
+                        return issue_id
+
+                # Fallback to generic search
                 link_match = COMPILED_ISSUE_LINK_PATTERN.search(text)
                 if link_match:
                     return link_match.group(1)

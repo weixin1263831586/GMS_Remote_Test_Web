@@ -109,13 +109,13 @@ def run_sync(args: argparse.Namespace) -> int:
                 if args.verbose:
                     print(f'fetching {source.key}: {source.url}', file=sys.stderr)
                 fetched = fetch_source(session, source, args.timeout)
-                scanned, changes, parsed = sync_source(conn, run_id, fetched, force=force, timestamp=utc_now())
+                scanned, changes, parsed = sync_source(conn, run_id, fetched, force=force, timestamp=utc_now(), session=session)
                 if scanned:
                     sources_scanned += 1
                 else:
                     sources_skipped += 1
                 artifacts_total += len(parsed.artifacts)
-                packages_total += len(parsed.gms_packages)
+                packages_total += len(parsed.gms_packages) + len(parsed.mainline_packages)
                 requirement_sections_total += len(parsed.requirement_sections)
                 requirement_table_rows_total += len(parsed.requirement_table_rows)
                 changes_total += changes
@@ -123,7 +123,8 @@ def run_sync(args: argparse.Namespace) -> int:
                     state = 'parsed' if scanned else 'unchanged'
                     print(
                         f'{source.key}: {state}, changes={changes}, artifacts={len(parsed.artifacts)}, '
-                        f'packages={len(parsed.gms_packages)}, req_sections={len(parsed.requirement_sections)}, '
+                        f'packages={len(parsed.gms_packages)}, mainline={len(parsed.mainline_packages)}, '
+                        f'req_sections={len(parsed.requirement_sections)}, '
                         f'req_rows={len(parsed.requirement_table_rows)}',
                         file=sys.stderr,
                     )

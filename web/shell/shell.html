@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>测试界面 - GMS远程测试</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260605-dx2">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260623-dcfg-scroll">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260601-01"></script>
@@ -64,12 +64,12 @@
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
-            const sidebarAllPages = ['test', 'desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'test-suites', 'apk-analysis', 'security-audit', 'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant', 'automation', 'redmine-agent', 'gerrit-dashboard', 'agent'];
+            const sidebarAllPages = ['test', 'desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'apk-analysis', 'test-suites', 'api-docs', 'architecture', 'websites', 'tools', 'security-audit', 'gms-assistant', 'automation', 'redmine-agent', 'gerrit-dashboard', 'agent'];
 
             // 确定要显示的页面（在页面渲染前）
             const hash = window.location.hash.substring(1);
             const hashPage = hash.split('?')[0];
-            const savedPage = localStorage.getItem('gms_current_page') || 'test';
+            const savedPage = localStorage.getItem('gms_current_page') || 'automation';
             let savedVisiblePages = null;
             try {
                 savedVisiblePages = JSON.parse(localStorage.getItem('gms_sidebar_visible_pages') || 'null');
@@ -90,7 +90,7 @@
                 targetPage = savedPage;
             }
             if (!visiblePages.includes(targetPage)) {
-                targetPage = visiblePages[0] || 'test';
+                targetPage = visiblePages[0] || 'automation';
             }
 
             // 保存目标页面供后续使用
@@ -842,10 +842,7 @@
             <!-- 分析结果区域 -->
             <div id="report-analysis-result" style="display: none;">
                 <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 10px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <div style="font-size: 16px; font-weight: 600;">📊 分析结果</div>
-                        <button class="btn-xs" onclick="resetReportAnalysis()">清除</button>
-                    </div>
+                    <button class="btn-xs" onclick="resetReportAnalysis()" style="float: right;">清除</button>
 
                     <!-- 总体统计 -->
                     <div id="report-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 20px;">
@@ -1710,85 +1707,70 @@
     </div>
 
     <!-- 设备 config 资源查看弹框 -->
-    <div id="device-config-modal" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 96vw; width: 1500px; max-height: 92vh;">
-            <div class="modal-header">
-                <span class="modal-title" id="device-config-title">ℹ️ 设备信息</span>
-                <span class="modal-close" onclick="closeDeviceConfigExplorer()">&times;</span>
-            </div>
-            <div class="modal-body" style="padding: 12px 16px; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
-                <style>
-                    #device-config-modal .dcell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;}
-                    #device-config-modal .dcfg-tab{flex:1;min-height:0;display:none;flex-direction:column;}
-                    #device-config-modal .dcfg-tab.active{display:flex;}
-                    /* sticky 表头：背景/定位放在 th 单元格上，滚动时数据不会透过来 */
-                    #device-config-modal .dcfg-th{position:sticky;top:0;z-index:1;background:var(--card-bg);box-shadow:inset 0 -1px 0 var(--border-color);}
-                    #device-config-modal .dcfg-scroll{padding-top:0 !important;}
-                </style>
-                <!-- Tab 切换栏 -->
-                <div style="display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--border-color); flex-shrink: 0;" id="dcfg-tabs">
-                    <button class="dcfg-tabbtn" onclick="dcfgSwitchTab('configs')" data-tab="configs" style="padding: 8px 18px; border: none; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent;">⚙️ configs</button>
-                    <button class="dcfg-tabbtn" onclick="dcfgSwitchTab('packages')" data-tab="packages" style="padding: 8px 18px; border: none; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent;">📦 packages</button>
-                    <button class="dcfg-tabbtn" onclick="dcfgSwitchTab('features')" data-tab="features" style="padding: 8px 18px; border: none; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent;">✨ features</button>
-                    <button class="dcfg-tabbtn" onclick="dcfgSwitchTab('props')" data-tab="props" style="padding: 8px 18px; border: none; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent;">🔧 props</button>
+    <div id="device-config-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header dcfg-header">
+                <div class="dcfg-tabs" id="dcfg-tabs">
+                    <button class="dcfg-tabbtn" onclick="dcfgSwitchTab('configs')" data-tab="configs">⚙️ configs</button>
+                    <button class="dcfg-tabbtn" onclick="dcfgSwitchTab('packages')" data-tab="packages">📦 packages</button>
+                    <button class="dcfg-tabbtn" onclick="dcfgSwitchTab('features')" data-tab="features">✨ features</button>
+                    <button class="dcfg-tabbtn" onclick="dcfgSwitchTab('props')" data-tab="props">🔧 property</button>
                 </div>
-
+                <div class="dcfg-header-right">
+                    <span id="device-config-serial" class="dcfg-serial"></span>
+                    <span class="modal-close" onclick="closeDeviceConfigExplorer()">&times;</span>
+                </div>
+            </div>
+            <div class="modal-body dcfg-body">
                 <!-- ===== Tab: configs ===== -->
                 <div class="dcfg-tab active" id="dcfg-tab-configs">
-                <!-- 工具栏（固定，不随表格滚动） -->
-                <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; flex-shrink: 0;">
-                    <span style="font-size: 12px; color: var(--text-secondary);">应用包名</span>
-                    <input type="text" id="dcfg-package" list="dcfg-package-list" value="android" placeholder="包名（可下拉选或直接输入，如 android）" onchange="runDeviceConfigQuery()" style="min-width: 240px; background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; padding: 4px 8px; font-size: 13px;">
-                    <datalist id="dcfg-package-list"></datalist>
-                    <input type="text" id="dcfg-name" placeholder="资源名过滤（如 config_supports）" onkeydown="if(event.key==='Enter')runDeviceConfigQuery()" style="flex: 1; min-width: 200px; background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; padding: 4px 8px; font-size: 13px;">
-                    <select id="dcfg-type" onchange="runDeviceConfigQuery()" style="background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; padding: 4px 8px; font-size: 13px;">
-                        <option value="">全部类型</option>
-                        <option value="bool">bool</option>
-                        <option value="integer">integer</option>
-                        <option value="string">string</option>
-                        <option value="dimen">dimen</option>
-                        <option value="array">array</option>
-                    </select>
-                    <label style="font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="计算 overlay 生效值：每个资源调用一次 adb，后端并发执行（8路）。全量查询约1-2分钟，请耐心等待">
-                        <input type="checkbox" id="dcfg-effective" checked> 对比 overlay 生效值
-                    </label>
-                    <button class="btn-xxs btn-primary" onclick="runDeviceConfigQuery()">查询</button>
-                </div>
-                <!-- 说明（固定） -->
-                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px; flex-shrink: 0;">
-                    <b>默认值</b>=APK 里写的原始值；<b>生效值</b>=经 vendor overlay 覆盖后的实际值（<code>cmd overlay lookup</code>，未被修改则留空）；<b>状态</b>标记「已修改/默认」。全量计算生效值约1-2分钟，期间请勿关闭弹框。
-                </div>
-                <!-- 状态条（固定） -->
-                <div id="dcfg-stat" style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; display: none; flex-shrink: 0;"></div>
-                <!-- 结果表（独立滚动区） -->
-                <div id="dcfg-results" style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 12px 10px; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;">点击「查询」开始</div>
+                    <div class="dcfg-toolbar">
+                        <span class="dcfg-label">应用包名</span>
+                        <input type="text" id="dcfg-package" list="dcfg-package-list" value="android" placeholder="包名（可下拉选或直接输入，如 android）" onchange="runDeviceConfigQuery()">
+                        <datalist id="dcfg-package-list"></datalist>
+                        <input type="text" id="dcfg-name" placeholder="资源名过滤（如 config_supports）" onkeydown="if(event.key==='Enter')runDeviceConfigQuery()">
+                        <select id="dcfg-type" onchange="runDeviceConfigQuery()">
+                            <option value="">全部类型</option>
+                            <option value="bool">bool</option>
+                            <option value="integer">integer</option>
+                            <option value="string">string</option>
+                            <option value="dimen">dimen</option>
+                            <option value="array">array</option>
+                        </select>
+                        <label class="dcfg-label" title="计算 overlay 生效值：每个资源调用一次 adb，后端并发执行（8路）。全量查询约1-2分钟，请耐心等待">
+                            <input type="checkbox" id="dcfg-effective" checked> 对比 overlay 生效值
+                        </label>
+                        <button class="btn-xxs btn-primary" onclick="runDeviceConfigQuery()">查询</button>
+                    </div>
+                    <div id="dcfg-stat" class="dcfg-stat"></div>
+                    <div id="dcfg-results" class="dcfg-empty">点击「查询」开始</div>
                 </div>
                 <!-- ===== Tab: packages ===== -->
                 <div class="dcfg-tab" id="dcfg-tab-packages">
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
-                        <input type="text" id="dcfg-pkg-filter" placeholder="过滤包名或路径…" oninput="dcfgFilterPkg()" style="flex:1;min-width:200px;background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; padding: 4px 8px; font-size: 13px;">
+                    <div class="dcfg-toolbar">
+                        <input type="text" id="dcfg-pkg-filter" placeholder="过滤包名或路径…" oninput="dcfgFilterPkg()">
                         <button class="btn-xxs btn-primary" onclick="loadDevicePackagesF()">刷新</button>
                         <span id="dcfg-pkg-stat"></span>
                     </div>
-                    <div id="dcfg-pkg-results" style="flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; font-size: 13px; color: var(--text-muted); text-align: center; padding: 12px 10px;">点击「刷新」加载</div>
+                    <div id="dcfg-pkg-results" class="dcfg-empty">点击「刷新」加载</div>
                 </div>
                 <!-- ===== Tab: features ===== -->
                 <div class="dcfg-tab" id="dcfg-tab-features">
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
-                        <input type="text" id="dcfg-feat-filter" placeholder="过滤特性名…" oninput="dcfgFilterFeat()" style="flex:1;min-width:200px;background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; padding: 4px 8px; font-size: 13px;">
+                    <div class="dcfg-toolbar">
+                        <input type="text" id="dcfg-feat-filter" placeholder="过滤特性名…" oninput="dcfgFilterFeat()">
                         <button class="btn-xxs btn-primary" onclick="loadDeviceFeatures()">刷新</button>
                         <span id="dcfg-feat-stat"></span>
                     </div>
-                    <div id="dcfg-feat-results" style="flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; font-size: 13px; color: var(--text-muted); text-align: center; padding: 12px 10px;">点击「刷新」加载</div>
+                    <div id="dcfg-feat-results" class="dcfg-empty">点击「刷新」加载</div>
                 </div>
                 <!-- ===== Tab: props (getprop) ===== -->
                 <div class="dcfg-tab" id="dcfg-tab-props">
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
-                        <input type="text" id="dcfg-prop-filter" placeholder="过滤属性名或值…" oninput="dcfgFilterProp()" style="flex:1;min-width:200px;background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; padding: 4px 8px; font-size: 13px;">
+                    <div class="dcfg-toolbar">
+                        <input type="text" id="dcfg-prop-filter" placeholder="过滤属性名或值…" oninput="dcfgFilterProp()" class="dcfg-filter-input">
                         <button class="btn-xxs btn-primary" onclick="loadDeviceProps()">刷新</button>
                         <span id="dcfg-prop-stat"></span>
                     </div>
-                    <div id="dcfg-prop-results" style="flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; font-size: 13px; color: var(--text-muted); text-align: center; padding: 12px 10px;">点击「刷新」加载</div>
+                    <div id="dcfg-prop-results" class="dcfg-empty">点击「刷新」加载</div>
                 </div>
             </div>
         </div>
@@ -2766,7 +2748,7 @@
                 return;
             }
             dcfgDeviceSerial = serialNo;
-            document.getElementById('device-config-title').textContent = `ℹ️ 设备信息 · ${serialNo}`;
+            document.getElementById('device-config-serial').textContent = serialNo;
             // 重置为安全默认值
             document.getElementById('dcfg-name').value = '';
             document.getElementById('dcfg-type').value = '';
@@ -2795,9 +2777,14 @@
                 el.classList.toggle('active', el.id === 'dcfg-tab-' + tab);
             });
             document.querySelectorAll('#dcfg-tabs .dcfg-tabbtn').forEach(btn => {
-                const on = btn.dataset.tab === tab;
-                btn.style.color = on ? 'var(--primary-color)' : 'var(--text-secondary)';
-                btn.style.borderBottom = on ? '2px solid var(--primary-color)' : '2px solid transparent';
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+            });
+            // 滚动区样式随内容切换，默认/空/错误时保持居中的占位样式
+            ['dcfg-results','dcfg-pkg-results','dcfg-feat-results','dcfg-prop-results'].forEach(id => {
+                const box = document.getElementById(id);
+                if (!box) return;
+                const hasTable = box.querySelector('table');
+                box.classList.toggle('dcfg-empty', !hasTable);
             });
             // 懒加载：切到 packages/features/props 时首次自动拉取
             if (tab === 'packages' && !dcfgPkgLoaded) { dcfgPkgLoaded = true; loadDevicePackagesF(); }
@@ -2807,38 +2794,42 @@
 
         // ===== packages (pm list packages -f) =====
         let dcfgPkgRows = [];
+        let dcfgPkgLoading = false;
         async function loadDevicePackagesF() {
+            if (dcfgPkgLoading) return;
+            dcfgPkgLoading = true;
             const box = document.getElementById('dcfg-pkg-results');
-            box.style.color = 'var(--text-muted)'; box.style.textAlign = 'center';
+            box.classList.add('dcfg-empty');
             box.innerHTML = '加载中…';
             try {
                 const r = await fetch('/api/config-explorer/packages-with-path?device_id=' + encodeURIComponent(dcfgDeviceSerial));
                 const j = await r.json();
-                if (!j.success) { box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
+                if (!j.success) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
                 dcfgPkgRows = (j.data && j.data.rows) || [];
                 document.getElementById('dcfg-pkg-stat').textContent = `共 ${dcfgPkgRows.length} 个`;
                 dcfgFilterPkg();
-            } catch (e) { box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
+            } catch (e) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
+            finally { dcfgPkgLoading = false; }
         }
         function dcfgFilterPkg() {
             const q = document.getElementById('dcfg-pkg-filter').value.trim().toLowerCase();
             const box = document.getElementById('dcfg-pkg-results');
             const rows = q ? dcfgPkgRows.filter(r => (r.package + ' ' + r.path).toLowerCase().includes(q)) : dcfgPkgRows;
-            if (!rows.length) { box.innerHTML = '无匹配'; return; }
-            box.style.color = ''; box.style.textAlign = '';
+            if (!rows.length) { box.classList.add('dcfg-empty'); box.innerHTML = '无匹配'; return; }
+            box.classList.remove('dcfg-empty');
             box.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;">
                 <colgroup><col style="width:30%"><col style="width:58%"><col style="width:12%"></colgroup>
                 <thead><tr>
-                    <th class="dcfg-th" style="padding:5px 8px;text-align:left;">包名</th><th class="dcfg-th" style="padding:5px 8px;text-align:left;">APK 路径</th><th class="dcfg-th" style="padding:5px 8px;text-align:left;">操作</th>
+                    <th class="dcfg-th">包名</th><th class="dcfg-th">APK 路径</th><th class="dcfg-th">操作</th>
                 </tr></thead><tbody>${rows.map(r => {
                     const isApk = /\.(apk|jar)$/i.test(r.path);
                     const actBtn = isApk
                         ? `<button class="btn-xxs btn-primary" onclick="dcfgDecompileApk('${dcfgEscapeHtml(r.path)}', '${dcfgEscapeHtml(r.package)}')">🔍 反编译</button>`
-                        : '<span style="color:var(--text-muted);font-size:11px;">非 APK</span>';
+                        : '<span class="dcfg-muted dcfg-hint">非 APK</span>';
                     return `<tr>
-                    <td style="padding:4px 8px;"><div class="dcell" title="${dcfgEscapeHtml(r.package)}" style="font-family:monospace;font-size:12px;">${dcfgEscapeHtml(r.package)}</div></td>
-                    <td style="padding:4px 8px;"><div class="dcell" title="${dcfgEscapeHtml(r.path)}" style="font-family:monospace;font-size:12px;">${dcfgEscapeHtml(r.path)}</div></td>
-                    <td style="padding:4px 8px;">${actBtn}</td>
+                    <td><div class="dcell" title="${dcfgEscapeHtml(r.package)}">${dcfgEscapeHtml(r.package)}</div></td>
+                    <td><div class="dcell" title="${dcfgEscapeHtml(r.path)}">${dcfgEscapeHtml(r.path)}</div></td>
+                    <td>${actBtn}</td>
                 </tr>`;
                 }).join('')}</tbody></table>`;
         }
@@ -2895,63 +2886,71 @@
 
         // ===== features (pm list features) =====
         let dcfgFeatRows = [];
+        let dcfgFeatLoading = false;
         async function loadDeviceFeatures() {
+            if (dcfgFeatLoading) return;
+            dcfgFeatLoading = true;
             const box = document.getElementById('dcfg-feat-results');
-            box.style.color = 'var(--text-muted)'; box.style.textAlign = 'center';
+            box.classList.add('dcfg-empty');
             box.innerHTML = '加载中…';
             try {
                 const r = await fetch('/api/config-explorer/features?device_id=' + encodeURIComponent(dcfgDeviceSerial));
                 const j = await r.json();
-                if (!j.success) { box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
+                if (!j.success) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
                 dcfgFeatRows = (j.data && j.data.rows) || [];
                 document.getElementById('dcfg-feat-stat').textContent = `共 ${dcfgFeatRows.length} 个`;
                 dcfgFilterFeat();
-            } catch (e) { box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
+            } catch (e) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
+            finally { dcfgFeatLoading = false; }
         }
         function dcfgFilterFeat() {
             const q = document.getElementById('dcfg-feat-filter').value.trim().toLowerCase();
             const box = document.getElementById('dcfg-feat-results');
             const rows = q ? dcfgFeatRows.filter(r => r.name.toLowerCase().includes(q)) : dcfgFeatRows;
-            if (!rows.length) { box.innerHTML = '无匹配'; return; }
-            box.style.color = ''; box.style.textAlign = '';
+            if (!rows.length) { box.classList.add('dcfg-empty'); box.innerHTML = '无匹配'; return; }
+            box.classList.remove('dcfg-empty');
             box.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;">
                 <colgroup><col style="width:70%"><col style="width:30%"></colgroup>
                 <thead><tr>
-                    <th class="dcfg-th" style="padding:5px 8px;text-align:left;">特性名</th><th class="dcfg-th" style="padding:5px 8px;text-align:left;">版本</th>
+                    <th class="dcfg-th">特性名</th><th class="dcfg-th">版本</th>
                 </tr></thead><tbody>${rows.map(r => `<tr>
-                    <td style="padding:4px 8px;"><div class="dcell" title="${dcfgEscapeHtml(r.name)}" style="font-family:monospace;font-size:12px;">${dcfgEscapeHtml(r.name)}</div></td>
-                    <td style="padding:4px 8px;"><div class="dcell" title="${dcfgEscapeHtml(r.version)}" style="font-family:monospace;font-size:12px;">${r.version ? dcfgEscapeHtml(r.version) : '<span style="color:var(--text-muted)">—</span>'}</div></td>
+                    <td><div class="dcell" title="${dcfgEscapeHtml(r.name)}">${dcfgEscapeHtml(r.name)}</div></td>
+                    <td><div class="dcell" title="${dcfgEscapeHtml(r.version)}">${r.version ? dcfgEscapeHtml(r.version) : '<span class="dcfg-muted">—</span>'}</div></td>
                 </tr>`).join('')}</tbody></table>`;
         }
 
         // ===== props (getprop) =====
         let dcfgPropRows = [];
+        let dcfgPropLoading = false;
         async function loadDeviceProps() {
+            if (dcfgPropLoading) return;
+            dcfgPropLoading = true;
             const box = document.getElementById('dcfg-prop-results');
-            box.style.color = 'var(--text-muted)'; box.style.textAlign = 'center';
+            box.classList.add('dcfg-empty');
             box.innerHTML = '加载中…';
             try {
                 const r = await fetch('/api/config-explorer/props?device_id=' + encodeURIComponent(dcfgDeviceSerial));
                 const j = await r.json();
-                if (!j.success) { box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
+                if (!j.success) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
                 dcfgPropRows = (j.data && j.data.rows) || [];
                 document.getElementById('dcfg-prop-stat').textContent = `共 ${dcfgPropRows.length} 项`;
                 dcfgFilterProp();
-            } catch (e) { box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
+            } catch (e) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
+            finally { dcfgPropLoading = false; }
         }
         function dcfgFilterProp() {
             const q = document.getElementById('dcfg-prop-filter').value.trim().toLowerCase();
             const box = document.getElementById('dcfg-prop-results');
             const rows = q ? dcfgPropRows.filter(r => (r.name + ' ' + r.value).toLowerCase().includes(q)) : dcfgPropRows;
-            if (!rows.length) { box.innerHTML = '无匹配'; return; }
-            box.style.color = ''; box.style.textAlign = '';
+            if (!rows.length) { box.classList.add('dcfg-empty'); box.innerHTML = '无匹配'; return; }
+            box.classList.remove('dcfg-empty');
             box.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;">
                 <colgroup><col style="width:40%"><col style="width:60%"></colgroup>
                 <thead><tr>
-                    <th class="dcfg-th" style="padding:5px 8px;text-align:left;">属性名</th><th class="dcfg-th" style="padding:5px 8px;text-align:left;">值</th>
+                    <th class="dcfg-th">属性名</th><th class="dcfg-th">值</th>
                 </tr></thead><tbody>${rows.map(r => `<tr>
-                    <td style="padding:4px 8px;"><div class="dcell" title="${dcfgEscapeHtml(r.name)}" style="font-family:monospace;font-size:12px;">${dcfgEscapeHtml(r.name)}</div></td>
-                    <td style="padding:4px 8px;"><div class="dcell" title="${dcfgEscapeHtml(r.value)}" style="font-family:monospace;font-size:12px;">${r.value ? dcfgEscapeHtml(r.value) : '<span style="color:var(--text-muted)">—</span>'}</div></td>
+                    <td><div class="dcell" title="${dcfgEscapeHtml(r.name)}">${dcfgEscapeHtml(r.name)}</div></td>
+                    <td><div class="dcell" title="${dcfgEscapeHtml(r.value)}">${r.value ? dcfgEscapeHtml(r.value) : '<span class="dcfg-muted">—</span>'}</div></td>
                 </tr>`).join('')}</tbody></table>`;
         }
 
@@ -2994,20 +2993,21 @@
 
             const stat = document.getElementById('dcfg-stat');
             const results = document.getElementById('dcfg-results');
-            stat.style.display = 'none';
-            results.style.color = 'var(--text-muted)';
-            results.style.textAlign = 'center';
+            stat.classList.remove('active');
+            results.classList.add('dcfg-empty');
             results.innerHTML = withEffective ? '正在查询 overlay 生效值（逐个 adb 调用，请稍候）…' : '查询中…';
 
             try {
                 const r = await fetch('/api/config-explorer?' + params);
                 const j = await r.json();
                 if (!j.success) {
+                    results.classList.add('dcfg-empty');
                     results.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || j.message || '查询失败');
                     return;
                 }
                 renderDeviceConfigResults(j.data, withEffective);
             } catch (e) {
+                results.classList.add('dcfg-empty');
                 results.innerHTML = '❌ 请求失败: ' + dcfgEscapeHtml(e.message);
             }
         }
@@ -3017,68 +3017,66 @@
             const stat = document.getElementById('dcfg-stat');
             const results = document.getElementById('dcfg-results');
             if (!res.length) {
-                results.style.color = 'var(--text-muted)';
-                results.style.textAlign = 'center';
+                results.classList.add('dcfg-empty');
                 results.innerHTML = '没有匹配的资源';
-                stat.style.display = 'none';
+                stat.classList.remove('active');
                 return;
             }
             let txt = `共 ${data.total} 个资源`;
             if (withEffective) {
-                txt += ` · 模式: <b>默认值+overlay生效值</b> · 被 overlay 修改: <b style="color:var(--warning-color)">${data.overlayed_count}</b>`;
+                txt += ` · 模式: <b>默认值+overlay生效值</b> · 被 overlay 修改: <b class="dcfg-changed">${data.overlayed_count}</b>`;
             } else {
                 txt += ` · 模式: <b>仅默认值</b>（勾选「对比 overlay 生效值」可显示生效值/状态列）`;
             }
             stat.innerHTML = txt;
-            stat.style.display = 'block';
+            stat.classList.add('active');
 
             // table-layout:fixed + 固定列宽，确保生效值/状态列始终可见，长内容自动截断
             // .dcell 容器实现单行截断，title 属性让鼠标悬停显示完整内容
             const colWidths = withEffective
                 ? '<colgroup><col style="width:26%"><col style="width:7%"><col style="width:20%"><col style="width:22%"><col style="width:10%"><col style="width:15%"></colgroup>'
                 : '<colgroup><col style="width:45%"><col style="width:10%"><col style="width:45%"></colgroup>';
-            const effCol = withEffective ? '<th class="dcfg-th" style="padding:5px 8px;text-align:left;">生效值(overlay)</th><th class="dcfg-th" style="padding:5px 8px;text-align:left;">状态</th><th class="dcfg-th" style="padding:5px 8px;text-align:left;">overlay来源</th>' : '';
+            const effCol = withEffective ? '<th class="dcfg-th">生效值(overlay)</th><th class="dcfg-th">状态</th><th class="dcfg-th">overlay来源</th>' : '';
             const rows = res.map(e => {
                 const changed = e.overlay_changed === true;
                 // 未被 overlay 覆盖时，生效值列留空（lookup 返回值与默认值相同，无意义）
                 const effDisplay = changed
                     ? dcfgEscapeHtml(e.effective_value)
-                    : '<span style="color:var(--text-muted);">—</span>';
+                    : '<span class="dcfg-muted">—</span>';
                 const effTitle = changed ? dcfgEscapeHtml(e.effective_value) : '';
                 // overlay 来源：只有被修改时才显示来源包名，否则留空
                 const srcDisplay = changed && e.overlay_source
                     ? dcfgEscapeHtml(e.overlay_source)
-                    : '<span style="color:var(--text-muted);">—</span>';
+                    : '<span class="dcfg-muted">—</span>';
                 const status = e.lookup_error
-                    ? `<span title="${dcfgEscapeHtml(e.lookup_error)}" style="color:var(--danger-color)">错误</span>`
-                    : (changed ? '<span style="color:var(--warning-color);font-weight:600;">已修改</span>'
-                               : (e.overlay_changed === false ? '<span style="color:var(--text-muted)">默认</span>' : ''));
+                    ? `<span title="${dcfgEscapeHtml(e.lookup_error)}" class="dcfg-danger">错误</span>`
+                    : (changed ? '<span class="dcfg-changed dcfg-status">已修改</span>'
+                               : (e.overlay_changed === false ? '<span class="dcfg-muted">默认</span>' : ''));
                 const effCell = withEffective
-                    ? `<td style="padding:5px 8px;color:${changed ? 'var(--warning-color)' : 'var(--text-muted)'};"><div class="dcell" title="${effTitle}" style="font-family:monospace;font-size:12px;">${effDisplay}</div></td><td style="padding:5px 8px;">${status}</td><td style="padding:5px 8px;"><div class="dcell" title="${changed && e.overlay_source ? dcfgEscapeHtml(e.overlay_source) : ''}" style="font-family:monospace;font-size:12px;">${srcDisplay}</div></td>`
+                    ? `<td class="${changed ? 'dcfg-changed' : ''}"><div class="dcell" title="${effTitle}">${effDisplay}</div></td><td>${status}</td><td><div class="dcell" title="${changed && e.overlay_source ? dcfgEscapeHtml(e.overlay_source) : ''}">${srcDisplay}</div></td>`
                     : '';
                 return `<tr>
-                    <td style="padding:5px 8px;"><div class="dcell" title="${dcfgEscapeHtml(e.name)}" style="font-family:monospace;font-size:12px;">${dcfgEscapeHtml(e.name)}</div></td>
-                    <td style="padding:5px 8px;"><span style="padding:1px 6px;border-radius:8px;background:var(--card-bg);font-size:11px;">${dcfgEscapeHtml(e.type)}</span></td>
-                    <td style="padding:5px 8px;"><div class="dcell" title="${dcfgEscapeHtml(e.default_value)}" style="font-family:monospace;font-size:12px;">${dcfgEscapeHtml(e.default_value)}</div></td>
+                    <td><div class="dcell" title="${dcfgEscapeHtml(e.name)}">${dcfgEscapeHtml(e.name)}</div></td>
+                    <td><span class="dcfg-type-badge">${dcfgEscapeHtml(e.type)}</span></td>
+                    <td><div class="dcell" title="${dcfgEscapeHtml(e.default_value)}">${dcfgEscapeHtml(e.default_value)}</div></td>
                     ${effCell}
                 </tr>`;
             }).join('');
 
-            results.style.color = '';
-            results.style.textAlign = '';
+            results.classList.remove('dcfg-empty');
             results.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;">
                 ${colWidths}
                 <thead><tr>
-                    <th class="dcfg-th" style="padding:5px 8px;text-align:left;">资源名</th>
-                    <th class="dcfg-th" style="padding:5px 8px;text-align:left;">类型</th>
-                    <th class="dcfg-th" style="padding:5px 8px;text-align:left;">默认值(APK)</th>
+                    <th class="dcfg-th">资源名</th>
+                    <th class="dcfg-th">类型</th>
+                    <th class="dcfg-th">默认值(APK)</th>
                     ${effCol}
                 </tr></thead>
                 <tbody>${rows}</tbody></table>`;
         }
 
         // ==================== 页面切换功能 ====================
-        let currentPage = 'test';
+        let currentPage = 'automation';
         let terminalInitialized = false;
         let terminal = null;
         let terminalSocket = null;
@@ -3196,7 +3194,7 @@
             if (visiblePages.includes(pageName)) {
                 return pageName;
             }
-            return visiblePages[0] || getAllSidebarPages()[0] || 'test';
+            return visiblePages[0] || getAllSidebarPages()[0] || 'automation';
         }
 
         function applySidebarVisibility(pages) {
@@ -3335,8 +3333,9 @@
             }
         }
 
-        // 页面切换函数
-        function ensureLazyFrameLoaded(pageName) {
+        // 页面切换函数：iframe 微前端懒加载
+        // 解决 F5 刷新后 iframe 内容丢失的问题
+        function ensureLazyFrameLoaded(pageName, forceReload = false) {
             const frameMap = {
                 'gms-assistant': 'gms-assistant-frame',
                 'automation': 'automation-frame',
@@ -3346,9 +3345,27 @@
             const frameId = frameMap[pageName];
             if (!frameId) return;
             const frame = document.getElementById(frameId);
-            if (frame && !frame.getAttribute('src')) {
-                const src = frame.getAttribute('data-src');
-                if (src) frame.setAttribute('src', src);
+            if (!frame) return;
+
+            const dataSrc = frame.getAttribute('data-src');
+            if (!dataSrc) return;
+
+            const hasSrc = frame.hasAttribute('src');
+
+            // 首次加载：iframe 没有 src，从 data-src 加载
+            if (!hasSrc) {
+                frame.setAttribute('src', dataSrc);
+                return;
+            }
+
+            // F5 刷新后：iframe 有 src 但内容可能空白
+            // 只有 forceReload=true 时才强制重新加载（避免页面切换时不必要的重载）
+            if (forceReload) {
+                const currentSrc = frame.getAttribute('src');
+                frame.removeAttribute('src');
+                setTimeout(() => {
+                    frame.setAttribute('src', currentSrc);
+                }, 0);
             }
         }
 
@@ -4628,6 +4645,16 @@
                     sync_title: 'GMS包更新'
                 },
                 {
+                    icon: '🚆',
+                    title: 'Mainline包更新',
+                    description: '扫描并查看Mainline PRELOAD包更新表格，默认抓取近12个月',
+                    url: '/gms-update-monitor?tab=mainline',
+                    action: 'gms-update-sync',
+                    builtin_id: 'gms-mainline-monitor',
+                    sync_sources: ['mainline_preload'],
+                    sync_title: 'Mainline包更新'
+                },
+                {
                     icon: '📋',
                     title: 'GMS要求',
                     description: '扫描GMS认证要求章节和表格更新，默认展示顶层主章节',
@@ -5599,19 +5626,25 @@
                 }
             }
 
-            // 从 DOM 获取当前导航栏的顺序（支持拖拽排序后）
-            const navItems = document.querySelectorAll('.sidebar-item');
-            const pages = Array.from(navItems).map(item => item.dataset.page);
+            // 从 DOM 获取当前导航栏的顺序（支持拖拽排序后）。
+            // 只在「可见」的导航项之间跳转：被侧边栏可见性设置隐藏的项
+            // （style.display === 'none'）会被跳过，否则 switchPage 会经
+            // resolveVisiblePage 把隐藏页重定向到第一个可见页（test），
+            // 导致方向键在隐藏页位置上「直接跳到测试界面」。
+            const navItems = Array.from(document.querySelectorAll('.sidebar-item')).filter(
+                item => item.style.display !== 'none'
+            );
+            const pages = navItems.map(item => item.dataset.page);
             const currentIndex = pages.indexOf(currentPage);
 
-            if (currentIndex === -1) return;
+            if (currentIndex === -1 || pages.length === 0) return;
 
             let newIndex;
             if (e.key === 'ArrowUp') {
-                // 向上：前一个页面
+                // 向上：前一个可见页面
                 newIndex = (currentIndex - 1 + pages.length) % pages.length;
             } else {
-                // 向下：下一个页面
+                // 向下：下一个可见页面
                 newIndex = (currentIndex + 1) % pages.length;
             }
 
@@ -6238,7 +6271,7 @@
         // 页面加载完成后，如果是终端页面则初始化终端
         window.addEventListener('load', () => {
             // 获取页面加载前确定的目标页面
-            let targetPage = window.__targetPage || localStorage.getItem('gms_current_page') || 'test';
+            let targetPage = window.__targetPage || localStorage.getItem('gms_current_page') || 'automation';
             applySidebarVisibility(getSavedSidebarVisiblePages());
             targetPage = resolveVisiblePage(targetPage);
 
@@ -6271,6 +6304,13 @@
             if (targetPageEl) {
                 targetPageEl.classList.add('active');
             }
+
+            // F5 刷新时，iframe 微前端（gms-assistant / automation /
+            // redmine-agent / gerrit-dashboard）的 src 是懒加载的：只有
+            // switchPage() 会触发。刷新不会走 switchPage，所以必须在这里
+            // 显式加载，否则刷新后页面空白 / 无数据。
+            // 传入 forceReload=true 确保刷新后 iframe 内容正确加载
+            ensureLazyFrameLoaded(targetPage, true);
 
             currentPage = targetPage;
 
@@ -6332,10 +6372,18 @@
             const items = Array.from(nav.querySelectorAll('.sidebar-item'));
             const itemByPage = new Map(items.map(item => [item.dataset.page, item]));
             const currentPages = getSidebarPages(nav);
+            const currentSet = new Set(currentPages);
+            // 只保留 order 里真实存在的页面
             const orderedPages = order.filter(page => itemByPage.has(page));
-            const remainingPages = currentPages.filter(page => !orderedPages.includes(page));
 
-            orderedPages.concat(remainingPages).forEach(page => {
+            // 关键防御：只有当 order 完整覆盖当前所有页面时才按它重排。
+            // 否则（持久化了重构前的旧 order、缺页面、含历史残留名）保持 HTML
+            // 默认顺序，避免把缺失的真实页面一股脑挤到末尾导致「F5 后导航栏乱跳」。
+            if (orderedPages.length !== currentPages.length) {
+                return;
+            }
+
+            orderedPages.forEach(page => {
                 nav.appendChild(itemByPage.get(page));
             });
         }
@@ -6346,19 +6394,11 @@
             const nav = document.getElementById('sidebar-nav');
             if (!nav) return;
 
-            if (savedOrder && Array.isArray(savedOrder) && savedOrder.length > 0 && savedOrder[0] !== 'gms-assistant') {
-                const itemByPage = new Map();
-                nav.querySelectorAll('.sidebar-item').forEach(item => {
-                    itemByPage.set(item.dataset.page, item);
-                });
-
-                // 按保存的顺序重新排列导航项
-                savedOrder.forEach(page => {
-                    const item = itemByPage.get(page);
-                    if (item) {
-                        nav.appendChild(item);
-                    }
-                });
+            // 复用 applySidebarOrder 的完整性校验：只有当 savedOrder 完整覆盖
+            // 当前所有页面时才重排。旧的/不完整的/含历史残留名（ai-assistant）
+            // 的 savedOrder 会被忽略，保持 HTML 默认顺序，避免 F5 后乱跳。
+            if (savedOrder && Array.isArray(savedOrder) && savedOrder.length > 0) {
+                applySidebarOrder(nav, savedOrder);
             }
 
             applySidebarVisibility(getSavedSidebarVisiblePages());
@@ -6530,7 +6570,7 @@
             loadSidebarConfigFromBackend();
 
             // 初始化默认页面的组件（如果默认是 APK 分析页面）
-            const defaultPage = localStorage.getItem('gms_current_page') || 'test';
+            const defaultPage = localStorage.getItem('gms_current_page') || 'automation';
             if (defaultPage === 'apk-analysis') {
                 setTimeout(() => {
                     if (typeof window.initApkAnalysisPage === 'function') {

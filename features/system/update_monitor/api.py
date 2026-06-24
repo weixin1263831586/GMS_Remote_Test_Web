@@ -390,6 +390,54 @@ async def list_gms_update_monitor_packages(
     return {'success': True, 'data': {'items': _rows_to_dicts(rows)}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
+_MAINLINE_MONTH_ORDER_SQL = (
+    "CASE month "
+    "WHEN 'jan' THEN 1 WHEN 'feb' THEN 2 WHEN 'mar' THEN 3 WHEN 'apr' THEN 4 "
+    "WHEN 'may' THEN 5 WHEN 'jun' THEN 6 WHEN 'jul' THEN 7 WHEN 'aug' THEN 8 "
+    "WHEN 'sep' THEN 9 WHEN 'oct' THEN 10 WHEN 'nov' THEN 11 WHEN 'dec' THEN 12 "
+    "ELSE 0 END"
+)
+
+
+@router.get('/mainline')
+async def list_gms_update_monitor_mainline(
+    year: str = Query(''),
+    month: str = Query(''),
+    q: str = Query(''),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    conn, missing = _get_db()
+    if missing:
+        return missing
+    where = []
+    params: list[str] = []
+    if year:
+        where.append('year = ?')
+        params.append(year)
+    if month:
+        where.append('month = ? COLLATE NOCASE')
+        params.append(month.lower())
+    if q:
+        like = _like_param(q)
+        where.append('(preload_version LIKE ? OR partner_zip_build_id LIKE ? OR notes_url LIKE ? OR ci_build_url LIKE ?)')
+        params.extend([like, like, like, like])
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ''
+    with conn:
+        total = conn.execute(f'SELECT COUNT(*) FROM gms_update_mainline_packages {where_sql}', params).fetchone()[0]
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM gms_update_mainline_packages
+            {where_sql}
+            ORDER BY CAST(year AS INTEGER) DESC, {_MAINLINE_MONTH_ORDER_SQL} DESC, preload_version DESC
+            LIMIT ? OFFSET ?
+            """,
+            [*params, limit, offset],
+        ).fetchall()
+    return {'success': True, 'data': {'items': _rows_to_dicts(rows)}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
+
+
 @router.get('/requirements/sections')
 async def list_gms_update_monitor_requirement_sections(
     level: int | None = Query(None, ge=2, le=3),

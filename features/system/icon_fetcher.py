@@ -20,6 +20,8 @@ from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
+from foundation.config import PROJECT_ROOT
+
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,11 @@ class IconResult:
 class IconFetcher:
     """网站图标获取器 - Web优化版本"""
 
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # 被 bootstrap/application.py 挂载在 '/static' 的物理目录。
+    # 必须与该处保持一致（PROJECT_ROOT / 'web/static'），否则下载的图标
+    # 会落进一个未被 serve 的目录，前端通过 /static/... 永远访问不到。
+    WEB_STATIC_DIR = os.path.join(str(PROJECT_ROOT), "web", "static")
+    BASE_DIR = WEB_STATIC_DIR  # 向后兼容：历史代码以 BASE_DIR 为基准拼接
 
     # 常量配置
     ICON_VALIDATION_TIMEOUT = 5  # 图标验证超时时间（秒）
@@ -115,8 +121,8 @@ class IconFetcher:
         'digitalocean.com': {'icon': '🌊', 'type': 'emoji'},
     }
 
-    CACHE_FILE = os.path.join(BASE_DIR, "data", "icon_cache.json")
-    LOCAL_ICON_DIR = os.path.join(BASE_DIR, "static", "icons", "favicons")
+    CACHE_FILE = os.path.join(str(PROJECT_ROOT), "data", "icon_cache.json")
+    LOCAL_ICON_DIR = os.path.join(WEB_STATIC_DIR, "icons", "favicons")
     LOCAL_ICON_URL_PREFIX = "/static/icons/favicons"
     DEFAULT_ICON_URL = "/static/icons/site-default.svg"
     CACHE_DURATION = timedelta(days=7)  # 缓存7天
@@ -256,21 +262,20 @@ class IconFetcher:
 
     @classmethod
     def static_url_to_path(cls, url: str) -> str:
-        """将本地静态图标 URL 转为文件路径"""
-        if url == cls.DEFAULT_ICON_URL:
-            return os.path.join(cls.BASE_DIR, url.lstrip('/'))
-        if not isinstance(url, str) or not url.startswith(cls.LOCAL_ICON_URL_PREFIX + '/'):
-            return ""
+        """将本地静态图标 URL 转为文件路径。
 
-        filename = os.path.basename(urlparse(url).path)
-        if not filename:
+        URL 的 /static 前缀对应 bootstrap 挂载的 WEB_STATIC_DIR 物理目录，
+        去掉该前缀后拼接即可得到磁盘路径。
+        """
+        if not isinstance(url, str) or not url.startswith('/static/'):
             return ""
-        return os.path.join(cls.LOCAL_ICON_DIR, filename)
+        rel = url[len('/static/'):]
+        return os.path.join(cls.WEB_STATIC_DIR, rel.replace('/', os.sep))
 
     @classmethod
     def default_icon_path(cls) -> str:
         """默认图标文件路径"""
-        return os.path.join(cls.BASE_DIR, cls.DEFAULT_ICON_URL.lstrip('/'))
+        return os.path.join(cls.WEB_STATIC_DIR, "icons", "site-default.svg")
 
     def _local_url_for_path(self, path: str) -> str:
         """本地文件路径转 URL"""

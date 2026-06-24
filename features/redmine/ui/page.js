@@ -11,7 +11,7 @@ let currentPage = 1;
 const pageSize = 15;
 let currentRunId = '';
 let statsUserInitialized = false;
-let statsConfig = {stale_days: 20, window_days: 60, cache_ttl: 600, redmine_base_url: 'https://redmine.rock-chips.com', dashboard: {profiles: [], defaults: {list_limit: 50, issue_limit: 500}}};
+let statsConfig = {stale_days: 20, window_days: 60, cache_ttl: 600, redmine: {base_url: 'https://redmine.rock-chips.com'}, dashboard: {profiles: [], defaults: {list_limit: 50, issue_limit: 500}}};
 let departmentProfileId = '';
 let projectProfileId = '';
 // 趋势明细点击上下文：当前看板作用的指派人姓名列表（个人=[name]，部门=全员）
@@ -61,7 +61,7 @@ function trunc(s, n) {
   return s.length > n ? s.slice(0, n) + '...' : s;
 }
 function redmineBaseUrl() {
-  return String(statsConfig.redmine_base_url || 'https://redmine.rock-chips.com').replace(new RegExp('/+$'), '');
+  return String(((statsConfig.redmine || {}).base_url) || 'https://redmine.rock-chips.com').replace(new RegExp('/+$'), '');
 }
 function redmineIssueUrl(issueId) {
   return redmineBaseUrl() + '/issues/' + encodeURIComponent(String(issueId || '').trim());
@@ -372,7 +372,7 @@ async function submitAddUser() {
     await api('/api/redmine-agent/users', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({id: Number(id), name: name, email: email, profile_id: profileId})
+      body: JSON.stringify({id: Number(id), name: name, email: email, department_id: profileId})
     });
     hideModal('addUserModal');
     statsUserInitialized = false;
@@ -427,7 +427,7 @@ function hideAddProjectModal() { hideModal('addProjectModal'); }
 async function submitAddProject() {
   var name = document.getElementById('addProjectName').value.trim();
   var projectId = document.getElementById('addProjectId').value.trim();
-  if (!projectId) { notifyUser('添加项目失败', '请输入项目标识或 URL', 'warning'); return; }
+  if (!projectId) { notifyUser('添加项目失败', '请输入项目标识', 'warning'); return; }
   try {
     var result = await api('/api/redmine-agent/dashboard/projects', {
       method: 'POST',
@@ -756,9 +756,7 @@ function trendEndDate(chartKey) {
 }
 function trendDateRange(chartKey) {
   var ranges = statsConfig.chart_date_ranges || {};
-  if (ranges[chartKey]) return ranges[chartKey] || {};
-  var legacy = ((statsConfig.chart_start_dates || {})[chartKey] || '').trim();
-  return legacy ? {start: legacy} : {};
+  return ranges[chartKey] || {};
 }
 function filterTrendItems(items, keyName, chartKey) {
   var start = trendStartDate(chartKey);
@@ -967,9 +965,33 @@ async function sendProjectReminder(userId, btn) {
   }
 }
 
+function saveRedmineProfileState() {
+  try {
+    window.sessionStorage.setItem('redmineDepartmentProfileId', departmentProfileId || '');
+    window.sessionStorage.setItem('redmineProjectProfileId', projectProfileId || '');
+  } catch(_) {}
+  var url = new URL(window.location.href);
+  if (departmentProfileId) url.searchParams.set('dept_profile', departmentProfileId);
+  else url.searchParams.delete('dept_profile');
+  if (projectProfileId) url.searchParams.set('project_profile', projectProfileId);
+  else url.searchParams.delete('project_profile');
+  window.history.replaceState({}, '', url.toString());
+}
+
+function restoreRedmineProfileState() {
+  var q = new URLSearchParams(window.location.search);
+  departmentProfileId = q.get('dept_profile') || '';
+  projectProfileId = q.get('project_profile') || '';
+  try {
+    if (!departmentProfileId) departmentProfileId = window.sessionStorage.getItem('redmineDepartmentProfileId') || '';
+    if (!projectProfileId) projectProfileId = window.sessionStorage.getItem('redmineProjectProfileId') || '';
+  } catch(_) {}
+}
+
 function onDepartmentProfileChange() {
   var select = document.getElementById('departmentProfileSelect');
   departmentProfileId = select ? select.value : '';
+  saveRedmineProfileState();
   loadDepartmentOverdue(true);
 }
 
@@ -1183,6 +1205,7 @@ async function loadStatistics() {
 function onProjectProfileChange() {
   var select = document.getElementById('projectProfileSelect');
   projectProfileId = select ? select.value : '';
+  saveRedmineProfileState();
   loadProjectDashboard(true);
 }
 function toggleProjectOpenOnly() {
@@ -1314,6 +1337,7 @@ async function waitForRun(runId, label) {
 }
 
 // ---- Init ----
+restoreRedmineProfileState();
 var initialTab = new URLSearchParams(window.location.search).get('tab') || (window.sessionStorage.getItem('redmineLastTab') || 'stats');
 if (!document.getElementById('tab-' + initialTab)) initialTab = 'stats';
 switchTab(initialTab);

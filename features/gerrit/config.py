@@ -89,7 +89,7 @@ def normalize_gerrit_dashboard_config(raw: dict[str, Any] | None) -> dict[str, A
     for idx, item in enumerate(raw.get("personal_profiles") or DEFAULT_GERRIT_DASHBOARD["personal_profiles"]):
         if not isinstance(item, dict):
             continue
-        owner = str(item.get("owner") or item.get("email") or "").strip()
+        owner = str(item.get("owner") or "").strip()
         name = str(item.get("name") or owner or f"个人看板 {idx + 1}").strip()
         if not owner:
             continue
@@ -97,7 +97,7 @@ def normalize_gerrit_dashboard_config(raw: dict[str, Any] | None) -> dict[str, A
             "id": _profile_id(item.get("id") or owner or name),
             "name": name,
             "owner": owner,
-            "department_id": str(item.get("department_id") or item.get("departmentId") or "").strip(),
+            "department_id": str(item.get("department_id") or "").strip(),
             "department": str(item.get("department") or "").strip(),
             "list_limit": _bounded_int(item.get("list_limit"), defaults["list_limit"], 1, 500),
             "query_limit": _bounded_int(item.get("query_limit"), defaults["query_limit"], 1, 5000),
@@ -109,7 +109,7 @@ def normalize_gerrit_dashboard_config(raw: dict[str, Any] | None) -> dict[str, A
     for idx, item in enumerate(raw.get("department_profiles") or DEFAULT_GERRIT_DASHBOARD["department_profiles"]):
         if not isinstance(item, dict):
             continue
-        owners = [str(owner or "").strip() for owner in (item.get("owners") or item.get("emails") or []) if str(owner or "").strip()]
+        owners = [str(owner or "").strip() for owner in (item.get("owners") or []) if str(owner or "").strip()]
         name = str(item.get("name") or f"部门看板 {idx + 1}").strip()
         department_profiles.append({
             "id": _profile_id(item.get("id") or name or f"department-{idx + 1}"),
@@ -125,8 +125,8 @@ def normalize_gerrit_dashboard_config(raw: dict[str, Any] | None) -> dict[str, A
 
     return {
         "base_url": str(raw.get("base_url") or DEFAULT_GERRIT_DASHBOARD["base_url"]).rstrip("/"),
-        "rest_username": str(raw.get("rest_username") or raw.get("username") or DEFAULT_GERRIT_DASHBOARD["rest_username"]).strip(),
-        "rest_password": str(raw.get("rest_password") or raw.get("password") or DEFAULT_GERRIT_DASHBOARD["rest_password"]).strip(),
+        "rest_username": str(raw.get("rest_username") or DEFAULT_GERRIT_DASHBOARD["rest_username"]).strip(),
+        "rest_password": str(raw.get("rest_password") or DEFAULT_GERRIT_DASHBOARD["rest_password"]).strip(),
         "rest_verify_ssl": bool(raw.get("rest_verify_ssl", DEFAULT_GERRIT_DASHBOARD["rest_verify_ssl"])),
         "ssh_host": str(raw.get("ssh_host") or DEFAULT_GERRIT_DASHBOARD["ssh_host"]).strip(),
         "ssh_user": str(raw.get("ssh_user") or DEFAULT_GERRIT_DASHBOARD["ssh_user"]).strip(),
@@ -306,7 +306,7 @@ def sync_gerrit_members_from_redmine_users(config: dict[str, Any], users: Iterab
     departments_by_id = {str(item.get("id") or ""): item for item in normalized["department_profiles"]}
     personal_by_owner = {str(item.get("owner") or ""): item for item in normalized["personal_profiles"]}
     for user in users or []:
-        email = str(user.get("email") or user.get("owner") or "").strip()
+        email = str(user.get("email") or "").strip()
         department_id = _profile_id(user.get("department_id") or "")
         department_name = str(user.get("department") or department_id).strip()
         name = str(user.get("name") or email).strip()

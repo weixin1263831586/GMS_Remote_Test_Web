@@ -2,8 +2,8 @@
 
 Exposes the "配置资源查看器" tool: list framework (or any package) config
 resources with their APK default value and, optionally, the overlay-effective
-value. Also serves a self-contained HTML page reached via a built-in tool card
-on the 常用工具 page (no sidebar nav entry).
+value. The UI is embedded in the device-config modal; these /api endpoints are
+consumed by that modal (no standalone page or sidebar entry).
 """
 
 import logging
@@ -13,7 +13,6 @@ from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from foundation.config import APK_MAX_FILE_SIZE, APK_UPLOAD_DIR
@@ -30,7 +29,6 @@ from .config_explorer import (
     list_props,
     pull_device_file,
 )
-from .config_explorer_page import CONFIG_EXPLORER_HTML
 
 
 logger = logging.getLogger(__name__)
@@ -219,12 +217,6 @@ async def api_explore(
         },
         message="Success",
     )
-
-
-@router.get("/config-explorer", response_class=HTMLResponse)
-async def config_explorer_page():
-    """Self-contained HTML page for the config explorer tool card."""
-    return HTMLResponse(content=CONFIG_EXPLORER_HTML)
 
 
 class DecompileRequest(BaseModel):

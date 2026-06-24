@@ -85,6 +85,12 @@ async def analyze_report_from_url(request: Request):
         original_issue_id = source_issue_id or None
         attachment_owner_issue_id = None
 
+        async def _redmine_credentials_for_lookup() -> tuple[str, str]:
+            if redmine_username and redmine_password:
+                return redmine_username, redmine_password
+            stored_creds = await _load_redmine_credentials()
+            return (stored_creds or {}).get("username", ""), (stored_creds or {}).get("password", "")
+
         if is_redmine:
             issue_match = COMPILED_REDMINE_ISSUE_PATTERN.search(url)
             if issue_match and "/attachments/" not in url:
@@ -97,24 +103,23 @@ async def analyze_report_from_url(request: Request):
                     if not base_url:
                         return error_response("Redmine base URL unavailable", 404)
 
-                    stored_creds = await _load_redmine_credentials()
-                    if stored_creds:
-                        username = stored_creds.get("username")
-                        password = stored_creds.get("password")
+                    username, password = await _redmine_credentials_for_lookup()
+                    if username and password:
                         logger.info(f"[Report Analysis] Using stored credentials for issue {issue_id}")
                     else:
-                        username = ""
-                        password = ""
                         logger.warning("[Report Analysis] No stored credentials, anonymous query")
 
                     client = RedmineClient(base_url, username, password)
-                    first_attachment = await client.first_issue_attachment(issue_id)
-                    if not first_attachment:
-                        return error_response(f"Issue {issue_id} has no attachments", 404)
-                    attachment_id = first_attachment.id
-                    filename = first_attachment.filename or f"attachment_{attachment_id}"
-                    url = first_attachment.content_url or client.download_url(attachment_id)
-                    logger.info(f"[Report Analysis] Extracted attachment: {filename} -> {url}")
+                    try:
+                        first_attachment = await client.first_issue_attachment(issue_id)
+                        if not first_attachment:
+                            return error_response(f"Issue {issue_id} has no attachments", 404)
+                        attachment_id = first_attachment.id
+                        filename = first_attachment.filename or f"attachment_{attachment_id}"
+                        url = first_attachment.content_url or client.download_url(attachment_id)
+                        logger.info(f"[Report Analysis] Extracted attachment: {filename} -> {url}")
+                    finally:
+                        await client.close()
                 except Exception as extract_error:
                     logger.error(f"[Report Analysis] Attachment extraction failed: {extract_error}")
                     return error_response(f"Cannot extract attachment: {extract_error!s}", 500)
@@ -123,21 +128,37 @@ async def analyze_report_from_url(request: Request):
                 if redmine_attach_match:
                     attachment_id = redmine_attach_match.group(1)
                     logger.info(f"[Report Analysis] Redmine attachment URL, ID: {attachment_id}")
+                    if original_issue_id == attachment_id:
+                        logger.warning(
+                            "[Report Analysis] Ignoring source_issue_id=%s because it matches attachment_id",
+                            original_issue_id,
+                        )
+                        original_issue_id = None
 
                     if attachment_id in REDMINE_ISSUE_ID_CACHE:
                         cached_issue_id = REDMINE_ISSUE_ID_CACHE[attachment_id]
-                        if not original_issue_id:
+                        if cached_issue_id == attachment_id:
+                            logger.warning(
+                                "[Report Analysis] Ignoring cached issue_id=%s because it matches attachment_id",
+                                cached_issue_id,
+                            )
+                        elif not original_issue_id:
                             original_issue_id = cached_issue_id
-                    else:
+                    if not original_issue_id:
                         try:
                             base_url = redmine_base_url
                             if not base_url:
                                 raise ValueError("Redmine base URL unavailable")
-                            stored_creds = await _load_redmine_credentials()
-                            client = RedmineClient(base_url, (stored_creds or {}).get("username", ""), (stored_creds or {}).get("password", ""))
-                            attachment_owner_issue_id = await client.find_attachment_issue_id(attachment_id)
-                            if attachment_owner_issue_id and not original_issue_id:
-                                original_issue_id = attachment_owner_issue_id
+                            username, password = await _redmine_credentials_for_lookup()
+                            client = RedmineClient(base_url, username, password)
+                            try:
+                                attachment_owner_issue_id = await client.find_attachment_issue_id(attachment_id)
+                                if attachment_owner_issue_id and (
+                                    not original_issue_id or original_issue_id == attachment_id
+                                ):
+                                    original_issue_id = attachment_owner_issue_id
+                            finally:
+                                await client.close()
                         except Exception as search_error:
                             logger.warning(f"[Report Analysis] Query attachment owner failed: {search_error}")
 
@@ -214,42 +235,52 @@ async def analyze_report_from_url(request: Request):
             with suppress(Exception):
                 shutil.rmtree(temp_dir)
 
-            if result:
-                report_name = filename
+            # 解析为空 ≠ 服务器错误：文件下载成功但不是有效的测试报告
+            # （HTML/非报告 XML/空内容等）。返回 422 让前端提示「不是有效报告」，
+            # 而不是误导性的 500。
+            if not result:
+                logger.warning(f"[Report Analysis] Empty analysis result for: {filename}")
+                return error_response(
+                    f"无法解析报告「{filename}」：不是有效的测试报告（test_result.xml/zip）",
+                    status_code=422,
+                )
 
-                if is_redmine:
-                    if original_issue_id:
-                        report_filename = strip_redmine_report_prefix(filename)
-                        report_name = f"Redmine-{original_issue_id}-{report_filename}"
-                        logger.info(f"[Report Analysis] Redmine prefix: {report_name}")
+            report_name = filename
+
+            if is_redmine:
+                if original_issue_id:
+                    report_filename = strip_redmine_report_prefix(filename)
+                    report_name = f"Redmine-{original_issue_id}-{report_filename}"
+                    logger.info(f"[Report Analysis] Redmine prefix: {report_name}")
+                else:
+                    issue_match = COMPILED_REDMINE_ISSUE_PATTERN.search(url)
+                    if issue_match:
+                        issue_id = issue_match.group(1)
+                        report_name = f"Redmine-{issue_id}-{filename}"
                     else:
-                        issue_match = COMPILED_REDMINE_ISSUE_PATTERN.search(url)
-                        if issue_match:
-                            issue_id = issue_match.group(1)
-                            report_name = f"Redmine-{issue_id}-{filename}"
+                        redmine_attach_match = COMPILED_REDMINE_ATTACHMENT_PATTERN.search(url)
+                        if redmine_attach_match:
+                            attachment_id = redmine_attach_match.group(1)
+                            report_name = f"Redmine attachment {attachment_id}"
                         else:
-                            redmine_attach_match = COMPILED_REDMINE_ATTACHMENT_PATTERN.search(url)
-                            if redmine_attach_match:
-                                attachment_id = redmine_attach_match.group(1)
-                                report_name = f"Redmine attachment {attachment_id}"
-                            else:
-                                report_name = "Redmine attachment report"
+                            report_name = "Redmine attachment report"
 
-                result["report_name"] = report_name
+            result["report_name"] = report_name
 
-                # Update cache
-                if is_redmine and original_issue_id:
-                    redmine_attach_match = COMPILED_REDMINE_ATTACHMENT_PATTERN.search(url)
-                    if redmine_attach_match:
-                        attachment_id_for_cache = redmine_attach_match.group(1)
-                        if REDMINE_ISSUE_ID_CACHE.get(attachment_id_for_cache) != original_issue_id:
-                            if len(REDMINE_ISSUE_ID_CACHE) >= REDMINE_ISSUE_ID_CACHE_MAX_SIZE:
-                                REDMINE_ISSUE_ID_CACHE.popitem(last=False)
-                            REDMINE_ISSUE_ID_CACHE[attachment_id_for_cache] = original_issue_id
+            # Update cache
+            if is_redmine and original_issue_id:
+                redmine_attach_match = COMPILED_REDMINE_ATTACHMENT_PATTERN.search(url)
+                if redmine_attach_match:
+                    attachment_id_for_cache = redmine_attach_match.group(1)
+                    if (
+                        original_issue_id != attachment_id_for_cache
+                        and REDMINE_ISSUE_ID_CACHE.get(attachment_id_for_cache) != original_issue_id
+                    ):
+                        if len(REDMINE_ISSUE_ID_CACHE) >= REDMINE_ISSUE_ID_CACHE_MAX_SIZE:
+                            REDMINE_ISSUE_ID_CACHE.popitem(last=False)
+                        REDMINE_ISSUE_ID_CACHE[attachment_id_for_cache] = original_issue_id
 
-                return JSONResponse(content={"success": True, "data": result, "filename": filename, "mode": "url"})
-            else:
-                return error_response("Report analysis failed", 500)
+            return JSONResponse(content={"success": True, "data": result, "filename": filename, "mode": "url"})
 
         except Exception as download_error:
             with suppress(Exception):
@@ -325,10 +356,13 @@ async def extract_redmine_attachment(request: Request):
         username = stored_creds.get("username")
         password = stored_creds.get("password")
         client = RedmineClient(base_url, username, password)
-        first_attachment = await client.first_issue_attachment(issue_id)
-        if not first_attachment:
-            return error_response("Issue has no attachments", 404)
-        attachment_url = first_attachment.content_url or client.download_url(first_attachment.id)
+        try:
+            first_attachment = await client.first_issue_attachment(issue_id)
+            if not first_attachment:
+                return error_response("Issue has no attachments", 404)
+            attachment_url = first_attachment.content_url or client.download_url(first_attachment.id)
+        finally:
+            await client.close()
 
         logger.info(f"[Redmine Extract] Found attachment: {first_attachment.filename} (ID: {first_attachment.id})")
         return JSONResponse(content={"success": True, "attachment_url": attachment_url, "filename": first_attachment.filename, "attachment_id": first_attachment.id})

@@ -11,12 +11,20 @@ from pathlib import Path
 import requests
 from lxml import html
 
+from foundation import partner_android as fetch_partner_android
+
 
 DEFAULT_DB_PATH = Path('data/gms_update_monitor.sqlite3')
 SCHEMA_VERSION = 1
 
+# How many recent months of Mainline PRELOAD notes to crawl per scan. Keeps the
+# number of authenticated child-page fetches bounded (one per PRELOAD build).
+MAINLINE_MONTH_DEPTH = 12
+MAINLINE_INDEX_URL = 'https://docs.partner.android.com/mainline/release/release-notes?authuser=2'
+
 
 from .models import *
+from .parsing import clean_title, stable_doc_hash
 
 
 def build_session(args: argparse.Namespace) -> requests.Session:
@@ -53,3 +61,41 @@ def fetch_source(session: requests.Session, source: SourceConfig, timeout: float
         status_code=response.status_code,
         final_url=response.url,
     )
+
+
+def fetch_html(session: requests.Session | None, url: str, timeout: float = 30.0) -> tuple[int, str, str]:
+    """Fetch a single authenticated child page defensively.
+
+    Returns ``(status_code, final_url, text)``. Does not raise on HTTP errors
+    because authenticated Partner pages can transiently 404 (e.g. before the
+    browser session is fully signed in); callers decide what to do with a 404.
+    """
+    if session is None:
+        return 0, url, ''
+    try:
+        response = session.get(url, timeout=timeout, allow_redirects=True)
+    except Exception:
+        return 0, url, ''
+    return response.status_code, response.url, getattr(response, 'text', '') or ''
+
+
+def build_train_url(build_id: str) -> str:
+    """Map a Mainline PRELOAD partner-zip build number to its CI build page."""
+    return f'https://ci.android.com/builds/train/{build_id}/train_build/latest?authuser=2'
+
+
+def recent_month_cutoff(depth: int, *, now_year: int | None = None, now_month: int | None = None) -> tuple[int, int]:
+    """Return the ``(year, month)`` cutoff for the last ``depth`` months.
+
+    ``depth`` months back from ``now`` inclusive — e.g. depth=12 starting in
+    2026-06 yields cutoff (2025, 7). Pure arithmetic, no dateutil dependency.
+    Used only as an import-time-free helper; the actual "now" is injected at
+    call sites so the function stays deterministic for tests.
+    """
+    import datetime as _dt
+
+    if now_year is None or now_month is None:
+        today = _dt.date.today()
+        now_year, now_month = today.year, today.month
+    total = now_year * 12 + (now_month - 1) - max(depth - 1, 0)
+    return total // 12, total % 12 + 1

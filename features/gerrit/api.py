@@ -90,10 +90,10 @@ async def update_gerrit_dashboard_config(request: Request):
 async def create_gerrit_personal_profile(request: Request):
     body = await request.json()
     name = str(body.get("name") or "").strip()
-    owner = str(body.get("owner") or body.get("email") or "").strip()
-    profile_id = str(body.get("id") or body.get("profile_id") or "").strip()
-    department_id = str(body.get("department_id") or body.get("departmentId") or "").strip()
-    department_name = str(body.get("department") or body.get("department_name") or body.get("departmentName") or "").strip()
+    owner = str(body.get("owner") or "").strip()
+    profile_id = str(body.get("id") or "").strip()
+    department_id = str(body.get("department_id") or "").strip()
+    department_name = str(body.get("department") or "").strip()
     current_cfg = config_manager.get_gerrit_dashboard_config()
     if department_id:
         current_cfg = _ensure_gerrit_department_profile(current_cfg, department_id, department_name or department_id)
@@ -117,7 +117,7 @@ async def create_gerrit_personal_profile(request: Request):
 async def create_gerrit_department_profile(request: Request):
     body = await request.json()
     name = str(body.get("name") or "").strip()
-    profile_id = str(body.get("id") or body.get("profile_id") or "").strip()
+    profile_id = str(body.get("id") or "").strip()
     raw_owners = body.get("owners") or []
     if isinstance(raw_owners, str):
         raw_owners = [item.strip() for item in raw_owners.replace(";", ",").split(",")]
@@ -139,7 +139,7 @@ async def create_gerrit_department_profile(request: Request):
 @router.post("/department-profiles/{profile_id}/owners")
 async def add_gerrit_department_owner(profile_id: str, request: Request):
     body = await request.json()
-    owner = str(body.get("owner") or body.get("email") or "").strip()
+    owner = str(body.get("owner") or "").strip()
     try:
         dashboard_cfg = assign_owner_to_gerrit_department(config_manager.get_gerrit_dashboard_config(), profile_id, owner)
     except ValueError as exc:
@@ -154,7 +154,7 @@ async def add_gerrit_department_owner(profile_id: str, request: Request):
 @router.delete("/department-profiles/{profile_id}/owners")
 async def delete_gerrit_department_owner(profile_id: str, request: Request):
     body = await request.json()
-    owner = str(body.get("owner") or body.get("email") or "").strip()
+    owner = str(body.get("owner") or "").strip()
     try:
         dashboard_cfg = remove_owner_from_gerrit_department(config_manager.get_gerrit_dashboard_config(), profile_id, owner)
     except ValueError as exc:

@@ -91,6 +91,9 @@ class _ReportConfig:
     def load_redmine_credentials(self):
         return redmine_config_manager.load_redmine_credentials()
 
+    def get_ai_provider_config(self, provider_name: str):
+        return self.base.get_ai_provider_config(provider_name)
+
 
 config_manager = _ReportConfig()
 

@@ -76,6 +76,21 @@ class GmsPackageRecord:
 
 
 @dataclass(frozen=True)
+class MainlinePackageRecord:
+    source_key: str
+    item_key: str
+    year: str
+    month: str
+    month_label: str
+    preload_version: str
+    notes_url: str
+    partner_zip_build_id: str
+    ci_build_url: str
+    partner_zip_label: str
+    content_hash: str
+
+
+@dataclass(frozen=True)
 class RequirementSectionRecord:
     source_key: str
     section_key: str
@@ -120,12 +135,20 @@ class RequirementVersionTagRecord:
 class ParsedSource:
     artifacts: list[ArtifactRecord] = None  # type: ignore[assignment]
     gms_packages: list[GmsPackageRecord] = None  # type: ignore[assignment]
+    mainline_packages: list[MainlinePackageRecord] = None  # type: ignore[assignment]
     requirement_sections: list[RequirementSectionRecord] = None  # type: ignore[assignment]
     requirement_table_rows: list[RequirementTableRowRecord] = None  # type: ignore[assignment]
     requirement_version_tags: list[RequirementVersionTagRecord] = None  # type: ignore[assignment]
 
     def __post_init__(self):
-        for field_name in ('artifacts', 'gms_packages', 'requirement_sections', 'requirement_table_rows', 'requirement_version_tags'):
+        for field_name in (
+            'artifacts',
+            'gms_packages',
+            'mainline_packages',
+            'requirement_sections',
+            'requirement_table_rows',
+            'requirement_version_tags',
+        ):
             if getattr(self, field_name) is None:
                 object.__setattr__(self, field_name, [])
 
@@ -168,6 +191,14 @@ SOURCES: tuple[SourceConfig, ...] = (
         url='https://docs.partner.android.com/gms/policies/domains/reqs',
         category='certification_requirement',
         parser='gms_requirements',
+        auth_required=True,
+    ),
+    SourceConfig(
+        key='mainline_preload',
+        name='Mainline PRELOAD Release Notes',
+        url='https://docs.partner.android.com/mainline/release/release-notes?authuser=2',
+        category='mainline_package',
+        parser='mainline_release_notes',
         auth_required=True,
     ),
 )

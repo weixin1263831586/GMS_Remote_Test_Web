@@ -11,7 +11,6 @@ DEFAULT_REDMINE_STATS = {
     "stale_days": 20,
     "window_days": 60,
     "cache_ttl": 600,
-    "chart_start_dates": {},
     "chart_date_ranges": {},
 }
 
@@ -42,14 +41,6 @@ def _profile_id(value: Any, fallback: str = "") -> str:
 def normalize_redmine_stats_config(raw: dict[str, Any] | None) -> dict[str, int]:
     """Normalize runtime-editable Redmine statistics settings."""
     raw = raw or {}
-    chart_start_dates = {}
-    for key, value in (raw.get("chart_start_dates") or {}).items():
-        text = str(value or "").strip()
-        try:
-            date.fromisoformat(text)
-        except ValueError:
-            continue
-        chart_start_dates[str(key or "").strip()] = text
     chart_date_ranges = {}
     for key, value in (raw.get("chart_date_ranges") or {}).items():
         if not isinstance(value, dict):
@@ -67,7 +58,6 @@ def normalize_redmine_stats_config(raw: dict[str, Any] | None) -> dict[str, int]
         "stale_days": _bounded_int(raw.get("stale_days"), DEFAULT_REDMINE_STATS["stale_days"], 1, 30),
         "window_days": _bounded_int(raw.get("window_days"), DEFAULT_REDMINE_STATS["window_days"], 0, 365),
         "cache_ttl": _bounded_int(raw.get("cache_ttl"), DEFAULT_REDMINE_STATS["cache_ttl"], 0, 3600),
-        "chart_start_dates": chart_start_dates,
         "chart_date_ranges": chart_date_ranges,
     }
 
@@ -229,10 +219,10 @@ def assign_user_to_profiles(config: dict[str, Any], user_id: Any, profile_ids: I
     return normalized
 
 
-def add_project_profile(config: dict[str, Any], name: str, project_id_or_url: str, profile_id: str = "") -> dict[str, Any]:
+def add_project_profile(config: dict[str, Any], name: str, project_id: str, profile_id: str = "") -> dict[str, Any]:
     """Return config with a new Redmine project dashboard profile appended."""
     normalized = normalize_redmine_dashboard_profiles(_to_raw_dashboard_config(config))
-    project_id = _project_id(project_id_or_url)
+    project_id = _project_id(project_id)
     clean_name = str(name or project_id).strip()
     if not project_id:
         raise ValueError("project id is required")
@@ -322,10 +312,7 @@ def _to_raw_dashboard_config(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _project_id(value: Any) -> str:
-    text = str(value or "").strip().rstrip("/")
-    if "/projects/" in text:
-        text = text.rsplit("/projects/", 1)[-1]
-    return text.strip("/")
+    return str(value or "").strip().strip("/")
 
 
 def _date_text(value: Any) -> str:
