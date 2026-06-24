@@ -1207,7 +1207,9 @@ select option {
 #device-config-modal .modal-content {
     width: 96vw;
     max-width: 1500px;
+    height: 92vh;
     max-height: 92vh;
+    min-height: 0;
 }
 
 .modal-header {
@@ -1261,7 +1263,7 @@ select option {
 }
 
 .dcfg-header .dcfg-tabbtn {
-    padding: 6px 14px;
+    padding: 3px 14px;
     border: none;
     background: transparent;
     color: var(--text-secondary);
@@ -1284,7 +1286,8 @@ select option {
 .dcfg-header-right {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 10px;
+    flex-shrink: 0;
 }
 
 .dcfg-serial {
@@ -1318,10 +1321,11 @@ select option {
    用 min-height:0 + flex:1 让它随弹框(92vh)伸缩，而不是被钉死在固定像素高度上
    ——否则 96vw×92vh 的弹框里大部分垂直空间变成不可滚动的死区，结果区只剩一小条能滚。
    sticky 表头仍在该 overflow:auto 容器内生效。 */
-#device-config-modal .dcfg-results,
-#device-config-modal .dcfg-pkg-results,
-#device-config-modal .dcfg-feat-results,
-#device-config-modal .dcfg-prop-results {
+#device-config-modal #dcfg-results,
+#device-config-modal #dcfg-pkg-results,
+#device-config-modal #dcfg-feat-results,
+#device-config-modal #dcfg-prop-results,
+#device-config-modal #dcfg-ovr-results {
     padding: 0 !important;
     overflow-y: auto;
     overflow-x: hidden;
@@ -1332,10 +1336,11 @@ select option {
     position: relative;
 }
 
-#device-config-modal .dcfg-results table,
-#device-config-modal .dcfg-pkg-results table,
-#device-config-modal .dcfg-feat-results table,
-#device-config-modal .dcfg-prop-results table {
+#device-config-modal #dcfg-results table,
+#device-config-modal #dcfg-pkg-results table,
+#device-config-modal #dcfg-feat-results table,
+#device-config-modal #dcfg-prop-results table,
+#device-config-modal #dcfg-ovr-results table {
     margin: 0;
 }
 
@@ -1384,15 +1389,10 @@ select option {
 
 #device-config-modal .dcfg-toolbar input#dcfg-name,
 #device-config-modal .dcfg-toolbar input#dcfg-pkg-filter,
-#device-config-modal .dcfg-toolbar input#dcfg-feat-filter {
-    flex: 1;
-    min-width: 200px;
-}
-
+#device-config-modal .dcfg-toolbar input#dcfg-feat-filter,
 #device-config-modal .dcfg-toolbar input#dcfg-prop-filter {
     flex: 1;
     min-width: 200px;
-    max-width: 60%;
 }
 
 #device-config-modal .dcfg-toolbar .btn-xxs {
@@ -1480,6 +1480,125 @@ select option {
     border-radius: 8px;
     background: var(--card-bg);
     font-size: 11px;
+}
+
+/* ===== override tab (RRO config override) ===== */
+#device-config-modal .dcfg-ovr-toolbar {
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+#device-config-modal .dcfg-ovr-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 0;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+#device-config-modal .dcfg-ovr-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: var(--card-bg);
+    white-space: nowrap;
+}
+
+#device-config-modal .dcfg-ovr-ok {
+    color: var(--success-color, #2e7d32);
+}
+
+#device-config-modal .dcfg-ovr-bad {
+    color: var(--danger-color);
+}
+
+#device-config-modal .dcfg-ovr-warn {
+    width: 100%;
+    padding: 6px 10px;
+    margin-top: 4px;
+    border-radius: 4px;
+    background: rgba(255, 193, 7, 0.12);
+    color: #b8860b;
+    font-size: 12px;
+}
+
+#device-config-modal .dcfg-ovr-warn code {
+    background: var(--darker-bg, #000);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+
+#device-config-modal .dcfg-ovr-add {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 0;
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+#device-config-modal .dcfg-ovr-add input[type="text"],
+#device-config-modal .dcfg-ovr-add select {
+    flex: 1 1 0;
+    min-width: 90px;
+}
+
+#device-config-modal .dcfg-ovr-add #dcfg-ovr-value {
+    flex: 2 1 160px;
+}
+
+#device-config-modal .dcfg-ovr-add #dcfg-ovr-value-arr {
+    flex: 2 1 200px;
+    font-family: "SF Mono", Consolas, Menlo, monospace;
+    font-size: 12px;
+}
+
+#device-config-modal .dcfg-ovr-preview {
+    flex-shrink: 0;
+    margin-top: 8px;
+    font-size: 12px;
+}
+
+#device-config-modal .dcfg-ovr-pre {
+    max-height: 360px;
+    overflow: auto;
+    background: var(--darker-bg, #000);
+    color: var(--text-secondary);
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.dcfg-minimized {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 10001;
+    align-items: center;
+    gap: 10px;
+    max-width: min(520px, calc(100vw - 36px));
+    padding: 10px 12px;
+    background: var(--bg-color, var(--light-bg));
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.32);
+}
+
+.dcfg-minimized-title {
+    min-width: 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* ==================== Modal Form ==================== */

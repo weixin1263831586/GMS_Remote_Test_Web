@@ -245,35 +245,24 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
 
     with SSHConnection() as ssh:
         async def remount_single_device(device_id: str) -> dict:
-            output, _, _ = runtime.ssh_manager.execute_command(
-                ssh, f"adb -s {device_id} root", timeout=15
-            )
-
             await runtime.safe_websocket_send(
                 client_id,
                 {
                     "type": "log_update",
-                    "log": f"[{device_id}] adb root: {output.strip()}",
-                    "log_type": "info",
-                },
-            )
-
-            await asyncio.sleep(2)
-
-            output, _error, _code = runtime.ssh_manager.execute_command(
-                ssh, f"adb -s {device_id} remount", timeout=15
-            )
-
-            await runtime.safe_websocket_send(
-                client_id,
-                {
-                    "type": "log_update",
-                    "log": f"[{device_id}] adb remount: {output.strip()}",
+                    "log": f"[{device_id}] adb root && adb remount",
                     "log_type": "info",
                 },
             )
 
             result = device_manager.remount_device(device_id, ssh)
+            await runtime.safe_websocket_send(
+                client_id,
+                {
+                    "type": "log_update",
+                    "log": f"[{device_id}] remount: {(result.get('output') or '').strip()}",
+                    "log_type": "info" if result.get("success") else "error",
+                },
+            )
             result["device"] = device_id
             return result
 
