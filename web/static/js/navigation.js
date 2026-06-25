@@ -436,8 +436,7 @@ function initWebSocket() {
                 switch (messageType) {
                     case 'log_update':
                         debugLog('[WebSocket] log_update:', data.log);
-                        // 所有日志都添加到日志区域
-                        addLogEntry(data.log, data.log_type || 'info');
+                        addNormalizedLogEntry(data);
                         break;
 
                     case 'test_complete':
@@ -4319,11 +4318,11 @@ async function startTest() {
             void requestBrowserNotificationPermission();
         }
 
-        // 清空日志输出并重置计数
-        const logOutput = $('log-output');
-        if (logOutput) {
-            logOutput.innerHTML = '';
-        }
+        // 清空两个日志容器并重置计数
+        const systemOut = getLogContainer('system');
+        const moduleOut = getLogContainer('module');
+        if (systemOut) systemOut.innerHTML = '';
+        if (moduleOut) moduleOut.innerHTML = '';
         state.lastLogCount = 0;
 
         await apiCall('/api/test/start', 'POST', {
@@ -4415,9 +4414,12 @@ function updateTestToggleButton(isTesting) {
 async function cleanTest() {
     try {
         await apiCall('/api/test/clean', 'POST');
-        const logOutput = document.getElementById('log-output');
-        logOutput.innerHTML = '<div class="log-entry">[系统] 日志已清除</div>';
+        const systemOut = getLogContainer('system');
+        const moduleOut = getLogContainer('module');
+        if (systemOut) systemOut.innerHTML = '';
+        if (moduleOut) moduleOut.innerHTML = '';
         addLogEntry('测试日志已清除', 'info');
+        state.lastLogCount = 0;
     } catch (error) {
         addLogEntry('清除日志失败: ' + error.message, 'error');
     }
@@ -4427,9 +4429,15 @@ async function downloadTestLog() {
     try {
         addLogEntry('正在保存日志...', 'info');
 
-        // 获取当前日志区域的实际内容
-        const logOutput = document.getElementById('log-output');
-        const logContent = logOutput ? logOutput.innerText : '';
+        // 拼接两个日志容器的实际内容（系统日志 + 测试日志）
+        const systemOut = getLogContainer('system');
+        const moduleOut = getLogContainer('module');
+        const systemContent = systemOut ? systemOut.innerText : '';
+        const moduleContent = moduleOut ? moduleOut.innerText : '';
+        const logContent = [
+            systemContent.trim() ? `===== 系统日志 =====\n${systemContent.trim()}` : '',
+            moduleContent.trim() ? `===== 测试日志 =====\n${moduleContent.trim()}` : '',
+        ].filter(Boolean).join('\n\n');
 
         if (!logContent.trim()) {
             showToast('没有可保存的日志内容', 'warning');
@@ -4584,12 +4592,54 @@ async function saveConfig() {
 const _logQueue = [];
 let _logFlushScheduled = false;
 
-function addLogEntry(message, type = 'info', showTimestamp = true) {
+// Returns the DOM container for a given log source ("system" | "module").
+function getLogContainer(source = 'system') {
+    return document.getElementById(`${source === 'module' ? 'module' : 'system'}-log-output`);
+}
+
+const MODULE_LOG_PATTERNS = [
+    /\b(?:CTS|VTS|GTS|STS|Tradefed|TradeFed|Compatibility Console|Invocation)\b/,
+    /\b(?:ModuleListener|PrettyTestEventLogger|TestRunner|TestInvocation|ITestInvocationListener)\b/,
+    /\b(?:testRunStarted|testRunEnded|testStarted|testEnded|testFailed|testIgnored|IGNORED|ASSUMPTION_FAILURE)\b/,
+    /\b(?:PASSED|FAILED)\b/,
+    /\[[0-9]+\/[0-9]+\]\s+\S+\s+\S+#\S+/
+];
+
+function inferLogSource(message, explicitSource) {
+    if (explicitSource === 'module' || explicitSource === 'system') {
+        return explicitSource;
+    }
+
+    const text = String(message || '');
+    return MODULE_LOG_PATTERNS.some(pattern => pattern.test(text)) ? 'module' : 'system';
+}
+
+function normalizeLogEntry(log) {
+    const isObject = log && typeof log === 'object';
+    const message = isObject
+        ? (log.msg || log.message || log.log || '')
+        : String(log || '');
+    const cleanedMessage = String(message).replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '');
+
+    return {
+        message: cleanedMessage,
+        type: isObject ? (log.type || log.log_type || 'info') : 'info',
+        source: inferLogSource(cleanedMessage, isObject ? log.source : undefined)
+    };
+}
+
+function addNormalizedLogEntry(log) {
+    const entry = normalizeLogEntry(log);
+    addLogEntry(entry.message, entry.type, true, entry.source);
+}
+
+function addLogEntry(message, type = 'info', showTimestamp = true, source = 'system') {
     // Queue the log entry
     _logQueue.push({
         message,
         type,
         showTimestamp,
+        source: source === 'module' ? 'module' : 'system',
         timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false })
     });
 
@@ -4606,35 +4656,60 @@ function addLogEntry(message, type = 'info', showTimestamp = true) {
 function flushLogQueue() {
     _logFlushScheduled = false;
 
-    const logOutput = document.getElementById('log-output');
-    if (!logOutput) return;
-
     // Take all queued entries
     const entries = _logQueue.splice(0, _logQueue.length);
     if (entries.length === 0) return;
 
-    // Use DocumentFragment for batch DOM insertion
-    const fragment = document.createDocumentFragment();
-    entries.forEach(({ message, type, timestamp, showTimestamp }) => {
-        const logEntry = document.createElement('div');
-        logEntry.className = `log-entry log-${type}`;
-        logEntry.textContent = showTimestamp ? `[${timestamp}] ${message}` : message;
-        fragment.appendChild(logEntry);
+    // Route each entry to its log container by source
+    const maxLogs = 500;
+    const buckets = { system: [], module: [] };
+    entries.forEach(entry => (buckets[entry.source] || buckets.system).push(entry));
+
+    for (const src of ['system', 'module']) {
+        const bucket = buckets[src];
+        if (!bucket.length) continue;
+        const logOutput = getLogContainer(src);
+        if (!logOutput) continue;
+
+        // Use DocumentFragment for batch DOM insertion
+        const fragment = document.createDocumentFragment();
+        bucket.forEach(({ message, type, timestamp, showTimestamp }) => {
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.textContent = showTimestamp ? `[${timestamp}] ${message}` : message;
+            fragment.appendChild(logEntry);
+        });
+
+        logOutput.appendChild(fragment);
+        logOutput.scrollTop = logOutput.scrollHeight;
+
+        // Batch trim old log entries (keep max 500 per container)
+        if (logOutput.children.length > maxLogs) {
+            const removeCount = logOutput.children.length - maxLogs;
+            const range = document.createRange();
+            range.setStartBefore(logOutput.firstChild);
+            range.setEndBefore(logOutput.children[removeCount]);
+            range.deleteContents();
+        }
+    }
+}
+
+// Switch between the system-operations log tab and the module-test log tab.
+function switchLogTab(tabName) {
+    const target = tabName === 'module' ? 'module' : 'system';
+    state.currentLogTab = target;
+
+    document.querySelectorAll('.log-tab-btn').forEach(btn => {
+        const selected = btn.dataset.logTab === target;
+        btn.classList.toggle('active', selected);
+        btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+    document.querySelectorAll('.log-tab-content').forEach(panel => {
+        panel.classList.toggle('active', panel.id === `log-tab-${target}`);
     });
 
-    logOutput.appendChild(fragment);
-    logOutput.scrollTop = logOutput.scrollHeight;
-
-    // Batch trim old log entries (keep max 500)
-    const maxLogs = 500;
-    if (logOutput.children.length > maxLogs) {
-        const removeCount = logOutput.children.length - maxLogs;
-        // Remove in bulk using range
-        const range = document.createRange();
-        range.setStartBefore(logOutput.firstChild);
-        range.setEndBefore(logOutput.children[removeCount]);
-        range.deleteContents();
-    }
+    const out = getLogContainer(target);
+    if (out) out.scrollTop = out.scrollHeight;
 }
 
 // 更新进度条 - 使用固件上传的进度条
@@ -4729,30 +4804,10 @@ function startStatusPolling() {
 
             // 如果没有实时连接，处理日志更新
             if (!hasRealtimeConnection && status.logs && status.logs.length > 0) {
-                const logOutput = document.getElementById('log-output');
-                if (logOutput && status.logs.length > state.lastLogCount) {
-                    // 显示新增的日志
+                if (status.logs.length > state.lastLogCount) {
+                    // 显示新增的日志（按 source 路由到对应 Tab）
                     const newLogs = status.logs.slice(state.lastLogCount);
-                    newLogs.forEach(log => {
-                        // 日志已经是字符串格式（包含时间戳），直接显示
-                        if (typeof log === 'string') {
-                            // 移除时间戳（因为addLogEntry会再次添加）
-                            const message = log.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '');
-                            // 提取原始日志类型（如果有）
-                            let logType = 'info';
-                            if (message.includes('✅') || message.includes('Test completed')) {
-                                logType = 'success';
-                            } else if (message.includes('❌') || message.includes('ERROR') || message.includes('[STDERR]')) {
-                                logType = 'error';
-                            } else if (message.includes('⚠️') || message.includes('WARNING')) {
-                                logType = 'warning';
-                            }
-                            addLogEntry(message, logType);
-                        } else {
-                            // 兼容对象格式
-                            addLogEntry(log.message || log.log || '', log.type || log.log_type || 'info');
-                        }
-                    });
+                    newLogs.forEach(addNormalizedLogEntry);
                     state.lastLogCount = status.logs.length;
                 }
             }
@@ -4793,33 +4848,17 @@ async function checkInitialTestStatus() {
 
         // 页面刷新时加载历史日志（限制最近100条，避免卡顿）
         if (status.logs && status.logs.length > 0) {
-            // 直接获取元素，不使用缓存
-            const logOutput = document.getElementById('log-output');
-            if (!logOutput) {
-                console.warn('[Init] log-output element not found');
-                return;
-            }
+            const systemOut = getLogContainer('system');
+            const moduleOut = getLogContainer('module');
+            if (systemOut) systemOut.innerHTML = '';
+            if (moduleOut) moduleOut.innerHTML = '';
 
-            logOutput.innerHTML = '';
-
-            // 只显示最近100条历史日志，避免卡顿
+            // 只显示最近100条历史日志，避免卡顿（按 source 路由到对应 Tab）
             const recentLogs = status.logs.slice(-100);
+            recentLogs.forEach(addNormalizedLogEntry);
 
-            // 使用DocumentFragment批量添加，减少DOM操作
-            const fragment = document.createDocumentFragment();
-            recentLogs.forEach(log => {
-                const logEntry = document.createElement('div');
-                const message = typeof log === 'string' ? log : (log.message || log.log || log);
-                const type = typeof log === 'object' ? (log.type || 'info') : 'info';
-                const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-
-                logEntry.className = `log-entry log-${type}`;
-                logEntry.textContent = `[${timestamp}] ${message}`;
-                fragment.appendChild(logEntry);
-            });
-
-            logOutput.appendChild(fragment);
-            logOutput.scrollTop = logOutput.scrollHeight;
+            const activeOut = getLogContainer(state.currentLogTab || 'system');
+            if (activeOut) activeOut.scrollTop = activeOut.scrollHeight;
 
             state.lastLogCount = status.log_count || status.logs.length;
         } else {

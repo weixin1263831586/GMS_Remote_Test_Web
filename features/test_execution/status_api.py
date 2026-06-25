@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -15,6 +16,43 @@ from . import runtime
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+MODULE_LOG_PATTERNS = (
+    re.compile(r"\b(?:CTS|VTS|GTS|STS|Tradefed|TradeFed|Compatibility Console|Invocation)\b"),
+    re.compile(r"\b(?:ModuleListener|PrettyTestEventLogger|TestRunner|TestInvocation|ITestInvocationListener)\b"),
+    re.compile(r"\b(?:testRunStarted|testRunEnded|testStarted|testEnded|testFailed|testIgnored|IGNORED|ASSUMPTION_FAILURE)\b"),
+    re.compile(r"\b(?:PASSED|FAILED)\b"),
+    re.compile(r"\[[0-9]+/[0-9]+\]\s+\S+\s+\S+#\S+"),
+)
+
+
+def _infer_log_source(message: str, source: object = None) -> str:
+    if isinstance(source, str) and source in {"system", "module"}:
+        return source
+    return "module" if any(pattern.search(message) for pattern in MODULE_LOG_PATTERNS) else "system"
+
+
+def _normalize_log_entry(entry: object) -> dict:
+    """Normalize a stored log entry to the object shape consumed by the frontend.
+
+    Newer entries are dicts {t, msg, type, source}; older sessions may still hold
+    plain "string" entries - wrap those as system/info so the UI keeps working.
+    """
+    if isinstance(entry, dict):
+        message = entry.get("msg") or entry.get("message") or ""
+        return {
+            "t": entry.get("t", ""),
+            "msg": message,
+            "type": entry.get("type", "info"),
+            "source": _infer_log_source(str(message), entry.get("source")),
+        }
+    text = str(entry)
+    if text.startswith("[") and "]" in text:
+        prefix, _, rest = text.partition("]")
+        message = rest.strip()
+        return {"t": prefix.lstrip("["), "msg": message, "type": "info", "source": _infer_log_source(message)}
+    return {"t": "", "msg": text, "type": "info", "source": _infer_log_source(text)}
 
 
 # ==================== Test Status ====================
@@ -68,17 +106,18 @@ async def get_status(
 
         if include_logs:
             logs = user_state.get("logs", [])
+            normalized = [_normalize_log_entry(entry) for entry in logs]
             if since is not None and since.isdigit():
                 since_int = int(since)
-                if 0 <= since_int < len(logs):
-                    response["logs"] = logs[since_int:]
-                    response["log_count"] = len(logs)
+                if 0 <= since_int < len(normalized):
+                    response["logs"] = normalized[since_int:]
+                    response["log_count"] = len(normalized)
                 else:
-                    response["logs"] = logs
-                    response["log_count"] = len(logs)
+                    response["logs"] = normalized
+                    response["log_count"] = len(normalized)
             else:
-                response["logs"] = logs
-                response["log_count"] = len(logs)
+                response["logs"] = normalized
+                response["log_count"] = len(normalized)
 
         return JSONResponse(content=response)
     except Exception as e:
@@ -104,8 +143,8 @@ async def stream_test_logs(request: Request):
 
                 if current_log_count > last_log_count:
                     for i in range(last_log_count, current_log_count):
-                        log_entry = logs[i]
-                        yield f"{log_entry}\n"
+                        log_entry = _normalize_log_entry(logs[i])
+                        yield f"{log_entry['t']} {log_entry['msg']}\n".strip() + "\n"
                     last_log_count = current_log_count
 
                 if not running and last_log_count > 0:

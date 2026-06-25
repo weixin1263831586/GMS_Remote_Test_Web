@@ -17,6 +17,7 @@ const state = {
     suiteBrowser: { selectedSuitePath: '', currentPath: '', highlightPath: '' },
     domCache: {},
     lastLogCount: 0,
+    currentLogTab: 'system',
     pendingDeviceRefresh: null,
     deviceRefreshPromise: null,
     isRefreshingDevices: false,

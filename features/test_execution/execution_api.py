@@ -104,28 +104,46 @@ async def _run_test_background(
 
     ssh = None
 
-    async def log_callback(message: str, log_type: LogLevel | str = LogLevel.INFO):
+    async def log_callback(
+        message: str,
+        log_type: LogLevel | str = LogLevel.INFO,
+        source: str = "system",
+    ):
+        """Append a log entry.
+
+        source: "system" for operational/status logs, "module" for the actual
+        CTS/VTS/GTS/STS module-test output (SSH stdout/stderr lines).
+        """
         timestamp_str = datetime.now().strftime("%H:%M:%S")
-        log_str = f"[{timestamp_str}] {message}"
 
         if isinstance(log_type, str):
             log_type_str = log_type
         else:
             log_type_str = log_type.value
 
+        log_entry = {
+            "message": message,
+            "type": log_type_str,
+            "timestamp": datetime.now().isoformat(),
+            "source": source,
+        }
+
         with runtime.global_state.test_logs_lock:
             if client_id not in runtime.global_state.test_logs:
                 runtime.global_state.test_logs[client_id] = deque(maxlen=runtime.max_log_entries)
-            runtime.global_state.test_logs[client_id].append(
-                {"message": message, "type": log_type_str, "timestamp": datetime.now().isoformat()}
-            )
+            runtime.global_state.test_logs[client_id].append(log_entry)
 
         user_state = get_or_create_user_state(client_id)
         if "logs" not in user_state:
             user_state["logs"] = deque(maxlen=runtime.max_log_entries)
-        user_state["logs"].append(log_str)
+        user_state["logs"].append(
+            {"t": timestamp_str, "msg": message, "type": log_type_str, "source": source}
+        )
 
-        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": message, "log_type": log_type_str})
+        await runtime.safe_websocket_send(
+            client_id,
+            {"type": "log_update", "log": message, "log_type": log_type_str, "source": source},
+        )
 
     try:
         user_state = get_or_create_user_state(client_id)
@@ -321,7 +339,7 @@ async def _run_test_background(
                         if data:
                             for line in data.split("\n"):
                                 if line.strip():
-                                    await log_callback(line.strip(), "info")
+                                    await log_callback(line.strip(), "info", source="module")
                     except Exception as e:
                         logger.error(f"Error reading stdout: {e}")
 
@@ -331,7 +349,7 @@ async def _run_test_background(
                         if error_data:
                             for line in error_data.split("\n"):
                                 if line.strip():
-                                    await log_callback(line.strip(), "error")
+                                    await log_callback(line.strip(), "error", source="module")
                     except Exception as e:
                         logger.error(f"Error reading stderr: {e}")
 
@@ -345,7 +363,7 @@ async def _run_test_background(
                     if remaining_data:
                         for line in remaining_data.split("\n"):
                             if line.strip():
-                                await log_callback(line.strip(), "info")
+                                await log_callback(line.strip(), "info", source="module")
                 except Exception as e:
                     logger.error(f"Error reading remaining stdout: {e}")
 
@@ -355,7 +373,7 @@ async def _run_test_background(
                     if remaining_error:
                         for line in remaining_error.split("\n"):
                             if line.strip():
-                                await log_callback(line.strip(), "error")
+                                await log_callback(line.strip(), "error", source="module")
                 except Exception as e:
                     logger.error(f"Error reading remaining stderr: {e}")
 
