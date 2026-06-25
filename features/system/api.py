@@ -38,6 +38,28 @@ GMS_ASSISTANT_UPSTREAM = os.getenv("GMS_ASSISTANT_URL", "http://172.16.14.248:51
 # Template factory (initialized from app.py)
 _templates = None
 
+SHELL_PAGE_TITLES = {
+    "test": "测试界面 - GMS远程测试",
+    "desktop": "主机桌面 - GMS远程测试",
+    "terminal": "主机终端 - GMS远程测试",
+    "users": "用户管理 - GMS远程测试",
+    "devices": "设备管理 - GMS远程测试",
+    "reports": "报告管理 - GMS远程测试",
+    "report-analysis": "报告分析 - GMS远程测试",
+    "apk-analysis": "APK分析 - GMS远程测试",
+    "test-suites": "测试套件 - GMS远程测试",
+    "api-docs": "系统接口 - GMS远程测试",
+    "architecture": "系统架构 - GMS远程测试",
+    "websites": "常用网址 - GMS远程测试",
+    "tools": "常用工具 - GMS远程测试",
+    "security-audit": "安全审计 - GMS 远程测试",
+    "gms-assistant": "GMS助手 - GMS 远程测试",
+    "automation": "GMS ATS - GMS 远程测试",
+    "redmine-agent": "Redmine - GMS 远程测试",
+    "gerrit-dashboard": "Gerrit看板 - GMS 远程测试",
+    "agent": "对话Agent - GMS 远程测试",
+}
+
 
 def init_templates(templates):
     """Initialize Jinja2 templates reference from the main app."""
@@ -51,11 +73,13 @@ def init_templates(templates):
 async def root(request: Request):
     """主页 - 使用FastAPI专用模板"""
     config = config_manager.load_config()
+    saved_page = request.cookies.get("gms_current_page") or "test"
+    initial_title = SHELL_PAGE_TITLES.get(saved_page, SHELL_PAGE_TITLES["test"])
 
     response = _templates.TemplateResponse(
         request=request,
         name="shell.html",
-        context={"config": config},
+        context={"config": config, "initial_title": initial_title},
     )
     # HTML页面不缓存（确保用户获取最新版本）
     response.headers["Cache-Control"] = "no-cache"

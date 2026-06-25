@@ -13,7 +13,7 @@ from foundation.errors import handle_api_errors
 from foundation.networking import is_local_host
 from foundation.responses import error_response, success_response
 
-from . import runtime
+from . import reconnect, runtime
 from .locks import device_lock_manager
 from .manager import device_manager
 from .models import DeviceActionRequest, DeviceShellRequest, WifiConnectRequest
@@ -218,9 +218,22 @@ async def list_user_locks():
 async def reboot_devices(req: DeviceActionRequest):
     """Reboot devices."""
     usbip_device_ids = _known_usbip_device_ids()
+    usbip_reconnect_hosts: dict[str, list[str]] = {}
+    runtime_sources = (runtime.config_manager.get_runtime_config() or {}).get(
+        "usbip_devices_source"
+    ) or {}
+    with runtime.global_state.usbip_devices_source_lock:
+        memory_sources = dict(runtime.global_state.usbip_devices_source)
 
     async def reboot_single_device(device_id: str) -> dict:
         wait_for_online = device_id not in usbip_device_ids
+        if not wait_for_online:
+            source_info = memory_sources.get(device_id) or (
+                runtime_sources.get(device_id) if isinstance(runtime_sources, dict) else {}
+            ) or {}
+            device_host = str(source_info.get("source") or "").strip()
+            if device_host:
+                usbip_reconnect_hosts.setdefault(device_host, []).append(device_id)
         result = await asyncio.to_thread(
             device_manager.reboot_device,
             device_id,
@@ -234,6 +247,13 @@ async def reboot_devices(req: DeviceActionRequest):
     results = await asyncio.gather(
         *[reboot_single_device(d) for d in req.devices]
     )
+    if usbip_reconnect_hosts:
+        for device_host, device_ids in usbip_reconnect_hosts.items():
+            reconnect.schedule_usbip_reconnect(
+                device_host,
+                reason="USB/IP device reboot requested",
+                expected_devices=device_ids,
+            )
     return _device_results(results, "Device reboot")
 
 

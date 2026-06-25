@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from . import runtime
+from .manager import device_manager
 from .usbip import find_device_host_password, usbip_manager
 
 
@@ -14,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 USBIP_RECONNECT_ATTEMPTS = 30
 USBIP_RECONNECT_INTERVAL_SECONDS = 5
+USBIP_RECONNECT_STABLE_CHECKS = 3
+USBIP_RECONNECT_STABLE_INTERVAL_SECONDS = 2
 
 _tasks: dict[str, threading.Thread] = {}
 _stop_events: dict[str, threading.Event] = {}
@@ -98,7 +101,11 @@ def schedule_usbip_reconnect_for_removed_devices(
                 reason,
             )
             continue
-        if schedule_usbip_reconnect(device_host, reason=f"{reason}: {device_id}"):
+        if schedule_usbip_reconnect(
+            device_host,
+            reason=f"{reason}: {device_id}",
+            expected_devices=[device_id],
+        ):
             scheduled_hosts.append(device_host)
     return scheduled_hosts
 
@@ -124,12 +131,20 @@ def schedule_usbip_reconnect_for_missing_devices(
                 reason,
             )
             continue
-        if schedule_usbip_reconnect(device_host, reason=f"{reason}: {device_id}"):
+        if schedule_usbip_reconnect(
+            device_host,
+            reason=f"{reason}: {device_id}",
+            expected_devices=[device_id],
+        ):
             scheduled_hosts.append(device_host)
     return scheduled_hosts
 
 
-def schedule_usbip_reconnect(device_host: str, reason: str = "") -> bool:
+def schedule_usbip_reconnect(
+    device_host: str,
+    reason: str = "",
+    expected_devices: Iterable[str] = (),
+) -> bool:
     """Start a background reconnect worker for a device host if one is not running."""
     device_host = str(device_host or "").strip()
     if not device_host:
@@ -147,7 +162,7 @@ def schedule_usbip_reconnect(device_host: str, reason: str = "") -> bool:
         stop_event = threading.Event()
         worker = threading.Thread(
             target=_reconnect_worker,
-            args=(device_host, reason, stop_event),
+            args=(device_host, reason, stop_event, tuple(dict.fromkeys(expected_devices or ()))),
             name=f"USBIPReconnect-{device_host}",
             daemon=True,
         )
@@ -187,8 +202,10 @@ def _reconnect_worker(
     device_host: str,
     reason: str = "",
     stop_event: threading.Event | None = None,
+    expected_devices: Iterable[str] = (),
 ):
     stop_event = stop_event or threading.Event()
+    expected_set = {str(device_id) for device_id in expected_devices or [] if str(device_id)}
     try:
         for attempt in range(1, USBIP_RECONNECT_ATTEMPTS + 1):
             if stop_event.is_set():
@@ -216,7 +233,12 @@ def _reconnect_worker(
                 return
             result = usbip_manager.start_usbip(device_host, device_password)
             device_list = result.get("device_list") or []
-            if result.get("success") and device_list:
+            if result.get("success") and device_list and _usbip_devices_stable(
+                device_host,
+                device_list,
+                expected_set,
+                stop_event,
+            ):
                 _record_reconnected_devices(device_host, device_list)
                 logger.info(
                     "[USB/IP Reconnect] success for %s, devices=%s",
@@ -240,6 +262,40 @@ def _reconnect_worker(
             if current is threading.current_thread():
                 _tasks.pop(device_host, None)
                 _stop_events.pop(device_host, None)
+
+
+def _usbip_devices_stable(
+    device_host: str,
+    device_list: Iterable[str],
+    expected_devices: set[str],
+    stop_event: threading.Event,
+) -> bool:
+    """Return True only after USB/IP ADB devices stay visible for consecutive checks."""
+    observed = {str(device_id) for device_id in device_list or [] if str(device_id)}
+    if expected_devices and not expected_devices.issubset(observed):
+        logger.info(
+            "[USB/IP Reconnect] expected devices not all returned for %s: expected=%s observed=%s",
+            device_host,
+            sorted(expected_devices),
+            sorted(observed),
+        )
+        return False
+
+    for check_index in range(USBIP_RECONNECT_STABLE_CHECKS):
+        if stop_event.is_set():
+            return False
+        if check_index and stop_event.wait(USBIP_RECONNECT_STABLE_INTERVAL_SECONDS):
+            return False
+        current = set(device_manager.get_connected_devices(force_refresh=True))
+        if not observed.issubset(current):
+            logger.info(
+                "[USB/IP Reconnect] devices not stable for %s: expected_online=%s current=%s",
+                device_host,
+                sorted(observed),
+                sorted(current),
+            )
+            return False
+    return True
 
 
 def _record_reconnected_devices(device_host: str, device_list: list[str]):

@@ -16,17 +16,24 @@ def _strip_ansi(text: str) -> str:
 
 def _iter_connected_lines(output: str) -> Iterator[str]:
     in_connected = False
+    saw_section = False
     for line in _strip_ansi(output).splitlines():
         stripped = line.strip()
         if not stripped:
             continue
         if stripped.startswith('Connected:'):
             in_connected = True
+            saw_section = True
             continue
         if stripped.startswith('Persisted:'):
             break
-        if in_connected:
+        if in_connected or (not saw_section and _looks_like_usbipd_device_line(stripped)):
             yield stripped
+
+
+def _looks_like_usbipd_device_line(line: str) -> bool:
+    parts = line.split()
+    return bool(parts and USBIPD_BUSID_RE.match(parts[0]))
 
 
 def parse_usbipd_android_busids(

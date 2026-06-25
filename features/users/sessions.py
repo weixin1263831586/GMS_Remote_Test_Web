@@ -33,10 +33,11 @@ class ClientManager:
 
     def _save_client_runtime(self) -> bool:
         """保存客户端运行时配置"""
-        return self.config_manager.save_runtime_config({
+        runtime_config = self.config_manager.prepare_client_config({
             'client_hosts': self.client_hosts,
-            'client_ssh_credentials': self.ssh_credentials
+            'client_ssh_credentials': self.ssh_credentials,
         })
+        return self.config_manager.save_runtime_config(runtime_config)
 
     def _ssh_whoami(self, client_ip: str, username: str, password: str) -> str:
         """Connect via SSH, run whoami, return username. Raises on failure."""

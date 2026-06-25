@@ -26,7 +26,6 @@ global_state = SimpleNamespace(
     user_states_lock=threading.RLock(),
 )
 
-
 class EmptyConfigManager:
     def get_runtime_config(self):
         return {}
@@ -46,6 +45,9 @@ configure_runtime(
 
 class UsbipCredentialTests(unittest.TestCase):
     def setUp(self):
+        import features.devices.reconnect as reconnect
+
+        reconnect.stop_usbip_reconnect_tasks(timeout=1)
         configure_runtime(
             selected_config_manager=EmptyConfigManager(),
             selected_global_state=global_state,
@@ -56,6 +58,11 @@ class UsbipCredentialTests(unittest.TestCase):
             selected_probe_windows_usbipd=None,
             selected_resolve_tailscale_device_host=None,
         )
+
+    def tearDown(self):
+        import features.devices.reconnect as reconnect
+
+        reconnect.stop_usbip_reconnect_tasks(timeout=1)
 
     def test_usbipd_persisted_guid_is_not_treated_as_busid(self):
         output = """
@@ -68,6 +75,47 @@ GUID                                  DEVICE
 """
 
         self.assertEqual(parse_usbipd_android_busids(output), [])
+
+    def test_usbipd_connected_android_adb_shared_busid_is_detected(self):
+        output = """
+Connected:
+BUSID  VID:PID    DEVICE                                                        STATE
+1-1    2207:0006  Android ADB Interface                                         Shared
+1-13   0403:6001  USB Serial Converter                                          Not shared
+
+Persisted:
+GUID                                  DEVICE
+466f3f47-c2c9-4ea1-bb28-333847ee3c00  Android ADB Interface
+"""
+
+        self.assertEqual(parse_usbipd_android_busids(output), ["1-1"])
+
+    def test_usbipd_legacy_table_without_connected_header_is_detected(self):
+        output = """
+BUSID  VID:PID    DEVICE                                                        STATE
+1-1    2207:0006  Android ADB Interface                                         Shared
+1-13   0403:6001  USB Serial Converter                                          Not shared
+"""
+
+        self.assertEqual(parse_usbipd_android_busids(output), ["1-1"])
+
+    def test_find_android_devices_parses_stderr_output(self):
+        class FakeSshManager:
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                self.cmd = cmd
+                self.get_pty = get_pty
+                return (
+                    "",
+                    "Connected:\n"
+                    "BUSID  VID:PID    DEVICE                                                        STATE\n"
+                    "1-1    2207:0006  Android ADB Interface                                         Shared\n",
+                    0,
+                )
+
+        manager = USBIPManager()
+        manager.ssh_manager = FakeSshManager()
+
+        self.assertEqual(manager._find_android_devices(object(), {}), ["1-1"])
 
     def test_attach_devices_reports_only_successful_attach_commands(self):
         class FakeSshManager:
@@ -279,7 +327,13 @@ GUID                                  DEVICE
 
         scheduled = []
         try:
-            with patch.object(reconnect, "schedule_usbip_reconnect", side_effect=lambda host, reason="": scheduled.append((host, reason)) or True):
+            with patch.object(
+                reconnect,
+                "schedule_usbip_reconnect",
+                side_effect=lambda host, reason="", expected_devices=(): scheduled.append(
+                    (host, reason, tuple(expected_devices))
+                ) or True,
+            ):
                 hosts = reconnect.schedule_usbip_reconnect_for_removed_devices(["USBIP001"], reason="test")
         finally:
             with global_state.usbip_devices_source_lock:
@@ -287,7 +341,7 @@ GUID                                  DEVICE
                 global_state.usbip_devices_source.update(old_sources)
 
         self.assertEqual(hosts, ["hcq@172.16.14.66"])
-        self.assertEqual(scheduled[0][0], "hcq@172.16.14.66")
+        self.assertEqual(scheduled, [("hcq@172.16.14.66", "test: USBIP001", ("USBIP001",))])
 
     def test_manual_usbip_disconnect_suppresses_server_side_reconnect(self):
         import features.devices.reconnect as reconnect
@@ -303,7 +357,13 @@ GUID                                  DEVICE
         scheduled = []
         try:
             reconnect.suppress_usbip_reconnect("hcq@172.16.14.66", ["USBIP001"])
-            with patch.object(reconnect, "schedule_usbip_reconnect", side_effect=lambda host, reason="": scheduled.append((host, reason)) or True):
+            with patch.object(
+                reconnect,
+                "schedule_usbip_reconnect",
+                side_effect=lambda host, reason="", expected_devices=(): scheduled.append(
+                    (host, reason, tuple(expected_devices))
+                ) or True,
+            ):
                 hosts = reconnect.schedule_usbip_reconnect_for_removed_devices(["USBIP001"], reason="manual disconnect")
         finally:
             reconnect.clear_usbip_reconnect_suppression("hcq@172.16.14.66", ["USBIP001"])
@@ -372,7 +432,7 @@ GUID                                  DEVICE
                 global_state.device_cache = old_cache
 
     def test_usbip_reboot_returns_without_waiting_for_adb_online(self):
-        import features.devices.api as devices_router
+        import features.devices.operations_api as operations
 
         old_sources = dict(global_state.usbip_devices_source)
         calls = []
@@ -384,12 +444,13 @@ GUID                                  DEVICE
                 calls.append((device_id, wait_for_online))
                 return {"success": True, "back_online": False, "wait_time": 0.0}
 
-            with patch.object(devices_router.runtime, "config_manager", SimpleNamespace(get_runtime_config=lambda: {
+            with patch.object(operations.runtime, "config_manager", SimpleNamespace(get_runtime_config=lambda: {
                 "usbip_devices_source": {
                     "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1}
                 }
-            })), patch.object(devices_router.device_manager, "reboot_device", side_effect=fake_reboot_device):
-                response = asyncio.run(devices_router.reboot_devices(DeviceActionRequest(devices=["USBIP001"])))
+            })), patch.object(operations.device_manager, "reboot_device", side_effect=fake_reboot_device), \
+                    patch.object(operations.reconnect, "schedule_usbip_reconnect", return_value=True):
+                response = asyncio.run(operations.reboot_devices(DeviceActionRequest(devices=["USBIP001"])))
 
             body = json.loads(response.body.decode("utf-8"))
             self.assertTrue(body["success"])
@@ -400,7 +461,82 @@ GUID                                  DEVICE
                 global_state.usbip_devices_source.clear()
                 global_state.usbip_devices_source.update(old_sources)
 
-    def test_frontend_submits_device_host_and_autoreconnects_usbip_disconnects(self):
+    def test_usbip_reboot_schedules_backend_reconnect_for_device_host(self):
+        import features.devices.operations_api as operations
+
+        old_sources = dict(global_state.usbip_devices_source)
+        scheduled = []
+        calls = []
+        try:
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+                global_state.usbip_devices_source["USBIP001"] = {
+                    "source": "hcq@172.16.14.66",
+                    "timestamp": 1,
+                }
+
+            def fake_reboot_device(device_id, ssh=None, wait_for_online=True):
+                calls.append((device_id, wait_for_online))
+                return {"success": True}
+
+            with patch.object(operations.device_manager, "reboot_device", side_effect=fake_reboot_device), \
+                    patch.object(operations.reconnect, "schedule_usbip_reconnect", side_effect=lambda host, reason="", expected_devices=(): scheduled.append((host, reason, tuple(expected_devices))) or True):
+                response = asyncio.run(operations.reboot_devices(DeviceActionRequest(devices=["USBIP001"])))
+
+            body = json.loads(response.body.decode("utf-8"))
+            self.assertTrue(body["success"])
+            self.assertEqual(calls, [("USBIP001", False)])
+            self.assertEqual(scheduled, [("hcq@172.16.14.66", "USB/IP device reboot requested", ("USBIP001",))])
+        finally:
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+                global_state.usbip_devices_source.update(old_sources)
+
+    def test_reconnect_waits_for_stable_expected_device(self):
+        import features.devices.reconnect as reconnect
+
+        class FakeConfigManager:
+            def load_config(self, force_reload=False):
+                return {"device_pswd": "secret", "client_ssh_credentials": []}
+
+            def get_runtime_config(self):
+                return {}
+
+            def save_runtime_config(self, data):
+                return True
+
+        class FakeUsbipManager:
+            def __init__(self):
+                self.calls = 0
+
+            def start_usbip(self, device_host, device_password):
+                self.calls += 1
+                return {"success": True, "device_list": ["USBIP001"]}
+
+        fake_usbip = FakeUsbipManager()
+        device_sequences = iter([
+            [],
+            ["USBIP001"],
+            ["USBIP001"],
+            ["USBIP001"],
+        ])
+
+        with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
+                patch.object(reconnect, "usbip_manager", fake_usbip), \
+                patch.object(reconnect.device_manager, "get_connected_devices", side_effect=lambda force_refresh=True: next(device_sequences)), \
+                patch.object(reconnect, "USBIP_RECONNECT_INTERVAL_SECONDS", 0), \
+                patch.object(reconnect, "USBIP_RECONNECT_STABLE_INTERVAL_SECONDS", 0):
+            reconnect._reconnect_worker(
+                "hcq@172.16.14.66",
+                "test",
+                threading.Event(),
+                ("USBIP001",),
+            )
+
+        self.assertEqual(fake_usbip.calls, 2)
+        self.assertIn("USBIP001", global_state.usbip_devices_source)
+
+    def test_frontend_waits_for_backend_autoreconnects_usbip_disconnects(self):
         text = Path("web/static/js/navigation.js").read_text(encoding="utf-8", errors="ignore")
 
         self.assertIn("device_host: deviceHost", text)
@@ -412,5 +548,8 @@ GUID                                  DEVICE
         self.assertIn("data.source !== 'usbip_disconnect'", text)
         self.assertIn("manual_connect: true", text)
         self.assertIn("isUsbipAdbReady", text)
+        self.assertIn("等待后端自动重连", text)
+        self.assertIn("/api/usbip/status?device_host=", text)
+        self.assertNotIn("const result = await apiCall('/api/usbip/connect', 'POST', payload);", text)
         self.assertNotIn("result.success || result.devices", text)
         self.assertNotIn("Button reset due to device disconnect", text)

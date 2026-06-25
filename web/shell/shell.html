@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>测试界面 - GMS远程测试</title>
+    <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/css/common.css?v=20260624-dcfg-ui">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
@@ -22,7 +22,7 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260601-01"></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260617-usbip-reconnect" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260624-shell-audit" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -65,11 +65,35 @@
     <script>
         (function() {
             const sidebarAllPages = ['test', 'desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'apk-analysis', 'test-suites', 'api-docs', 'architecture', 'websites', 'tools', 'security-audit', 'gms-assistant', 'automation', 'redmine-agent', 'gerrit-dashboard', 'agent'];
+            const pageTitles = {
+                'test': '测试界面 - GMS远程测试',
+                'desktop': '主机桌面 - GMS远程测试',
+                'terminal': '主机终端 - GMS远程测试',
+                'users': '用户管理 - GMS远程测试',
+                'devices': '设备管理 - GMS远程测试',
+                'reports': '报告管理 - GMS远程测试',
+                'report-analysis': '报告分析 - GMS远程测试',
+                'apk-analysis': 'APK分析 - GMS远程测试',
+                'test-suites': '测试套件 - GMS远程测试',
+                'api-docs': '系统接口 - GMS远程测试',
+                'architecture': '系统架构 - GMS远程测试',
+                'websites': '常用网址 - GMS远程测试',
+                'tools': '常用工具 - GMS远程测试',
+                'security-audit': '安全审计 - GMS 远程测试',
+                'gms-assistant': 'GMS助手 - GMS 远程测试',
+                'automation': 'GMS ATS - GMS 远程测试',
+                'redmine-agent': 'Redmine - GMS 远程测试',
+                'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
+                'agent': '对话Agent - GMS 远程测试'
+            };
+            const saveCurrentPageCookie = (pageName) => {
+                document.cookie = 'gms_current_page=' + encodeURIComponent(pageName) + '; path=/; max-age=31536000; SameSite=Lax';
+            };
 
             // 确定要显示的页面（在页面渲染前）
             const hash = window.location.hash.substring(1);
             const hashPage = hash.split('?')[0];
-            const savedPage = localStorage.getItem('gms_current_page') || 'automation';
+            const savedPage = localStorage.getItem('gms_current_page') || 'test';
             let savedVisiblePages = null;
             try {
                 savedVisiblePages = JSON.parse(localStorage.getItem('gms_sidebar_visible_pages') || 'null');
@@ -90,11 +114,13 @@
                 targetPage = savedPage;
             }
             if (!visiblePages.includes(targetPage)) {
-                targetPage = visiblePages[0] || 'automation';
+                targetPage = visiblePages[0] || 'test';
             }
 
             // 保存目标页面供后续使用
             window.__targetPage = targetPage;
+            saveCurrentPageCookie(targetPage);
+            document.title = pageTitles[targetPage] || 'GMS远程测试';
 
             // 尝试获取保存的导航栏排序（从 localStorage）- 使用与保存时相同的 key
             let savedOrder = null;
@@ -1417,7 +1443,7 @@
         <div class="container page-content" id="page-architecture">
             <div class="section-title">🏗️ 系统架构</div>
             <div class="architecture-container">
-                <iframe src="/templates/architecture.html"
+                <iframe data-src="/templates/architecture.html"
                         frameborder="0" scrolling="yes" id="architecture-iframe"></iframe>
             </div>
         </div>
@@ -3446,7 +3472,7 @@
         }
 
         // ==================== 页面切换功能 ====================
-        let currentPage = 'automation';
+        let currentPage = 'test';
         let terminalInitialized = false;
         let terminal = null;
         let terminalSocket = null;
@@ -3504,7 +3530,7 @@
             'security-audit': '安全审计 - GMS 远程测试',
             'gms-assistant': 'GMS助手 - GMS 远程测试',
             'automation': 'GMS ATS - GMS 远程测试',
-            'redmine-agent': 'RedmineAgent - GMS 远程测试',
+            'redmine-agent': 'Redmine - GMS 远程测试',
             'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
             'agent': '对话Agent - GMS 远程测试'
         };
@@ -3564,7 +3590,7 @@
             if (visiblePages.includes(pageName)) {
                 return pageName;
             }
-            return visiblePages[0] || getAllSidebarPages()[0] || 'automation';
+            return visiblePages[0] || getAllSidebarPages()[0] || 'test';
         }
 
         function applySidebarVisibility(pages) {
@@ -3710,7 +3736,8 @@
                 'gms-assistant': 'gms-assistant-frame',
                 'automation': 'automation-frame',
                 'redmine-agent': 'redmine-agent-frame',
-                'gerrit-dashboard': 'gerrit-dashboard-frame'
+                'gerrit-dashboard': 'gerrit-dashboard-frame',
+                'architecture': 'architecture-iframe'
             };
             const frameId = frameMap[pageName];
             if (!frameId) return;
@@ -3739,6 +3766,90 @@
             }
         }
 
+        function runPageInitializers(pageName) {
+            // Keep switchPage() and F5 restoration on the same page-specific path.
+            if (pageName === 'terminal') {
+                const pendingCommand = sessionStorage.getItem('pending_terminal_command');
+                const commandSource = sessionStorage.getItem('command_source');
+                pendingAdbDevice = pendingAdbDevice || sessionStorage.getItem('pending_adb_device');
+
+                if (!terminalInitialized || pendingAdbDevice || pendingCommand) {
+                    if ((pendingAdbDevice || pendingCommand) && terminalInitialized) {
+                        debugLog('Forcing terminal re-initialization');
+                        isReconnecting = true;
+                        if (terminalSocket) {
+                            terminalSocket.close();
+                            terminalSocket = null;
+                        }
+                        if (terminal) {
+                            terminal.dispose();
+                            terminal = null;
+                        }
+                        terminalInitialized = false;
+                        setTimeout(() => {
+                            isReconnecting = false;
+                        }, 100);
+                    }
+
+                    if (pendingCommand && commandSource === 'route_check') {
+                        updateSilentMode(false, 'route', pendingCommand);
+                        sessionStorage.removeItem('pending_terminal_command');
+                        sessionStorage.removeItem('command_source');
+                        debugLog('Route command mode enabled, command:', pendingCommand);
+                    }
+
+                    initTerminal();
+                }
+            }
+
+            if (pageName === 'users') {
+                loadUsersList();
+                startUsersAutoRefresh();
+            } else {
+                stopUsersAutoRefresh();
+            }
+
+            if (pageName === 'security-audit') {
+                loadSecurityAudit();
+            }
+            if (pageName === 'devices') {
+                loadDevicesManagement();
+            }
+            if (pageName === 'reports') {
+                loadTestReports(typeof currentUserFilter !== 'undefined' ? currentUserFilter : false);
+            }
+            if (pageName === 'api-docs') {
+                loadApiDocs();
+            }
+            if (pageName === 'test-suites') {
+                initTestSuiteBrowserPage();
+            }
+            if (pageName === 'apk-analysis') {
+                setTimeout(() => {
+                    if (typeof window.initApkAnalysisPage === 'function') {
+                        window.initApkAnalysisPage();
+                    }
+                }, 50);
+            }
+            if (pageName === 'terminal' && terminalInitialized && terminal) {
+                setTimeout(() => {
+                    terminal.focus();
+                }, 100);
+            }
+            if (pageName === 'desktop') {
+                ensureDesktopInitialized();
+            }
+            if (pageName === 'websites') {
+                loadToolsList();
+            }
+            if (pageName === 'tools') {
+                ut_loadToolsList();
+            }
+            if (pageName === 'agent' && typeof initAgentPage === 'function') {
+                initAgentPage();
+            }
+        }
+
         function switchPage(pageName, event) {
             if (event) {
                 event.preventDefault();
@@ -3746,6 +3857,10 @@
             pageName = resolveVisiblePage(pageName);
             const pageEl = document.getElementById(`page-${pageName}`);
             if (!pageEl) return;
+            const initStyle = document.getElementById('page-init-style');
+            if (initStyle) {
+                initStyle.remove();
+            }
 
             // 更新导航栏高亮
             document.querySelectorAll('.sidebar-item').forEach(item => {
@@ -3762,6 +3877,9 @@
             // 显示目标页面
             pageEl.classList.add('active');
             ensureLazyFrameLoaded(pageName);
+            if (document.readyState !== 'complete') {
+                window.__shellPageSwitchedBeforeLoad = true;
+            }
 
             // 清除DOM缓存，避免保留已隐藏页面的元素引用
             if (typeof clearDomCache === 'function') clearDomCache();
@@ -3770,6 +3888,7 @@
 
             // 保存当前页面到 localStorage
             localStorage.setItem('gms_current_page', pageName);
+            document.cookie = 'gms_current_page=' + encodeURIComponent(pageName) + '; path=/; max-age=31536000; SameSite=Lax';
 
             // 动态更新页面标题
             document.title = PAGE_TITLES[pageName] || 'GMS远程测试';
@@ -3777,116 +3896,7 @@
                 recordSecurityPageView(pageName);
             }
 
-            // 如果切换到终端页面且未初始化，则初始化终端
-            // 如果是ADB模式(pendingAdbDevice存在),强制重新初始化
-            if (pageName === 'terminal') {
-                // 检查是否有待执行的命令（从路由检查弹框来的）
-                const pendingCommand = sessionStorage.getItem('pending_terminal_command');
-                const commandSource = sessionStorage.getItem('command_source');
-                pendingAdbDevice = pendingAdbDevice || sessionStorage.getItem('pending_adb_device');
-
-                if (!terminalInitialized || pendingAdbDevice || pendingCommand) {
-                    // ADB模式需要重新初始化,先清理旧连接
-                    if ((pendingAdbDevice || pendingCommand) && terminalInitialized) {
-                        debugLog('Forcing terminal re-initialization');
-                        isReconnecting = true;  // 标记为重新连接,隐藏断开消息
-                        if (terminalSocket) {
-                            terminalSocket.close();
-                            terminalSocket = null;
-                        }
-                        if (terminal) {
-                            terminal.dispose();
-                            terminal = null;
-                        }
-                        terminalInitialized = false;
-                        // 延迟重置标志,确保onclose事件已经处理完毕
-                        setTimeout(() => {
-                            isReconnecting = false;
-                        }, 100);
-                    }
-
-                    // 如果有路由命令，启用静默模式
-                    if (pendingCommand && commandSource === 'route_check') {
-                        updateSilentMode(false, 'route', pendingCommand);
-                        sessionStorage.removeItem('pending_terminal_command');
-                        sessionStorage.removeItem('command_source');
-                        debugLog('Route command mode enabled, command:', pendingCommand);
-                    }
-
-                    initTerminal();
-                }
-            }
-
-            // 如果切换到用户管理页面，加载用户列表并启动自动刷新
-            if (pageName === 'users') {
-                loadUsersList();
-                startUsersAutoRefresh();
-            } else {
-                // 离开用户页面时停止自动刷新
-                stopUsersAutoRefresh();
-            }
-
-            if (pageName === 'security-audit') {
-                loadSecurityAudit();
-            }
-
-            // 如果切换到设备管理页面，加载设备列表
-            if (pageName === 'devices') {
-                loadDevicesManagement();
-            }
-
-            // 如果切换到报告管理页面，刷新报告列表
-            if (pageName === 'reports') {
-                loadTestReports(typeof currentUserFilter !== 'undefined' ? currentUserFilter : false);
-            }
-
-            // 如果切换到系统接口页面，加载API文档
-            if (pageName === 'api-docs') {
-                loadApiDocs();
-            }
-
-            // 如果切换到测试套件页面，加载套件浏览器
-            if (pageName === 'test-suites') {
-                initTestSuiteBrowserPage();
-            }
-
-            // 如果切换到APK分析页面，初始化上传区域
-            if (pageName === 'apk-analysis') {
-                setTimeout(() => {
-                    if (typeof window.initApkAnalysisPage === 'function') {
-                        window.initApkAnalysisPage();
-                    }
-                }, 50);
-            }
-
-            // 切换页面时重新fit终端（如果已初始化）
-            if (pageName === 'terminal' && terminalInitialized && terminal) {
-                setTimeout(() => {
-                    terminal.focus();
-                }, 100);
-            }
-
-            // 如果切换到桌面页面，初始化主机列表（仅首次）
-            if (pageName === 'desktop') {
-                ensureDesktopInitialized();
-            }
-
-            // 如果切换到常用网址页面，加载网址列表
-            if (pageName === 'websites') {
-                loadToolsList();
-            }
-
-            // 如果切换到常用工具页面，加载工具列表
-            if (pageName === 'tools') {
-                ut_loadToolsList();
-            }
-
-            // 如果切换到对话Agent页面，初始化本地 Agent
-            if (pageName === 'agent') {
-                if (typeof initAgentPage === 'function') {
-                    initAgentPage();
-                }
-            }
+            runPageInitializers(pageName);
         }
 
         // 将 switchPage 导出到全局作用域，供外部脚本调用
@@ -6641,12 +6651,16 @@
         // 页面加载完成后，如果是终端页面则初始化终端
         window.addEventListener('load', () => {
             // 获取页面加载前确定的目标页面
-            let targetPage = window.__targetPage || localStorage.getItem('gms_current_page') || 'automation';
+            const pageWasSwitchedBeforeLoad = Boolean(window.__shellPageSwitchedBeforeLoad);
+            let targetPage = pageWasSwitchedBeforeLoad
+                ? currentPage
+                : (window.__targetPage || localStorage.getItem('gms_current_page') || 'test');
             applySidebarVisibility(getSavedSidebarVisiblePages());
             targetPage = resolveVisiblePage(targetPage);
 
             // 保存初始页面状态到 localStorage（确保首次访问后刷新能保持）
             localStorage.setItem('gms_current_page', targetPage);
+            document.cookie = 'gms_current_page=' + encodeURIComponent(targetPage) + '; path=/; max-age=31536000; SameSite=Lax';
 
             // 移除临时内联样式
             const initStyle = document.getElementById('page-init-style');
@@ -6656,6 +6670,10 @@
 
             // 初始化客户端信息
             initClientInfo();
+
+            if (pageWasSwitchedBeforeLoad && targetPage === currentPage) {
+                return;
+            }
 
             // 先设置导航栏高亮（在显示页面前）
             document.querySelectorAll('.sidebar-item').forEach(item => {
@@ -6684,44 +6702,12 @@
 
             currentPage = targetPage;
 
-            // 执行页面特定的初始化逻辑
-            if (targetPage === 'terminal' && !terminalInitialized) {
-                initTerminal();
-            }
-            if (targetPage === 'users') {
-                loadUsersList();
-            }
-            if (targetPage === 'security-audit') {
-                loadSecurityAudit();
-            }
-            if (targetPage === 'devices') {
-                loadDevicesManagement();
-            }
-            if (targetPage === 'reports') {
-                loadTestReports(typeof currentUserFilter !== 'undefined' ? currentUserFilter : false);
-            }
-            if (targetPage === 'test-suites') {
-                initTestSuiteBrowserPage();
-            }
-            if (targetPage === 'api-docs') {
-                loadApiDocs();
-            }
-            if (targetPage === 'desktop') {
-                ensureDesktopInitialized();
-            }
-
             // 更新页面标题
             document.title = PAGE_TITLES[targetPage] || 'GMS远程测试';
             if (typeof recordSecurityPageView === 'function') {
                 recordSecurityPageView(targetPage);
             }
-            if (targetPage === 'websites') loadToolsList();
-            if (targetPage === 'tools') ut_loadToolsList();
-            if (targetPage === 'agent') {
-                if (typeof initAgentPage === 'function') {
-                    initAgentPage();
-                }
-            }
+            runPageInitializers(targetPage);
 
         });
 
@@ -6940,7 +6926,7 @@
             loadSidebarConfigFromBackend();
 
             // 初始化默认页面的组件（如果默认是 APK 分析页面）
-            const defaultPage = localStorage.getItem('gms_current_page') || 'automation';
+            const defaultPage = localStorage.getItem('gms_current_page') || 'test';
             if (defaultPage === 'apk-analysis') {
                 setTimeout(() => {
                     if (typeof window.initApkAnalysisPage === 'function') {
@@ -7238,8 +7224,15 @@
     // ==================== Source Analysis Modal (OpenGrok) ====================
 
     function closeSourceAnalysisModal() {
+        if (window.ModalManager) {
+            ModalManager.close('source-analysis-modal');
+            return;
+        }
         const modal = document.getElementById('source-analysis-modal');
-        if (modal) modal.style.display = 'none';
+        if (modal) {
+            modal.classList.remove('show');
+            modal.style.display = 'none';
+        }
     }
 
     function searchSourceCode() {
