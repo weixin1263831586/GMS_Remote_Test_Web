@@ -65,9 +65,7 @@ _FRACTION_SUFFIXES = ("%", "%p")
 # target_package per entry and the manifest builder accepts it, so v2
 # multi-package grouping is a small change. See apply_overrides.
 DEFAULT_TARGET_PACKAGE = "android"
-
-# The single overlay package that carries every override.
-OVERLAY_PACKAGE = "com.gms.configoverrides"
+OVERLAY_PACKAGE = "com.rockchip.configoverrides"
 OVERLAY_PRIORITY = 9999
 # File name on /product/overlay (and our host build dir).
 OVERLAY_APK_NAME = "GmsConfigOverrides.apk"
