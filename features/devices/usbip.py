@@ -373,16 +373,17 @@ class USBIPManager:
         """查找Android设备的BUSID"""
         try:
             # 使用 get_pty=True 获取完整的设备列表（需要交互式会话环境）
-            stdout, _stderr, _code = self.ssh_manager.execute_command(
+            stdout, stderr, code = self.ssh_manager.execute_command(
                 ssh,
                 'usbipd list',
                 timeout=15,
                 get_pty=True
             )
+            output = "\n".join(part for part in (stdout, stderr) if part)
 
-            logger.info(f"USB/IP devices:\n{stdout}")
+            logger.info(f"USB/IP devices (code={code}):\n{output}")
 
-            devices = parse_usbipd_android_busids(stdout, config.get('usbip_vid_pid'))
+            devices = parse_usbipd_android_busids(output, config.get('usbip_vid_pid'))
             logger.info(f"Found USB/IP devices: {devices}")
             return devices
 

@@ -210,6 +210,138 @@ class RuntimeUiSmokeTests(unittest.TestCase):
         finally:
             page.close()
 
+    def test_first_visit_defaults_to_test_page(self):
+        page = self.browser.new_page(viewport={"width": 1440, "height": 960})
+        page.set_default_timeout(8000)
+        page.set_default_navigation_timeout(15000)
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            page.goto(self.base_url, wait_until="load")
+            page.wait_for_selector(".sidebar-item[data-page]")
+            self.close_initial_modals(page)
+            expect(page.locator("#page-test")).to_have_class(re.compile(r"active"))
+            expect(page.locator('.sidebar-item[data-page="test"]')).to_have_class(re.compile(r"active"))
+            self.assertEqual(page.evaluate("localStorage.getItem('gms_current_page')"), "test")
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_saved_users_page_restores_auto_refresh_on_load(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            page.route(
+                "**/api/users/list",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body='{"users":[]}',
+                ),
+            )
+            page.add_init_script(
+                """
+                localStorage.setItem('gms_current_page', 'users');
+                window.__usersAutoRefreshIntervals = [];
+                const originalSetInterval = window.setInterval.bind(window);
+                window.setInterval = (handler, delay, ...args) => {
+                  const id = originalSetInterval(handler, delay, ...args);
+                  const source = Function.prototype.toString.call(handler);
+                  if (delay === 10000 && source.includes('loadUsersList')) {
+                    window.__usersAutoRefreshIntervals.push(delay);
+                  }
+                  return id;
+                };
+                """
+            )
+            page.goto(self.base_url, wait_until="load")
+            page.wait_for_selector(".sidebar-item[data-page]")
+            self.close_initial_modals(page)
+            page.wait_for_function("typeof window.switchPage === 'function'")
+            expect(page.locator("#page-users")).to_have_class(re.compile(r"active"))
+            page.wait_for_function(
+                "window.__usersAutoRefreshIntervals && window.__usersAutoRefreshIntervals.length > 0"
+            )
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_saved_architecture_page_sets_title_before_load_and_lazy_loads_frame(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            page.context.add_cookies([
+                {
+                    "name": "gms_current_page",
+                    "value": "architecture",
+                    "url": self.base_url,
+                }
+            ])
+            page.add_init_script(
+                """
+                localStorage.setItem('gms_current_page', 'architecture');
+                """
+            )
+            page.goto(self.base_url, wait_until="domcontentloaded")
+            self.close_initial_modals(page)
+            self.assertEqual(page.title(), "系统架构 - GMS远程测试")
+            page.wait_for_function("typeof window.switchPage === 'function'")
+            expect(page.locator("#page-architecture")).to_have_class(re.compile(r"active"))
+            expect(page.locator("#architecture-iframe")).to_have_attribute("src", re.compile(r"/templates/architecture\.html"))
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_saved_page_cookie_sets_initial_html_title(self):
+        page = self.new_page()
+        try:
+            page.context.add_cookies([
+                {
+                    "name": "gms_current_page",
+                    "value": "devices",
+                    "url": self.base_url,
+                }
+            ])
+            page.goto(self.base_url, wait_until="commit")
+
+            self.assertEqual(page.title(), "设备管理 - GMS远程测试")
+        finally:
+            page.close()
+
+    def test_architecture_template_uses_local_fonts_only(self):
+        html = (Path(__file__).resolve().parents[1] / "web" / "templates" / "architecture.html").read_text(encoding="utf-8")
+
+        self.assertNotIn("fonts.font.im", html)
+        self.assertNotIn("fonts.googleapis.com", html)
+
+    def test_arrow_key_navigation_persists_page_for_reload(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof window.switchPage === 'function'")
+            expect(page.locator("#page-test")).to_have_class(re.compile(r"active"))
+
+            page.evaluate("document.activeElement && document.activeElement.blur()")
+            page.keyboard.press("ArrowDown")
+            expect(page.locator("#page-desktop")).to_have_class(re.compile(r"active"))
+            self.assertEqual(page.title(), "主机桌面 - GMS远程测试")
+            self.assertEqual(page.evaluate("localStorage.getItem('gms_current_page')"), "desktop")
+            self.assertIn("gms_current_page=desktop", page.evaluate("document.cookie"))
+
+            page.reload(wait_until="domcontentloaded")
+            self.assertEqual(page.title(), "主机桌面 - GMS远程测试")
+            page.wait_for_load_state("load")
+            page.wait_for_function("typeof window.switchPage === 'function'")
+            expect(page.locator("#page-desktop")).to_have_class(re.compile(r"active"))
+            self.assertEqual(page.evaluate("localStorage.getItem('gms_current_page')"), "desktop")
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
     def test_agent_page_quick_action_opens_every_sidebar_page(self):
         page = self.new_page()
         page_errors = []

@@ -270,12 +270,11 @@ async def update_config(req: dict):
             status_code=400,
         )
 
-    # 合并现有配置和请求配置（单次遍历）
-    runtime_updates = {
-        k: req.get(k, existing_runtime.get(k))
-        for k in runtime_keys
-        if k in existing_runtime or k in req
-    }
+    # 只更新允许字段，保留 Gerrit/Redmine/USB-IP 等其他运行时段落。
+    runtime_updates = dict(existing_runtime)
+    for key in runtime_keys:
+        if key in req:
+            runtime_updates[key] = req[key]
 
     # 保存运行时配置
     if config_manager.save_runtime_config(runtime_updates):

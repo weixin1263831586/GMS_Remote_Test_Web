@@ -85,6 +85,7 @@ let pendingUsbipDeviceHost = '';
 let usbipReconnectTimer = null;
 let usbipReconnectAttempts = 0;
 let usbipManualDisconnectUntil = 0;
+let usbipReconnectWaiting = false;
 const USBIP_RECONNECT_MAX_ATTEMPTS = 30;
 const USBIP_RECONNECT_INTERVAL_MS = 5000;
 const USBIP_RECONNECT_INITIAL_DELAY_MS = 1500;
@@ -2668,14 +2669,15 @@ async function submitFirmwareBurn() {
 
             xhr.open('POST', `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`);
             applyClientIdentityHeadersToXhr(xhr);
+            // 烧写是阻塞请求（完成后才返回），「已启动」必须在发出请求时立即提示，
+            // 否则会被后端烧写完成的通知晚到，导致时序颠倒。
+            notifyOperationResult('固件烧写已启动', '烧写任务已开始', 'info', 'firmware-burn');
+            addLogEntry(`固件烧写任务已启动，设备: ${devices.join(', ')}`, 'success');
             xhr.send(formData);
         });
 
         const result = uploadResult;
-        if (result.success) {
-            notifyOperationResult('固件烧写已启动', '烧写任务已开始', 'info', 'firmware-burn');
-            addLogEntry(`固件烧写任务已启动，设备: ${devices.join(', ')}`, 'success');
-        } else {
+        if (!result.success) {
             notifyOperationResult('固件烧写失败', result.error, 'error', 'firmware-burn');
             addLogEntry(`固件烧写失败: ${result.error}`, 'error');
         }
@@ -3115,13 +3117,14 @@ async function setupUsbipForward() {
 function scheduleUsbipReconnect(reason) {
     if (Date.now() <= usbipManualDisconnectUntil) return;
     if (usbipReconnectTimer) return;
+    usbipReconnectWaiting = true;
     usbipReconnectAttempts = 0;
     const btn = $('usbip-btn');
     if (btn) {
-        btn.textContent = '📱 重连中...';
-        btn.disabled = true;
+        btn.textContent = '📱 等待重连...';
+        btn.disabled = false;
     }
-    addLogEntry((reason || '检测到 USB/IP 设备断开') + '，等待设备重启后自动重连...', 'warning');
+    addLogEntry((reason || '检测到 USB/IP 设备断开') + '，等待后端自动重连...', 'warning');
     usbipReconnectTimer = setTimeout(attemptUsbipReconnect, USBIP_RECONNECT_INITIAL_DELAY_MS);
 }
 
@@ -3134,23 +3137,27 @@ async function attemptUsbipReconnect() {
     usbipReconnectAttempts += 1;
     try {
         usbipReconnectTimer = null;
-        const payload = pendingUsbipDeviceHost ? { device_host: pendingUsbipDeviceHost } : {};
-        const result = await apiCall('/api/usbip/connect', 'POST', payload);
-        if (isUsbipAdbReady(result)) {
+        const statusPath = pendingUsbipDeviceHost
+            ? '/api/usbip/status?device_host=' + encodeURIComponent(pendingUsbipDeviceHost)
+            : '/api/usbip/status';
+        const status = await apiCall(statusPath, 'GET');
+        const devices = await loadDevices(true);
+        const usbipDevices = devices.filter(device => device && device.is_usbip);
+        if (status.connected && usbipDevices.length > 0) {
             state.usbipConnected = true;
-            pendingUsbipDeviceHost = result.device_host || pendingUsbipDeviceHost || '';
+            usbipReconnectWaiting = false;
+            pendingUsbipDeviceHost = status.device_host || pendingUsbipDeviceHost || '';
             if (btn) {
                 btn.textContent = '📱 断开设备';
                 btn.disabled = false;
             }
-            addLogEntry(result.message || 'USB/IP 已自动重连', 'success');
-            setTimeout(() => debouncedRefreshDevices(), 3500);
+            addLogEntry('USB/IP 后端自动重连已恢复', 'success');
             return;
         }
-        throw new Error(result.error || result.message || '自动重连失败');
+        throw new Error('设备尚未稳定在线');
     } catch (error) {
         if (usbipReconnectAttempts < USBIP_RECONNECT_MAX_ATTEMPTS) {
-            addLogEntry(`USB/IP 自动重连第 ${usbipReconnectAttempts} 次未成功，继续等待设备恢复...`, 'warning');
+            addLogEntry(`USB/IP 自动重连等待第 ${usbipReconnectAttempts} 次未恢复，继续等待...`, 'warning');
             usbipReconnectTimer = setTimeout(attemptUsbipReconnect, USBIP_RECONNECT_INTERVAL_MS);
             return;
         }
@@ -3159,6 +3166,7 @@ async function attemptUsbipReconnect() {
             btn.disabled = false;
         }
         state.usbipConnected = false;
+        usbipReconnectWaiting = false;
         addLogEntry('USB/IP 自动重连失败: ' + error.message, 'error');
         showToast('USB/IP 自动重连失败', 'error');
     }
@@ -3808,8 +3816,9 @@ function updateUsbipButtonStatus(connected) {
     if (connected) {
         btn.textContent = '📱 断开设备';
         state.usbipConnected = true;
+        usbipReconnectWaiting = false;
     } else {
-        btn.textContent = '📱 本地设备';
+        btn.textContent = usbipReconnectWaiting ? '📱 等待重连...' : '📱 本地设备';
         state.usbipConnected = false;
     }
 }

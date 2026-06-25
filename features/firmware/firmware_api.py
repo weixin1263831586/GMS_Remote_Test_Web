@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 UPLOAD_PROGRESS_EXPIRATION = 10
+_REMOTE_FILE_FOUND_MARKER = "__GMS_REMOTE_FILE_FOUND__"
+_REMOTE_FILE_MISSING_MARKER = "__GMS_REMOTE_FILE_MISSING__"
 _FASTBOOT_OKAY_RE = re.compile(r"\s+OKAY\s+\[\s*[\d.]+s\]$")
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
@@ -32,6 +34,17 @@ def strip_ansi_codes(text: str) -> str:
 def get_default_suites_path(config: dict) -> str:
     username = runtime.config_manager.get_ubuntu_user(config)
     return config.get("suites_path", f"/home/{username}/GMS-Suite")
+
+
+def _remote_file_exists(ssh, path: str) -> bool:
+    check_cmd = (
+        f"test -f {shlex.quote(path)} "
+        f"&& echo {_REMOTE_FILE_FOUND_MARKER} "
+        f"|| echo {_REMOTE_FILE_MISSING_MARKER}"
+    )
+    output, _, _ = runtime.ssh_manager.execute_command(ssh, check_cmd, timeout=5)
+    lines = {line.strip() for line in output.splitlines()}
+    return _REMOTE_FILE_FOUND_MARKER in lines
 
 
 async def _lock_devices(client_id: str, devices: list, error_prefix="Devices occupied"):
@@ -227,21 +240,7 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                 return error_response("SSH connection failed")
 
             try:
-                # Upload upgrade_tool
-                logger.info("[Firmware Burn] Uploading upgrade_tool...")
                 gms_suite_dir = get_default_suites_path(config)
-                local_tool = os.path.join(runtime.project_root, "tools", "upgrade_tool")
-                remote_tool = os.path.join(gms_suite_dir, "upgrade_tool")
-
-                if not os.path.exists(local_tool):
-                    await runtime.release_firmware_devices(client_id, locked_devices)
-                    return error_response(f"upgrade_tool not found: {local_tool}")
-
-                import scp
-                scp_client = scp.SCPClient(ssh.get_transport())
-                scp_client.put(local_tool, remote_tool)
-                scp_client.close()
-
                 # Handle firmware file
                 if firmware_file:
                     firmware_name = os.path.basename(firmware_file.filename or "").strip()
@@ -270,10 +269,7 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                     local_firmware_path = None
 
                     if firmware_path.startswith("/") or firmware_path.startswith("./"):
-                        quoted = shlex.quote(firmware_path)
-                        check_cmd = f"test -f {quoted} && echo 'found' || echo 'not_found'"
-                        output, _, _ = runtime.ssh_manager.execute_command(ssh, check_cmd, timeout=5)
-                        if "found" in output:
+                        if _remote_file_exists(ssh, firmware_path):
                             remote_firmware = firmware_path
                         elif os.path.exists(firmware_path):
                             local_firmware_path = firmware_path
@@ -284,9 +280,7 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                         local_firmware_path = firmware_path
                     else:
                         remote_candidate = os.path.join(gms_suite_dir, firmware_path)
-                        check_cmd = f"test -f {shlex.quote(remote_candidate)} && echo 'found' || echo 'not_found'"
-                        output, _, _ = runtime.ssh_manager.execute_command(ssh, check_cmd, timeout=5)
-                        if "found" in output:
+                        if _remote_file_exists(ssh, remote_candidate):
                             remote_firmware = remote_candidate
                         else:
                             await runtime.release_firmware_devices(client_id, locked_devices)
@@ -298,6 +292,21 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                             await runtime.release_firmware_devices(client_id, locked_devices)
                             return error_response("Firmware file is empty")
                         await _upload_firmware_to_test_host(ssh, client_id, local_firmware_path, remote_firmware, firmware_name, file_size)
+
+                # Upload upgrade_tool only after the firmware source has been
+                # validated. Missing paths must not reboot devices into loader.
+                logger.info("[Firmware Burn] Uploading upgrade_tool...")
+                local_tool = os.path.join(runtime.project_root, "tools", "upgrade_tool")
+                remote_tool = os.path.join(gms_suite_dir, "upgrade_tool")
+
+                if not os.path.exists(local_tool):
+                    await runtime.release_firmware_devices(client_id, locked_devices)
+                    return error_response(f"upgrade_tool not found: {local_tool}")
+
+                import scp
+                scp_client = scp.SCPClient(ssh.get_transport())
+                scp_client.put(local_tool, remote_tool)
+                scp_client.close()
 
                 # Enter Loader mode
                 for device in devices:
