@@ -150,7 +150,7 @@ class TestBuilders(unittest.TestCase):
 
     def test_manifest_has_no_targetname(self):
         m = build_manifest()
-        self.assertIn('package="com.gms.configoverrides"', m)
+        self.assertIn(f'package="{co.OVERLAY_PACKAGE}"', m)
         self.assertIn('android:targetPackage="android"', m)
         self.assertIn('android:isStatic="true"', m)
         self.assertIn('android:priority="9999"', m)
