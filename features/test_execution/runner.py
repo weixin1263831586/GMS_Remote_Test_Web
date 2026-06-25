@@ -56,7 +56,7 @@ class TestRunner:
         self,
         test_params: dict[str, Any],
         client_id: str,
-        log_callback: Callable[[str, str], None]
+        log_callback: Callable[..., None]
     ) -> bool:
         """
         启动测试
@@ -164,7 +164,7 @@ class TestRunner:
         self,
         ssh: paramiko.SSHClient,
         config: dict[str, Any],
-        log_callback: Callable[[str, str], None]
+        log_callback: Callable[..., None]
     ) -> bool:
         """上传测试脚本到远程服务器"""
         try:
@@ -212,7 +212,7 @@ class TestRunner:
         test_params: dict[str, Any],
         config: dict[str, Any],
         process_group_id: str,
-        log_callback: Callable[[str, str], None]
+        log_callback: Callable[..., None]
     ) -> str | None:
         """构建测试命令"""
         try:
@@ -277,7 +277,7 @@ class TestRunner:
         ssh: paramiko.SSHClient,
         command: str,
         client_id: str,
-        log_callback: Callable[[str, str], None],
+        log_callback: Callable[..., None],
         test_type: str
     ):
         """异步执行测试命令"""
@@ -294,7 +294,7 @@ class TestRunner:
                             lines = data.split('\n')
                             for line in lines:
                                 if line.strip():
-                                    await log_callback(line.strip(), 'info')
+                                    await log_callback(line.strip(), 'info', source='module')
                     except Exception as e:
                         logger.error(f"Error reading stdout: {e}")
 
@@ -305,7 +305,7 @@ class TestRunner:
                             lines = error.split('\n')
                             for line in lines:
                                 if line.strip():
-                                    await log_callback(line.strip(), 'error')
+                                    await log_callback(line.strip(), 'error', source='module')
                     except Exception as e:
                         logger.error(f"Error reading stderr: {e}")
 
@@ -338,7 +338,7 @@ class TestRunner:
     async def stop_test(
         self,
         client_id: str,
-        log_callback: Callable[[str, str], None]
+        log_callback: Callable[..., None]
     ) -> bool:
         """
         停止测试

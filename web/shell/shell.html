@@ -576,8 +576,19 @@
 
             <!-- 日志区域 -->
             <div class="log-frame">
-                <div class="section-title">测试日志</div>
-                <div class="log-text" id="log-output"></div>
+                <div class="log-frame-header">
+                    <div class="section-title">日志</div>
+                    <div class="log-tabs" role="tablist" aria-label="日志类型">
+                        <button class="log-tab-btn active" data-log-tab="system" role="tab" aria-selected="true" aria-controls="log-tab-system" onclick="switchLogTab('system')">系统日志</button>
+                        <button class="log-tab-btn" data-log-tab="module" role="tab" aria-selected="false" aria-controls="log-tab-module" onclick="switchLogTab('module')">测试日志</button>
+                    </div>
+                </div>
+                <div class="log-tab-content active" id="log-tab-system" role="tabpanel">
+                    <div class="log-text" id="system-log-output"></div>
+                </div>
+                <div class="log-tab-content" id="log-tab-module" role="tabpanel">
+                    <div class="log-text" id="module-log-output"></div>
+                </div>
             </div>
         </div>
         <!-- End of page-test -->
