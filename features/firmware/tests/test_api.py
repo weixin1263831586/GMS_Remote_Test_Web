@@ -1,6 +1,8 @@
 import threading
 import unittest
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -98,3 +100,44 @@ class FirmwareApiTests(unittest.TestCase):
             {"success": False, "error": "Firmware not found: /tmp/not-found.img"},
         )
         self.assertFalse(any("reboot loader" in command for command, _ in fake_ssh.commands))
+
+    def test_firmware_chunk_upload_can_resume_without_locking_devices(self):
+        lock_calls = []
+
+        async def record_lock(**kwargs):
+            lock_calls.append(kwargs)
+            return ["D1"], None
+
+        runtime.configure_runtime(lock_firmware_devices=record_lock)
+
+        with TemporaryDirectory() as tmp, patch("features.firmware.firmware_api._FIRMWARE_CHUNK_ROOT", tmp):
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1",
+                data={
+                    "chunk_index": "0",
+                    "total_chunks": "2",
+                    "upload_id": "upload-1",
+                    "file_name": "update.img",
+                    "file_size": "8",
+                },
+                files={"file": ("update.img", b"1234")},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertTrue(payload["success"])
+            self.assertFalse(payload["upload_complete"])
+            self.assertEqual(payload["chunks_uploaded"], 1)
+            self.assertEqual(lock_calls, [])
+
+            resume = self.client.post(
+                "/api/burn/firmware?devices=D1",
+                data={
+                    "check_chunks": "1",
+                    "total_chunks": "2",
+                    "upload_id": "upload-1",
+                    "file_name": "update.img",
+                    "file_size": "8",
+                },
+            )
+            self.assertEqual(resume.json()["uploaded_chunks"], [0])

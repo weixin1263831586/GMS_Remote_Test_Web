@@ -119,7 +119,9 @@ async def _query_gerrit_dual_mode(
 ) -> dict[str, Any]:
     rest_error = ""
     effective_page_size = int(page_size or cfg.get("query_page_size") or cfg.get("defaults", {}).get("query_page_size") or 500)
-    if cfg.get("base_url"):
+    # 仅当配置了 REST 凭据时才尝试 REST；否则匿名请求对带 nginx HTTP 认证的实例
+    # 每次都 401，徒增往返再 fallback SSH。
+    if cfg.get("base_url") and cfg.get("rest_username") and cfg.get("rest_password"):
         result = await _query_gerrit_via_rest(cfg, query, max_changes=max_changes, page_size=effective_page_size)
         if not result.get("error"):
             return result

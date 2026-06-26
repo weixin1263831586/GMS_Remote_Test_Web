@@ -4,13 +4,15 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from features.devices.models import DeviceActionRequest, USBIPStartRequest
 from features.devices.runtime import configure_runtime
 from features.devices.usbip import (
     USBIPManager,
     find_device_host_password,
+    parse_adb_device_states,
+    parse_fastboot_devices,
     parse_usbipd_android_busids,
 )
 
@@ -99,6 +101,24 @@ BUSID  VID:PID    DEVICE                                                        
 
         self.assertEqual(parse_usbipd_android_busids(output), ["1-1"])
 
+    def test_protocol_state_parsers_include_recovery_and_fastboot(self):
+        adb_output = """
+List of devices attached
+ADB001	device
+REC001	recovery
+OFF001	offline
+UNAUTH001	unauthorized
+"""
+        fastboot_output = "FB001\tfastboot\n"
+
+        self.assertEqual(parse_adb_device_states(adb_output), {
+            "ADB001": "device",
+            "REC001": "recovery",
+            "OFF001": "offline",
+            "UNAUTH001": "unauthorized",
+        })
+        self.assertEqual(parse_fastboot_devices(fastboot_output), ["FB001"])
+
     def test_find_android_devices_parses_stderr_output(self):
         class FakeSshManager:
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
@@ -159,6 +179,77 @@ BUSID  VID:PID    DEVICE                                                        
         self.assertEqual(devices, ["USBIP001"])
         self.assertGreaterEqual(manager.ssh_manager.adb_calls, 4)
 
+    def test_attach_devices_returns_when_fastboot_protocol_appears(self):
+        class FakeSshManager:
+            def __init__(self):
+                self.fastboot_calls = 0
+
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                if cmd == "adb devices":
+                    return ("List of devices attached\n", "", 0)
+                if cmd == "fastboot devices":
+                    self.fastboot_calls += 1
+                    if self.fastboot_calls < 2:
+                        return ("", "", 0)
+                    return ("FB001\tfastboot\n", "", 0)
+                if cmd.startswith("sudo usbip attach"):
+                    return ("attached", "", 0)
+                return ("", "", 0)
+
+        manager = USBIPManager()
+        manager.ssh_manager = FakeSshManager()
+
+        with patch("features.devices.usbip.time.sleep", return_value=None):
+            attached, devices = manager._attach_devices(object(), "172.16.14.66", ["1-1"])
+
+        self.assertEqual(attached, ["1-1"])
+        self.assertEqual(devices, [])
+        self.assertEqual(manager.ssh_manager.fastboot_calls, 2)
+
+    def test_attach_devices_returns_when_recovery_protocol_appears(self):
+        class FakeSshManager:
+            def __init__(self):
+                self.adb_calls = 0
+
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                if cmd == "adb devices":
+                    self.adb_calls += 1
+                    if self.adb_calls < 2:
+                        return ("List of devices attached\n", "", 0)
+                    return ("List of devices attached\nREC001\trecovery\n", "", 0)
+                if cmd.startswith("sudo usbip attach"):
+                    return ("attached", "", 0)
+                return ("", "", 0)
+
+        manager = USBIPManager()
+        manager.ssh_manager = FakeSshManager()
+
+        with patch("features.devices.usbip.time.sleep", return_value=None):
+            attached, devices = manager._attach_devices(object(), "172.16.14.66", ["1-1"])
+
+        self.assertEqual(attached, ["1-1"])
+        self.assertEqual(devices, [])
+        self.assertEqual(manager.ssh_manager.adb_calls, 2)
+
+    def test_protocol_status_is_scoped_to_attached_usbip_devices(self):
+        manager = USBIPManager()
+        scoped = manager._scope_protocol_status(
+            {
+                "adb": {"LOCAL001": "device", "USBIP001": "device"},
+                "adb_ready": ["LOCAL001", "USBIP001"],
+                "recovery": [],
+                "sideload": [],
+                "unauthorized": [],
+                "offline": [],
+                "fastboot": [],
+                "mode": "adb",
+            },
+            ["USBIP001"],
+        )
+
+        self.assertEqual(scoped["adb"], {"USBIP001": "device"})
+        self.assertEqual(scoped["adb_ready"], ["USBIP001"])
+
     def test_device_host_password_matches_full_host_before_username_fallback(self):
         config = {
             "client_ssh_credentials": [
@@ -213,7 +304,7 @@ BUSID  VID:PID    DEVICE                                                        
         self.assertEqual(saved["device_host"], "hcq@172.16.14.66")
         self.assertEqual(saved["password"], "secret")
 
-    def test_usbip_connect_waits_for_adb_device_before_reporting_success(self):
+    def test_usbip_connect_accepts_transport_before_adb_device_is_ready(self):
         import features.devices.integrations_api as integrations
 
         class FakeConfigManager:
@@ -222,7 +313,14 @@ BUSID  VID:PID    DEVICE                                                        
 
         class FakeUsbipManager:
             def start_usbip(self, device_host, device_password, usbip_attach_host=None):
-                return {"success": True, "message": "attached", "devices": ["1-1"], "device_list": []}
+                return {
+                    "success": True,
+                    "message": "attached",
+                    "devices": ["1-1"],
+                    "device_list": [],
+                    "transport_connected": True,
+                    "protocol_status": {"mode": "fastboot", "fastboot": ["FB001"]},
+                }
 
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         req = USBIPStartRequest(device_host="hcq@172.16.14.66")
@@ -234,8 +332,73 @@ BUSID  VID:PID    DEVICE                                                        
 
         self.assertEqual(response.status_code, 200)
         body = json.loads(response.body.decode("utf-8"))
-        self.assertFalse(body["success"])
-        self.assertIn("ADB", body["error"])
+        self.assertTrue(body["success"])
+        self.assertTrue(body["transport_connected"])
+        self.assertFalse(body["adb_ready"])
+        self.assertEqual(body["protocol_status"]["mode"], "fastboot")
+
+    def test_usbip_status_defaults_to_configured_device_host(self):
+        import features.devices.integrations_api as integrations
+
+        class FakeConfigManager:
+            def load_config(self):
+                return {"device_host": "hcq@172.16.14.66"}
+
+        request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+        with global_state.usbip_states_lock:
+            old_states = dict(global_state.usbip_states)
+            global_state.usbip_states.clear()
+            global_state.usbip_states["hcq@172.16.14.66"] = {"connected": True, "timestamp": 1}
+        try:
+            with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+                    patch.object(integrations.runtime, "get_client_id_from_request", return_value="alice-user-id"), \
+                    patch.object(integrations.runtime, "resolve_tailscale_device_host", None):
+                response = asyncio.run(integrations.get_usbip_status(request=request))
+        finally:
+            with global_state.usbip_states_lock:
+                global_state.usbip_states.clear()
+                global_state.usbip_states.update(old_states)
+
+        body = json.loads(response.body.decode("utf-8"))
+        self.assertTrue(body["connected"])
+        self.assertEqual(body["device_host"], "hcq@172.16.14.66")
+        self.assertFalse(body["transport_connected"])
+
+    def test_usbip_status_source_record_does_not_imply_transport_restored(self):
+        import features.devices.integrations_api as integrations
+
+        class FakeConfigManager:
+            def load_config(self):
+                return {"device_host": "hcq@172.16.14.66"}
+
+        request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+        with global_state.usbip_states_lock:
+            old_states = dict(global_state.usbip_states)
+            global_state.usbip_states.clear()
+        with global_state.usbip_devices_source_lock:
+            old_sources = dict(global_state.usbip_devices_source)
+            global_state.usbip_devices_source.clear()
+            global_state.usbip_devices_source["USBIP001"] = {
+                "source": "hcq@172.16.14.66",
+                "timestamp": 1,
+            }
+        try:
+            with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+                    patch.object(integrations.runtime, "get_client_id_from_request", return_value="alice-user-id"), \
+                    patch.object(integrations.runtime, "resolve_tailscale_device_host", None):
+                response = asyncio.run(integrations.get_usbip_status(request=request))
+        finally:
+            with global_state.usbip_states_lock:
+                global_state.usbip_states.clear()
+                global_state.usbip_states.update(old_states)
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+                global_state.usbip_devices_source.update(old_sources)
+
+        body = json.loads(response.body.decode("utf-8"))
+        self.assertTrue(body["connected"])
+        self.assertFalse(body["transport_connected"])
+        self.assertFalse(body["adb_ready"])
 
     def test_suppressed_usbip_auto_connect_is_blocked_until_manual_connect(self):
         import features.devices.integrations_api as integrations
@@ -401,6 +564,167 @@ BUSID  VID:PID    DEVICE                                                        
             integrations.usbip_manager.device_sources.clear()
             integrations.usbip_manager.device_sources.update(old_manager_sources)
 
+    def test_usbip_disconnect_detaches_ubuntu_ports_in_normal_mode(self):
+        import features.devices.integrations_api as integrations
+
+        calls = []
+
+        class FakeConfigManager:
+            def load_config(self):
+                return {
+                    "device_host": "hcq@172.16.14.66",
+                    "device_pswd": "secret",
+                    "client_ssh_credentials": [],
+                }
+
+            def get_runtime_config(self):
+                return {
+                    "usbip_devices_source": {
+                        "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1},
+                    }
+                }
+
+            def save_runtime_config(self, data):
+                return True
+
+        class FakeSshManager:
+            def get_connection(self, config):
+                return "ubuntu-ssh"
+
+            def return_connection(self, ssh):
+                calls.append(("return", ssh))
+
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                calls.append(("exec", ssh, cmd))
+                return ("", "", 0)
+
+        class FakeDeviceSSHConnection:
+            def __init__(self, config):
+                self.config = config
+
+            def __enter__(self):
+                return "windows-ssh"
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+
+        with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+                patch.object(integrations.runtime, "ssh_manager", FakeSshManager()), \
+                patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"), \
+                patch.object(integrations.runtime, "resolve_tailscale_device_host", return_value=(None, None)), \
+                patch.object(integrations, "DeviceSSHConnection", FakeDeviceSSHConnection), \
+                patch.object(integrations, "notify_device_change", AsyncMock()), \
+                patch("features.devices.reconnect.stop_usbip_reconnect_for_host") as stop_reconnect, \
+                patch.object(integrations, "detach_ubuntu_usbip_ports", return_value=["00"] ) as detach:
+            response = asyncio.run(integrations.stop_usbip(request=request, req=None))
+
+        body = json.loads(response.body.decode("utf-8"))
+        self.assertTrue(body["success"])
+        detach.assert_called_once_with("ubuntu-ssh", "172.16.14.66", detach_all=False)
+        stop_reconnect.assert_called_once_with("hcq@172.16.14.66", timeout=2)
+        self.assertIn(("exec", "windows-ssh", "usbipd unbind --all"), calls)
+
+    def test_usbip_disconnect_defaults_to_resolved_device_host_not_platform_user_id(self):
+        import features.devices.integrations_api as integrations
+
+        class FakeConfigManager:
+            def load_config(self):
+                return {
+                    "client_hosts": {"172.16.14.66": "hcq"},
+                    "client_ssh_credentials": [
+                        {
+                            "device_host": "hcq@172.16.14.66",
+                            "username": "hcq",
+                            "host": "172.16.14.66",
+                            "password": "secret",
+                        }
+                    ],
+                }
+
+            def get_runtime_config(self):
+                return {
+                    "usbip_devices_source": {
+                        "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1},
+                    }
+                }
+
+            def save_runtime_config(self, data):
+                return True
+
+        class FakeSshManager:
+            def get_connection(self, config):
+                return "ubuntu-ssh"
+
+            def return_connection(self, ssh):
+                pass
+
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                return ("", "", 0)
+
+        class FakeDeviceSSHConnection:
+            def __init__(self, config):
+                self.config = config
+
+            def __enter__(self):
+                return "windows-ssh"
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        request = SimpleNamespace(headers={}, client=SimpleNamespace(host="172.16.14.66"))
+
+        with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+                patch.object(integrations.runtime, "ssh_manager", FakeSshManager()), \
+                patch.object(integrations.runtime, "get_client_id_from_request", return_value="NqWo58sh1jr5c6ZiyxxPtQ"), \
+                patch.object(integrations.runtime, "resolve_tailscale_device_host", return_value=(None, None)), \
+                patch.object(integrations, "get_client_display_id_from_request", return_value="hcq@172.16.14.66"), \
+                patch.object(integrations, "DeviceSSHConnection", FakeDeviceSSHConnection), \
+                patch.object(integrations, "notify_device_change", AsyncMock()), \
+                patch("features.devices.reconnect.stop_usbip_reconnect_for_host"), \
+                patch.object(integrations, "detach_ubuntu_usbip_ports", return_value=["00"]) as detach:
+            response = asyncio.run(integrations.stop_usbip(request=request, req=None))
+
+        body = json.loads(response.body.decode("utf-8"))
+        self.assertTrue(body["success"])
+        detach.assert_called_once_with("ubuntu-ssh", "172.16.14.66", detach_all=False)
+
+    def test_verified_detach_falls_back_when_target_device_remains(self):
+        import features.devices.integrations_api as integrations
+
+        adb_calls = 0
+
+        class FakeSshManager:
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                nonlocal adb_calls
+                if cmd == "adb devices":
+                    adb_calls += 1
+                    if adb_calls == 1:
+                        return ("List of devices attached\nUSBIP001\tdevice\n", "", 0)
+                    return ("List of devices attached\n", "", 0)
+                return ("", "", 0)
+
+        detach_calls = []
+
+        def fake_detach(ssh, remote_host=None, detach_all=False):
+            detach_calls.append((remote_host, detach_all))
+            return ["00"] if not detach_all else ["01"]
+
+        with patch.object(integrations.runtime, "ssh_manager", FakeSshManager()), \
+                patch.object(integrations, "detach_ubuntu_usbip_ports", side_effect=fake_detach):
+            result = integrations._detach_ubuntu_usbip_for_devices(
+                "ubuntu-ssh",
+                device_host="hcq@172.16.14.66",
+                usbip_attach_host=None,
+                devices_to_remove=["USBIP001"],
+                detach_all=False,
+            )
+
+        self.assertEqual(detach_calls, [("172.16.14.66", False), (None, True)])
+        self.assertEqual(result["detached_ports"], ["00", "01"])
+        self.assertEqual(result["remaining_devices"], [])
+
     def test_device_list_refresh_keeps_usbip_source_for_reconnect(self):
         import features.devices.api as devices_router
 
@@ -428,6 +752,29 @@ BUSID  VID:PID    DEVICE                                                        
             with global_state.usbip_devices_source_lock:
                 global_state.usbip_devices_source.clear()
                 global_state.usbip_devices_source.update(old_sources)
+            with global_state.device_cache_lock:
+                global_state.device_cache = old_cache
+
+    def test_device_list_hides_manually_disconnected_usbip_device(self):
+        import features.devices.api as devices_router
+        import features.devices.reconnect as reconnect
+
+        old_cache = dict(global_state.device_cache)
+        try:
+            with global_state.device_cache_lock:
+                global_state.device_cache = {"devices": [], "timestamp": 0}
+            reconnect.suppress_usbip_reconnect("hcq@172.16.14.66", ["USBIP001"])
+            request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+            with patch.object(devices_router.device_manager, "get_connected_devices", return_value=["LOCAL001", "USBIP001"]), \
+                    patch.object(devices_router.runtime, "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
+                    patch.object(devices_router.runtime, "get_client_ip", return_value="127.0.0.1"), \
+                    patch.object(devices_router.runtime, "client_manager", SimpleNamespace(get_client_id=lambda _ip: "hcq@127.0.0.1")):
+                response = asyncio.run(devices_router.get_connected_devices(request=request, help=False, force_refresh=True))
+
+            body = json.loads(response.body.decode("utf-8"))
+            self.assertEqual([item["device_id"] for item in body], ["LOCAL001"])
+        finally:
+            reconnect.clear_usbip_reconnect_suppression("hcq@172.16.14.66", ["USBIP001"])
             with global_state.device_cache_lock:
                 global_state.device_cache = old_cache
 
@@ -536,6 +883,88 @@ BUSID  VID:PID    DEVICE                                                        
         self.assertEqual(fake_usbip.calls, 2)
         self.assertIn("USBIP001", global_state.usbip_devices_source)
 
+    def test_reconnect_result_is_ignored_after_manual_disconnect_suppression(self):
+        import features.devices.reconnect as reconnect
+
+        class FakeConfigManager:
+            def load_config(self, force_reload=False):
+                return {"device_pswd": "secret", "client_ssh_credentials": []}
+
+            def get_runtime_config(self):
+                return {}
+
+        class FakeUsbipManager:
+            def start_usbip(self, device_host, device_password):
+                reconnect.suppress_usbip_reconnect(device_host, ["USBIP001"])
+                return {
+                    "success": True,
+                    "transport_connected": True,
+                    "device_list": ["USBIP001"],
+                }
+
+        old_sources = dict(global_state.usbip_devices_source)
+        try:
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+            with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
+                    patch.object(reconnect, "usbip_manager", FakeUsbipManager()), \
+                    patch.object(reconnect.device_manager, "get_connected_devices", return_value=["USBIP001"]):
+                reconnect._reconnect_worker(
+                    "hcq@172.16.14.66",
+                    "test",
+                    threading.Event(),
+                    ("USBIP001",),
+                )
+            self.assertNotIn("USBIP001", global_state.usbip_devices_source)
+        finally:
+            reconnect.clear_usbip_reconnect_suppression("hcq@172.16.14.66", ["USBIP001"])
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+                global_state.usbip_devices_source.update(old_sources)
+
+    def test_reconcile_observed_usbip_device_restores_source_mapping(self):
+        import features.devices.reconnect as reconnect
+
+        old_sources = dict(global_state.usbip_devices_source)
+        old_states = dict(global_state.usbip_states)
+        class FakeConfigManager:
+            def get_runtime_config(self):
+                return {}
+
+            def save_runtime_config(self, data):
+                return True
+
+        try:
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+            with global_state.usbip_states_lock:
+                global_state.usbip_states.clear()
+                global_state.usbip_states["hcq@172.16.14.66"] = {
+                    "connected": True,
+                    "transport_connected": False,
+                    "adb_ready": False,
+                    "reconnecting": True,
+                    "expected_devices": ["USBIP001"],
+                    "protocol_status": {"mode": "reconnecting"},
+                }
+            with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()):
+                restored = reconnect.reconcile_observed_usbip_devices(["LOCAL001", "USBIP001"])
+
+            self.assertEqual(restored, {"hcq@172.16.14.66": ["USBIP001"]})
+            self.assertEqual(
+                global_state.usbip_devices_source["USBIP001"]["source"],
+                "hcq@172.16.14.66",
+            )
+            self.assertFalse(global_state.usbip_states["hcq@172.16.14.66"]["reconnecting"])
+            self.assertTrue(global_state.usbip_states["hcq@172.16.14.66"]["adb_ready"])
+        finally:
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+                global_state.usbip_devices_source.update(old_sources)
+            with global_state.usbip_states_lock:
+                global_state.usbip_states.clear()
+                global_state.usbip_states.update(old_states)
+
     def test_frontend_waits_for_backend_autoreconnects_usbip_disconnects(self):
         text = Path("web/static/js/navigation.js").read_text(encoding="utf-8", errors="ignore")
 
@@ -548,6 +977,9 @@ BUSID  VID:PID    DEVICE                                                        
         self.assertIn("data.source !== 'usbip_disconnect'", text)
         self.assertIn("manual_connect: true", text)
         self.assertIn("isUsbipAdbReady", text)
+        self.assertIn("isUsbipProtocolVisible", text)
+        self.assertIn("usbipReconnectWaiting || usbipReconnectTimer", text)
+        self.assertNotIn("status.transport_connected || usbipDevices.length > 0", text)
         self.assertIn("等待后端自动重连", text)
         self.assertIn("/api/usbip/status?device_host=", text)
         self.assertNotIn("const result = await apiCall('/api/usbip/connect', 'POST', payload);", text)

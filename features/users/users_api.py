@@ -6,14 +6,17 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from features.auth import get_authenticated_user
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response
 
 from . import runtime
 from .clients import (
+    get_client_display_id_from_request,
     get_client_id_from_request,
     get_client_ip,
     get_client_source,
+    get_client_username_from_request,
     is_manual_username_fallback_error,
     parse_client_id,
 )
@@ -28,21 +31,30 @@ router = APIRouter()
 
 @router.get("/api/users/current")
 async def get_client_info(request: Request):
-    """获取客户端信息（返回client_id用于WebSocket连接）"""
-    # 使用统一的client_id获取逻辑（优先从client_hosts读取）
+    """获取当前平台用户信息（返回 user_id 用于 WebSocket 连接）"""
     client_id = get_client_id_from_request(request)
+    user = get_authenticated_user(request)
 
-    # 确保用户状态存在
     runtime.get_or_create_user_state(client_id)
 
-    username, client_ip = parse_client_id(client_id)
+    client_ip = get_client_ip(request)
+    username = get_client_username_from_request(request, getattr(user, "username", client_id))
+    display_client_id = get_client_display_id_from_request(request)
+    with runtime.global_state.user_states_lock:
+        state = runtime.global_state.user_states.get(client_id)
+        if state is not None:
+            state["client_username"] = username
+            state["client_ip"] = client_ip
+            state["display_client_id"] = display_client_id
 
     logger.info(f"[ClientInfo] GET - IP: {client_ip} | Username: {username} | ClientID: {client_id}")
 
     return JSONResponse(content={
         "ip": client_ip,
         "client_id": client_id,
-        "username": username
+        "display_client_id": display_client_id,
+        "username": username,
+        "user": user.as_dict() if user else None,
     })
 
 
@@ -97,26 +109,14 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
         # 更新内存中的映射
         client_manager.client_hosts = client_hosts
 
-        # 同时更新 runtime.global_state.user_states 中的用户名
-        old_client_id = f"unknown@{client_ip}"
-        new_client_id = f"{username}@{client_ip}"
-
+        display_client_id = f"{username}@{client_ip}" if client_ip and client_ip != "unknown" else username
+        client_id = get_client_id_from_request(request)
         with runtime.global_state.user_states_lock:
-            # 如果存在 unknown@IP 的记录，更新为新用户名
-            if old_client_id in runtime.global_state.user_states:
-                old_state = runtime.global_state.user_states.pop(old_client_id)
-                old_state['client_username'] = username
-                runtime.global_state.user_states[new_client_id] = old_state
-            # 或者更新已存在的 client_id 的用户名
-            elif client_ip in [parse_client_id(k)[1] for k in runtime.global_state.user_states]:
-                for key in list(runtime.global_state.user_states.keys()):
-                    if key.endswith(f"@{client_ip}"):
-                        runtime.global_state.user_states[key]['client_username'] = username
-                        # 如果需要，也可以更新 client_id
-                        if key != new_client_id:
-                            state = runtime.global_state.user_states.pop(key)
-                            runtime.global_state.user_states[new_client_id] = state
-                        break
+            state = runtime.global_state.user_states.get(client_id)
+            if state is not None:
+                state['client_username'] = username
+                state['client_ip'] = client_ip
+                state['display_client_id'] = display_client_id
 
         logger.info(f"[Set Username] {client_ip} -> {username}")
 
@@ -124,7 +124,8 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
             "success": True,
             "username": username,
             "ip": client_ip,
-            "client_id": new_client_id
+            "client_id": client_id,
+            "display_client_id": display_client_id,
         })
     else:
         return error_response("保存配置失败", 500)
@@ -153,19 +154,24 @@ async def list_users():
                 except (ValueError, TypeError):
                     continue
 
-            username_from_id, ip = parse_client_id(client_id)
+            username_from_id, ip_from_id = parse_client_id(client_id)
 
             # 优先使用state中存储的username（更准确）
             username = state.get('client_username', username_from_id)
             if username == 'unknown':
                 username = username_from_id
+            ip = state.get('client_ip') or ip_from_id
+            display_client_id = state.get('display_client_id') or (
+                f"{username}@{ip}" if username and username != 'unknown' and ip and ip != 'unknown' else client_id
+            )
 
             # 过滤本地地址和VPN网关地址
             if ip in local_addresses or ip in vpn_gateway_addresses:
                 continue
 
             user_info = {
-                'client_id': client_id,
+                'client_id': display_client_id,
+                'user_id': client_id,
                 'username': username,
                 'ip': ip,
                 **get_client_source(ip),

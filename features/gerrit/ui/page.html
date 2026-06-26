@@ -9,15 +9,16 @@
     * { box-sizing:border-box; }
     body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
     html { scrollbar-gutter:stable; overflow-y:scroll; scroll-padding-top:86px; }
-    header { position:sticky; top:0; z-index:10; display:grid; grid-template-columns:max-content minmax(0, 1fr) max-content; align-items:center; gap:14px; padding:8px 16px; background:var(--panel); border-bottom:1px solid var(--border); box-shadow:0 8px 18px rgba(0,0,0,.22); }
-    h1 { font-size:18px; margin:0; white-space:nowrap; }
+    header { position:sticky; top:0; z-index:1000; display:grid; grid-template-columns:max-content minmax(0, 1fr) max-content; align-items:center; column-gap:16px; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
+    .header-title { font-size:18px; font-weight:700; white-space:nowrap; margin:0; }
     select,input { height:30px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:0 8px; font-size:13px; }
     input { min-width:260px; }
     button { height:30px; border:0; border-radius:6px; padding:0 10px; color:white; background:var(--primary); font-weight:650; cursor:pointer; font-size:13px; }
     button.secondary { background:#30394a; }
-    main { padding:16px; }
+    main { padding:0; }
     .tabs { display:flex; gap:0; }
-    .tab { padding:8px 14px; cursor:pointer; font-size:13px; font-weight:650; color:var(--muted); border-bottom:2px solid transparent; }
+    .tab { padding:8px 16px; cursor:pointer; font-size:13px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent; transition:all .15s; }
+    .tab:hover { color:var(--text); }
     .tab.active { color:var(--primary); border-bottom-color:var(--primary); }
     .btn-group { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
     .toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
@@ -25,7 +26,7 @@
     .select-with-add select { padding-right:28px; min-width:180px; }
     .select-add-btn { position:absolute; right:2px; top:50%; transform:translateY(-50%); background:none; border:0; color:var(--muted); font-size:15px; padding:0 6px; line-height:1; cursor:pointer; height:24px; min-width:22px; }
     .select-add-btn:hover { color:var(--text); background:transparent; }
-    .tab-content { display:none; }
+    .tab-content { display:none; padding:16px; }
     .tab-content.active { display:block; }
     .stats-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:16px; }
     .stat-card { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:14px; text-align:center; }
@@ -36,9 +37,9 @@
     .stat-card.bad .value { color:var(--bad); }
     .clickable-stat { cursor:pointer; transition:transform .15s,box-shadow .15s; }
     .clickable-stat:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.3); }
-    .dashboard-summary-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:12px; flex-wrap:wrap; min-height:30px; }
+    .dashboard-summary-header { display:flex; align-items:center; margin-bottom:10px; gap:12px; flex-wrap:wrap; min-height:30px; }
     .dashboard-summary-title { margin:0; font-size:15px; line-height:30px; }
-    .dashboard-summary-controls { display:flex; align-items:center; gap:8px; margin-left:auto; flex-wrap:wrap; min-height:30px; }
+    .dashboard-summary-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-height:30px; margin-left:auto; }
     .dashboard-summary-meta { font-size:12px; min-height:30px; display:flex; align-items:center; }
     .trend-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:12px; margin-bottom:18px; }
     .trend-panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; min-height:180px; display:flex; flex-direction:column; }
@@ -80,12 +81,15 @@
     .trend-start-btn { width:30px; min-width:30px; padding:0; background:#30394a; color:var(--muted); }
     .trend-start-btn:hover { color:var(--text); }
     .error { color:#fca5a5; }
-    .status-line { min-height:26px; margin-bottom:10px; }
+    .status-line { margin-bottom:10px; }
+    .status-line:empty { display:none; }
     .modal { display:none; position:fixed; inset:0; z-index:100; background:rgba(0,0,0,.68); align-items:center; justify-content:center; padding:18px; }
     .modal.show { display:flex; }
     .modal-content { width:min(720px, 100%); max-height:85vh; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; box-shadow:0 18px 40px rgba(0,0,0,.4); }
-    .modal-header { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:var(--panel2); border-bottom:1px solid var(--border); }
-    .modal-header h2 { margin:0; font-size:15px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .modal-header { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:linear-gradient(135deg,#667eea,#764ba2); border-bottom:1px solid var(--border); }
+    .modal-header h2 { margin:0; font-size:15px; color:#fff; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .modal-header button.secondary { background:rgba(255,255,255,.15); color:#fff; }
+    .modal-header button.secondary:hover { background:rgba(255,255,255,.25); }
     .modal-body { padding:16px; display:grid; gap:12px; overflow:auto; min-height:0; }
     #trendDetailBody { max-height:calc(85vh - 62px); }
     .form-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
@@ -93,19 +97,18 @@
     .field input { width:100%; min-width:0; }
     .field.full { grid-column:1 / -1; }
     .modal-actions { display:flex; justify-content:flex-end; gap:8px; padding:0 16px 16px; }
-    @media (max-width:800px) { header { grid-template-columns:1fr; align-items:flex-start; } input { min-width:180px; width:100%; } .toolbar { align-items:stretch; } }
+    @media (max-width:800px) { header { grid-template-columns:1fr; align-items:flex-start; row-gap:8px; } input { min-width:180px; width:100%; } .toolbar { align-items:stretch; } }
   </style>
 </head>
 <body>
 <header>
-  <h1>Gerrit 看板</h1>
   <div class="tabs">
-    <div class="tab active" data-tab="personal" onclick="switchTab('personal')">个人看板</div>
-    <div class="tab" data-tab="department" onclick="switchTab('department')">部门看板</div>
-    <div class="tab" data-tab="query" onclick="switchTab('query')">查询</div>
+    <div class="tab" data-tab="department" onclick="switchTab('department')">🏢 部门看板</div>
+    <div class="tab active" data-tab="personal" onclick="switchTab('personal')">📈 个人看板</div>
+    <div class="tab" data-tab="query" onclick="switchTab('query')">🔍 查询</div>
   </div>
   <div class="btn-group">
-    <button class="secondary" onclick="refreshCurrentTab()">刷新</button>
+    <button class="secondary" onclick="refreshCurrentTab()">🔄 刷新</button>
     <button class="secondary" onclick="showSettings()" title="设置">⚙️</button>
   </div>
 </header>
@@ -534,16 +537,13 @@ async function loadChanges() {
 }
 function metaLine(data) {
   const parts = [
-    '来源: ' + (data.source || '-'),
-    '生成: ' + (data.generated_at || '-'),
-    data.cache_hit ? '缓存命中' : '',
     data.rest_error ? 'REST失败后回退: ' + data.rest_error : '',
     data.error ? '错误: ' + data.error : ''
   ].filter(Boolean);
   return esc(parts.join(' / '));
 }
 function renderSummaryHeader(title, controlsHtml, metaHtml) {
-  return '<div class="dashboard-summary-header"><h2 class="dashboard-summary-title">' + esc(title) + '</h2><div class="dashboard-summary-controls">' + (controlsHtml || '') + '</div><div class="muted dashboard-summary-meta">' + (metaHtml || '') + '</div></div>';
+  return '<div class="dashboard-summary-header"><h2 class="dashboard-summary-title">' + esc(title) + '</h2>' + (controlsHtml ? '<div class="dashboard-summary-controls">' + controlsHtml + '</div>' : '') + (metaHtml ? '<div class="muted dashboard-summary-meta">' + metaHtml + '</div>' : '') + '</div>';
 }
 function renderDashboard(data) {
   const isPersonal = currentTab === 'personal';
@@ -551,7 +551,7 @@ function renderDashboard(data) {
   const title = isPersonal ? 'Gerrit 个人提交汇总' : 'Gerrit 提交汇总';
   const s = data.summary || {};
   return '<section class="list-section">'
-    + renderSummaryHeader(title, controls, '来源: ' + esc(data.source || '-') + ' | 缓存: ' + (data.cache_hit ? '是' : '否'))
+    + renderSummaryHeader(title, controls, '来源: ' + esc(data.source || '-'))
     + renderCards([
     {label:'历史提交', value:s.total_count || 0},
     {label:'已合并', value:s.merged_count || 0, className:'ok clickable-stat', onclick:"scrollToSection('sec-merged')"},
@@ -730,7 +730,7 @@ function renderDepartmentDashboard(data) {
   const profile = data.profile || {};
   currentDepartmentProfileId = profile.id || currentDepartmentProfileId || '';
   const s = data.summary || {};
-  const header = '<section class="list-section">' + renderSummaryHeader((profile.name || '部门') + ' Gerrit 提交汇总', departmentControlsHtml(currentDepartmentProfileId), '成员: ' + ((data.users || []).length) + ' | 来源: ' + esc(((data.users || [])[0] || {}).source || '-') + ' | 缓存: ' + (data.cache_hit ? '是' : '否'))
+  const header = '<section class="list-section">' + renderSummaryHeader((profile.name || '部门') + ' Gerrit 提交汇总', departmentControlsHtml(currentDepartmentProfileId), '成员: ' + ((data.users || []).length) + ' | 来源: ' + esc(((data.users || [])[0] || {}).source || '-'))
     + renderCards([
       {label:'历史提交', value:s.total_count || 0},
       {label:'已合并', value:s.merged_count || 0, className:'ok'},

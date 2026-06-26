@@ -32,30 +32,38 @@ def get_primary_vpn_target(config: dict[str, Any]) -> str:
     return str(vpn_target or 'www.google.com')
 
 
-def check_local_vpn_connected(vpn_target: str) -> bool:
-    """检查本地VPN是否已连接"""
-    for _ in range(2):
-        try:
-            result = subprocess.run(
-                ['ping', '-c', '1', '-W', '1', vpn_target],
-                capture_output=True, text=True, timeout=3
-            )
-            output = f"{result.stdout}\n{result.stderr}"
-            if result.returncode == 0 and ('1 received' in output or 'bytes from' in output):
-                return True
-        except Exception as e:
-            logger.debug(f"[VPN Status] Local ping check failed: {e}")
+VPN_CONNECTION_TYPES = {"vpn", "tun", "tap", "wireguard"}
 
+
+def has_active_vpn_connection(nmcli_output: str) -> bool:
+    """判断 nmcli -t -f NAME,TYPE,STATE 输出里是否有活跃的 VPN 类型连接。
+
+    nmcli -t 每行 "NAME:TYPE:STATE"——只认 TYPE 列明确属于 VPN 类型，
+    避免连接名或其它字段误含子串导致假阳性（误报已连接）。
+    """
+    for line in (nmcli_output or '').splitlines():
+        fields = line.split(":")
+        if len(fields) >= 2 and fields[1].strip().lower() in VPN_CONNECTION_TYPES:
+            return True
+    return False
+
+
+def check_local_vpn_connected() -> bool:
+    """检查本地VPN是否已连接
+
+    以"是否存在活跃的 VPN 类型连接"为权威判据（与 connect/disconnect 信号一致），
+    ping 仅作可达性补充——避免手动断开后因 ping 目标仍可达而误报"已连接"。
+    """
     try:
         result = subprocess.run(
             ['nmcli', '-t', '-f', 'NAME,TYPE,STATE', 'connection', 'show', '--active'],
             capture_output=True, text=True, timeout=3
         )
-        output = result.stdout.lower()
-        return 'vpn' in output or 'tun' in output or 'tap' in output
+        return has_active_vpn_connection(result.stdout)
     except Exception as e:
         logger.debug(f"[VPN Status] Local nmcli check failed: {e}")
-        return False
+
+    return False
 
 
 def get_configured_vpn_connection_name(config: dict[str, Any]) -> str:

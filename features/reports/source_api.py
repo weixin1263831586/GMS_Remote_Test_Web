@@ -15,6 +15,7 @@ from .api_helpers import (
     _load_redmine_credentials,
     _looks_like_redmine_url,
     _redmine_base_url_for,
+    _redmine_config_manager_for_request,
     _redmine_public_url_hint,
     _rename_downloaded_report_if_needed,
     _save_redmine_credentials,
@@ -36,6 +37,27 @@ from .api_helpers import (
 
 
 router = APIRouter()
+
+
+def _request_redmine_config_manager(request: Request):
+    if getattr(getattr(request, "state", None), "current_user", None) is None:
+        return config_manager
+    return _redmine_config_manager_for_request(request)
+
+
+async def _load_redmine_credentials_for_request(request: Request):
+    try:
+        return await _load_redmine_credentials(request)
+    except TypeError:
+        return await _load_redmine_credentials()
+
+
+async def _save_redmine_credentials_for_request(username: str, password: str, request: Request):
+    try:
+        return await _save_redmine_credentials(username, password, request)
+    except TypeError:
+        return await _save_redmine_credentials(username, password)
+
 
 # ==================== Analyze URL ====================
 
@@ -62,8 +84,9 @@ async def analyze_report_from_url(request: Request):
 
         redmine_config = None
         configured_redmine_match = False
+        request_redmine_config = _request_redmine_config_manager(request)
         try:
-            redmine_config = config_manager.get_redmine_config()
+            redmine_config = request_redmine_config.get_redmine_config()
             configured_domain = (redmine_config.get("domain") or "").lower()
             configured_base_host = urlparse(redmine_config.get("base_url", "")).netloc.lower()
             current_host = parsed_url.netloc.lower()
@@ -88,7 +111,7 @@ async def analyze_report_from_url(request: Request):
         async def _redmine_credentials_for_lookup() -> tuple[str, str]:
             if redmine_username and redmine_password:
                 return redmine_username, redmine_password
-            stored_creds = await _load_redmine_credentials()
+            stored_creds = await _load_redmine_credentials_for_request(request)
             return (stored_creds or {}).get("username", ""), (stored_creds or {}).get("password", "")
 
         if is_redmine:
@@ -180,9 +203,9 @@ async def analyze_report_from_url(request: Request):
             if is_redmine:
                 if redmine_username and redmine_password:
                     headers.update(create_basic_auth_header(redmine_username, redmine_password))
-                    await _save_redmine_credentials(redmine_username, redmine_password)
+                    await _save_redmine_credentials_for_request(redmine_username, redmine_password, request)
                 else:
-                    stored_creds = await _load_redmine_credentials()
+                    stored_creds = await _load_redmine_credentials_for_request(request)
                     if stored_creds:
                         redmine_username = stored_creds.get("username")
                         redmine_password = stored_creds.get("password")
@@ -298,7 +321,7 @@ async def analyze_report_from_url(request: Request):
 async def get_redmine_config(request: Request):
     """Get Redmine configuration."""
     try:
-        redmine_config = config_manager.get_redmine_config()
+        redmine_config = _request_redmine_config_manager(request).get_redmine_config()
         return JSONResponse(content={"success": True, "data": redmine_config})
     except ValueError as e:
         return error_response(str(e), status_code=404)
@@ -325,12 +348,12 @@ async def extract_redmine_attachment(request: Request):
         issue_id = issue_match.group(1)
         logger.info(f"[Redmine Extract] Extracting issue {issue_id} attachment")
 
-        stored_creds = await _load_redmine_credentials()
+        stored_creds = await _load_redmine_credentials_for_request(request)
         if not stored_creds:
             return error_response("Redmine credentials not configured", 401)
 
         try:
-            redmine_config = config_manager.get_redmine_config()
+            redmine_config = _request_redmine_config_manager(request).get_redmine_config()
         except ValueError:
             redmine_config = None
 

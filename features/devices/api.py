@@ -15,6 +15,7 @@ from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
 from . import runtime
+from . import reconnect
 from .locks import device_lock_manager
 from .manager import device_manager
 from .models import (
@@ -118,7 +119,9 @@ async def get_connected_devices(
     get_or_create_user_state(client_id)
 
     # Refresh device list first
-    devices = await asyncio.to_thread(device_manager.get_connected_devices, force_refresh)
+    raw_devices = await asyncio.to_thread(device_manager.get_connected_devices, force_refresh)
+    reconnect.reconcile_observed_usbip_devices(raw_devices)
+    devices = reconnect.filter_suppressed_usbip_devices(raw_devices)
 
     # Keep USB/IP source records for disconnected devices. They are needed for
     # server-side auto reconnect after device reboot; manual USB/IP disconnect
@@ -150,10 +153,14 @@ async def get_connected_devices(
         if lock_status:
             device_info["locked"] = True
             device_info["locked_by"] = lock_status["locked_by"]
+            device_info["locked_username"] = lock_status.get("username", "")
+            device_info["locked_client_id"] = lock_status.get("client_id", "")
             device_info["locked_by_self"] = lock_status.get("client_id") == client_id_from_ip
             device_info["locked_at"] = lock_status["locked_at"]
         else:
             device_info["locked_by"] = ""
+            device_info["locked_username"] = ""
+            device_info["locked_client_id"] = ""
             device_info["locked_by_self"] = False
 
         # Check USB/IP source

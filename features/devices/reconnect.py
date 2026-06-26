@@ -81,6 +81,20 @@ def is_usbip_reconnect_suppressed(device_host: str = "", device_id: str = "") ->
     return False
 
 
+def filter_suppressed_usbip_devices(devices: Iterable[str]) -> list[str]:
+    """Hide manually disconnected USB/IP serials from generic device views."""
+    filtered: list[str] = []
+    for device_id in devices or []:
+        device_id = str(device_id or "").strip()
+        if not device_id:
+            continue
+        if is_usbip_reconnect_suppressed(device_id=device_id):
+            logger.info("[USB/IP] hiding manually disconnected device from generic list: %s", device_id)
+            continue
+        filtered.append(device_id)
+    return filtered
+
+
 def schedule_usbip_reconnect_for_removed_devices(
     removed_devices: Iterable[str],
     reason: str = "USB/IP device removed",
@@ -101,6 +115,7 @@ def schedule_usbip_reconnect_for_removed_devices(
                 reason,
             )
             continue
+        _mark_usbip_reconnecting(device_host, [device_id], reason)
         if schedule_usbip_reconnect(
             device_host,
             reason=f"{reason}: {device_id}",
@@ -180,6 +195,43 @@ def active_usbip_reconnect_hosts() -> list[str]:
         )
 
 
+def reconcile_observed_usbip_devices(current_devices: Iterable[str]) -> dict[str, list[str]]:
+    """Promote reconnecting USB/IP devices when they reappear in ADB output."""
+    current_set = {str(device_id) for device_id in current_devices or [] if str(device_id)}
+    if not current_set:
+        return {}
+
+    restored: dict[str, list[str]] = {}
+    with runtime.global_state.usbip_states_lock:
+        state_items = list(runtime.global_state.usbip_states.items())
+
+    for device_host, state_info in state_items:
+        if not isinstance(state_info, dict) or not state_info.get("reconnecting"):
+            continue
+        expected = {
+            str(device_id)
+            for device_id in state_info.get("expected_devices", [])
+            if str(device_id)
+        }
+        observed = sorted(expected & current_set)
+        if not observed:
+            continue
+        _record_reconnected_devices(
+            device_host,
+            observed,
+            {
+                "transport_connected": True,
+                "protocol_status": {
+                    "mode": "adb",
+                    "adb_ready": observed,
+                },
+            },
+        )
+        restored[device_host] = observed
+
+    return restored
+
+
 def stop_usbip_reconnect_tasks(timeout: float = 5) -> None:
     with _tasks_lock:
         tasks = list(_tasks.items())
@@ -196,6 +248,27 @@ def stop_usbip_reconnect_tasks(timeout: float = 5) -> None:
             if not task.is_alive():
                 _tasks.pop(host, None)
                 _stop_events.pop(host, None)
+
+
+def stop_usbip_reconnect_for_host(device_host: str, timeout: float = 5) -> None:
+    """Stop an in-flight reconnect worker for a single host."""
+    device_host = str(device_host or "").strip()
+    if not device_host:
+        return
+    with _tasks_lock:
+        task = _tasks.get(device_host)
+        stop_event = _stop_events.get(device_host)
+        if stop_event:
+            stop_event.set()
+
+    if task and task is not threading.current_thread():
+        task.join(timeout=max(0, timeout))
+
+    with _tasks_lock:
+        current = _tasks.get(device_host)
+        if current is task and (not task or not task.is_alive()):
+            _tasks.pop(device_host, None)
+            _stop_events.pop(device_host, None)
 
 
 def _reconnect_worker(
@@ -232,20 +305,39 @@ def _reconnect_worker(
             if stop_event.is_set():
                 return
             result = usbip_manager.start_usbip(device_host, device_password)
+            if is_usbip_reconnect_suppressed(device_host) or stop_event.is_set():
+                logger.info("[USB/IP Reconnect] result ignored after manual disconnect for %s", device_host)
+                return
             device_list = result.get("device_list") or []
-            if result.get("success") and device_list and _usbip_devices_stable(
-                device_host,
-                device_list,
-                expected_set,
-                stop_event,
-            ):
-                _record_reconnected_devices(device_host, device_list)
-                logger.info(
-                    "[USB/IP Reconnect] success for %s, devices=%s",
+            if result.get("success") and result.get("transport_connected", True):
+                if device_list and _usbip_devices_stable(
                     device_host,
                     device_list,
-                )
-                return
+                    expected_set,
+                    stop_event,
+                ):
+                    _record_reconnected_devices(device_host, device_list, result)
+                    logger.info(
+                        "[USB/IP Reconnect] success for %s, devices=%s",
+                        device_host,
+                        device_list,
+                    )
+                    return
+                if not device_list:
+                    protocol_mode = (result.get("protocol_status") or {}).get("mode", "unknown")
+                    if protocol_mode in {"fastboot", "recovery", "unauthorized", "offline", "adb_non_device"}:
+                        _record_reconnected_devices(device_host, [], result)
+                        logger.info(
+                            "[USB/IP Reconnect] transport restored for %s, protocol=%s",
+                            device_host,
+                            protocol_mode,
+                        )
+                        return
+                    _mark_usbip_reconnecting(device_host, expected_set, f"{reason}; protocol={protocol_mode}")
+                    logger.info(
+                        "[USB/IP Reconnect] transport attached but protocol not visible for %s, continue waiting",
+                        device_host,
+                    )
 
             logger.info(
                 "[USB/IP Reconnect] not ready for %s: success=%s devices=%s error=%s",
@@ -298,10 +390,21 @@ def _usbip_devices_stable(
     return True
 
 
-def _record_reconnected_devices(device_host: str, device_list: list[str]):
+def _record_reconnected_devices(
+    device_host: str,
+    device_list: list[str],
+    result: dict[str, Any] | None = None,
+):
     now = time.time()
     with runtime.global_state.usbip_states_lock:
-        runtime.global_state.usbip_states[device_host] = {"connected": True, "timestamp": now}
+        runtime.global_state.usbip_states[device_host] = {
+            "connected": True,
+            "timestamp": now,
+            "transport_connected": bool((result or {}).get("transport_connected", True)),
+            "adb_ready": bool(device_list),
+            "reconnecting": False,
+            "protocol_status": (result or {}).get("protocol_status") or {},
+        }
 
     with runtime.global_state.usbip_devices_source_lock:
         for device_id in device_list:
@@ -324,3 +427,26 @@ def _record_reconnected_devices(device_host: str, device_list: list[str]):
         runtime.config_manager.save_runtime_config(runtime_config)
     except Exception as exc:
         logger.warning("[USB/IP Reconnect] failed to persist sources: %s", exc)
+
+
+def _mark_usbip_reconnecting(
+    device_host: str,
+    expected_devices: Iterable[str],
+    reason: str = "",
+) -> None:
+    now = time.time()
+    with runtime.global_state.usbip_states_lock:
+        runtime.global_state.usbip_states[device_host] = {
+            "connected": True,
+            "timestamp": now,
+            "transport_connected": False,
+            "adb_ready": False,
+            "reconnecting": True,
+            "expected_devices": list(dict.fromkeys(
+                str(device_id)
+                for device_id in expected_devices or []
+                if str(device_id)
+            )),
+            "reason": reason,
+            "protocol_status": {"mode": "reconnecting"},
+        }

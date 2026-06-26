@@ -140,11 +140,14 @@ class RedmineAgent(
         self,
         db: RedmineAgentDB | None = None,
         *,
+        redmine_config_manager: Any | None = None,
+        attachments_dir: Any | None = None,
         report_analyzer_factory: Callable[..., Any] | None = None,
         ai_analyzer_factory: Callable[..., Any] | None = None,
     ):
         self.db = db or RedmineAgentDB()
-        self.attachments_dir = settings.data_root / "redmine/attachments"
+        self.config_manager = redmine_config_manager or config_manager
+        self.attachments_dir = attachments_dir or settings.data_root / "redmine/attachments"
         self.attachments_dir.mkdir(parents=True, exist_ok=True)
         self._ai_config_cache: dict[str, Any] | None = None
         self.report_analyzer_factory = report_analyzer_factory
@@ -461,8 +464,8 @@ class RedmineAgent(
     # ------------------------------------------------------------------
 
     def _make_client(self) -> RedmineClient:
-        redmine_config = config_manager.get_redmine_config()
-        creds = config_manager.load_redmine_credentials()
+        redmine_config = self.config_manager.get_redmine_config()
+        creds = self.config_manager.load_redmine_credentials()
         if not creds:
             raise RuntimeError("Redmine credentials not configured")
         return RedmineClient(redmine_config["base_url"], creds.get("username", ""), creds.get("password", ""))

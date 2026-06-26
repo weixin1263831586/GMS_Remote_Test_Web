@@ -2,35 +2,29 @@
 
 import ipaddress
 import logging
-import urllib.parse
 from typing import Any
 
+from fastapi import HTTPException
+
+from features.auth import get_authenticated_user
 from foundation.networking import parse_host_address
 
 from . import runtime
-from .sessions import client_manager
 
 
 logger = logging.getLogger(__name__)
 
 
 def get_client_id_from_request(request) -> str:
-    """从请求中获取client_id（优先从配置文件读取用户名）"""
-    client_ip = get_client_ip(request)
+    """Return the authenticated platform user id.
 
-    config = runtime.config_manager.load_config()
-    client_hosts = config.get('client_hosts', {})
-
-    if client_ip in client_hosts:
-        username = client_hosts[client_ip]
-    else:
-        username = request.headers.get('X-Client-Username')
-        if username and request.headers.get('X-Client-Username-Encoding') == 'percent':
-            username = urllib.parse.unquote(username)
-        if not username or username == 'unknown':
-            username = 'unknown'
-
-    return client_manager.get_client_id(client_ip, username)
+    This is the security boundary for user-scoped runtime state. It must not
+    trust client-controlled IP or username headers.
+    """
+    user = get_authenticated_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user.id
 
 
 def get_client_ip(request, fallback_ip: str | None = None) -> str:
@@ -42,6 +36,32 @@ def get_client_ip(request, fallback_ip: str | None = None) -> str:
         if value:
             return value.split(',')[0].strip()
     return request.client.host if request.client else 'unknown'
+
+
+def get_client_username_from_request(request, fallback: str | None = None) -> str:
+    """Return the client machine username for display/SSH routing."""
+    client_ip = get_client_ip(request)
+    try:
+        config = runtime.config_manager.load_config()
+        client_hosts = config.get('client_hosts') or {}
+        username = str(client_hosts.get(client_ip) or '').strip()
+        if username and username != 'unknown':
+            return username
+    except Exception:
+        pass
+
+    user = get_authenticated_user(request)
+    username = str(getattr(user, 'username', '') or fallback or '').strip()
+    return username or 'unknown'
+
+
+def get_client_display_id_from_request(request) -> str:
+    """Return username@ip for UI and tools that require a reachable client host."""
+    client_ip = get_client_ip(request)
+    username = get_client_username_from_request(request)
+    if username and username != 'unknown' and client_ip and client_ip != 'unknown':
+        return f"{username}@{client_ip}"
+    return username if username and username != 'unknown' else client_ip
 
 
 def parse_client_id(client_id: str) -> tuple[str, str]:
@@ -84,7 +104,9 @@ def resolve_tailscale_device_host(request, client_id: str) -> tuple[str | None, 
     """Return (device_host, usbip_attach_host) for Tailscale-origin requests."""
     if not is_public_origin_request(request):
         return None, None
-    username, client_ip = parse_client_id(client_id)
+    user = get_authenticated_user(request)
+    username = user.username if user else parse_client_id(client_id)[0]
+    client_ip = get_client_ip(request)
     if not client_ip or client_ip == 'unknown':
         return None, None
     device_host = f"{username}@{client_ip}" if username and username != 'unknown' else client_ip

@@ -148,6 +148,48 @@ def select_redmine_dashboard_profile(config: dict[str, Any], profile_id: str = "
     return profiles[0]
 
 
+def with_department_profiles_from_users(
+    config: dict[str, Any],
+    users: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    """Return dashboard config with department profiles derived from user_map.
+
+    The Redmine department dashboard is an organization-level view. Older
+    deployments often have only ``configs/redmine_user_map.json`` populated and
+    no runtime ``redmine_dashboard`` section. In that case the UI can still
+    select department ids such as ``system-2`` if we expose profiles derived
+    from the user map.
+    """
+    normalized = normalize_redmine_dashboard_profiles(config or {})
+    profiles = list(normalized.get("profiles") or [])
+    existing = {str(item.get("id") or "").strip() for item in profiles}
+    defaults = normalized.get("defaults") or DEFAULT_DEPARTMENT_DASHBOARD
+    departments: dict[str, str] = {}
+    for user in users or []:
+        department_id = str(user.get("department_id") or "").strip()
+        department_name = str(user.get("department") or department_id).strip()
+        if not department_id:
+            continue
+        departments.setdefault(department_id, department_name or department_id)
+    for department_id, department_name in sorted(departments.items(), key=lambda item: item[1]):
+        profile_id = _profile_id(department_id)
+        if not profile_id or profile_id in existing:
+            continue
+        profiles.append({
+            "id": profile_id,
+            "name": department_name,
+            "user_ids": [],
+            "aliases": [],
+            "stale_days": DEFAULT_REDMINE_STATS["stale_days"],
+            "window_days": DEFAULT_REDMINE_STATS["window_days"],
+            "list_limit": defaults["list_limit"],
+            "issue_limit": defaults["issue_limit"],
+            "email_to": "",
+        })
+        existing.add(profile_id)
+    return {**normalized, "profiles": profiles}
+
+
 def filter_users_for_profile(users: list[dict[str, Any]], profile: dict[str, Any]) -> list[dict[str, Any]]:
     """Filter Redmine user map entries according to a dashboard profile."""
     user_ids = {str(user_id) for user_id in (profile or {}).get("user_ids") or []}

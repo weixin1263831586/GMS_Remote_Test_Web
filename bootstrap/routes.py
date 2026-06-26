@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from features.assistant import api as assistant
 from features.assistant.universal_ai import get_universal_analyzer
+from features.auth import router as auth_router
 from features.automation import api as automation
 from features.automation.api import configure_automation_service
 from features.automation.repository import AutomationStore
@@ -100,6 +101,7 @@ ALL_ROUTERS = [
     assistant.router,
     assets.router,
     audit.router,
+    auth_router,
     automation.router,
     automation.page_router,
     desktop.router,

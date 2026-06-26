@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from .api import (
@@ -16,8 +16,8 @@ from .api import (
     _get_redmine_stats_config,
     _resolve_owner_names,
     _update_ttl_cache,
-    config_manager,
-    redmine_service,
+    get_redmine_config_for_request,
+    get_redmine_service_for_request,
 )
 from .dashboard import (
     filter_users_for_profile,
@@ -25,27 +25,67 @@ from .dashboard import (
     merge_resolved_trends,
     select_redmine_dashboard_profile,
     summarize_project_issues,
+    with_department_profiles_from_users,
 )
 from .repository import (
-    USER_MAP_PATH,
     compute_user_overdue_stats,
     display_names_from_mapping,
-    find_user_mapping,
-    load_redmine_user_map,
+    load_redmine_user_map_for_owner,
+    owner_user_map_path,
 )
+from features.auth.service import require_authenticated_user
 
 
 router = APIRouter()
 
+
+def _request_user_id(request: Request | None) -> str:
+    if request is None:
+        return "legacy"
+    try:
+        return require_authenticated_user(request).id
+    except Exception:
+        # 未登录时回退到 state.current_user（内部直接调用场景），再退到 legacy。
+        user = getattr(getattr(request, "state", None), "current_user", None)
+        return getattr(user, "id", "") or "legacy"
+
+
+# 看板/统计读登录用户的隔离数据源：per-user 凭据、per-user DB、per-user 配置与 user_map。
+# 这是多用户隔离模式下的正确形态——配置存在 data/redmine/by_user/<owner>/config_runtime.json。
+def _service_for_request(request: Request | None):
+    return get_redmine_service_for_request(request)
+
+
+def _config_for_request(request: Request | None):
+    return get_redmine_config_for_request(request)
+
+
+def _user_map_for_request(request: Request | None) -> list[dict[str, Any]]:
+    return load_redmine_user_map_for_owner(_request_user_id(request))
+
+
+def _dashboard_config_for_request(request: Request | None) -> dict[str, Any]:
+    return with_department_profiles_from_users(
+        _config_for_request(request).get_redmine_dashboard_config(),
+        _user_map_for_request(request),
+    )
+
+
+def _user_map_mtime_for_request(request: Request | None) -> float:
+    path = owner_user_map_path(_request_user_id(request))
+    return path.stat().st_mtime if path.exists() else 0
+
 @router.get("/statistics/workload")
 async def get_workload_statistics(
+    request: Request = None,
     stale_days: int = Query(20, ge=1, le=30),
     list_limit: int = Query(30, ge=1, le=100),
     name: str = Query(""),
 ):
+    service = _service_for_request(request)
     # Check cache
-    stats_cfg = _get_redmine_stats_config()
-    cache_key = f"{stale_days}:{list_limit}:{name}"
+    stats_cfg = _get_redmine_stats_config(request)
+    cache_key = f"{_request_user_id(request)}:{stale_days}:{list_limit}:{name}"
     now_ts = datetime.now().timestamp()
     cached = _check_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, stats_cfg["cache_ttl"], now_ts)
     if cached is not None:
@@ -55,11 +95,25 @@ async def get_workload_statistics(
     display_names = []
     live_counts: dict[str, int] = {}
     if name:
-        mapped = find_user_mapping(name)
+        query_keys = set()
+        from .repository import _name_keys as _mapping_name_keys
+        for value in [name]:
+            query_keys.update(_mapping_name_keys(value))
+        mapped = None
+        mapped_names: list[str] = []
+        for item in _user_map_for_request(request):
+            names = display_names_from_mapping(item)
+            for value in names:
+                if query_keys.intersection(_mapping_name_keys(value)):
+                    mapped = item
+                    mapped_names = names
+                    break
+            if mapped:
+                break
         if mapped:
-            owner_names = display_names_from_mapping(mapped)
+            owner_names = mapped_names
             display_names = owner_names
-            client = redmine_service.agent._make_client()
+            client = service.agent._make_client()
             try:
                 live_counts = await client.count_issues_by_assignee(int(mapped["id"]))
                 live_counts.update(await client.resolved_trends_by_assignee(int(mapped["id"])))
@@ -71,20 +125,20 @@ async def get_workload_statistics(
             owner_names = [name]
             display_names = [name]
     if not owner_names:
-        owner_names = await _resolve_owner_names()
+        owner_names = await _resolve_owner_names(request, service)
         display_names = owner_names
     # Collect extra names from run history for matching only, not display
     extra_names = []
     if not name:
         try:
-            for run in redmine_service.repository.list_runs(10):
+            for run in service.repository.list_runs(10):
                 assigned_to = str(run.get("assigned_to") or "").strip()
                 if assigned_to:
                     extra_names.append(assigned_to)
         except Exception:
             pass
     all_names = owner_names + [n for n in extra_names if n]
-    data = redmine_service.repository.get_workload_statistics(
+    data = service.repository.get_workload_statistics(
         owner_names=all_names,
         stale_days=stale_days,
         list_limit=list_limit,
@@ -98,30 +152,32 @@ async def get_workload_statistics(
     return {"success": True, "data": data}
 
 
-async def _department_user_overdue(client, user: dict[str, Any], stale_days: int, issue_limit: int, window_days: int = 0) -> dict[str, Any]:
+async def _department_user_overdue(client, repository, user: dict[str, Any], stale_days: int, issue_limit: int, window_days: int = 0) -> dict[str, Any]:
     try:
-        return await compute_user_overdue_stats(client, redmine_service.repository, user, stale_days, issue_limit, window_days)
+        return await compute_user_overdue_stats(client, repository, user, stale_days, issue_limit, window_days)
     except Exception as exc:
         return _empty_user_stats(user, error=str(exc))
 
 
 @router.get("/statistics/resolved-by-date")
 async def get_resolved_issues_by_date(
+    request: Request = None,
     start: str = Query("", description="起始日期 YYYY-MM-DD（含）"),
     end: str = Query("", description="结束日期 YYYY-MM-DD（不含，即次日）"),
     names: str = Query("", description="指派人姓名列表，逗号分隔；为空则不过滤"),
     profile_id: str = Query("", description="部门看板 profile_id；传入时按部门配置展开成员和别名"),
     limit: int = Query(500, ge=1, le=2000),
 ):
+    service = _service_for_request(request)
     """按日期范围查询已解决的 Redmine issue（供趋势柱状图点击查看明细）。"""
     owner_names = [n.strip() for n in names.split(",") if n.strip()] if names else []
     profile_key = str(profile_id or "").strip()
     profile_users: list[dict[str, Any]] = []
     if profile_key:
-        dashboard_cfg = config_manager.get_redmine_dashboard_config()
+        dashboard_cfg = _dashboard_config_for_request(request)
         profile = select_redmine_dashboard_profile(dashboard_cfg, profile_key)
         if str(profile.get("id") or "") == profile_key:
-            profile_users = list(filter_users_for_profile(load_redmine_user_map(), profile))
+            profile_users = list(filter_users_for_profile(_user_map_for_request(request), profile))
             for user in profile_users:
                 owner_names.extend(display_names_from_mapping(user))
     owner_names = list(dict.fromkeys(name for name in owner_names if name))
@@ -130,7 +186,7 @@ async def get_resolved_issues_by_date(
             # Live fetch per assignee so the drill-down reflects the whole
             # department, independent of which issues were synced to the local
             # DB (the DB only holds issues assigned to the configured sync user).
-            client = redmine_service.agent._make_client()
+            client = service.agent._make_client()
             semaphore = asyncio.Semaphore(4)
 
             async def _user_issues(user: dict[str, Any]) -> list[dict[str, Any]]:
@@ -157,7 +213,7 @@ async def get_resolved_issues_by_date(
             issues.sort(key=lambda i: (i.get("resolved_on") or "", i.get("issue_id") or 0), reverse=True)
             issues = issues[:limit]
         else:
-            issues = redmine_service.repository.get_resolved_issues_by_date(
+            issues = service.repository.get_resolved_issues_by_date(
                 owner_names=owner_names or None, start=start.strip(), end=end.strip(), limit=limit,
             )
     except Exception as exc:
@@ -182,30 +238,33 @@ async def get_resolved_issues_by_date(
 
 @router.get("/statistics/department-overdue")
 async def get_department_overdue_statistics(
+    request: Request = None,
     stale_days: int | None = Query(None, ge=1, le=30),
     list_limit: int | None = Query(None, ge=1, le=500),
     issue_limit: int | None = Query(None, ge=1, le=2000),
     profile_id: str = Query(""),
     refresh: bool = Query(False),
 ):
+    service = _service_for_request(request)
     now_ts = datetime.now().timestamp()
-    stats_cfg = _get_redmine_stats_config()
-    dashboard_cfg = config_manager.get_redmine_dashboard_config()
+    stats_cfg = _get_redmine_stats_config(request)
+    dashboard_cfg = _dashboard_config_for_request(request)
     profile = select_redmine_dashboard_profile(dashboard_cfg, profile_id)
     effective_stale_days = int(stale_days or profile.get("stale_days") or stats_cfg["stale_days"])
     effective_list_limit = int(list_limit or profile.get("list_limit") or dashboard_cfg["defaults"]["list_limit"])
     effective_issue_limit = int(issue_limit or profile.get("issue_limit") or dashboard_cfg["defaults"]["issue_limit"])
     cache_key = (
         f"{profile.get('id')}:{effective_stale_days}:{effective_list_limit}:{effective_issue_limit}:"
-        f"{USER_MAP_PATH.stat().st_mtime if USER_MAP_PATH.exists() else 0}"
+        f"{_user_map_mtime_for_request(request)}:"
+        f"{_request_user_id(request)}"
     )
     cached = _check_ttl_cache(_DEPARTMENT_OVERDUE_CACHE, cache_key, stats_cfg["cache_ttl"], now_ts, refresh=refresh)
     if cached is not None:
         return {"success": True, "data": {**cached, "cache_hit": True}}
 
-    users = filter_users_for_profile(load_redmine_user_map(), profile)
+    users = filter_users_for_profile(_user_map_for_request(request), profile)
     try:
-        client = redmine_service.agent._make_client()
+        client = service.agent._make_client()
     except Exception as exc:
         return {"success": False, "error": f"Redmine client unavailable: {exc}"}
     window_days = int(profile.get("window_days") or stats_cfg["window_days"])
@@ -213,7 +272,7 @@ async def get_department_overdue_statistics(
 
     async def _safe_user(user: dict[str, Any]) -> dict[str, Any]:
         async with semaphore:
-            return await _department_user_overdue(client, user, effective_stale_days, effective_issue_limit, window_days)
+            return await _department_user_overdue(client, service.repository, user, effective_stale_days, effective_issue_limit, window_days)
 
     try:
         if users:
@@ -254,12 +313,15 @@ async def get_department_overdue_statistics(
 
 @router.get("/statistics/project")
 async def get_project_statistics(
+    request: Request = None,
     profile_id: str = Query(""),
     refresh: bool = Query(False),
 ):
+    service = _service_for_request(request)
     now_ts = datetime.now().timestamp()
-    stats_cfg = _get_redmine_stats_config()
-    dashboard_cfg = config_manager.get_redmine_dashboard_config()
+    manager = _config_for_request(request)
+    stats_cfg = _get_redmine_stats_config(request)
+    dashboard_cfg = manager.get_redmine_dashboard_config()
     profiles = dashboard_cfg.get("project_profiles") or []
     if not profiles:
         return JSONResponse(status_code=404, content={"success": False, "error": "project dashboard is not configured"})
@@ -268,14 +330,14 @@ async def get_project_statistics(
     project_id = str(profile.get("project_id") or profile.get("id") or "").strip()
     issue_limit = int(profile.get("issue_limit") or dashboard_cfg["defaults"]["issue_limit"])
     list_limit = int(profile.get("list_limit") or dashboard_cfg["defaults"]["list_limit"])
-    cache_key = f"{project_id}:{issue_limit}:{list_limit}"
+    cache_key = f"{_request_user_id(request)}:{project_id}:{issue_limit}:{list_limit}"
     cached = _check_ttl_cache(_PROJECT_STATS_CACHE, cache_key, stats_cfg["cache_ttl"], now_ts, refresh=refresh)
     if cached is not None:
         return {"success": True, "data": {**cached, "cache_hit": True}}
 
     client = None
     try:
-        client = redmine_service.agent._make_client()
+        client = service.agent._make_client()
         issues = await client.fetch_project_issues(project_id=project_id, status_id="*", limit=issue_limit)
         data = summarize_project_issues(issues, list_limit=list_limit)
         data.update({

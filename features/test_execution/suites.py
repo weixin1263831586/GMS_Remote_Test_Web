@@ -80,15 +80,21 @@ def is_config_host_local(config: dict[str, Any]) -> bool:
 
 def get_effective_local_server(client_id: str, requested_local_server: str = "") -> str:
     """Resolve the callback host for the current client."""
-    if requested_local_server:
+    if requested_local_server and "@" in requested_local_server:
         return requested_local_server
 
     runtime_config = runtime.config_manager.get_runtime_config()
-    runtime_local_server = runtime_config.get('local_server')
-    if runtime_local_server:
+    runtime_local_server = str(runtime_config.get('local_server') or "")
+    if "@" in runtime_local_server:
         return runtime_local_server
 
-    return client_id
+    with runtime.global_state.user_states_lock:
+        state = runtime.global_state.user_states.get(client_id) or {}
+        display_client_id = str(state.get("display_client_id") or "")
+        if "@" in display_client_id:
+            return display_client_id
+
+    return client_id if "@" in client_id else ""
 
 
 def build_suite_info(full_path: str) -> dict[str, str] | None:

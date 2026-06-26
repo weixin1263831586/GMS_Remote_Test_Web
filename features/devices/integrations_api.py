@@ -7,10 +7,14 @@ import time
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from foundation.networking import split_host_port
 from foundation.responses import error_response
 
 from . import runtime
+from . import reconnect
+from features.users.clients import get_client_display_id_from_request
 from .adb_forward import adb_forward_manager
+from .manager import device_manager
 from .models import ADBForwardStartRequest, USBIPDisconnectRequest, USBIPStartRequest
 from .support import DeviceSSHConnection, format_device_list_info, notify_device_change
 from .usbip import (
@@ -20,10 +24,77 @@ from .usbip import (
     find_device_host_password,
     usbip_manager,
 )
+from .utils import DeviceUtils
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _resolve_usbip_device_host(request: Request, config: dict | None = None, explicit: str | None = None) -> str:
+    """Resolve the reachable Windows USB/IP host for this request."""
+    if explicit:
+        return explicit
+    selected_config = config if config is not None else runtime.config_manager.load_config()
+    client_id = runtime.get_client_id_from_request(request)
+    if callable(runtime.resolve_tailscale_device_host):
+        tunnel_host, _ = runtime.resolve_tailscale_device_host(request, client_id)
+        if tunnel_host:
+            return tunnel_host
+    return (
+        selected_config.get("usbip_device_host")
+        or selected_config.get("device_host")
+        or get_client_display_id_from_request(request)
+        or client_id
+    )
+
+
+def _usbip_remote_host(device_host: str, usbip_attach_host: str | None = None) -> str:
+    if usbip_attach_host:
+        return usbip_attach_host
+    host = str(device_host or "").split("@", 1)[-1]
+    hostname, _port = split_host_port(host)
+    return hostname or "127.0.0.1"
+
+
+def _adb_devices_on_ssh(ssh) -> set[str]:
+    output, error, _code = runtime.ssh_manager.execute_command(
+        ssh,
+        "adb devices",
+        timeout=8,
+    )
+    return set(DeviceUtils.parse_adb_devices(output or error or ""))
+
+
+def _detach_ubuntu_usbip_for_devices(
+    ssh,
+    *,
+    device_host: str,
+    usbip_attach_host: str | None,
+    devices_to_remove: list[str],
+    detach_all: bool = False,
+) -> dict[str, object]:
+    """Detach Ubuntu USB/IP ports and verify target ADB serials disappear."""
+    expected_removed = {str(device_id) for device_id in devices_to_remove or [] if str(device_id)}
+    detached_ports = detach_ubuntu_usbip_ports(
+        ssh,
+        _usbip_remote_host(device_host, usbip_attach_host),
+        detach_all=detach_all,
+    )
+    remaining = expected_removed & _adb_devices_on_ssh(ssh) if expected_removed else set()
+    if remaining and not detach_all:
+        logger.warning(
+            "[USB/IP Stop] Target devices still present after host-filtered detach: %s; "
+            "falling back to detach all Ubuntu USB/IP ports",
+            sorted(remaining),
+        )
+        fallback_ports = detach_ubuntu_usbip_ports(ssh, None, detach_all=True)
+        detached_ports = list(dict.fromkeys([*detached_ports, *fallback_ports]))
+        remaining = expected_removed & _adb_devices_on_ssh(ssh)
+    return {
+        "detached_ports": detached_ports,
+        "remaining_devices": sorted(remaining),
+    }
 
 @router.post("/api/adb-forward/start")
 async def start_adb_forward(req: ADBForwardStartRequest):
@@ -59,17 +130,22 @@ async def get_usbip_status(
     device_host: str | None = None,
 ):
     """Get USB/IP status (supports specifying host)."""
-    if device_host:
-        client_id = device_host
-    else:
-        client_id = runtime.get_client_id_from_request(request)
-        tunnel_host, _ = runtime.resolve_tailscale_device_host(request, client_id)
-        if tunnel_host:
-            client_id = tunnel_host
+    config = runtime.config_manager.load_config()
+    client_id = _resolve_usbip_device_host(request, config, device_host)
 
     with runtime.global_state.usbip_states_lock:
         state_info = runtime.global_state.usbip_states.get(client_id, {"connected": False, "timestamp": 0})
         connected = state_info["connected"]
+
+    if state_info.get("reconnecting"):
+        current_devices = await asyncio.to_thread(
+            device_manager.get_connected_devices,
+            True,
+        )
+        reconnect.reconcile_observed_usbip_devices(current_devices)
+        with runtime.global_state.usbip_states_lock:
+            state_info = runtime.global_state.usbip_states.get(client_id, state_info)
+            connected = state_info["connected"]
 
     if not connected:
         with runtime.global_state.usbip_devices_source_lock:
@@ -80,11 +156,15 @@ async def get_usbip_status(
             if has_devices_from_host:
                 connected = True
 
-    logger.info(f"[USB/IP Status] client_id={client_id}, connected={connected}, device_count={len(runtime.global_state.usbip_devices_source)}")
+    logger.info(f"[USB/IP Status] device_host={client_id}, connected={connected}, device_count={len(runtime.global_state.usbip_devices_source)}")
     return JSONResponse(content={
         "connected": connected,
         "device_host": client_id,
         "device_count": len(runtime.global_state.usbip_devices_source),
+        "transport_connected": bool(state_info.get("transport_connected", False)),
+        "adb_ready": bool(state_info.get("adb_ready", False)),
+        "reconnecting": bool(state_info.get("reconnecting", False)),
+        "protocol_status": state_info.get("protocol_status") or {},
     })
 
 
@@ -123,7 +203,17 @@ async def start_usbip(
                 usbip_attach_host = tunnel_usbip_host
                 logger.info(f"[USB/IP] Tailscale direct mode: {device_host} attach={usbip_attach_host}")
             else:
-                device_host = config.get("usbip_device_host") or config.get("device_host") or client_id
+                # 可连接主机优先级：显式配置 > 当前客户端 username@ip（client_hosts 映射）。
+                # 注意：client_id 现在是平台用户安全边界（裸 ID），不可作为主机；
+                # 可连接主机由 client_hosts 映射的 username@client_ip 构造。
+                device_host = _resolve_usbip_device_host(request, config)
+                if not device_host or '@' not in device_host:
+                    # 没有可连接的主机地址（未配置、且 client_hosts 未映射当前客户端）。
+                    return JSONResponse(content={
+                        "success": False,
+                        "error": "未配置设备主机地址。请在「配置」中设置 device_host（格式 user@ip，例如 gms@192.168.1.100），或确保当前客户端已识别为主机。",
+                        "need_config": True,
+                    }, status_code=400)
 
         logger.info(f"[USB/IP] Using device_host: {device_host}")
         try:
@@ -160,10 +250,13 @@ async def start_usbip(
 
         if result.get("success"):
             device_list = result.get("device_list", [])
+            result["transport_connected"] = bool(result.get("transport_connected") or result.get("devices"))
+            result["adb_ready"] = bool(device_list)
             if not device_list:
-                result["success"] = False
-                result["error"] = result.get("error") or "USB/IP attach 成功但尚未识别到 ADB 设备，继续等待设备恢复"
-                return JSONResponse(content=result)
+                result.setdefault(
+                    "message",
+                    "USB/IP传输已连接，设备可能处于 reboot/fastboot/recovery 或 ADB 尚未枚举完成",
+                )
 
             if request_data.get("manual_connect"):
                 try:
@@ -180,7 +273,14 @@ async def start_usbip(
                     logger.warning(f"[USB/IP Start] Failed to save SSH credential for {device_host}: {e}")
 
             with runtime.global_state.usbip_states_lock:
-                runtime.global_state.usbip_states[device_host] = {"connected": True, "timestamp": time.time()}
+                runtime.global_state.usbip_states[device_host] = {
+                    "connected": True,
+                    "timestamp": time.time(),
+                    "transport_connected": result["transport_connected"],
+                    "adb_ready": result["adb_ready"],
+                    "reconnecting": False,
+                    "protocol_status": result.get("protocol_status") or {},
+                }
             logger.info(f"[USB/IP Start] Set connected=True for device_host={device_host}")
 
             if device_list:
@@ -269,6 +369,16 @@ def _clear_usbip_device_sources(
     _persist_device_source_removal(devices_to_remove)
 
 
+def _invalidate_device_cache() -> None:
+    """Clear the device-list cache so the next /api/devices/list re-queries ADB.
+
+    USB/IP disconnect must invalidate it, otherwise the stale cache still
+    returns the just-disconnected device (with its is_usbip flag) within TTL.
+    """
+    with runtime.global_state.device_cache_lock:
+        runtime.global_state.device_cache = {"devices": [], "timestamp": 0}
+
+
 # ==================== USB/IP Disconnect ====================
 
 @router.post("/api/usbip/disconnect")
@@ -290,7 +400,7 @@ async def stop_usbip(
             config["usbip_attach_host"] = tunnel_usbip_host
             tailscale_mode = True
         else:
-            config["device_host"] = client_id
+            config["device_host"] = _resolve_usbip_device_host(request, config)
 
     device_password = find_device_host_password(config["device_host"], config)
     if not device_password:
@@ -300,22 +410,37 @@ async def stop_usbip(
 
     devices_to_remove: list[str] = []
     usbip_attach_host = config.get("usbip_attach_host")
+    ubuntu_detached_ports: list[str] = []
+    remaining_devices_after_detach: list[str] = []
 
     try:
-        from features.devices.reconnect import suppress_usbip_reconnect
+        from features.devices.reconnect import (
+            stop_usbip_reconnect_for_host,
+            suppress_usbip_reconnect,
+        )
 
         devices_to_remove = _usbip_devices_for_host(config["device_host"])
         suppress_usbip_reconnect(config["device_host"], devices_to_remove)
+        stop_usbip_reconnect_for_host(config["device_host"], timeout=2)
+
+        ubuntu_ssh = runtime.ssh_manager.get_connection(config)
+        if ubuntu_ssh:
+            try:
+                detach_result = _detach_ubuntu_usbip_for_devices(
+                    ubuntu_ssh,
+                    device_host=config["device_host"],
+                    usbip_attach_host=usbip_attach_host,
+                    devices_to_remove=devices_to_remove,
+                    detach_all=tailscale_mode,
+                )
+                ubuntu_detached_ports = list(detach_result["detached_ports"])
+                remaining_devices_after_detach = list(detach_result["remaining_devices"])
+                runtime.ssh_manager.return_connection(ubuntu_ssh)
+            except Exception as e:
+                ubuntu_ssh.close()
+                logger.warning(f"[USB/IP Stop] detach Ubuntu usbip ports failed: {e}")
 
         if tailscale_mode:
-            ubuntu_ssh = usbip_manager.runtime.ssh_manager.get_connection(config)
-            if ubuntu_ssh:
-                try:
-                    detach_ubuntu_usbip_ports(ubuntu_ssh, usbip_attach_host or "127.0.0.1", detach_all=True)
-                    usbip_manager.runtime.ssh_manager.return_connection(ubuntu_ssh)
-                except Exception as e:
-                    ubuntu_ssh.close()
-                    logger.warning(f"[USB/IP Stop] detach Ubuntu usbip ports failed: {e}")
             logger.info("[USB/IP Stop] Public mode keeps Windows usbipd bindings; only Ubuntu attach is detached")
             await asyncio.sleep(1)
             _clear_usbip_device_sources(config["device_host"], devices_to_remove)
@@ -327,14 +452,34 @@ async def stop_usbip(
             _clear_usbip_device_sources(config["device_host"], devices_to_remove)
 
         with runtime.global_state.usbip_states_lock:
-            runtime.global_state.usbip_states[config["device_host"]] = {"connected": False, "timestamp": time.time()}
+            runtime.global_state.usbip_states[config["device_host"]] = {
+                "connected": False,
+                "timestamp": time.time(),
+                "transport_connected": False,
+                "adb_ready": False,
+                "reconnecting": False,
+                "protocol_status": {},
+            }
+
+        # 失效设备列表缓存，否则断开后短时间内 /api/devices/list 仍返回带 is_usbip 标记的旧设备。
+        _invalidate_device_cache()
 
         disconnected_devices_info = format_device_list_info(devices_to_remove)
         logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices{disconnected_devices_info}")
+        if remaining_devices_after_detach:
+            logger.warning(
+                "[USB/IP Stop] Devices still visible after detach cleanup: %s",
+                remaining_devices_after_detach,
+            )
 
         await notify_device_change(devices_to_remove, "USB/IP Stop")
 
-        return JSONResponse(content={"success": True, "message": f"Local devices disconnected{disconnected_devices_info}"})
+        return JSONResponse(content={
+            "success": True,
+            "message": f"Local devices disconnected{disconnected_devices_info}",
+            "detached_ports": ubuntu_detached_ports,
+            "remaining_devices": remaining_devices_after_detach,
+        })
 
     except HTTPException:
         # Cannot connect to Windows, just clear connection state and device source records
@@ -348,7 +493,17 @@ async def stop_usbip(
         _clear_usbip_device_sources(config["device_host"], devices_to_remove)
 
         with runtime.global_state.usbip_states_lock:
-            runtime.global_state.usbip_states[config["device_host"]] = {"connected": False, "timestamp": time.time()}
+            runtime.global_state.usbip_states[config["device_host"]] = {
+                "connected": False,
+                "timestamp": time.time(),
+                "transport_connected": False,
+                "adb_ready": False,
+                "reconnecting": False,
+                "protocol_status": {},
+            }
+
+        # 失效设备列表缓存，否则断开后短时间内 /api/devices/list 仍返回带 is_usbip 标记的旧设备。
+        _invalidate_device_cache()
 
         disconnected_devices_info = format_device_list_info(devices_to_remove)
         logger.info(f"[USB/IP Stop] Connection cleared for {config['device_host']}, removed {len(devices_to_remove)} devices{disconnected_devices_info}")

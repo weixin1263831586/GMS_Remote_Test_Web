@@ -15,6 +15,7 @@ import aiohttp
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 
+from features.redmine.api import get_redmine_config_for_request
 from features.reports.analyzer import ReportAnalyzer
 from features.reports.repository import test_report_db
 from foundation.archives import ARCHIVE_EXTENSIONS
@@ -52,23 +53,61 @@ from .service import test_report_manager
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "COMPILED_REDMINE_ATTACHMENT_PATTERN", "COMPILED_REDMINE_ISSUE_PATTERN",
-    "COMPILED_REPORT_NAME_PATTERN", "REDMINE_ISSUE_ID_CACHE",
-    "REDMINE_ISSUE_ID_CACHE_MAX_SIZE", "REDMINE_ISSUE_PATTERN", "APIRouter",
-    "AnalysisMode", "File", "Form", "JSONResponse", "Query", "RedmineClient",
-    "ReportAnalyzer", "ReportDiagnosisRequest", "Request", "StackTraceUtils",
-    "UploadFile", "_analyze_report_file", "_build_patch_draft",
-    "_ensure_uploaded_report_extension", "_extract_class_names_from_text",
-    "_extract_failure_keywords", "_get_knowledge_base", "_load_redmine_credentials",
-    "_looks_like_redmine_url", "_redmine_base_url_for",
-    "_redmine_public_url_hint", "_rename_downloaded_report_if_needed",
-    "_save_redmine_credentials", "aiohttp", "analyze_with_ai", "asyncio",
-    "config_manager", "create_basic_auth_header", "dependencies", "error_response",
-    "extract_filename_from_content_disposition", "extract_redmine_issue_id_from_text",
-    "extract_report_name_from_upload", "get_client_id_from_request", "json", "logger",
-    "os", "re", "safe_upload_target_path", "save_upload_to_path", "shutil",
-    "strip_redmine_report_prefix", "success_response", "tempfile", "test_report_db",
-    "test_report_manager", "urlparse",
+    "COMPILED_REDMINE_ATTACHMENT_PATTERN",
+    "COMPILED_REDMINE_ISSUE_PATTERN",
+    "COMPILED_REPORT_NAME_PATTERN",
+    "REDMINE_ISSUE_ID_CACHE",
+    "REDMINE_ISSUE_ID_CACHE_MAX_SIZE",
+    "REDMINE_ISSUE_PATTERN",
+    "APIRouter",
+    "AnalysisMode",
+    "File",
+    "Form",
+    "JSONResponse",
+    "Query",
+    "RedmineClient",
+    "ReportAnalyzer",
+    "ReportDiagnosisRequest",
+    "Request",
+    "StackTraceUtils",
+    "UploadFile",
+    "_analyze_report_file",
+    "_build_patch_draft",
+    "_ensure_uploaded_report_extension",
+    "_extract_class_names_from_text",
+    "_extract_failure_keywords",
+    "_get_knowledge_base",
+    "_load_redmine_credentials",
+    "_looks_like_redmine_url",
+    "_redmine_base_url_for",
+    "_redmine_config_manager_for_request",
+    "_redmine_public_url_hint",
+    "_rename_downloaded_report_if_needed",
+    "_save_redmine_credentials",
+    "aiohttp",
+    "analyze_with_ai",
+    "asyncio",
+    "config_manager",
+    "create_basic_auth_header",
+    "dependencies",
+    "error_response",
+    "extract_filename_from_content_disposition",
+    "extract_redmine_issue_id_from_text",
+    "extract_report_name_from_upload",
+    "get_client_id_from_request",
+    "json",
+    "logger",
+    "os",
+    "re",
+    "safe_upload_target_path",
+    "save_upload_to_path",
+    "shutil",
+    "strip_redmine_report_prefix",
+    "success_response",
+    "tempfile",
+    "test_report_db",
+    "test_report_manager",
+    "urlparse",
 ]
 
 
@@ -96,6 +135,14 @@ class _ReportConfig:
 
 
 config_manager = _ReportConfig()
+
+
+def _redmine_config_manager_for_request(request: Request | None = None):
+    if request is None:
+        return config_manager
+    if getattr(getattr(request, "state", None), "current_user", None) is None:
+        return config_manager
+    return get_redmine_config_for_request(request)
 
 def _get_knowledge_base():
     """Lazy-load and return a RedmineKnowledgeBase singleton."""
@@ -477,12 +524,12 @@ async def _analyze_report_file(
     return await asyncio.to_thread(analyzer.analyze_file, file_path)
 
 
-async def _save_redmine_credentials(username: str, password: str):
-    return config_manager.save_redmine_credentials(username, password)
+async def _save_redmine_credentials(username: str, password: str, request: Request | None = None):
+    return _redmine_config_manager_for_request(request).save_redmine_credentials(username, password)
 
 
-async def _load_redmine_credentials():
-    return config_manager.load_redmine_credentials()
+async def _load_redmine_credentials(request: Request | None = None):
+    return _redmine_config_manager_for_request(request).load_redmine_credentials()
 
 
 def _looks_like_redmine_url(url: str) -> bool:

@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSock
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.background import BackgroundTask
 
+from features.auth import AUTH_COOKIE_NAME, auth_service
 from features.system.api_docs_list import API_DOCS_LIST
 from features.system.state import global_state
 from features.system.terminal_service import (
@@ -594,6 +595,14 @@ async def get_api_help(api_path: str | None = None):
 @router.websocket("/api/system/websocket/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """WebSocket连接端点"""
+    user = auth_service.get_user_for_token(websocket.cookies.get(AUTH_COOKIE_NAME))
+    if not user:
+        await websocket.close(code=1008)
+        return
+    if client_id != user.id:
+        logger.warning("WebSocket client_id mismatch: path=%s auth=%s", client_id, user.id)
+    client_id = user.id
+
     await websocket.accept()
     with global_state.websocket_connections_lock:
         global_state.websocket_connections[client_id] = websocket

@@ -196,14 +196,13 @@ def _filter_entries(
     return result
 
 
-def _enabled_overlays(device_id: str | None) -> list[str] | None:
-    """Return enabled overlay package names via ``cmd overlay list``.
+def _enabled_overlays_by_target(device_id: str | None) -> dict[str, list[str]] | None:
+    """Return enabled overlay package names grouped by target package.
 
-    Each line looks like ``[x] com.android.vendor.overlay.foo`` where ``[x]``
-    marks an enabled overlay and ``[ ]`` a disabled one. Returns the list of
-    enabled overlay packages. Returns ``None`` when the command itself fails
-    (so callers fall back to per-resource lookups rather than silently skipping
-    them).
+    ``cmd overlay list`` prints target-package section headers followed by
+    ``[x]`` / ``[ ]`` overlay rows. Grouping lets us skip expensive
+    per-resource lookups when the current target package has no enabled RROs,
+    even if other packages on the device do.
     """
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
@@ -212,16 +211,30 @@ def _enabled_overlays(device_id: str | None) -> list[str] | None:
     )
     if code != 0:
         return None
-    enabled: list[str] = []
+    by_target: dict[str, list[str]] = {}
+    current_target = ""
     for ln in stdout.splitlines():
         ln = ln.strip()
+        if not ln:
+            continue
         # First whitespace-delimited token is the state tag: "[x]" (enabled),
         # "[ ]" (disabled), "---" (section separators), etc.
         parts = ln.split(None, 1)
-        if len(parts) < 2 or not parts[0].startswith("[") or "x" not in parts[0].lower():
+        if len(parts) < 2 or not parts[0].startswith("["):
+            if not ln.startswith("---"):
+                current_target = ln
+                by_target.setdefault(current_target, [])
             continue
-        enabled.append(parts[1].strip())
-    return enabled
+        if "x" in parts[0].lower() and current_target:
+            by_target.setdefault(current_target, []).append(parts[1].strip())
+    return by_target
+
+
+def _enabled_overlays(device_id: str | None) -> list[str] | None:
+    by_target = _enabled_overlays_by_target(device_id)
+    if by_target is None:
+        return None
+    return [overlay for overlays in by_target.values() for overlay in overlays]
 
 
 def _lookup_effective(
@@ -318,8 +331,9 @@ def explore(
         # can skip the expensive per-resource `cmd overlay lookup` calls
         # entirely (1600+ adb round-trips → 1). If the list call itself fails we
         # fall back to the full lookup path so results stay correct.
-        enabled_overlays = _enabled_overlays(device_id)
-        if enabled_overlays is not None and not enabled_overlays:
+        enabled_by_target = _enabled_overlays_by_target(device_id)
+        target_overlays = None if enabled_by_target is None else enabled_by_target.get(package, [])
+        if target_overlays is not None and not target_overlays:
             for e in targets:
                 e.effective_value = e.default_value
                 e.overlay_source = None

@@ -1,16 +1,20 @@
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import re
 import shlex
+import tempfile
 import threading
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from features.users.clients import get_client_username_from_request
 from foundation.responses import error_response, success_response
+from foundation.uploads import merge_files_to_path, safe_upload_target_path, save_upload_to_path
 
 from . import runtime
 from .models import SNBurnRequest
@@ -20,11 +24,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-UPLOAD_PROGRESS_EXPIRATION = 10
+UPLOAD_PROGRESS_EXPIRATION = 24 * 60 * 60
 _REMOTE_FILE_FOUND_MARKER = "__GMS_REMOTE_FILE_FOUND__"
 _REMOTE_FILE_MISSING_MARKER = "__GMS_REMOTE_FILE_MISSING__"
 _FASTBOOT_OKAY_RE = re.compile(r"\s+OKAY\s+\[\s*[\d.]+s\]$")
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+_FIRMWARE_CHUNK_ROOT = os.path.join(tempfile.gettempdir(), "gms_firmware_uploads")
 
 
 def strip_ansi_codes(text: str) -> str:
@@ -47,9 +52,136 @@ def _remote_file_exists(ssh, path: str) -> bool:
     return _REMOTE_FILE_FOUND_MARKER in lines
 
 
-async def _lock_devices(client_id: str, devices: list, error_prefix="Devices occupied"):
+def _safe_upload_token(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(value or "").strip())[:120] or "default"
+
+
+def _firmware_upload_session_dir(client_id: str, upload_id: str) -> str:
+    return os.path.join(
+        _FIRMWARE_CHUNK_ROOT,
+        _safe_upload_token(client_id),
+        _safe_upload_token(upload_id),
+    )
+
+
+def _read_uploaded_chunks(session_dir: str) -> set[int]:
+    chunks_file = os.path.join(session_dir, "uploaded_chunks.json")
+    if not os.path.exists(chunks_file):
+        return set()
+    try:
+        with open(chunks_file, encoding="utf-8") as handle:
+            return {int(item) for item in json.load(handle)}
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return set()
+
+
+def _write_uploaded_chunks(session_dir: str, uploaded_chunks: set[int]) -> None:
+    with open(os.path.join(session_dir, "uploaded_chunks.json"), "w", encoding="utf-8") as handle:
+        json.dump(sorted(uploaded_chunks), handle)
+
+
+def _firmware_chunk_paths(session_dir: str, total_chunks: int) -> list[str]:
+    return [os.path.join(session_dir, f"chunk_{idx:05d}") for idx in range(total_chunks)]
+
+
+async def _handle_firmware_chunk_upload(form, client_id: str):
+    upload_id = str(form.get("upload_id") or "").strip()
+    file_name = str(form.get("file_name") or "").strip()
+    if not upload_id or not file_name:
+        return error_response("upload_id and file_name are required for chunk upload", 400), None
+
+    session_dir = _firmware_upload_session_dir(client_id, upload_id)
+    os.makedirs(session_dir, exist_ok=True)
+
+    if str(form.get("check_chunks") or "").strip() in {"1", "true", "yes"}:
+        uploaded_chunks = _read_uploaded_chunks(session_dir)
+        return JSONResponse(content={
+            "success": True,
+            "uploaded_chunks": sorted(uploaded_chunks),
+            "upload_id": upload_id,
+        }), None
+
+    try:
+        chunk_index = int(form.get("chunk_index"))
+        total_chunks = int(form.get("total_chunks"))
+        file_size = int(form.get("file_size") or 0)
+    except (TypeError, ValueError):
+        return error_response("Invalid chunk metadata", 400), None
+
+    if chunk_index < 0 or total_chunks <= 0 or chunk_index >= total_chunks:
+        return error_response("Invalid chunk index", 400), None
+
+    upload_file = form.get("file") or form.get("firmware_file")
+    if upload_file is None:
+        return error_response("No chunk file provided", 400), None
+
+    chunk_path = os.path.join(session_dir, f"chunk_{chunk_index:05d}")
+    await save_upload_to_path(upload_file, chunk_path)
+
+    uploaded_chunks = _read_uploaded_chunks(session_dir)
+    uploaded_chunks.add(chunk_index)
+    chunk_paths = _firmware_chunk_paths(session_dir, total_chunks)
+    # Reconcile with the filesystem in case chunks arrived out of order / via resume.
+    present_paths = {idx: path for idx, path in enumerate(chunk_paths) if os.path.exists(path)}
+    uploaded_chunks.update(present_paths.keys())
+    _write_uploaded_chunks(session_dir, uploaded_chunks)
+
+    uploaded_size = sum(os.path.getsize(path) for path in present_paths.values())
+    with runtime.global_state.firmware_upload_progress_lock:
+        runtime.global_state.firmware_upload_progress[client_id] = {
+            "progress": round((len(uploaded_chunks) / total_chunks) * 100, 2),
+            "filename": file_name,
+            "uploaded_size": uploaded_size,
+            "total_size": file_size,
+            "timestamp": time.time(),
+            "stage": "uploading_to_server",
+            "upload_id": upload_id,
+        }
+
+    if len(uploaded_chunks) < total_chunks or not all(os.path.exists(path) for path in chunk_paths):
+        return JSONResponse(content={
+            "success": True,
+            "upload_complete": False,
+            "chunk_index": chunk_index,
+            "chunks_uploaded": len(uploaded_chunks),
+            "total_chunks": total_chunks,
+            "progress": round((len(uploaded_chunks) / total_chunks) * 100, 2),
+            "upload_id": upload_id,
+        }), None
+
+    merge_lock_path = os.path.join(session_dir, ".merge.lock")
+    try:
+        merge_lock_fd = os.open(merge_lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(merge_lock_fd)
+    except FileExistsError:
+        return JSONResponse(content={
+            "success": True,
+            "upload_complete": False,
+            "merging": True,
+            "chunks_uploaded": len(uploaded_chunks),
+            "total_chunks": total_chunks,
+            "progress": 100,
+            "upload_id": upload_id,
+        }), None
+
+    merged_file = safe_upload_target_path(session_dir, file_name, allow_nested=False)
+    merge_files_to_path(chunk_paths, merged_file)
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(merge_lock_path)
+    if file_size > 0 and os.path.getsize(merged_file) != file_size:
+        return error_response("Merged firmware size mismatch", 400), None
+
+    return None, {
+        "path": merged_file,
+        "name": os.path.basename(file_name),
+        "size": os.path.getsize(merged_file),
+        "upload_id": upload_id,
+    }
+
+
+async def _lock_devices(request: Request, client_id: str, devices: list, error_prefix="Devices occupied"):
     config = runtime.config_manager.load_config()
-    username = config.get("client_username", "unknown")
+    username = get_client_username_from_request(request)
     return await runtime.lock_firmware_devices(
         client_id=client_id,
         username=username,
@@ -210,24 +342,32 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
     try:
         client_id = runtime.get_client_id_from_request(request)
 
+        form = await request.form()
+        merged_firmware = None
+        if form.get("chunk_index") is not None or form.get("check_chunks") is not None:
+            chunk_response, merged_firmware = await _handle_firmware_chunk_upload(form, client_id)
+            if chunk_response is not None:
+                return chunk_response
+
         devices_param = request.query_params.get("devices")
         if devices_param:
             devices = devices_param.split(",")
         else:
-            form = await request.form()
             devices_str = form.get("devices")
             devices = devices_str.split(",") if devices_str else []
 
         if not devices:
             return error_response("No devices selected")
 
-        locked_devices, lock_err = await _lock_devices(client_id, devices, "The following devices are occupied")
+        locked_devices, lock_err = await _lock_devices(request, client_id, devices, "The following devices are occupied")
         if lock_err:
             return lock_err
 
-        form = await request.form()
         firmware_file = form.get("firmware_file")
         firmware_path = form.get("firmware_path", "").strip()
+        if merged_firmware:
+            firmware_file = None
+            firmware_path = merged_firmware["path"]
 
         if not firmware_file and not firmware_path:
             await runtime.release_firmware_devices(client_id, locked_devices)
@@ -264,7 +404,11 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                     remote_firmware = os.path.join(gms_suite_dir, firmware_name)
                     await _upload_firmware_to_test_host(ssh, client_id, firmware_stream, remote_firmware, firmware_name, firmware_size)
                 else:
-                    firmware_name = os.path.basename(firmware_path.rstrip("/"))
+                    firmware_name = (
+                        merged_firmware["name"]
+                        if merged_firmware
+                        else os.path.basename(firmware_path.rstrip("/"))
+                    )
                     remote_firmware = os.path.join(gms_suite_dir, firmware_name)
                     local_firmware_path = None
 
@@ -432,7 +576,7 @@ async def burn_gsi(request: Request):
         if not system_img:
             return error_response("System image path is required")
 
-        locked_devices, lock_err = await _lock_devices(client_id, devices)
+        locked_devices, lock_err = await _lock_devices(request, client_id, devices)
         if lock_err:
             return lock_err
 
