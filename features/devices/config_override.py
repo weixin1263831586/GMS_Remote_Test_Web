@@ -60,6 +60,10 @@ _ARRAY_TYPES = ("integer-array", "string-array", "array")
 _DIMEN_UNITS = ("dp", "dip", "sp", "sip", "px", "in", "mm", "pt")
 # Fraction suffixes.
 _FRACTION_SUFFIXES = ("%", "%p")
+# Pre-sorted longest-first so _parse_number_unit matches the longest unit first
+# (e.g. "dip" before "dp") without re-sorting on every value validated.
+_DIMEN_UNITS_SORTED = tuple(sorted(_DIMEN_UNITS, key=len, reverse=True))
+_FRACTION_SUFFIXES_SORTED = tuple(sorted(_FRACTION_SUFFIXES, key=len, reverse=True))
 
 # v1 target scope: only the framework package. The state schema carries
 # target_package per entry and the manifest builder accepts it, so v2
@@ -164,9 +168,13 @@ def _split_array_items(raw: str) -> list[str]:
 
 def _parse_number_unit(value: str, allowed_units: tuple[str, ...], type_label: str) -> str:
     """Validate a "<number><unit>" value (dimen/fraction). Returns the value
-    unchanged on success, raises ValueError otherwise."""
+    unchanged on success, raises ValueError otherwise.
+
+    ``allowed_units`` should already be sorted longest-first so multi-char
+    units (e.g. "dip") match before their prefixes (e.g. "dp").
+    """
     v = value.strip()
-    for unit in sorted(allowed_units, key=len, reverse=True):
+    for unit in allowed_units:
         if v.endswith(unit):
             num = v[: -len(unit)].strip()
             if not num:
@@ -214,9 +222,9 @@ def validate_override(rtype: str, value: str) -> str:
             raise ValueError(f"integer 值必须是十进制整数: {value!r}")
         return v
     if rtype == "dimen":
-        return _parse_number_unit(value, _DIMEN_UNITS, "dimen")
+        return _parse_number_unit(value, _DIMEN_UNITS_SORTED, "dimen")
     if rtype == "fraction":
-        return _parse_number_unit(value, _FRACTION_SUFFIXES, "fraction")
+        return _parse_number_unit(value, _FRACTION_SUFFIXES_SORTED, "fraction")
     # array types
     items = _split_array_items(value)
     if rtype == "integer-array":
@@ -373,21 +381,23 @@ class OverrideStore:
     tmp file + ``os.replace`` so a crash mid-write cannot corrupt the store.
     """
 
-    def __init__(self, path=_STORE_PATH) -> None:
+    def __init__(self, path=_STORE_PATH, owner_id: str | None = None) -> None:
         self.path = Path(path)
+        self.owner_id = (owner_id or "").strip()
 
     # -- internals --
     def _load(self) -> dict:
         if not self.path.exists():
-            return {"schema_version": 1, "device_overrides": {}}
+            return {"schema_version": 1, "device_overrides": {}, "owner_overrides": {}}
         try:
             with open(self.path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError):
             logger.warning("config_overrides.json 损坏，重置为空")
-            return {"schema_version": 1, "device_overrides": {}}
+            return {"schema_version": 1, "device_overrides": {}, "owner_overrides": {}}
         data.setdefault("schema_version", 1)
         data.setdefault("device_overrides", {})
+        data.setdefault("owner_overrides", {})
         return data
 
     def _save(self, data: dict) -> None:
@@ -401,9 +411,16 @@ class OverrideStore:
     def _device_key(device_id: str | None) -> str:
         return device_id if device_id else "_default"
 
+    def _device_root(self, data: dict) -> dict:
+        if not self.owner_id:
+            return data["device_overrides"]
+        owners = data.setdefault("owner_overrides", {})
+        owner = owners.setdefault(self.owner_id, {"device_overrides": {}})
+        return owner.setdefault("device_overrides", {})
+
     def _device_block(self, data: dict, device_id: str | None) -> dict:
         key = self._device_key(device_id)
-        return data["device_overrides"].setdefault(
+        return self._device_root(data).setdefault(
             key,
             {
                 "target_package": DEFAULT_TARGET_PACKAGE,
@@ -415,7 +432,7 @@ class OverrideStore:
     # -- public API --
     def list_entries(self, device_id: str | None) -> list[OverrideEntry]:
         data = self._load()
-        block = data["device_overrides"].get(self._device_key(device_id))
+        block = self._device_root(data).get(self._device_key(device_id))
         if not block:
             return []
         return [OverrideEntry.from_dict(d) for d in block.get("entries", {}).values()]
@@ -434,7 +451,7 @@ class OverrideStore:
 
     def remove(self, device_id: str | None, resource_name: str) -> bool:
         data = self._load()
-        block = data["device_overrides"].get(self._device_key(device_id))
+        block = self._device_root(data).get(self._device_key(device_id))
         if not block or resource_name not in block.get("entries", {}):
             return False
         del block["entries"][resource_name]
@@ -444,7 +461,7 @@ class OverrideStore:
     def clear(self, device_id: str | None) -> int:
         """Clear the HOST store for a device (does NOT touch the device)."""
         data = self._load()
-        block = data["device_overrides"].get(self._device_key(device_id))
+        block = self._device_root(data).get(self._device_key(device_id))
         if not block:
             return 0
         count = len(block.get("entries", {}))

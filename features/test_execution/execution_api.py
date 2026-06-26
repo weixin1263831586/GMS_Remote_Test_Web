@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from features.devices import get_or_create_user_state, update_user_state_field
 from features.reports import save_test_report_to_db, test_report_db
+from features.users.clients import get_client_username_from_request
 from foundation.responses import error_response, success_response
 
 from . import runtime
@@ -61,7 +62,7 @@ async def start_test(
         return error_response("No devices selected", 400)
 
     config = runtime.config_manager.load_config()
-    username = config.get("client_username", "unknown")
+    username = get_client_username_from_request(request)
 
     locked_devices, failed_devices = await runtime.acquire_test_devices(
         client_id=client_id,

@@ -16,6 +16,8 @@ from features.devices.monitor import (
     stop_usb_monitor,
 )
 from features.devices.reconnect import (
+    filter_suppressed_usbip_devices,
+    reconcile_observed_usbip_devices,
     schedule_usbip_reconnect_for_missing_devices,
     schedule_usbip_reconnect_for_removed_devices,
     stop_usbip_reconnect_tasks,
@@ -109,7 +111,9 @@ def _start_usb_monitor(app):
 
     def on_usb_devices_changed(devices):
         nonlocal previous_devices
-        current_devices = set(devices)
+        reconcile_observed_usbip_devices(devices)
+        visible_devices = filter_suppressed_usbip_devices(devices)
+        current_devices = set(visible_devices)
         connected = list(current_devices - previous_devices)
         disconnected = list(previous_devices - current_devices)
         previous_devices = current_devices
@@ -122,7 +126,7 @@ def _start_usb_monitor(app):
         app.state.usb_event_queue.put(
             {
                 'type': 'devices_changed',
-                'devices': devices,
+                'devices': visible_devices,
                 'connected': connected,
                 'disconnected': disconnected,
                 'timestamp': datetime.now().isoformat(),

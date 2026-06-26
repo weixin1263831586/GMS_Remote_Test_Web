@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import shutil
 import smtplib
+import threading
 from email.message import EmailMessage
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from features.auth.service import require_authenticated_user
 from features.redmine.agent import RedmineAgent
 from features.redmine.config import config_manager
 from features.redmine.dashboard import (
@@ -18,16 +22,28 @@ from features.redmine.dashboard import (
     assign_user_to_profiles,
     denormalize_redmine_dashboard_config,
     issue_url_text,
+    with_department_profiles_from_users,
 )
 from features.redmine.page import page_router
 from features.redmine.repository import (
+    DB_PATH,
+    DOCS_DIR,
+    USER_MAP_PATH,
     RedmineAgentDB,
-    load_redmine_user_map,
-    load_user_map_payload,
-    save_user_map_payload,
+    load_redmine_user_map_for_owner,
+    load_user_map_payload_for_owner,
+    owner_attachments_dir,
+    owner_db_path,
+    owner_docs_dir,
+    owner_runtime_config_path,
+    owner_user_map_path,
+    save_user_map_payload_for_owner,
 )
 from features.redmine.repository import (
     _name_keys as _nk,
+)
+from features.redmine.repository import (
+    load_redmine_user_map as _legacy_load_redmine_user_map,
 )
 from features.redmine.scheduler import get_scheduler_config
 from features.redmine.service import RedmineService
@@ -35,6 +51,8 @@ from foundation.config import settings
 
 
 __all__ = ["page_router", "router"]
+
+load_redmine_user_map = _legacy_load_redmine_user_map
 
 router = APIRouter(prefix="/api/redmine-agent")
 
@@ -47,6 +65,14 @@ redmine_service = RedmineService(
 _DEPARTMENT_OVERDUE_CACHE: dict[str, Any] = {}
 _WORKLOAD_STATS_CACHE: dict[str, Any] = {}
 _PROJECT_STATS_CACHE: dict[str, Any] = {}
+_USER_REDMINE_SERVICES: dict[str, RedmineService] = {}
+_USER_REDMINE_SERVICE_LOCK = threading.Lock()
+_REDMINE_RUNTIME_SECTIONS = {
+    "redmine_auth",
+    "redmine_dashboard",
+    "redmine_stats",
+    "gerrit_dashboard",
+}
 
 
 def configure_redmine_service(service: RedmineService) -> None:
@@ -58,9 +84,113 @@ def configure_redmine_service(service: RedmineService) -> None:
         pass
 
 
-def _get_redmine_stats_config() -> dict[str, Any]:
+def _migrate_legacy_redmine_data_for_owner(owner_id: str) -> None:
+    target_db = owner_db_path(owner_id)
+    if not target_db.exists() and DB_PATH.exists():
+        target_db.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(DB_PATH, target_db)
+
+    target_docs = owner_docs_dir(owner_id)
+    if not target_docs.exists() and DOCS_DIR.exists():
+        shutil.copytree(DOCS_DIR, target_docs, dirs_exist_ok=True)
+
+    target_user_map = owner_user_map_path(owner_id)
+    if not target_user_map.exists() and USER_MAP_PATH.exists():
+        target_user_map.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(USER_MAP_PATH, target_user_map)
+
+    target_runtime = owner_runtime_config_path(owner_id)
+    if target_runtime.exists():
+        return
+    legacy_runtime = settings.project_root / "configs/config_runtime.json"
+    if not legacy_runtime.exists():
+        return
+    try:
+        payload = json.loads(legacy_runtime.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(payload, dict):
+        return
+    migrated = {
+        key: payload[key]
+        for key in _REDMINE_RUNTIME_SECTIONS
+        if key in payload
+    }
+    if migrated:
+        target_runtime.parent.mkdir(parents=True, exist_ok=True)
+        target_runtime.write_text(
+            json.dumps(migrated, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+
+def _build_user_redmine_service(owner_id: str) -> RedmineService:
+    _migrate_legacy_redmine_data_for_owner(owner_id)
+    user_config = config_manager.for_owner(owner_id)
+    repository = RedmineAgentDB(
+        db_path=owner_db_path(owner_id),
+        docs_dir=owner_docs_dir(owner_id),
+    )
+    return RedmineService(
+        repository=repository,
+        agent=RedmineAgent(
+            repository,
+            redmine_config_manager=user_config,
+            attachments_dir=owner_attachments_dir(owner_id),
+        ),
+    )
+
+
+def get_redmine_service_for_owner(owner_id: str) -> RedmineService:
+    with _USER_REDMINE_SERVICE_LOCK:
+        service = _USER_REDMINE_SERVICES.get(owner_id)
+        if service is None:
+            service = _build_user_redmine_service(owner_id)
+            _USER_REDMINE_SERVICES[owner_id] = service
+        return service
+
+
+def get_redmine_service_for_request(request: Request) -> RedmineService:
+    user = require_authenticated_user(request)
+    return get_redmine_service_for_owner(user.id)
+
+
+def get_redmine_config_for_request(request: Request):
+    user = require_authenticated_user(request)
+    return config_manager.for_owner(user.id)
+
+
+def _owner_id_from_request(request: Request) -> str:
+    return require_authenticated_user(request).id
+
+
+def _load_user_map_for_request(request: Request) -> list[dict[str, Any]]:
+    return load_redmine_user_map_for_owner(_owner_id_from_request(request))
+
+
+def _load_user_map_payload_for_request(request: Request) -> dict[str, Any]:
+    return load_user_map_payload_for_owner(_owner_id_from_request(request))
+
+
+def _save_user_map_payload_for_request(request: Request, payload: dict[str, Any]) -> None:
+    save_user_map_payload_for_owner(_owner_id_from_request(request), payload)
+
+
+def _user_map_path_for_request(request: Request):
+    return owner_user_map_path(_owner_id_from_request(request))
+
+
+def get_shared_redmine_dashboard_config() -> dict[str, Any]:
+    return with_department_profiles_from_users(
+        config_manager.get_redmine_dashboard_config(),
+        load_redmine_user_map(),
+    )
+
+
+def _get_redmine_stats_config(request: Request | None = None) -> dict[str, Any]:
     """Read redmine_stats config (stale_days, window_days, cache_ttl) with defaults."""
-    return config_manager.get_redmine_stats_config()
+    manager = get_redmine_config_for_request(request) if request is not None else config_manager
+    return manager.get_redmine_stats_config()
 
 
 def _clear_stats_caches() -> None:
@@ -69,8 +199,9 @@ def _clear_stats_caches() -> None:
     _PROJECT_STATS_CACHE.clear()
 
 
-def _get_redmine_base_url() -> str:
-    return config_manager.get_redmine_base_url()
+def _get_redmine_base_url(request: Request | None = None) -> str:
+    manager = get_redmine_config_for_request(request) if request is not None else config_manager
+    return manager.get_redmine_base_url()
 
 
 
@@ -97,8 +228,9 @@ def _department_from_profiles(profile_ids: list[str]) -> dict[str, str]:
     return {"department_id": profile_ids[0], "department": ""}
 
 
-def _send_reminder_email(to_addr: str, subject: str, body: str) -> dict[str, Any]:
-    dashboard_cfg = config_manager.load_config().get("redmine_dashboard") or {}
+def _send_reminder_email(to_addr: str, subject: str, body: str, manager=None) -> dict[str, Any]:
+    selected_manager = manager or config_manager
+    dashboard_cfg = selected_manager.load_config().get("redmine_dashboard") or {}
     email_cfg = dashboard_cfg.get("email") or {}
     smtp_host = str(email_cfg.get("smtp_host") or "").strip()
     # from_addr 默认值统一来自 config.json 的 redmine_dashboard.email.default_from_addr
@@ -175,16 +307,18 @@ def _update_ttl_cache(cache_dict: dict, cache_key: str, now_ts: float, data: Any
         del cache_dict[k]
 
 
-async def start_redmine_agent_run(hours: int = 24, max_issues: int = 20, mode: str = "manual") -> dict:
-    return await redmine_service.start_run(
+async def start_redmine_agent_run(request: Request, hours: int = 24, max_issues: int = 20, mode: str = "manual") -> dict:
+    service = get_redmine_service_for_request(request)
+    return await service.start_run(
         hours=hours,
         max_issues=max_issues,
         mode=mode,
     )
 
 
-async def start_redmine_agent_sync(max_analyze: int = 20) -> dict:
-    return await redmine_service.start_sync(max_analyze=max_analyze)
+async def start_redmine_agent_sync(request: Request, max_analyze: int = 20) -> dict:
+    service = get_redmine_service_for_request(request)
+    return await service.start_sync(max_analyze=max_analyze)
 
 
 # ------------------------------------------------------------------
@@ -193,33 +327,38 @@ async def start_redmine_agent_sync(max_analyze: int = 20) -> dict:
 
 @router.post("/runs")
 async def create_run(
+    request: Request,
     hours: int = Query(48, ge=1, le=168),
     max_issues: int = Query(20, ge=1, le=100),
 ):
-    return await start_redmine_agent_run(hours=hours, max_issues=max_issues, mode="manual")
+    return await start_redmine_agent_run(request, hours=hours, max_issues=max_issues, mode="manual")
 
 
 @router.get("/status")
-async def get_status():
-    return {"success": True, "data": redmine_service.status()}
+async def get_status(request: Request):
+    service = get_redmine_service_for_request(request)
+    return {"success": True, "data": service.status()}
 
 
 @router.get("/runs")
-async def list_runs(limit: int = Query(20, ge=1, le=100)):
-    return {"success": True, "data": {"items": redmine_service.repository.list_runs(limit)}}
+async def list_runs(request: Request, limit: int = Query(20, ge=1, le=100)):
+    service = get_redmine_service_for_request(request)
+    return {"success": True, "data": {"items": service.repository.list_runs(limit)}}
 
 
 @router.get("/runs/{run_id}")
-async def get_run(run_id: str):
-    run = redmine_service.repository.get_run(run_id)
+async def get_run(run_id: str, request: Request):
+    service = get_redmine_service_for_request(request)
+    run = service.repository.get_run(run_id)
     if not run:
         return JSONResponse(status_code=404, content={"success": False, "error": "run not found"})
-    return {"success": True, "data": {"run": run, "issues": redmine_service.repository.list_run_issues(run_id)}}
+    return {"success": True, "data": {"run": run, "issues": service.repository.list_run_issues(run_id)}}
 
 
 @router.get("/issues/{issue_id}")
-async def get_issue(issue_id: int):
-    issue = redmine_service.repository.get_issue(issue_id)
+async def get_issue(issue_id: int, request: Request):
+    service = get_redmine_service_for_request(request)
+    issue = service.repository.get_issue(issue_id)
     if not issue:
         return JSONResponse(status_code=404, content={"success": False, "error": "issue not found"})
     # Enrich with structured fields
@@ -237,8 +376,9 @@ async def get_issue(issue_id: int):
 
 
 @router.get("/issues/{issue_id}/document")
-async def get_issue_document(issue_id: int):
-    issue = redmine_service.repository.get_issue(issue_id)
+async def get_issue_document(issue_id: int, request: Request):
+    service = get_redmine_service_for_request(request)
+    issue = service.repository.get_issue(issue_id)
     if not issue:
         return PlainTextResponse("issue not found", status_code=404)
     return PlainTextResponse(issue.get("doc_content") or "", media_type="text/markdown")
@@ -250,6 +390,7 @@ async def get_issue_document(issue_id: int):
 
 @router.get("/issues")
 async def list_issues(
+    request: Request,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     status: str = Query(""),
@@ -259,26 +400,30 @@ async def list_issues(
     sort: str = Query("updated_on"),
     order: str = Query("desc"),
 ):
-    issues = redmine_service.repository.list_all_issues(limit=limit, offset=offset, status=status, priority=priority, category=category, search=search, sort=sort, order=order)
-    total = redmine_service.repository.count_issues(status=status, priority=priority, category=category, search=search)
+    service = get_redmine_service_for_request(request)
+    issues = service.repository.list_all_issues(limit=limit, offset=offset, status=status, priority=priority, category=category, search=search, sort=sort, order=order)
+    total = service.repository.count_issues(status=status, priority=priority, category=category, search=search)
     return {"success": True, "data": {"items": issues, "total": total, "limit": limit, "offset": offset}}
 
 
 @router.get("/issues/search")
-async def search_issues(q: str = Query(..., min_length=1), limit: int = Query(10, ge=1, le=50)):
-    return {"success": True, "data": {"items": redmine_service.repository.search_issues(q, limit)}}
+async def search_issues(request: Request, q: str = Query(..., min_length=1), limit: int = Query(10, ge=1, le=50)):
+    service = get_redmine_service_for_request(request)
+    return {"success": True, "data": {"items": service.repository.search_issues(q, limit)}}
 
 
 @router.get("/statistics")
-async def get_statistics():
-    redmine_service._mark_stale_runs_once()
-    return {"success": True, "data": redmine_service.repository.get_issue_statistics()}
+async def get_statistics(request: Request):
+    service = get_redmine_service_for_request(request)
+    service._mark_stale_runs_once()
+    return {"success": True, "data": service.repository.get_issue_statistics()}
 
 
-async def _resolve_owner_names() -> list[str]:
+async def _resolve_owner_names(request: Request | None = None, service: RedmineService | None = None) -> list[str]:
+    selected_service = service or (get_redmine_service_for_request(request) if request is not None else redmine_service)
     names: list[str] = []
     try:
-        client = redmine_service.agent._make_client()
+        client = selected_service.agent._make_client()
         user = await client.get_current_user()
         first = str(getattr(user, "firstname", "") or "").strip()
         last = str(getattr(user, "lastname", "") or "").strip()
@@ -314,7 +459,7 @@ def _empty_user_stats(user: dict[str, Any], error: str = "") -> dict[str, Any]:
 
 
 @router.get("/users")
-async def list_stat_users():
+async def list_stat_users(request: Request):
     users = [
         {
             "id": item.get("id"),
@@ -324,9 +469,9 @@ async def list_stat_users():
             "department_id": item.get("department_id") or "",
             "department": item.get("department") or "",
         }
-        for item in load_redmine_user_map()
+        for item in _load_user_map_for_request(request)
     ]
-    current_names = await _resolve_owner_names()
+    current_names = await _resolve_owner_names(request)
     if current_names:
         current_keys = set()
         for n in current_names:
@@ -353,7 +498,7 @@ async def add_stat_user(request: Request):
         return {"success": False, "error": "id and name are required"}
     uid_text = str(uid).strip()
 
-    user_map = load_user_map_payload()
+    user_map = _load_user_map_payload_for_request(request)
     departments = user_map.setdefault("departments", [])
     dept_id = str(department.get("department_id") or "").strip()
     dept_name = str(department.get("department") or "").strip()
@@ -390,11 +535,12 @@ async def add_stat_user(request: Request):
     if created:
         target_department.setdefault("members", []).append(updated_member)
     user_map.pop("users", None)
-    save_user_map_payload(user_map)
+    _save_user_map_payload_for_request(request, user_map)
 
     if department_ids:
-        dashboard_cfg = assign_user_to_profiles(config_manager.get_redmine_dashboard_config(), uid_text, department_ids)
-        if not config_manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
+        manager = get_redmine_config_for_request(request)
+        dashboard_cfg = assign_user_to_profiles(manager.get_redmine_dashboard_config(), uid_text, department_ids)
+        if not manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
             return JSONResponse(status_code=500, content={"success": False, "error": "failed to save department membership"})
         _clear_stats_caches()
     return {"success": True, "data": {"created": created, "department_ids": department_ids}}
@@ -405,11 +551,12 @@ async def create_dashboard_profile(request: Request):
     body = await request.json()
     name = str(body.get("name") or "").strip()
     profile_id = str(body.get("id") or "").strip()
+    manager = get_redmine_config_for_request(request)
     try:
-        dashboard_cfg = add_department_profile(config_manager.get_redmine_dashboard_config(), name, profile_id)
+        dashboard_cfg = add_department_profile(manager.get_redmine_dashboard_config(), name, profile_id)
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
-    if not config_manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
+    if not manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save dashboard profile"})
     _clear_stats_caches()
     return {"success": True, "data": {"dashboard": dashboard_cfg, "profile": dashboard_cfg["profiles"][-1]}}
@@ -421,11 +568,12 @@ async def create_project_profile(request: Request):
     name = str(body.get("name") or "").strip()
     project_id = str(body.get("project_id") or "").strip()
     profile_id = str(body.get("id") or "").strip()
+    manager = get_redmine_config_for_request(request)
     try:
-        dashboard_cfg = add_project_profile(config_manager.get_redmine_dashboard_config(), name, project_id, profile_id)
+        dashboard_cfg = add_project_profile(manager.get_redmine_dashboard_config(), name, project_id, profile_id)
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
-    if not config_manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
+    if not manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save project profile"})
     _clear_stats_caches()
     return {"success": True, "data": {"dashboard": dashboard_cfg, "profile": dashboard_cfg["project_profiles"][-1]}}
@@ -440,21 +588,22 @@ async def send_department_reminder_email(request: Request):
         return JSONResponse(status_code=400, content={"success": False, "error": "user_id is required"})
     if not issue_ids:
         return JSONResponse(status_code=400, content={"success": False, "error": "issue_ids are required"})
-    user = next((item for item in load_redmine_user_map() if str(item.get("id") or "").strip() == user_id), None)
+    user = next((item for item in _load_user_map_for_request(request) if str(item.get("id") or "").strip() == user_id), None)
     if not user:
         return JSONResponse(status_code=404, content={"success": False, "error": "user not found"})
     to_addr = str(user.get("email") or "").strip()
     if not to_addr:
         return JSONResponse(status_code=400, content={"success": False, "error": "user email is not configured"})
 
-    base_url = _get_redmine_base_url()
+    base_url = _get_redmine_base_url(request)
     issues = [{"issue_id": issue_id} for issue_id in issue_ids]
     url_text = issue_url_text(issues, base_url)
     subject = str(body.get("subject") or "").strip() or f"Redmine 超阈值未回复提醒 - {user.get('name') or user_id}"
     intro = str(body.get("intro") or "").strip() or "以下 Redmine 问题已超过未回复阈值，请及时处理："
     body_text = intro + "\n\n" + url_text
+    manager = get_redmine_config_for_request(request)
     try:
-        result = await asyncio.to_thread(_send_reminder_email, to_addr, subject, body_text)
+        result = await asyncio.to_thread(_send_reminder_email, to_addr, subject, body_text, manager)
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "error": f"邮件发送失败: {exc}"})
     if not result.get("sent"):
@@ -463,22 +612,24 @@ async def send_department_reminder_email(request: Request):
 
 
 @router.post("/sync")
-async def trigger_sync(max_analyze: int = Query(20, ge=1, le=100)):
-    return await start_redmine_agent_sync(max_analyze=max_analyze)
+async def trigger_sync(request: Request, max_analyze: int = Query(20, ge=1, le=100)):
+    return await start_redmine_agent_sync(request, max_analyze=max_analyze)
 
 
 @router.post("/issues/{issue_id}/fetch")
-async def fetch_and_analyze_issue(issue_id: int):
+async def fetch_and_analyze_issue(issue_id: int, request: Request):
     """Fetch a single issue from Redmine and analyze it."""
-    return await redmine_service.fetch_and_analyze_issue(issue_id)
+    service = get_redmine_service_for_request(request)
+    return await service.fetch_and_analyze_issue(issue_id)
 
 
 @router.get("/reports/latest")
-async def get_latest_report():
-    run = redmine_service.repository.get_latest_run()
+async def get_latest_report(request: Request):
+    service = get_redmine_service_for_request(request)
+    run = service.repository.get_latest_run()
     if not run:
         return JSONResponse(status_code=404, content={"success": False, "error": "no completed runs"})
-    return {"success": True, "data": {"run": run, "issues": redmine_service.repository.list_run_issues(run.get("run_id", ""))}}
+    return {"success": True, "data": {"run": run, "issues": service.repository.list_run_issues(run.get("run_id", ""))}}
 
 
 @router.get("/config")
@@ -487,12 +638,13 @@ async def get_config():
 
 
 @router.get("/config/stats")
-async def get_stats_config():
+async def get_stats_config(request: Request):
     """Read redmine_stats config for the settings UI — single config load."""
-    config = config_manager.load_config()
-    stats_cfg = config_manager.get_redmine_stats_config()
-    dashboard_cfg = config_manager.get_redmine_dashboard_config()
-    gerrit_cfg = config_manager.get_gerrit_dashboard_config()
+    manager = config_manager
+    config = manager.load_config()
+    stats_cfg = manager.get_redmine_stats_config()
+    dashboard_cfg = get_shared_redmine_dashboard_config()
+    gerrit_cfg = manager.get_gerrit_dashboard_config()
     if gerrit_cfg.get("rest_password"):
         gerrit_cfg = {**gerrit_cfg, "rest_password": "***"}
     email_cfg = (config.get("redmine_dashboard") or {}).get("email") or {}
@@ -500,7 +652,7 @@ async def get_stats_config():
         **stats_cfg,
         "dashboard": dashboard_cfg,
         "gerrit_dashboard": gerrit_cfg,
-        "redmine": {"base_url": config_manager.get_redmine_base_url(config)},
+        "redmine": {"base_url": manager.get_redmine_base_url(config)},
         "email_mode": "smtp" if email_cfg.get("smtp_host") else "smtp_unconfigured",
     }}
 
@@ -509,7 +661,8 @@ async def get_stats_config():
 async def update_stats_config(request: Request):
     """Update redmine_stats config from the settings UI."""
     body = await request.json()
-    config = config_manager.load_config()
+    manager = get_redmine_config_for_request(request)
+    config = manager.load_config()
     stats = config.get("redmine_stats") or {}
     if "stale_days" in body:
         stats["stale_days"] = max(1, min(30, int(body["stale_days"])))
@@ -534,17 +687,49 @@ async def update_stats_config(request: Request):
                     continue
             current_ranges.pop(clean_key, None)
         stats["chart_date_ranges"] = current_ranges
-    if not config_manager.save_redmine_stats_config(stats):
+    if not manager.save_redmine_stats_config(stats):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save stats config"})
     _clear_stats_caches()
-    return {"success": True, "data": config_manager.get_redmine_stats_config()}
+    return {"success": True, "data": manager.get_redmine_stats_config()}
+
+
+@router.get("/config/credentials")
+async def get_credentials_status(request: Request):
+    """报告登录用户的 Redmine 凭据是否已配置（不回传明文）。
+
+    凭据随登录用户落盘到 per-user runtime（data/redmine/by_user/<owner>/），
+    与统计端点的数据源一致。
+    """
+    manager = get_redmine_config_for_request(request)
+    creds = manager.load_redmine_credentials() or {}
+    return {"success": True, "data": {"configured": bool(creds.get("password")),
+                                       "username": creds.get("username", "")}}
+
+
+@router.post("/config/credentials")
+async def save_credentials(request: Request):
+    """保存 Redmine 凭据到登录用户的运行时配置。
+
+    凭据随登录用户落盘，看板/统计端点据此读取。密码经 Fernet 加密落盘。
+    """
+    body = await request.json()
+    username = str(body.get("username") or "").strip()
+    password = str(body.get("password") or "")
+    if not username or not password:
+        return JSONResponse(status_code=400, content={"success": False, "error": "用户名和密码不能为空"})
+    manager = get_redmine_config_for_request(request)
+    if not manager.save_redmine_credentials(username, password):
+        return JSONResponse(status_code=500, content={"success": False, "error": "保存凭据失败"})
+    _clear_stats_caches()
+    return {"success": True}
 
 
 @router.post("/config/email")
 async def update_email_config(request: Request):
     """Update SMTP email config from the settings UI."""
     body = await request.json()
-    config = config_manager.load_config()
+    manager = get_redmine_config_for_request(request)
+    config = manager.load_config()
     dashboard = config.get("redmine_dashboard") or {}
     email = dashboard.get("email") or {}
     if "smtp_host" in body:
@@ -566,7 +751,7 @@ async def update_email_config(request: Request):
         email["use_tls"] = True
         email.pop("use_ssl", None)
     dashboard["email"] = email
-    if not config_manager.save_redmine_dashboard_config(dashboard):
+    if not manager.save_redmine_dashboard_config(dashboard):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save email config"})
     return {"success": True, "data": {"email": email, "email_mode": "smtp" if email.get("smtp_host") else "unconfigured"}}
 

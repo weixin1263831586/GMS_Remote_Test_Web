@@ -149,11 +149,13 @@ async def broadcast_device_lock_update(device_ids: list | None = None):
             for device_id in device_ids:
                 if device_id in all_locks:
                     lock_info = all_locks[device_id]
-                    locked_by = lock_info['client_id']
+                    locked_by = lock_info['username']
                     device_updates.append({
                         'device_id': device_id,
                         'locked': True,
                         'locked_by': locked_by,
+                        'locked_username': lock_info['username'],
+                        'locked_client_id': lock_info['client_id'],
                         'locked_at': lock_info['timestamp']
                     })
                 else:
@@ -164,11 +166,13 @@ async def broadcast_device_lock_update(device_ids: list | None = None):
         else:
             # 更新所有锁定的设备
             for device_id, lock_info in all_locks.items():
-                locked_by = lock_info['client_id']
+                locked_by = lock_info['username']
                 device_updates.append({
                     'device_id': device_id,
                     'locked': True,
                     'locked_by': locked_by,
+                    'locked_username': lock_info['username'],
+                    'locked_client_id': lock_info['client_id'],
                     'locked_at': lock_info['timestamp']
                 })
 

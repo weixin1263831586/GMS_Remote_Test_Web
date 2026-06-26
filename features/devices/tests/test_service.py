@@ -45,6 +45,24 @@ class DeviceServiceTests(unittest.TestCase):
             "other-client",
         )
 
+    def test_force_unlock_releases_other_users_device_lock(self):
+        from features.devices.locks import DeviceLockManager
+
+        locks = DeviceLockManager()
+        locks.lock_device("SERIAL-1", "client-id-1", "alice")
+
+        status = locks.get_lock_status("SERIAL-1")
+        self.assertEqual(status["locked_by"], "alice")
+        self.assertEqual(status["client_id"], "client-id-1")
+
+        success, _message = locks.unlock_device("SERIAL-1", "client-id-2")
+        self.assertFalse(success)
+        self.assertIsNotNone(locks.get_lock_status("SERIAL-1"))
+
+        success, _message = locks.force_unlock_device("SERIAL-1")
+        self.assertTrue(success)
+        self.assertIsNone(locks.get_lock_status("SERIAL-1"))
+
 
 if __name__ == "__main__":
     unittest.main()

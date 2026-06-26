@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from foundation.config import settings
@@ -12,6 +13,31 @@ from foundation.config import settings
 DB_PATH = settings.data_root / "redmine/redmine.sqlite3"
 DOCS_DIR = settings.data_root / "redmine/docs"
 USER_MAP_PATH = settings.project_root / "configs/redmine_user_map.json"
+
+
+def owner_redmine_root(owner_id: str) -> Path:
+    safe_owner = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(owner_id or "").strip())
+    return settings.data_root / "redmine/by_user" / (safe_owner or "anonymous")
+
+
+def owner_db_path(owner_id: str) -> Path:
+    return owner_redmine_root(owner_id) / "redmine.sqlite3"
+
+
+def owner_docs_dir(owner_id: str) -> Path:
+    return owner_redmine_root(owner_id) / "docs"
+
+
+def owner_attachments_dir(owner_id: str) -> Path:
+    return owner_redmine_root(owner_id) / "attachments"
+
+
+def owner_runtime_config_path(owner_id: str) -> Path:
+    return owner_redmine_root(owner_id) / "config_runtime.json"
+
+
+def owner_user_map_path(owner_id: str) -> Path:
+    return owner_redmine_root(owner_id) / "redmine_user_map.json"
 
 
 def _now() -> str:
@@ -177,12 +203,12 @@ def load_redmine_user_map() -> list[dict[str, Any]]:
         return []
 
 
-def load_user_map_payload() -> dict[str, Any]:
+def _load_user_map_payload_from(path) -> dict[str, Any]:
     """Load the raw user-map JSON payload (for mutation + save round-trips)."""
-    if not USER_MAP_PATH.exists():
+    if not path.exists():
         return {"departments": []}
     try:
-        payload = json.loads(USER_MAP_PATH.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
             payload.setdefault("departments", [])
             return payload
@@ -191,12 +217,33 @@ def load_user_map_payload() -> dict[str, Any]:
     return {"departments": []}
 
 
-def save_user_map_payload(payload: dict[str, Any]) -> None:
+def _save_user_map_payload_to(path, payload: dict[str, Any]) -> None:
     """Write the raw user-map JSON payload to disk."""
     global _user_map_cache
-    USER_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
-    USER_MAP_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    _user_map_cache = (0.0, [])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    if path == USER_MAP_PATH:
+        _user_map_cache = (0.0, [])
+
+
+def load_user_map_payload() -> dict[str, Any]:
+    return _load_user_map_payload_from(USER_MAP_PATH)
+
+
+def save_user_map_payload(payload: dict[str, Any]) -> None:
+    _save_user_map_payload_to(USER_MAP_PATH, payload)
+
+
+def load_redmine_user_map_for_owner(owner_id: str) -> list[dict[str, Any]]:
+    return _flatten_departments(load_user_map_payload_for_owner(owner_id))
+
+
+def load_user_map_payload_for_owner(owner_id: str) -> dict[str, Any]:
+    return _load_user_map_payload_from(owner_user_map_path(owner_id))
+
+
+def save_user_map_payload_for_owner(owner_id: str, payload: dict[str, Any]) -> None:
+    _save_user_map_payload_to(owner_user_map_path(owner_id), payload)
 
 
 def display_names_from_mapping(item: dict[str, Any]) -> list[str]:

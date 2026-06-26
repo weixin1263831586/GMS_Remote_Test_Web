@@ -459,6 +459,12 @@ function showSettingsModal() {
       document.getElementById('settingFromAddr').value = email.from_addr || email.default_from_addr || '';
       document.getElementById('settingSmtpUser').value = email.username || '';
       document.getElementById('settingSmtpPass').value = '';
+      // Redmine 凭据状态（已配置则回显用户名，密码不回显）
+      try {
+        var creds = await api('/api/redmine-agent/config/credentials');
+        document.getElementById('settingRedmineUser').value = (creds && creds.username) || '';
+      } catch (_) {}
+      document.getElementById('settingRedminePass').value = '';
     } catch (_) {}
   })();
 }
@@ -486,6 +492,16 @@ async function saveSettings() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({smtp_host: smtpHost, smtp_port: smtpPort, from_addr: fromAddr, username: smtpUser, password: smtpPass})
     });
+    // Redmine 凭据（仅当填写了密码才保存，避免误清空）
+    var redmineUser = document.getElementById('settingRedmineUser').value.trim();
+    var redminePass = document.getElementById('settingRedminePass').value;
+    if (redminePass) {
+      await api('/api/redmine-agent/config/credentials', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: redmineUser, password: redminePass})
+      });
+    }
     _statsConfigCacheTs = 0; // force reload
     hideSettingsModal();
     refreshCurrentTab();

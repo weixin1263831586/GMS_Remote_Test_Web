@@ -27,6 +27,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
+from features.users import get_client_id_from_request
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
@@ -64,6 +65,10 @@ class UpsertEntryRequest(BaseModel):
     value: str
 
 
+def _store_for_request(request: Request) -> OverrideStore:
+    return OverrideStore(owner_id=get_client_id_from_request(request))
+
+
 @router.get("/api/config-override/entries")
 @handle_api_errors
 async def api_list_entries(
@@ -71,7 +76,7 @@ async def api_list_entries(
     device_id: str = Query("", description="adb serial；为空时用默认设备"),
 ):
     """List stored overrides for a device."""
-    store = OverrideStore()
+    store = _store_for_request(request)
     entries = store.list_entries(device_id or None)
     return success_response(
         data={"entries": [e.to_dict() for e in entries], "count": len(entries)},
@@ -81,9 +86,9 @@ async def api_list_entries(
 
 @router.post("/api/config-override/entries")
 @handle_api_errors
-async def api_upsert_entry(req: UpsertEntryRequest):
+async def api_upsert_entry(req: UpsertEntryRequest, request: Request):
     """Insert or update one override (validated server-side)."""
-    store = OverrideStore()
+    store = _store_for_request(request)
     entry = OverrideEntry(
         resource_name=req.resource_name.strip(),
         resource_type=req.resource_type,
@@ -108,7 +113,7 @@ async def api_remove_entry(
     resource_name: str = Query(..., description="要删除的资源名"),
 ):
     """Remove one stored override by resource name."""
-    store = OverrideStore()
+    store = _store_for_request(request)
     removed = store.remove(device_id or None, resource_name)
     return success_response(data={"removed": removed}, message="Success")
 
@@ -120,7 +125,7 @@ async def api_clear_entries(
     device_id: str = Query("", description="清空该设备的 host 存储；不触碰设备"),
 ):
     """Clear all stored overrides for a device (host store only)."""
-    store = OverrideStore()
+    store = _store_for_request(request)
     count = store.clear(device_id or None)
     return success_response(data={"removed": count}, message="Success")
 
@@ -147,7 +152,7 @@ async def api_apply(
     Returns once the push completes (rebooting=True). The device is offline for
     ~40s after this call returns; the UI should poll /status afterward.
     """
-    result = await asyncio.to_thread(apply_overrides, device_id or None)
+    result = await asyncio.to_thread(apply_overrides, device_id or None, _store_for_request(request))
     if not result.success:
         return error_response(result.message, status_code=400)
     return success_response(data=asdict(result), message=result.message)
@@ -160,7 +165,7 @@ async def api_revert(
     device_id: str = Query("", description="adb serial；为空时用默认设备"),
 ):
     """Delete the overlay APK from the device and reboot (host store kept)."""
-    result = await asyncio.to_thread(revert_all, device_id or None)
+    result = await asyncio.to_thread(revert_all, device_id or None, _store_for_request(request))
     if not result.success:
         return error_response(result.message, status_code=400)
     return success_response(data=asdict(result), message=result.message)
@@ -218,7 +223,7 @@ async def api_preview_xml(
 
     Pure (no device I/O) — useful as a preview and as a test seam.
     """
-    store = OverrideStore()
+    store = _store_for_request(request)
     entries = store.list_entries(device_id or None)
     return success_response(
         data={

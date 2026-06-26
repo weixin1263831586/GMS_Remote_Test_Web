@@ -15,6 +15,7 @@ from .dashboard import (
     normalize_redmine_dashboard_profiles,
     normalize_redmine_stats_config,
 )
+from .users import owner_runtime_config_path
 
 
 DEFAULT_REDMINE_BASE_URL = "https://redmine.rock-chips.com"
@@ -30,8 +31,9 @@ class RedmineConfig:
         base_dir: str | None = None,
     ):
         if base_dir is not None:
-            project_root = Path(base_dir).resolve().parent
-        self.manager = ConfigManager(project_root=project_root)
+            self.manager = ConfigManager(base_dir=base_dir)
+        else:
+            self.manager = ConfigManager(project_root=project_root)
         self.project_root = self.manager.project_root
 
     @property
@@ -52,6 +54,13 @@ class RedmineConfig:
 
     def invalidate_cache(self) -> None:
         self.manager.invalidate_cache()
+
+    def for_owner(self, owner_id: str) -> RedmineConfig:
+        manager = RedmineConfig(self.project_root)
+        runtime_path = owner_runtime_config_path(owner_id)
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        manager.runtime_config_path = runtime_path
+        return manager
 
     def load_config(self, force_reload: bool = False) -> dict[str, Any]:
         return self.manager.load_config(force_reload=force_reload)
@@ -158,7 +167,7 @@ class RedmineConfig:
         name: str,
         payload: dict[str, Any],
     ) -> bool:
-        runtime_path = self.project_root / "configs/config_runtime.json"
+        runtime_path = Path(self.manager.runtime_config_path)
         try:
             runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
         except FileNotFoundError:

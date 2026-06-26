@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import subprocess
 from typing import Any
 
@@ -13,22 +14,33 @@ from foundation.responses import error_response, success_response
 
 from . import runtime
 from .clients import (
+    get_client_display_id_from_request,
     get_client_id_from_request,
     hide_sensitive_info,
+    parse_client_id,
 )
 
 
 config_manager = runtime.config_manager
+_SSH_DEVICE_HOST_RE = re.compile(r"^[^@\s<>\"'`]+@[^@\s<>\"'`]+$")
 
 
 def get_effective_local_server(
     client_id: str,
     requested_local_server: str = "",
+    request: Request | None = None,
 ) -> str:
     if requested_local_server:
         return requested_local_server
     runtime_config = config_manager.get_runtime_config()
-    return runtime_config.get("local_server") or client_id
+    runtime_local_server = str(runtime_config.get("local_server") or "").strip()
+    if "@" in runtime_local_server:
+        return runtime_local_server
+    if request is not None:
+        display_id = get_client_display_id_from_request(request)
+        if "@" in display_id:
+            return display_id
+    return client_id
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +160,7 @@ async def get_config(request: Request):
 
     config = config_manager.load_config()
     # local_server 是客户端回传地址；没有显式动态配置时，按当前请求用户/IP 展示。
-    config['local_server'] = get_effective_local_server(client_id)
+    config['local_server'] = get_effective_local_server(client_id, request=request)
 
     # 隐藏敏感信息
     safe_config = hide_sensitive_info(config.copy())
@@ -281,6 +293,91 @@ async def update_config(req: dict):
         return success_response()
     else:
         return error_response("保存配置失败", status_code=500)
+
+
+# ==================== Client SSH Credentials ====================
+
+def _public_credentials(credentials: list) -> list:
+    """返回凭据列表的脱敏副本（密码替换为 ***，永不回传明文）。"""
+    public = []
+    for cred in credentials or []:
+        if not isinstance(cred, dict):
+            continue
+        item = {
+            "device_host": str(cred.get("device_host") or "").strip(),
+            "username": str(cred.get("username") or "").strip(),
+            "host": str(cred.get("host") or cred.get("hostname") or "").strip(),
+            "has_password": bool(cred.get("password")),
+        }
+        public.append(item)
+    return public
+
+
+def _validate_ssh_device_host(device_host: str) -> bool:
+    return bool(_SSH_DEVICE_HOST_RE.fullmatch(device_host or ""))
+
+
+@router.get("/api/config/client-ssh-credentials")
+async def list_client_ssh_credentials():
+    """列出已保存的客户端 SSH 凭据（密码脱敏）。"""
+    runtime_cfg = config_manager.get_runtime_config()
+    credentials = runtime_cfg.get("client_ssh_credentials") or []
+    if not isinstance(credentials, list):
+        credentials = []
+    return success_response({"credentials": _public_credentials(credentials)})
+
+
+@router.post("/api/config/client-ssh-credentials")
+async def upsert_client_ssh_credential(req: dict = Body(default={})):
+    """新增或更新一条客户端 SSH 凭据（按 device_host 增改）。"""
+    device_host = str(req.get("device_host") or "").strip()
+    password = str(req.get("password") or "")
+    if not _validate_ssh_device_host(device_host):
+        return error_response(
+            "设备主机格式错误，应为 user@ip，例如 gms@192.168.1.100",
+            status_code=400,
+        )
+    if not password:
+        return error_response("密码不能为空", status_code=400)
+
+    if config_manager.upsert_device_host_password(device_host, password):
+        return success_response(message="凭据已保存")
+    return error_response("保存凭据失败", status_code=500)
+
+
+@router.delete("/api/config/client-ssh-credentials")
+async def delete_client_ssh_credential(req: dict = Body(default={})):
+    """删除一条客户端 SSH 凭据（按 device_host 或 username@host 匹配）。"""
+    device_host = str(req.get("device_host") or "").strip()
+    if not _validate_ssh_device_host(device_host):
+        return error_response(
+            "设备主机格式错误，应为 user@ip，例如 gms@192.168.1.100",
+            status_code=400,
+        )
+    username, hostname = parse_client_id(device_host)
+
+    runtime_cfg = config_manager.get_runtime_config()
+    credentials = runtime_cfg.get("client_ssh_credentials") or []
+    if not isinstance(credentials, list):
+        credentials = []
+
+    remaining = []
+    for cred in credentials:
+        if not isinstance(cred, dict):
+            continue
+        cred_device_host = str(cred.get("device_host") or "").strip()
+        cred_username = str(cred.get("username") or "").strip()
+        cred_host = str(cred.get("host") or cred.get("hostname") or "").strip()
+        is_same = (
+            (cred_device_host and cred_device_host == device_host)
+            or (cred_username == username and cred_host == hostname)
+        )
+        if not is_same:
+            remaining.append(cred)
+
+    if config_manager.save_client_ssh_credentials(remaining):
+        return success_response(message="凭据已删除")
+    return error_response("删除凭据失败", status_code=500)
 
 
 @router.get("/api/sidebar-order")

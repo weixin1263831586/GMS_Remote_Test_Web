@@ -22,18 +22,22 @@ async function uploadFileInChunks(file, url, options = {}) {
         onProgress = null,
         onChunkProgress = null,
         concurrent = 8, // 并发上传数 (增加并发)
-        resume = false // 是否支持断点续传
+        resume = false, // 是否支持断点续传
+        uploadId: providedUploadId = '',
+        extraFormData = null,
+        headers = null,
+        checkExisting = false
     } = options;
 
     const fileSize = file.size;
     const totalChunks = Math.ceil(fileSize / chunkSize);
-    const uploadId = window.crypto && window.crypto.randomUUID
+    const uploadId = providedUploadId || (window.crypto && window.crypto.randomUUID
         ? window.crypto.randomUUID()
         : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
             const r = Math.random() * 16 | 0;
             const v = c === 'x' ? r : (r & 0x3 | 0x8);
             return v.toString(16);
-        });
+        }));
 
     const formatBytes = window.formatBytes;
     chunkDebugLog(`[ChunkUpload] Starting: ${file.name} (${formatBytes(fileSize)})`);
@@ -45,8 +49,67 @@ async function uploadFileInChunks(file, url, options = {}) {
     let failedChunks = [];
     let completionResult = null;
 
+    function appendExtraFields(formData) {
+        if (!extraFormData) return;
+        if (extraFormData instanceof FormData) {
+            for (const [key, value] of extraFormData.entries()) {
+                formData.append(key, value);
+            }
+            return;
+        }
+        Object.entries(extraFormData).forEach(([key, value]) => {
+            if (Array.isArray(value)) {
+                value.forEach(item => formData.append(key, item));
+            } else if (value !== undefined && value !== null) {
+                formData.append(key, value);
+            }
+        });
+    }
+
+    function applyHeaders(xhr) {
+        if (!headers) return;
+        Object.entries(headers).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                xhr.setRequestHeader(key, value);
+            }
+        });
+    }
+
+    async function checkUploadedChunks() {
+        const formData = new FormData();
+        formData.append('check_chunks', '1');
+        formData.append('total_chunks', totalChunks);
+        formData.append('upload_id', uploadId);
+        formData.append('file_name', file.name);
+        formData.append('file_size', fileSize);
+        appendExtraFields(formData);
+
+        return new Promise((resolve) => {
+            const xhr = new XMLHttpRequest();
+            xhr.addEventListener('load', () => {
+                if (xhr.status !== 200) {
+                    resolve([]);
+                    return;
+                }
+                try {
+                    const result = JSON.parse(xhr.responseText);
+                    resolve(Array.isArray(result.uploaded_chunks) ? result.uploaded_chunks : []);
+                } catch (_e) {
+                    resolve([]);
+                }
+            });
+            xhr.addEventListener('error', () => resolve([]));
+            xhr.open('POST', url);
+            applyHeaders(xhr);
+            xhr.send(formData);
+        });
+    }
+
     // 上传单个块
     async function uploadChunk(chunkIndex, retry = 0) {
+        if (uploadedChunks.has(chunkIndex)) {
+            return {success: true, skipped: true, chunk_index: chunkIndex};
+        }
         const start = chunkIndex * chunkSize;
         const end = Math.min(start + chunkSize, fileSize);
         const chunk = file.slice(start, end);
@@ -59,6 +122,7 @@ async function uploadFileInChunks(file, url, options = {}) {
         formData.append('file_name', file.name);
         formData.append('file_size', fileSize);
         formData.append('resume', resume ? '1' : '0');
+        appendExtraFields(formData);
 
         try {
             const xhr = new XMLHttpRequest();
@@ -80,7 +144,7 @@ async function uploadFileInChunks(file, url, options = {}) {
                         try {
                             const result = JSON.parse(xhr.responseText);
                             if (result.success) {
-                                if (result.data && result.data.uploaded) {
+                                if (result.upload_complete || result.message || (result.data && result.data.uploaded)) {
                                     completionResult = result;
                                 }
                                 uploadedChunks.add(chunkIndex);
@@ -112,6 +176,7 @@ async function uploadFileInChunks(file, url, options = {}) {
 
                 // 发送请求
                 xhr.open('POST', url);
+                applyHeaders(xhr);
                 xhr.send(formData);
             });
         } catch (error) {
@@ -129,6 +194,17 @@ async function uploadFileInChunks(file, url, options = {}) {
 
     // 并发上传所有块
     try {
+        if (resume && checkExisting) {
+            const existing = await checkUploadedChunks();
+            uploadedChunks = new Set(existing.map(Number).filter(idx => idx >= 0 && idx < totalChunks));
+            if (uploadedChunks.size === totalChunks && totalChunks > 0) {
+                uploadedChunks.delete(totalChunks - 1);
+            }
+            if (uploadedChunks.size && onProgress) {
+                onProgress((uploadedChunks.size / totalChunks) * 100, uploadedChunks.size, totalChunks);
+            }
+            chunkDebugLog(`[ChunkUpload] Resume found: ${uploadedChunks.size}/${totalChunks}`);
+        }
         const chunks = Array.from({length: totalChunks}, (_, i) => i);
 
         chunkDebugLog(`[ChunkUpload] Chunks to upload: ${chunks.length}/${totalChunks}`);

@@ -238,6 +238,15 @@ async function callDeviceApi(endpoint, additionalData = {}) {
 
 // ==================== Initialization ====================
 document.addEventListener('DOMContentLoaded', async () => {
+    const authenticated = await ensureAuthenticatedBeforeAppStart().catch(error => {
+        console.error('[Auth] Failed to check auth status:', error);
+        showAuthGate(false);
+        return false;
+    });
+    if (!authenticated) {
+        return;
+    }
+
     initEventListeners();
     initDragDrop();
     renderNotificationList();
@@ -252,6 +261,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const userData = await currentUserResponse.json();
             if (userData.client_id) {
                 state.clientId = userData.client_id;
+                state.clientDisplayId = userData.display_client_id || userData.client_id;
                 debugLog('[Init] ✅ Set state.clientId from /api/users/current:', state.clientId);
 
                 // 检查是否是 unknown 用户（apiCall 中会统一处理弹框）
@@ -344,8 +354,7 @@ function checkPendingFirmwareUpload() {
         const message = `⚠️ 固件上传已中断: ${fileName}\n` +
                        `上次进度: ${progress.toFixed(1)}% (${formatBytes(uploadedSize)}/${formatBytes(totalSize)})\n` +
                        `中断时间: ${Math.floor(elapsed / 1000)}秒前\n\n` +
-                       `请重新开始上传。\n\n` +
-                       `💡 提示：上传过程中请勿刷新页面。`;
+                       `请重新选择同一文件，系统会从已上传分片继续。`;
 
         addLogEntry(message, 'warning');
         showToast('固件上传已中断，请重新上传', 'warning');
@@ -373,8 +382,7 @@ function checkPendingFirmwareUpload() {
             }
         }
 
-        // 清理状态
-        clearFirmwareUploadState();
+        sessionStorage.setItem('firmwareUploadInterrupted', 'true');
     }
 }
 
@@ -399,6 +407,7 @@ function initWebSocket() {
     apiCall('/api/users/current', 'GET').then(data => {
         const clientId = data.client_id || 'unknown';
         state.clientId = clientId;
+        state.clientDisplayId = data.display_client_id || clientId;
 
         // 建立WebSocket连接
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -410,7 +419,9 @@ function initWebSocket() {
         state.websocket.onopen = () => {
             debugLog('[WebSocket] Connected');
             updateConnectionStatus(true);
-            addLogEntry(`WebSocket已连接 (Client ID: ${clientId})`, 'success');
+            // 显示可读的 username@ip，而非平台用户安全边界（裸 ID）。
+            const displayId = data.display_client_id || clientId;
+            addLogEntry(`WebSocket已连接 (${displayId})`, 'success');
         };
 
         state.websocket.onclose = () => {
@@ -2596,11 +2607,16 @@ async function submitFirmwareBurn() {
         };
 
         if (selectedFirmwareFile) {
+            const uploadId = getReusableFirmwareUploadId(selectedFirmwareFile);
             // 设置上传状态标记，防止刷新导致进度丢失
             saveFirmwareUploadState(
                 selectedFirmwareFile.name,
                 selectedFirmwareFile.size,
-                Date.now()
+                Date.now(),
+                0,
+                0,
+                selectedFirmwareFile.size,
+                uploadId
             );
 
             // 添加beforeunload事件监听，警告用户不要刷新
@@ -2609,71 +2625,81 @@ async function submitFirmwareBurn() {
             addLogEntry(`使用服务器固件路径，跳过本机上传: ${firmwarePath}`, 'info');
         }
 
-        // 准备FormData
-        const formData = new FormData();
-        formData.append('firmware_path', firmwarePath);
+        let uploadResult;
         if (selectedFirmwareFile) {
-            formData.append('firmware_file', selectedFirmwareFile);
-        }
+            const uploadId = getReusableFirmwareUploadId(selectedFirmwareFile);
+            const startedAt = parseInt(sessionStorage.getItem('firmwareUploadStartTime') || Date.now());
+            notifyOperationResult('固件烧写已启动', '固件上传任务已开始', 'info', 'firmware-burn');
+            addLogEntry(`固件上传任务已启动，设备: ${devices.join(', ')}`, 'success');
 
-        // 使用XMLHttpRequest以显示上传进度
-        const uploadResult = await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-
-            // 监听上传进度
-            xhr.upload.addEventListener('progress', (e) => {
-                if (selectedFirmwareFile && e.lengthComputable) {
-                    const progress = (e.loaded / e.total) * 100;
-                    // 保存进度到sessionStorage（用于刷新后恢复）
-                    // 使用统一的状态管理函数
-                    const startTime = parseInt(sessionStorage.getItem('firmwareUploadStartTime') || Date.now());
-                    saveFirmwareUploadState(
-                        selectedFirmwareFile.name,
-                        selectedFirmwareFile.size,
-                        startTime,
-                        progress,
-                        e.loaded,
-                        e.total
-                    );
-
-                    // 复用现有的上传进度条显示
-                    updateUploadProgress(progress, selectedFirmwareFile.name, e.loaded, e.total);
-                }
-            });
-
-            xhr.addEventListener('load', () => {
-                cleanupUploadState();
-
-                if (xhr.status === 200) {
-                    try {
-                        const result = JSON.parse(xhr.responseText);
-                        resolve(result);
-                    } catch (e) {
-                        reject(new Error('Invalid response'));
+            uploadResult = await uploadFileInChunks(
+                selectedFirmwareFile,
+                `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`,
+                {
+                    chunkSize: 32 * 1024 * 1024,
+                    concurrent: 4,
+                    resume: true,
+                    checkExisting: true,
+                    uploadId,
+                    extraFormData: {
+                        firmware_path: firmwarePath,
+                    },
+                    onProgress: (progress, uploadedChunks, totalChunks) => {
+                        const uploadedSize = Math.min(
+                            selectedFirmwareFile.size,
+                            Math.round((uploadedChunks / totalChunks) * selectedFirmwareFile.size)
+                        );
+                        saveFirmwareUploadState(
+                            selectedFirmwareFile.name,
+                            selectedFirmwareFile.size,
+                            startedAt,
+                            progress,
+                            uploadedSize,
+                            selectedFirmwareFile.size,
+                            uploadId
+                        );
+                        updateUploadProgress(progress, selectedFirmwareFile.name, uploadedSize, selectedFirmwareFile.size);
                     }
-                } else {
-                    reject(new Error(`HTTP ${xhr.status}`));
                 }
-            });
+            );
+            cleanupUploadState();
+        } else {
+            const formData = new FormData();
+            formData.append('firmware_path', firmwarePath);
+            // 使用XMLHttpRequest提交服务器路径烧写请求
+            uploadResult = await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
 
-            xhr.addEventListener('error', () => {
-                cleanupUploadState();
-                reject(new Error('Network error'));
-            });
+                xhr.addEventListener('load', () => {
+                    if (xhr.status === 200) {
+                        try {
+                            const result = JSON.parse(xhr.responseText);
+                            resolve(result);
+                        } catch (e) {
+                            reject(new Error('Invalid response'));
+                        }
+                    } else {
+                        reject(new Error(`HTTP ${xhr.status}`));
+                    }
+                });
 
-            xhr.addEventListener('abort', () => {
-                cleanupUploadState();
-                reject(new Error('Upload aborted'));
-            });
+                xhr.addEventListener('error', () => {
+                    reject(new Error('Network error'));
+                });
 
-            xhr.open('POST', `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`);
-            applyClientIdentityHeadersToXhr(xhr);
-            // 烧写是阻塞请求（完成后才返回），「已启动」必须在发出请求时立即提示，
-            // 否则会被后端烧写完成的通知晚到，导致时序颠倒。
-            notifyOperationResult('固件烧写已启动', '烧写任务已开始', 'info', 'firmware-burn');
-            addLogEntry(`固件烧写任务已启动，设备: ${devices.join(', ')}`, 'success');
-            xhr.send(formData);
-        });
+                xhr.addEventListener('abort', () => {
+                    reject(new Error('Upload aborted'));
+                });
+
+                xhr.open('POST', `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`);
+                applyClientIdentityHeadersToXhr(xhr);
+                // 烧写是阻塞请求（完成后才返回），「已启动」必须在发出请求时立即提示，
+                // 否则会被后端烧写完成的通知晚到，导致时序颠倒。
+                notifyOperationResult('固件烧写已启动', '烧写任务已开始', 'info', 'firmware-burn');
+                addLogEntry(`固件烧写任务已启动，设备: ${devices.join(', ')}`, 'success');
+                xhr.send(formData);
+            });
+        }
 
         const result = uploadResult;
         if (!result.success) {
@@ -3055,7 +3081,11 @@ async function setupUsbipForward() {
             btn.textContent = '📱 本地设备';
             btn.disabled = false;
             addLogEntry(result.message || '本地设备已断开', 'success');
-            setTimeout(() => debouncedRefreshDevices(), 2500);
+            if (Array.isArray(result.remaining_devices) && result.remaining_devices.length > 0) {
+                addLogEntry('USB/IP 断开后仍检测到设备残留: ' + result.remaining_devices.join(' '), 'warning');
+            }
+            // 断开后强制刷新（force_refresh），确保不返回带 is_usbip 标记的缓存设备。
+            setTimeout(() => loadDevices(true), 2500);
         } catch (error) {
             btn.textContent = '📱 断开设备';
             btn.disabled = false;
@@ -3115,7 +3145,7 @@ async function setupUsbipForward() {
 
 function scheduleUsbipReconnect(reason) {
     if (Date.now() <= usbipManualDisconnectUntil) return;
-    if (usbipReconnectTimer) return;
+    if (usbipReconnectWaiting || usbipReconnectTimer) return;
     usbipReconnectWaiting = true;
     usbipReconnectAttempts = 0;
     const btn = $('usbip-btn');
@@ -3128,10 +3158,26 @@ function scheduleUsbipReconnect(reason) {
 }
 
 function isUsbipAdbReady(result) {
-    return !!(result && result.success && Array.isArray(result.device_list) && result.device_list.length > 0);
+    return !!(result && result.success && (result.transport_connected || (Array.isArray(result.device_list) && result.device_list.length > 0)));
+}
+
+function isUsbipProtocolVisible(status) {
+    if (!status || !status.protocol_status) return false;
+    const mode = status.protocol_status.mode;
+    return ['adb', 'fastboot', 'recovery', 'unauthorized', 'offline', 'adb_non_device'].includes(mode);
 }
 
 async function attemptUsbipReconnect() {
+    // 手动断开后立即终止重连循环——不要继续"自动重连等待"。
+    // （scheduleUsbipReconnect 的入口守卫拦不住已在执行的循环，故在此复核。）
+    if (Date.now() <= usbipManualDisconnectUntil) {
+        usbipReconnectTimer = null;
+        usbipReconnectWaiting = false;
+        const btn = $('usbip-btn');
+        if (btn) { btn.textContent = '📱 本地设备'; btn.disabled = false; }
+        addLogEntry('已手动断开 USB/IP，停止自动重连', 'info');
+        return;
+    }
     const btn = $('usbip-btn');
     usbipReconnectAttempts += 1;
     try {
@@ -3142,7 +3188,7 @@ async function attemptUsbipReconnect() {
         const status = await apiCall(statusPath, 'GET');
         const devices = await loadDevices(true);
         const usbipDevices = devices.filter(device => device && device.is_usbip);
-        if (status.connected && usbipDevices.length > 0) {
+        if (status.connected && (status.adb_ready || usbipDevices.length > 0 || isUsbipProtocolVisible(status))) {
             state.usbipConnected = true;
             usbipReconnectWaiting = false;
             pendingUsbipDeviceHost = status.device_host || pendingUsbipDeviceHost || '';
@@ -3150,11 +3196,21 @@ async function attemptUsbipReconnect() {
                 btn.textContent = '📱 断开设备';
                 btn.disabled = false;
             }
-            addLogEntry('USB/IP 后端自动重连已恢复', 'success');
+            const protocolMode = status.protocol_status && status.protocol_status.mode;
+            addLogEntry(protocolMode && protocolMode !== 'adb'
+                ? `USB/IP 后端自动重连已恢复，当前状态: ${protocolMode}`
+                : 'USB/IP 后端自动重连已恢复', 'success');
             return;
         }
-        throw new Error('设备尚未稳定在线');
+        throw new Error(status.reconnecting ? '后端正在重连' : '设备尚未稳定在线');
     } catch (error) {
+        if (Date.now() <= usbipManualDisconnectUntil) {
+            usbipReconnectTimer = null;
+            usbipReconnectWaiting = false;
+            if (btn) { btn.textContent = '📱 本地设备'; btn.disabled = false; }
+            addLogEntry('已手动断开 USB/IP，停止自动重连', 'info');
+            return;
+        }
         if (usbipReconnectAttempts < USBIP_RECONNECT_MAX_ATTEMPTS) {
             addLogEntry(`USB/IP 自动重连等待第 ${usbipReconnectAttempts} 次未恢复，继续等待...`, 'warning');
             usbipReconnectTimer = setTimeout(attemptUsbipReconnect, USBIP_RECONNECT_INTERVAL_MS);
@@ -3174,7 +3230,16 @@ async function attemptUsbipReconnect() {
 // ==================== 设备主机密码输入 ====================
 function showDevicePasswordModal(deviceHost) {
     pendingUsbipDeviceHost = deviceHost || pendingUsbipDeviceHost || '';
-    document.getElementById('device-host-display').value = deviceHost;
+    // 显示层用可读的主机地址；后端回退值若是裸 client_id（非 user@ip）则优先
+    // 用配置里的 device_host/usbip_device_host，仍无可读值时给友好提示。
+    const displayHost = (() => {
+        if (deviceHost && deviceHost.includes('@')) return deviceHost;
+        const cfg = state.config || {};
+        const configured = cfg.usbip_device_host || cfg.device_host;
+        if (configured && configured.includes('@')) return configured;
+        return deviceHost || configured || '（未配置主机）';
+    })();
+    document.getElementById('device-host-display').value = displayHost;
     document.getElementById('device-pswd').value = '';
     ModalManager.open('device-password-modal');
     document.getElementById('device-pswd').focus();
@@ -3257,6 +3322,10 @@ function updateUsernameDisplay(clientIp, username) {
         deviceHostInput.value = display;
         deviceHostInput.placeholder = '设备主机';
     }
+    const localServerInput = document.getElementById('local-server');
+    if (localServerInput) {
+        localServerInput.value = display;
+    }
 }
 
 async function saveUsernameManually(clientIp, username) {
@@ -3267,6 +3336,7 @@ async function saveUsernameManually(clientIp, username) {
 
     const savedUsername = response.username || username;
     const clientId = response.client_id || `${savedUsername}@${clientIp}`;
+    state.clientDisplayId = response.display_client_id || `${savedUsername}@${clientIp}`;
     state.clientId = clientId;
     localStorage.setItem(`gms_username_${clientIp}`, savedUsername);
     updateUsernameDisplay(clientIp, savedUsername);
@@ -3908,11 +3978,29 @@ async function handleUploadFile() {
 /**
  * 保存固件上传状态到 sessionStorage
  */
-function saveFirmwareUploadState(fileName, fileSize, startTime, progress = 0, uploadedSize = 0, totalSize = 0) {
+function getFirmwareUploadId(file) {
+    const raw = `${state.clientId || 'client'}:${file.name}:${file.size}:${file.lastModified || 0}`;
+    return 'fw-' + btoa(unescape(encodeURIComponent(raw))).replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 96);
+}
+
+function getReusableFirmwareUploadId(file) {
+    const savedName = sessionStorage.getItem('firmwareUploadFileName');
+    const savedSize = parseInt(sessionStorage.getItem('firmwareUploadFileSize') || '0');
+    const savedId = sessionStorage.getItem('firmwareUploadId');
+    if (savedId && savedName === file.name && savedSize === file.size) {
+        return savedId;
+    }
+    return getFirmwareUploadId(file);
+}
+
+function saveFirmwareUploadState(fileName, fileSize, startTime, progress = 0, uploadedSize = 0, totalSize = 0, uploadId = '') {
     sessionStorage.setItem('firmwareUploadInProgress', 'true');
     sessionStorage.setItem('firmwareUploadFileName', fileName);
     sessionStorage.setItem('firmwareUploadFileSize', fileSize);
     sessionStorage.setItem('firmwareUploadStartTime', startTime.toString());
+    if (uploadId) {
+        sessionStorage.setItem('firmwareUploadId', uploadId);
+    }
     if (progress > 0) {
         sessionStorage.setItem('firmwareUploadProgress', progress.toString());
         sessionStorage.setItem('firmwareUploadedSize', uploadedSize.toString());
@@ -3931,6 +4019,8 @@ function clearFirmwareUploadState() {
     sessionStorage.removeItem('firmwareUploadProgress');
     sessionStorage.removeItem('firmwareUploadedSize');
     sessionStorage.removeItem('firmwareTotalSize');
+    sessionStorage.removeItem('firmwareUploadId');
+    sessionStorage.removeItem('firmwareUploadInterrupted');
 }
 
 // 导出到全局
@@ -4332,7 +4422,7 @@ async function startTest() {
             test_case: testCase,
             retry_dir: retryResult,
             test_suite: suitePath,
-            local_server: state.config?.local_server || state.clientId || ''
+            local_server: state.config?.local_server || state.clientDisplayId || state.clientId || ''
         });
 
         debugLog('[startTest] API call successful, setting testing = true');
@@ -4516,6 +4606,31 @@ async function showConfig() {
             <input type="text" id="config-suites-path" value="${config.suites_path || ''}" />
         </div>
         </form>
+
+        <!-- 客户端 SSH 凭据管理（增删独立于上方静态配置，即时生效） -->
+        <div class="modal-form-row" style="flex-direction:column;align-items:stretch;margin-top:14px;">
+            <label style="margin-bottom:6px;">客户端 SSH 凭据:</label>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                    <tr style="background: var(--darker-bg);">
+                        <th style="padding:5px 6px;text-align:left;">设备主机</th>
+                        <th style="padding:5px 6px;text-align:left;">用户名</th>
+                        <th style="padding:5px 6px;text-align:left;">密码</th>
+                        <th style="padding:5px 6px;text-align:center;">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="client-creds-table-body">
+                    <tr><td colspan="4" style="padding:20px;text-align:center;">加载中...</td></tr>
+                </tbody>
+            </table>
+            <div class="modal-form-row" style="margin-top:8px;gap:6px;">
+                <input type="text" id="client-cred-host" placeholder="user@ip，例如 gms@192.168.1.100" autocomplete="off" style="flex:2;" />
+                <input type="password" id="client-cred-password" placeholder="SSH 密码" autocomplete="new-password" style="flex:1.5;" />
+                <button class="btn-xxs btn-primary" onclick="addClientCredential()">添加/更新</button>
+            </div>
+            <small style="color:var(--text-secondary);margin-top:4px;">填入已有主机的地址+新密码可覆盖更新；密码不会回显明文。</small>
+        </div>
+
         <div class="modal-buttons">
             <button class="btn-xxs" onclick="closeModal()">取消</button>
             <button class="btn-xxs btn-primary" onclick="saveConfig()">保存</button>
@@ -4523,6 +4638,108 @@ async function showConfig() {
     `;
 
     ModalManager.open('config-modal');
+    loadClientCredentials();
+}
+
+// ==================== Client SSH Credentials Management ====================
+async function loadClientCredentials() {
+    const tbody = document.getElementById('client-creds-table-body');
+    if (!tbody) return;
+    let credentials = [];
+    try {
+        const result = await apiCall('/api/config/client-ssh-credentials', 'GET');
+        credentials = (result && (result.credentials || result.data?.credentials)) || [];
+    } catch (error) {
+        renderClientCredentialsMessage(tbody, `加载失败: ${error.message}`, 'var(--error-color)');
+        return;
+    }
+
+    if (!credentials.length) {
+        renderClientCredentialsMessage(tbody, '暂无凭据。在下方添加设备主机 SSH 凭据。', 'var(--text-secondary)');
+        return;
+    }
+
+    tbody.replaceChildren();
+    credentials.forEach(cred => {
+        const host = cred.device_host || `${cred.username || ''}@${cred.host || ''}`.replace(/^@$/, '');
+        const masked = cred.has_password ? '••••••' : '未设置';
+        const row = document.createElement('tr');
+        row.style.borderBottom = '1px solid var(--border-color)';
+
+        appendClientCredentialCell(row, host || '-');
+        appendClientCredentialCell(row, cred.username || '-');
+        appendClientCredentialCell(row, masked, 'var(--text-secondary)');
+
+        const actionCell = appendClientCredentialCell(row, '');
+        actionCell.style.textAlign = 'center';
+        const deleteButton = document.createElement('button');
+        deleteButton.className = 'btn-xxs';
+        deleteButton.type = 'button';
+        deleteButton.textContent = '删除';
+        deleteButton.addEventListener('click', () => deleteClientCredential(host));
+        actionCell.appendChild(deleteButton);
+
+        tbody.appendChild(row);
+    });
+}
+
+function renderClientCredentialsMessage(tbody, message, color) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 4;
+    cell.style.padding = '20px';
+    cell.style.textAlign = 'center';
+    if (color) cell.style.color = color;
+    cell.textContent = message;
+    row.appendChild(cell);
+    tbody.replaceChildren(row);
+}
+
+function appendClientCredentialCell(row, text, color) {
+    const cell = document.createElement('td');
+    cell.style.padding = '4px 6px';
+    if (color) cell.style.color = color;
+    cell.textContent = text;
+    row.appendChild(cell);
+    return cell;
+}
+
+async function addClientCredential() {
+    const hostInput = document.getElementById('client-cred-host');
+    const pwdInput = document.getElementById('client-cred-password');
+    const deviceHost = (hostInput?.value || '').trim();
+    const password = pwdInput?.value || '';
+
+    if (!/^[^@\s<>"'`]+@[^@\s<>"'`]+$/.test(deviceHost)) {
+        showToast('请输入 user@ip 格式的设备主机', 'warning');
+        return;
+    }
+    if (!password) {
+        showToast('请输入密码', 'warning');
+        return;
+    }
+
+    try {
+        await apiCall('/api/config/client-ssh-credentials', 'POST', { device_host: deviceHost, password });
+        showToast('凭据已保存', 'success');
+        if (hostInput) hostInput.value = '';
+        if (pwdInput) pwdInput.value = '';
+        await loadClientCredentials();
+    } catch (error) {
+        showToast('保存凭据失败: ' + error.message, 'error');
+    }
+}
+
+async function deleteClientCredential(deviceHost) {
+    if (!deviceHost) return;
+    if (!confirm(`确认删除凭据：${deviceHost}？`)) return;
+    try {
+        await apiCall('/api/config/client-ssh-credentials', 'DELETE', { device_host: deviceHost });
+        showToast('凭据已删除', 'success');
+        await loadClientCredentials();
+    } catch (error) {
+        showToast('删除凭据失败: ' + error.message, 'error');
+    }
 }
 
 function closeModal(modalId) {

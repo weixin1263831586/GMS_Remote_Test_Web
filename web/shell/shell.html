@@ -274,6 +274,25 @@
     </style>
 </head>
 <body>
+    <div id="auth-gate" class="auth-gate" style="display: none;">
+        <form class="auth-panel" onsubmit="event.preventDefault(); submitAuthForm();" autocomplete="on">
+            <div class="auth-title" id="auth-title">登录</div>
+            <div class="auth-row">
+                <label for="auth-username">用户名</label>
+                <input id="auth-username" name="username" type="text" autocomplete="username" required>
+            </div>
+            <div class="auth-row">
+                <label for="auth-password">密码</label>
+                <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+            </div>
+            <div class="auth-row" id="auth-display-name-row" style="display: none;">
+                <label for="auth-display-name">显示名</label>
+                <input id="auth-display-name" name="display_name" type="text" autocomplete="name">
+            </div>
+            <div class="auth-message" id="auth-message"></div>
+            <button id="auth-submit" class="btn-primary auth-submit" type="submit">登录</button>
+        </form>
+    </div>
     <div class="main-container">
         <!-- 左侧导航栏 -->
         <aside class="sidebar">
@@ -2725,6 +2744,12 @@
 
             // 渲染设备列表
             tbody.innerHTML = devices.map(device => {
+                const serialNo = device.serial_no || device.device_id || '';
+                const serialAttr = escapeIconAttr(serialNo);
+                const actionButtonStyle = 'width: 92px; min-width: 92px; font-size: 12px; padding: 4px 8px;';
+                const releaseButton = device.locked_by
+                    ? `<button class="btn-xxs" data-serial="${serialAttr}" onclick="forceReleaseDeviceLock(this.dataset.serial)" title="强制释放该设备的平台占用锁" style="background: var(--danger-color); color: white; ${actionButtonStyle}">释放设备</button>`
+                    : `<span style="visibility: hidden; width: 92px; min-width: 92px;"></span>`;
                 const sourceTypeBadge = device.source_type === 'local'
                     ? '<span style="background: rgba(76, 175, 80, 0.2); color: var(--success-color); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: 600;">测试主机</span>'
                     : '<span style="background: rgba(255, 152, 0, 0.2); color: var(--warning-color); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: 600;">USB/IP</span>';
@@ -2785,12 +2810,47 @@
                             ${device.locked_by || '-'}
                         </td>
                         <td style="padding: 4px 6px; text-align: center; white-space: nowrap;">
-                            <button class="btn-xxs" onclick="openDeviceShell('${device.serial_no}')" style="background: var(--primary-color); font-size: 12px; padding: 4px 10px;">🐧 adb shell</button>
-                            <button class="btn-xxs" onclick="openDeviceConfigExplorer('${device.serial_no}')" title="查看设备信息：configs 配置资源 / packages 已装包 / features 特性" style="background: var(--success-color); color: white; font-size: 12px; padding: 4px 10px;">ℹ️ device info</button>
+                            <div style="display: grid; grid-template-columns: repeat(3, 92px); gap: 6px; justify-content: center; align-items: center;">
+                                <button class="btn-xxs" data-serial="${serialAttr}" onclick="openDeviceShell(this.dataset.serial)" style="background: var(--primary-color); ${actionButtonStyle}">🐧 adb shell</button>
+                                <button class="btn-xxs" data-serial="${serialAttr}" onclick="openDeviceConfigExplorer(this.dataset.serial)" title="查看设备信息：configs 配置资源 / packages 已装包 / features 特性" style="background: var(--success-color); color: white; ${actionButtonStyle}">ℹ️ device info</button>
+                                ${releaseButton}
+                            </div>
                         </td>
                     </tr>
                 `;
             }).join('');
+        }
+
+        async function forceReleaseDeviceLock(serialNo) {
+            if (!serialNo || serialNo === '-') {
+                showToast('设备序列号无效，无法释放', 'error');
+                return;
+            }
+            const confirmed = await showConfirmDialog(
+                '释放设备',
+                `确定要强制释放设备 ${serialNo} 的占用锁吗？`
+            );
+            if (!confirmed) return;
+
+            try {
+                const response = await fetch('/api/devices/force-release', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_id: serialNo })
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error || result.message || '释放失败');
+                }
+                showToast('设备占用锁已释放', 'success');
+                await loadDevicesManagement();
+                if (typeof refreshDevices === 'function') {
+                    refreshDevices();
+                }
+            } catch (error) {
+                console.error('[Devices] Force release failed:', error);
+                showToast(`释放设备失败: ${error.message}`, 'error');
+            }
         }
 
         // 打开设备ADB Shell

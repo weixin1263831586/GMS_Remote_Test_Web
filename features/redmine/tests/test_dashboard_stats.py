@@ -203,24 +203,35 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 pass
 
         client = Client()
-        with patch.object(redmine_router.config_manager, "get_redmine_dashboard_config", return_value={
-            "profiles": [{"id": "system-2", "name": "系统二部", "user_ids": [], "aliases": []}],
-        }), patch.object(redmine_router, "load_redmine_user_map", return_value=[
+        from features.auth.service import CurrentUser
+
+        request = SimpleNamespace(
+            state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
+            cookies={},
+        )
+        stats_api = redmine_router._statistics_api
+        department_users = [
             {"id": 1, "name": "韩金锋", "department_id": "system-2", "department": "系统二部"},
             {"id": 2, "name": "黄超群", "department_id": "system-2", "department": "系统二部"},
-        ]), patch.object(
-            redmine_router._statistics_api,
-            "load_redmine_user_map",
-            return_value=[
-                {"id": 1, "name": "韩金锋", "department_id": "system-2", "department": "系统二部"},
-                {"id": 2, "name": "黄超群", "department_id": "system-2", "department": "系统二部"},
-            ],
+        ]
+        with patch.object(
+            stats_api,
+            "_dashboard_config_for_request",
+            return_value={
+                "profiles": [{"id": "system-2", "name": "系统二部", "user_ids": [], "aliases": []}],
+                "defaults": {"list_limit": 50, "issue_limit": 500},
+            },
         ), patch.object(
-            redmine_router._statistics_api.redmine_service.agent,
-            "_make_client",
-            return_value=client,
+            stats_api,
+            "_user_map_for_request",
+            return_value=department_users,
+        ), patch.object(
+            stats_api,
+            "_service_for_request",
+            return_value=SimpleNamespace(agent=SimpleNamespace(_make_client=lambda: client)),
         ):
-            result = asyncio.run(redmine_router.get_resolved_issues_by_date(
+            result = asyncio.run(stats_api.get_resolved_issues_by_date(
+                request,
                 start="2026-06-12",
                 end="2026-06-13",
                 names="",
@@ -571,6 +582,20 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             _owners_for_department_profile(cfg, cfg["department_profiles"][0]),
             ["all@example.com", "a@example.com", "b@example.com"],
         )
+
+    def test_redmine_department_profiles_are_derived_from_user_map_when_runtime_config_empty(self):
+        dashboard = import_module("features.redmine.dashboard")
+        users = [
+            {"id": 1, "name": "Alice", "department_id": "system-2", "department": "系统二部"},
+            {"id": 2, "name": "Bob", "department_id": "system-1", "department": "系统一部"},
+        ]
+
+        cfg = dashboard.with_department_profiles_from_users({}, users)
+        profile = dashboard.select_redmine_dashboard_profile(cfg, "system-2")
+        selected = dashboard.filter_users_for_profile(users, profile)
+
+        self.assertEqual(profile["name"], "系统二部")
+        self.assertEqual([user["name"] for user in selected], ["Alice"])
 
 
 if __name__ == "__main__":

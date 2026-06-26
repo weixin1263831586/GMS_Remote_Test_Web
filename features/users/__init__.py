@@ -1,4 +1,5 @@
 from .clients import (
+    get_client_display_id_from_request,
     get_client_id_from_request,
     get_client_ip,
     get_client_source,
@@ -16,6 +17,7 @@ from .users_api import list_users
 __all__ = [
     "ClientInfoRequest",
     "client_manager",
+    "get_client_display_id_from_request",
     "get_client_id_from_request",
     "get_client_ip",
     "get_client_source",

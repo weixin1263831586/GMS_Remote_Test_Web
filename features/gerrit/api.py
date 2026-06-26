@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from features.auth.service import require_authenticated_user
 from features.gerrit.config import (
     add_gerrit_department_profile,
     add_gerrit_personal_profile,
@@ -22,7 +23,6 @@ from features.gerrit.config import (
     summarize_gerrit_department_results,
     sync_gerrit_members_from_redmine_users,
 )
-from features.gerrit.dependencies import list_redmine_users
 from features.gerrit.service import (
     _effective_history_limit,
     _extract_query_limit,
@@ -31,6 +31,7 @@ from features.gerrit.service import (
     _select_profile,
 )
 from features.gerrit.settings import config_manager
+from features.redmine.users import load_redmine_user_map_for_owner
 
 
 router = APIRouter(prefix="/api/gerrit-dashboard")
@@ -38,15 +39,40 @@ page_router = APIRouter()
 _STATS_CACHE: dict[str, Any] = {}
 
 
+def _request_user_id(request: Request) -> str:
+    return require_authenticated_user(request).id
+
+
+def _config_for_request(request: Request):
+    # Gerrit 看板读登录用户的隔离配置（data/redmine/by_user/<owner>/config_runtime.json）。
+    # 多用户隔离模式下，配置与凭据随登录用户落盘；端点据此读写 per-user runtime。
+    return config_manager.for_owner(_request_user_id(request))
+
+
+def _redmine_users_for_request(request: Request) -> list[dict[str, Any]]:
+    # 部门成员邮箱→中文名映射读登录用户的 user_map（与 Redmine 看板一致）。
+    return load_redmine_user_map_for_owner(_request_user_id(request))
+
+
+def _dashboard_config_for_request(request: Request) -> dict[str, Any]:
+    cfg = _config_for_request(request).get_gerrit_dashboard_config()
+    return sync_gerrit_members_from_redmine_users(
+        cfg,
+        _redmine_users_for_request(request),
+    )
+
+
 @router.get("/config")
-async def get_gerrit_dashboard_config():
-    return {"success": True, "data": _public_config(config_manager.get_gerrit_dashboard_config())}
+async def get_gerrit_dashboard_config(request: Request):
+    manager = _config_for_request(request)
+    return {"success": True, "data": _public_config(_dashboard_config_for_request(request), manager=manager)}
 
 
 @router.post("/config")
 async def update_gerrit_dashboard_config(request: Request):
     body = await request.json()
-    current = config_manager.get_gerrit_dashboard_config()
+    manager = _config_for_request(request)
+    current = manager.get_gerrit_dashboard_config()
     updates: dict[str, Any] = {}
     for key in ("base_url", "rest_username", "ssh_host", "ssh_user", "default_owner"):
         if key in body:
@@ -80,10 +106,10 @@ async def update_gerrit_dashboard_config(request: Request):
     if "chart_date_ranges" in body and isinstance(body.get("chart_date_ranges"), dict):
         updates["chart_date_ranges"] = body["chart_date_ranges"]
     merged = {**current, **updates}
-    if not config_manager.save_gerrit_dashboard_config(merged):
+    if not manager.save_gerrit_dashboard_config(merged):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save Gerrit dashboard config"})
     _STATS_CACHE.clear()
-    return {"success": True, "data": _public_config(config_manager.get_gerrit_dashboard_config())}
+    return {"success": True, "data": _public_config(_dashboard_config_for_request(request), manager=manager)}
 
 
 @router.post("/personal-profiles")
@@ -94,7 +120,8 @@ async def create_gerrit_personal_profile(request: Request):
     profile_id = str(body.get("id") or "").strip()
     department_id = str(body.get("department_id") or "").strip()
     department_name = str(body.get("department") or "").strip()
-    current_cfg = config_manager.get_gerrit_dashboard_config()
+    manager = _config_for_request(request)
+    current_cfg = manager.get_gerrit_dashboard_config()
     if department_id:
         current_cfg = _ensure_gerrit_department_profile(current_cfg, department_id, department_name or department_id)
     try:
@@ -107,10 +134,10 @@ async def create_gerrit_personal_profile(request: Request):
         )
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
-    if not config_manager.save_gerrit_dashboard_config(dashboard_cfg):
+    if not manager.save_gerrit_dashboard_config(dashboard_cfg):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save Gerrit personal profile"})
     _STATS_CACHE.clear()
-    return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg), "profile": dashboard_cfg["personal_profiles"][-1]}}
+    return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": dashboard_cfg["personal_profiles"][-1]}}
 
 
 @router.post("/department-profiles")
@@ -121,66 +148,70 @@ async def create_gerrit_department_profile(request: Request):
     raw_owners = body.get("owners") or []
     if isinstance(raw_owners, str):
         raw_owners = [item.strip() for item in raw_owners.replace(";", ",").split(",")]
+    manager = _config_for_request(request)
     try:
         dashboard_cfg = add_gerrit_department_profile(
-            config_manager.get_gerrit_dashboard_config(),
+            manager.get_gerrit_dashboard_config(),
             name,
             profile_id,
             owners=raw_owners,
         )
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
-    if not config_manager.save_gerrit_dashboard_config(dashboard_cfg):
+    if not manager.save_gerrit_dashboard_config(dashboard_cfg):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save Gerrit department profile"})
     _STATS_CACHE.clear()
-    return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg), "profile": dashboard_cfg["department_profiles"][-1]}}
+    return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": dashboard_cfg["department_profiles"][-1]}}
 
 
 @router.post("/department-profiles/{profile_id}/owners")
 async def add_gerrit_department_owner(profile_id: str, request: Request):
     body = await request.json()
     owner = str(body.get("owner") or "").strip()
+    manager = _config_for_request(request)
     try:
-        dashboard_cfg = assign_owner_to_gerrit_department(config_manager.get_gerrit_dashboard_config(), profile_id, owner)
+        dashboard_cfg = assign_owner_to_gerrit_department(manager.get_gerrit_dashboard_config(), profile_id, owner)
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
-    if not config_manager.save_gerrit_dashboard_config(dashboard_cfg):
+    if not manager.save_gerrit_dashboard_config(dashboard_cfg):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save Gerrit department owner"})
     _STATS_CACHE.clear()
     profile = select_gerrit_department_profile(dashboard_cfg, profile_id)
-    return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg), "profile": profile}}
+    return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": profile}}
 
 
 @router.delete("/department-profiles/{profile_id}/owners")
 async def delete_gerrit_department_owner(profile_id: str, request: Request):
     body = await request.json()
     owner = str(body.get("owner") or "").strip()
+    manager = _config_for_request(request)
     try:
-        dashboard_cfg = remove_owner_from_gerrit_department(config_manager.get_gerrit_dashboard_config(), profile_id, owner)
+        dashboard_cfg = remove_owner_from_gerrit_department(manager.get_gerrit_dashboard_config(), profile_id, owner)
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
-    if not config_manager.save_gerrit_dashboard_config(dashboard_cfg):
+    if not manager.save_gerrit_dashboard_config(dashboard_cfg):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to remove Gerrit department owner"})
     _STATS_CACHE.clear()
     profile = select_gerrit_department_profile(dashboard_cfg, profile_id)
-    return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg), "profile": profile}}
+    return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": profile}}
 
 
 @router.post("/sync-redmine-members")
-async def sync_gerrit_redmine_members():
+async def sync_gerrit_redmine_members(request: Request):
+    manager = _config_for_request(request)
     dashboard_cfg = sync_gerrit_members_from_redmine_users(
-        config_manager.get_gerrit_dashboard_config(),
-        list_redmine_users(),
+        manager.get_gerrit_dashboard_config(),
+        _redmine_users_for_request(request),
     )
-    if not config_manager.save_gerrit_dashboard_config(dashboard_cfg):
+    if not manager.save_gerrit_dashboard_config(dashboard_cfg):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to sync Redmine members to Gerrit dashboard"})
     _STATS_CACHE.clear()
-    return {"success": True, "data": _public_config(config_manager.get_gerrit_dashboard_config())}
+    return {"success": True, "data": _public_config(_dashboard_config_for_request(request), manager=manager)}
 
 
 @router.get("/changes")
-async def list_gerrit_changes(profile_id: str = Query(""), query: str = Query("")):
-    cfg = config_manager.get_gerrit_dashboard_config()
+async def list_gerrit_changes(request: Request, profile_id: str = Query(""), query: str = Query("")):
+    cfg = _dashboard_config_for_request(request)
     profile = _select_profile(cfg, profile_id)
     effective_query = (query or profile.get("query") or "status:open").strip()
     if "limit:" not in effective_query:
@@ -198,11 +229,12 @@ async def list_gerrit_changes(profile_id: str = Query(""), query: str = Query(""
             },
         }
     result = await _query_gerrit_dual_mode(cfg, effective_query, max_changes=_extract_query_limit(effective_query) or cfg["query_limit"])
-    return {"success": True, "data": {**result, "configured": True, "config": _public_config(cfg), "profile": profile, "query": effective_query}}
+    return {"success": True, "data": {**result, "configured": True, "config": _public_config(cfg, manager=_config_for_request(request)), "profile": profile, "query": effective_query}}
 
 
 @router.get("/changes-by-date")
 async def list_gerrit_changes_by_date(
+    request: Request,
     owners: str = Query(""),
     start: str = Query(""),
     end: str = Query(""),
@@ -210,7 +242,7 @@ async def list_gerrit_changes_by_date(
     profile_id: str = Query(""),
     limit: int = Query(500, ge=1, le=2000),
 ):
-    cfg = config_manager.get_gerrit_dashboard_config()
+    cfg = _dashboard_config_for_request(request)
     owner_list = [item.strip() for item in str(owners or "").split(",") if item.strip()]
     if not owner_list:
         return {"success": False, "error": "owners is required"}
@@ -266,11 +298,12 @@ async def list_gerrit_changes_by_date(
 
 @router.get("/statistics/personal")
 async def get_gerrit_personal_statistics(
+    request: Request,
     profile_id: str = Query(""),
     owner: str = Query(""),
     refresh: bool = Query(False),
 ):
-    cfg = config_manager.get_gerrit_dashboard_config()
+    cfg = _dashboard_config_for_request(request)
     profile = select_gerrit_personal_profile(cfg, profile_id, owner)
     owner_text = str(owner or profile.get("owner") or cfg.get("default_owner") or "").strip()
     if not owner_text:
@@ -278,7 +311,7 @@ async def get_gerrit_personal_statistics(
     list_limit = int(profile.get("list_limit") or cfg["defaults"]["list_limit"])
     query_limit = _effective_history_limit(profile, cfg["defaults"])
     page_size = int(profile.get("query_page_size") or cfg["defaults"].get("query_page_size") or 500)
-    cache_key = f"personal:{owner_text}:{list_limit}:{query_limit}:{page_size}"
+    cache_key = f"{_request_user_id(request)}:personal:{owner_text}:{list_limit}:{query_limit}:{page_size}"
     cached = _get_cache(cache_key, cfg["cache_ttl"], refresh)
     if cached is not None:
         return {"success": True, "data": {**cached, "cache_hit": True}}
@@ -305,10 +338,11 @@ async def get_gerrit_personal_statistics(
 
 @router.get("/statistics/department")
 async def get_gerrit_department_statistics(
+    request: Request,
     profile_id: str = Query(""),
     refresh: bool = Query(False),
 ):
-    cfg = config_manager.get_gerrit_dashboard_config()
+    cfg = _dashboard_config_for_request(request)
     profile = select_gerrit_department_profile(cfg, profile_id)
     owners = _owners_for_department_profile(cfg, profile)
     if not owners:
@@ -324,7 +358,7 @@ async def get_gerrit_department_statistics(
     list_limit = int(profile.get("list_limit") or cfg["defaults"]["list_limit"])
     query_limit = _effective_history_limit(profile, cfg["defaults"])
     page_size = int(profile.get("query_page_size") or cfg["defaults"].get("query_page_size") or 500)
-    cache_key = f"department:{profile.get('id')}:{','.join(owners)}:{list_limit}:{query_limit}:{page_size}"
+    cache_key = f"{_request_user_id(request)}:department:{profile.get('id')}:{','.join(owners)}:{list_limit}:{query_limit}:{page_size}"
     cached = _get_cache(cache_key, cfg["cache_ttl"], refresh)
     if cached is not None:
         return {"success": True, "data": {**cached, "cache_hit": True}}
@@ -335,7 +369,7 @@ async def get_gerrit_department_statistics(
     # 最后回退邮箱前缀。供部门成员表显示中文姓名。
     owner_names: dict[str, str] = {}
     try:
-        for entry in list_redmine_users():
+        for entry in _redmine_users_for_request(request):
             email = str(entry.get("email") or "").strip().lower()
             name = str(entry.get("name") or "").strip()
             if email and name:
@@ -383,26 +417,28 @@ async def get_gerrit_department_statistics(
     return {"success": True, "data": data}
 
 
-def _public_config(cfg: dict[str, Any]) -> dict[str, Any]:
+def _public_config(cfg: dict[str, Any], manager=None) -> dict[str, Any]:
     public = dict(cfg or {})
     if public.get("rest_password"):
         public["rest_password"] = "***"
     try:
-        public["redmine_departments"] = _redmine_department_options()
+        public["redmine_departments"] = _redmine_department_options(manager=manager)
     except Exception:
         public["redmine_departments"] = []
     return public
 
 
-def _redmine_department_options() -> list[dict[str, str]]:
-    redmine_cfg = config_manager.get_redmine_dashboard_config()
-    rows = []
-    for profile in redmine_cfg.get("profiles") or []:
-        profile_id = str(profile.get("id") or "").strip()
-        if not profile_id or profile_id == "all":
+def _redmine_department_options(manager=None) -> list[dict[str, str]]:
+    rows: dict[str, str] = {}
+    for user in load_redmine_user_map():
+        profile_id = str(user.get("department_id") or "").strip()
+        if not profile_id:
             continue
-        rows.append({"id": profile_id, "name": str(profile.get("name") or profile_id).strip()})
-    return rows
+        rows.setdefault(profile_id, str(user.get("department") or profile_id).strip() or profile_id)
+    return [
+        {"id": profile_id, "name": name}
+        for profile_id, name in sorted(rows.items(), key=lambda item: item[1])
+    ]
 
 
 def _ensure_gerrit_department_profile(cfg: dict[str, Any], department_id: str, department_name: str = "") -> dict[str, Any]:

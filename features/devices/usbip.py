@@ -136,6 +136,30 @@ def wait_for_adb_serial_ready(ssh, serial_no: str, timeout: int = 30) -> dict[st
         'devices': (devices_out or devices_err or '').strip(),
     }
 
+
+def parse_adb_device_states(output: str) -> dict[str, str]:
+    """Parse all adb-visible serials, including recovery/offline/unauthorized."""
+    states: dict[str, str] = {}
+    for raw_line in (output or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.lower().startswith("list of devices"):
+            continue
+        parts = line.split()
+        if len(parts) >= 2:
+            states[parts[0]] = parts[1]
+    return states
+
+
+def parse_fastboot_devices(output: str) -> list[str]:
+    """Parse fastboot device serials."""
+    devices: list[str] = []
+    for raw_line in (output or "").splitlines():
+        parts = raw_line.strip().split()
+        if len(parts) >= 2 and parts[1].lower() == "fastboot":
+            devices.append(parts[0])
+    return devices
+
+
 class USBIPManager:
     """
     USB/IP管理器
@@ -245,6 +269,7 @@ class USBIPManager:
                 try:
                     # 确保vhci驱动已加载
                     self._ensure_vhci_driver(ubuntu_ssh)
+                    detach_ubuntu_usbip_ports(ubuntu_ssh, usbip_attach_host, detach_all=False)
 
                     # Attach设备
                     attached, device_list = self._attach_devices(
@@ -262,7 +287,13 @@ class USBIPManager:
                             'device_list': []
                         }
 
-                    # 更新设备来源记录
+                    protocol_status = self._scope_protocol_status(
+                        self.probe_protocol_status(ubuntu_ssh),
+                        device_list,
+                    )
+
+                    # 更新设备来源记录。只有 ADB serial 稳定后才按 serial 记录来源；
+                    # fastboot/recovery/reboot 中 serial 可能暂时不可见或状态不是 device。
                     for device_id in device_list:
                         self.device_sources[device_id] = {
                             'source': device_host,
@@ -273,9 +304,11 @@ class USBIPManager:
 
                     return {
                         'success': True,
-                        'message': f'✅ 成功连接{len(attached)}个设备: {", ".join(attached)}',
+                        'message': self._build_attach_message(attached, device_list, protocol_status),
                         'devices': attached,
-                        'device_list': device_list
+                        'device_list': device_list,
+                        'transport_connected': True,
+                        'protocol_status': protocol_status,
                     }
 
                 except Exception as e:
@@ -436,11 +469,18 @@ class USBIPManager:
         device_ip: str,
         busids: list[str]
     ) -> tuple[list[str], list[str]]:
-        """在Ubuntu上attach设备，返回已attach的BUSID和新设备ID列表"""
+        """在Ubuntu上attach设备，返回已attach的BUSID和ADB device态新设备ID列表"""
         try:
             # 获取attach前的设备列表
             stdout_before, _, _ = self.ssh_manager.execute_command(ssh, 'adb devices')
             devices_before = set(DeviceUtils.parse_adb_devices(stdout_before))
+            adb_states_before = parse_adb_device_states(stdout_before)
+            fastboot_before_out, fastboot_before_err, _ = self.ssh_manager.execute_command(
+                ssh,
+                'fastboot devices',
+                timeout=5,
+            )
+            fastboot_before = set(parse_fastboot_devices(fastboot_before_out or fastboot_before_err or ""))
             logger.info(f"Devices before attach: {devices_before}")
 
             # Attach设备
@@ -465,6 +505,7 @@ class USBIPManager:
             deadline = time.time() + 30
             while time.time() < deadline:
                 stdout_after, _, _ = self.ssh_manager.execute_command(ssh, 'adb devices', timeout=8)
+                adb_states = parse_adb_device_states(stdout_after)
                 devices_after = set(DeviceUtils.parse_adb_devices(stdout_after))
                 logger.info(f"Devices after attach: {devices_after}")
 
@@ -472,6 +513,26 @@ class USBIPManager:
                 if new_devices:
                     logger.info(f"New devices via USB/IP: {new_devices}")
                     return attached, new_devices
+
+                non_device_adb = {
+                    serial: state
+                    for serial, state in adb_states.items()
+                    if state != "device" and adb_states_before.get(serial) != state
+                }
+                if non_device_adb:
+                    logger.info(f"USB/IP protocol visible but not ADB device-ready: {non_device_adb}")
+                    return attached, []
+
+                fastboot_out, fastboot_err, _ = self.ssh_manager.execute_command(
+                    ssh,
+                    'fastboot devices',
+                    timeout=5,
+                )
+                fastboot_devices = parse_fastboot_devices(fastboot_out or fastboot_err or "")
+                new_fastboot_devices = sorted(set(fastboot_devices) - fastboot_before)
+                if new_fastboot_devices:
+                    logger.info(f"USB/IP fastboot devices visible: {new_fastboot_devices}")
+                    return attached, []
 
                 for device_id in devices_after:
                     if device_id in self.device_sources:
@@ -500,6 +561,88 @@ class USBIPManager:
         except Exception as e:
             logger.error(f"Error attaching devices: {e}")
             return [], []
+
+    def probe_protocol_status(self, ssh) -> dict[str, Any]:
+        """Probe Android protocol states after USB/IP transport is attached."""
+        status: dict[str, Any] = {
+            "adb": {},
+            "adb_ready": [],
+            "recovery": [],
+            "sideload": [],
+            "unauthorized": [],
+            "offline": [],
+            "fastboot": [],
+            "mode": "unknown",
+        }
+        try:
+            adb_out, adb_err, _ = self.ssh_manager.execute_command(ssh, "adb devices", timeout=8)
+            adb_states = parse_adb_device_states(adb_out or adb_err or "")
+            status["adb"] = adb_states
+            status["adb_ready"] = [serial for serial, state in adb_states.items() if state == "device"]
+            status["recovery"] = [serial for serial, state in adb_states.items() if state == "recovery"]
+            status["sideload"] = [serial for serial, state in adb_states.items() if state == "sideload"]
+            status["unauthorized"] = [serial for serial, state in adb_states.items() if state == "unauthorized"]
+            status["offline"] = [serial for serial, state in adb_states.items() if state == "offline"]
+        except Exception as exc:
+            logger.debug("[USB/IP] adb protocol probe failed: %s", exc)
+
+        try:
+            fastboot_out, fastboot_err, _ = self.ssh_manager.execute_command(ssh, "fastboot devices", timeout=8)
+            status["fastboot"] = parse_fastboot_devices(fastboot_out or fastboot_err or "")
+        except Exception as exc:
+            logger.debug("[USB/IP] fastboot protocol probe failed: %s", exc)
+
+        if status["fastboot"]:
+            status["mode"] = "fastboot"
+        elif status["recovery"] or status["sideload"]:
+            status["mode"] = "recovery"
+        elif status["adb_ready"]:
+            status["mode"] = "adb"
+        elif status["unauthorized"]:
+            status["mode"] = "unauthorized"
+        elif status["offline"]:
+            status["mode"] = "offline"
+        elif status["adb"]:
+            status["mode"] = "adb_non_device"
+        return status
+
+    def _build_attach_message(
+        self,
+        attached: list[str],
+        device_list: list[str],
+        protocol_status: dict[str, Any],
+    ) -> str:
+        if device_list:
+            return f'✅ 成功连接{len(attached)}个USB/IP设备，ADB在线: {", ".join(device_list)}'
+        mode = (protocol_status or {}).get("mode") or "unknown"
+        if mode in {"fastboot", "recovery", "unauthorized", "offline", "adb_non_device"}:
+            return f'✅ USB/IP传输已连接，当前协议状态: {mode}'
+        return f'✅ USB/IP传输已连接，等待设备枚举完成'
+
+    def _scope_protocol_status(
+        self,
+        protocol_status: dict[str, Any],
+        device_list: list[str],
+    ) -> dict[str, Any]:
+        """Keep protocol status focused on the USB/IP devices from this attach."""
+        if not device_list:
+            return protocol_status
+        allowed = set(device_list)
+        scoped = dict(protocol_status or {})
+        adb_states = scoped.get("adb") or {}
+        if isinstance(adb_states, dict):
+            scoped["adb"] = {
+                serial: state
+                for serial, state in adb_states.items()
+                if serial in allowed
+            }
+        for key in ("adb_ready", "recovery", "sideload", "unauthorized", "offline", "fastboot"):
+            values = scoped.get(key) or []
+            if isinstance(values, list):
+                scoped[key] = [serial for serial in values if serial in allowed]
+        if scoped.get("adb_ready"):
+            scoped["mode"] = "adb"
+        return scoped
 
     def check_usbipd_installed(self, ssh) -> tuple[bool, str]:
         """

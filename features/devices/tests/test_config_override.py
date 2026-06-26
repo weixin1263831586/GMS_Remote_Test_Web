@@ -203,6 +203,17 @@ class TestStore(unittest.TestCase):
             self.store.list_entries("d2")[0].value,
         )
 
+    def test_owner_namespaces_are_isolated(self):
+        alice = OverrideStore(self.path, owner_id="alice")
+        bob = OverrideStore(self.path, owner_id="bob")
+
+        alice.upsert("d", OverrideEntry("config_foo", "bool", "true"))
+        bob.upsert("d", OverrideEntry("config_foo", "bool", "false"))
+
+        self.assertEqual(alice.list_entries("d")[0].value, "true")
+        self.assertEqual(bob.list_entries("d")[0].value, "false")
+        self.assertEqual(self.store.list_entries("d"), [])
+
     def test_empty_device_id_uses_default_key(self):
         self.store.upsert(None, OverrideEntry("a", "bool", "true"))
         with open(self.path, encoding="utf-8") as f:

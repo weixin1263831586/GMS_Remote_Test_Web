@@ -16,9 +16,9 @@ from foundation.responses import error_response, success_response
 from . import reconnect, runtime
 from .locks import device_lock_manager
 from .manager import device_manager
-from .models import DeviceActionRequest, DeviceShellRequest, WifiConnectRequest
+from .models import DeviceActionRequest, DeviceLockRequest, DeviceShellRequest, WifiConnectRequest
 from .screens_api import router as screens_router
-from .support import SSHConnection
+from .support import SSHConnection, broadcast_device_lock_update
 from .usbip import wait_for_adb_serial_ready
 from .utils import DeviceUtils
 
@@ -129,7 +129,9 @@ def _build_devices_management_payload(
                 "source_type": source_type,
                 "source_host": source_host,
                 "status": "online",
-                "locked_by": lock_info.get("client_id", "") if device_id in locks else "",
+                "locked_by": lock_info.get("username", "") if device_id in locks else "",
+                "locked_username": lock_info.get("username", "") if device_id in locks else "",
+                "locked_client_id": lock_info.get("client_id", "") if device_id in locks else "",
                 "locked_by_self": (
                     lock_info.get("client_id") == client_id
                     if device_id in locks
@@ -210,6 +212,46 @@ async def list_user_locks():
     """List all user-locked devices."""
     return JSONResponse(
         content={"success": True, "data": device_lock_manager.get_all_locks()}
+    )
+
+
+@router.post("/api/devices/force-release")
+async def force_release_device_locks(req: DeviceLockRequest):
+    """Force release platform device occupation locks."""
+    device_ids = []
+    if req.device_id:
+        device_ids.append(req.device_id)
+    if req.devices:
+        device_ids.extend(req.devices)
+    device_ids = list(dict.fromkeys(
+        str(device_id or "").strip()
+        for device_id in device_ids
+        if str(device_id or "").strip()
+    ))
+
+    if not device_ids:
+        return JSONResponse(
+            content={"success": False, "error": "No devices selected"},
+            status_code=400,
+        )
+
+    results = []
+    for device_id in device_ids:
+        success, message = device_lock_manager.force_unlock_device(device_id)
+        results.append(
+            {
+                "device_id": device_id,
+                "success": success,
+                "message": message,
+            }
+        )
+
+    await broadcast_device_lock_update(device_ids)
+    return JSONResponse(
+        content={
+            "success": all(item["success"] for item in results),
+            "results": results,
+        }
     )
 
 

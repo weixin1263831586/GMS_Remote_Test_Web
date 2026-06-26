@@ -64,3 +64,13 @@ class DeviceLifecycleTests(unittest.TestCase):
         monitor.invalidate_device_cache(state)
 
         self.assertEqual(state.device_cache, {"devices": [], "timestamp": 0})
+
+    def test_suppressed_usbip_device_is_hidden_from_monitor_getter(self):
+        reconnect.suppress_usbip_reconnect("host", ["USBIP001"])
+        try:
+            self.assertEqual(
+                reconnect.filter_suppressed_usbip_devices(["LOCAL001", "USBIP001"]),
+                ["LOCAL001"],
+            )
+        finally:
+            reconnect.clear_usbip_reconnect_suppression("host", ["USBIP001"])

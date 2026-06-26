@@ -2,6 +2,8 @@ import unittest
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 class GerritConfigTests(unittest.TestCase):
@@ -106,6 +108,67 @@ class GerritConfigTests(unittest.TestCase):
             self.assertEqual(runtime["redmine_auth"]["username"], "u")
             self.assertEqual(runtime["sidebar_order"], ["test"])
             self.assertEqual(runtime["gerrit_dashboard"]["base_url"], "https://10.10.10.29")
+
+    def test_gerrit_request_config_is_isolated_per_user(self):
+        """Gerrit 看板按登录用户隔离：不同用户的 _config_for_request 指向各自的 per-user runtime。"""
+        import features.gerrit.api as gerrit_api
+        from features.auth.service import CurrentUser
+
+        def request_for(user_id):
+            return SimpleNamespace(
+                state=SimpleNamespace(current_user=CurrentUser(user_id, user_id, "user")),
+                cookies={},
+            )
+
+        alice_cfg = gerrit_api._config_for_request(request_for("alice-isolated"))
+        bob_cfg = gerrit_api._config_for_request(request_for("bob-isolated"))
+        # 不同登录用户拿到各自的 per-user runtime 路径，互不干扰。
+        self.assertNotEqual(
+            str(alice_cfg.runtime_config_path),
+            str(bob_cfg.runtime_config_path),
+        )
+        self.assertIn("alice-isolated", str(alice_cfg.runtime_config_path))
+        self.assertIn("bob-isolated", str(bob_cfg.runtime_config_path))
+
+    def test_gerrit_department_config_is_derived_from_redmine_user_map_when_runtime_config_empty(self):
+        import features.gerrit.api as gerrit_api
+        from features.auth.service import CurrentUser
+
+        class FakeManager:
+            def get_gerrit_dashboard_config(self):
+                return {}
+
+            def for_owner(self, owner_id):
+                return self
+
+        request = SimpleNamespace(
+            state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
+            cookies={},
+        )
+        old_manager = gerrit_api.config_manager
+        try:
+            gerrit_api.config_manager = FakeManager()
+            # _redmine_users_for_request 现读 per-user user_map（load_redmine_user_map_for_owner）。
+            with patch.object(gerrit_api, "load_redmine_user_map_for_owner", return_value=[
+                {
+                    "name": "Alice",
+                    "email": "alice@example.com",
+                    "department_id": "system-2",
+                    "department": "系统二部",
+                },
+                {
+                    "name": "Bob",
+                    "email": "bob@example.com",
+                    "department_id": "system-2",
+                    "department": "系统二部",
+                },
+            ]):
+                cfg = gerrit_api._dashboard_config_for_request(request)
+
+            system_2 = next(profile for profile in cfg["department_profiles"] if profile["id"] == "system-2")
+            self.assertEqual(system_2["owners"], ["alice@example.com", "bob@example.com"])
+        finally:
+            gerrit_api.config_manager = old_manager
 
 
 if __name__ == "__main__":

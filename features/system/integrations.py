@@ -26,7 +26,7 @@ from features.system.network import (
     resolve_vpn_connection_name,
 )
 from features.system.ssh import SSHD_INSTALL_GUIDE, ssh_manager
-from features.users import get_client_id_from_request, get_client_ip, resolve_tailscale_device_host
+from features.users import get_client_display_id_from_request, get_client_id_from_request, get_client_ip, resolve_tailscale_device_host
 from foundation.common_utils import CommonUtils
 from foundation.config import config_manager
 from foundation.errors import handle_api_errors
@@ -58,16 +58,34 @@ async def check_ssh_sshd(request: Request, device_host: str | None = Query(None,
         return stdout.read().decode('utf-8', errors='ignore').strip()
 
     config = config_manager.load_config()
-    # 优先使用查询参数中的 device_host，否则使用请求中的客户端ID
+    # 优先使用查询参数中的 device_host，否则尝试 Tailscale/配置/当前客户端 IP。
+    # 注意：client_id 现在是平台用户安全边界（裸 ID），不可作为可连接主机；
+    # 可连接主机由 client_hosts 映射的 username@client_ip 构造。
     if not device_host:
         client_id = get_client_id_from_request(request)
         tunnel_host, _ = resolve_tailscale_device_host(request, client_id)
-        # Tailscale 直连模式：通过 SSH 检查 Windows SSHD 状态
-        # 直接走下面的正常 SSH 检查路径，device_host 为 Tailscale IP
-        device_host = tunnel_host or client_id
+        if tunnel_host:
+            # Tailscale 直连模式：device_host 为 Tailscale 路径下的 user@ip
+            device_host = tunnel_host
+        else:
+            device_host = (
+                config.get("usbip_device_host")
+                or config.get("device_host")
+                or get_client_display_id_from_request(request)
+                or ""
+            )
+
+    # 未配置任何主机地址
+    if not device_host:
+        return JSONResponse(content={
+            'success': False,
+            'error': '未配置设备主机地址。请在「配置」中设置 device_host（格式 user@ip，例如 gms@192.168.1.100）。',
+            'installed': False,
+            'running': False
+        }, status_code=400)
 
     # 验证 device_host 格式
-    if device_host and '@' not in device_host:
+    if '@' not in device_host:
         return JSONResponse(content={
             'success': False,
             'error': f'设备主机格式错误："{device_host}"。正确格式应为 user@ip，例如 user@192.168.1.100',
@@ -347,12 +365,17 @@ async def get_vpn_connections():
 @router.get("/api/vpn/status")
 @handle_api_errors
 async def get_vpn_status():
-    """获取VPN连接状态（多次ping提高可靠性）"""
+    """获取VPN连接状态
+
+    以"是否存在活跃的 VPN 类型连接"为权威判据（与 connect/disconnect 用的
+    nmcli 信号一致），ping 仅作为可达性补充信息——避免手动断开后因 ping 目标
+    仍可达而误报"已连接"。
+    """
     config = config_manager.load_config()
     vpn_target = get_primary_vpn_target(config)
 
     if config_manager.is_config_host_local(config):
-        connected = await asyncio.to_thread(check_local_vpn_connected, vpn_target)
+        connected = await asyncio.to_thread(check_local_vpn_connected)
         return JSONResponse(content={
             "success": True,
             "connected": connected,
@@ -366,37 +389,35 @@ async def get_vpn_status():
                 status_code=500
             )
 
-        max_attempts = 2
-        for attempt in range(max_attempts):
+        # 权威判据：是否存在活跃的 VPN 类型连接（与 disconnect 使用同一信号）。
+        active_vpn = await resolve_vpn_connection_name(config, ssh, active_only=True)
+
+        # 可达性补充：ping 目标是否可达（仅作信息，不单独决定 connected）。
+        ping_reachable = False
+        try:
             output, _, _ = ssh_manager.execute_command(
                 ssh,
-                f"ping -c 1 -W 1 {vpn_target} 2>&1",  # 减少-W timeout从2到1
-                timeout=3  # 减少timeout从5到3
+                f"ping -c 1 -W 1 {vpn_target} 2>&1",
+                timeout=3
             )
-
-            # 检查ping结果（成功则立即返回）
-            if '1 packets transmitted, 1 received' in output or '1 received' in output or 'bytes from' in output:
-                logger.info(f"[VPN Status] {vpn_target}: connected (attempt {attempt + 1})")
-                return JSONResponse(content={"success": True, "connected": True})
-
-        # 所有尝试都失败，尝试通过nmcli检查VPN连接状态
-        try:
-            nmcli_output, _, _ = ssh_manager.execute_command(
-                ssh,
-                "nmcli -t -f NAME,TYPE,STATE connection show --active 2>&1",
-                timeout=3  # 减少timeout从5到3
+            ping_reachable = (
+                '1 packets transmitted, 1 received' in output
+                or '1 received' in output
+                or 'bytes from' in output
             )
-
-            # 检查是否有VPN类型的活跃连接
-            if 'vpn' in nmcli_output.lower() or 'tun' in nmcli_output.lower() or 'tap' in nmcli_output.lower():
-                logger.info(f"[VPN Status] VPN detected via nmcli: {nmcli_output.strip()}")
-                return JSONResponse(content={"success": True, "connected": True})
         except Exception as e:
-            logger.warning(f"[VPN Status] nmcli check failed: {e}")
+            logger.warning(f"[VPN Status] ping check failed: {e}")
 
-        # 所有尝试都失败
-        logger.info(f"[VPN Status] {vpn_target}: disconnected (0/{max_attempts} successful)")
-        return JSONResponse(content={"success": True, "connected": False})
+        connected = bool(active_vpn)
+        logger.info(
+            f"[VPN Status] active_vpn={active_vpn!r}, ping={ping_reachable} -> connected={connected}"
+        )
+        return JSONResponse(content={
+            "success": True,
+            "connected": connected,
+            "vpn_connection_name": active_vpn,
+            "ping_reachable": ping_reachable,
+        })
 
 
 @router.post("/api/vpn/connect")
@@ -407,10 +428,11 @@ async def connect_vpn(
     try:
         config = config_manager.load_config()
         ssh = None
-        if not config_manager.is_config_host_local(config):
+        is_local = config_manager.is_config_host_local(config)
+        if not is_local:
             ssh = ssh_manager.get_connection(config)
 
-        if not config_manager.is_config_host_local(config) and not ssh:
+        if not is_local and not ssh:
             return JSONResponse(
                 content={"success": False, "error": "SSH连接失败"},
                 status_code=500
@@ -488,10 +510,11 @@ async def disconnect_vpn():
     try:
         config = config_manager.load_config()
         ssh = None
-        if not config_manager.is_config_host_local(config):
+        is_local = config_manager.is_config_host_local(config)
+        if not is_local:
             ssh = ssh_manager.get_connection(config)
 
-        if not config_manager.is_config_host_local(config) and not ssh:
+        if not is_local and not ssh:
             return JSONResponse(
                 content={"success": False, "error": "SSH连接失败"},
                 status_code=500

@@ -16,6 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from bootstrap.dependencies import AppServices, build_services
 from bootstrap.lifecycle import create_lifespan
 from bootstrap.routes import include_routes
+from features.auth import AUTH_COOKIE_NAME, auth_service
 from features.system.security_audit import classify_request_source, security_audit_logger
 from features.system.security_audit_utils import (
     can_audit_path,
@@ -48,6 +49,7 @@ def _csv_env(name: str, default: str) -> list[str]:
 
 def create_app(services: AppServices | None = None) -> FastAPI:
     services = build_services() if services is None else services
+    auth_service.initialize()
     app = FastAPI(
         title='GMS Auto Test - FastAPI Server (Port 5001)',
         description='完整的测试管理服务',
@@ -74,9 +76,47 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
     app.add_middleware(GZipMiddleware, minimum_size=500)
 
+    def _is_public_path(path: str, method: str) -> bool:
+        if method == 'OPTIONS':
+            return True
+        if path in {'/', '/favicon.ico'}:
+            return True
+        if path.startswith('/static/'):
+            return True
+        if path in {
+            '/api/auth/status',
+            '/api/auth/setup',
+            '/api/auth/login',
+            '/api/auth/logout',
+            '/api/system/health',
+        }:
+            return True
+        return False
+
     @app.middleware('http')
     async def audit_and_security_headers(request, call_next):
         path = request.url.path
+        token = request.cookies.get(AUTH_COOKIE_NAME)
+        current_user = auth_service.get_user_for_token(token)
+        if current_user:
+            request.state.current_user = current_user
+
+        if path.startswith('/api/') and not _is_public_path(path, request.method):
+            if not current_user:
+                response = JSONResponse(
+                    status_code=401,
+                    content={
+                        'success': False,
+                        'error': 'Authentication required',
+                        'auth_required': True,
+                        'setup_required': auth_service.setup_required(),
+                    },
+                )
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                response.headers['X-Content-Type-Options'] = 'nosniff'
+                response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+                return response
+
         source = classify_request_source(
             request.headers.get('user-agent', ''),
             path,
