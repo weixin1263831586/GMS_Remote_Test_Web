@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -12,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from features.redmine.analysis_ai import AiAnalysisMixin
-from features.redmine.analysis_attachments import AttachmentAnalysisMixin
+from features.redmine.analysis_attachments import IMAGE_ATTACHMENT_RE, PROCESS_ATTACHMENT_RE, AttachmentAnalysisMixin
 from features.redmine.analysis_issue import IssueAnalysisMixin
 from features.redmine.analysis_reporting import ReportingAnalysisMixin
 from features.redmine.analysis_resolution import ResolutionAnalysisMixin
@@ -30,9 +31,6 @@ from foundation.config import settings
 
 logger = logging.getLogger(__name__)
 
-
-PROCESS_ATTACHMENT_RE = re.compile(r"\.(zip|7z|rar|tar|tgz|gz|xml|txt|log|png|jpg|jpeg|webp|bmp|docx)$", re.IGNORECASE)
-IMAGE_ATTACHMENT_RE = re.compile(r"\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE)
 
 # Enhanced error patterns for structured extraction
 _ERROR_LINE_PATTERNS = [
@@ -98,11 +96,26 @@ def _now_iso() -> str:
 
 
 def _iso(value: Any) -> str:
+    """Normalize a Redmine timestamp to ISO 8601 with a 'T' separator.
+
+    Redmine/python-redmine may hand back either a ``datetime`` or a string like
+    ``"2026-06-27 09:08:50"`` (space separator). Normalizing on store keeps the
+    DB consistent so list views sort and compare timestamps uniformly.
+    """
     if value is None:
         return ""
     if isinstance(value, datetime):
         return value.isoformat(timespec="seconds")
-    return str(value)
+    text = str(value).strip()
+    if not text:
+        return ""
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).isoformat(timespec="seconds")
+        except ValueError:
+            continue
+    # Last resort: collapse a space separator to 'T' if it looks like a timestamp.
+    return text.replace(" ", "T", 1) if len(text) >= 10 and text[4:5] == "-" else text
 
 
 def _obj_name(value: Any) -> str:
@@ -162,21 +175,43 @@ class RedmineAgent(
         analyze_new: bool = True,
         max_analyze: int = 20,
         run_id: str = "",
+        assignee_id: int | None = None,
+        assignee_name: str = "",
     ) -> dict[str, Any]:
-        """Fetch ALL assigned issues and store them. Optionally analyze unanalyzed ones."""
+        """Fetch ALL assigned issues and store them. Optionally analyze unanalyzed ones.
+
+        ``assignee_id``/``assignee_name`` restricts the sync to issues assigned to
+        that specific Redmine user. When both are omitted the authenticated user
+        (``assigned_to_id="me"``) is used for backwards compatibility.
+        """
         run_id = run_id or self._generate_run_id("sync-")
         client = self._make_client()
 
         current_user = await client.get_current_user()
-        assigned_to = self._get_user_name(current_user)
+        current_user_name = self._get_user_name(current_user)
+
+        resolved_assignee_id, resolved_assignee_name = await self._resolve_assignee(
+            client,
+            assignee_id=assignee_id,
+            assignee_name=assignee_name,
+            current_user=current_user,
+        )
+        assigned_to = resolved_assignee_name or current_user_name
 
         self.db.create_run(run_id, "sync", _now_iso(), _now_iso(), max_analyze)
         self.db.update_run(run_id, assigned_to=assigned_to)
 
         try:
             _agent_cfg = _load_agent_config()
-            all_issues = await client.fetch_all_assigned_issues(status_id="*", limit=_agent_cfg["sync_max_issues"])
-            logger.info("[RedmineAgent] sync fetched %d assigned issues", len(all_issues))
+            if resolved_assignee_id is not None:
+                all_issues = await client.fetch_issues_by_assignee(
+                    resolved_assignee_id,
+                    status_id="*",
+                    limit=_agent_cfg["sync_max_issues"],
+                )
+            else:
+                all_issues = await client.fetch_all_assigned_issues(status_id="*", limit=_agent_cfg["sync_max_issues"])
+            logger.info("[RedmineAgent] sync fetched %d assigned issues for %s", len(all_issues), assigned_to)
 
             new_count = 0
             updated_count = 0
@@ -271,6 +306,33 @@ class RedmineAgent(
             return {"run_id": run_id, "status": "failed", "error": str(exc)}
         finally:
             await client.close()
+
+    async def _resolve_assignee(
+        self,
+        client: RedmineClient,
+        assignee_id: int | None,
+        assignee_name: str,
+        current_user: Any,
+    ) -> tuple[int | None, str]:
+        """Resolve sync target to (redmine_user_id, display_name)."""
+        name = (assignee_name or "").strip()
+        if assignee_id is not None and int(assignee_id) > 0:
+            user = await asyncio.to_thread(
+                lambda: client._redmine.user.get(int(assignee_id))
+            )
+            return int(assignee_id), self._get_user_name(user)
+        if name:
+            users = await client.search_users(name, limit=10)
+            exact_match: dict[str, Any] | None = None
+            for user in users:
+                if user.get("name") == name or user.get("login") == name:
+                    exact_match = user
+                    break
+            if not exact_match and users:
+                exact_match = users[0]
+            if exact_match:
+                return int(exact_match["id"]), exact_match.get("name") or self._get_user_name(exact_match)
+        return None, self._get_user_name(current_user)
 
     # ------------------------------------------------------------------
     # Timed scan (daily midnight run)
@@ -410,6 +472,7 @@ class RedmineAgent(
                 "attachment_id": attachment.id,
                 "filename": attachment.filename,
                 "content_type": attachment.content_type,
+                "content_url": attachment.content_url,
                 "filesize": attachment.filesize,
                 "local_path": "",
                 "analysis_json": {},

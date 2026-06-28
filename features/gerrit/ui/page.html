@@ -114,12 +114,12 @@
 </header>
 <main>
   <section id="tab-personal" class="tab-content active">
-    <div id="personalStatus" class="muted status-line">加载中...</div>
-    <div id="personalContent"></div>
+    <div id="personalStatus" class="muted status-line"></div>
+    <div id="personalContent"><div class="muted" style="padding:40px;text-align:center">⏳ 正在统计个人 Gerrit 提交...</div></div>
   </section>
   <section id="tab-department" class="tab-content">
-    <div id="departmentStatus" class="muted status-line">加载中...</div>
-    <div id="departmentContent"></div>
+    <div id="departmentStatus" class="muted status-line"></div>
+    <div id="departmentContent"><div class="muted" style="padding:40px;text-align:center">⏳ 正在统计部门 Gerrit 提交...</div></div>
   </section>
   <section id="tab-query" class="tab-content">
     <div class="toolbar">
@@ -242,7 +242,9 @@ async function init() {
   const first = (config.dashboard_profiles || [])[0] || {};
   var queryInput = document.getElementById('query');
   if (queryInput && !queryInput.value) queryInput.value = first.query || 'status:open';
-  const person = (config.personal_profiles || [])[0] || {};
+  // owner 默认值取当前选中 profile 的 owner（与 personalControlsHtml 一致），
+  // 避免深链恢复到非第一条 profile 时首次绘制仍用 [0] 的邮箱、与标题姓名错位。
+  const person = findPersonalProfile(currentPersonalProfileId) || (config.personal_profiles || [])[0] || {};
   const ownerInput = document.getElementById('owner');
   if (ownerInput) ownerInput.value = person.owner || config.default_owner || 'chaoqun.huang@rock-chips.com';
   if (currentTab === 'personal') await loadPersonal(false);
@@ -357,6 +359,8 @@ function restoreGerritProfileState() {
     if (!t) currentTab = window.sessionStorage.getItem('gerritCurrentTab') || currentTab;
     if (!currentPersonalProfileId) currentPersonalProfileId = window.sessionStorage.getItem('gerritPersonalProfileId') || '';
     if (!currentDepartmentProfileId) currentDepartmentProfileId = window.sessionStorage.getItem('gerritDepartmentProfileId') || '';
+    // 默认显示“全部部门”（排在下拉最前），除非用户记忆或 URL 指定了其它部门。
+    if (!currentDepartmentProfileId) currentDepartmentProfileId = 'all';
     var savedQueryProfile = window.sessionStorage.getItem('gerritQueryProfileId') || '';
     var savedQuery = window.sessionStorage.getItem('gerritQueryValue') || '';
     var profileEl = document.getElementById('profile');
@@ -470,12 +474,15 @@ async function refreshCurrentTab() {
     if (btn) { btn.disabled = false; btn.textContent = '刷新'; }
   }
 }
+function findPersonalProfile(id) {
+  return (config.personal_profiles || []).find(x => x.id === id);
+}
 function onPersonalProfileChange() {
   const select = document.getElementById('personalProfile');
   const id = select ? select.value : '';
   currentPersonalProfileId = id;
-  const profile = (config.personal_profiles || []).find(x => x.id === id) || {};
-  if (profile.owner) document.getElementById('owner').value = profile.owner;
+  const profile = findPersonalProfile(id);
+  if (profile && profile.owner) document.getElementById('owner').value = profile.owner;
   saveGerritProfileState();
   loadPersonal(true);
 }
@@ -487,10 +494,10 @@ async function loadPersonal(refresh) {
   const profileId = (profileSelect ? profileSelect.value : '') || currentPersonalProfileId || '';
   currentPersonalProfileId = profileId;
   saveGerritProfileState();
-  document.getElementById('personalStatus').textContent = '统计中...';
+  document.getElementById('personalStatus').textContent = '';
+  document.getElementById('personalContent').innerHTML = placeholderHtml('⏳ 正在统计个人 Gerrit 提交...');
   try {
     const data = await api('/api/gerrit-dashboard/statistics/personal?profile_id=' + encodeURIComponent(profileId) + '&owner=' + encodeURIComponent(owner) + '&refresh=' + (refresh ? 'true' : 'false'));
-    document.getElementById('personalStatus').innerHTML = metaLine(data);
     document.getElementById('personalContent').innerHTML = renderDashboard(data);
     trendOwner = owner;
     trendOwners = owner ? [owner] : [];
@@ -499,7 +506,8 @@ async function loadPersonal(refresh) {
     requestedOwner = '';
   } catch (e) {
     requestedOwner = '';
-    document.getElementById('personalStatus').innerHTML = '<span class="error">' + esc(e.message) + '</span>';
+    document.getElementById('personalContent').innerHTML = placeholderHtml('<span class="error">' + esc(e.message) + '</span>');
+    notifyUser('Gerrit 个人统计失败', e.message, 'error');
   }
 }
 async function loadDepartment(refresh) {
@@ -508,17 +516,18 @@ async function loadDepartment(refresh) {
   const profileId = (profileSelect ? profileSelect.value : '') || currentDepartmentProfileId || '';
   currentDepartmentProfileId = profileId;
   saveGerritProfileState();
-  document.getElementById('departmentStatus').textContent = '统计中...';
+  document.getElementById('departmentStatus').textContent = '';
+  document.getElementById('departmentContent').innerHTML = placeholderHtml('⏳ 正在统计部门 Gerrit 提交...');
   try {
     const data = await api('/api/gerrit-dashboard/statistics/department?profile_id=' + encodeURIComponent(profileId) + '&refresh=' + (refresh ? 'true' : 'false'));
-    document.getElementById('departmentStatus').innerHTML = metaLine(data);
     document.getElementById('departmentContent').innerHTML = renderDepartmentDashboard(data);
     trendOwners = (data.users || []).map(function(u) { return u.owner; }).filter(Boolean);
     trendOwner = '';
     trendScope = 'department';
     trendProfileId = profileId;
   } catch (e) {
-    document.getElementById('departmentStatus').innerHTML = '<span class="error">' + esc(e.message) + '</span>';
+    document.getElementById('departmentContent').innerHTML = placeholderHtml('<span class="error">' + esc(e.message) + '</span>');
+    notifyUser('Gerrit 部门统计失败', e.message, 'error');
   }
 }
 async function loadChanges() {
@@ -535,12 +544,10 @@ async function loadChanges() {
     document.getElementById('status').innerHTML = '<span class="error">' + esc(e.message) + '</span>';
   }
 }
-function metaLine(data) {
-  const parts = [
-    data.rest_error ? 'REST失败后回退: ' + data.rest_error : '',
-    data.error ? '错误: ' + data.error : ''
-  ].filter(Boolean);
-  return esc(parts.join(' / '));
+// 居中占位/错误块：scope 为 '个人'|'部门'。供 personal/department 看板共用，
+// 避免在 loadPersonal/loadDepartment 里重复内联同一段 wrapper HTML。
+function placeholderHtml(innerHtml) {
+  return '<div class="muted" style="padding:40px;text-align:center">' + innerHtml + '</div>';
 }
 function renderSummaryHeader(title, controlsHtml, metaHtml) {
   return '<div class="dashboard-summary-header"><h2 class="dashboard-summary-title">' + esc(title) + '</h2>' + (controlsHtml ? '<div class="dashboard-summary-controls">' + controlsHtml + '</div>' : '') + (metaHtml ? '<div class="muted dashboard-summary-meta">' + metaHtml + '</div>' : '') + '</div>';
@@ -693,6 +700,16 @@ function renderDepartmentUsers(users) {
   }).join('');
   return '<section class="list-section"><h2>成员汇总</h2><div class="muted" style="margin:-4px 0 10px;font-size:12px">点击任意成员行可在个人看板查看其详细提交。</div><div class="dept-table-wrap"><table class="dept-table"><thead><tr><th>姓名</th><th>邮箱</th><th>历史提交</th><th>已合并</th><th>未合并</th><th>待评审</th><th>错误</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
 }
+// 部门名排序键：识别“系统N部”里的中文数字编号，让 系统一部<系统二部<…<系统十部。
+// 返回 [前缀, 编号, 后缀]；无编号的部门编号记为 Infinity，排在编号部门之后。
+// 用码点而非 localeCompare：拼音排序会把“系统二部”排到“系统一部”前面（èr<yī），反直觉。
+const _DEPT_CN_NUM = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10};
+function departmentSortKey(name) {
+  name = String(name || '');
+  const m = name.match(/^(.*?)([一二三四五六七八九十])(.*)$/);
+  if (m) return [m[1], _DEPT_CN_NUM[m[2]] || 0, m[3]];
+  return [name, Infinity, ''];
+}
 function departmentOptionsHtml(selectedId, includeAll) {
   const seen = {};
   const departments = [];
@@ -708,6 +725,15 @@ function departmentOptionsHtml(selectedId, includeAll) {
   });
   return departments.filter(function(p) {
     return includeAll || p.id !== 'all';
+  }).sort(function(a, b) {
+    // “全部部门”始终置顶；其余按部门名里的中文数字编号排序（系统一部<系统二部<…<系统十部），
+    // 没有数字编号的（如 Platform）按 Unicode 码点排在编号部门之后。
+    // 用码点而非 localeCompare：拼音排序会把“系统二部”排到“系统一部”前面（èr<yī），反直觉。
+    if (a.id === 'all') return -1;
+    if (b.id === 'all') return 1;
+    const ka = departmentSortKey(a.name || a.id);
+    const kb = departmentSortKey(b.name || b.id);
+    return (ka < kb) ? -1 : (ka > kb) ? 1 : 0;
   }).map(function(p) {
     return '<option value="' + esc(p.id) + '" data-name="' + esc(p.name || p.id) + '"' + (p.id === selectedId ? ' selected' : '') + '>' + esc((p.name || p.id) + (p.source === 'redmine' ? ' / Redmine' : '')) + '</option>';
   }).join('');
@@ -717,14 +743,34 @@ function populateDepartmentSelect(selectId, selectedId, includeAll) {
   if (!select) return;
   select.innerHTML = departmentOptionsHtml(selectedId || '', includeAll) || '<option value="">暂无部门</option>';
 }
+// 成员排序：先按部门（与部门看板一致的 departmentSortKey，系统一部<系统二部<…），
+// 同部门内按姓名拼音序（通讯录习惯）；无部门的成员排最后。
+// 显式多级比较，避免嵌套数组做字典序时不可靠。
+function compareMembers(a, b) {
+  const da = a.department && String(a.department).trim();
+  const db = b.department && String(b.department).trim();
+  if (!!da !== !!db) return da ? -1 : 1;
+  if (da) {
+    const ka = departmentSortKey(da), kb = departmentSortKey(db);
+    for (let i = 0; i < ka.length; i++) {
+      if (ka[i] < kb[i]) return -1;
+      if (ka[i] > kb[i]) return 1;
+    }
+  }
+  return String(a.name || a.owner || a.id).trim().localeCompare(
+    String(b.name || b.owner || b.id).trim(), 'zh');
+}
 function personalControlsHtml() {
-  return '<div class="select-with-add"><select id="personalProfile" onchange="onPersonalProfileChange()">' + (config.personal_profiles || []).map(p => '<option value="' + esc(p.id) + '"' + (p.id === currentPersonalProfileId ? ' selected' : '') + '>' + esc((p.name || p.owner || p.id) + (p.department ? ' / ' + p.department : '')) + '</option>').join('') + '</select><button class="select-add-btn" type="button" onclick="showAddPersonalModal()" title="添加成员">＋</button></div>'
-    + '<input id="owner" value="' + esc(requestedOwner || (document.getElementById('owner') ? document.getElementById('owner').value : '') || ((config.personal_profiles || [])[0] || {}).owner || config.default_owner || '') + '" placeholder="owner 邮箱">'
-    + '<button onclick="loadPersonal(true)">刷新</button>';
+  const profiles = config.personal_profiles || [];
+  // owner 输入框默认值：当前选中 profile 的 owner 优先，避免选中非第一条时
+  // 邮箱仍显示第一条 owner、与标题姓名错位（姓名/邮箱不同步）。
+  const selectedProfile = findPersonalProfile(currentPersonalProfileId) || profiles[0] || {};
+  return '<div class="select-with-add"><select id="personalProfile" onchange="onPersonalProfileChange()">' + profiles.slice().sort(compareMembers).map(p => '<option value="' + esc(p.id) + '"' + (p.id === currentPersonalProfileId ? ' selected' : '') + '>' + esc((p.department ? p.department + ' / ' : '') + (p.name || p.owner || p.id)) + '</option>').join('') + '</select><button class="select-add-btn" type="button" onclick="showAddPersonalModal()" title="添加成员">＋</button></div>'
+    + '<input id="owner" value="' + esc(requestedOwner || (document.getElementById('owner') ? document.getElementById('owner').value : '') || selectedProfile.owner || config.default_owner || '') + '" placeholder="owner 邮箱">';
 }
 function departmentControlsHtml(profileId) {
   return '<div class="select-with-add"><select id="departmentProfile" onchange="loadDepartment(true)" style="min-width:160px">' + departmentOptionsHtml(profileId, true) + '</select><button class="select-add-btn" type="button" onclick="showAddDepartmentModal(&quot;departmentProfile&quot;)" title="添加部门">＋</button></div>'
-    + '<button class="secondary" onclick="showAddPersonalModal()">成员</button><button class="secondary" onclick="syncRedmineMembers(this)">同步成员</button><button onclick="loadDepartment(true)">刷新</button>';
+    + '<button class="secondary" onclick="syncRedmineMembers(this)">同步成员</button>';
 }
 function renderDepartmentDashboard(data) {
   const profile = data.profile || {};

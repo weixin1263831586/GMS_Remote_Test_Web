@@ -66,8 +66,21 @@ function redmineBaseUrl() {
 function redmineIssueUrl(issueId) {
   return redmineBaseUrl() + '/issues/' + encodeURIComponent(String(issueId || '').trim());
 }
+function redmineIssueAttachmentsUrl(issueId) {
+  return redmineIssueUrl(issueId) + '#attachments';
+}
+function redmineAttachmentDownloadUrl(attachmentId) {
+  return redmineBaseUrl() + '/attachments/download/' + encodeURIComponent(String(attachmentId || '').trim()) + '/';
+}
 function redmineIssueUrls(items) {
   return (items || []).map(function(item) { return item.issue_id || ''; }).filter(Boolean).map(redmineIssueUrl);
+}
+function formatBytes(bytes) {
+  var n = Number(bytes || 0);
+  if (!n) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(n >= 100 * 1024 ? 0 : 1) + ' KB';
+  return (n / 1024 / 1024).toFixed(2) + ' MB';
 }
 function departmentProfiles() {
   return ((statsConfig.dashboard || {}).profiles || []);
@@ -96,9 +109,19 @@ var _NL = String.fromCharCode(10);
 var _HTML_RE = /<pre><code(?:\s+class="(\w*)")?\s*>([\s\S]*?)<\/code><\/pre>/g;
 
 function _nl2br(s) { return s.replace(new RegExp(_NL, 'g'), '<br>'); }
+function normalizeDisplayText(text) {
+  return String(text == null ? '' : text).replace(/\\r\\n/g, _NL).replace(/\\n/g, _NL).replace(/\r\n/g, _NL);
+}
+
+function renderIssueRichText(text, defaultClass) {
+  text = normalizeDisplayText(text);
+  if (!text.trim()) return '<div class="muted">-</div>';
+  return '<div class="' + (defaultClass || 'rich-field') + '">' + renderMarkdownDoc(text) + '</div>';
+}
 
 function renderFormattedContent(text, defaultClass) {
   if (!text) return '';
+  text = normalizeDisplayText(text);
   var cls = defaultClass || 'field-content';
   var result = '';
   var parts = []; // {type:'text'|'code', content, lang}
@@ -128,6 +151,17 @@ function renderFormattedContent(text, defaultClass) {
     if (lastIdx < text.length) parts.push({type:'text', content:text.slice(lastIdx), lang:''});
   }
 
+  // If still no blocks, try to auto-detect code-like text (stack traces,
+  // shell commands, key:value logs) so plain problem_description / error_analysis
+  // get formatted as readable code blocks instead of a wall of escaped text.
+  if (!parts.length || (parts.length === 1 && parts[0].type === 'text')) {
+    var raw = parts.length ? parts[0].content : text;
+    var auto = _splitAutoCode(raw);
+    if (auto.length > 1 || (auto.length === 1 && auto[0].type === 'code')) {
+      parts = auto;
+    }
+  }
+
   // If still no blocks, return escaped text
   if (!parts.length) return _nl2br(esc(text));
 
@@ -143,6 +177,210 @@ function renderFormattedContent(text, defaultClass) {
     }
   }
   return result || _nl2br(esc(text));
+}
+
+// Split plain text into alternating {type:'text'|'code'} segments by detecting
+// code-like lines: stack traces (at foo.bar(File.java:123)), shell commands
+// ($/run/adb/fastboot prefixes), file:line failures, and key:value log lines.
+function _splitAutoCode(text) {
+  text = String(text || '');
+  if (!text.trim()) return [];
+  var lines = text.split(_NL);
+  var segments = [];
+  var textBuf = [];
+  var codeBuf = [];
+  var inCode = false;
+
+  function flush() {
+    if (codeBuf.length) { segments.push({type:'code', content: codeBuf.join(_NL), lang: _guessCodeLang(codeBuf)}); codeBuf = []; }
+    if (textBuf.length) { segments.push({type:'text', content: textBuf.join(_NL), lang:''}); textBuf = []; }
+  }
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var isCode = _isCodeLikeLine(line, lines, i);
+    if (isCode && !inCode) { flush(); inCode = true; }
+    else if (!isCode && inCode) {
+      // Allow a single blank line inside a code run to continue it.
+      if (line.trim() === '' && codeBuf.length && i + 1 < lines.length && _isCodeLikeLine(lines[i+1], lines, i+1)) {
+        codeBuf.push(line); continue;
+      }
+      flush(); inCode = false;
+    }
+    if (inCode) codeBuf.push(line); else textBuf.push(line);
+  }
+  flush();
+  return segments;
+}
+
+function _isCodeLikeLine(line, lines, idx) {
+  var s = String(line || '');
+  if (!s.trim()) return false;
+  // Unified diff blocks, including command + diff output pasted from Redmine.
+  if (/^\s*diff\s+--git\s+/.test(s)) return true;
+  if (/^\s*index\s+[0-9a-f]+\.\.[0-9a-f]+/.test(s)) return true;
+  if (/^\s*(---|\+\+\+)\s+[ab]\//.test(s)) return true;
+  if (/^\s*@@\s+[-+0-9, ]+@@/.test(s)) return true;
+  if (idx > 0 && (/^\s*[+-]/.test(s)) && lines && lines.slice(Math.max(0, idx - 6), idx).some(function(prev) {
+    return /^\s*(diff\s+--git|---\s+[ab]\/|\+\+\+\s+[ab]\/|@@\s+)/.test(prev);
+  })) return true;
+  // Stack trace: "at com.foo.Bar.method(File.java:123)"
+  if (/^\s*at\s+[\w.$]+\(/.test(s)) return true;
+  // Caused by / Exception / Error
+  if (/^\s*(Caused by:|Exception|Error|FATAL|AssertionFailedError)/.test(s)) return true;
+  // File:line failure (gtest/vts): "path.cpp:123: Failure"
+  if (/[\w./\\]+\.(cpp|java|kt|py|h|c|cc):\d+:\s*(Failure|error|FAIL)?/i.test(s)) return true;
+  // Shell command prefixes
+  if (/^\s*\$\s/.test(s)) return true;
+  if (/^\s*(run\s+\w+|adb\s|fastboot\s|python\d?\s|git\s|make\s|cd\s)/.test(s)) return true;
+  // Logcat / kernel log: "12-12 15:41:11.123 X/Tag( 123): ..."
+  if (/^\s*\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/.test(s)) return true;
+  if (/^\s*\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return true;
+  // Test result lines: "[1/1] abc def TestRunner"
+  if (/^\s*\[\d+\/\d+\]\s/.test(s)) return true;
+  if (/\bFAILURE\b|\[\s*FAILED\s*\]|^\s*(Value of:|Actual:|Expected:)/i.test(s)) return true;
+  // "失败模块: / 失败用例: / 关键报错:" key:value analysis lines (only when mixed with code)
+  return false;
+}
+
+function _guessCodeLang(codeLines) {
+  var sample = (codeLines || []).slice(0, 16).join(_NL);
+  if (/^\s*diff\s+--git\s+/m.test(sample) || /^---\s+[ab]\//m.test(sample) || /^\+\+\+\s+[ab]\//m.test(sample) || /^@@\s+/m.test(sample)) return 'diff';
+  if (/^\s*\$\s/m.test(sample) || /^\s*(run|adb|fastboot|python|git|make|cd)\s/m.test(sample)) return 'shell';
+  return '';
+}
+
+// Lightweight markdown rendering for the full issue document (headings,
+// tables, lists, code fences). Avoids pulling in a full markdown lib.
+function renderMarkdownDoc(text) {
+  text = normalizeDisplayText(text);
+  if (!text.trim()) return '';
+  var lines = text.split(_NL);
+  var html = '';
+  var i = 0;
+  while (i < lines.length) {
+    var line = lines[i];
+    // Fenced code block ```lang ... ```
+    var fence = line.match(/^```(\w*)\s*$/);
+    if (fence) {
+      var lang = fence[1] || '';
+      var buf = [];
+      i++;
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
+      i++; // skip closing fence
+      var code = buf.join(_NL);
+      if (lang === 'diff') html += renderDiffBlock(code);
+      else if (lang === 'shell' || lang === 'bash' || lang === 'sh') html += renderShellBlock(code);
+      else html += renderGenericCodeBlock(code, lang);
+      continue;
+    }
+    // HTML <pre><code> blocks (legacy agent docs)
+    if (/<pre><code/.test(line)) {
+      var hbuf = [];
+      while (i < lines.length && !/<\/code><\/pre>/.test(lines[i])) { hbuf.push(lines[i]); i++; }
+      if (i < lines.length) { hbuf.push(lines[i]); i++; }
+      html += renderFormattedContent(hbuf.join(_NL), 'field-content');
+      continue;
+    }
+    // Table: a line with | followed by a separator line |---|
+    if (/^\s*\|/.test(line) && i + 1 < lines.length && /^\s*\|?[\s:-]+\|[\s:-|]+/.test(lines[i+1])) {
+      var rows = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i])) { rows.push(lines[i]); i++; }
+      html += _renderMarkdownTable(rows);
+      continue;
+    }
+    // Headings
+    var h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      var level = h[1].length;
+      html += '<h' + level + ' class="md-h">' + esc(h[2]) + '</h' + level + '>';
+      i++; continue;
+    }
+    // Unordered list
+    if (/^\s*[-*]\s+/.test(line)) {
+      var items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*]\s+/, '')); i++; }
+      html += '<ul class="md-ul">' + items.map(function(t){ return '<li>' + _inlineMd(esc(t)) + '</li>'; }).join('') + '</ul>';
+      continue;
+    }
+    // Ordered list
+    if (/^\s*\d+\.\s+/.test(line)) {
+      var oitems = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { oitems.push(lines[i].replace(/^\s*\d+\.\s+/, '')); i++; }
+      html += '<ol class="md-ol">' + oitems.map(function(t){ return '<li>' + _inlineMd(esc(t)) + '</li>'; }).join('') + '</ol>';
+      continue;
+    }
+    // Analysis key/value lines: "失败模块: ...", "关键报错: ...",
+    // "高度相似的历史单: #621439 ..." etc.
+    if (_isKvLine(line)) {
+      var kvRows = [];
+      while (i < lines.length && _isKvLine(lines[i])) {
+        var kv = lines[i].split(/[:：]/);
+        var key = kv.shift() || '';
+        var val = kv.join(':') || '';
+        kvRows.push({key:key.trim(), val:val.trim()});
+        i++;
+      }
+      html += '<div class="md-kv-list">' + kvRows.map(function(row) {
+        return '<div class="md-kv-row"><b>' + esc(row.key) + '</b><span>' + _inlineMd(esc(row.val || '-')) + '</span></div>';
+      }).join('') + '</div>';
+      continue;
+    }
+    // Code-like log lines in plain text.
+    if (_isCodeLikeLine(line, lines, i)) {
+      var cbuf = [];
+      while (i < lines.length && (_isCodeLikeLine(lines[i], lines, i) || (lines[i].trim() === '' && cbuf.length))) {
+        cbuf.push(lines[i]); i++;
+      }
+      html += renderGenericCodeBlock(cbuf.join(_NL), _guessCodeLang(cbuf));
+      continue;
+    }
+    // Blank line
+    if (!line.trim()) { i++; continue; }
+    // Paragraph (merge consecutive non-empty plain lines)
+    var para = [];
+    while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|[-*]\s|\d+\.\s|\|)/.test(lines[i]) && !/<pre><code/.test(lines[i])) {
+      para.push(lines[i]); i++;
+    }
+    if (!para.length) {
+      html += '<p class="md-p">' + _inlineMd(esc(line)) + '</p>';
+      i++;
+      continue;
+    }
+    html += '<p class="md-p">' + _nl2br(_inlineMd(esc(para.join(_NL)))) + '</p>';
+  }
+  return html;
+}
+
+function _renderMarkdownTable(rows) {
+  if (rows.length < 2) return esc(rows.join(_NL));
+  var header = rows[0].split('|').map(function(c){return c.trim();}).filter(function(_, idx, arr){ return !(idx === 0 && arr[0] === '') && !(idx === arr.length-1 && arr[arr.length-1] === ''); });
+  var body = rows.slice(2).map(function(r){
+    var cells = r.split('|').map(function(c){return c.trim();});
+    // drop leading/trailing empty from split on |
+    if (cells.length && cells[0] === '') cells.shift();
+    if (cells.length && cells[cells.length-1] === '') cells.pop();
+    return '<tr>' + cells.map(function(c){return '<td>' + _inlineMd(esc(c)) + '</td>';}).join('') + '</tr>';
+  }).join('');
+  return '<table class="md-table"><thead><tr>' + header.map(function(c){return '<th>' + esc(c) + '</th>';}).join('') + '</tr></thead><tbody>' + body + '</tbody></table>';
+}
+
+function _inlineMd(text) {
+  // `code`, **bold**, [link](url)
+  return String(text || '')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+    .replace(/(^|[^\w/])#(\d{5,})\b/g, function(_, prefix, id) {
+      return prefix + '<a href="' + redmineIssueUrl(id) + '" target="_blank">#' + id + '</a>';
+    });
+}
+
+function _isKvLine(line) {
+  var s = String(line || '').trim();
+  if (!s || s.length > 500) return false;
+  if (!/^[^:：]{2,40}[:：]\s*\S/.test(s)) return false;
+  return /^(失败模块|失败用例|关键报错|高度相似|描述\/附件报错|附件证据|历史回复|测试模块|测试用例|模块|问题|根因|方案说明|解决方法|补丁方向|验证方式|参考文档|应用目录|建议参考历史单)[:：]/.test(s);
 }
 function renderDiffBlock(code) {
   var lines = code.split(_NL).map(function(line) {
@@ -190,6 +428,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'tab-' + tab));
   if (tab === 'issues') loadIssues();
+  else if (tab === 'cases') loadCases();
   else if (tab === 'runs') loadRuns();
   else if (tab === 'department') loadDepartmentOverdue(false);
   else if (tab === 'project') loadProjectDashboard(false);
@@ -202,7 +441,7 @@ async function refreshCurrentTab() {
   refreshBtns.forEach(function(b) { if (b.textContent.includes('刷新')) targetBtn = b; });
   if (targetBtn) { targetBtn.disabled = true; targetBtn.textContent = '⏳ 刷新中...'; }
   try {
-    await (currentTab === 'issues' ? loadIssues() : currentTab === 'runs' ? loadRuns() : currentTab === 'department' ? loadDepartmentOverdue(true) : currentTab === 'project' ? loadProjectDashboard(true) : loadStatistics());
+    await (currentTab === 'issues' ? loadIssues() : currentTab === 'cases' ? loadCases() : currentTab === 'runs' ? loadRuns() : currentTab === 'department' ? loadDepartmentOverdue(true) : currentTab === 'project' ? loadProjectDashboard(true) : loadStatistics());
   } finally {
     if (targetBtn) { targetBtn.disabled = false; targetBtn.textContent = '刷新'; }
   }
@@ -216,12 +455,13 @@ async function initStatsUserSelect() {
   try {
     var data = await api('/api/redmine-agent/users');
     var items = (data.items || []).slice().sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
-    select.innerHTML = '<option value="">当前登录用户</option>' + items.map(function(item) {
+    select.innerHTML = items.map(function(item) {
       var name = item.name || '';
       return '<option value="' + esc(name) + '">' + esc(name) + '</option>';
     }).join('');
+    // 默认选中当前登录用户：优先 URL 上的 name，否则用后端返回的 current_name。
     var q = new URLSearchParams(window.location.search);
-    var name = q.get('name') || '';
+    var name = q.get('name') || data.current_name || '';
     if (name) select.value = name;
   } catch (_) {}
 }
@@ -591,14 +831,19 @@ function renderIssueCard(item) {
   const refs = item.references_json || [];
   const failures = item.failures_json || [];
   const ai = item.ai_json || {};
+  const attachments = item.attachment_links || [];
 
   // Extract seven fields
   const title = esc(item.subject || ai.title || '-');
-  const problemDesc = esc(item.problem_description || item.description || '-');
+  const problemDesc = _buildProblemDescription(item, attachments);
   const errorInfoRaw = item.error_info || _extractErrorHtml(failures) || '-';
-  const errorAnalysis = esc(item.error_analysis || ai.root_cause_guess || '-');
+  const errorAnalysis = item.error_analysis || ai.root_cause_guess || '-';
   const solutionRaw = item.solution || ai.solution || '-';
   const patchRaw = item.patch_direction || ai.patch_direction || '-';
+  const attachmentLinks = attachments;
+  const hasPatch = patchRaw && patchRaw !== '-' && patchRaw !== '需要进一步分析具体日志和源码'
+    && !String(patchRaw).includes('未从现有证据中提取到明确补丁')
+    && !String(patchRaw).includes('当前缺少可定位补丁');
 
   const statusClass = ['已关闭','Closed','已解决','Resolved'].includes(item.status_name) ? 'ok' :
                       ['紧急','Urgent'].includes(item.priority_name) ? 'high' :
@@ -630,16 +875,7 @@ function renderIssueCard(item) {
   // Build references HTML — full display, no truncation
   let refsHtml = '';
   if (refs.length) {
-    refsHtml = refs.map(r => {
-      const level = r.similarity_level || 'low';
-      const score = (r.score || 0).toFixed(0);
-      const levelText = level === 'high' ? '高' : level === 'medium' ? '中' : '低';
-      return `<div class="ref-item">
-        <a href="${redmineIssueUrl(r.issue_id)}" target="_blank">#${r.issue_id}</a>
-        <span class="ref-badge ${level}">${levelText} ${score}</span>
-        <span class="ref-title">${esc(r.subject || '')}</span>
-      </div>`;
-    }).join('');
+    refsHtml = '<div class="ref-card-list">' + refs.map(renderReferenceCard).join('') + '</div>';
   } else {
     refsHtml = '<div class="muted">暂无参考单</div>';
   }
@@ -681,27 +917,32 @@ function renderIssueCard(item) {
 
     <div class="field">
       <div class="field-label">📝 问题描述</div>
-      <div class="field-content">${trunc(problemDesc, 500)}</div>
+      ${renderIssueRichText(problemDesc)}
     </div>
 
     <div class="field">
       <div class="field-label">🔴 报错信息</div>
-      ${renderFormattedContent(trunc(errorInfoCombined, 2000), 'field-content error-section')}
+      ${renderIssueRichText(errorInfoCombined, 'rich-field error-rich')}
     </div>
 
     <div class="field">
       <div class="field-label">🔍 报错分析</div>
-      <div class="field-content">${trunc(errorAnalysis, 800)}</div>
+      ${renderIssueRichText(errorAnalysis)}
     </div>
 
     <div class="field">
       <div class="field-label">✅ 解决方案</div>
-      <div class="field-content solution-section">${renderFormattedContent(trunc(solutionRaw, 1500), 'field-content solution-section')}</div>
+      <div class="solution-section">${renderMarkdownDoc(solutionRaw)}</div>
     </div>
 
-    ${patchRaw && patchRaw !== '-' && patchRaw !== '需要进一步分析具体日志和源码' ? `<div class="field">
+    <div class="field">
+      <div class="field-label">📎 Redmine附件 / 补丁</div>
+      ${renderAttachmentLinks(item.issue_id, attachmentLinks)}
+    </div>
+
+    ${hasPatch ? `<div class="field">
       <div class="field-label">🔧 解决补丁</div>
-      ${renderFormattedContent(patchRaw, 'field-content')}
+      ${renderIssueRichText(patchRaw)}
     </div>` : ''}
 
     ${refs.length ? `<div class="field">
@@ -709,8 +950,54 @@ function renderIssueCard(item) {
       ${refsHtml}
     </div>` : ''}
 
-    <details><summary>📄 完整文档</summary><div class="formatted-doc">${renderFormattedContent(item.doc_content || '', 'field-content')}</div></details>
+    <details class="issue-doc-details" ontoggle="loadIssueDocOnToggle(this, ${item.issue_id})">
+      <summary>📄 完整文档</summary>
+      <div class="formatted-doc muted">展开后加载完整文档…</div>
+    </details>
+
+    <div class="knowledge-actions">
+      <button class="ka-btn primary" onclick="agentReplyDraft(${item.issue_id}, this)" title="复用报告分析风格生成 Redmine 回复草稿、根因和补丁方向">✉️ Redmine回复</button>
+      <button class="ka-btn" onclick="refreshIssueMetadata(${item.issue_id})" title="只刷新Redmine历史回复和附件元数据，不下载附件">🔄 刷新附件元数据</button>
+      <button class="ka-btn" onclick="toggleIssueWorkbench(${item.issue_id})" title="展开相似工单、历史回复和附件解析摘要">🧩 展开依据</button>
+    </div>
+    <div id="issue-workbench-${item.issue_id}" class="issue-workbench" style="display:none"></div>
   </div>`;
+}
+
+function renderReferenceCard(r) {
+  const level = r.similarity_level || 'low';
+  const score = Number(r.score || 0).toFixed(0);
+  const levelText = level === 'high' ? '高' : level === 'medium' ? '中' : '低';
+  return `<div class="ref-card">
+    <div class="ref-item">
+      <a href="${redmineIssueUrl(r.issue_id)}" target="_blank">#${r.issue_id}</a>
+      <span class="ref-badge ${level}">${levelText} ${score}</span>
+      <span class="ref-title">${esc(r.subject || '')}</span>
+    </div>
+  </div>`;
+}
+
+function _buildProblemDescription(item, attachments) {
+  const parts = [];
+  const desc = item.problem_description || item.description || '';
+  if (desc && String(desc).trim() && String(desc).trim() !== '-') parts.push(String(desc).trim());
+  const attachmentNotes = (attachments || []).map(function(a) {
+    const analysis = a.analysis_json || {};
+    const details = analysis.details || {};
+    const excerpt = analysis.text_excerpt || details.ocr_text || '';
+    const detected = details.detected_errors || [];
+    if (!excerpt && !detected.length) return '';
+    var lines = [`**附件**: ${a.filename || '-'}`];
+    if (detected.length) lines.push(`检测到: ${detected.join(' / ')}`);
+    if (excerpt) lines.push(excerpt.trim());
+    return lines.join('\n');
+  }).filter(Boolean);
+  if (attachmentNotes.length) {
+    parts.push('');
+    parts.push('**附件分析**: ');
+    parts.push(attachmentNotes.join('\n\n'));
+  }
+  return parts.join('\n') || '-';
 }
 
 function _extractErrorHtml(failures) {
@@ -718,15 +1005,95 @@ function _extractErrorHtml(failures) {
   return failures.slice(0, 3).map(f => `[${f.module || '-'}] ${f.name || '-'}: ${trunc(f.reason || '', 200)}`).join(_NL);
 }
 
+function renderAttachmentLinks(issueId, attachments) {
+  const items = attachments || [];
+  if (!items.length) {
+    return `<div class="muted">本地暂无附件元数据。可点击“刷新附件元数据”从 Redmine 拉取附件名；或直接打开 <a href="${redmineIssueAttachmentsUrl(issueId)}" target="_blank">Redmine 附件区</a>。</div>`;
+  }
+  return `<div class="attachment-link-list">${items.map(a => {
+    const name = String(a.filename || '');
+    const lower = name.toLowerCase();
+    const kind = lower.endsWith('.diff') || lower.endsWith('.patch') ? '补丁'
+      : (/\.(png|jpg|jpeg|webp|bmp)$/i.test(lower) ? '截图' : '报告');
+    const patchDir = kind === '补丁' ? '/vendor/rockchip/modules/power_ext' : '';
+    // Same-origin proxy download (no page navigation); falls back to Redmine
+    // link only when we have no attachment_id to proxy through the backend.
+    const attId = a.attachment_id || a.id || '';
+    const safeName = esc(name || '-');
+    const linkHtml = attId
+      ? `<a href="/api/redmine-agent/issues/${issueId}/attachments/${encodeURIComponent(attId)}/download" download="${esc(name)}" title="直接下载(不跳转)">${safeName}</a>`
+      : `<a href="${esc(a.url || redmineIssueAttachmentsUrl(issueId))}" target="_blank">${safeName}</a>`;
+    return `<div class="attachment-link-item">
+      <span class="attachment-kind">${esc(kind)}</span>
+      ${linkHtml}
+      ${patchDir ? `<span class="patch-dir">应用目录：${esc(patchDir)}</span>` : ''}
+    </div>`;
+  }).join('')}</div>`;
+}
+
+async function loadIssueDocOnToggle(details, issueId) {
+  if (!details || !details.open || details.dataset.loaded === '1') return;
+  const box = details.querySelector('.formatted-doc');
+  if (!box) return;
+  box.innerHTML = '<div class="muted">正在加载完整文档…</div>';
+  try {
+    const data = await api(`/api/redmine-agent/issues/${issueId}/document`);
+    const text = data && data.doc_content ? data.doc_content : (data || '');
+    box.classList.remove('muted');
+    box.innerHTML = renderMarkdownDoc(String(text || '-'));
+    details.dataset.loaded = '1';
+  } catch (e) {
+    box.innerHTML = `<div class="muted">完整文档加载失败: ${esc(e.message)}</div>`;
+  }
+}
+
+async function refreshIssueMetadata(issueId) {
+  try {
+    notifyUser('正在刷新', `#${issueId} 附件和历史回复元数据`);
+    await api(`/api/redmine-agent/issues/${issueId}/metadata`, {method:'POST'});
+    await loadIssues(currentPage);
+    notifyUser('已刷新', `#${issueId} 元数据已更新`);
+  } catch (e) {
+    notifyUser('刷新失败', e.message, 'error');
+  }
+}
+
 function renderPagination(total, limit, offset) {
   const box = document.getElementById('issuesPagination');
   const pages = Math.ceil(total / limit);
   const current = Math.floor(offset / limit) + 1;
   if (pages <= 1) { box.innerHTML = `<div class="muted">共 ${total} 条</div>`; return; }
-  let html = '';
-  if (current > 1) html += `<button onclick="loadIssues(${current-1})">上一页</button>`;
+
+  // Build a windowed page-number list: first, last, current ±2, with ellipses.
+  function pageWindow() {
+    const span = 2;            // pages either side of current
+    const win = new Set([1, pages, current]);
+    for (let p = current - span; p <= current + span; p++) {
+      if (p > 1 && p < pages) win.add(p);
+    }
+    const sorted = Array.from(win).filter(p => p >= 1 && p <= pages).sort((a, b) => a - b);
+    const out = [];
+    for (let i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) out.push('…');
+      out.push(sorted[i]);
+    }
+    return out;
+  }
+
+  const numBtn = (p, label) => {
+    const active = p === current;
+    return `<button class="page-num${active ? ' active' : ''}"${active ? ' disabled' : ''} onclick="loadIssues(${p})">${label}</button>`;
+  };
+
+  let html = `<button onclick="loadIssues(1)"${current === 1 ? ' disabled' : ''}>首页</button>`;
+  html += `<button onclick="loadIssues(${current-1})"${current === 1 ? ' disabled' : ''}>上一页</button>`;
+  for (const p of pageWindow()) {
+    if (p === '…') html += `<span class="muted" style="line-height:32px">…</span>`;
+    else html += numBtn(p, p);
+  }
+  html += `<button onclick="loadIssues(${current+1})"${current === pages ? ' disabled' : ''}>下一页</button>`;
+  html += `<button onclick="loadIssues(${pages})"${current === pages ? ' disabled' : ''}>末页</button>`;
   html += `<span class="muted" style="line-height:32px">第 ${current}/${pages} 页 (共${total}条)</span>`;
-  if (current < pages) html += `<button onclick="loadIssues(${current+1})">下一页</button>`;
   box.innerHTML = html;
 }
 
@@ -881,19 +1248,26 @@ function renderTrend(title, items, keyName, chartKey, detailNames, detailProfile
 }
 
 function renderMiniIssueList(title, items, emptyText, sectionId) {
+  const hasReplyBtn = ['sec-waiting-reply', 'sec-no-reply-3d', 'sec-missing-report'].includes(sectionId);
   const rows = (items || []).map(item => {
     const issueId = item.issue_id || '';
     const reply = item.last_external_reply_by ? `最后回复: ${item.last_external_reply_by}` :
       (item.last_owner_reply_by ? `最后回复: ${item.last_owner_reply_by}` : `附件: ${item.attachment_count || 0}`);
     const note = item.last_external_reply || item.last_owner_reply || '';
     const time = item.last_external_reply_at || item.last_owner_reply_at || item.updated_on || item.created_on || '-';
+    const replyBtn = hasReplyBtn && issueId
+      ? `<button class="ka-btn" onclick="event.stopPropagation();agentReplyDraft(${issueId}, this)" title="AI 生成回复草稿+补丁方向(联网拉取工单详情与历史回复)">✉️ 回复草稿</button>`
+      : '';
     return `<div class="issue-mini">
-      <div><a href="${redmineIssueUrl(issueId)}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
+      <div class="issue-mini-id"><a href="${redmineIssueUrl(issueId)}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
       <div class="issue-mini-title">
         <strong title="${esc(item.subject || '')}">${esc(item.subject || '-')}</strong>
         <span>${esc(reply)}${note ? ' | ' + esc(trunc(note, 120)) : ''}</span>
       </div>
-      <div class="issue-mini-meta">${esc(item.priority_name || '-')}<br>${esc(String(time).slice(0, 16))}</div>
+      <div class="issue-mini-right">
+        <div class="issue-mini-right-meta">${esc(item.priority_name || '-')}<br>${esc(String(time).slice(0, 16))}</div>
+        ${replyBtn}
+      </div>
     </div>`;
   }).join('');
   return `<section class="stats-section" id="${sectionId || ''}"><h2>${esc(title)}</h2><div class="issue-mini-list">${rows || `<div class="muted">${esc(emptyText || '暂无数据')}</div>`}</div></section>`;
@@ -1137,7 +1511,7 @@ async function loadDepartmentOverdue(force) {
   if (!box) return;
   await loadStatsConfig();
   var sd = statsConfig.stale_days || 20;
-  box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计部门看板超阈值未回复问题...</div>';
+  box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计部门Redmine数据...</div>';
   try {
     var defaults = (statsConfig.dashboard || {}).defaults || {};
     var url = '/api/redmine-agent/statistics/department-overdue?stale_days=' + sd
@@ -1176,7 +1550,7 @@ async function loadStatistics() {
 
     const userSelectHtml = '<div class="select-with-add">'
       + '<select id="statsUserSelect" onchange="onStatsUserChange()" style="width:160px">'
-      + '<option value="">当前登录用户</option>'
+      + '<option value="' + esc(selectedName || '加载中...') + '">' + esc(selectedName || '加载中...') + '</option>'
       + '</select>'
       + '<button class="select-add-btn" onclick="showAddUserModal()" title="添加用户">＋</button>'
       + '</div>';
@@ -1326,14 +1700,44 @@ async function startScan() {
 }
 
 async function triggerSync() {
-  if (!confirm('确认全量同步所有指派给你的 Redmine 工单？这可能需要几分钟。')) return;
+  const assignee = (document.getElementById('syncAssigneeInput') || {}).value || '';
+  const target = assignee ? `「${assignee}」名下的` : '指派给你的';
+  if (!confirm(`确认全量同步 ${target} Redmine 工单？这可能需要几分钟。`)) return;
+  const params = new URLSearchParams({max_analyze: '30'});
+  if (assignee) params.set('assignee_name', assignee);
   const btn = document.getElementById('scanBtn');
   try {
-    const started = await api('/api/redmine-agent/sync?max_analyze=30', {method:'POST'});
+    const started = await api(`/api/redmine-agent/sync?${params}`, {method:'POST'});
     if (btn) { btn.disabled = true; btn.textContent = '⏳ 同步中...'; }
     await waitForRun(started.run_id, '同步');
   } catch (e) { notifyUser('同步失败', e.message, 'error'); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '🔍 扫描'; } }
+}
+
+function showResetModal() {
+  const cb = document.getElementById('resetConfirm');
+  if (cb) cb.checked = false;
+  const m = document.getElementById('resetModal');
+  if (m) m.style.display = 'flex';
+}
+
+function hideResetModal() {
+  const m = document.getElementById('resetModal');
+  if (m) m.style.display = 'none';
+}
+
+async function confirmReset() {
+  const cb = document.getElementById('resetConfirm');
+  if (!cb || !cb.checked) {
+    notifyUser('请确认', '需要勾选「我确认删除所有数据」才能继续', 'warning');
+    return;
+  }
+  hideResetModal();
+  try {
+    await api('/api/redmine-agent/reset', {method:'POST'});
+    notifyUser('重置完成', 'Redmine 数据已清空', 'success');
+    refreshCurrentTab();
+  } catch (e) { notifyUser('重置失败', e.message, 'error'); }
 }
 
 async function waitForRun(runId, label) {
@@ -1351,6 +1755,438 @@ async function waitForRun(runId, label) {
   refreshCurrentTab();
   notifyUser('RedmineAgent ' + label + '超时', '任务 ' + runId + ' 等待超时，请检查状态', 'warning');
 }
+
+// ===========================================================================
+// Knowledge base: mature cases, batch import, case analysis, reply drafting
+// ===========================================================================
+let currentCaseOffset = 0;
+const casePageSize = 30;
+let pendingReferenceIssueId = 0;
+let pendingInternalSource = null; // {type:'issue'|'case', id}
+let caseView = 'facts'; // 'facts' (imported issue facts) | 'cases' (mature cases)
+
+function switchCaseView(view) {
+  caseView = view;
+  document.getElementById('viewBtnFacts').classList.toggle('active', view === 'facts');
+  document.getElementById('viewBtnCases').classList.toggle('active', view === 'cases');
+  currentCaseOffset = 0;
+  loadCases();
+}
+
+async function loadCases() {
+  const search = (document.getElementById('caseSearchInput') || {}).value || '';
+  try {
+    if (caseView === 'facts') {
+      const data = await api(`/api/redmine-agent/cases?limit=${casePageSize}&offset=${currentCaseOffset}&search=${encodeURIComponent(search)}`);
+      renderFactsList(data.items || [], data.total || 0);
+    } else {
+      const data = await api(`/api/redmine-agent/mature-cases?limit=${casePageSize}&offset=${currentCaseOffset}&search=${encodeURIComponent(search)}`);
+      renderCasesList(data.items || [], data.total || 0);
+    }
+  } catch (e) {
+    const box = document.getElementById('casesList');
+    if (box) box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderFactsList(items, total) {
+  const box = document.getElementById('casesList');
+  if (!items.length) {
+    box.innerHTML = '<div class="muted" style="padding:14px">暂无已导入的工单。点击右上「📥 批量导入工单」粘贴工单号,或「导入最近20个我的指派」。</div>';
+    return;
+  }
+  box.innerHTML = items.map(f => {
+    const sig = f.error_signature ? `<span class="case-sig">${esc(f.error_signature)}</span>` : '';
+    const scope = [f.chip_platform, f.android_version, f.certification_type, f.module].filter(Boolean).map(esc).join(' / ');
+    const conf = f.confidence ? `<span class="muted" style="float:right">置信度 ${f.confidence}</span>` : '';
+    return `<div class="case-card" onclick="showCaseFact(${f.issue_id})">
+      <div class="case-head"><span class="case-status draft">#${f.issue_id}</span>${sig}${conf}</div>
+      <div class="case-title">${esc(f.subject || '-')}</div>
+      <div class="case-scope muted">${scope || '-'}</div>
+      <div class="case-sources muted">${esc(f.problem_summary || '').slice(0,80)}</div>
+    </div>`;
+  }).join('') + `<div class="muted" style="padding:8px">共 ${total} 条工单事实</div>`;
+}
+
+function renderCasesList(items, total) {
+  const box = document.getElementById('casesList');
+  if (!items.length) {
+    box.innerHTML = '<div class="muted" style="padding:14px">暂无成熟案例。请先「批量导入工单」结构化历史单,再选中若干案例用「📚分析案例」→ 构建成熟案例。</div>';
+    return;
+  }
+  box.innerHTML = items.map(c => {
+    const status = c.status || 'draft';
+    const badge = status === 'approved' ? '✅已审核' : status === 'draft' ? '📝草稿' : esc(status);
+    const sig = c.canonical_error_signature ? `<span class="case-sig">${esc(c.canonical_error_signature)}</span>` : '';
+    const scope = [c.chip_platform, c.android_version, c.certification_type, c.module].filter(Boolean).map(esc).join(' / ');
+    return `<div class="case-card" onclick="showCaseDetail(${c.case_id})">
+      <div class="case-head"><span class="case-status ${status}">${badge}</span>${sig}</div>
+      <div class="case-title">${esc(c.title || '-')}</div>
+      <div class="case-scope muted">${scope || '-'}</div>
+      <div class="case-sources muted">来源: ${(c.source_issue_ids_json||[]).map(i=>'#'+i).join(' ') || '-'}</div>
+    </div>`;
+  }).join('') + `<div class="muted" style="padding:8px">共 ${total} 个案例</div>`;
+}
+
+async function showCaseDetail(caseId) {
+  document.getElementById('caseDetailTitle').textContent = '案例 #' + caseId;
+  const box = document.getElementById('caseDetail');
+  box.innerHTML = '<div class="muted">加载中…</div>';
+  try {
+    const c = await api(`/api/redmine-agent/mature-cases/${caseId}`);
+    const sol = c.solution_json || {};
+    const rules = c.rules_json || [];
+    const sources = c.source_issue_ids_json || [];
+    box.innerHTML = `
+      <div class="field"><div class="field-label">标题</div><div class="field-content">${esc(c.title||'-')}</div></div>
+      <div class="field"><div class="field-label">适用范围</div><div class="field-content">${esc([c.chip_platform,c.android_version,c.certification_type,c.module].filter(Boolean).join(' / ')||'-')}</div></div>
+      <div class="field"><div class="field-label">问题摘要</div><div class="field-content">${esc(c.problem_summary||'-')}</div></div>
+      <div class="field"><div class="field-label">根因</div><div class="field-content">${esc(c.root_cause||'-')}</div></div>
+      <div class="field"><div class="field-label">解决方案</div><div class="field-content">${renderFormattedContent(sol.overview||'-','field-content')}</div></div>
+      ${rules.length?`<div class="field"><div class="field-label">经验规则</div><div class="field-content">${rules.map(r=>esc((r.title||'')+(r.content?': '+r.content:''))).join('<br>')}</div></div>`:''}
+      <div class="field"><div class="field-label">来源工单</div><div class="field-content">${sources.map(i=>`<a href="${redmineIssueUrl(i)}" target="_blank">#${i}</a>`).join(' ')||'-'}</div></div>
+      <div class="case-actions">
+        ${c.status!=='approved'?`<button onclick="approveCase(${caseId})">✅ 审核通过</button>`:''}
+        <button class="secondary" onclick="draftReply(${sources[0]||0}, ${caseId})">✉️ 生成回复</button>
+        <button class="secondary" onclick="startCreateInternalCase(${caseId})">📝 创建内部单</button>
+      </div>`;
+  } catch (e) { box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`; }
+}
+
+async function approveCase(caseId) {
+  try { await api(`/api/redmine-agent/mature-cases/${caseId}/approve`, {method:'POST'}); notifyUser('已审核', '案例 #'+caseId+' 已标记为 approved'); loadCases(); showCaseDetail(caseId); }
+  catch(e){ notifyUser('审核失败', e.message, 'error'); }
+}
+
+// ---- Batch import ----
+function showBatchImportModal() {
+  document.getElementById('batchImportIds').value = '';
+  document.getElementById('batchImportResult').innerHTML = '';
+  showModal('batchImportModal');
+}
+
+function _renderImportResult(data, resultBox) {
+  const items = data.items || [];
+  const done = items.filter(i => i.status === 'done' || i.status === 'exists').length;
+  resultBox.innerHTML = `✅ 完成 ${done}/${items.length}${data.failed ? ` (失败 ${data.failed})` : ''}<br><span class="muted">${items.slice(0, 12).map(i => `#${i.issue_id}:${i.status}`).join('  ')}</span>`;
+  notifyUser('批量导入完成', `成功 ${done}/${items.length}，已自动跳转「工单事实」查看`);
+  hideModal('batchImportModal');
+  switchCaseView('facts');
+}
+
+async function submitBatchImport() {
+  const raw = document.getElementById('batchImportIds').value.trim();
+  const reanalyze = document.getElementById('batchReanalyze').checked;
+  const resultBox = document.getElementById('batchImportResult');
+  if (!raw) { resultBox.innerHTML = '❌ 请先粘贴工单号,或点「导入最近20个」'; return; }
+  resultBox.innerHTML = '⏳ 导入中...';
+  try {
+    const data = await api('/api/redmine-agent/issues/batch-import', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({issue_ids: raw, reanalyze})});
+    _renderImportResult(data, resultBox);
+  } catch(e){ resultBox.innerHTML = `❌ ${esc(e.message)}`; }
+}
+
+async function submitImportRecent(n) {
+  const reanalyze = document.getElementById('batchReanalyze').checked;
+  const resultBox = document.getElementById('batchImportResult');
+  resultBox.innerHTML = `⏳ 导入最近 ${n} 个我的指派工单...`;
+  try {
+    const data = await api(`/api/redmine-agent/issues/import-recent?limit=${n}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({assigned_like: '', reanalyze})});
+    _renderImportResult(data, resultBox);
+  } catch(e){ resultBox.innerHTML = `❌ ${esc(e.message)}`; }
+}
+
+// ---- Per-issue knowledge actions ----
+async function analyzeIssueCase(issueId) {
+  try {
+    const data = await api(`/api/redmine-agent/issues/${issueId}/analyze-case`, {method:'POST'});
+    if (data.status==='done'||data.status==='exists') { notifyUser('已入库', `#${issueId} → 模块 ${data.module||'-'}`); showCaseFact(issueId); }
+    else notifyUser('分析失败', data.error||data.status, 'error');
+  } catch(e){ notifyUser('分析失败', e.message, 'error'); }
+}
+
+async function findSimilarCase(issueId) {
+  openKnowledgeModal(`#${issueId} 相似工单`, '<div class="muted">检索中…</div>');
+  try {
+    const data = await api(`/api/redmine-agent/issues/${issueId}/similar?limit=10`);
+    const items = data.similar || [];
+    if (!items.length) { setKnowledgeBody('<div class="muted">知识库暂无相似工单。请先批量导入历史单。</div>'); return; }
+    setKnowledgeBody(items.map(s=>`<div class="ref-item">
+      <a href="${redmineIssueUrl(s.issue_id)}" target="_blank">#${s.issue_id}</a>
+      <span class="ref-badge ${s.similarity_level}">${s.similarity_level==='high'?'高':s.similarity_level==='medium'?'中':'低'} ${s.score}</span>
+      <span class="ref-title">${esc(s.subject||'')}</span>
+      <span class="muted">[${esc(s.module||'-')}${s.error_signature?'/'+esc(s.error_signature):''}]</span>
+    </div>`).join(''));
+  } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
+}
+
+async function toggleIssueWorkbench(issueId) {
+  const panel = document.getElementById('issue-workbench-' + issueId);
+  if (!panel) return;
+  if (panel.style.display !== 'none') {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  panel.innerHTML = '<div class="muted" style="padding:10px">正在汇总结构化事实、历史回复、附件证据和相似工单…</div>';
+  try {
+    const data = await api(`/api/redmine-agent/issues/${issueId}/workbench?similar_limit=8`);
+    panel.innerHTML = renderIssueWorkbench(data);
+  } catch (e) {
+    panel.innerHTML = `<div class="muted" style="padding:10px">知识面板加载失败: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderIssueWorkbench(data) {
+  const fact = data.fact || {};
+  const sections = data.gms_like_sections || {};
+  const scope = sections.scope || {};
+  const evidence = data.evidence || {};
+  const mature = data.mature_case || null;
+  const similar = data.similar || [];
+  const attachments = evidence.attachment_summary || [];
+  const replies = evidence.reply_summary || [];
+  const failures = evidence.failure_summary || [];
+  const symptoms = sections.symptoms || [];
+  const rules = sections.rules || [];
+  const sourceIds = sections.source_issue_ids || [];
+  return `
+    <div class="workbench-grid">
+      <section class="workbench-block">
+        <div class="workbench-title">GMS风格结构化结论</div>
+        <div class="kv-line"><b>范围</b><span>${esc([scope.chip_platform, scope.android_version, scope.test_version, scope.module].filter(Boolean).join(' / ') || '-')}</span></div>
+        <div class="kv-line"><b>错误签名</b><span>${esc(fact.error_signature || (mature ? mature.canonical_error_signature : '') || '-')}</span></div>
+        <div class="kv-line"><b>问题现象</b><span>${renderListText(symptoms, '暂无结构化现象')}</span></div>
+        <div class="kv-line"><b>根因</b><span>${renderFormattedContent(sections.root_cause || '-', 'field-content')}</span></div>
+        <div class="kv-line"><b>解决方案</b><span>${renderFormattedContent(sections.solution || '-', 'field-content')}</span></div>
+        <div class="kv-line"><b>验证方式</b><span>${esc(sections.verification || '-')}</span></div>
+        ${rules.length ? `<div class="kv-line"><b>经验规则</b><span>${rules.map(r => esc((r.title || '') + (r.content ? ': ' + r.content : ''))).join('<br>')}</span></div>` : ''}
+      </section>
+      <section class="workbench-block">
+        <div class="workbench-title">历史依据</div>
+        ${mature ? `<div class="mature-hit">命中成熟案例 #${mature.case_id}: ${esc(mature.title || '')}</div>` : '<div class="muted">暂无成熟案例命中，可先从相似工单构建。</div>'}
+        <div class="similar-list">${similar.length ? similar.map(s => `
+          <div class="ref-item">
+            <a href="${redmineIssueUrl(s.issue_id)}" target="_blank">#${s.issue_id}</a>
+            <span class="ref-badge ${s.similarity_level || 'low'}">${esc(s.similarity_level || 'low')} ${s.score || 0}</span>
+            <span class="ref-title">${esc(s.subject || '')}</span>
+          </div>`).join('') : '<div class="muted">暂无相似历史工单。</div>'}</div>
+        <div class="source-links">${sourceIds.length ? '来源: ' + sourceIds.map(i => `<a href="${redmineIssueUrl(i)}" target="_blank">#${i}</a>`).join(' ') : ''}</div>
+      </section>
+    </div>
+    <div class="workbench-grid">
+      <section class="workbench-block">
+        <div class="workbench-title">附件 / 截图 / 日志证据</div>
+        ${failures.length ? `<div class="mini-evidence-title">失败项</div>${failures.map(f => `<div class="evidence-line"><b>${esc(f.module || '-')}</b> ${esc(f.name || '')}<br><span>${esc(f.reason || '')}</span></div>`).join('')}` : ''}
+        ${attachments.length ? attachments.map(a => renderAttachmentEvidence(a)).join('') : `<div class="muted">暂无本地解析结果；附件文件不存入内部知识库，请通过上方“Redmine附件 / 补丁”或 <a href="${redmineIssueAttachmentsUrl(data.issue_id)}" target="_blank">Redmine 附件区</a> 查看源文件。</div>`}
+      </section>
+      <section class="workbench-block">
+        <div class="workbench-title">历史回复摘要</div>
+        ${replies.length ? replies.map(r => `
+          <div class="reply-line">
+            <div><b>${esc(r.user || '-')}</b> <span class="muted">${esc(String(r.created_on || '').slice(0, 19))}</span></div>
+            ${r.notes ? `<div>${esc(r.notes)}</div>` : ''}
+            ${r.details && r.details.length ? `<div class="muted">${r.details.map(d => esc([d.name, d.old_value, d.new_value].filter(Boolean).join(' -> '))).join('<br>')}</div>` : ''}
+          </div>`).join('') : '<div class="muted">暂无可汇总的历史回复。</div>'}
+      </section>
+    </div>`;
+}
+
+function renderListText(items, emptyText) {
+  if (!items || !items.length) return esc(emptyText || '-');
+  return '<ul class="compact-list">' + items.slice(0, 8).map(item => `<li>${esc(item)}</li>`).join('') + '</ul>';
+}
+
+function renderAttachmentEvidence(a) {
+  const detected = a.detected_errors || [];
+  const failures = a.failures || [];
+  const type = a.type || a.content_type || '';
+  return `<div class="attachment-evidence">
+    <div><b>${esc(a.filename || '-')}</b> <span class="muted">${esc(type || a.status || '')}</span></div>
+    ${detected.length ? `<div class="detected-errors">${detected.map(esc).join(' / ')} ${a.certification_type ? '(' + esc(a.certification_type) + ')' : ''}</div>` : ''}
+    ${failures.length ? failures.map(f => `<div class="evidence-line"><b>${esc(f.module || '-')}</b> ${esc(f.name || '')}<br><span>${esc(f.reason || '')}</span></div>`).join('') : ''}
+    ${a.text_excerpt ? `<details><summary>OCR/文本摘录</summary><pre>${esc(a.text_excerpt)}</pre></details>` : ''}
+  </div>`;
+}
+
+async function draftReply(issueId, matureCaseId) {
+  openKnowledgeModal(`✉️ 回复草稿 #${issueId}`, '<div class="muted">生成中…</div>');
+  try {
+    const data = await api(`/api/redmine-agent/issues/${issueId}/draft-reply`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(matureCaseId ? {mature_case_id: matureCaseId} : {})});
+    const body = `<div class="muted" style="margin-bottom:6px">来源: ${data.source==='mature_case'?'成熟案例 #'+(data.mature_case_id||''):'相似工单'} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
+      <textarea id="replyDraftArea" rows="14" style="width:100%;font-family:monospace">${esc(data.reply_draft||'')}</textarea>
+      <div style="margin-top:8px"><button onclick="copyReplyDraft(this)">📋 复制</button></div>`;
+    setKnowledgeBody(body);
+  } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
+}
+
+async function draftAgentReply(issueId, matureCaseId) {
+  openKnowledgeModal(`🤖 AI+知识库回复 #${issueId}`, '<div class="muted">正在拉取/分析工单并生成回复，可能需要几十秒…</div>');
+  try {
+    const data = await api(`/api/redmine-agent/issues/${issueId}/agent-reply`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(matureCaseId ? {mature_case_id: matureCaseId} : {})
+    });
+    const body = `<div class="muted" style="margin-bottom:6px">来源: ${esc(data.source || '-')} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
+      ${data.patch_direction ? `<div class="field"><div class="field-label">补丁方向</div>${renderFormattedContent(data.patch_direction, 'field-content')}</div>` : ''}
+      <textarea id="replyDraftArea" rows="16" style="width:100%;font-family:monospace">${esc(data.reply_draft||'')}</textarea>
+      <div style="margin-top:8px"><button onclick="copyReplyDraft(this)">📋 复制</button></div>`;
+    setKnowledgeBody(body);
+  } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
+}
+
+function copyReplyDraft(btn) {
+  const area = document.getElementById('replyDraftArea');
+  if (!area) return;
+  navigator.clipboard.writeText(area.value).then(function(){ notifyUser('已复制', '回复草稿已复制到剪贴板'); });
+  if (btn) { var old = btn.textContent; btn.textContent = '✓'; setTimeout(function(){ btn.textContent = old; }, 1500); }
+}
+
+async function sendReplyToRedmine(issueId, btn) {
+  const area = document.getElementById('replyDraftArea');
+  if (!area) { notifyUser('无回复内容', '请先生成回复草稿', 'error'); return; }
+  const text = (area.value || '').trim();
+  if (!text) { notifyUser('回复为空', '请先生成或编辑回复草稿', 'error'); return; }
+  if (!confirm('确认将此回复发送到 Redmine #' + issueId + ' ?')) return;
+  if (btn) { btn.disabled = true; var old = btn.textContent; btn.textContent = '⏳ 发送中…'; }
+  try {
+    const data = await api('/api/redmine/reply', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({issue_id: String(issueId), reply_text: text}),
+    });
+    notifyUser('已发送', data && data.message ? data.message : '回复已发送到 Redmine #' + issueId);
+    if (btn) { btn.textContent = '✓ 已发送'; }
+  } catch (e) {
+    notifyUser('发送失败', e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; setTimeout(function(){ btn.textContent = old; }, 2000); }
+  }
+}
+
+async function agentReplyDraft(issueId, btn) {
+  if (!issueId) return;
+  if (btn) { btn.disabled = true; var oldBtn = btn.textContent; btn.textContent = '⏳ 生成中…'; }
+  openKnowledgeModal(`✉️ 回复草稿+补丁方向 #${issueId}`, '<div class="muted">AI 分析中（联网拉取工单详情、附件与历史回复，约 10–30s）…</div>');
+  try {
+    const data = await api(`/api/redmine-agent/issues/${issueId}/agent-reply`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({force: false}),
+    });
+    const srcMap = {mature_case: '成熟案例 #' + (data.mature_case_id || ''), ai_analysis: 'AI 分析（联网）', similar_issues: '相似历史工单'};
+    const srcLabel = srcMap[data.source] || data.source;
+    const sigLine = data.error_signature ? ' / ' + esc(data.error_signature) : '';
+    const similarHtml = (data.similar_issues || []).length
+      ? '<div class="muted" style="margin-top:6px">相似历史: ' + (data.similar_issues||[]).map(function(s){return '#'+s.issue_id;}).join(' ') + '</div>'
+      : '';
+    const body = '<div class="muted" style="margin-bottom:6px">来源: ' + esc(srcLabel) + ' · 模块 ' + esc(data.module||'-') + sigLine + ' · 分析时间 ' + esc((data.analyzed_at||'').slice(0,16)) + '</div>'
+      + '<textarea id="replyDraftArea" rows="14" style="width:100%;font-family:monospace">' + esc(data.reply_draft||'') + '</textarea>'
+      + '<h4 style="margin:10px 0 4px">根因</h4><div class="muted">' + esc(data.root_cause||'-') + '</div>'
+      + '<h4 style="margin:10px 0 4px">补丁方向</h4><pre id="patchDirectionBlock" style="background:#0f172a;color:#e2e8f0;padding:10px;overflow:auto;border-radius:6px;white-space:pre-wrap"><code>' + esc(data.patch_direction||'-') + '</code></pre>'
+      + '<div style="margin-top:8px;display:flex;gap:8px">'
+      + '<button onclick="copyReplyDraft(this)">📋 复制回复</button>'
+      + '<button onclick="copyPatchDirection(this)">📋 复制补丁</button>'
+      + '</div>' + similarHtml;
+    setKnowledgeBody(body);
+  } catch (e) {
+    setKnowledgeBody('<div class="muted">失败: ' + esc(e.message) + '</div>');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = oldBtn; }
+  }
+}
+
+function copyPatchDirection(btn) {
+  const code = document.querySelector('#patchDirectionBlock code');
+  if (!code) return;
+  navigator.clipboard.writeText(code.textContent).then(function(){ notifyUser('已复制', '补丁方向已复制到剪贴板'); });
+  if (btn) { var old = btn.textContent; btn.textContent = '✓'; setTimeout(function(){ btn.textContent = old; }, 1500); }
+}
+
+async function showCaseFact(issueId) {
+  openKnowledgeModal(`📚 案例结构化 #${issueId}`, '<div class="muted">加载中…</div>');
+  try {
+    const f = await api(`/api/redmine-agent/cases/${issueId}`);
+    setKnowledgeBody(`
+      <div class="field"><div class="field-label">平台/版本</div><div class="field-content">${esc(f.chip_platform||'-')} / ${esc(f.android_version||'-')} / ${esc(f.certification_type||'-')}</div></div>
+      <div class="field"><div class="field-label">模块/错误签名</div><div class="field-content">${esc(f.module||'-')} / ${esc(f.error_signature||'-')} <span class="muted">(置信度 ${f.confidence||0})</span></div></div>
+      <div class="field"><div class="field-label">问题摘要</div><div class="field-content">${esc(f.problem_summary||'-')}</div></div>
+      <div class="field"><div class="field-label">根因</div><div class="field-content">${esc(f.root_cause||'-')}</div></div>
+      <div class="field"><div class="field-label">解决方案</div><div class="field-content">${renderFormattedContent(f.solution||'-','field-content')}</div></div>
+      <div class="case-actions">
+        <button onclick="buildMatureFromIssue(${issueId})">🏗️ 构建成熟案例</button>
+        <button class="secondary" onclick="draftReply(${issueId})">✉️ 生成回复</button>
+      </div>`);
+  } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
+}
+
+async function buildMatureFromIssue(issueId) {
+  try {
+    const data = await api('/api/redmine-agent/mature-cases/build', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({issue_ids: String(issueId)})});
+    notifyUser('已构建', '成熟案例 #'+data.case_id); hideModal('knowledgeModal'); loadCases();
+  } catch(e){ notifyUser('构建失败', e.message, 'error'); }
+}
+
+// ---- Reference output + evaluation ----
+function openReferenceModal(issueId) { pendingReferenceIssueId = issueId; showModal('referenceModal'); }
+
+async function submitReference() {
+  const issueId = pendingReferenceIssueId;
+  const payload = {
+    source: document.getElementById('referenceSource').value,
+    title: document.getElementById('referenceTitle').value,
+    markdown: document.getElementById('referenceMarkdown').value,
+  };
+  try {
+    await api(`/api/redmine-agent/issues/${issueId}/reference-output`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    hideModal('referenceModal');
+    compareCase(issueId);
+  } catch(e){ notifyUser('导入失败', e.message, 'error'); }
+}
+
+async function compareCase(issueId) {
+  openKnowledgeModal(`⚖️ 质量对比 #${issueId}`, '<div class="muted">评测中…</div>');
+  try {
+    const data = await api(`/api/redmine-agent/issues/${issueId}/evaluate-case`, {method:'POST'});
+    setKnowledgeBody(`
+      <div class="field"><div class="field-label">评分</div><div class="field-content" style="font-size:20px;font-weight:600">${data.score||0}/100</div></div>
+      ${(data.missing_fields||[]).length?`<div class="field"><div class="field-label">缺失字段</div><div class="field-content">${data.missing_fields.map(esc).join(', ')}</div></div>`:''}
+      ${(data.mismatch_fields||[]).length?`<div class="field"><div class="field-label">不一致字段</div><div class="field-content">${data.mismatch_fields.map(m=>`${esc(m.field)}: 内部=${esc(m.internal)} / 参考=${esc(m.reference)}`).join('<br>')}</div></div>`:''}
+      ${(data.suggestions||[]).length?`<div class="field"><div class="field-label">优化建议</div><div class="field-content">${data.suggestions.map(esc).join('<br>')}</div></div>`:''}
+      <div class="muted" style="margin-top:8px">注:参考输出仅用于评测,不参与自动回复。</div>`);
+  } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
+}
+
+// ---- Internal issue creation ----
+function startCreateInternal(issueId) { pendingInternalSource = {type:'issue', id: issueId}; showModal('internalCreateModal'); }
+function startCreateInternalCase(caseId) { pendingInternalSource = {type:'case', id: caseId}; showModal('internalCreateModal'); }
+
+async function confirmInternalCreate() {
+  if (!pendingInternalSource) return;
+  const payload = {
+    project_id: document.getElementById('internalProjectId').value,
+    tracker_id: parseInt(document.getElementById('internalTrackerId').value)||1,
+    priority_id: parseInt(document.getElementById('internalPriorityId').value)||2,
+    assigned_to_id: document.getElementById('internalAssignedId').value || null,
+    confirmed: true,
+  };
+  const src = pendingInternalSource; pendingInternalSource = null;
+  try {
+    const url = src.type==='case' ? `/api/redmine-agent/mature-cases/${src.id}/create-internal` : `/api/redmine-agent/issues/${src.id}/create-internal`;
+    const data = await api(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    hideModal('internalCreateModal');
+    if (data.success) notifyUser('已创建', '内部工单 #'+data.internal_issue_id);
+    else notifyUser('创建未完成', data.error||'请检查 Redmine 凭据/配置', 'warning');
+  } catch(e){ notifyUser('创建失败', e.message, 'error'); }
+}
+
+// ---- Knowledge modal helpers ----
+function openKnowledgeModal(title, body) {
+  document.getElementById('knowledgeTitle').textContent = title;
+  document.getElementById('knowledgeFooter').style.display = '';
+  setKnowledgeBody(body);
+  showModal('knowledgeModal');
+}
+function setKnowledgeBody(html) { document.getElementById('knowledgeBody').innerHTML = html; }
 
 // ---- Init ----
 restoreRedmineProfileState();

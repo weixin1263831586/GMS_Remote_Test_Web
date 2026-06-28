@@ -40,6 +40,11 @@ def owner_user_map_path(owner_id: str) -> Path:
     return owner_redmine_root(owner_id) / "redmine_user_map.json"
 
 
+def owner_knowledge_db_path(owner_id: str) -> Path:
+    """Per-user knowledge base sqlite (case_facts / mature_cases / reference_outputs ...)."""
+    return owner_redmine_root(owner_id) / "knowledge.sqlite3"
+
+
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -257,9 +262,21 @@ def display_names_from_mapping(item: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
 
 
-def find_user_mapping(name: str) -> dict[str, Any] | None:
-    keys = _name_keys(name)
-    for item in load_redmine_user_map():
+def find_user_mapping(name: str, user_map: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+    """Find the user_map entry matching ``name``.
+
+    ``user_map`` defaults to the global map; pass a per-owner map to match
+    against an isolated user list.
+    """
+    return find_user_mapping_for_names(user_map if user_map is not None else load_redmine_user_map(), [name])
+
+
+def find_user_mapping_for_names(user_map: list[dict[str, Any]], names: list[str]) -> dict[str, Any] | None:
+    """Match any of ``names`` against ``user_map``; returns the first hit."""
+    keys: set[str] = set()
+    for value in names:
+        keys.update(_name_keys(value))
+    for item in user_map:
         for value in display_names_from_mapping(item):
             if keys.intersection(_name_keys(value)):
                 return item

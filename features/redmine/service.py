@@ -7,6 +7,8 @@ from typing import Any
 from foundation.tasks import SingleFlightTask
 
 from .agent import RedmineAgent
+from .knowledge_repository import RedmineKnowledgeDB
+from .knowledge_service import RedmineKnowledgeService
 from .repository import RedmineAgentDB
 from .users import load_redmine_user_map
 
@@ -19,12 +21,35 @@ class RedmineService:
         *,
         repository: RedmineAgentDB,
         agent: RedmineAgent | None = None,
+        knowledge_db: RedmineKnowledgeDB | None = None,
+        knowledge_config: dict[str, Any] | None = None,
     ):
         self.repository = repository
         self.agent = agent or RedmineAgent(repository)
         self.task = SingleFlightTask()
         self.active_run_id: str | None = None
         self._stale_runs_marked = False
+        # Knowledge base lives in a separate sqlite; reuses the issue scan
+        # store as its read-side source of already-analyzed issues. When the
+        # repository exposes no on-disk path (e.g. a test fake), fall back to a
+        # temporary database so the service is still constructible.
+        if knowledge_db is not None:
+            self.knowledge_db = knowledge_db
+        else:
+            repo_path = getattr(repository, "db_path", None)
+            if repo_path is not None:
+                self.knowledge_db = RedmineKnowledgeDB(repo_path.parent / "knowledge.sqlite3")
+            else:
+                import tempfile
+                from pathlib import Path
+
+                self.knowledge_db = RedmineKnowledgeDB(Path(tempfile.gettempdir()) / "redmine_knowledge.sqlite3")
+        self.knowledge = RedmineKnowledgeService(
+            knowledge_db=self.knowledge_db,
+            issue_repository=repository,
+            agent=self.agent,
+            config=knowledge_config or {},
+        )
 
     def _mark_stale_runs_once(self) -> None:
         if self._stale_runs_marked:
@@ -67,7 +92,13 @@ class RedmineService:
             ),
         )
 
-    async def start_sync(self, *, max_analyze: int) -> dict:
+    async def start_sync(
+        self,
+        *,
+        max_analyze: int,
+        assignee_id: int | None = None,
+        assignee_name: str = "",
+    ) -> dict:
         run_id = "sync-" + datetime.now().strftime("%Y%m%d%H%M%S")
         return await self._start(
             run_id=run_id,
@@ -76,8 +107,20 @@ class RedmineService:
                 analyze_new=True,
                 max_analyze=max_analyze,
                 run_id=run_id,
+                assignee_id=assignee_id,
+                assignee_name=assignee_name,
             ),
         )
+
+    async def reset_data(self) -> dict[str, Any]:
+        """Delete all per-user Redmine scan and knowledge data.
+
+        This is a destructive operation used when the user wants to start over
+        with a clean slate (e.g. after changing assignee filters).
+        """
+        self.repository.reset()
+        self.knowledge_db.reset()
+        return {"success": True, "message": "Redmine data reset"}
 
     async def fetch_and_analyze_issue(self, issue_id: int) -> dict:
         existing = self.repository.get_issue(issue_id)
@@ -104,6 +147,25 @@ class RedmineService:
             message=f"Fetching #{issue_id} from Redmine",
             operation=analyze,
         )
+
+    async def refresh_issue_metadata(self, issue_id: int) -> dict:
+        """Fetch issue detail, journals, and attachment metadata only.
+
+        This deliberately does not download or parse attachments; it stores
+        Redmine metadata (filename/id/url/size) so the UI can link back to the
+        source issue.
+        """
+        run_id = f"metadata-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        client = self.agent._make_client()
+        try:
+            payload = await self.agent.fetch_issue_snapshot(client, int(issue_id), run_id)
+        finally:
+            await client.close()
+        existing = self.repository.get_issue(int(issue_id)) or {}
+        if existing:
+            self.agent._preserve_existing_analysis_fields(payload, existing)
+        self.repository.upsert_issue(payload)
+        return {"success": True, "data": {"action": "metadata", "issue": payload}}
 
     def status(self) -> dict:
         last_result = self.task.last_result
