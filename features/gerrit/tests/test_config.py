@@ -80,6 +80,41 @@ class GerritConfigTests(unittest.TestCase):
         self.assertEqual(department["owners"], ["alice@example.com"])
         self.assertEqual(personal["department_id"], "platform")
 
+    def test_redmine_user_sync_overwrites_stale_personal_name(self):
+        # 已存在的 personal profile 残留旧 name 时，同步必须用 redmine 权威 name 覆盖，
+        # 否则姓名与邮箱会不同步（残留旧名永远短路 `or`）。
+        from features.gerrit.config import (
+            normalize_gerrit_dashboard_config,
+            sync_gerrit_members_from_redmine_users,
+        )
+
+        current = normalize_gerrit_dashboard_config(
+            {
+                "department_profiles": [],
+                "personal_profiles": [
+                    {"owner": "alice@example.com", "name": "alice"}
+                ],
+            }
+        )
+        updated = sync_gerrit_members_from_redmine_users(
+            current,
+            [
+                {
+                    "name": "爱丽丝",
+                    "email": "alice@example.com",
+                    "department_id": "platform",
+                    "department": "Platform",
+                }
+            ],
+        )
+        personal = next(
+            profile
+            for profile in updated["personal_profiles"]
+            if profile["owner"] == "alice@example.com"
+        )
+        self.assertEqual(personal["name"], "爱丽丝")
+        self.assertEqual(personal["department"], "Platform")
+
     def test_feature_gerrit_config_save_preserves_other_runtime_sections(self):
         from features.gerrit.settings import GerritConfig
 

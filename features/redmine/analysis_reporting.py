@@ -8,14 +8,11 @@ import re
 from datetime import datetime
 from typing import Any
 
+from features.redmine.analysis_attachments import IMAGE_ATTACHMENT_RE, PROCESS_ATTACHMENT_RE
 from features.redmine.config import config_manager
 
 
 logger = logging.getLogger(__name__)
-
-
-PROCESS_ATTACHMENT_RE = re.compile(r"\.(zip|7z|rar|tar|tgz|gz|xml|txt|log|png|jpg|jpeg|webp|bmp|docx)$", re.IGNORECASE)
-IMAGE_ATTACHMENT_RE = re.compile(r"\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE)
 
 # Enhanced error patterns for structured extraction
 _ERROR_LINE_PATTERNS = [

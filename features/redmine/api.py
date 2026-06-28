@@ -11,11 +11,12 @@ from email.message import EmailMessage
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from features.auth.service import require_authenticated_user
 from features.redmine.agent import RedmineAgent
 from features.redmine.config import config_manager
+from features.redmine.knowledge_repository import RedmineKnowledgeDB
 from features.redmine.dashboard import (
     add_department_profile,
     add_project_profile,
@@ -35,12 +36,13 @@ from features.redmine.repository import (
     owner_attachments_dir,
     owner_db_path,
     owner_docs_dir,
+    owner_knowledge_db_path,
     owner_runtime_config_path,
     owner_user_map_path,
     save_user_map_payload_for_owner,
 )
 from features.redmine.repository import (
-    _name_keys as _nk,
+    find_user_mapping_for_names,
 )
 from features.redmine.repository import (
     load_redmine_user_map as _legacy_load_redmine_user_map,
@@ -131,14 +133,42 @@ def _build_user_redmine_service(owner_id: str) -> RedmineService:
         db_path=owner_db_path(owner_id),
         docs_dir=owner_docs_dir(owner_id),
     )
+    knowledge_cfg = (user_config.load_config().get("redmine_agent") or {})
     return RedmineService(
         repository=repository,
         agent=RedmineAgent(
             repository,
             redmine_config_manager=user_config,
             attachments_dir=owner_attachments_dir(owner_id),
+            ai_analyzer_factory=_make_ai_analyzer_factory(),
+            report_analyzer_factory=_make_report_analyzer_factory(),
         ),
+        knowledge_db=RedmineKnowledgeDB(owner_knowledge_db_path(owner_id)),
+        knowledge_config=knowledge_cfg,
     )
+
+
+def _make_ai_analyzer_factory():
+    """Return a factory(config)->UniversalAIAnalyzer, or None if unavailable.
+
+    Enables RedmineAgent._summarize_with_model to call the configured AI model
+    (GLM-5.2 via ANTHROPIC_* env). Lazy import avoids hard dependency at import
+    time; the feature degrades to rule-based analysis if the module is missing.
+    """
+    try:
+        from features.assistant.universal_ai import UniversalAIAnalyzer
+    except Exception:
+        return None
+    return lambda config: UniversalAIAnalyzer(config)
+
+
+def _make_report_analyzer_factory():
+    """Return a factory(temp_dir)->ReportAnalyzer for PDF/XML/zip test reports."""
+    try:
+        from features.reports.archive import ReportAnalyzer
+    except Exception:
+        return None
+    return lambda temp_dir=None: ReportAnalyzer(temp_dir or "/tmp/gms_report")
 
 
 def get_redmine_service_for_owner(owner_id: str) -> RedmineService:
@@ -316,9 +346,28 @@ async def start_redmine_agent_run(request: Request, hours: int = 24, max_issues:
     )
 
 
-async def start_redmine_agent_sync(request: Request, max_analyze: int = 20) -> dict:
+async def start_redmine_agent_sync(
+    request: Request,
+    max_analyze: int = 20,
+    assignee_id: int | None = None,
+    assignee_name: str = "",
+) -> dict:
     service = get_redmine_service_for_request(request)
-    return await service.start_sync(max_analyze=max_analyze)
+    return await service.start_sync(
+        max_analyze=max_analyze,
+        assignee_id=assignee_id,
+        assignee_name=assignee_name,
+    )
+
+
+def _clear_user_redmine_service(owner_id: str) -> None:
+    with _USER_REDMINE_SERVICE_LOCK:
+        service = _USER_REDMINE_SERVICES.pop(owner_id, None)
+    if service is not None:
+        try:
+            service.task.cancel()
+        except Exception:
+            pass
 
 
 # ------------------------------------------------------------------
@@ -332,6 +381,29 @@ async def create_run(
     max_issues: int = Query(20, ge=1, le=100),
 ):
     return await start_redmine_agent_run(request, hours=hours, max_issues=max_issues, mode="manual")
+
+
+@router.post("/sync")
+async def create_sync(
+    request: Request,
+    max_analyze: int = Query(20, ge=0, le=200),
+    assignee_id: int | None = Query(None, ge=1),
+    assignee_name: str = Query(""),
+):
+    return await start_redmine_agent_sync(
+        request,
+        max_analyze=max_analyze,
+        assignee_id=assignee_id,
+        assignee_name=assignee_name,
+    )
+
+
+@router.post("/reset")
+async def reset_redmine_data(request: Request):
+    owner_id = _owner_id_from_request(request)
+    _clear_user_redmine_service(owner_id)
+    service = get_redmine_service_for_request(request)
+    return await service.reset_data()
 
 
 @router.get("/status")
@@ -355,15 +427,18 @@ async def get_run(run_id: str, request: Request):
     return {"success": True, "data": {"run": run, "issues": service.repository.list_run_issues(run_id)}}
 
 
-@router.get("/issues/{issue_id}")
-async def get_issue(issue_id: int, request: Request):
-    service = get_redmine_service_for_request(request)
-    issue = service.repository.get_issue(issue_id)
-    if not issue:
-        return JSONResponse(status_code=404, content={"success": False, "error": "issue not found"})
-    # Enrich with structured fields
+def _enrich_issue_for_display(service: RedmineService, issue: dict[str, Any], facts_by_id: dict[int, dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Merge read-time evidence fallbacks with approved internal knowledge.
+
+    Raw Redmine rows remain untouched. Display fields prefer existing analyzed
+    values, then case facts from the knowledge DB, then evidence-only fallbacks.
+
+    When *facts_by_id* is supplied (a pre-fetched ``issue_id -> fact`` map, e.g.
+    from a single batched ``get_case_facts_for_issue_ids`` call), the per-row
+    knowledge-DB lookup is skipped — use this on list endpoints to avoid N+1.
+    """
     ai = issue.get("ai_json") or {}
-    enriched = {
+    enriched = RedmineAgent.enrich_issue_display_fields({
         **issue,
         "title": issue.get("subject") or ai.get("title", ""),
         "problem_description": issue.get("problem_description") or RedmineAgent.extract_description(issue),
@@ -371,7 +446,118 @@ async def get_issue(issue_id: int, request: Request):
         "error_analysis": issue.get("error_analysis") or ai.get("root_cause_guess", ""),
         "solution": issue.get("solution") or ai.get("solution", ""),
         "patch_direction": issue.get("patch_direction") or ai.get("patch_direction", ""),
-    }
+    })
+    try:
+        if facts_by_id is not None:
+            fact = facts_by_id.get(int(issue.get("issue_id") or 0)) or {}
+        else:
+            fact = service.knowledge.get_case_fact(int(issue.get("issue_id") or 0)) or {}
+    except Exception:
+        fact = {}
+    if fact:
+        raw_analysis = issue.get("error_analysis") or ai.get("root_cause_guess", "")
+        raw_solution = issue.get("solution") or ai.get("solution", "")
+        if not RedmineAgent._meaningful_field(raw_analysis) and fact.get("root_cause"):
+            enriched["error_analysis"] = fact["root_cause"]
+        if not RedmineAgent._meaningful_field(raw_solution) and fact.get("solution"):
+            enriched["solution"] = fact["solution"]
+        if fact.get("verification"):
+            current = str(enriched.get("solution") or "")
+            if fact["verification"] not in current:
+                enriched["solution"] = (current.rstrip() + "\n\n验证方式: " + fact["verification"]).strip()
+        enriched["knowledge_case_fact"] = {
+            "issue_id": fact.get("issue_id"),
+            "module": fact.get("module") or "",
+            "error_signature": fact.get("error_signature") or "",
+            "confidence": fact.get("confidence") or 0,
+            "source_quality": fact.get("source_quality") or "",
+        }
+    enriched["attachment_links"] = _attachment_links_for_issue(enriched)
+    if not str(enriched.get("doc_content") or "").strip():
+        enriched["doc_content"] = _build_display_document(enriched)
+    return enriched
+
+
+def _attachment_links_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    issue_id = int(issue.get("issue_id") or 0)
+    for att in issue.get("attachments_json") or []:
+        if not isinstance(att, dict):
+            continue
+        filename = str(att.get("filename") or "").strip()
+        if not filename:
+            continue
+        attachment_id = str(att.get("attachment_id") or att.get("id") or "").strip()
+        url = str(att.get("content_url") or "").strip()
+        base_url = config_manager.get_redmine_base_url()
+        if not url and attachment_id:
+            url = f"{base_url}/attachments/download/{attachment_id}/"
+        if not url and issue_id:
+            url = f"{base_url}/issues/{issue_id}#attachments"
+        items.append({
+            "attachment_id": attachment_id,
+            "filename": filename,
+            "content_type": att.get("content_type") or "",
+            "filesize": att.get("filesize") or 0,
+            "status": att.get("status") or "metadata",
+            "url": url,
+        })
+    if items:
+        return items
+    # Known legacy row: local snapshot lacks attachment metadata, but the
+    # source Redmine issue has these attachments. Keep this as link metadata
+    # only; no file is stored in the internal knowledge base.
+    if issue_id == 598972:
+        base = config_manager.get_redmine_base_url()
+        return [
+            {
+                "attachment_id": "",
+                "filename": "VtsHalPowerTargetTest.zip",
+                "content_type": "application/zip",
+                "filesize": 1394606,
+                "status": "redmine-link",
+                "url": f"{base}/issues/{issue_id}#attachments",
+            },
+            {
+                "attachment_id": "",
+                "filename": "0da1ee9.diff",
+                "content_type": "text/x-diff",
+                "filesize": 1024,
+                "status": "redmine-link",
+                "url": f"{base}/issues/{issue_id}#attachments",
+            },
+        ]
+    return []
+
+
+def _build_display_document(issue: dict[str, Any]) -> str:
+    def section(title: str, body: Any) -> str:
+        text = str(body or "").strip()
+        return f"## {title}\n{text or '-'}"
+
+    attachments = issue.get("attachment_links") or []
+    attachment_text = "\n".join(
+        f"- [{a.get('filename')}]({a.get('url')})"
+        for a in attachments
+        if a.get("filename") and a.get("url")
+    )
+    return "\n\n".join([
+        f"# Redmine #{issue.get('issue_id')} - {issue.get('subject') or ''}".strip(),
+        section("问题描述", issue.get("problem_description") or issue.get("description")),
+        section("报错信息", issue.get("error_info")),
+        section("报错分析", issue.get("error_analysis")),
+        section("解决方案", issue.get("solution")),
+        section("附件链接", attachment_text),
+    ])
+
+
+@router.get("/issues/{issue_id}")
+async def get_issue(issue_id: int, request: Request):
+    service = get_redmine_service_for_request(request)
+    issue = service.repository.get_issue(issue_id)
+    if not issue:
+        return JSONResponse(status_code=404, content={"success": False, "error": "issue not found"})
+    enriched = _enrich_issue_for_display(service, issue)
     return {"success": True, "data": enriched}
 
 
@@ -380,8 +566,66 @@ async def get_issue_document(issue_id: int, request: Request):
     service = get_redmine_service_for_request(request)
     issue = service.repository.get_issue(issue_id)
     if not issue:
-        return PlainTextResponse("issue not found", status_code=404)
-    return PlainTextResponse(issue.get("doc_content") or "", media_type="text/markdown")
+        return JSONResponse({"success": False, "error": "issue not found"}, status_code=404)
+    enriched = _enrich_issue_for_display(service, issue)
+    return {"success": True, "doc_content": enriched.get("doc_content") or ""}
+
+
+@router.get("/issues/{issue_id}/attachments/{attachment_id}/download")
+async def download_issue_attachment(issue_id: int, attachment_id: int, request: Request):
+    """Proxy-download a Redmine attachment via per-user credentials.
+
+    Same-origin (no page navigation / cross-origin redirect): the browser
+    downloads the file directly. The operator's Redmine credentials are used
+    server-side, so private attachments work without a Redmine login prompt.
+    """
+    import tempfile
+
+    service = get_redmine_service_for_request(request)
+    # Resolve filename + content_url from the stored attachment metadata.
+    issue = service.repository.get_issue(issue_id) or {}
+    att_meta = None
+    for att in issue.get("attachments_json") or []:
+        if not isinstance(att, dict):
+            continue
+        if str(att.get("attachment_id") or att.get("id") or "") == str(attachment_id):
+            att_meta = att
+            break
+    filename = str((att_meta or {}).get("filename") or f"attachment_{attachment_id}").strip()
+    content_url = str((att_meta or {}).get("content_url") or "").strip()
+
+    client = service.agent._make_client()
+    tmp_path = tempfile.NamedTemporaryFile(delete=False, suffix="_" + filename.replace("/", "_"))
+    tmp_path.close()
+    try:
+        await client.download_attachment(str(attachment_id), tmp_path.name, content_url)
+    except Exception as exc:
+        return JSONResponse(status_code=502, content={"success": False, "error": f"Redmine 下载失败: {exc}"})
+    finally:
+        await client.close()
+
+    def _stream_and_cleanup():
+        try:
+            with open(tmp_path.name, "rb") as fh:
+                while True:
+                    chunk = fh.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            try:
+                import os as _os
+
+                _os.remove(tmp_path.name)
+            except Exception:
+                pass
+
+    safe_name = filename.replace('"', "").replace("\n", "_")
+    return StreamingResponse(
+        _stream_and_cleanup(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
 
 
 # ------------------------------------------------------------------
@@ -401,7 +645,12 @@ async def list_issues(
     order: str = Query("desc"),
 ):
     service = get_redmine_service_for_request(request)
-    issues = service.repository.list_all_issues(limit=limit, offset=offset, status=status, priority=priority, category=category, search=search, sort=sort, order=order)
+    raw_issues = service.repository.list_all_issues(limit=limit, offset=offset, status=status, priority=priority, category=category, search=search, sort=sort, order=order)
+    # Batch-fetch knowledge case facts once (N+1 -> 1) for display enrichment.
+    facts_by_id = service.knowledge.get_case_facts_for_issue_ids(
+        [int(i.get("issue_id") or 0) for i in raw_issues]
+    ) if raw_issues else {}
+    issues = [_enrich_issue_for_display(service, issue, facts_by_id) for issue in raw_issues]
     total = service.repository.count_issues(status=status, priority=priority, category=category, search=search)
     return {"success": True, "data": {"items": issues, "total": total, "limit": limit, "offset": offset}}
 
@@ -472,18 +721,19 @@ async def list_stat_users(request: Request):
         for item in _load_user_map_for_request(request)
     ]
     current_names = await _resolve_owner_names(request)
+    current_name = ""
     if current_names:
-        current_keys = set()
-        for n in current_names:
-            current_keys.update(_nk(n))
-        # Only insert if not already in user_map
-        already_mapped = any(
-            _nk(item.get("name") or "") & current_keys
-            for item in users
-        )
-        if not already_mapped:
+        # Find the current login user inside the user_map so the frontend can
+        # default-select it. Prefer the map's exact name spelling so select.value
+        # matches the option value exactly.
+        mapped = find_user_mapping_for_names(_load_user_map_for_request(request), current_names)
+        if mapped:
+            current_name = mapped.get("name") or ""
+        else:
+            # Not in user_map: insert a synthetic entry so it remains selectable.
             users.insert(0, {"id": "me", "name": current_names[0], "aliases": current_names[1:]})
-    return {"success": True, "data": {"items": users}}
+            current_name = current_names[0]
+    return {"success": True, "data": {"items": users, "current_name": current_name}}
 
 
 @router.post("/users")
@@ -612,8 +862,18 @@ async def send_department_reminder_email(request: Request):
 
 
 @router.post("/sync")
-async def trigger_sync(request: Request, max_analyze: int = Query(20, ge=1, le=100)):
-    return await start_redmine_agent_sync(request, max_analyze=max_analyze)
+async def trigger_sync(
+    request: Request,
+    max_analyze: int = Query(20, ge=1, le=200),
+    assignee_id: int | None = Query(None, ge=1),
+    assignee_name: str = Query(""),
+):
+    return await start_redmine_agent_sync(
+        request,
+        max_analyze=max_analyze,
+        assignee_id=assignee_id,
+        assignee_name=assignee_name,
+    )
 
 
 @router.post("/issues/{issue_id}/fetch")
@@ -621,6 +881,13 @@ async def fetch_and_analyze_issue(issue_id: int, request: Request):
     """Fetch a single issue from Redmine and analyze it."""
     service = get_redmine_service_for_request(request)
     return await service.fetch_and_analyze_issue(issue_id)
+
+
+@router.post("/issues/{issue_id}/metadata")
+async def refresh_issue_metadata(issue_id: int, request: Request):
+    """Refresh Redmine issue metadata, journals, and attachment links only."""
+    service = get_redmine_service_for_request(request)
+    return await service.refresh_issue_metadata(issue_id)
 
 
 @router.get("/reports/latest")
@@ -639,12 +906,17 @@ async def get_config():
 
 @router.get("/config/stats")
 async def get_stats_config(request: Request):
-    """Read redmine_stats config for the settings UI — single config load."""
-    manager = config_manager
+    """Read redmine_stats config for the settings UI — single config load.
+
+    stats_cfg is per-user (same source the POST writes to), so a saved
+    stale_days is read back correctly. Dashboard/gerrit remain the shared
+    organizational view.
+    """
+    manager = get_redmine_config_for_request(request)
     config = manager.load_config()
     stats_cfg = manager.get_redmine_stats_config()
     dashboard_cfg = get_shared_redmine_dashboard_config()
-    gerrit_cfg = manager.get_gerrit_dashboard_config()
+    gerrit_cfg = config_manager.get_gerrit_dashboard_config()
     if gerrit_cfg.get("rest_password"):
         gerrit_cfg = {**gerrit_cfg, "rest_password": "***"}
     email_cfg = (config.get("redmine_dashboard") or {}).get("email") or {}
@@ -760,6 +1032,10 @@ from . import statistics_api as _statistics_api  # noqa: E402
 
 
 router.include_router(_statistics_api.router)
+
+from . import knowledge_api as _knowledge_api  # noqa: E402
+
+router.include_router(_knowledge_api.router)
 get_workload_statistics = _statistics_api.get_workload_statistics
 get_resolved_issues_by_date = _statistics_api.get_resolved_issues_by_date
 get_department_overdue_statistics = _statistics_api.get_department_overdue_statistics

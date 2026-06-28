@@ -238,8 +238,8 @@ class RepositoryStorageMixin:
             params.append(category)
         if search:
             like = f"%{search[:80]}%"
-            clauses.append("(subject LIKE ? OR description LIKE ? OR error_info LIKE ? OR summary LIKE ?)")
-            params.extend([like, like, like, like])
+            clauses.append("(CAST(issue_id AS TEXT) LIKE ? OR subject LIKE ? OR description LIKE ? OR error_info LIKE ? OR summary LIKE ?)")
+            params.extend([like, like, like, like, like])
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         return where, params
 

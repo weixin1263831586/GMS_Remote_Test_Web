@@ -12,8 +12,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from features.redmine.cert_rules import detect_certification_errors
 from features.redmine.config import config_manager
 from features.redmine.models import RedmineAttachment
+from features.redmine.tesseract_finder import (
+    bundled_tesseract_cmd,
+    bundled_tesseract_env,
+    configure_bundled_tesseract,
+)
 
 
 if TYPE_CHECKING:
@@ -23,7 +29,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-PROCESS_ATTACHMENT_RE = re.compile(r"\.(zip|7z|rar|tar|tgz|gz|xml|txt|log|png|jpg|jpeg|webp|bmp|docx)$", re.IGNORECASE)
+# Canonical "is this attachment something we process?" pattern. Single source of
+# truth — imported by the other analysis mixins so PDF (and future types) are
+# handled consistently everywhere, not just in the attachment mixin.
+ATTACHMENT_PROCESSABLE_RE = re.compile(r"\.(zip|7z|rar|tar|tgz|gz|xml|txt|log|png|jpg|jpeg|webp|bmp|docx|pdf)$", re.IGNORECASE)
+# Backwards-compatible alias used by older call sites.
+PROCESS_ATTACHMENT_RE = ATTACHMENT_PROCESSABLE_RE
 IMAGE_ATTACHMENT_RE = re.compile(r"\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE)
 
 # Enhanced error patterns for structured extraction
@@ -148,6 +159,7 @@ class AttachmentAnalysisMixin:
             "attachment_id": attachment.id,
             "filename": attachment.filename,
             "content_type": attachment.content_type,
+            "content_url": attachment.content_url,
             "filesize": attachment.filesize,
             "local_path": str(local_path) if local_path.exists() else "",
             "analysis_json": analysis or {},
@@ -161,6 +173,8 @@ class AttachmentAnalysisMixin:
         lower_path = path.lower()
         if lower_path.endswith((".txt", ".log")):
             return self._analyze_text_attachment(path)
+        if lower_path.endswith(".pdf"):
+            return self._analyze_pdf_attachment(path)
         if IMAGE_ATTACHMENT_RE.search(lower_path):
             return self._analyze_image_attachment(path)
         if lower_path.endswith(".docx"):
@@ -221,28 +235,139 @@ class AttachmentAnalysisMixin:
         }
 
     def _analyze_image_attachment(self, path: str) -> dict[str, Any]:
-        details: dict[str, Any] = {"type": "image"}
+        metadata = self._read_image_metadata(path)
+        details: dict[str, Any] = {"type": "image", **metadata}
+
+        # OCR is optional (Redmine.txt §5.3): use pytesseract if present, else
+        # return an empty string. Failure here must never block the main flow.
+        ocr_text = self._run_ocr(path)
+        detected = detect_certification_errors(ocr_text)
+        if detected["errors"]:
+            details["ocr_text"] = ocr_text
+            details["detected_errors"] = detected["errors"]
+            details["detected_partitions"] = detected["partitions"]
+            details["certification_type"] = detected["certification_type"]
+
+        return {
+            "filename": os.path.basename(path),
+            "parsed": "error" not in metadata,
+            "summary": details,
+            "details": details,
+            "text_excerpt": ocr_text[:3000],
+            "failures": detected["failures"],
+        }
+
+    @staticmethod
+    def _read_image_metadata(path: str) -> dict[str, Any]:
         try:
             from PIL import Image
 
             with Image.open(path) as image:
-                details.update({
+                return {
                     "width": image.width,
                     "height": image.height,
                     "format": image.format or "",
                     "mode": image.mode or "",
-                })
+                }
         except Exception as exc:
-            details["error"] = str(exc)
+            return {"error": str(exc)}
 
+    @staticmethod
+    def _run_ocr(path: str) -> str:
+        """Best-effort OCR via pytesseract. Returns '' if unavailable or it fails.
+
+        Uses a bundled tesseract binary (tools/tesseract) when the system one is
+        not installed, so screenshot analysis works without apt/sudo access.
+        """
+        try:
+            import pytesseract
+            from PIL import Image
+        except Exception:
+            return ""
+        try:
+            if bundled_tesseract_cmd():
+                configure_bundled_tesseract()
+                import pytesseract.pytesseract as _pt
+                _pt.tesseract_cmd = bundled_tesseract_cmd()
+            with Image.open(path) as image:
+                return str(pytesseract.image_to_string(image, lang="chi_sim+eng") or "")
+        except Exception as exc:
+            logger.debug("[RedmineAgent] OCR skipped for %s: %s", path, exc)
+            return ""
+
+    def _analyze_pdf_attachment(self, path: str) -> dict[str, Any]:
+        """Parse a PDF test report (BTS/CTS/VTS). Extracts text via any
+        available library (pdfminer / PyMuPDF / pypdf), then runs the same
+        error-block + certification-rule detection as text logs.
+
+        Returns empty failures (but never raises) if no PDF backend is installed.
+        """
+        content = self._extract_pdf_text(path)
+        error_blocks = self._extract_error_blocks(content)
+        cert_detected = detect_certification_errors(content)
+        failures: list[dict[str, Any]] = []
+        if error_blocks:
+            failures.append({
+                "name": "pdf-report-analysis",
+                "module": cert_detected.get("certification_type") or "report",
+                "reason": _truncate("\n".join(error_blocks), 1200),
+                "stack_trace": "",
+            })
+        # Certification errors (e.g. VBMeta test key) become explicit failures too.
+        for cert_failure in cert_detected.get("failures") or []:
+            failures.append(cert_failure)
+        interesting = self._extract_failure_like_lines(content)
         return {
             "filename": os.path.basename(path),
-            "parsed": "error" not in details,
-            "summary": details,
-            "details": details,
-            "text_excerpt": "",
-            "failures": [],
+            "parsed": bool(content),
+            "summary": {
+                "interesting_lines": len(interesting),
+                "error_blocks": len(error_blocks),
+                "certification_type": cert_detected.get("certification_type") or "",
+                "characters": len(content),
+            },
+            "details": {
+                "type": "pdf",
+                "detected_errors": cert_detected.get("errors") or [],
+                "detected_partitions": cert_detected.get("partitions") or [],
+                "certification_type": cert_detected.get("certification_type") or "",
+            },
+            "text_excerpt": _truncate(content, 3000),
+            "failures": failures,
         }
+
+    @staticmethod
+    def _extract_pdf_text(path: str) -> str:
+        """Best-effort PDF text extraction. Returns '' if no backend available."""
+        # PyMuPDF (fitz) — fastest, best layout.
+        try:
+            import fitz  # type: ignore
+
+            text_parts: list[str] = []
+            with fitz.open(path) as doc:
+                for page in doc:
+                    text_parts.append(page.get_text() or "")
+            return "\n".join(text_parts)
+        except Exception:
+            pass
+        # pdfminer.
+        try:
+            from pdfminer.high_level import extract_text  # type: ignore
+
+            return str(extract_text(path) or "")
+        except Exception:
+            pass
+        # pypdf / PyPDF2.
+        try:
+            try:
+                from pypdf import PdfReader  # type: ignore
+            except Exception:
+                from PyPDF2 import PdfReader  # type: ignore
+            reader = PdfReader(path)
+            return "\n".join(str((page.extract_text() or "")) for page in reader.pages)
+        except Exception as exc:
+            logger.debug("[RedmineAgent] PDF text extraction unavailable for %s: %s", path, exc)
+            return ""
 
     def _analyze_docx_attachment(self, path: str) -> dict[str, Any]:
         content = ""

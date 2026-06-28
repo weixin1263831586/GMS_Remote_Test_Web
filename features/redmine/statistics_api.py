@@ -30,6 +30,7 @@ from .dashboard import (
 from .repository import (
     compute_user_overdue_stats,
     display_names_from_mapping,
+    find_user_mapping_for_names,
     load_redmine_user_map_for_owner,
     owner_user_map_path,
 )
@@ -75,6 +76,26 @@ def _user_map_mtime_for_request(request: Request | None) -> float:
     path = owner_user_map_path(_request_user_id(request))
     return path.stat().st_mtime if path.exists() else 0
 
+
+async def _live_counts_for_user(service, user_id: int) -> dict[str, Any]:
+    """Fetch full count + resolved trends from Redmine for a user id.
+
+    Both calls are independent Redmine round-trips, so they run concurrently.
+    Returns {} on failure (callers fall back to local-DB snapshots).
+    """
+    client = service.agent._make_client()
+    try:
+        counts, trends = await asyncio.gather(
+            client.count_issues_by_assignee(user_id),
+            client.resolved_trends_by_assignee(user_id),
+        )
+        return {**counts, **trends}
+    except Exception:
+        return {}
+    finally:
+        await client.close()
+
+
 @router.get("/statistics/workload")
 async def get_workload_statistics(
     request: Request = None,
@@ -91,41 +112,22 @@ async def get_workload_statistics(
     if cached is not None:
         return {"success": True, "data": {**cached, "cache_hit": True}}
 
-    owner_names = []
-    display_names = []
-    live_counts: dict[str, int] = {}
-    if name:
-        query_keys = set()
-        from .repository import _name_keys as _mapping_name_keys
-        for value in [name]:
-            query_keys.update(_mapping_name_keys(value))
-        mapped = None
-        mapped_names: list[str] = []
-        for item in _user_map_for_request(request):
-            names = display_names_from_mapping(item)
-            for value in names:
-                if query_keys.intersection(_mapping_name_keys(value)):
-                    mapped = item
-                    mapped_names = names
-                    break
-            if mapped:
-                break
-        if mapped:
-            owner_names = mapped_names
-            display_names = owner_names
-            client = service.agent._make_client()
-            try:
-                live_counts = await client.count_issues_by_assignee(int(mapped["id"]))
-                live_counts.update(await client.resolved_trends_by_assignee(int(mapped["id"])))
-            except Exception:
-                live_counts = {}
-            finally:
-                await client.close()
-        else:
-            owner_names = [name]
-            display_names = [name]
-    if not owner_names:
-        owner_names = await _resolve_owner_names(request, service)
+    # Resolve the target user once: a selected name, else the current login user.
+    # When the name maps to a user_map entry we also fetch live Redmine counts +
+    # resolved trends (the local DB only holds partial snapshots), so the
+    # personal dashboard's closed/total/resolved-trend numbers are accurate.
+    user_map = _user_map_for_request(request)
+    live_counts: dict[str, Any] = {}
+    candidate_names = [name] if name else []
+    if not candidate_names:
+        candidate_names = await _resolve_owner_names(request, service)
+    mapped = find_user_mapping_for_names(user_map, candidate_names) if candidate_names else None
+    if mapped:
+        owner_names = display_names_from_mapping(mapped)
+        display_names = owner_names
+        live_counts = await _live_counts_for_user(service, int(mapped["id"]))
+    else:
+        owner_names = [n for n in candidate_names if n]
         display_names = owner_names
     # Collect extra names from run history for matching only, not display
     extra_names = []

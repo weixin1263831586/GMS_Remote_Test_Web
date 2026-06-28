@@ -16,6 +16,7 @@
     <div class="tab active" data-tab="stats" onclick="switchTab('stats')">📈 个人看板</div>
     <div class="tab" data-tab="project" onclick="switchTab('project')">🧩 项目看板</div>
     <div class="tab" data-tab="issues" onclick="switchTab('issues')">📋 工单列表</div>
+    <div class="tab" data-tab="cases" onclick="switchTab('cases')">📚 成熟案例</div>
     <div class="tab" data-tab="runs" onclick="switchTab('runs')">📊 扫描记录</div>
   </div>
   <div class="header-spacer"></div>
@@ -36,18 +37,63 @@
       <option value="正常">正常</option>
       <option value="低">低</option>
     </select>
+    <input type="text" id="syncAssigneeInput" placeholder="同步指定负责人（姓名/登录名）" style="width:200px" title="留空则同步当前登录用户">
   </div>
   <div class="btn-group">
     <button id="scanBtn" onclick="startScan()">🔍 扫描</button>
     <button class="secondary" onclick="triggerSync()">🔄 同步</button>
     <button class="secondary" onclick="refreshCurrentTab()">刷新</button>
+    <button class="secondary" onclick="showResetModal()">🗑️ 重置</button>
     <button class="secondary" onclick="showSettingsModal()" title="设置">⚙️</button>
   </div>
 </header>
 
+<!-- Reset confirmation modal -->
+<div id="resetModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">重置 Redmine 数据</span>
+      <span class="modal-close" onclick="hideResetModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <p class="warning" style="color:#c00">此操作将删除当前用户在本系统内的所有 Redmine 扫描数据、知识库、附件缓存和文档缓存，且不可恢复。确认继续？</p>
+      <label>
+        <input type="checkbox" id="resetConfirm"> 我确认删除所有数据
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="secondary" onclick="hideResetModal()">取消</button>
+      <button class="danger" onclick="confirmReset()">确认重置</button>
+    </div>
+  </div>
+</div>
+
 <div id="tab-issues" class="tab-content">
   <div id="issuesList"></div>
   <div id="issuesPagination" class="pagination"></div>
+</div>
+
+<div id="tab-cases" class="tab-content">
+  <div class="two-col">
+    <section class="panel">
+      <h2>📚 知识库
+        <button class="secondary" style="float:right" onclick="showBatchImportModal()">📥 批量导入工单</button>
+      </h2>
+      <div class="filter-bar" style="margin:6px 0 10px;display:flex;gap:8px;align-items:center">
+        <div class="case-view-toggle">
+          <button id="viewBtnFacts" class="active" onclick="switchCaseView('facts')">📋 工单事实</button>
+          <button id="viewBtnCases" onclick="switchCaseView('cases')">🏗️ 成熟案例</button>
+        </div>
+        <input type="text" id="caseSearchInput" placeholder="搜索（模块/签名/关键词）..." onkeydown="if(event.key==='Enter')loadCases()" style="flex:1;min-width:120px">
+        <button onclick="loadCases()">搜索</button>
+      </div>
+      <div id="casesList" class="scroll"><div class="muted">点击「批量导入工单」结构化历史工单，导入后在此查看结构化结果。</div></div>
+    </section>
+    <section class="panel">
+      <h2 id="caseDetailTitle">详情</h2>
+      <div id="caseDetail" class="scroll" style="padding:14px"><div class="muted">选择左侧条目查看结构化结论。</div></div>
+    </section>
+  </div>
 </div>
 
 <div id="tab-runs" class="tab-content">
@@ -64,15 +110,15 @@
 </div>
 
 <div id="tab-stats" class="tab-content active">
-  <div id="statsContent"><div class="muted">加载中...</div></div>
+  <div id="statsContent"><div class="muted" style="padding:20px;text-align:center">⏳ 正在加载个人看板数据...</div></div>
 </div>
 
 <div id="tab-department" class="tab-content">
-  <div id="departmentContent"><div class="muted">加载中...</div></div>
+  <div id="departmentContent"><div class="muted" style="padding:20px;text-align:center">⏳ 正在加载部门看板数据...</div></div>
 </div>
 
 <div id="tab-project" class="tab-content">
-  <div id="projectContent"><div class="muted">加载中...</div></div>
+  <div id="projectContent"><div class="muted" style="padding:20px;text-align:center">⏳ 正在加载项目看板数据...</div></div>
 </div>
 
 <!-- Add User Modal -->
@@ -263,5 +309,80 @@
 <script>
 {{REDMINE_JS}}
 </script>
+
+<!-- Batch Import Modal -->
+<div id="batchImportModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header" style="background:linear-gradient(135deg,#7c3aed,#4f46e5)">
+      <span class="modal-title">📥 批量导入历史工单到知识库</span>
+      <span class="modal-close" onclick="hideModal('batchImportModal')">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div class="muted" style="font-size:11px;margin-bottom:8px">粘贴工单号(每行一个,可带#号),或直接导入你名下最近的工单。</div>
+      <textarea id="batchImportIds" rows="6" placeholder="633454&#10;635211&#10;636612" style="width:100%;font-family:monospace"></textarea>
+      <div style="display:flex;gap:16px;margin-top:8px">
+        <label><input type="checkbox" id="batchReanalyze" checked> 重新分析(忽略已缓存)</label>
+      </div>
+      <div id="batchImportResult" class="muted" style="margin-top:8px;font-size:12px"></div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="hideModal('batchImportModal')">取消</button>
+        <button class="secondary" onclick="submitImportRecent(20)">📥 导入最近20个(我的指派)</button>
+        <button onclick="submitBatchImport()">按工单号导入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Knowledge Case Detail / Reply Modal -->
+<div id="knowledgeModal" class="modal">
+  <div class="modal-content" style="max-width:880px">
+    <div class="modal-header" style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">
+      <span class="modal-title" id="knowledgeTitle">知识库</span>
+      <span class="modal-close" onclick="hideModal('knowledgeModal')">&times;</span>
+    </div>
+    <div class="modal-body" id="knowledgeBody"><div class="muted">加载中…</div></div>
+    <div class="modal-buttons" id="knowledgeFooter" style="display:none">
+      <button class="secondary" onclick="hideModal('knowledgeModal')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reference Output Import Modal -->
+<div id="referenceModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">
+      <span class="modal-title">导入参考输出(仅评测,不进自动回复)</span>
+      <span class="modal-close" onclick="hideModal('referenceModal')">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div><label>来源</label>
+        <select id="referenceSource"><option value="gms_assistant">gms_assistant</option><option value="manual">manual</option><option value="imported">imported</option></select>
+      </div>
+      <div><label>标题</label><input type="text" id="referenceTitle" placeholder="参考案例标题"></div>
+      <div><label>Markdown 正文</label><textarea id="referenceMarkdown" rows="6" style="width:100%"></textarea></div>
+      <div class="modal-buttons"><button class="secondary" onclick="hideModal('referenceModal')">取消</button><button onclick="submitReference()">导入并评测</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Internal Issue Confirm Modal -->
+<div id="internalCreateModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header" style="background:linear-gradient(135deg,#dc2626,#b91c1c)">
+      <span class="modal-title">⚠️ 创建内部 Redmine 工单</span>
+      <span class="modal-close" onclick="hideModal('internalCreateModal')">&times;</span>
+    </div>
+    <div class="modal-body">
+      <div class="muted" style="margin-bottom:8px">该操作会在 Redmine 上真实创建工单,请确认信息无误。</div>
+      <div><label>项目标识</label><input type="text" id="internalProjectId" value="fae"></div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><label>Tracker ID</label><input type="number" id="internalTrackerId" value="1"></div>
+        <div style="flex:1"><label>优先级 ID</label><input type="number" id="internalPriorityId" value="2"></div>
+        <div style="flex:1"><label>指派人 ID</label><input type="number" id="internalAssignedId" placeholder="可选"></div>
+      </div>
+      <div class="modal-buttons"><button class="secondary" onclick="hideModal('internalCreateModal')">取消</button><button id="internalConfirmBtn" onclick="confirmInternalCreate()">确认创建</button></div>
+    </div>
+  </div>
+</div>
 </body>
 </html>

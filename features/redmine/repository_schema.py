@@ -191,6 +191,23 @@ class RepositorySchemaMixin:
             """
         )
 
+    def reset(self) -> None:
+        """Delete all runtime-generated data but keep the empty database shell."""
+        with self.connect() as conn:
+            conn.executescript(
+                """
+                DELETE FROM redmine_agent_issue_status_history;
+                DELETE FROM redmine_agent_references;
+                DELETE FROM redmine_agent_attachments;
+                DELETE FROM redmine_agent_issues;
+                DELETE FROM redmine_agent_runs;
+                """
+            )
+            try:
+                conn.execute("DELETE FROM redmine_agent_issue_fts")
+            except sqlite3.OperationalError:
+                pass
+
     # ------------------------------------------------------------------
     # Runs
     # ------------------------------------------------------------------

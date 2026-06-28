@@ -17,6 +17,29 @@ from .users import (
 )
 
 
+def _dedupe_display_names(names: list[str]) -> list[str]:
+    """Keep one display name per person, drop emails.
+
+    - emails (含 @) 仅用于查询匹配，不作为显示名；
+    - 同一人的多个写法（“卞 金晨”/“卞金晨”）按去空格归一，优先保留带空格的写法；
+    - 过滤后人名为空时退回原列表，避免显示成“未识别”。
+    """
+    fallback = [n for n in names if n]
+    persons = [n for n in fallback if "@" not in n]
+    if not persons:
+        return fallback
+    seen: set[str] = set()
+    result: list[str] = []
+    # 按带空格优先排序：含空格的写法排在前面，作为该人的规范显示名。
+    for name in sorted(persons, key=lambda s: (" " not in s, s)):
+        compact = name.replace(" ", "")  # 去空格归一键
+        if compact in seen:
+            continue
+        seen.add(compact)
+        result.append(name)
+    return result or fallback
+
+
 class RepositoryQueryMixin:
     def upsert_issue(self, issue: dict[str, Any]) -> None:
         payload = dict(issue)
@@ -249,7 +272,12 @@ class RepositoryQueryMixin:
                 "open_issues": [self._issue_summary(item) for item in open_issues[:list_limit]],
             },
             "meta": {
-                "owner_names": [n for n in (display_names or owner_names or []) if n],
+                # 显示名只保留人名，过滤掉邮箱/login 等匹配键（它们只用于查询匹配，
+                # 不应出现在“统计身份”里）。同一人的多个写法（如“卞 金晨”与“卞金晨”，
+                # 由 _name_display_variants 为匹配而生）按去空格归一，只保留一个，
+                # 优先带空格的规范写法。若过滤后为空（例如只有邮箱可用），则退回原列表，
+                # 避免显示成“未识别”。
+                "owner_names": _dedupe_display_names(list(display_names or owner_names or [])),
                 "stale_days": stale_days,
                 "list_limit": list_limit,
                 "generated_at": _now(),
