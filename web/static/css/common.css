@@ -3198,6 +3198,61 @@ select option {
     font-size: 11px;
     word-break: break-all;
 }
+.suite-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+.suite-file-search {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 9px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--darker-bg);
+    color: var(--text-primary);
+    font-size: 12px;
+}
+.suite-search-results {
+    display: none;
+    max-height: 160px;
+    overflow-y: auto;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--darker-bg);
+    flex-shrink: 0;
+}
+.suite-search-result {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.suite-search-result:hover {
+    background: var(--lighter-bg);
+}
+.suite-search-result-main {
+    min-width: 0;
+    flex: 1;
+}
+.suite-search-result-name {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.suite-search-result-path {
+    color: var(--text-secondary);
+    font-size: 10px;
+    margin-top: 2px;
+    word-break: break-all;
+}
 .suite-file-actions {
     display: flex;
     gap: 6px;

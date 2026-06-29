@@ -82,6 +82,7 @@ const HTTP_METHODS = {
 const CURL_SPECIAL_PARAMS = ['force_refresh', 'log_type', 'report_timestamp'];
 const VIEWPORT_HEIGHT_OFFSET = 150;
 let pendingUsbipDeviceHost = '';
+let pendingDevicePasswordAction = 'usbip';
 let usbipReconnectTimer = null;
 let usbipReconnectAttempts = 0;
 let usbipManualDisconnectUntil = 0;
@@ -1684,6 +1685,7 @@ function clearSuiteBrowserSelection(message) {
     if (titleEl) titleEl.textContent = '未选择测试套件';
     if (pathEl) pathEl.textContent = '';
     if (breadcrumb) breadcrumb.innerHTML = '';
+    clearSuiteSearchResults();
 
     renderTestSuiteBrowserList();
     renderSuiteFileEmpty(message || '请选择左侧测试套件');
@@ -1761,6 +1763,9 @@ async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
     if (!options.preserveHighlight) {
         state.suiteBrowser.highlightPath = '';
     }
+    if (!options.preserveSearchResults) {
+        clearSuiteSearchResults();
+    }
 
     const suiteSelect = document.getElementById('test-suite');
     if (suiteSelect && suiteSelect.value !== suite.tools_path) {
@@ -1777,6 +1782,133 @@ async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
 
     renderTestSuiteBrowserList();
     await loadSuiteBrowserDirectory(path || '');
+}
+
+function handleSuiteFileSearchKeydown(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        searchSuiteFiles();
+    }
+    if (event.key === 'Escape') {
+        clearSuiteFileSearch();
+    }
+}
+
+function clearSuiteSearchResults() {
+    const resultsEl = $('suite-search-results');
+    if (resultsEl) {
+        resultsEl.innerHTML = '';
+        resultsEl.style.display = 'none';
+    }
+}
+
+function clearSuiteFileSearch() {
+    const input = $('suite-file-search');
+    if (input) input.value = '';
+    clearSuiteSearchResults();
+    state.suiteBrowser.highlightPath = '';
+    setSuiteBrowserHighlightedPath('');
+}
+
+function renderSuiteSearchResults(items, query) {
+    const resultsEl = $('suite-search-results');
+    if (!resultsEl) return;
+
+    if (!items.length) {
+        resultsEl.innerHTML = `<div class="suite-empty" style="padding: 10px;">未找到: ${escapeHtml(query)}</div>`;
+        resultsEl.style.display = 'block';
+        return;
+    }
+
+    resultsEl.innerHTML = '';
+    items.slice(0, 30).forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'suite-search-result';
+        row.title = item.path || item.name || '';
+        row.innerHTML = `
+            <span>${item.type === 'directory' ? '📁' : (item.is_apk ? '📦' : (item.is_jar ? '🫙' : '📄'))}</span>
+            <div class="suite-search-result-main">
+                <div class="suite-search-result-name">${escapeHtml(item.name || '-')}</div>
+                <div class="suite-search-result-path">${escapeHtml([item.suite_label || '', item.path || ''].filter(Boolean).join(' · '))}</div>
+            </div>
+        `;
+        row.addEventListener('click', () => locateSuiteSearchResult(item));
+        resultsEl.appendChild(row);
+    });
+    resultsEl.style.display = 'block';
+}
+
+async function locateSuiteSearchResult(item) {
+    if (!item || !item.path) return;
+    const targetPath = item.path || '';
+    const parentPath = item.type === 'directory' ? getParentSuitePath(targetPath) : getParentSuitePath(targetPath);
+    state.suiteBrowser.highlightPath = targetPath;
+    await selectTestSuiteForBrowser(
+        item.suite_path || state.suiteBrowser.selectedSuitePath,
+        parentPath,
+        { preserveHighlight: true, preserveSearchResults: true }
+    );
+}
+
+async function searchSuiteFilesInSuite(suite, query, limit = 30) {
+    const params = new URLSearchParams({
+        suite_path: suite.tools_path,
+        query,
+        limit: String(limit)
+    });
+    const result = await apiCall(`/api/test/suites/search?${params.toString()}`);
+    const payload = result.data || {};
+    const suiteLabel = `${String(suite.test_type || '').toUpperCase()} ${getSuiteDisplayName(suite)}`.trim();
+    return (payload.items || []).map(item => ({
+        ...item,
+        suite_path: suite.tools_path,
+        suite_label: suiteLabel
+    }));
+}
+
+async function searchSuiteFiles() {
+    const input = $('suite-file-search');
+    const query = (input?.value || '').trim();
+    if (!query) {
+        showToast('请输入搜索关键词', 'warning');
+        return;
+    }
+    if (!testSuitesCache.length) {
+        await loadTestSuites();
+    }
+    if (!testSuitesCache.length) {
+        showToast('未找到可搜索的测试套件', 'warning');
+        return;
+    }
+
+    const resultsEl = $('suite-search-results');
+    if (resultsEl) {
+        resultsEl.innerHTML = '<div class="suite-empty" style="padding: 10px;">搜索中...</div>';
+        resultsEl.style.display = 'block';
+    }
+
+    try {
+        const selectedSuite = testSuitesCache.find(suite => suite.tools_path === state.suiteBrowser.selectedSuitePath);
+        const orderedSuites = [
+            ...(selectedSuite ? [selectedSuite] : []),
+            ...testSuitesCache.filter(suite => !selectedSuite || suite.tools_path !== selectedSuite.tools_path)
+        ];
+        let items = [];
+        for (const suite of orderedSuites) {
+            items = await searchSuiteFilesInSuite(suite, query, 30);
+            if (items.length) break;
+        }
+        renderSuiteSearchResults(items, query);
+        if (items.length) {
+            await locateSuiteSearchResult(items[0]);
+            showToast(`找到 ${items.length} 个匹配项`, 'success');
+        } else {
+            showToast('未找到匹配项', 'warning');
+        }
+    } catch (error) {
+        renderSuiteSearchResults([], query);
+        showToast('搜索失败: ' + error.message, 'error');
+    }
 }
 
 async function loadSuiteBrowserDirectory(path = '') {
@@ -3228,8 +3360,9 @@ async function attemptUsbipReconnect() {
 }
 
 // ==================== 设备主机密码输入 ====================
-function showDevicePasswordModal(deviceHost) {
+function showDevicePasswordModal(deviceHost, action = 'usbip') {
     pendingUsbipDeviceHost = deviceHost || pendingUsbipDeviceHost || '';
+    pendingDevicePasswordAction = action || 'usbip';
     // 显示层用可读的主机地址；后端回退值若是裸 client_id（非 user@ip）则优先
     // 用配置里的 device_host/usbip_device_host，仍无可读值时给友好提示。
     const displayHost = (() => {
@@ -3424,6 +3557,24 @@ async function submitDevicePassword() {
         return;
     }
 
+    if (pendingDevicePasswordAction === 'sshd') {
+        try {
+            await apiCall('/api/config/client-ssh-credentials', 'POST', {
+                device_host: deviceHost,
+                password
+            });
+            closeDevicePasswordModal();
+            showToast('SSH 凭据已保存', 'success');
+            addLogEntry(`已保存 ${deviceHost} 的 SSH 凭据，重新检查 SSHD...`, 'info');
+            pendingDevicePasswordAction = 'usbip';
+            await checkSshd();
+        } catch (error) {
+            addLogEntry('保存 SSH 凭据失败: ' + error.message, 'error');
+            showToast('保存失败: ' + error.message, 'error');
+        }
+        return;
+    }
+
     try {
         // 显示正在连接的提示
         addLogEntry('正在连接 USB/IP...', 'info');
@@ -3486,8 +3637,16 @@ async function checkSshd() {
 
         if (result.error) {
             addLogEntry(`⚠️ ${result.error}`, 'warning');
+            if (result.need_password && result.device_host) {
+                showDevicePasswordModal(result.device_host, 'sshd');
+            }
         }
     } catch (error) {
+        if (error.needPassword && error.deviceHost) {
+            addLogEntry('需要输入SSH密码以检查 ' + error.deviceHost + ' 的 SSHD 状态', 'warning');
+            showDevicePasswordModal(error.deviceHost, 'sshd');
+            return;
+        }
         addLogEntry('检查 SSHD 失败: ' + error.message, 'error');
         try {
             const result = await apiCall('/api/ssh/sshd', 'GET');

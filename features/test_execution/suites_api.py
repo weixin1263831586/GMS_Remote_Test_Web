@@ -26,6 +26,7 @@ from .suite_helpers import (
     _resolve_suite_diagnosis_target,
 )
 from .suites import get_default_suites_path, is_config_host_local
+from .suite_modules import search_latest_suite_modules
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,26 @@ async def list_suites(base_path: str = None):
         "success": True, "suites": suites, "count": len(suites),
         "base_path": base_path, "source": "local" if is_config_host_local(config) else "ssh",
     })
+
+
+@router.get("/api/test/suites/modules")
+@handle_api_errors
+async def search_suite_modules(
+    query: str = Query(..., description="模块关键词，例如 Camera"),
+    suite_types: str = Query("cts,vts,gts,sts", description="逗号分隔套件类型，例如 cts,vts,gts,sts"),
+    per_suite_limit: int = Query(30, ge=1, le=200),
+):
+    """Search latest CTS/VTS/GTS/STS testcases for modules matching a keyword."""
+    config = runtime.config_manager.load_config()
+    types = [item.strip() for item in suite_types.split(",") if item.strip()]
+    payload = await asyncio.to_thread(
+        search_latest_suite_modules,
+        config,
+        query,
+        types,
+        per_suite_limit,
+    )
+    return ApiResponse.success(payload)
 
 
 # ==================== Diagnose Target ====================
@@ -110,6 +131,41 @@ name_lower = target.lower()
 emit({"success": True, "real_path": target, "name": os.path.basename(target), "size": st.st_size, "modified": int(st.st_mtime), "is_apk": name_lower.endswith(".apk"), "is_jar": name_lower.endswith(".jar")})
 """
 
+SUITE_FILE_SEARCH_SCRIPT = _SUITE_SCRIPT_PREAMBLE + r"""
+query = sys.argv[3].lower()
+limit = int(sys.argv[4])
+if not os.path.isdir(target):
+    emit({"success": False, "error": "Directory not found"})
+    sys.exit(0)
+items = []
+for current, dirs, files in os.walk(target):
+    dirs[:] = [d for d in dirs if not d.startswith('.')]
+    for name in sorted(dirs, key=str.lower):
+        if query and query not in name.lower():
+            continue
+        full_path = os.path.join(current, name)
+        rel = os.path.relpath(full_path, root)
+        items.append({"name": name, "path": "" if rel == "." else rel, "type": "directory", "size": 0, "modified": int(os.path.getmtime(full_path))})
+        if len(items) >= limit:
+            emit({"success": True, "items": items})
+            sys.exit(0)
+    for name in sorted(files, key=str.lower):
+        if query and query not in name.lower():
+            continue
+        full_path = os.path.join(current, name)
+        try:
+            st = os.stat(full_path)
+        except OSError:
+            continue
+        rel = os.path.relpath(full_path, root)
+        lower = name.lower()
+        items.append({"name": name, "path": rel, "type": "file", "size": st.st_size, "modified": int(st.st_mtime), "is_apk": lower.endswith(".apk"), "is_jar": lower.endswith(".jar")})
+        if len(items) >= limit:
+            emit({"success": True, "items": items})
+            sys.exit(0)
+emit({"success": True, "items": items})
+"""
+
 
 def _normalize_suite_relative_path(path: str | None) -> str:
     rel_path = (path or "").replace("\\", "/").strip().strip("/")
@@ -155,6 +211,51 @@ def _run_suite_file_script(ssh, script: str, suite_root: str, remote_path: str, 
         ) from e
 
 
+def _search_suite_files_local(suite_root: str, query: str, limit: int) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+    query_lower = query.lower()
+    if not os.path.isdir(suite_root):
+        return matches
+    for current, dirs, files in os.walk(suite_root):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for name in sorted(dirs, key=str.lower):
+            if query_lower and query_lower not in name.lower():
+                continue
+            full_path = os.path.join(current, name)
+            rel = os.path.relpath(full_path, suite_root)
+            matches.append({
+                "name": name,
+                "path": "" if rel == "." else rel,
+                "type": "directory",
+                "size": 0,
+                "modified": int(os.path.getmtime(full_path)),
+            })
+            if len(matches) >= limit:
+                return matches
+        for name in sorted(files, key=str.lower):
+            if query_lower and query_lower not in name.lower():
+                continue
+            full_path = os.path.join(current, name)
+            try:
+                st = os.stat(full_path)
+            except OSError:
+                continue
+            rel = os.path.relpath(full_path, suite_root)
+            lower = name.lower()
+            matches.append({
+                "name": name,
+                "path": rel,
+                "type": "file",
+                "size": st.st_size,
+                "modified": int(st.st_mtime),
+                "is_apk": lower.endswith(".apk"),
+                "is_jar": lower.endswith(".jar"),
+            })
+            if len(matches) >= limit:
+                return matches
+    return matches
+
+
 @router.get("/api/test/suites/files")
 @handle_api_errors
 async def list_suite_files(suite_path: str = Query(...), path: str = Query("")):
@@ -173,6 +274,43 @@ async def list_suite_files(suite_path: str = Query(...), path: str = Query("")):
         if not payload.get("success"):
             return ApiResponse.error(payload.get("error", "Directory read failed"), status_code=400)
         return ApiResponse.success({"suite_path": suite_path, "suite_root": suite_root, "path": payload.get("path", rel_path), "items": payload.get("items", [])})
+
+
+@router.get("/api/test/suites/search")
+@handle_api_errors
+async def search_suite_files(
+    suite_path: str = Query(...),
+    query: str = Query(..., min_length=1),
+    limit: int = Query(30, ge=1, le=200),
+):
+    """Search files/directories by name inside a test suite."""
+    config = runtime.config_manager.load_config()
+    try:
+        suite_root, _, _ = _build_suite_remote_path(suite_path, "", config)
+    except ValueError as e:
+        return ApiResponse.error(str(e), status_code=400)
+
+    if os.path.isdir(suite_root):
+        items = await asyncio.to_thread(_search_suite_files_local, suite_root, query.strip(), limit)
+        return ApiResponse.success({"suite_path": suite_path, "suite_root": suite_root, "query": query, "items": items, "count": len(items)})
+
+    with runtime.ssh_manager.optional_connection(config) as ssh:
+        if not ssh:
+            return ssh_connection_failed_response()
+
+        script = f"{SUITE_FILE_SEARCH_SCRIPT}"
+        cmd = (
+            f"python3 -c {shlex.quote(script)} {shlex.quote(suite_root)} {shlex.quote(suite_root)} "
+            f"{shlex.quote(query.strip().lower())} {shlex.quote(str(limit))}"
+        )
+        output, error, code = runtime.ssh_manager.execute_command(ssh, cmd, timeout=60)
+        if code != 0:
+            raise RuntimeError(error.strip() or output.strip() or "Remote search failed")
+        payload = json.loads(output.strip() or "{}")
+        if not payload.get("success"):
+            return ApiResponse.error(payload.get("error", "Search failed"), status_code=400)
+        items = payload.get("items") or []
+        return ApiResponse.success({"suite_path": suite_path, "suite_root": suite_root, "query": query, "items": items, "count": len(items)})
 
 
 @router.get("/api/test/suites/download")

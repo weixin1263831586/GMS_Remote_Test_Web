@@ -976,6 +976,14 @@
                         </button>
                     </div>
                     <div id="suite-browser-breadcrumb" class="suite-browser-breadcrumb"></div>
+                    <div class="suite-search-bar">
+                        <input type="text" id="suite-file-search" class="suite-file-search"
+                               placeholder="搜索文件/目录，例如 CtsVirtualDevicesCameraTestCases 或 2026.06.26_20.54.21"
+                               onkeydown="handleSuiteFileSearchKeydown(event)" autocomplete="off" />
+                        <button class="btn-xs" onclick="searchSuiteFiles()">搜索</button>
+                        <button class="btn-xs" onclick="clearSuiteFileSearch()">清除</button>
+                    </div>
+                    <div id="suite-search-results" class="suite-search-results"></div>
                     <div id="suite-file-list" class="suite-file-list">
                         <div class="suite-empty">从左侧选择一个测试套件</div>
                     </div>
