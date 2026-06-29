@@ -14,6 +14,20 @@ from features.redmine.config import config_manager
 
 logger = logging.getLogger(__name__)
 
+
+def _doc_line(value: Any) -> str:
+    """Coerce a document line to a single str.
+
+    AI output and decoded JSON fields (journal notes, solution, reply_draft, …)
+    can occasionally be a list instead of a str; joining such an item would raise
+    ``TypeError: sequence item N: expected str instance, list found``. This
+    flattens lists (newline-joined) and stringifies everything else.
+    """
+    if isinstance(value, list):
+        return "\n".join(_doc_line(v) for v in value)
+    return str(value or "")
+
+
 # Enhanced error patterns for structured extraction
 _ERROR_LINE_PATTERNS = [
     # Stack traces
@@ -234,7 +248,10 @@ class ReportingAnalysisMixin:
         # Reply draft at the end
         lines.extend(["", "## 建议回复草稿", item.get("reply_draft") or "", ""])
 
-        return "\n".join(lines).strip() + "\n"
+        # Defensive flatten: AI/stored fields (notes, solution, reply_draft, ...)
+        # can occasionally be a list instead of a str, which would break the join.
+        # Coerce every item to a single str so the document always builds.
+        return "\n".join(_doc_line(x) for x in lines).strip() + "\n"
 
     def _build_run_report(self, run_id: str, issues: list[dict[str, Any]]) -> str:
         lines = [
