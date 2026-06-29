@@ -582,7 +582,6 @@ async def download_issue_attachment(issue_id: int, attachment_id: int, request: 
     import tempfile
 
     service = get_redmine_service_for_request(request)
-    # Resolve filename + content_url from the stored attachment metadata.
     issue = service.repository.get_issue(issue_id) or {}
     att_meta = None
     for att in issue.get("attachments_json") or []:

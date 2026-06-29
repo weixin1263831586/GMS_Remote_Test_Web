@@ -826,7 +826,6 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     session = await _get_or_create_session(req.session_id, client_id)
     _append_message(session, "user", message)
 
-    # Record user message in context
     record_user_message(session, message)
 
     # --- 1. Check pending plan confirmation (existing behavior) ---
@@ -987,7 +986,6 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             "参数：" + _format_params(intent.params) + "\n\n"
             "输入\"确认执行\"或点击执行按钮后启动。"
         )
-        # Store intent as pending plan for confirmation
         session["pending_plan"] = {
             "intent": {
                 "tool_name": intent.tool_name,

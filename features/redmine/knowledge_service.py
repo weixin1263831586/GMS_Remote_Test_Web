@@ -59,7 +59,7 @@ class RedmineKnowledgeService:
         self.search = RedmineCaseSearch(knowledge_db)
         self.builder = MatureCaseBuilder(knowledge_db)
         self.evaluator = CaseEvaluator(knowledge_db)
-        # Per-issue dedup for agent-reply (avoids duplicate AI runs on rapid clicks).
+        # Avoid duplicate AI runs on rapid clicks of the same issue (per-issue dedup).
         self._agent_reply_inflight: dict[int, asyncio.Task] = {}
         self._agent_reply_fresh_hours = float(self.config.get("agent_reply_fresh_hours", 24))
 
@@ -214,7 +214,6 @@ class RedmineKnowledgeService:
     def list_mature_cases(self, *, limit: int = 50, offset: int = 0, status: str = "", search: str = "") -> dict[str, Any]:
         items = self.knowledge_db.list_mature_cases(limit=limit, offset=offset, status=status, search=search)
         total = self.knowledge_db.count_mature_cases(status=status, search=search)
-        # Attach source issue links for each case.
         for item in items:
             item["links"] = self.knowledge_db.list_links_for_case(int(item["case_id"]))
         return {"items": items, "total": total, "limit": limit, "offset": offset}

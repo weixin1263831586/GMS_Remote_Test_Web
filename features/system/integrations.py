@@ -113,7 +113,6 @@ async def check_ssh_sshd(request: Request, device_host: str | None = Query(None,
             if not installed:
                 installed = bool(exec_ssh_cmd(ssh, "sc query sshd 2>nul | findstr /C:\"RUNNING\" /C:\"STOPPED\""))
 
-            # 检查是否运行中
             running = bool(exec_ssh_cmd(ssh, "sc query sshd | findstr /C:\"RUNNING\" 2>nul"))
 
             logger.info(f"[SSHD Check] {device_host}: installed={installed}, running={running}")
@@ -530,7 +529,6 @@ async def disconnect_vpn():
                     status_code=200
                 )
 
-            # 使用nmcli断开VPN
             disconnect_cmd = f"sudo nmcli connection down {shlex.quote(vpn_name)}"
             output, error, code = await execute_config_host_command(
                 config,

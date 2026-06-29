@@ -285,7 +285,6 @@ def _coerce_issue_ids(raw: Any) -> list[int]:
             ids.append(int(str(item).strip().lstrip("#")))
         except (ValueError, AttributeError):
             continue
-    # Preserve order, dedup.
     seen: set[int] = set()
     result: list[int] = []
     for issue_id in ids:

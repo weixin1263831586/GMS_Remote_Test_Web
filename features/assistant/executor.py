@@ -236,7 +236,6 @@ class ActionExecutor:
                     error=str(e), formatted_text=f"执行失败: {e}",
                 )
 
-        # 对于没有专用 handler 的工具，尝试调用 router 函数
         if tool.executor_ref:
             try:
                 return await self._call_router_function(tool, session, request, params)
@@ -277,7 +276,6 @@ class ActionExecutor:
     # ==================== Query Handlers ====================
 
     async def _query_devices(self, session, request, params) -> ToolResult:
-        """查询设备列表。"""
         query = str(params.get("query") or "").strip().lower()
         details = await self._load_device_summaries()
         if query == "available":
@@ -410,13 +408,11 @@ class ActionExecutor:
         )
 
     async def _query_devices_management(self, session, request, params) -> ToolResult:
-        """查询设备管理信息（详细版）。"""
         result = await self._query_devices(session, request, params)
         result.tool_name = "devices_management"
         return result
 
     async def _query_locked_devices(self, session, request, params) -> ToolResult:
-        """查询锁定设备。"""
         locks = device_lock_manager.get_all_locks()
         lines = [f"- {did}: {info.get('locked_by', 'unknown')}" for did, info in locks.items()]
         text = f"当前锁定设备 {len(locks)} 台。\n" + ("\n".join(lines) if lines else "- 无锁定设备")
@@ -426,7 +422,6 @@ class ActionExecutor:
         )
 
     async def _query_device_info(self, session, request, params) -> ToolResult:
-        """查询设备详细信息。"""
         devices = params.get("devices", [])
         if not devices:
             return ToolResult(success=False, tool_name="devices_info", error="未指定设备")
@@ -446,7 +441,6 @@ class ActionExecutor:
         )
 
     async def _query_suites(self, session, request, params) -> ToolResult:
-        """查询测试套件。"""
         from features.test_execution import _get_available_test_suites, get_default_suites_path
 
         config = config_manager.load_config()
@@ -475,7 +469,6 @@ class ActionExecutor:
         )
 
     async def _query_test_status(self, session, request, params) -> ToolResult:
-        """查询测试运行状态。"""
         client_id = session.get("client_id", "")
         user_state = get_or_create_user_state(client_id)
         running = user_state.get("running", False)
@@ -500,7 +493,6 @@ class ActionExecutor:
         )
 
     async def _query_reports(self, session, request, params) -> ToolResult:
-        """查询测试报告。"""
         from features.reports import test_report_db
 
         reports = test_report_db.get_reports(limit=10)
@@ -525,7 +517,6 @@ class ActionExecutor:
         )
 
     async def _query_users(self, session, request, params) -> ToolResult:
-        """查询在线用户。"""
         from features.users import list_users
 
         response = await list_users()
@@ -544,7 +535,6 @@ class ActionExecutor:
         )
 
     async def _query_health(self, session, request, params) -> ToolResult:
-        """查询系统健康。"""
         from features.system import health_check
 
         response = await health_check()
@@ -562,7 +552,6 @@ class ActionExecutor:
         )
 
     async def _query_config(self, session, request, params) -> ToolResult:
-        """查询配置摘要。"""
         config = config_manager.load_config()
         safe = {
             "ubuntu_host": config.get("ubuntu_host"),
@@ -580,7 +569,6 @@ class ActionExecutor:
         )
 
     async def _query_vpn_status(self, session, request, params) -> ToolResult:
-        """查询 VPN 状态。"""
         result, payload = await self._fetch_router_json("features.system.integrations", "get_vpn_status")
         if result is not None:
             return result
@@ -595,7 +583,6 @@ class ActionExecutor:
         )
 
     async def _query_vnc_status(self, session, request, params) -> ToolResult:
-        """查询 VNC 状态。"""
         result, payload = await self._fetch_router_json("features.system.desktop", "get_desktop_vnc_status")
         if result is not None:
             return result
@@ -607,7 +594,6 @@ class ActionExecutor:
         )
 
     async def _query_terminal(self, session, request, params) -> ToolResult:
-        """查询终端连接信息。"""
         result, payload = await self._fetch_router_json("features.system.terminal_api", "get_ssh_terminal_info")
         if result is not None:
             return result
@@ -619,7 +605,6 @@ class ActionExecutor:
         )
 
     async def _query_usbip_status(self, session, request, params) -> ToolResult:
-        """查询 USB/IP 状态。"""
         result, payload = await self._fetch_router_json("features.devices.integrations_api", "get_usbip_status")
         if result is not None:
             return result
@@ -630,7 +615,6 @@ class ActionExecutor:
         )
 
     async def _query_apk_tasks(self, session, request, params) -> ToolResult:
-        """查询 APK 反编译任务。"""
         result, payload = await self._fetch_router_json("features.firmware.apk_api", "list_apk_tasks")
         if result is not None:
             return result
@@ -644,7 +628,6 @@ class ActionExecutor:
         )
 
     async def _query_ssh_status(self, session, request, params) -> ToolResult:
-        """查询 SSH 服务状态。"""
         return ToolResult(
             success=True, tool_name="ssh_sshd",
             formatted_text="请使用「系统接口」页面查看 SSH 服务状态",
@@ -835,7 +818,6 @@ class ActionExecutor:
         )
 
     async def _query_security_audit_logs(self, session, request, params) -> ToolResult:
-        """查询安全审计日志。"""
         kwargs = {"limit": max(1, min(int(params.get("limit") or 50), 1000))}
         if params.get("source"):
             kwargs["source"] = str(params.get("source"))

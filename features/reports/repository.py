@@ -43,24 +43,18 @@ class TestReportDB:
         self._cache = None  # 数据缓存
         self._cache_dirty = True  # 缓存是否脏
 
-        # 内存索引
         self._indexes = _empty_indexes()
         self._indexes_dirty = True  # 索引是否需要重建
 
-        # 确保数据目录存在
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
 
-        # 初始化数据库文件
         self._init_db()
 
     def _init_db(self):
-        """初始化数据库文件"""
         if not os.path.exists(self.db_path):
             self._save_data({'reports': [], 'last_update': None})
 
     def _load_data(self) -> dict:
-        """加载数据(带缓存)"""
-        # 如果缓存有效,直接返回
         if not self._cache_dirty and self._cache is not None:
             return self._cache
 
@@ -78,7 +72,6 @@ class TestReportDB:
             return data
 
     def _save_data(self, data: dict, invalidate_indexes: bool = True):
-        """保存数据"""
         try:
             with open(self.db_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -92,12 +85,11 @@ class TestReportDB:
             logger.error(f"保存数据库失败: {e}")
 
     def _build_indexes(self):
-        """构建内存索引"""
+        """Rebuild in-memory indexes from cached reports if marked dirty."""
         if not self._indexes_dirty:
             return
 
         try:
-            # 清空索引
             self._indexes = _empty_indexes()
 
             data = self._load_data()
@@ -108,27 +100,22 @@ class TestReportDB:
                 if not timestamp:
                     continue
 
-                # 时间戳索引
                 self._indexes['timestamp'][timestamp] = report
 
-                # 测试类型索引
                 test_type = report.get('test_type', 'UNKNOWN')
                 self._indexes['test_type'][test_type].append(timestamp)
 
-                # 客户端ID索引
                 client_id = report.get('client_id')
                 if client_id:
                     self._indexes['client_id'][client_id].append(timestamp)
 
-                # 状态索引
                 status = report.get('status', 'unknown')
                 self._indexes['status'][status].append(timestamp)
 
-                # 创建日期索引
                 created_at = report.get('created_at')
                 if created_at:
                     try:
-                        date = created_at.split('T')[0]  # 提取日期部分
+                        date = created_at.split('T')[0]
                         self._indexes['created_at'][date].append(timestamp)
                     except Exception:
                         pass
@@ -140,48 +127,24 @@ class TestReportDB:
             self._indexes_dirty = False
 
     def _invalidate_cache(self):
-        """使缓存失效"""
         self._cache_dirty = True
         self._indexes_dirty = True
 
     def add_report(self, report_info: dict) -> bool:
-        """
-        添加测试报告记录
-
-        Args:
-            report_info: 报告信息字典，包含：
-                - timestamp: 时间戳 (YYYY.MM.DD_HH.MM.SS.mmm_pid)
-                - test_type: 测试类型 (CTS, GTS, etc.)
-                - client_id: 客户端ID
-                - user: 用户名
-                - devices: 设备列表
-                - result_dir: RESULT DIRECTORY 路径
-                - pass_count: 通过数量
-                - fail_count: 失败数量
-                - total: 总数量
-                - pass_rate: 通过率
-                - suite_path: 测试套件路径
-                - start_time: 测试开始时间
-
-        Returns:
-            bool: 是否添加成功
-        """
+        """Insert (or update by timestamp) a test report row; return success."""
         try:
             with self.lock:
                 data = self._load_data()
 
-                # 检查是否已存在相同时间戳的报告
                 existing = next((r for r in data['reports'] if r['timestamp'] == report_info['timestamp']), None)
 
                 if existing:
-                    # 更新现有报告
                     existing.update(report_info)
                     existing['updated_at'] = datetime.now().isoformat()
                 else:
-                    # 添加新报告
                     report_info['created_at'] = datetime.now().isoformat()
                     report_info['updated_at'] = datetime.now().isoformat()
-                    data['reports'].insert(0, report_info)  # 最新的在前面
+                    data['reports'].insert(0, report_info)  # newest first
 
                 data['last_update'] = datetime.now().isoformat()
                 self._save_data(data)
@@ -201,29 +164,15 @@ class TestReportDB:
         status: str | None = None,
         user_only: str | None = None,
     ) -> list[dict]:
-        """
-        获取测试报告列表
-
-        Args:
-            limit: 返回数量限制
-            test_type: 过滤测试类型 (可选)
-            client_id: 过滤客户端ID (可选)
-            status: 过滤状态 (可选)
-            user_only: 仅显示指定用户的报告 (可选)
-
-        Returns:
-            List[Dict]: 报告列表
-        """
+        """Return up to *limit* reports, optionally filtered by test_type / client_id / status / user_only."""
         try:
-            # 如果没有过滤条件,直接返回(避免构建索引)
+            # Skip index build when no filter is provided.
             if not test_type and not client_id and not status and not user_only:
                 data = self._load_data()
                 return data.get('reports', [])[:limit]
 
-            # 有过滤条件时才构建和使用索引
             self._build_indexes()
 
-            # 使用索引查找
             timestamps = None
 
             if test_type:
@@ -239,17 +188,14 @@ class TestReportDB:
                 timestamps = status_timestamps if timestamps is None else timestamps & status_timestamps
 
             if user_only:
-                # 过滤当前用户的报告
                 user_timestamps = set(self._indexes['client_id'].get(user_only, []))
                 timestamps = user_timestamps if timestamps is None else timestamps & user_timestamps
 
             if timestamps is None:
                 return []
 
-            # 根据时间戳获取报告
             reports = [self._indexes['timestamp'][ts] for ts in timestamps if ts in self._indexes['timestamp']]
 
-            # 按时间倒序排序
             reports.sort(key=lambda x: x.get('created_at', ''), reverse=True)
 
             return reports[:limit]
@@ -259,20 +205,10 @@ class TestReportDB:
             return []
 
     def get_report_by_timestamp(self, timestamp: str) -> dict | None:
-        """
-        根据时间戳获取报告
-
-        Args:
-            timestamp: 报告时间戳
-
-        Returns:
-            Optional[Dict]: 报告信息，不存在返回 None
-        """
+        """Return the report row for *timestamp*, or None."""
         try:
-            # 确保索引已构建
             self._build_indexes()
 
-            # 直接从索引获取
             return self._indexes['timestamp'].get(timestamp)
 
         except Exception as e:
@@ -280,17 +216,7 @@ class TestReportDB:
             return None
 
     def update_report_status(self, timestamp: str, status: str, **kwargs) -> bool:
-        """
-        更新报告状态
-
-        Args:
-            timestamp: 报告时间戳
-            status: 状态 (running, completed, failed)
-            **kwargs: 其他更新字段
-
-        Returns:
-            bool: 是否更新成功
-        """
+        """Set *status* (running/completed/failed) plus any extra *kwargs* on the *timestamp* row; return success."""
         try:
             with self.lock:
                 data = self._load_data()
@@ -323,15 +249,7 @@ class TestReportDB:
             return False
 
     def delete_report(self, timestamp: str) -> bool:
-        """
-        删除报告记录
-
-        Args:
-            timestamp: 报告时间戳
-
-        Returns:
-            bool: 是否删除成功
-        """
+        """Delete the *timestamp* report row; return success."""
         try:
             with self.lock:
                 data = self._load_data()
@@ -351,25 +269,16 @@ class TestReportDB:
             return False
 
     def get_statistics(self) -> dict:
-        """
-        获取统计信息
-
-        Returns:
-            Dict: 统计信息
-        """
+        """Return aggregate {total_reports, type_counts, recent_week, last_update} across reports."""
         try:
-            # 确保索引已构建
             self._build_indexes()
 
-            # 使用索引统计,避免重复加载
             total = len(self._indexes['timestamp'])
 
-            # 使用索引统计测试类型
             type_counts = {}
             for test_type, timestamps in self._indexes['test_type'].items():
                 type_counts[test_type] = len(timestamps)
 
-            # 最近7天的报告
             week_ago = datetime.now() - timedelta(days=7)
             recent_count = 0
 
@@ -381,7 +290,7 @@ class TestReportDB:
                 except (ValueError, TypeError):
                     pass
 
-            # 获取last_update需要重新加载数据
+            # last_update isn't indexed, so reload the data file.
             data = self._load_data()
 
             return {
@@ -396,17 +305,7 @@ class TestReportDB:
             return {'total_reports': 0, 'type_counts': {}, 'recent_week': 0}
 
     def scan_and_sync_remote_reports(self, result_dirs: list[str]) -> int:
-        """
-        扫描远程测试套件 results 目录并同步到本地数据库
-
-        Args:
-            result_dirs: results 目录列表，如：
-                ['~/GMS-Suite/android-gts/android-gts/results',
-                 '~/GMS-Suite/android-cts/android-cts/results']
-
-        Returns:
-            int: 新增的报告数量
-        """
+        """Scan the given test-suite *result_dirs* and insert newly found reports; return how many were added."""
         new_count = 0
 
         for result_dir in result_dirs:
@@ -468,5 +367,4 @@ class TestReportDB:
         return new_count
 
 
-# 全局实例
 test_report_db = TestReportDB()

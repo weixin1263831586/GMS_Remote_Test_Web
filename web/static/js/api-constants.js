@@ -118,12 +118,11 @@ function getCategoryOrder(category) {
 }
 
 /**
- * Sort APIs by category
+ * Sort APIs by path (alphabetical). Despite the name, ignores category order.
  * @param {Array} apis - Array of API objects
  * @returns {Array} Sorted array
  */
 function sortApisByCategory(apis) {
-    // 全部分类时，直接按路径字母顺序排序
     return apis.sort((a, b) => a.path.localeCompare(b.path));
 }
 

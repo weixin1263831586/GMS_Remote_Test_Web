@@ -98,7 +98,7 @@ def _detach_ubuntu_usbip_for_devices(
 
 @router.post("/api/adb-forward/start")
 async def start_adb_forward(req: ADBForwardStartRequest):
-    """启动ADB转发"""
+    """Start ADB port forwarding to the configured device host."""
     try:
         result = adb_forward_manager.start_forward(req.device_host, req.device_password)
         if result.get('success'):
@@ -111,7 +111,7 @@ async def start_adb_forward(req: ADBForwardStartRequest):
 
 @router.post("/api/adb-forward/stop")
 async def stop_adb_forward():
-    """停止ADB转发"""
+    """Stop the active ADB port forwarding."""
     try:
         result = adb_forward_manager.stop_forward('test_client')
         if result.get('success'):

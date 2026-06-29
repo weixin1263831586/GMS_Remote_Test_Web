@@ -292,7 +292,6 @@ def _rule_based_analysis(test_name, error_message, stack_trace, module):
     Returns:
         dict: 分析结果
     """
-    # 解析失败信息
     failure_info = parse_cts_failure_info(test_name, error_message)
 
     analysis_parts = []
@@ -423,7 +422,6 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
             raise RuntimeError("Universal AI analyzer is not configured")
         ai_analyzer = dependencies.universal_analyzer_factory()
 
-        # 解析测试信息
         failure_info = parse_cts_failure_info(test_name, error_message)
 
         # 调用AI分析（自动获取源码）
