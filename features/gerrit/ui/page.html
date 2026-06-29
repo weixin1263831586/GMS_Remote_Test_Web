@@ -44,6 +44,9 @@
     .trend-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:12px; margin-bottom:18px; }
     .trend-panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; min-height:180px; display:flex; flex-direction:column; }
     .trend-panel h2, .list-section h2 { margin:0 0 10px; font-size:14px; }
+    .dept-section-head { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+    .dept-section-head h2 { margin:0; }
+    .dept-hint { font-size:12px; }
     .trend-panel h2 { flex-shrink:0; line-height:30px; }
     .trend-body { overflow-y:auto; max-height:330px; flex:1; }
     .trend-body::-webkit-scrollbar { width:6px; }
@@ -490,18 +493,23 @@ async function loadPersonal(refresh) {
   const ownerInput = document.getElementById('owner');
   const owner = requestedOwner || (ownerInput ? ownerInput.value : '') || config.default_owner || '';
   const profileSelect = document.getElementById('personalProfile');
-  const profileId = (profileSelect ? profileSelect.value : '') || currentPersonalProfileId || '';
+  // 点击成员行跳转时走 requestedOwner：此时不要沿用看板上残留的 profile 下拉值，
+  // 否则后端按残留 profile_id（陈伟等）匹配，导致显示成别人的个人看板。
+  const profileId = requestedOwner ? '' : ((profileSelect ? profileSelect.value : '') || currentPersonalProfileId || '');
   currentPersonalProfileId = profileId;
   saveGerritProfileState();
   document.getElementById('personalStatus').textContent = '';
   document.getElementById('personalContent').innerHTML = placeholderHtml('⏳ 正在统计个人 Gerrit 提交...');
   try {
     const data = await api('/api/gerrit-dashboard/statistics/personal?profile_id=' + encodeURIComponent(profileId) + '&owner=' + encodeURIComponent(owner) + '&refresh=' + (refresh ? 'true' : 'false'));
+    // owner 跳转后，按后端返回的 profile（由 owner 解析）回填下拉选中项，保持 UI 与数据一致。
+    const resolvedProfile = (data.profile || {}).id || '';
+    if (requestedOwner && resolvedProfile) currentPersonalProfileId = resolvedProfile;
     document.getElementById('personalContent').innerHTML = renderDashboard(data);
     trendOwner = owner;
     trendOwners = owner ? [owner] : [];
     trendScope = 'personal';
-    trendProfileId = profileId;
+    trendProfileId = resolvedProfile || profileId;
     requestedOwner = '';
   } catch (e) {
     requestedOwner = '';
@@ -555,7 +563,7 @@ function renderDashboard(data) {
   const title = isPersonal ? 'Gerrit 个人提交汇总' : 'Gerrit 提交汇总';
   const s = data.summary || {};
   return '<section class="list-section">'
-    + renderSummaryHeader(title, controls, '来源: ' + esc(data.source || '-'))
+    + renderSummaryHeader(title, controls)
     + renderCards([
     {label:'历史提交', value:s.total_count || 0},
     {label:'已合并', value:s.merged_count || 0, className:'ok clickable-stat', onclick:"scrollToSection('sec-merged')"},
@@ -678,7 +686,13 @@ function renderChangeList(title, rows, sectionId) {
 }
 function renderDepartmentUsers(users) {
   if (!users.length) return '';
-  const rows = users.map(user => {
+  // 成员按姓名（中文拼音序）排序；姓名缺失则回退邮箱前缀，保持稳定顺序。
+  const sorted = users.slice().sort(function(a, b) {
+    const na = String(a.name || (a.owner || '').split('@')[0] || '').trim();
+    const nb = String(b.name || (b.owner || '').split('@')[0] || '').trim();
+    return na.localeCompare(nb, 'zh');
+  });
+  const rows = sorted.map(user => {
     const s = user.summary || {};
     const owner = String(user.owner || '');
     const name = String(user.name || owner.split('@')[0] || '-');
@@ -695,7 +709,7 @@ function renderDepartmentUsers(users) {
       + '<td onclick="event.stopPropagation()"><button class="secondary dept-action-btn" onclick="removeDepartmentOwner(&quot;' + esc(owner) + '&quot;, this)">移出</button></td>'
       + '</tr>';
   }).join('');
-  return '<section class="list-section"><h2>成员汇总</h2><div class="muted" style="margin:-4px 0 10px;font-size:12px">点击任意成员行可在个人看板查看其详细提交。</div><div class="dept-table-wrap"><table class="dept-table"><thead><tr><th>姓名</th><th>邮箱</th><th>历史提交</th><th>已合并</th><th>未合并</th><th>待评审</th><th>错误</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+  return '<section class="list-section"><div class="dept-section-head"><h2>成员汇总</h2><span class="muted dept-hint">点击任意成员行可在个人看板查看其详细提交。</span></div><div class="dept-table-wrap"><table class="dept-table"><thead><tr><th>姓名</th><th>邮箱</th><th>历史提交</th><th>已合并</th><th>未合并</th><th>待评审</th><th>错误</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
 }
 // 中文数字编号排序键（系统一部<系统二部<…<系统十部）；无编号部门编号记 Infinity 排在后。
 // 用码点而非 localeCompare：拼音序会把“系统二部”排到“系统一部”前面（èr<yī）。
@@ -767,7 +781,7 @@ function renderDepartmentDashboard(data) {
   const profile = data.profile || {};
   currentDepartmentProfileId = profile.id || currentDepartmentProfileId || '';
   const s = data.summary || {};
-  const header = '<section class="list-section">' + renderSummaryHeader((profile.name || '部门') + ' Gerrit 提交汇总', departmentControlsHtml(currentDepartmentProfileId), '成员: ' + ((data.users || []).length) + ' | 来源: ' + esc(((data.users || [])[0] || {}).source || '-'))
+  const header = '<section class="list-section">' + renderSummaryHeader((profile.name || '部门') + ' Gerrit 提交汇总', departmentControlsHtml(currentDepartmentProfileId), '成员: ' + ((data.users || []).length))
     + renderCards([
       {label:'历史提交', value:s.total_count || 0},
       {label:'已合并', value:s.merged_count || 0, className:'ok'},
