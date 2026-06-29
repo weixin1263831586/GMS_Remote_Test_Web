@@ -308,7 +308,6 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
     try:
         logger.info(f"[SKILLS_DOWNLOAD] 请求下载技能包: {skill_name}")
 
-        # 使用相对路径避免硬编码
         skills_base_dir = os.path.join(PROJECT_ROOT, 'skills')
         skills_dir = os.path.join(skills_base_dir, skill_name)
 
@@ -319,7 +318,6 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
                 status_code=404
             )
 
-        # 使用共享工具创建ZIP
         zip_filename = f"{skill_name}-skills.zip"
         result = FileUtils.create_zip_from_directory(skills_dir, zip_filename)
 
@@ -523,7 +521,6 @@ async def get_api_help(api_path: str | None = None):
         curl -s "http://localhost:5001/api/system/help?api_path=api/test/start"
     """
     try:
-        # 如果指定了api_path，返回单个API的详细帮助
         if api_path:
             # 查找匹配的API
             api_doc = None
@@ -685,7 +682,7 @@ def generate_per_api_help_text(method: str, path: str) -> str | None:
         """计算字符串的显示宽度（中文算2个字符）"""
         width = 0
         for char in text:
-            if ord(char) > 127:  # 非ASCII字符（中文等）
+            if ord(char) > 127:
                 width += 2
             else:
                 width += 1

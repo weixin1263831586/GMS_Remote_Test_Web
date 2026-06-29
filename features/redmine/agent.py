@@ -434,7 +434,6 @@ class RedmineAgent(
 
         issue_payload = self._issue_payload(issue, run_id, journals, attachment_records, failures)
 
-        # Detect category from subject/description
         issue_payload["category"] = self._detect_category(issue_payload.get("subject", ""), issue_payload.get("description", ""))
 
         # Track status

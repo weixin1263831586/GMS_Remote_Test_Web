@@ -197,7 +197,6 @@ class ResolutionAnalysisMixin:
             if is_solution and not provider:
                 provider = user
                 provider_time = created
-                # Extract plain text before the first <pre> as solution description
                 pre_idx = notes.find("<pre>")
                 provider_notes = notes[:pre_idx].strip() if pre_idx > 0 else notes[:500].strip()
 

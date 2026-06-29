@@ -36,7 +36,7 @@ def ssh_connection_failed_response():
 
 @router.get("/api/files/progress")
 async def get_upload_progress(upload_id: str | None = None):
-    """获取上传进度"""
+    """Return the current upload progress for an upload_id (always completed)."""
     return JSONResponse(content={
         "success": True,
         "data": {
@@ -55,7 +55,6 @@ async def list_files(req: dict):
         config = config_manager.load_config()
 
         if not path:
-            # Default to user home directory
             path = f"/home/{config_manager.get_ubuntu_user(config)}"
 
         with ssh_manager.optional_connection(config) as ssh:
@@ -339,7 +338,6 @@ async def batch_fetch_favicons(request: Request):
 
 
 def load_tools_data():
-    """加载所有用户的工具数据"""
     try:
         if os.path.exists(TOOLS_DATA_FILE):
             with open(TOOLS_DATA_FILE, encoding='utf-8') as f:
@@ -351,7 +349,6 @@ def load_tools_data():
 
 
 def save_tools_data(tools_data):
-    """保存所有用户的工具数据"""
     try:
         with open(TOOLS_DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(tools_data, f, indent=4, ensure_ascii=False)
@@ -374,7 +371,7 @@ def _save_user_tools_entry(all_tools_data, client_id, tools, request):
 @router.post("/api/websites/save")
 @handle_api_errors
 async def save_user_tools(request: Request):
-    """保存用户的工具数据"""
+    """Persist the calling user's tools/shortcuts data."""
     try:
         data = await request.json()
         client_id = get_client_id_from_request(request)
@@ -386,10 +383,8 @@ async def save_user_tools(request: Request):
         if not isinstance(tools_data, dict):
             return error_response('Invalid tools data format', status_code=400)
 
-        # 加载现有数据
         all_tools_data = load_tools_data()
 
-        # 更新当前用户的数据并保存
         if _save_user_tools_entry(all_tools_data, client_id, tools_data, request):
             logger.info(f"[ToolsData] Saved tools data for {client_id}")
             return JSONResponse(content={'success': True})
@@ -404,17 +399,15 @@ async def save_user_tools(request: Request):
 @router.get("/api/websites/load")
 @handle_api_errors
 async def load_user_tools(request: Request):
-    """加载用户的工具数据"""
+    """Return the calling user's tools/shortcuts data."""
     try:
         client_id = get_client_id_from_request(request)
 
         if not client_id:
             return error_response('Unable to identify user', status_code=400)
 
-        # 加载所有用户数据
         all_tools_data = load_tools_data()
 
-        # 获取当前用户的数据
         user_data = all_tools_data.get(client_id, {})
         tools = user_data.get('tools', {})
         last_updated = user_data.get('last_updated')
@@ -435,7 +428,7 @@ async def load_user_tools(request: Request):
 @router.post("/api/websites/sync")
 @handle_api_errors
 async def sync_user_tools(request: Request):
-    """同步用户的工具数据（智能合并本地和服务器数据）"""
+    """Sync the user's tools data, keeping whichever copy (local or server) is newer."""
     try:
         data = await request.json()
         client_id = get_client_id_from_request(request)
@@ -449,13 +442,11 @@ async def sync_user_tools(request: Request):
         if not isinstance(local_tools, dict):
             return error_response('Invalid local tools data', status_code=400)
 
-        # 加载服务器数据
         all_tools_data = load_tools_data()
         server_user_data = all_tools_data.get(client_id, {})
         server_tools = server_user_data.get('tools', {})
         server_timestamp = server_user_data.get('last_updated')
 
-        # 智能合并策略：选择最新的数据
         use_local = False
         if server_timestamp and local_timestamp:
             try:

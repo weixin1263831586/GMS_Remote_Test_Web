@@ -157,9 +157,7 @@ class MatureCaseBuilder:
                     merged.append(value)
         return merged
 
-    # Lines that are journal/AI metadata, not real solution steps. Filtered out
-    # when structuring solution.steps so the case matches the Redmine.txt §4
-    # shape (clean actionable steps, not raw notes).
+    # Journal/AI metadata lines, filtered out before structuring solution.steps (Redmine.txt §4).
     _META_PREFIXES = (
         "✓ 已解决", "✓已解决", "已解决:", "已解决：",
         "方案说明:", "方案说明：", "方案说明 ",

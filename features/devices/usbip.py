@@ -161,17 +161,9 @@ def parse_fastboot_devices(output: str) -> list[str]:
 
 
 class USBIPManager:
-    """
-    USB/IP管理器
-
-    特性：
-    - USB/IP设备转发
-    - Windows主机支持
-    - 设备绑定/解绑/attach
-    """
+    """Manages the full USB/IP lifecycle: Windows-side bind, Ubuntu-side attach, and protocol probing."""
 
     def __init__(self, ssh_manager=None, config_manager=None):
-        """初始化USB/IP管理器"""
         self.ssh_manager = ssh_manager
         self.config_manager = config_manager
         self.active_connections: dict[str, Any] = {}  # {client_id: connection_info}
@@ -183,15 +175,11 @@ class USBIPManager:
         device_password: str | None = None,
         usbip_attach_host: str | None = None
     ) -> dict[str, Any]:
-        """
-        启动USB/IP转发
+        """Start USB/IP forwarding to the Ubuntu host over the given Windows device_host.
 
         Args:
-            device_host: 设备主机地址（格式: user@ip）
-            device_password: 设备主机密码
-
-        Returns:
-            结果字典
+            device_host: Windows host as user@ip (password auto-resolved if omitted).
+            usbip_attach_host: override the IP Ubuntu attaches from (defaults to device host).
         """
         try:
             config = self.config_manager.load_config()
@@ -245,16 +233,13 @@ class USBIPManager:
                         'install_guide': USBIPD_INSTALL_GUIDE.format(install_cmd=USBIPD_INSTALL_CMD)
                     }
 
-                # 终止ADB
                 self.ssh_manager.execute_command(win_ssh, 'taskkill /F /IM adb.exe /T')
 
-                # 查找Android设备
                 busids = self._find_android_devices(win_ssh, config)
                 if not busids:
                     win_ssh.close()
                     return {'success': False, 'error': '未找到Android设备'}
 
-                # 绑定设备
                 bound = self._bind_devices(win_ssh, busids)
                 win_ssh.close()
 
@@ -326,17 +311,8 @@ class USBIPManager:
             return {'success': False, 'error': str(e)}
 
     def stop_usbip(self, client_id: str | None = None) -> dict[str, Any]:
-        """
-        停止USB/IP转发
-
-        Args:
-            client_id: 客户端ID（可选）
-
-        Returns:
-            结果字典
-        """
+        """Stop USB/IP forwarding for client_id, keeping device-source records for re-attach."""
         try:
-            # 清除连接状态，但保留设备来源记录
             if client_id and client_id in self.active_connections:
                 del self.active_connections[client_id]
 
@@ -350,22 +326,12 @@ class USBIPManager:
             return {'success': True, 'message': '✅ USB/IP连接已断开'}
 
     def get_usbip_status(self, client_id: str | None = None) -> dict[str, Any]:
-        """
-        获取USB/IP状态
-
-        Args:
-            client_id: 客户端ID（可选）
-
-        Returns:
-            状态字典
-        """
+        """Return {connected, device_count}; connected if client_id is active OR any device-source record exists."""
         connected = False
 
-        # 检查活动连接
         if client_id and client_id in self.active_connections:
             connected = True
 
-        # 检查是否有设备来源记录
         if not connected and self.device_sources:
             connected = True
 
@@ -374,10 +340,9 @@ class USBIPManager:
             'device_count': len(self.device_sources)
         }
 
-    # ============ 辅助方法 ============
+    # ============ Helpers ============
 
     def _create_windows_ssh(self, hostname: str, username: str, password: str, port: int = 22):
-        """创建Windows主机SSH连接"""
         try:
             import paramiko
             ssh = paramiko.SSHClient()
@@ -395,7 +360,6 @@ class USBIPManager:
             return None
 
     def _is_windows_host(self, ssh) -> bool:
-        """检查是否为Windows主机"""
         try:
             stdout, _stderr, _code = self.ssh_manager.execute_command(ssh, 'ver 2>&1')
             return 'microsoft' in stdout.lower() or 'windows' in stdout.lower()
@@ -403,9 +367,8 @@ class USBIPManager:
             return False
 
     def _find_android_devices(self, ssh, config: dict[str, Any]) -> list[str]:
-        """查找Android设备的BUSID"""
         try:
-            # 使用 get_pty=True 获取完整的设备列表（需要交互式会话环境）
+            # get_pty=True: usbipd list needs an interactive (PTY) session to return the full device table.
             stdout, stderr, code = self.ssh_manager.execute_command(
                 ssh,
                 'usbipd list',
@@ -425,11 +388,9 @@ class USBIPManager:
             return []
 
     def _bind_devices(self, ssh, busids: list[str]) -> list[str]:
-        """绑定设备到USB/IP"""
         bound = []
         for busid in busids:
             try:
-                # 检查状态
                 stdout, _, _ = self.ssh_manager.execute_command(ssh, f'usbipd list | findstr {busid}')
 
                 if 'Shared' in stdout:
@@ -453,7 +414,6 @@ class USBIPManager:
         return bound
 
     def _ensure_vhci_driver(self, ssh):
-        """确保vhci_hcd驱动已加载"""
         try:
             stdout, _, _ = self.ssh_manager.execute_command(ssh, 'lsmod | grep vhci_hcd')
             if not stdout.strip():
@@ -469,9 +429,8 @@ class USBIPManager:
         device_ip: str,
         busids: list[str]
     ) -> tuple[list[str], list[str]]:
-        """在Ubuntu上attach设备，返回已attach的BUSID和ADB device态新设备ID列表"""
+        """Attach the busids on Ubuntu, returning (attached_busids, newly-seen adb device ids)."""
         try:
-            # 获取attach前的设备列表
             stdout_before, _, _ = self.ssh_manager.execute_command(ssh, 'adb devices')
             devices_before = set(DeviceUtils.parse_adb_devices(stdout_before))
             adb_states_before = parse_adb_device_states(stdout_before)
@@ -541,17 +500,14 @@ class USBIPManager:
 
                 time.sleep(1)
 
-            # 计算新增设备
             new_devices = list(devices_after - devices_before)
             logger.info(f"New devices via USB/IP: {new_devices}")
 
-            # 🔧 修复：如果没有新增设备，检查是否有设备来源已知的USB/IP设备
-            # 如果设备已存在，我们仍然需要返回它，因为这是通过USB/IP连接的
+            # No new devices: still return a previously-recorded USB/IP device if it's still online.
             if not new_devices:
                 # 检查是否有之前记录的USB/IP设备现在仍然在线
                 for device_id in devices_after:
                     if device_id in self.device_sources:
-                        # 这个设备之前是通过USB/IP连接的，现在还在
                         new_devices = [device_id]
                         logger.info(f"Found existing USB/IP device still online: {device_id}")
                         break
@@ -645,15 +601,7 @@ class USBIPManager:
         return scoped
 
     def check_usbipd_installed(self, ssh) -> tuple[bool, str]:
-        """
-        检查 usbipd 是否已安装
-
-        Args:
-            ssh: SSH 连接对象
-
-        Returns:
-            (是否安装, 版本信息)
-        """
+        """Check whether usbipd is installed on the Windows host; return (installed, version)."""
         try:
             stdout, _stderr, code = self.ssh_manager.execute_command(ssh, 'usbipd --version')
             if code == 0 and stdout.strip():

@@ -132,12 +132,7 @@ PLACEHOLDER_PATTERN = re.compile(r'\$\{([^}]+)\}')
 
 
 class ConfigManager:
-    """
-    配置管理器
-
-    管理配置文件的读取和保存，支持静态配置和动态配置
-    支持TTL缓存机制，减少磁盘I/O操作
-    """
+    """Reads/writes static + runtime config with a short TTL cache to cut disk I/O."""
 
     def __init__(
         self,
@@ -145,13 +140,7 @@ class ConfigManager:
         cache_ttl: int = 5,
         project_root: str | Path | None = None,
     ):
-        """
-        初始化配置管理器
-
-        Args:
-            base_dir: 基础目录（默认为当前文件所在目录）
-            cache_ttl: 缓存生存时间（秒），默认5秒
-        """
+        """Configure the config root (default: this module's dir) and cache TTL (default 5s)."""
         if project_root is not None:
             root = Path(project_root).resolve()
             base_dir = str(root / 'foundation')
@@ -177,50 +166,27 @@ class ConfigManager:
         self._section_denormalizers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
 
     def load_config(self, force_reload: bool = False) -> dict[str, Any]:
-        """
-        加载配置（静态 + 动态）
-
-        Args:
-            force_reload: 强制重新加载，忽略缓存
-
-        Returns:
-            配置字典
-        """
+        """Return the merged static+runtime config, bypassing the cache when force_reload."""
         with self._cache_lock:
             current_time = time.time()
-
-            # 检查是否需要重新加载
             if not force_reload and self._is_cache_valid(current_time):
                 return self._cache.copy() if self._cache else {}
 
-            # 加载配置
             config = self._load_and_merge_config()
 
-            # 更新缓存
             self._cache = config
             self._cache_timestamp = current_time
 
             return config.copy() if config else {}
 
     def _is_cache_valid(self, current_time: float) -> bool:
-        """
-        检查缓存是否有效
-
-        Args:
-            current_time: 当前时间戳
-
-        Returns:
-            缓存是否有效
-        """
-        # 检查缓存是否存在
+        """True iff the cached snapshot is within its TTL and no config file changed on disk."""
         if self._cache is None:
             return False
 
-        # 检查TTL是否过期
         if current_time - self._cache_timestamp > self._cache_ttl:
             return False
 
-        # 检查文件是否被修改
         try:
             static_mtime = os.path.getmtime(self.config_path)
             try:
@@ -228,7 +194,6 @@ class ConfigManager:
             except FileNotFoundError:
                 runtime_mtime = 0
 
-            # 如果文件修改时间变化，缓存失效
             if (
                 static_mtime != self._static_mtime
                 or runtime_mtime != self._runtime_mtime
@@ -242,13 +207,7 @@ class ConfigManager:
         return True
 
     def _load_and_merge_config(self) -> dict[str, Any]:
-        """
-        加载并合并配置
-
-        Returns:
-            合并后的配置字典
-        """
-        # 更新文件修改时间
+        """Load static config and overlay runtime overrides, returning the merged dict."""
         try:
             self._static_mtime = os.path.getmtime(self.config_path)
             try:
@@ -258,11 +217,10 @@ class ConfigManager:
         except Exception as e:
             logger.warning(f"Error updating file mtime: {e}")
 
-        # 加载静态配置
         config = self._load_static_config()
 
-        # 加载运行时配置并合并。config_runtime.json 保存部署身份和用户操作数据，
-        # 需要覆盖随源码携带的静态默认值。
+        # Runtime config (deploy identity + user data) overrides the static defaults
+        # shipped with the source, but the static ai_models block is preserved.
         runtime_config = self._load_runtime_config()
         if runtime_config:
             ai_config = config.get('ai_models', {})
@@ -273,41 +231,26 @@ class ConfigManager:
         return config
 
     def invalidate_cache(self):
-        """使缓存失效，下次调用load_config时将重新加载"""
+        """Drop the cache so the next load_config() reloads from disk."""
         with self._cache_lock:
             self._cache = None
             self._cache_timestamp = 0
 
     def get_ai_config(self) -> dict[str, Any]:
-        """
-        获取 AI 配置（统一的配置访问接口）
-
-        Returns:
-            AI 配置字典，如果未配置或未启用则返回空字典
-        """
+        """Return the AI config dict, or {} when AI is unconfigured or disabled."""
         config = self.load_config()
         ai_models = config.get('ai_models', {})
 
-        # 如果 AI 未启用，返回空配置
         if not ai_models.get('enabled', False):
             return {}
 
         return ai_models
 
     def get_redmine_config(self) -> dict[str, Any]:
-        """
-        获取 Redmine 配置（统一的配置访问接口）
-
-        Returns:
-            Redmine 配置字典，包含 domain 和 base_url
-
-        Raises:
-            ValueError: 如果 Redmine 未配置或配置不完整
-        """
+        """Return the Redmine config (domain + base_url); raise ValueError if incomplete."""
         config = self.load_config()
         redmine_config = config.get('redmine', {})
 
-        # 如果配置为空或不完整，抛出异常
         if not redmine_config or 'base_url' not in redmine_config:
             raise ValueError(
                 'Redmine 未配置或配置不完整，请在 configs/config.json 中配置 redmine 段，'
@@ -324,10 +267,7 @@ class ConfigManager:
         return redmine_config
 
     def get_redmine_base_url(self, config: dict[str, Any] = None) -> str:
-        """读取 Redmine base_url，未配置时返回 DEFAULT_REDMINE_BASE_URL（不抛异常）。
-
-        集中管理曾经散落在多处的 'https://redmine.rock-chips.com' 默认值。
-        """
+        """Return the configured Redmine base_url, falling back to DEFAULT_REDMINE_BASE_URL (no exception)."""
         try:
             redmine_config = (config if config is not None else self.load_config()).get("redmine") or {}
         except Exception:
@@ -335,15 +275,7 @@ class ConfigManager:
         return str(redmine_config.get("base_url") or "").strip().rstrip("/") or DEFAULT_REDMINE_BASE_URL
 
     def get_ai_provider_config(self, provider_name: str) -> dict[str, Any] | None:
-        """
-        获取指定 AI provider 的配置
-
-        Args:
-            provider_name: provider 名称（如 'qwen', 'zhipu'）
-
-        Returns:
-            provider 配置字典，如果不存在则返回 None
-        """
+        """Return the named provider's config (e.g. 'qwen', 'zhipu'), or None if absent."""
         ai_config = self.get_ai_config()
         if not ai_config:
             return None
@@ -352,25 +284,18 @@ class ConfigManager:
         return providers.get(provider_name)
 
     def is_ai_enabled(self) -> bool:
-        """
-        检查 AI 功能是否已启用
-
-        Returns:
-            AI 是否已启用
-        """
+        """True iff the AI feature is enabled and usable."""
         ai_config = self.get_ai_config()
         return ai_config.get('enabled', False)
 
     def _load_static_config(self) -> dict[str, Any]:
-        """加载静态配置"""
+        """Load and validate the static config from disk (placeholders expanded)."""
         try:
             with open(self.config_path, encoding='utf-8') as f:
                 config = json.load(f)
 
-                # 递归替换所有占位符（支持 ${ubuntu_user} 和环境变量 ${VAR_NAME}）
                 config_copy = self._replace_placeholders(config)
 
-                # 验证替换后的 AI 配置
                 self._validate_ai_config(config_copy)
 
                 return config_copy
@@ -383,15 +308,7 @@ class ConfigManager:
             return {}
 
     def _validate_ai_config(self, config: dict[str, Any]) -> None:
-        """
-        验证 AI 配置的有效性
-
-        Args:
-            config: 配置字典
-
-        Raises:
-            ValueError: 如果配置无效
-        """
+        """Raise ValueError if the enabled AI config references a missing primary_provider."""
         ai_models = config.get('ai_models', {})
         if not ai_models or not ai_models.get('enabled', False):
             return
@@ -407,21 +324,7 @@ class ConfigManager:
             )
 
     def _replace_placeholders(self, value: Any, config: dict = None) -> Any:
-        """
-        递归替换配置中的占位符
-
-        支持的占位符格式：
-        - ${ubuntu_user} -> 配置中的 ubuntu_user 值
-        - ${ENV_VAR} -> 环境变量值
-        - ${VAR:default} -> 环境变量值，如果不存在则使用默认值
-
-        Args:
-            value: 配置值（可以是 dict, list, str 等）
-            config: 原始配置对象（用于获取配置值）
-
-        Returns:
-            替换后的值
-        """
+        """Recursively expand ${name} placeholders: config keys, ${ENV_VAR}, and ${VAR:default}."""
         if isinstance(value, dict):
             # 第一次遍历时保存配置引用
             if config is None:
@@ -443,7 +346,7 @@ class ConfigManager:
             return value
 
     def _replace_single_placeholder(self, value: str, config: dict = None) -> str:
-        """替换字符串中的单个占位符"""
+        """Replace a single ${...} placeholder in *value* (env var, config key, or ${VAR:default})."""
         full_placeholder_match = PLACEHOLDER_PATTERN.fullmatch(value)
 
         def replace_var(match):
@@ -597,15 +500,7 @@ class ConfigManager:
             return False
 
     def save_config(self, config: dict[str, Any]) -> bool:
-        """
-        保存静态配置
-
-        Args:
-            config: 配置字典
-
-        Returns:
-            是否保存成功
-        """
+        """Persist the static config; return whether the write succeeded."""
         try:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)
@@ -617,15 +512,7 @@ class ConfigManager:
             return False
 
     def save_runtime_config(self, runtime_config: dict[str, Any]) -> bool:
-        """
-        保存运行时配置到 config_runtime.json（包含部署身份和 SSH 凭据）
-
-        Args:
-            runtime_config: 运行时配置字典
-
-        Returns:
-            是否保存成功
-        """
+        """Persist runtime_config (deploy identity + SSH creds) to config_runtime.json; return success."""
         try:
             runtime_config = dict(runtime_config or {})
             return self._write_runtime_config_file(runtime_config)
@@ -639,14 +526,8 @@ class ConfigManager:
         return self.save_runtime_config(runtime)
 
     def _write_runtime_config_file(self, runtime_config: dict[str, Any], preserve_redmine_auth: bool = True) -> bool:
-        """保存运行时配置到文件
-
-        Args:
-            runtime_config: 完整的运行时配置字典
-            preserve_redmine_auth: 是否自动保留已有的 redmine_auth（调用方已加载时可传 False 避免重复读文件）
-        """
+        """Write the full runtime config to disk, re-keeping existing redmine_auth unless the caller already loaded it (preserve_redmine_auth=False)."""
         try:
-            # 仅在调用方未包含 redmine_auth 且未明确跳过时，从文件读取保留
             if preserve_redmine_auth and 'redmine_auth' not in runtime_config:
                 existing = self._load_runtime_config()
                 if existing and 'redmine_auth' in existing:
@@ -663,15 +544,7 @@ class ConfigManager:
             return False
 
     def prepare_client_config(self, updates: dict[str, Any]) -> dict[str, Any]:
-        """
-        准备客户端相关配置，保留现有client_hosts和client_ssh_credentials
-
-        Args:
-            updates: 要更新的字段字典
-
-        Returns:
-            完整的客户端配置字典
-        """
+        """Merge *updates* into the existing client_hosts/client_ssh_credentials and return the full client config."""
         existing = self._load_runtime_config() or {}
         existing_credentials = existing.get('client_ssh_credentials', [])
 
@@ -691,30 +564,13 @@ class ConfigManager:
         return runtime_config
 
     def get_device_hosts(self, config: dict[str, Any] = None) -> list:
-        """
-        获取设备主机列表
-
-        Args:
-            config: 配置字典（如果不提供则重新加载）
-
-        Returns:
-            设备主机配置列表
-        """
+        """Return the device-host list, reloading config when *config* is omitted."""
         if config is None:
             config = self.load_config()
         return config.get('device_hosts', [])
 
     def get_device_host_config(self, host: str, config: dict[str, Any] = None) -> dict[str, Any] | None:
-        """
-        获取指定主机的配置
-
-        Args:
-            host: 主机地址
-            config: 配置字典（如果不提供则重新加载）
-
-        Returns:
-            主机配置字典
-        """
+        """Return the config block for *host* (or None), reloading config when *config* is omitted."""
         device_hosts = self.get_device_hosts(config)
         for device_host in device_hosts:
             if device_host.get('host') == host:
@@ -722,15 +578,7 @@ class ConfigManager:
         return None
 
     def get_ubuntu_user(self, config: dict[str, Any] = None) -> str:
-        """
-        获取 Ubuntu 用户名
-
-        Args:
-            config: 配置字典（如果不提供则重新加载）
-
-        Returns:
-            Ubuntu 用户名
-        """
+        """Return the Ubuntu username, reloading config when *config* is omitted."""
         if config is None:
             config = self.load_config()
         return config.get('ubuntu_user') or get_ubuntu_user()
@@ -750,15 +598,7 @@ class ConfigManager:
         }
 
     def get_ubuntu_host(self, config: dict[str, Any] = None) -> str:
-        """
-        获取 Ubuntu 主机地址
-
-        Args:
-            config: 配置字典（如果不提供则重新加载）
-
-        Returns:
-            Ubuntu 主机地址
-        """
+        """Return the Ubuntu host address, reloading config when *config* is omitted."""
         if config is None:
             config = self.load_config()
         return config.get('ubuntu_host') or get_ubuntu_host()
@@ -776,16 +616,7 @@ class ConfigManager:
         return username.strip(), hostname.strip()
 
     def find_device_host_password(self, device_host: str, config: dict[str, Any] = None) -> str | None:
-        """
-        从 client_ssh_credentials 中查找对应 device_host 的密码
-
-        Args:
-            device_host: 设备主机地址（格式: username@ip）
-            config: 配置字典（如果不提供则重新加载）
-
-        Returns:
-            密码字符串，如果找不到则返回 None
-        """
+        """Return the stored SSH password for *device_host* (user@ip) from client_ssh_credentials, or None; reloads config when *config* is omitted."""
         if config is None:
             config = self.load_config()
 
@@ -900,7 +731,6 @@ class ConfigManager:
             return None
 
 
-# 全局配置管理器实例
 config_manager = ConfigManager()
 
 

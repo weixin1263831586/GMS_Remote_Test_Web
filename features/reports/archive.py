@@ -39,7 +39,6 @@ class ReportFileHandler:
         self.temp_dir = temp_dir
 
     def extract_archive(self, archive_path: str) -> bool:
-        """解压压缩包"""
         try:
             if archive_path.endswith('.zip'):
                 self._extract_zip(archive_path)
@@ -56,12 +55,10 @@ class ReportFileHandler:
             return False
 
     def _extract_zip(self, zip_path: str):
-        """解压ZIP文件"""
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(self.temp_dir)
 
     def _extract_tar(self, tar_path: str):
-        """解压TAR文件"""
         with tarfile.open(tar_path, 'r:*') as tf:
             tf.extractall(self.temp_dir)
 
@@ -107,8 +104,6 @@ class ReportAnalyzer:
         self.report = None
 
     def analyze_file(self, file_path: str) -> dict | None:
-        """分析报告文件"""
-        # 确保临时目录存在
         os.makedirs(self.temp_dir, exist_ok=True)
 
         report = None
@@ -286,14 +281,12 @@ class ReportAnalyzer:
         return None
 
     def analyze_log_dir(self, log_dir: str) -> dict | None:
-        """分析日志目录（CTS/VTS/GTS日志）"""
         report = self.host_log_parser.parse_log_dir(log_dir)
         if report:
             return self._report_to_dict(report)
         return None
 
     def analyze_content(self, xml_content: str) -> dict | None:
-        """分析XML内容"""
         report = self.parser.parse_content(xml_content)
         if report:
             return self._report_to_dict(report)
@@ -493,5 +486,4 @@ class ReportAnalyzer:
         }
 
 
-# 全局实例
 analyzer = ReportAnalyzer()

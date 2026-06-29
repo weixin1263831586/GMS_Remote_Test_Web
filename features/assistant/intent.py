@@ -272,14 +272,12 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
         if re.search(pattern, lowered):
             tool = registry.get(tool_name)
             params = dict(extra)
-            # Special handling for navigate
             if tool_name == "navigate":
                 page = _extract_page_name(text)
                 if page:
                     params["page"] = page
                 else:
                     continue  # "打开" 但没有匹配到页面，跳过
-            # Special handling for reboot
             if tool_name == "devices_reboot":
                 params["devices"] = _extract_device_ids(text)
             if tool_name == "devices_list":
@@ -297,7 +295,6 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
     if ctx_result.get("resolved"):
         hint = ctx_result.get("intent_hint", "")
         entities = ctx_result.get("entities", {})
-        # Map hint to tool
         hint_tool_map = {
             "device_detail": "devices_info",
             "devices_detail": "devices_info",

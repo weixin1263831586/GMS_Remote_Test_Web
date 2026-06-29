@@ -110,10 +110,7 @@ class RedmineClient(RedmineAttachmentMixin):
         limit: int = 100,
         sort: str = "updated_on:desc",
     ) -> list[Any]:
-        """Fetch ALL issues assigned to the authenticated user (no date window).
-
-        Use this to build a complete local database of assigned issues.
-        """
+        """Fetch up to `limit` issues assigned to me (no date window); raise limit toward 5000 for a fuller local DB."""
         return await self._paginate_issues("me", status_id, limit, sort)
 
     async def fetch_issues_by_assignee(

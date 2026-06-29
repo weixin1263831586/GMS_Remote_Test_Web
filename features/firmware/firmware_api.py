@@ -381,7 +381,6 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
 
             try:
                 gms_suite_dir = get_default_suites_path(config)
-                # Handle firmware file
                 if firmware_file:
                     firmware_name = os.path.basename(firmware_file.filename or "").strip()
                     if not firmware_name:

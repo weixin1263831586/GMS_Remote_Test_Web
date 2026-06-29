@@ -25,7 +25,6 @@ from foundation.config import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
-# 预编译常用正则表达式
 _RE_APPLE_ICON = re.compile(
     r'<link[^>]*rel=["\']apple-touch-icon["\'][^>]*href=["\']([^"\']+)["\'][^>]*>',
     re.IGNORECASE
@@ -53,7 +52,6 @@ class IconResult:
     original_icon_url: str = ""  # 原始远程图标地址
 
     def to_dict(self) -> dict[str, Any]:
-        """转换为字典"""
         return {
             'success': self.success,
             'icon_url': self.icon_url,
@@ -135,7 +133,6 @@ class IconFetcher:
         self.cache = self._load_cache()
 
     async def get_session(self):
-        """获取aiohttp会话"""
         if self.session is None or self.session.closed:
             timeout = aiohttp.ClientTimeout(total=self.timeout)
             headers = {
@@ -149,12 +146,11 @@ class IconFetcher:
         return self.session
 
     async def close(self):
-        """关闭会话"""
         if self.session and not self.session.closed:
             await self.session.close()
 
     def _load_cache(self) -> dict[str, Any]:
-        """加载图标缓存"""
+        """从磁盘加载图标缓存并剔除已过期条目。"""
         if not self.use_cache:
             return {}
 
@@ -221,14 +217,12 @@ class IconFetcher:
             logger.warning(f"保存图标缓存失败: {e}")
 
     def get_cache_stats(self) -> dict[str, Any]:
-        """获取缓存统计信息"""
         return {
             'size': len(self.cache),
             'keys': list(self.cache.keys())
         }
 
     def clear_cache(self):
-        """清理缓存"""
         self.cache.clear()
         try:
             if os.path.exists(self.CACHE_FILE):
@@ -787,7 +781,6 @@ class IconFetcher:
 
     @staticmethod
     def _is_image_content(data: bytes) -> bool:
-        """检查是否是图片内容"""
         if len(data) < 4:
             return False
 

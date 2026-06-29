@@ -14,8 +14,8 @@ from foundation.dashboard_config import (
 )
 
 
-# Gerrit 分页查询每页大小上限。默认 500，可调高以减少翻页次数；
-# 历史提交总量不受此限制（max_history_changes=0 表示拉取全部历史）。
+# Gerrit 分页查询每页大小上限（配置默认每页 500，可调高至该值以减少翻页）。
+# 历史总量上限 max_history_changes=0 表示无上限（拉取全部历史）。
 MAX_QUERY_PAGE_SIZE = 2000
 
 DEFAULT_GERRIT_DASHBOARD = {

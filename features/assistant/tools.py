@@ -312,7 +312,6 @@ class ToolRegistry:
         """从 API_DOCS_LIST 批量注册工具。"""
         for entry in api_docs:
             path = entry.get("path", "")
-            # 跳过非 API 路径
             if not path.startswith("/api/") and path != "/":
                 continue
 
@@ -341,10 +340,8 @@ class ToolRegistry:
                 keywords.extend(cat_kws[:2])  # 只加前2个（通常是中英文分类名）
             else:
                 keywords.extend(cat_kws)
-            # 去重
             keywords = list(dict.fromkeys(keywords))
 
-            # 判断属性
             is_readonly = _READONLY_PATHS.get(method, method == "GET")
             is_dangerous = path in _DANGEROUS_PATHS
             requires_confirm = path in _CONFIRM_PATHS

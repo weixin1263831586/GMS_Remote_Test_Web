@@ -101,7 +101,7 @@ async def _run_test_background(
     client_id: str,
     locked_devices: list[str],
 ):
-    """Run test in background."""
+    """Execute the GMS test over SSH, stream logs, and record the report on completion."""
 
     ssh = None
 

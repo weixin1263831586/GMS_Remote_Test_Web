@@ -12,7 +12,6 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# Emoji 常量用于 AI 分析结果
 EMOJI_TARGET = "🎯"
 EMOJI_CHART = "📊"
 EMOJI_CHECK = "✅"
@@ -87,20 +86,7 @@ class UniversalAIAnalyzer:
         source_code: str | None = None,
         auto_fetch_source: bool = True
     ) -> dict:
-        """
-        使用AI模型分析测试失败（自动获取源码）
-
-        Args:
-            class_name: 测试类名
-            method_name: 测试方法名
-            error_message: 错误信息
-            stack_trace: 堆栈跟踪
-            source_code: 源码（可选，如果为空且auto_fetch_source=True则自动获取）
-            auto_fetch_source: 是否自动使用OpenGrok获取源码
-
-        Returns:
-            dict: 分析结果，包含源码信息
-        """
+        """Analyze a test failure with the configured AI provider, auto-fetching source when source_code is empty and auto_fetch_source is True."""
         result = {
             'success': False,
             'error': None,
@@ -108,7 +94,7 @@ class UniversalAIAnalyzer:
             'suggestions': [],
             'solution': None,
             'provider': None,
-            'source_info': None  # 新增：源码信息
+            'source_info': None
         }
 
         try:
@@ -120,7 +106,6 @@ class UniversalAIAnalyzer:
                     result['source_info'] = source_info
                     logger.info(f"成功获取源码: {source_info.get('file_path', 'unknown')}")
 
-            # 获取启用的提供商
             provider_name = self.get_primary_provider()
 
             if not provider_name:
@@ -152,19 +137,7 @@ class UniversalAIAnalyzer:
 
     def _call_aimodel(self, provider_name: str, config: dict, class_name: str, method_name: str | None,
                                 error_message: str, stack_trace: str | None, source_code: str | None) -> dict:
-        """
-        Args:
-            provider_name: 提供商名称
-            config: 提供商配置
-            class_name: 测试类名
-            method_name: 测试方法名
-            error_message: 错误信息
-            stack_trace: 堆栈跟踪
-            source_code: 源码
-
-        Returns:
-            分析结果字典
-        """
+        """Call the provider AI model to analyze a test failure."""
         try:
             api_key = config.get('api_key', '')
             if not api_key:
@@ -180,12 +153,9 @@ class UniversalAIAnalyzer:
 
             prompt = self._build_prompt(class_name, method_name, error_message, stack_trace, source_code)
 
-            # 获取 API 格式（优先使用配置中的 api_format 字段）
             api_format = self._get_api_format(provider_name, config)
 
-            # 根据 API 格式构建请求
             if api_format == self.API_FORMAT_ANTHROPIC:
-                # Anthropic 格式：/v1/messages
                 url = f"{base_url}/v1/messages" if not base_url.endswith('/messages') else base_url
                 headers = {
                     "x-api-key": api_key,
@@ -196,12 +166,10 @@ class UniversalAIAnalyzer:
                     "model": model,
                     "max_tokens": config.get('max_tokens', 2000),
                     "messages": [{"role": "user", "content": prompt}],
-                    # 禁用推理模式，确保直接返回结果
                     "disable_thinking": True,
                     "skip_reasoning": True
                 }
             else:
-                # OpenAI 格式：/v1/chat/completions
                 headers = {
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
@@ -211,7 +179,6 @@ class UniversalAIAnalyzer:
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": config.get('temperature', 0.3),
                     "max_tokens": config.get('max_tokens', 2000),
-                    # 禁用推理模式，确保直接返回结果
                     "disable_thinking": True,
                     "skip_reasoning": True
                 }
@@ -219,7 +186,6 @@ class UniversalAIAnalyzer:
 
             logger.info(f"[{provider_name}] Request URL: {url}, Model: {model}, Format: {api_format}")
 
-            # 增加重试机制和更好的错误处理
             max_retries = 2
             retry_delay = 1
 
@@ -250,12 +216,9 @@ class UniversalAIAnalyzer:
             if response.status_code == 200:
                 result = response.json()
 
-                # 支持两种响应格式：Anthropic 和 OpenAI
                 if api_format == self.API_FORMAT_ANTHROPIC and 'content' in result:
-                    # Anthropic 格式
                     content = result['content'][0].get('text', '')
                 elif 'choices' in result:
-                    # OpenAI 格式（智谱AI等）
                     choice = result.get('choices', [{}])[0]
                     message = choice.get('message', {})
                     content = message.get('content', '')
@@ -839,35 +802,21 @@ class UniversalAIAnalyzer:
         }
 
     def _fetch_source_code_android(self, class_name: str) -> dict | None:
-        """
-        使用OpenGrok获取Android源码
-
-        Args:
-            class_name: 测试类名（如 com.android.angleallowlists.vts.AngleAllowlistTraceTest）
-
-        Returns:
-            dict: 包含源码信息，如果失败返回None
-        """
+        """Fetch Android source for *class_name* (e.g. com.android...vts.SomeTest) via OpenGrok; return None on failure."""
         try:
-            # 参数验证
             if not class_name or not isinstance(class_name, str):
                 logger.warning(f"无效的类名参数: {class_name}")
                 return None
 
-            # 使用本地的 rk_codesearch 技能来查找源码
             from features.reports import ReportAnalyzer
 
-            # 创建临时分析器实例
             temp_analyzer = ReportAnalyzer()
 
-            # 调用 rk_codesearch 方法搜索源码
             search_results = temp_analyzer.rk_codesearch(class_name, max_results=3)
 
             if search_results and len(search_results) > 0:
-                # 取第一个搜索结果
                 first_result = search_results[0]
 
-                # 构建返回结果
                 result = {
                     'file_path': first_result.get('path', ''),
                     'line': first_result.get('line', ''),

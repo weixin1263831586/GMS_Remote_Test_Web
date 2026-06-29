@@ -24,17 +24,9 @@ from .ssh import ssh_manager
 logger = logging.getLogger(__name__)
 
 class VNCManager:
-    """
-    VNC管理器
-
-    特性：
-- VNC服务启动/停止
-- 多主机VNC支持
-- 设备屏幕显示（scrcpy）
-"""
+    """Manages VNC start/stop, scrcpy device screens, locally and over SSH."""
 
     def __init__(self):
-        """初始化VNC管理器"""
         self.ssh_manager = ssh_manager
         self.config_manager = config_manager
 
@@ -72,10 +64,8 @@ class VNCManager:
             is_local = CommonUtils.is_local_host(host_ip)
 
             if is_local:
-                # 本地主机的VNC启动
                 return self._start_local_vnc(force_restart=force_restart)
 
-            # 远程主机的VNC启动
             return self._start_remote_vnc(host, password, vnc_password, config)
 
         except Exception as e:
@@ -161,7 +151,6 @@ class VNCManager:
                         'local': True
                     }
 
-            # 启动x11vnc
             x11vnc_cmd = [
                 'x11vnc',
                 '-display', ':0',
@@ -175,7 +164,6 @@ class VNCManager:
             logger.info("[VNC] Started x11vnc")
             time.sleep(0.5)
 
-            # 启动websockify
             websockify_cmd = self._build_local_websockify_cmd(novnc_web_dir)
             subprocess.Popen(websockify_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             logger.info("[VNC] Started websockify")
@@ -291,7 +279,6 @@ class VNCManager:
                     self.ssh_manager.execute_command(ssh, create_passwd_cmd, timeout=10)
                 time.sleep(0.5)  # 等待文件创建完成
 
-            # 检查noVNC安装
             check_novnc_cmd = "[ -d /opt/noVNC ] && echo 'exists' || echo 'missing'"
             stdout, stderr, code = self.ssh_manager.execute_command(ssh, check_novnc_cmd)
 
@@ -498,7 +485,6 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
 
             results = []
 
-            # 启动scrcpy
             for idx, device_id in enumerate(devices):
                 # 计算窗口位置
                 x_offset = start_x + idx * (window_width + horizontal_gap)
@@ -562,12 +548,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             return {'success': False, 'error': str(e)}
 
     def get_vnc_status(self) -> dict[str, Any]:
-        """
-        获取VNC状态
-
-        Returns:
-            VNC状态信息
-        """
+        """Check whether x11vnc is running and port 6080 is listening."""
         try:
             config = self.config_manager.load_config()
             host = config.get('ubuntu_host', '')
@@ -575,13 +556,11 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             if not ssh:
                 return {'running': False, 'error': 'SSH连接失败'}
 
-            # 检查VNC进程
             check_cmd = "pgrep -f 'x11vnc' | wc -l"
             stdout, _, code = self.ssh_manager.execute_command(ssh, check_cmd)
 
             vnc_count = int(stdout.strip()) if code == 0 else 0
 
-            # 检查VNC端口
             port_check = "netstat -tuln | grep 6080"
             stdout, _, code = self.ssh_manager.execute_command(ssh, port_check)
 
@@ -611,5 +590,4 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
         return self.start_vnc(host, password, vnc_password)
 
 
-# 全局VNC管理器实例
 vnc_manager = VNCManager()

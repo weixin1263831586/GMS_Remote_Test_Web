@@ -97,7 +97,6 @@ class LocalPtyChannel:
 
 
 def close_terminal_session_resources(session_info: dict[str, Any]):
-    """关闭终端会话资源"""
     mode = session_info.get('mode')
     channel = session_info.get('channel')
     ssh = session_info.get('ssh')
@@ -118,7 +117,6 @@ def close_terminal_session_resources(session_info: dict[str, Any]):
 
 
 def create_local_terminal_channel(command: list[str] | None = None) -> LocalPtyChannel:
-    """创建本地终端通道"""
     shell = os.environ.get("SHELL") or "/bin/bash"
     terminal_command = command or [shell, "-l"]
     env = os.environ.copy()
@@ -234,7 +232,6 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
 
 
 async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: dict):
-    """处理终端SSH连接"""
     try:
         config = config_manager.load_config()
         host = data.get('host', config_manager.get_ubuntu_host(config))
@@ -399,7 +396,6 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
 
 
 async def handle_terminal_input(client_id: str, websocket: WebSocket, data: dict):
-    """处理终端输入"""
     session_id = client_id
     with global_state.terminal_lock:
         if session_id in global_state.terminal_ssh_sessions:
@@ -412,7 +408,6 @@ async def handle_terminal_input(client_id: str, websocket: WebSocket, data: dict
 
 
 async def handle_terminal_resize(client_id: str, websocket: WebSocket, data: dict):
-    """处理终端大小调整"""
     session_id = client_id
     with global_state.terminal_lock:
         if session_id in global_state.terminal_ssh_sessions:
@@ -425,7 +420,6 @@ async def handle_terminal_resize(client_id: str, websocket: WebSocket, data: dic
 
 
 async def refresh_devices_websocket(client_id: str, websocket: WebSocket):
-    """WebSocket刷新设备列表"""
     try:
         config = config_manager.load_config()
         ssh = ssh_manager.get_connection(config)
@@ -462,7 +456,6 @@ async def refresh_devices_websocket(client_id: str, websocket: WebSocket):
 
 
 async def handle_tradefed_list_results(client_id: str, websocket: WebSocket, data: dict):
-    """处理 tradefed list results 命令"""
     from features.test_execution import execute_tradefed_command, parse_tradefed_list_results
 
     try:

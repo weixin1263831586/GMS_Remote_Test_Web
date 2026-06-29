@@ -93,10 +93,6 @@ def decode_json_obj(value, default=None):
     return default if default is not None else {}
 
 
-# Certification / test types in priority order (first match wins).
-# Certification-type detection is shared from cert_rules (single source of truth,
-# keeps BTS/EDLA/CTS-Verifier/CTS/VTS/GTS/GMS/MCTS order consistent everywhere).
-
 # Module detection rules: (module_name, compiled regex on the issue text).
 _MODULE_RULES = [
     ("AVB/VBMeta", re.compile(r"vbmeta|avb\b|verified\s*boot", re.I)),
@@ -218,7 +214,6 @@ class RedmineCaseExtractor:
         summary = str(issue.get("summary") or "")
         doc_content = str(issue.get("doc_content") or "")
 
-        # Attachment / journal failures contribute more text signal.
         attachment_failures_text = cls._collect_attachment_failure_text(attachments)
         journal_text = cls._collect_journal_text(journals)
         full_text = "\n".join(filter(None, [subject, description, summary, error_info, attachment_failures_text]))
@@ -309,7 +304,6 @@ class RedmineCaseExtractor:
         major = match.group(1).split(".")[0]
         return f"Android{major}"
 
-    # Certification-type detection delegates to cert_rules (shared, no local list).
     _detect_certification_type = staticmethod(detect_certification_type)
 
     @staticmethod
@@ -339,7 +333,7 @@ class RedmineCaseExtractor:
                 return name
         return ""
 
-    # product_form currently derives from the same region rules.
+    # product_form reuses region rules for now (no separate detection yet).
     _detect_product_form = _detect_region
 
     # ------------------------------------------------------------------
@@ -506,8 +500,6 @@ class RedmineCaseExtractor:
             score += 15
         return min(score, 100.0)
 
-    # Placeholder texts produced by the rule-based fallbacks in analysis_resolution;
-    # they carry no real knowledge and should yield to the signature knowledge base.
     _PLACEHOLDERS = MEANINGLESS_PLACEHOLDERS
 
     @classmethod

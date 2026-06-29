@@ -766,7 +766,6 @@ async function smartSearch() {
     } catch (_) {
       // Not found locally — fetch from Redmine
     }
-    // Fetch from Redmine
     await fetchIssueFromRedmine(issueId);
   } else {
     loadIssues();
