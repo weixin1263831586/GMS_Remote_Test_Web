@@ -224,6 +224,29 @@ def _extract_query_text(text: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+def _extract_suite_module_query(text: str) -> str:
+    cleaned = re.sub(r"\b(?:CTS|VTS|GTS|STS)\b", " ", text, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"(最新|套件|测试套件|testcases?|相关|测试项|测试模块|模块|用例|有哪些|有那些|列表|列出|查询|查看|显示|包含)",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    tokens = re.findall(r"[A-Za-z0-9_.-]+", cleaned)
+    if tokens:
+        return max(tokens, key=len)
+    return ""
+
+
+def _extract_suite_types(text: str) -> str:
+    found = []
+    upper = text.upper()
+    for suite_type in ("CTS", "VTS", "GTS", "STS"):
+        if suite_type in upper:
+            found.append(suite_type.lower())
+    return ",".join(found)
+
+
 def _is_run_test_request(text: str) -> bool:
     lowered = text.lower()
     if re.search(r"\b(run|start|retry)\b|启动|开始|执行|重试|再跑|跑测试|跑\s*[a-z0-9_.-]*_test", lowered):
@@ -346,6 +369,24 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
                 tool=tool,
                 confidence=0.9,
                 params=_extract_params_for_tool(text, tool),
+                needs_confirm=False,
+                is_run_test=False,
+                context_entities={},
+                stage="rule",
+            )
+
+    if re.search(r"testcases?|测试项|测试模块|模块", lowered_text) and re.search(r"哪些|列表|列出|查询|查看|相关|module", lowered_text):
+        tool = registry.get("suite_modules")
+        if tool:
+            params = {"query": _extract_suite_module_query(text)}
+            suite_types = _extract_suite_types(text)
+            if suite_types:
+                params["suite_types"] = suite_types
+            return ResolvedIntent(
+                tool_name="suite_modules",
+                tool=tool,
+                confidence=0.9,
+                params=params,
                 needs_confirm=False,
                 is_run_test=False,
                 context_entities={},
@@ -483,8 +524,14 @@ def _extract_params_for_tool(text: str, tool: AgentTool) -> dict[str, Any]:
                 params["profile_id"] = profile_id
         elif pname == "query":
             query = _extract_query_text(text)
+            if not query and tool.name == "suite_modules":
+                query = _extract_suite_module_query(text)
             if query:
                 params["query"] = query
+        elif pname == "suite_types":
+            suite_types = _extract_suite_types(text)
+            if suite_types:
+                params["suite_types"] = suite_types
 
     if tool.name in {"devices_list", "devices_management"}:
         keyword = _extract_device_keyword(text)

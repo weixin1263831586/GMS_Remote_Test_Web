@@ -94,17 +94,20 @@ async def check_ssh_sshd(request: Request, device_host: str | None = Query(None,
         }, status_code=400)
 
     config['device_host'] = device_host
+    configured_device_password = str(config.get('device_pswd') or '')
     found_pwd = config_manager.find_device_host_password(device_host, config)
-    config['device_pswd'] = found_pwd or config.get('device_pswd', '')
+    config['device_pswd'] = found_pwd or configured_device_password
 
     # 提前检查：如果没密码则明确提示，而非让连接失败后报通用错误
     if not config.get('device_pswd'):
-        return JSONResponse(content={
-            'success': False,
-            'installed': False,
-            'running': False,
-            'error': f'未找到 {device_host} 的 SSH 密码，请先在客户端管理中添加该主机的凭据'
-        })
+        return error_response(
+            f'未找到 {device_host} 的 SSH 密码，请先在客户端管理中添加该主机的凭据，或在配置中设置设备主机密码',
+            status_code=401,
+            installed=False,
+            running=False,
+            need_password=True,
+            device_host=device_host,
+        )
 
     try:
         with DeviceSSHConnection(config) as ssh:

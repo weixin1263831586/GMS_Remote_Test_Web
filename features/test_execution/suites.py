@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from . import runtime
+from foundation.config import config_manager as default_config_manager
 
 
 logger = logging.getLogger(__name__)
@@ -69,13 +70,15 @@ def detect_test_type_from_dir_path(dir_path: str) -> str | None:
 
 def get_default_suites_path(config: dict[str, Any]) -> str:
     """Get default suites path from config or environment."""
-    ubuntu_user = runtime.config_manager.get_ubuntu_user(config)
+    manager = runtime.config_manager or default_config_manager
+    ubuntu_user = manager.get_ubuntu_user(config)
     return config.get('suites_path', f"/home/{ubuntu_user}/GMS-Suite")
 
 
 def is_config_host_local(config: dict[str, Any]) -> bool:
     """Return whether the configured Ubuntu host is local."""
-    return runtime.config_manager.is_config_host_local(config)
+    manager = runtime.config_manager or default_config_manager
+    return manager.is_config_host_local(config)
 
 
 def get_effective_local_server(client_id: str, requested_local_server: str = "") -> str:
@@ -83,7 +86,8 @@ def get_effective_local_server(client_id: str, requested_local_server: str = "")
     if requested_local_server and "@" in requested_local_server:
         return requested_local_server
 
-    runtime_config = runtime.config_manager.get_runtime_config()
+    manager = runtime.config_manager or default_config_manager
+    runtime_config = manager.get_runtime_config()
     runtime_local_server = str(runtime_config.get('local_server') or "")
     if "@" in runtime_local_server:
         return runtime_local_server

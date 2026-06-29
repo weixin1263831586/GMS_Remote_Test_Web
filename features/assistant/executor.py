@@ -187,6 +187,7 @@ class ActionExecutor:
             "devices_user_locked": self._query_locked_devices,
             "devices_info": self._query_device_info,
             "test_suites": self._query_suites,
+            "suite_modules": self._query_suite_modules,
             "test_status": self._query_test_status,
             "reports_list": self._query_reports,
             "users_list": self._query_users,
@@ -466,6 +467,58 @@ class ActionExecutor:
             quick_actions=[
                 {"label": "打开测试套件页", "page": "test-suites"},
             ],
+        )
+
+    async def _query_suite_modules(self, session, request, params) -> ToolResult:
+        from features.test_execution.suite_modules import search_latest_suite_modules
+
+        query = str(params.get("query") or "").strip()
+        suite_types_raw = params.get("suite_types") or "cts,vts,gts,sts"
+        if isinstance(suite_types_raw, str):
+            suite_types = [item.strip() for item in suite_types_raw.split(",") if item.strip()]
+        else:
+            suite_types = [str(item).strip() for item in suite_types_raw if str(item).strip()]
+
+        config = config_manager.load_config()
+        payload = await asyncio.to_thread(
+            search_latest_suite_modules,
+            config,
+            query,
+            suite_types,
+            30,
+        )
+        modules = payload.get("modules") or []
+        searched = payload.get("searched_suites") or []
+        counts: dict[str, int] = {}
+        for item in modules:
+            suite_type = str(item.get("suite_type") or "UNKNOWN").upper()
+            counts[suite_type] = counts.get(suite_type, 0) + 1
+
+        grouped: dict[str, list[str]] = {}
+        for item in modules:
+            suite_type = str(item.get("suite_type") or "UNKNOWN").upper()
+            grouped.setdefault(suite_type, []).append(str(item.get("module") or "-"))
+
+        suite_order = ["CTS", "VTS", "GTS", "STS"]
+        text_blocks = []
+        for suite_type in suite_order + sorted(set(grouped) - set(suite_order)):
+            names = grouped.get(suite_type) or []
+            if not names:
+                continue
+            unique_names = list(dict.fromkeys(names))
+            text_blocks.append(f"{suite_type}模块\n" + "\n".join(unique_names[:40]))
+
+        text = "\n\n".join(text_blocks) if text_blocks else f"未找到 {payload.get('normalized_query') or query} 相关模块"
+
+        return ToolResult(
+            success=True,
+            tool_name="suite_modules",
+            data=payload,
+            formatted_text=text,
+            kind="table",
+            page="test-suites",
+            entities={"suites": [item.get("suite_path", "") for item in searched[:8]]},
+            quick_actions=[{"label": "打开测试套件页", "page": "test-suites"}],
         )
 
     async def _query_test_status(self, session, request, params) -> ToolResult:

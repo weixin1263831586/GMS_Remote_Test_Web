@@ -686,6 +686,27 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             response_type="detail",
         ),
         AgentTool(
+            name="suite_modules",
+            category="test",
+            description="查询最新 CTS/VTS/GTS/STS 套件 testcases 中匹配关键词的测试模块",
+            api_path="/api/test/suites/modules",
+            method="GET",
+            params=[
+                {"name": "query", "type": "string", "required": True, "desc": "模块关键词，例如 Camera"},
+                {"name": "suite_types", "type": "string", "required": False, "desc": "逗号分隔套件类型，默认 cts,vts,gts,sts"},
+            ],
+            keywords=[
+                "测试项有哪些模块", "相关测试项", "测试模块有哪些", "有哪些模块",
+                "testcases", "test modules", "suite modules", "Camera测试项", "Camera模块",
+                "模块列表", "查询测试模块",
+            ],
+            is_readonly=True,
+            is_dangerous=False,
+            requires_confirm=False,
+            executor_ref="features.test_execution.api:search_suite_modules",
+            response_type="list",
+        ),
+        AgentTool(
             name="test_parse_args",
             category="test",
             description="解析测试命令参数",

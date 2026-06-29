@@ -49,6 +49,12 @@ from .suites_api import (
     list_suites as list_suites,
 )
 from .suites_api import (
+    search_suite_modules as search_suite_modules,
+)
+from .suites_api import (
+    search_suite_files as search_suite_files,
+)
+from .suites_api import (
     router as suites_router,
 )
 from .transfers_api import (
