@@ -174,15 +174,15 @@ class CommonUtils:
             如果没有 username，返回 (None, host)
 
         Examples:
-            >>> parse_host_address('user@192.168.1.1')
+            >>> CommonUtils.parse_host_address('user@192.168.1.1')
             ('user', '192.168.1.1')
-            >>> parse_host_address('192.168.1.1')
+            >>> CommonUtils.parse_host_address('192.168.1.1')
             (None, '192.168.1.1')
         """
-        if '@' in host:
-            username, host_ip = host.split('@', 1)
-            return username, host_ip
-        return None, host
+        # Delegate to the canonical implementation in networking to avoid a
+        # second copy of the same '@'-split logic drifting out of sync.
+        from foundation.networking import parse_host_address
+        return parse_host_address(host)
 
     @classmethod
     def create_result_dict(

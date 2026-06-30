@@ -4,18 +4,19 @@ import asyncio
 import logging
 import os
 import re
+import shlex
 import time
 from datetime import datetime
-from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from features.test_execution.suites import get_default_suites_path
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
+from foundation.security import sanitize_device_ids
 
-from . import runtime
-from . import reconnect
+from . import reconnect, runtime
 from .locks import device_lock_manager
 from .manager import device_manager
 from .models import (
@@ -58,11 +59,6 @@ def _help_or_continue(help: bool, method: str, path: str):
     if runtime.generate_help_or_continue is None:
         return None
     return runtime.generate_help_or_continue(help, method, path)
-
-
-def _default_suites_path(config: dict[str, Any]) -> str:
-    ubuntu_user = runtime.config_manager.get_ubuntu_user(config)
-    return config.get("suites_path", f"/home/{ubuntu_user}/GMS-Suite")
 
 
 def _api_success(data=None, message="操作成功"):
@@ -199,7 +195,7 @@ async def _manage_bootloader_lock(devices: list[str], action: str) -> JSONRespon
             local_script = os.path.join(
                 runtime.project_root, "scripts", "run_Device_Lock.sh"
             )
-            remote_script = os.path.join(_default_suites_path(config), "run_Device_Lock.sh")
+            remote_script = os.path.join(get_default_suites_path(config), "run_Device_Lock.sh")
 
             if not os.path.exists(local_script):
                 return _api_error(
@@ -209,7 +205,7 @@ async def _manage_bootloader_lock(devices: list[str], action: str) -> JSONRespon
             try:
                 with ssh.open_sftp() as sftp:
                     sftp.put(local_script, remote_script)
-                runtime.ssh_manager.execute_command(ssh, f"chmod +x '{remote_script}'")
+                runtime.ssh_manager.execute_command(ssh, f"chmod +x {shlex.quote(remote_script)}")
             except Exception as e:
                 return _api_error(
                     f"Script upload failed: {e!s}", status_code=500
@@ -298,8 +294,13 @@ async def unlock_bootloader(
 async def check_bootloader_status(req: DeviceActionRequest):
     """Check device Bootloader lock status (GREEN=locked, ORANGE=unlocked)."""
     try:
+        devices = sanitize_device_ids(req.devices)
+        if not devices:
+            return _api_error("No valid device serials", status_code=400)
         with SSHConnection() as ssh:
-            async def check_single_device(device_id: str) -> dict:
+            # Synchronous per-device SSH check — run serially off the event loop
+            # (see get_device_info for why gather was false concurrency here).
+            def check_single_device(device_id: str) -> dict:
                 output, _error, _code = runtime.ssh_manager.execute_command(
                     ssh,
                     f"adb -s {device_id} shell getprop ro.boot.verifiedbootstate",
@@ -321,9 +322,9 @@ async def check_bootloader_status(req: DeviceActionRequest):
                     "status": status_text,
                 }
 
-            results = await asyncio.gather(
-                *[check_single_device(d) for d in req.devices]
-            )
+            results = []
+            for device_id in devices:
+                results.append(await asyncio.to_thread(check_single_device, device_id))
 
             return _api_success({"results": results}, "Lock status check completed")
 
@@ -338,8 +339,19 @@ async def check_bootloader_status(req: DeviceActionRequest):
 async def get_device_info(req: DeviceActionRequest):
     """Get device detailed information."""
     try:
+        devices = sanitize_device_ids(req.devices)
+        if not devices:
+            return _api_error("No valid device serials", status_code=400)
         with SSHConnection() as ssh:
-            async def get_single_device_info(device_id: str) -> dict:
+            # Per-device work is fully synchronous (get_device_info +
+            # get_device_properties_optimized both do blocking SSH). The old
+            # asyncio.gather looked concurrent but had no await suspension
+            # point inside, so it ran serially while blocking the event loop.
+            # Run each device off the loop in turn — same serial behaviour,
+            # but the loop is freed between devices and the shared ssh
+            # connection is never used by two threads at once (paramiko is not
+            # thread-safe).
+            def get_single_device_info(device_id: str) -> dict:
                 device_info = {"device": device_id, "properties": {}}
 
                 base_info = device_manager.get_device_info(device_id, ssh)
@@ -360,7 +372,7 @@ async def get_device_info(req: DeviceActionRequest):
                     if key in base_info:
                         device_info["properties"][label] = base_info[key]
 
-                extra_props = await get_device_properties_optimized(device_id, ssh)
+                extra_props = get_device_properties_optimized(device_id, ssh)
 
                 prop_mapping = {
                     "boot_state": ("Boot State", lambda x: x if x else "Unknown"),
@@ -387,9 +399,9 @@ async def get_device_info(req: DeviceActionRequest):
 
                 return device_info
 
-            results = await asyncio.gather(
-                *[get_single_device_info(d) for d in req.devices]
-            )
+            results = []
+            for device_id in devices:
+                results.append(await asyncio.to_thread(get_single_device_info, device_id))
 
             return _api_success({"results": results}, "Device info retrieved")
 

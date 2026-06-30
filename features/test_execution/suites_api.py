@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from features.devices import ssh_connection_failed_response
+from features.devices.support import ssh_connection_failed_response
 from foundation.errors import handle_api_errors
 
 from . import runtime
@@ -25,8 +25,8 @@ from .suite_helpers import (
     _get_available_test_suites,
     _resolve_suite_diagnosis_target,
 )
-from .suites import get_default_suites_path, is_config_host_local
 from .suite_modules import search_latest_suite_modules
+from .suites import get_default_suites_path, is_config_host_local
 
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ import json, os, sys
 root = os.path.realpath(sys.argv[1])
 target = os.path.realpath(sys.argv[2])
 def emit(payload):
-    print(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
 if target != root and not target.startswith(root + os.sep):
     emit({"success": False, "error": "Illegal path"})
     sys.exit(0)

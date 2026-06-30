@@ -38,7 +38,7 @@ def _create_apk_task(task_id, apk_path, filename):
     with runtime.global_state.apk_analysis_tasks_lock:
         if len(runtime.global_state.apk_analysis_tasks) >= runtime.apk_max_tasks:
             oldest = min(runtime.global_state.apk_analysis_tasks.items(), key=lambda t: t[1].get('timestamp', 0))
-            old_dir = os.path.join(runtime.apk_upload_dir, oldest[0])
+            old_dir = _safe_join(runtime.apk_upload_dir, oldest[0])
             shutil.rmtree(old_dir, ignore_errors=True)
             del runtime.global_state.apk_analysis_tasks[oldest[0]]
         runtime.global_state.apk_analysis_tasks[task_id] = {
@@ -94,6 +94,11 @@ def _cleanup_files(paths: list[str]):
 
 def _get_apk_task(task_id: str, require_completed: bool = True):
     """获取APK分析任务，返回 (task, error_response)"""
+    try:
+        task_id = _normalize_apk_task_id(task_id)
+    except ValueError as e:
+        return None, ApiResponse.error(str(e), status_code=400)
+
     with runtime.global_state.apk_analysis_tasks_lock:
         task = runtime.global_state.apk_analysis_tasks.get(task_id)
     if not task:

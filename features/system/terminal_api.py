@@ -1,10 +1,10 @@
 """Terminal router - SSH terminal info and file push/upload APIs."""
 
+import asyncio
 import json
 import logging
 import os
 import shutil
-import tempfile
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -12,7 +12,13 @@ from fastapi.responses import JSONResponse
 from features.system.ssh import ssh_manager
 from foundation.config import config_manager
 from foundation.responses import error_response
-from foundation.uploads import merge_files_to_path, safe_upload_target_path, save_upload_to_path
+from foundation.uploads import (
+    merge_files_to_path,
+    remote_home_file_path,
+    safe_upload_target_path,
+    save_upload_to_path,
+    upload_temp_root,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -69,7 +75,7 @@ async def upload_file(
     """File upload - supports chunked upload and resume."""
     # HEAD request: check uploaded chunks for resume
     if check_chunks and upload_id:
-        session_dir = os.path.join(tempfile.gettempdir(), "gms_uploads", upload_id)
+        session_dir = os.path.join(upload_temp_root(), upload_id)
         chunks_file = os.path.join(session_dir, "uploaded_chunks.json")
 
         if os.path.exists(chunks_file):
@@ -94,7 +100,7 @@ async def upload_file(
 
         config = config_manager.load_config()
 
-        upload_dir = os.path.join(tempfile.gettempdir(), "gms_uploads")
+        upload_dir = upload_temp_root()
         os.makedirs(upload_dir, exist_ok=True)
 
         try:
@@ -111,31 +117,37 @@ async def upload_file(
                     os.remove(temp_path)
                     return error_response("SSH connection failed", 500)
 
-                # Determine target path and upload via SFTP
-                default_remote = f"/home/{config['ubuntu_user']}/{safe_filename}"
+                # Determine target path and upload via SFTP. sftp.put is a
+                # blocking transfer (files can be GB-sized) — run the whole
+                # upload off the event loop so a large upload doesn't freeze
+                # every other request.
+                default_remote = remote_home_file_path(
+                    config_manager.get_ubuntu_user(config),
+                    safe_filename,
+                )
 
-                if path and path.strip():
-                    target_dir = path.rstrip("/")
-                    try:
-                        with ssh.open_sftp() as sftp:
-                            ssh_manager.optimize_sftp_performance(sftp)
-                            try:
-                                sftp.stat(target_dir)
-                            except OSError:
-                                sftp.mkdir(target_dir)
-                            remote_path = f"{target_dir}/{safe_filename}"
-                            sftp.put(temp_path, remote_path)
-                    except Exception as e:
-                        logger.error(f"Failed to upload to specified path: {e}")
-                        remote_path = default_remote
-                        with ssh.open_sftp() as sftp:
-                            ssh_manager.optimize_sftp_performance(sftp)
-                            sftp.put(temp_path, remote_path)
-                else:
-                    remote_path = default_remote
+                def _sftp_upload() -> str:
+                    if path and path.strip():
+                        target_dir = path.rstrip("/")
+                        try:
+                            with ssh.open_sftp() as sftp:
+                                ssh_manager.optimize_sftp_performance(sftp)
+                                try:
+                                    sftp.stat(target_dir)
+                                except OSError:
+                                    sftp.mkdir(target_dir)
+                                remote = f"{target_dir}/{safe_filename}"
+                                sftp.put(temp_path, remote)
+                                return remote
+                        except Exception as e:
+                            logger.error(f"Failed to upload to specified path: {e}")
+                    remote = default_remote
                     with ssh.open_sftp() as sftp:
                         ssh_manager.optimize_sftp_performance(sftp)
-                        sftp.put(temp_path, remote_path)
+                        sftp.put(temp_path, remote)
+                    return remote
+
+                remote_path = await asyncio.to_thread(_sftp_upload)
 
                 os.remove(temp_path)
 
@@ -169,7 +181,7 @@ async def _upload_file_chunk(
         start_time = time.time()
         logger.info(f"[ChunkUpload] Received chunk {chunk_index}/{total_chunks} for {upload_id}")
 
-        session_dir = os.path.join(tempfile.gettempdir(), "gms_uploads", upload_id)
+        session_dir = os.path.join(upload_temp_root(), upload_id)
         os.makedirs(session_dir, exist_ok=True)
 
         chunk_filename = f"chunk_{chunk_index:05d}"
@@ -242,7 +254,10 @@ async def _upload_file_chunk(
 
                 try:
                     remote_filename = os.path.basename(merged_file)
-                    remote_path = f"/home/{config['ubuntu_user']}/{remote_filename}"
+                    remote_path = remote_home_file_path(
+                        config_manager.get_ubuntu_user(config),
+                        remote_filename,
+                    )
                     upload_start = time.time()
 
                     with ssh.open_sftp() as sftp:

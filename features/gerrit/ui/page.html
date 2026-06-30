@@ -491,11 +491,13 @@ function onPersonalProfileChange() {
 async function loadPersonal(refresh) {
   if (currentTab !== 'personal') return;
   const ownerInput = document.getElementById('owner');
-  const owner = requestedOwner || (ownerInput ? ownerInput.value : '') || config.default_owner || '';
   const profileSelect = document.getElementById('personalProfile');
   // 点击成员行跳转时走 requestedOwner：此时不要沿用看板上残留的 profile 下拉值，
   // 否则后端按残留 profile_id（陈伟等）匹配，导致显示成别人的个人看板。
   const profileId = requestedOwner ? '' : ((profileSelect ? profileSelect.value : '') || currentPersonalProfileId || '');
+  const selectedProfile = requestedOwner ? null : findPersonalProfile(profileId);
+  const owner = requestedOwner || (selectedProfile ? selectedProfile.owner : '') || (ownerInput ? ownerInput.value : '') || config.default_owner || '';
+  if (!requestedOwner && ownerInput && selectedProfile && selectedProfile.owner) ownerInput.value = selectedProfile.owner;
   currentPersonalProfileId = profileId;
   saveGerritProfileState();
   document.getElementById('personalStatus').textContent = '';
@@ -768,10 +770,13 @@ function compareMembers(a, b) {
 }
 function personalControlsHtml() {
   const profiles = config.personal_profiles || [];
+  const orderedProfiles = profiles.slice().sort(compareMembers);
   // owner 取选中 profile 的邮箱，不回退到第一条。
-  const selectedProfile = findPersonalProfile(currentPersonalProfileId) || profiles[0] || {};
-  return '<div class="select-with-add"><select id="personalProfile" onchange="onPersonalProfileChange()">' + profiles.slice().sort(compareMembers).map(p => '<option value="' + esc(p.id) + '"' + (p.id === currentPersonalProfileId ? ' selected' : '') + '>' + esc((p.department ? p.department + ' / ' : '') + (p.name || p.owner || p.id)) + '</option>').join('') + '</select><button class="select-add-btn" type="button" onclick="showAddPersonalModal()" title="添加成员">＋</button></div>'
-    + '<input id="owner" value="' + esc(requestedOwner || (document.getElementById('owner') ? document.getElementById('owner').value : '') || selectedProfile.owner || config.default_owner || '') + '" placeholder="owner 邮箱">';
+  const selectedProfile = findPersonalProfile(currentPersonalProfileId) || orderedProfiles[0] || {};
+  const selectedProfileId = selectedProfile.id || currentPersonalProfileId || '';
+  const ownerValue = requestedOwner || selectedProfile.owner || (document.getElementById('owner') ? document.getElementById('owner').value : '') || config.default_owner || '';
+  return '<div class="select-with-add"><select id="personalProfile" onchange="onPersonalProfileChange()">' + orderedProfiles.map(p => '<option value="' + esc(p.id) + '"' + (p.id === selectedProfileId ? ' selected' : '') + '>' + esc((p.department ? p.department + ' / ' : '') + (p.name || p.owner || p.id)) + '</option>').join('') + '</select><button class="select-add-btn" type="button" onclick="showAddPersonalModal()" title="添加成员">＋</button></div>'
+    + '<input id="owner" value="' + esc(ownerValue) + '" placeholder="owner 邮箱">';
 }
 function departmentControlsHtml(profileId) {
   return '<div class="select-with-add"><select id="departmentProfile" onchange="loadDepartment(true)" style="min-width:160px">' + departmentOptionsHtml(profileId, true) + '</select><button class="select-add-btn" type="button" onclick="showAddDepartmentModal(&quot;departmentProfile&quot;)" title="添加部门">＋</button></div>'

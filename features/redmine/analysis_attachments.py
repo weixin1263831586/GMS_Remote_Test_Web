@@ -17,9 +17,9 @@ from features.redmine.config import config_manager
 from features.redmine.models import RedmineAttachment
 from features.redmine.tesseract_finder import (
     bundled_tesseract_cmd,
-    bundled_tesseract_env,
     configure_bundled_tesseract,
 )
+from features.redmine.utils import sanitize_attachment_filename
 
 
 if TYPE_CHECKING:
@@ -139,7 +139,7 @@ class AttachmentAnalysisMixin:
     async def _process_attachment(self, client: RedmineClient, issue_id: int, attachment: RedmineAttachment) -> dict[str, Any]:
         issue_dir = self.attachments_dir / str(issue_id)
         issue_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", attachment.filename or f"attachment_{attachment.id}")
+        safe_name = sanitize_attachment_filename(attachment.filename, f"attachment_{attachment.id}")
         local_path = issue_dir / f"{attachment.id}-{safe_name}"
         status = "skipped"
         error = ""
@@ -364,7 +364,7 @@ class AttachmentAnalysisMixin:
             except Exception:
                 from PyPDF2 import PdfReader  # type: ignore
             reader = PdfReader(path)
-            return "\n".join(str((page.extract_text() or "")) for page in reader.pages)
+            return "\n".join(str(page.extract_text() or "") for page in reader.pages)
         except Exception as exc:
             logger.debug("[RedmineAgent] PDF text extraction unavailable for %s: %s", path, exc)
             return ""

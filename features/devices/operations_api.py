@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from foundation.errors import handle_api_errors
 from foundation.networking import is_local_host
 from foundation.responses import error_response, success_response
+from foundation.security import sanitize_device_ids
 
 from . import reconnect, runtime
 from .locks import device_lock_manager
@@ -97,10 +98,11 @@ def _build_devices_management_payload(
     device_ids: list[str],
     device_data: dict[str, dict[str, str]],
     config: dict[str, Any],
+    client_id: str | None = None,
 ) -> dict[str, Any]:
     from features.devices.usbip import usbip_manager
 
-    client_id = runtime.client_manager.get_client_id("127.0.0.1")
+    client_id = client_id or runtime.client_manager.get_client_id("127.0.0.1")
     locks = device_lock_manager.get_all_locks()
     devices_info = []
     ubuntu_host = runtime.config_manager.get_ubuntu_host(config)
@@ -144,7 +146,7 @@ def _build_devices_management_payload(
 
 
 @router.get("/api/devices/management")
-async def devices_management():
+async def devices_management(request: Request):
     """Device management page - get detailed management info for all devices."""
     try:
         config = runtime.config_manager.load_config()
@@ -177,7 +179,10 @@ async def devices_management():
                 )
 
             payload = _build_devices_management_payload(
-                device_ids, _parse_management_device_props(props_output), config
+                device_ids,
+                _parse_management_device_props(props_output),
+                config,
+                runtime.get_client_id_from_request(request),
             )
             payload.update({"success": True, "source": "local"})
             return JSONResponse(content=payload)
@@ -197,6 +202,7 @@ async def devices_management():
                     device_ids,
                     _parse_management_device_props(props_output),
                     config,
+                    runtime.get_client_id_from_request(request),
                 )
             )
 
@@ -304,6 +310,9 @@ async def reboot_devices(req: DeviceActionRequest):
 async def remount_devices(req: DeviceActionRequest, request: Request):
     """Remount devices."""
     client_id = runtime.get_client_id_from_request(request)
+    devices = sanitize_device_ids(req.devices)
+    if not devices:
+        return error_response("No valid device serials", status_code=400)
 
     with SSHConnection() as ssh:
         async def remount_single_device(device_id: str) -> dict:
@@ -316,7 +325,10 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
                 },
             )
 
-            result = device_manager.remount_device(device_id, ssh)
+            # remount_device does blocking SSH — run it off the event loop. The
+            # surrounding for-loop is serial, so the shared ssh connection is
+            # never used by two threads at once.
+            result = await asyncio.to_thread(device_manager.remount_device, device_id, ssh)
             await runtime.safe_websocket_send(
                 client_id,
                 {
@@ -328,9 +340,11 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
             result["device"] = device_id
             return result
 
-        results = await asyncio.gather(
-            *[remount_single_device(d) for d in req.devices]
-        )
+        # Serial execution (was a false-concurrency gather) — frees the loop
+        # between devices and keeps the shared ssh connection single-threaded.
+        results = []
+        for device_id in devices:
+            results.append(await remount_single_device(device_id))
         return _device_results(results, "Device Remount")
 
 
@@ -338,21 +352,35 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
 async def connect_wifi(req: WifiConnectRequest):
     """Connect to WiFi."""
     try:
+        devices = sanitize_device_ids(req.devices)
+        if not devices:
+            return error_response("No valid device serials", status_code=400)
         config = runtime.config_manager.load_config()
+        wifi_defaults = runtime.config_manager.get_wifi_defaults(config)
+        ssid = req.ssid or wifi_defaults["ssid"]
+        password = req.password or wifi_defaults["password"]
+        # Quote ssid/password so special characters can't break out of the adb
+        # shell argument (they were previously interpolated raw between quotes).
+        ssid_q = shlex.quote(ssid)
+        password_q = shlex.quote(password)
         with runtime.ssh_manager.optional_connection(config) as ssh:
             if not ssh:
                 return error_response("SSH connection failed", status_code=500)
 
-            results = []
-            for device_id in req.devices:
+            def _connect_one(device_id: str) -> dict:
                 enable_cmd = f"adb -s {device_id} shell cmd wifi set-wifi-enabled enabled"
                 connect_cmd = (
-                    f'adb -s {device_id} shell cmd wifi connect-network "{req.ssid}" wpa2 "{req.password}"'
+                    f"adb -s {device_id} shell cmd wifi connect-network {ssid_q} wpa2 {password_q}"
                 )
                 full_cmd = f"{enable_cmd} && sleep 2 && {connect_cmd}"
-
                 _output, _error, code = runtime.ssh_manager.execute_command(ssh, full_cmd)
-                results.append({"device": device_id, "success": code == 0})
+                return {"device": device_id, "success": code == 0}
+
+            # Serial to_thread — frees the loop between devices and keeps the
+            # shared ssh connection single-threaded (paramiko is not thread-safe).
+            results = []
+            for device_id in devices:
+                results.append(await asyncio.to_thread(_connect_one, device_id))
 
             success_count = sum(1 for r in results if r.get("success", False))
             return JSONResponse(

@@ -136,7 +136,7 @@ async def analyze_apk(task_id: str):
     if not os.path.exists(apk_path):
         return ApiResponse.error("APK file not found, please re-upload", status_code=404)
 
-    output_dir = os.path.join(runtime.apk_upload_dir, task_id, "jadx_output")
+    output_dir = _safe_join(runtime.apk_upload_dir, _normalize_apk_task_id(task_id), "jadx_output")
 
     with runtime.global_state.apk_analysis_tasks_lock:
         t = runtime.global_state.apk_analysis_tasks[task_id]
@@ -350,9 +350,9 @@ async def download_apk_source(task_id: str):
     if not os.path.exists(output_dir):
         return ApiResponse.error("Output directory not found", status_code=404)
 
-    filename = task.get("filename", "app.apk").replace(".apk", "_decompiled")
+    filename = _normalize_apk_filename(task.get("filename", "app.apk")).replace(".apk", "_decompiled").replace(".jar", "_decompiled")
     zip_path = shutil.make_archive(
-        os.path.join(runtime.apk_upload_dir, task_id, filename),
+        _safe_join(runtime.apk_upload_dir, task_id, filename),
         "zip",
         output_dir,
     )
@@ -395,14 +395,19 @@ async def list_apk_tasks():
 @handle_api_errors
 async def delete_apk_task(task_id: str):
     """Delete APK analysis task and its files."""
-    with runtime.global_state.apk_analysis_tasks_lock:
-        if task_id not in runtime.global_state.apk_analysis_tasks:
-            return ApiResponse.error("Task not found", status_code=404)
-        runtime.global_state.apk_analysis_tasks.pop(task_id)
+    try:
+        safe_task_id = _normalize_apk_task_id(task_id)
+    except ValueError as e:
+        return ApiResponse.error(str(e), status_code=400)
 
-    task_dir = os.path.join(runtime.apk_upload_dir, task_id)
+    with runtime.global_state.apk_analysis_tasks_lock:
+        if safe_task_id not in runtime.global_state.apk_analysis_tasks:
+            return ApiResponse.error("Task not found", status_code=404)
+        runtime.global_state.apk_analysis_tasks.pop(safe_task_id)
+
+    task_dir = _safe_join(runtime.apk_upload_dir, safe_task_id)
     await asyncio.to_thread(shutil.rmtree, task_dir, ignore_errors=True)
     with runtime.global_state.apk_upload_locks_lock:
-        runtime.global_state.apk_upload_locks.pop(task_id, None)
+        runtime.global_state.apk_upload_locks.pop(safe_task_id, None)
 
     return ApiResponse.success(message="Task deleted")

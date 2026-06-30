@@ -22,17 +22,18 @@ import paramiko
 from foundation.networking import parse_host_address
 
 from . import runtime
+from .process_control import (
+    build_process_group_id,
+    find_arg_pgid_command,
+    find_env_pgid_command,
+    kill_pid_tree_commands,
+    parse_pid_lines,
+    tradefed_kill_command,
+)
+from .suites import TRADEFED_BINARY_MAP, get_default_suites_path
 
 
 logger = logging.getLogger(__name__)
-
-
-def default_suites_path(config: dict[str, Any]) -> str:
-    ubuntu_user = (
-        config.get("ubuntu_user")
-        or runtime.config_manager.get_ubuntu_user(config)
-    )
-    return f"/home/{ubuntu_user}/GMS-Suite"
 
 
 class TestRunner:
@@ -105,7 +106,7 @@ class TestRunner:
             await log_callback("✅ SSH 连接成功", 'success')
 
             # 生成进程组ID（多用户隔离）
-            process_group_id = f"gms_test_{client_id.replace('@', '_')}_{int(time.time() * 1000)}"
+            process_group_id = build_process_group_id(client_id, int(time.time() * 1000))
 
             # 记录测试信息
             self.running_tests[client_id] = {
@@ -181,7 +182,7 @@ class TestRunner:
                 return True
 
             # 上传脚本
-            suites_path = config.get('suites_path') or default_suites_path(config)
+            suites_path = config.get('suites_path') or get_default_suites_path(config)
             remote_script = os.path.join(suites_path, 'run_GMS_Test_Auto.sh')
 
             script_size = os.path.getsize(local_script)
@@ -194,7 +195,7 @@ class TestRunner:
             sftp.close()
 
             # 设置可执行权限
-            self.ssh_manager.execute_command(ssh, f"chmod +x '{remote_script}'")
+            self.ssh_manager.execute_command(ssh, f"chmod +x {shlex.quote(remote_script)}")
 
             await log_callback(f"🔐 已设置可执行权限: {remote_script}", 'info')
             await log_callback(f"✅ 上传完成 ({size_kb:.2f}KB)", 'success')
@@ -224,7 +225,7 @@ class TestRunner:
             local_server = test_params.get('local_server', '')
             devices = test_params.get('devices', [])
 
-            suites_path = config.get('suites_path') or default_suites_path(config)
+            suites_path = config.get('suites_path') or get_default_suites_path(config)
             remote_script = os.path.join(suites_path, 'run_GMS_Test_Auto.sh')
 
             # 构建命令参数
@@ -263,7 +264,15 @@ class TestRunner:
 
             # 构建最终命令
             command = ' '.join(shlex.quote(part) for part in cmd_parts)
-            command_full = f"cd {os.path.dirname(remote_script)} && {command}"
+
+            # 注入 APE_API_KEY:SSH 非交互 shell 不加载 ~/.bashrc,tradefed 脚本
+            # (gts-tradefed) 会在该变量缺失时报 "APE_API_KEY not set"。从配置
+            # 读取并内联 export,只作用于这条命令,不污染远程会话环境。
+            prefix_parts = [f"cd {shlex.quote(os.path.dirname(remote_script))}"]
+            ape_api_key = (config.get('tradefed') or {}).get('ape_api_key')
+            if ape_api_key:
+                prefix_parts.append(f"export APE_API_KEY={shlex.quote(str(ape_api_key))}")
+            command_full = ' && '.join(prefix_parts) + f" && {command}"
 
             logger.info(f"Test command: {command}")
             return command_full
@@ -371,12 +380,10 @@ class TestRunner:
             def _kill_and_finish(pids: list, msg: str) -> int:
                 """Kill processes and mark test as stopped. Returns number killed."""
                 killed_count = 0
-                for pid in pids:
-                    pid = pid.strip()
-                    if pid:
-                        self.ssh_manager.execute_command(ssh, f"kill -9 {pid} 2>/dev/null")
-                        self.ssh_manager.execute_command(ssh, f"pkill -9 -P {pid} 2>/dev/null")
-                        killed_count += 1
+                for pid in parse_pid_lines("\n".join(pids)):
+                    for command in kill_pid_tree_commands(pid):
+                        self.ssh_manager.execute_command(ssh, command)
+                    killed_count += 1
                 self.ssh_manager.return_connection(ssh)
                 test_info['status'] = 'stopped'
                 test_info['end_time'] = datetime.now().isoformat()
@@ -384,7 +391,7 @@ class TestRunner:
 
             # 方法1: 使用进程组ID杀死进程
             if process_group_id:
-                find_cmd = f"ps eww -e | grep 'GMS_TEST_PGID={process_group_id}' | grep -v grep | awk '{{print $1}}'"
+                find_cmd = find_env_pgid_command(process_group_id)
                 stdout, _, code = self.ssh_manager.execute_command(
                     ssh,
                     find_cmd,
@@ -397,7 +404,7 @@ class TestRunner:
                     return bool(killed)
 
                 # 回退：尝试通过命令行参数查找
-                fallback_cmd = f"ps aux | grep -- '--pgid {process_group_id}' | grep -v grep | awk '{{print $2}}'"
+                fallback_cmd = find_arg_pgid_command(process_group_id)
                 stdout, _, code = self.ssh_manager.execute_command(
                     ssh,
                     fallback_cmd,
@@ -410,16 +417,8 @@ class TestRunner:
                     return bool(killed)
 
             # 方法2: 回退到传统方法（杀死tradefed进程）
-            binary_map = {
-                'cts': 'cts-tradefed',
-                'gsi': 'cts-tradefed',
-                'gts': 'gts-tradefed',
-                'sts': 'sts-tradefed',
-                'vts': 'vts-tradefed',
-                'xts': 'xts-tradefed'
-            }
-            tradefed_bin = binary_map.get(test_type, 'tradefed')
-            kill_cmd = f"pkill -f '[./]?{tradefed_bin}.*run commandAndExit'"
+            tradefed_bin = TRADEFED_BINARY_MAP.get(test_type, 'tradefed')
+            kill_cmd = tradefed_kill_command(tradefed_bin)
 
             stdout, _, code = self.ssh_manager.execute_command(
                 ssh,

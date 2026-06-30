@@ -8,6 +8,8 @@ import re
 import subprocess
 from typing import Any
 
+from foundation.processes import run_local_shell_command
+
 
 _PING_RTT_PATTERN = re.compile(r"time[=<]([\d.]+)\s*ms")
 _PING_AVG_PATTERN = re.compile(r"=\s*[\d.]+/([\d.]+)/")
@@ -90,7 +92,9 @@ async def execute_config_host_command(
     """在配置主机上执行命令（本地或远程）"""
     if _is_config_host_local(config):
         return await asyncio.to_thread(run_local_shell_command, command, timeout)
-    return _ssh_manager.execute_command(ssh, command, timeout=timeout)
+    # execute_command is a blocking paramiko call — run it off the event loop
+    # so a slow remote host doesn't freeze every other request.
+    return await asyncio.to_thread(_ssh_manager.execute_command, ssh, command, timeout)
 
 
 async def resolve_vpn_connection_name(
@@ -110,22 +114,6 @@ async def resolve_vpn_connection_name(
     output, _, _ = await execute_config_host_command(config, ssh, cmd, timeout=5)
     names = parse_vpn_connection_names(output)
     return names[0] if names else ""
-
-
-def run_local_shell_command(
-    command: str,
-    timeout: int = 30,
-) -> tuple[str, str, int]:
-    """在本地执行 shell 命令"""
-    try:
-        result = subprocess.run(
-            command, shell=True, capture_output=True, text=True, timeout=timeout
-        )
-        return result.stdout, result.stderr, result.returncode
-    except subprocess.TimeoutExpired:
-        return '', 'Command timed out', -1
-    except Exception as e:
-        return '', str(e), -1
 
 
 def are_same_network(ip1: str, ip2: str, prefix_len: int = 24) -> bool:

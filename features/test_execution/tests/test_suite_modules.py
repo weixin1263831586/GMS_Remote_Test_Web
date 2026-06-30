@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import time
@@ -6,6 +7,35 @@ from pathlib import Path
 from unittest.mock import patch
 
 from features.test_execution.suite_modules import search_latest_suite_modules
+
+
+class _FakeSshManager:
+    def __init__(self):
+        self.command = ""
+
+    def optional_connection(self, config):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute_command(self, ssh, command, timeout=60):
+        self.command = command
+        return (
+            json.dumps([
+                {
+                    "module": "CtsCameraTestCases",
+                    "file_name": "CtsCameraTestCases.apk",
+                    "path": "/remote/android-cts/testcases/CtsCameraTestCases.apk",
+                    "relative_path": "CtsCameraTestCases.apk",
+                }
+            ]),
+            "",
+            0,
+        )
 
 
 class SuiteModuleSearchTests(unittest.TestCase):
@@ -45,6 +75,24 @@ class SuiteModuleSearchTests(unittest.TestCase):
         self.assertNotIn(("CTS", "CtsOldCameraTestCases"), modules)
         self.assertEqual(payload["normalized_query"], "Camera")
         self.assertEqual(len(payload["modules"]), len(modules))
+
+    def test_remote_suite_module_search_uses_json_stdout_without_print(self):
+        ssh_manager = _FakeSshManager()
+        suite = {
+            "test_type": "cts",
+            "version": "17_r1",
+            "tools_path": "/remote/android-cts/tools",
+        }
+        config = {"suites_path": "/remote", "ubuntu_host": "172.16.14.66"}
+        with patch("features.test_execution.suite_modules.is_config_host_local", return_value=False), \
+                patch("features.test_execution.suite_modules._get_available_test_suites", return_value=[suite]), \
+                patch("features.test_execution.suite_modules.runtime.ssh_manager", ssh_manager):
+            payload = search_latest_suite_modules(config, "Camera", ["cts"], per_suite_limit=10)
+
+        self.assertNotIn("print(", ssh_manager.command)
+        self.assertIn("sys.stdout.write", ssh_manager.command)
+        self.assertEqual(payload["modules"][0]["module"], "CtsCameraTestCases")
+        self.assertEqual(payload["modules"][0]["suite_type"], "CTS")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -160,9 +161,14 @@ async def retry_automation_run(run_id: str):
 
 @router.post('/worker/tick')
 async def automation_worker_tick(executor: str = Query('stub')):
+    # worker_tick drives the whole automation state machine synchronously —
+    # Jenkins trigger/poll, firmware flash (HTTP timeout up to 3600s), test
+    # start, report analysis. Run it off the event loop or a single tick can
+    # freeze the server for the duration of a flash.
+    data = await asyncio.to_thread(automation_service.worker_tick, executor)
     return {
         'success': True,
-        'data': automation_service.worker_tick(executor),
+        'data': data,
     }
 
 

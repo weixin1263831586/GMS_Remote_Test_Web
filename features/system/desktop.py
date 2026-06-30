@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, Response
 
 from features.system.models import VNCStartRequest
 from features.system.ssh import ssh_manager
-from features.system.vnc import vnc_manager
+from features.system.vnc import NOVNC_WEB_PORT, vnc_manager
 from foundation.common_utils import CommonUtils
 from foundation.config import config_manager
 from foundation.responses import error_response, success_response
@@ -21,8 +21,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+def default_novnc_upstream_http() -> str:
+    return f"http://127.0.0.1:{NOVNC_WEB_PORT}"
+
+
 # noVNC upstream URLs
-NOVNC_UPSTREAM_HTTP = os.getenv("GMS_NOVNC_UPSTREAM", "http://127.0.0.1:6080").rstrip("/")
+NOVNC_UPSTREAM_HTTP = os.getenv("GMS_NOVNC_UPSTREAM", default_novnc_upstream_http()).rstrip("/")
 NOVNC_UPSTREAM_WS = NOVNC_UPSTREAM_HTTP.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
 
 
@@ -40,7 +44,7 @@ def build_novnc_upstream_url(path: str, query_string: bytes = b"") -> str:
 async def get_desktop_vnc_status():
     """获取VNC状态"""
     try:
-        result = vnc_manager.get_vnc_status()
+        result = await asyncio.to_thread(vnc_manager.get_vnc_status)
         return success_response(result)
     except Exception as e:
         logger.error(f"Error getting VNC status: {e}")
@@ -64,7 +68,9 @@ async def start_desktop_vnc(req: VNCStartRequest | None = Body(default=None)):
         vnc_password = req.vnc_password or ''
         force_restart = req.force_restart
 
-    result = vnc_manager.start_vnc(host, password, vnc_password, force_restart=force_restart)
+    # start_vnc runs several blocking SSH calls + sleeps (up to ~30s) — keep it
+    # off the event loop so VNC start doesn't freeze every other request.
+    result = await asyncio.to_thread(vnc_manager.start_vnc, host, password, vnc_password, force_restart=force_restart)
     return JSONResponse(content=result)
 
 
@@ -77,7 +83,7 @@ async def start_desktop_vnc_legacy(req: VNCStartRequest | None = Body(default=No
 @router.post("/api/desktop/vnc/stop")
 async def stop_desktop_vnc():
     """停止Ubuntu主机桌面VNC"""
-    result = vnc_manager.stop_vnc()
+    result = await asyncio.to_thread(vnc_manager.stop_vnc)
     return JSONResponse(content=result)
 
 
@@ -190,14 +196,14 @@ async def validate_desktop_host(req: dict = Body(...)):
                 'password': password,
                 'timeout': 10
             }
-            ssh = ssh_manager.create_connection(config)
+            ssh = await asyncio.to_thread(ssh_manager.create_connection, config)
 
             # 如果密码认证失败，尝试密钥认证
             if not ssh:
                 logger.info(f"[Desktop] Password auth failed for {user}@{ip}, trying key authentication")
                 config['use_key_auth'] = True
                 config.pop('password', None)
-                ssh = ssh_manager.create_connection(config)
+                ssh = await asyncio.to_thread(ssh_manager.create_connection, config)
 
             if not ssh:
                 return JSONResponse(

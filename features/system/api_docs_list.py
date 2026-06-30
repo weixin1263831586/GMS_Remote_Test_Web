@@ -188,8 +188,8 @@ API_DOCS_LIST = [
         "description": "让设备连接到指定的WiFi网络",
         "params": [
             {"name": "devices", "type": "array", "required": True, "desc": "设备序列号数组"},
-            {"name": "ssid", "type": "string", "required": False, "desc": "WiFi名称，默认AndroidWifi"},
-            {"name": "password", "type": "string", "required": False, "desc": "WiFi密码，默认1234567890"}
+            {"name": "ssid", "type": "string", "required": False, "desc": "WiFi名称，留空读取 config.wifi.ssid"},
+            {"name": "password", "type": "string", "required": False, "desc": "WiFi密码，留空读取 config.wifi.password"}
         ],
         "category": "device",
         "skill": "gms-rt-devices-wifi"

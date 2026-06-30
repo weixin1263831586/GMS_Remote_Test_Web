@@ -12,6 +12,7 @@ import time
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from features.test_execution.suites import get_default_suites_path
 from features.users.clients import get_client_username_from_request
 from foundation.responses import error_response, success_response
 from foundation.uploads import merge_files_to_path, safe_upload_target_path, save_upload_to_path
@@ -34,11 +35,6 @@ _FIRMWARE_CHUNK_ROOT = os.path.join(tempfile.gettempdir(), "gms_firmware_uploads
 
 def strip_ansi_codes(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text or "")
-
-
-def get_default_suites_path(config: dict) -> str:
-    username = runtime.config_manager.get_ubuntu_user(config)
-    return config.get("suites_path", f"/home/{username}/GMS-Suite")
 
 
 def _remote_file_exists(ssh, path: str) -> bool:
@@ -180,7 +176,6 @@ async def _handle_firmware_chunk_upload(form, client_id: str):
 
 
 async def _lock_devices(request: Request, client_id: str, devices: list, error_prefix="Devices occupied"):
-    config = runtime.config_manager.load_config()
     username = get_client_username_from_request(request)
     return await runtime.lock_firmware_devices(
         client_id=client_id,
@@ -459,7 +454,8 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                 await asyncio.sleep(8)
 
                 # Check Loader devices
-                check_cmd = f"cd {gms_suite_dir} && ./upgrade_tool ld"
+                quoted_suite_dir = shlex.quote(gms_suite_dir)
+                check_cmd = f"cd {quoted_suite_dir} && ./upgrade_tool ld"
                 output, _, _ = runtime.ssh_manager.execute_command(ssh, check_cmd, timeout=5)
 
                 if "List of rockusb connected(0)" in output or "List of rockusb connected" not in output:
@@ -467,7 +463,7 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                     return error_response(f"No Loader devices detected. Output:\n{output}")
 
                 # Burn firmware
-                burn_cmd = f"cd {gms_suite_dir} && ./upgrade_tool uf {shlex.quote(remote_firmware)}"
+                burn_cmd = f"cd {quoted_suite_dir} && ./upgrade_tool uf {shlex.quote(remote_firmware)}"
 
                 if client_id in runtime.global_state.websocket_connections:
                     with contextlib.suppress(Exception):
@@ -598,7 +594,7 @@ async def burn_gsi(request: Request):
                     scp_client = scp.SCPClient(ssh.get_transport())
                     scp_client.put(local_script, remote_script)
                     scp_client.close()
-                    runtime.ssh_manager.execute_command(ssh, f"chmod +x {remote_script}")
+                    runtime.ssh_manager.execute_command(ssh, f"chmod +x {shlex.quote(remote_script)}")
                 else:
                     return error_response(f"GSI burn script not found: {local_script}")
 

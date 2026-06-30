@@ -14,14 +14,21 @@ from typing import Any
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.devices import get_or_create_user_state, update_user_state_field
+from features.devices.support import get_or_create_user_state, update_user_state_field
 from features.reports import save_test_report_to_db, test_report_db
-from features.users.clients import get_client_username_from_request
+from features.users.clients import get_client_display_id_from_request, get_client_username_from_request
 from foundation.responses import error_response, success_response
 
 from . import runtime
 from .api_support import LogLevel
 from .models import TestStartRequest
+from .process_control import (
+    build_process_group_id,
+    find_arg_pgid_command,
+    find_env_pgid_command,
+    kill_pid_tree_commands,
+    parse_pid_lines,
+)
 from .suites import (
     TRADEFED_BINARY_LIST,
     detect_test_type_from_dir_path,
@@ -81,6 +88,7 @@ async def start_test(
 
     test_params = req.model_dump()
     test_params["client_id"] = client_id
+    test_params["display_client_id"] = get_client_display_id_from_request(request)
 
     user_state = get_or_create_user_state(client_id)
     logger.info(f"[TestStart] Client state created/loaded: {client_id}")
@@ -152,7 +160,7 @@ async def _run_test_background(
             await log_callback("Test cancelled", "warning")
             return
 
-        process_group_id = f"gms_test_{client_id.replace('@', '_')}_{int(time.time() * 1000)}"
+        process_group_id = build_process_group_id(client_id, int(time.time() * 1000))
         update_user_state_field(client_id, {"process_group_id": process_group_id})
 
         await log_callback(f"Process group ID: {process_group_id}", "info")
@@ -179,7 +187,7 @@ async def _run_test_background(
                 await log_callback(f"Uploading: run_GMS_Test_Auto.sh -> {remote_script} ({size_kb:.2f}KB)", "info")
                 with ssh.open_sftp() as sftp:
                     sftp.put(local_script, remote_script)
-                _, stdout, stderr = ssh.exec_command(f"chmod +x '{remote_script}'")
+                _, stdout, stderr = ssh.exec_command(f"chmod +x {shlex.quote(remote_script)}")
                 stdout.read()
                 await log_callback(f"Upload complete ({size_kb:.2f}KB)", "success")
             except FileNotFoundError:
@@ -320,7 +328,21 @@ async def _run_test_background(
                 cmd_parts.extend(["--pgid", process_group_id])
 
             command = " ".join(shlex.quote(part) for part in cmd_parts)
-            command_full = f"cd {os.path.dirname(remote_script)} && {command}"
+
+            # SSH exec_command runs a non-interactive shell, so user exports in
+            # ~/.bashrc or ~/.profile are otherwise missing. GTS needs
+            # APE_API_KEY; prefer the configured value, then fall back to the
+            # remote user's shell startup files.
+            prefix_parts = [
+                "if [ -f ~/.profile ]; then . ~/.profile; fi",
+                "if [ -f ~/.bashrc ]; then . ~/.bashrc; fi",
+            ]
+            ape_api_key = (config.get("tradefed") or {}).get("ape_api_key")
+            if ape_api_key:
+                prefix_parts.append(f"export APE_API_KEY={shlex.quote(str(ape_api_key))}")
+            prefix_parts.append(f"cd {shlex.quote(os.path.dirname(remote_script))}")
+            shell_command = " && ".join(prefix_parts) + f" && {command}"
+            command_full = f"bash -lic {shlex.quote(shell_command)}"
 
             await log_callback(f"Executing command: {command}", "info")
 
@@ -331,7 +353,13 @@ async def _run_test_background(
                 if not user_state.get("running", False):
                     await log_callback("Test stopped by user", "warning")
                     with contextlib.suppress(Exception):
-                        ssh.exec_command("pkill -f 'run_GMS_Test_Auto.sh'")
+                        if process_group_id:
+                            find_cmd = find_env_pgid_command(process_group_id)
+                            _stdin, pid_stdout, _stderr = ssh.exec_command(find_cmd)
+                            pids = parse_pid_lines(pid_stdout.read().decode("utf-8", errors="replace"))
+                            for pid in pids:
+                                for kill_cmd in kill_pid_tree_commands(pid):
+                                    ssh.exec_command(kill_cmd)
                     break
 
                 if stdout.channel.recv_ready():
@@ -459,31 +487,29 @@ async def stop_test(
             killed_count = 0
 
             if process_group_id:
-                find_cmd = f"ps eww -e | grep 'GMS_TEST_PGID={process_group_id}' | grep -v grep | awk '{{print $1}}'"
+                find_cmd = find_env_pgid_command(process_group_id)
                 user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminating test process group: {process_group_id}...")
 
                 output, _error, _code = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=10)
-                if output.strip():
-                    pids = output.strip().split("\n")
+                pids = parse_pid_lines(output)
+                if pids:
                     for pid in pids:
-                        if pid.strip():
-                            runtime.ssh_manager.execute_command(ssh, f"kill -9 {pid.strip()} 2>/dev/null")
-                            runtime.ssh_manager.execute_command(ssh, f"pkill -9 -P {pid.strip()} 2>/dev/null")
-                            killed_count += 1
+                        for command in kill_pid_tree_commands(pid):
+                            runtime.ssh_manager.execute_command(ssh, command)
+                        killed_count += 1
 
                     await asyncio.sleep(1)
                     user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminated {killed_count} test processes")
                     return success_response(message="Test stopped")
 
-                fallback_cmd = f"ps aux | grep -- '--pgid {process_group_id}' | grep -v grep | awk '{{print $2}}'"
+                fallback_cmd = find_arg_pgid_command(process_group_id)
                 output2, _error2, _code2 = runtime.ssh_manager.execute_command(ssh, fallback_cmd, timeout=10)
-                if output2.strip():
-                    pids = output2.strip().split("\n")
+                pids = parse_pid_lines(output2)
+                if pids:
                     for pid in pids:
-                        if pid.strip():
-                            runtime.ssh_manager.execute_command(ssh, f"kill -9 {pid.strip()} 2>/dev/null")
-                            runtime.ssh_manager.execute_command(ssh, f"pkill -9 -P {pid.strip()} 2>/dev/null")
-                            killed_count += 1
+                        for command in kill_pid_tree_commands(pid):
+                            runtime.ssh_manager.execute_command(ssh, command)
+                        killed_count += 1
 
                     await asyncio.sleep(1)
                     user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminated {killed_count} test processes (command match)")

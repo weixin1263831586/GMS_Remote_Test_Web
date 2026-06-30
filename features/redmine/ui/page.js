@@ -66,6 +66,23 @@ function redmineBaseUrl() {
 function redmineIssueUrl(issueId) {
   return redmineBaseUrl() + '/issues/' + encodeURIComponent(String(issueId || '').trim());
 }
+function renderRedmineIssueLink(issueId, options) {
+  const id = String(issueId || '').trim();
+  if (!id) return '-';
+  const opts = options || {};
+  const label = opts.label || ('#' + id);
+  const stop = opts.stopPropagation === false ? '' : ' onclick="event.stopPropagation()"';
+  return '<a class="redmine-issue-link" href="' + redmineIssueUrl(id) + '" target="_blank" rel="noopener"' + stop + '>' + esc(label) + '</a>';
+}
+function renderRedmineIssueLinks(issueIds, options) {
+  const ids = (issueIds || []).map(function(id) { return String(id || '').trim(); }).filter(Boolean);
+  return ids.length ? ids.map(function(id) { return renderRedmineIssueLink(id, options); }).join(' ') : '-';
+}
+function linkifyRedmineIssueRefs(escapedText, options) {
+  return String(escapedText || '').replace(/(^|[^\w/])#(\d{5,})\b/g, function(_, prefix, id) {
+    return prefix + renderRedmineIssueLink(id, options);
+  });
+}
 function redmineIssueAttachmentsUrl(issueId) {
   return redmineIssueUrl(issueId) + '#attachments';
 }
@@ -163,20 +180,20 @@ function renderFormattedContent(text, defaultClass) {
   }
 
   // If still no blocks, return escaped text
-  if (!parts.length) return _nl2br(esc(text));
+  if (!parts.length) return _nl2br(linkifyRedmineIssueRefs(esc(text), {stopPropagation: false}));
 
   // 2. Render each part
   for (var i = 0; i < parts.length; i++) {
     var p = parts[i];
     if (p.type === 'text') {
-      if (p.content.trim()) result += '<div class="' + cls + '">' + _nl2br(esc(p.content)) + '</div>';
+      if (p.content.trim()) result += '<div class="' + cls + '">' + _nl2br(linkifyRedmineIssueRefs(esc(p.content), {stopPropagation: false})) + '</div>';
     } else {
       if (p.lang === 'diff') result += renderDiffBlock(p.content);
       else if (p.lang === 'shell' || p.lang === 'bash' || p.lang === 'sh') result += renderShellBlock(p.content);
       else result += renderGenericCodeBlock(p.content, p.lang);
     }
   }
-  return result || _nl2br(esc(text));
+  return result || _nl2br(linkifyRedmineIssueRefs(esc(text), {stopPropagation: false}));
 }
 
 // Split plain text into alternating {type:'text'|'code'} segments by detecting
@@ -372,7 +389,7 @@ function _inlineMd(text) {
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
     .replace(/(^|[^\w/])#(\d{5,})\b/g, function(_, prefix, id) {
-      return prefix + '<a href="' + redmineIssueUrl(id) + '" target="_blank">#' + id + '</a>';
+      return prefix + renderRedmineIssueLink(id, {stopPropagation: false});
     });
 }
 
@@ -436,15 +453,35 @@ function switchTab(tab) {
 }
 
 async function refreshCurrentTab() {
-  var refreshBtns = document.querySelectorAll('.btn-group .secondary');
-  var targetBtn = null;
-  refreshBtns.forEach(function(b) { if (b.textContent.includes('刷新')) targetBtn = b; });
+  var targetBtn = document.getElementById('refreshBtn');
   if (targetBtn) { targetBtn.disabled = true; targetBtn.textContent = '⏳ 刷新中...'; }
   try {
-    await (currentTab === 'issues' ? loadIssues() : currentTab === 'cases' ? loadCases() : currentTab === 'runs' ? loadRuns() : currentTab === 'department' ? loadDepartmentOverdue(true) : currentTab === 'project' ? loadProjectDashboard(true) : loadStatistics());
+    if (currentTab === 'issues') {
+      await refreshRedmineSnapshots();
+      await loadIssues();
+    } else if (currentTab === 'runs') {
+      await refreshRedmineSnapshots();
+      await loadRuns();
+    } else if (currentTab === 'cases') {
+      await loadCases();
+    } else if (currentTab === 'department') {
+      await loadDepartmentOverdue(true);
+    } else if (currentTab === 'project') {
+      await loadProjectDashboard(true);
+    } else {
+      await loadStatistics(true);
+    }
   } finally {
     if (targetBtn) { targetBtn.disabled = false; targetBtn.textContent = '刷新'; }
   }
+}
+
+async function refreshRedmineSnapshots() {
+  const assignee = (document.getElementById('syncAssigneeInput') || {}).value || '';
+  const params = new URLSearchParams({max_analyze: '0'});
+  if (assignee) params.set('assignee_name', assignee);
+  const started = await api(`/api/redmine-agent/sync?${params}`, {method:'POST'});
+  await waitForRun(started.run_id, '刷新', {reload: false});
 }
 
 async function initStatsUserSelect() {
@@ -492,6 +529,10 @@ document.addEventListener('click', function(e) {
 });
 function showModal(id) { document.getElementById(id).classList.add('show'); }
 function hideModal(id) { document.getElementById(id).classList.remove('show'); }
+function removeDynamicModal(id) {
+  const modal = document.getElementById(id);
+  if (modal) modal.remove();
+}
 function notifyUser(title, message, level) {
   level = level || 'info';
   try {
@@ -507,6 +548,111 @@ function notifyUser(title, message, level) {
   toast.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:10000;max-width:min(460px,calc(100vw - 32px));padding:10px 12px;border-radius:6px;background:#111827;color:#f8fafc;border:1px solid #334155;box-shadow:0 8px 24px rgba(0,0,0,.28);font-size:12px;';
   document.body.appendChild(toast);
   setTimeout(function(){ if (toast.parentNode) toast.remove(); }, 3600);
+}
+
+function openRedmineReplyModal(issueId, replyText, meta) {
+  issueId = String(issueId || '').trim();
+  meta = meta || {};
+  const modalId = 'redmineReplyModal-' + Date.now();
+  const issueInputId = modalId + '-issue';
+  const replyTextId = modalId + '-reply';
+  const fileInputId = modalId + '-files';
+  const fileListId = modalId + '-file-list';
+  const modal = document.createElement('div');
+  modal.id = modalId;
+  modal.className = 'modal show';
+  modal.innerHTML = `
+    <div class="modal-content redmine-reply-modal">
+      <div class="modal-header" style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">
+        <span class="modal-title">📝 Redmine回复</span>
+        <span class="modal-close" onclick="removeDynamicModal('${modalId}')">&times;</span>
+      </div>
+      <div class="modal-body">
+        ${meta.summaryHtml ? `<div class="muted">${meta.summaryHtml}</div>` : (meta.summary ? `<div class="muted">${esc(meta.summary)}</div>` : '')}
+        <div>
+          <label>Redmine Issue ID</label>
+          <input type="text" id="${issueInputId}" data-redmine-issue-input value="${esc(issueId)}" placeholder="输入 Redmine Issue ID">
+        </div>
+        <div>
+          <label>回复内容</label>
+          <textarea id="${replyTextId}" data-redmine-reply-text rows="14" placeholder="输入回复内容...">${esc(replyText || '')}</textarea>
+        </div>
+        <div>
+          <label>📎 附件</label>
+          <input type="file" id="${fileInputId}" data-redmine-files multiple style="display:none" onchange="updateRedmineReplyFileList('${fileInputId}', '${fileListId}')">
+          <div id="${fileInputId}-drop" class="redmine-reply-drop" onclick="document.getElementById('${fileInputId}').click()">拖拽文件到此处，或点击选择文件</div>
+          <div id="${fileListId}" class="redmine-reply-file-list"></div>
+        </div>
+        <div class="modal-buttons">
+          <button class="secondary" onclick="removeDynamicModal('${modalId}')">取消</button>
+          <button onclick="confirmAndSendRedmineReply('${modalId}')">确认并发送</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const drop = document.getElementById(fileInputId + '-drop');
+  if (drop) {
+    drop.addEventListener('dragover', function(e) { e.preventDefault(); drop.classList.add('drag-over'); });
+    drop.addEventListener('dragleave', function(e) { e.preventDefault(); drop.classList.remove('drag-over'); });
+    drop.addEventListener('drop', function(e) {
+      e.preventDefault();
+      drop.classList.remove('drag-over');
+      if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+      const input = document.getElementById(fileInputId);
+      const dt = new DataTransfer();
+      Array.from(input.files || []).forEach(function(file) { dt.items.add(file); });
+      Array.from(e.dataTransfer.files || []).forEach(function(file) { dt.items.add(file); });
+      input.files = dt.files;
+      updateRedmineReplyFileList(fileInputId, fileListId);
+    });
+  }
+  const area = document.getElementById(replyTextId);
+  if (area) area.focus();
+}
+
+function updateRedmineReplyFileList(fileInputId, fileListId) {
+  const input = document.getElementById(fileInputId);
+  const box = document.getElementById(fileListId);
+  if (!input || !box) return;
+  const files = Array.from(input.files || []);
+  if (!files.length) { box.innerHTML = ''; return; }
+  box.innerHTML = files.map(function(file, idx) {
+    return `<div class="redmine-reply-file"><span>📎 ${esc(file.name)} <span class="muted">(${formatBytes(file.size) || '0 B'})</span></span><button type="button" onclick="removeRedmineReplyFile('${fileInputId}', '${fileListId}', ${idx})">移除</button></div>`;
+  }).join('');
+}
+
+function removeRedmineReplyFile(fileInputId, fileListId, index) {
+  const input = document.getElementById(fileInputId);
+  if (!input) return;
+  const dt = new DataTransfer();
+  Array.from(input.files || []).forEach(function(file, idx) {
+    if (idx !== index) dt.items.add(file);
+  });
+  input.files = dt.files;
+  updateRedmineReplyFileList(fileInputId, fileListId);
+}
+
+async function confirmAndSendRedmineReply(modalId) {
+  const modal = document.getElementById(modalId);
+  const issueId = (modal && modal.querySelector('[data-redmine-issue-input]') ? modal.querySelector('[data-redmine-issue-input]').value : '').trim();
+  const replyText = (modal && modal.querySelector('[data-redmine-reply-text]') ? modal.querySelector('[data-redmine-reply-text]').value : '').trim();
+  const fileInput = modal ? modal.querySelector('[data-redmine-files]') : null;
+  if (!issueId) { notifyUser('缺少 Issue ID', '请输入 Redmine Issue ID', 'error'); return; }
+  if (!replyText) { notifyUser('回复为空', '请填写回复内容', 'error'); return; }
+  const formData = new FormData();
+  formData.append('issue_id', issueId);
+  formData.append('reply_text', replyText);
+  Array.from((fileInput && fileInput.files) || []).forEach(function(file) { formData.append('files', file); });
+  const sendBtn = modal ? modal.querySelector('.modal-buttons button:last-child') : null;
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '发送中...'; }
+  try {
+    const data = await api('/api/redmine/reply', {method:'POST', body: formData});
+    notifyUser('已发送', (data && data.message) || ('回复已发送到 Redmine #' + issueId));
+    removeDynamicModal(modalId);
+  } catch (e) {
+    notifyUser('发送失败', e.message, 'error');
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '确认并发送'; }
+  }
 }
 
 // 趋势柱状图点击：粒度+标签 → 日期范围 [start, end)（ISO，闭开区间）
@@ -576,7 +722,7 @@ async function showRedmineTrendDetail(granularity, label, namesCsv, profileId) {
     body.innerHTML = '<div class="muted" style="margin-bottom:8px">共 ' + items.length + ' 条</div><div class="wrap"><table class="dept-table"><thead><tr><th>#</th><th>主题</th><th>状态</th><th>指派人</th><th>解决日期</th></tr></thead><tbody>'
       + items.slice(0, 200).map(function(i) {
         var issueId = i.issue_id || '';
-        var issueCell = issueId ? '<a href="' + redmineIssueUrl(issueId) + '" target="_blank">#' + esc(issueId) + '</a>' : '-';
+        var issueCell = issueId ? renderRedmineIssueLink(issueId, {stopPropagation: false}) : '-';
         return '<tr><td>' + issueCell + '</td><td>' + esc((i.subject || '-').slice(0, 60)) + '</td><td>' + esc(i.status_name || '-') + '</td><td>' + esc(i.assigned_to_name || '-') + '</td><td>' + esc(i.closed_on || '-') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
   } catch (e) {
@@ -786,7 +932,7 @@ async function fetchIssueFromRedmine(issueId) {
     }
     // Wait for analysis to complete
     btn.textContent = '⏳ 分析 #' + issueId + '...';
-    await waitForRun(result.run_id);
+    await waitForRun(result.run_id, '拉取');
     document.getElementById('searchInput').value = '';
     loadIssues();
   } catch (e) {
@@ -896,7 +1042,7 @@ function renderIssueCard(item) {
 
   return `<div class="issue-card">
     <h3>
-      <a href="${redmineIssueUrl(item.issue_id)}" target="_blank">#${item.issue_id}</a>
+      ${renderRedmineIssueLink(item.issue_id, {stopPropagation: false})}
       <span>${title}</span>
       <span style="margin-left:auto;font-size:12px;color:var(--muted)">${esc(item.priority_name || '-')}</span>
     </h3>
@@ -969,7 +1115,7 @@ function renderReferenceCard(r) {
   const levelText = level === 'high' ? '高' : level === 'medium' ? '中' : '低';
   return `<div class="ref-card">
     <div class="ref-item">
-      <a href="${redmineIssueUrl(r.issue_id)}" target="_blank">#${r.issue_id}</a>
+      ${renderRedmineIssueLink(r.issue_id, {stopPropagation: false})}
       <span class="ref-badge ${level}">${levelText} ${score}</span>
       <span class="ref-title">${esc(r.subject || '')}</span>
     </div>
@@ -1258,7 +1404,7 @@ function renderMiniIssueList(title, items, emptyText, sectionId) {
       ? `<button class="ka-btn" onclick="event.stopPropagation();agentReplyDraft(${issueId}, this)" title="AI 生成回复草稿+补丁方向(联网拉取工单详情与历史回复)">✉️ 回复草稿</button>`
       : '';
     return `<div class="issue-mini">
-      <div class="issue-mini-id"><a href="${redmineIssueUrl(issueId)}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
+      <div class="issue-mini-id">${renderRedmineIssueLink(issueId, {stopPropagation: false})}<div class="muted">${esc(item.status_name || '-')}</div></div>
       <div class="issue-mini-title">
         <strong title="${esc(item.subject || '')}">${esc(item.subject || '-')}</strong>
         <span>${esc(reply)}${note ? ' | ' + esc(trunc(note, 120)) : ''}</span>
@@ -1390,7 +1536,7 @@ function renderDepartmentIssue(item) {
   const days = Number(item.unreplied_days || 0);
   const replyText = item.last_external_reply ? ' | ' + esc(trunc(item.last_external_reply, 140)) : '';
   return `<div class="issue-mini">
-    <div><a href="${redmineIssueUrl(issueId)}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
+    <div>${renderRedmineIssueLink(issueId, {stopPropagation: false})}<div class="muted">${esc(item.status_name || '-')}</div></div>
     <div class="issue-mini-title">
       <strong title="${esc(item.subject || '')}">${esc(item.subject || '-')}</strong>
       <span>最后回复: ${esc(item.last_external_reply_by || '-')} | 未回复 ${days} 天${replyText}</span>
@@ -1403,7 +1549,7 @@ function renderProjectIssue(item) {
   const issueId = item.issue_id || '';
   const updated = item.updated_on || item.created_on || '-';
   return `<div class="issue-mini">
-    <div><a href="${redmineIssueUrl(issueId)}" target="_blank">#${issueId}</a><div class="muted">${esc(item.status_name || '-')}</div></div>
+    <div>${renderRedmineIssueLink(issueId, {stopPropagation: false})}<div class="muted">${esc(item.status_name || '-')}</div></div>
     <div class="issue-mini-title">
       <strong title="${esc(item.subject || '')}">${esc(item.subject || '-')}</strong>
       <span>指派给: ${esc(item.assigned_to_name || '-')}</span>
@@ -1525,7 +1671,7 @@ async function loadDepartmentOverdue(force) {
   }
 }
 
-async function loadStatistics() {
+async function loadStatistics(force) {
   var savedName = '';
   try {
     var oldSel = document.getElementById('statsUserSelect');
@@ -1539,6 +1685,7 @@ async function loadStatistics() {
     var sd = statsConfig.stale_days || 3;
     var workloadUrl = '/api/redmine-agent/statistics/workload?stale_days=' + sd + '&list_limit=30';
     if (selectedName) workloadUrl += '&name=' + encodeURIComponent(selectedName);
+    if (force) workloadUrl += '&refresh=true';
     const [basic, workload] = await Promise.all([
       api('/api/redmine-agent/statistics'),
       api(workloadUrl)
@@ -1704,13 +1851,14 @@ async function triggerSync() {
   if (!confirm(`确认全量同步 ${target} Redmine 工单？这可能需要几分钟。`)) return;
   const params = new URLSearchParams({max_analyze: '30'});
   if (assignee) params.set('assignee_name', assignee);
-  const btn = document.getElementById('scanBtn');
+  const btn = document.getElementById('syncBtn');
+  const oldText = btn ? btn.textContent : '';
   try {
     const started = await api(`/api/redmine-agent/sync?${params}`, {method:'POST'});
     if (btn) { btn.disabled = true; btn.textContent = '⏳ 同步中...'; }
     await waitForRun(started.run_id, '同步');
   } catch (e) { notifyUser('同步失败', e.message, 'error'); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = '🔍 扫描'; } }
+  finally { if (btn) { btn.disabled = false; btn.textContent = oldText || '🔄 全量同步'; } }
 }
 
 function showResetModal() {
@@ -1739,19 +1887,21 @@ async function confirmReset() {
   } catch (e) { notifyUser('重置失败', e.message, 'error'); }
 }
 
-async function waitForRun(runId, label) {
+async function waitForRun(runId, label, options) {
+  const opts = options || {};
+  const reload = opts.reload !== false;
   for (let i = 0; i < 240; i++) {
     await new Promise(r => setTimeout(r, 1500));
     try {
       const status = await api('/api/redmine-agent/status');
       if (!status.running) {
-        refreshCurrentTab();
+        if (reload) refreshCurrentTab();
         notifyUser('RedmineAgent ' + label + '完成', '任务 ' + runId + ' 已完成', 'success');
         return;
       }
     } catch (_) {}
   }
-  refreshCurrentTab();
+  if (reload) refreshCurrentTab();
   notifyUser('RedmineAgent ' + label + '超时', '任务 ' + runId + ' 等待超时，请检查状态', 'warning');
 }
 
@@ -1799,7 +1949,7 @@ function renderFactsList(items, total) {
     const scope = [f.chip_platform, f.android_version, f.certification_type, f.module].filter(Boolean).map(esc).join(' / ');
     const conf = f.confidence ? `<span class="muted" style="float:right">置信度 ${f.confidence}</span>` : '';
     return `<div class="case-card" onclick="showCaseFact(${f.issue_id})">
-      <div class="case-head"><span class="case-status draft">#${f.issue_id}</span>${sig}${conf}</div>
+      <div class="case-head"><span class="case-status draft">${renderRedmineIssueLink(f.issue_id)}</span>${sig}${conf}</div>
       <div class="case-title">${esc(f.subject || '-')}</div>
       <div class="case-scope muted">${scope || '-'}</div>
       <div class="case-sources muted">${esc(f.problem_summary || '').slice(0,80)}</div>
@@ -1822,7 +1972,7 @@ function renderCasesList(items, total) {
       <div class="case-head"><span class="case-status ${status}">${badge}</span>${sig}</div>
       <div class="case-title">${esc(c.title || '-')}</div>
       <div class="case-scope muted">${scope || '-'}</div>
-      <div class="case-sources muted">来源: ${(c.source_issue_ids_json||[]).map(i=>'#'+i).join(' ') || '-'}</div>
+      <div class="case-sources muted">来源: ${renderRedmineIssueLinks(c.source_issue_ids_json || [])}</div>
     </div>`;
   }).join('') + `<div class="muted" style="padding:8px">共 ${total} 个案例</div>`;
 }
@@ -1843,7 +1993,7 @@ async function showCaseDetail(caseId) {
       <div class="field"><div class="field-label">根因</div><div class="field-content">${esc(c.root_cause||'-')}</div></div>
       <div class="field"><div class="field-label">解决方案</div><div class="field-content">${renderFormattedContent(sol.overview||'-','field-content')}</div></div>
       ${rules.length?`<div class="field"><div class="field-label">经验规则</div><div class="field-content">${rules.map(r=>esc((r.title||'')+(r.content?': '+r.content:''))).join('<br>')}</div></div>`:''}
-      <div class="field"><div class="field-label">来源工单</div><div class="field-content">${sources.map(i=>`<a href="${redmineIssueUrl(i)}" target="_blank">#${i}</a>`).join(' ')||'-'}</div></div>
+      <div class="field"><div class="field-label">来源工单</div><div class="field-content">${renderRedmineIssueLinks(sources)}</div></div>
       <div class="case-actions">
         ${c.status!=='approved'?`<button onclick="approveCase(${caseId})">✅ 审核通过</button>`:''}
         <button class="secondary" onclick="draftReply(${sources[0]||0}, ${caseId})">✉️ 生成回复</button>
@@ -1867,7 +2017,7 @@ function showBatchImportModal() {
 function _renderImportResult(data, resultBox) {
   const items = data.items || [];
   const done = items.filter(i => i.status === 'done' || i.status === 'exists').length;
-  resultBox.innerHTML = `✅ 完成 ${done}/${items.length}${data.failed ? ` (失败 ${data.failed})` : ''}<br><span class="muted">${items.slice(0, 12).map(i => `#${i.issue_id}:${i.status}`).join('  ')}</span>`;
+  resultBox.innerHTML = `✅ 完成 ${done}/${items.length}${data.failed ? ` (失败 ${data.failed})` : ''}<br><span class="muted">${items.slice(0, 12).map(i => `${renderRedmineIssueLink(i.issue_id)}:${esc(i.status || '')}`).join('  ')}</span>`;
   notifyUser('批量导入完成', `成功 ${done}/${items.length}，已自动跳转「工单事实」查看`);
   hideModal('batchImportModal');
   switchCaseView('facts');
@@ -1911,7 +2061,7 @@ async function findSimilarCase(issueId) {
     const items = data.similar || [];
     if (!items.length) { setKnowledgeBody('<div class="muted">知识库暂无相似工单。请先批量导入历史单。</div>'); return; }
     setKnowledgeBody(items.map(s=>`<div class="ref-item">
-      <a href="${redmineIssueUrl(s.issue_id)}" target="_blank">#${s.issue_id}</a>
+      ${renderRedmineIssueLink(s.issue_id, {stopPropagation: false})}
       <span class="ref-badge ${s.similarity_level}">${s.similarity_level==='high'?'高':s.similarity_level==='medium'?'中':'低'} ${s.score}</span>
       <span class="ref-title">${esc(s.subject||'')}</span>
       <span class="muted">[${esc(s.module||'-')}${s.error_signature?'/'+esc(s.error_signature):''}]</span>
@@ -1966,11 +2116,11 @@ function renderIssueWorkbench(data) {
         ${mature ? `<div class="mature-hit">命中成熟案例 #${mature.case_id}: ${esc(mature.title || '')}</div>` : '<div class="muted">暂无成熟案例命中，可先从相似工单构建。</div>'}
         <div class="similar-list">${similar.length ? similar.map(s => `
           <div class="ref-item">
-            <a href="${redmineIssueUrl(s.issue_id)}" target="_blank">#${s.issue_id}</a>
+            ${renderRedmineIssueLink(s.issue_id, {stopPropagation: false})}
             <span class="ref-badge ${s.similarity_level || 'low'}">${esc(s.similarity_level || 'low')} ${s.score || 0}</span>
             <span class="ref-title">${esc(s.subject || '')}</span>
           </div>`).join('') : '<div class="muted">暂无相似历史工单。</div>'}</div>
-        <div class="source-links">${sourceIds.length ? '来源: ' + sourceIds.map(i => `<a href="${redmineIssueUrl(i)}" target="_blank">#${i}</a>`).join(' ') : ''}</div>
+        <div class="source-links">${sourceIds.length ? '来源: ' + renderRedmineIssueLinks(sourceIds, {stopPropagation: false}) : ''}</div>
       </section>
     </div>
     <div class="workbench-grid">
@@ -2012,7 +2162,7 @@ async function draftReply(issueId, matureCaseId) {
   openKnowledgeModal(`✉️ 回复草稿 #${issueId}`, '<div class="muted">生成中…</div>');
   try {
     const data = await api(`/api/redmine-agent/issues/${issueId}/draft-reply`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(matureCaseId ? {mature_case_id: matureCaseId} : {})});
-    const body = `<div class="muted" style="margin-bottom:6px">来源: ${data.source==='mature_case'?'成熟案例 #'+(data.mature_case_id||''):'相似工单'} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
+    const body = `<div class="muted" style="margin-bottom:6px">Redmine ${renderRedmineIssueLink(issueId, {stopPropagation: false})} · 来源: ${data.source==='mature_case'?'成熟案例 #'+(data.mature_case_id||''):'相似工单'} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
       <textarea id="replyDraftArea" rows="14" style="width:100%;font-family:monospace">${esc(data.reply_draft||'')}</textarea>
       <div style="margin-top:8px"><button onclick="copyReplyDraft(this)">📋 复制</button></div>`;
     setKnowledgeBody(body);
@@ -2027,7 +2177,7 @@ async function draftAgentReply(issueId, matureCaseId) {
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify(matureCaseId ? {mature_case_id: matureCaseId} : {})
     });
-    const body = `<div class="muted" style="margin-bottom:6px">来源: ${esc(data.source || '-')} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
+    const body = `<div class="muted" style="margin-bottom:6px">Redmine ${renderRedmineIssueLink(issueId, {stopPropagation: false})} · 来源: ${esc(data.source || '-')} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
       ${data.patch_direction ? `<div class="field"><div class="field-label">补丁方向</div>${renderFormattedContent(data.patch_direction, 'field-content')}</div>` : ''}
       <textarea id="replyDraftArea" rows="16" style="width:100%;font-family:monospace">${esc(data.reply_draft||'')}</textarea>
       <div style="margin-top:8px"><button onclick="copyReplyDraft(this)">📋 复制</button></div>`;
@@ -2066,7 +2216,7 @@ async function sendReplyToRedmine(issueId, btn) {
 async function agentReplyDraft(issueId, btn) {
   if (!issueId) return;
   if (btn) { btn.disabled = true; var oldBtn = btn.textContent; btn.textContent = '⏳ 生成中…'; }
-  openKnowledgeModal(`✉️ 回复草稿+补丁方向 #${issueId}`, '<div class="muted">AI 分析中（联网拉取工单详情、附件与历史回复，约 10–30s）…</div>');
+  notifyUser('正在生成回复', '联网拉取工单详情、附件与历史回复，约 10-30s');
   try {
     const data = await api(`/api/redmine-agent/issues/${issueId}/agent-reply`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -2074,21 +2224,14 @@ async function agentReplyDraft(issueId, btn) {
     });
     const srcMap = {mature_case: '成熟案例 #' + (data.mature_case_id || ''), ai_analysis: 'AI 分析（联网）', similar_issues: '相似历史工单'};
     const srcLabel = srcMap[data.source] || data.source;
-    const sigLine = data.error_signature ? ' / ' + esc(data.error_signature) : '';
-    const similarHtml = (data.similar_issues || []).length
-      ? '<div class="muted" style="margin-top:6px">相似历史: ' + (data.similar_issues||[]).map(function(s){return '#'+s.issue_id;}).join(' ') + '</div>'
+    const sigLine = data.error_signature ? ' / ' + data.error_signature : '';
+    const similarText = (data.similar_issues || []).length
+      ? ' · 相似历史 ' + (data.similar_issues || []).map(function(s) { return renderRedmineIssueLink(s.issue_id, {stopPropagation: false}); }).join(' ')
       : '';
-    const body = '<div class="muted" style="margin-bottom:6px">来源: ' + esc(srcLabel) + ' · 模块 ' + esc(data.module||'-') + sigLine + ' · 分析时间 ' + esc((data.analyzed_at||'').slice(0,16)) + '</div>'
-      + '<textarea id="replyDraftArea" rows="14" style="width:100%;font-family:monospace">' + esc(data.reply_draft||'') + '</textarea>'
-      + '<h4 style="margin:10px 0 4px">根因</h4><div class="muted">' + esc(data.root_cause||'-') + '</div>'
-      + '<h4 style="margin:10px 0 4px">补丁方向</h4><pre id="patchDirectionBlock" style="background:#0f172a;color:#e2e8f0;padding:10px;overflow:auto;border-radius:6px;white-space:pre-wrap"><code>' + esc(data.patch_direction||'-') + '</code></pre>'
-      + '<div style="margin-top:8px;display:flex;gap:8px">'
-      + '<button onclick="copyReplyDraft(this)">📋 复制回复</button>'
-      + '<button onclick="copyPatchDirection(this)">📋 复制补丁</button>'
-      + '</div>' + similarHtml;
-    setKnowledgeBody(body);
+    const summaryHtml = '来源: ' + esc(srcLabel || '-') + ' · 模块 ' + esc(data.module || '-') + esc(sigLine) + similarText;
+    openRedmineReplyModal(issueId, data.reply_draft || '', {summaryHtml: summaryHtml});
   } catch (e) {
-    setKnowledgeBody('<div class="muted">失败: ' + esc(e.message) + '</div>');
+    notifyUser('生成失败', e.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = oldBtn; }
   }
@@ -2106,6 +2249,7 @@ async function showCaseFact(issueId) {
   try {
     const f = await api(`/api/redmine-agent/cases/${issueId}`);
     setKnowledgeBody(`
+      <div class="field"><div class="field-label">Redmine工单</div><div class="field-content">${renderRedmineIssueLink(issueId, {stopPropagation: false})}</div></div>
       <div class="field"><div class="field-label">平台/版本</div><div class="field-content">${esc(f.chip_platform||'-')} / ${esc(f.android_version||'-')} / ${esc(f.certification_type||'-')}</div></div>
       <div class="field"><div class="field-label">模块/错误签名</div><div class="field-content">${esc(f.module||'-')} / ${esc(f.error_signature||'-')} <span class="muted">(置信度 ${f.confidence||0})</span></div></div>
       <div class="field"><div class="field-label">问题摘要</div><div class="field-content">${esc(f.problem_summary||'-')}</div></div>
@@ -2147,6 +2291,7 @@ async function compareCase(issueId) {
   try {
     const data = await api(`/api/redmine-agent/issues/${issueId}/evaluate-case`, {method:'POST'});
     setKnowledgeBody(`
+      <div class="field"><div class="field-label">Redmine工单</div><div class="field-content">${renderRedmineIssueLink(issueId, {stopPropagation: false})}</div></div>
       <div class="field"><div class="field-label">评分</div><div class="field-content" style="font-size:20px;font-weight:600">${data.score||0}/100</div></div>
       ${(data.missing_fields||[]).length?`<div class="field"><div class="field-label">缺失字段</div><div class="field-content">${data.missing_fields.map(esc).join(', ')}</div></div>`:''}
       ${(data.mismatch_fields||[]).length?`<div class="field"><div class="field-label">不一致字段</div><div class="field-content">${data.mismatch_fields.map(m=>`${esc(m.field)}: 内部=${esc(m.internal)} / 参考=${esc(m.reference)}`).join('<br>')}</div></div>`:''}
@@ -2192,6 +2337,15 @@ restoreRedmineProfileState();
 var initialTab = new URLSearchParams(window.location.search).get('tab') || (window.sessionStorage.getItem('redmineLastTab') || 'stats');
 if (!document.getElementById('tab-' + initialTab)) initialTab = 'stats';
 switchTab(initialTab);
+try {
+  var initialQuery = new URLSearchParams(window.location.search).get('issue') || new URLSearchParams(window.location.search).get('q') || '';
+  if (initialQuery) {
+    var searchInput = document.getElementById('searchInput');
+    if (searchInput) searchInput.value = String(initialQuery).replace(/^#/, '');
+    switchTab('issues');
+    setTimeout(function() { smartSearch(); }, 50);
+  }
+} catch (_) {}
 
 // Check if a task is already running on page load — reset button state
 (async function() {

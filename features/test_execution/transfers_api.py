@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Query
 from fastapi.responses import JSONResponse
 
-from features.devices import ssh_connection_failed_response
+from features.devices.support import ssh_connection_failed_response
 from foundation.archives import (
     derive_suite_dir_name_from_archive,
     is_complete_archive_file,
@@ -189,7 +189,14 @@ def _extract_archive_local_with_progress(archive_path: str, extract_dir: str, ta
             else:
                 total = len(names)
                 for member_name in names:
-                    zip_ref.extract(member_name, extract_dir)
+                    target_path = safe_extract_member_path(extract_dir, member_name)
+                    if member_name.endswith("/"):
+                        os.makedirs(target_path, exist_ok=True)
+                        continue
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    with zip_ref.open(member_name) as src, open(target_path, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    _chmod_tradefed(target_path, os.path.basename(target_path))
                     files_count += 0 if member_name.endswith("/") else 1
                     progress(files_count, total)
     elif archive_path.endswith((".tar.gz", ".tgz", ".tar", ".tar.bz2")):
@@ -220,11 +227,17 @@ def _extract_archive_local_with_progress(archive_path: str, extract_dir: str, ta
             else:
                 total = len([m for m in members if m.isfile()])
                 for member in members:
-                    safe_extract_member_path(extract_dir, member.name)
-                    tar_ref.extract(member, extract_dir)
+                    target_path = safe_extract_member_path(extract_dir, member.name)
+                    if member.isdir():
+                        os.makedirs(target_path, exist_ok=True)
+                        continue
                     if member.isfile():
-                        extracted = os.path.join(extract_dir, member.name)
-                        _chmod_tradefed(extracted, os.path.basename(extracted))
+                        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                        src = tar_ref.extractfile(member)
+                        if src:
+                            with src, open(target_path, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
+                        _chmod_tradefed(target_path, os.path.basename(target_path))
                         files_count += 1
                         progress(files_count, total)
     else:

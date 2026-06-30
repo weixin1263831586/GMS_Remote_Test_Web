@@ -113,37 +113,16 @@ async def issue_workbench(issue_id: int, request: Request, similar_limit: int = 
     try:
         return {"success": True, "data": _knowledge(request).issue_workbench(issue_id, similar_limit=similar_limit)}
     except Exception as exc:
+        # Surface the failure as a real error (non-2xx + success:false) so the
+        # frontend's catch branch shows "知识面板加载失败". The previous body
+        # returned 200/success:true with a degraded payload, which made a crash
+        # indistinguishable from genuinely-empty data.
         return JSONResponse(
-            status_code=200,
+            status_code=502,
             content={
-                "success": True,
-                "data": {
-                    "issue_id": int(issue_id),
-                    "subject": "",
-                    "status_name": "",
-                    "fact": {},
-                    "evidence": {
-                        "reply_summary": [],
-                        "attachment_summary": [],
-                        "failure_summary": [],
-                        "source_excerpt": {},
-                    },
-                    "similar": [],
-                    "mature_case": None,
-                    "reference_count": 0,
-                    "latest_evaluation": None,
-                    "gms_like_sections": {
-                        "title": "",
-                        "scope": {},
-                        "symptoms": [],
-                        "root_cause": "知识依据加载失败，请刷新工单元数据后重试。",
-                        "solution": "",
-                        "verification": "",
-                        "rules": [],
-                        "source_issue_ids": [int(issue_id)],
-                    },
-                    "error": str(exc),
-                },
+                "success": False,
+                "error": f"知识依据加载失败: {exc}",
+                "issue_id": int(issue_id),
             },
         )
 

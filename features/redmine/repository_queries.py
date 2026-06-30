@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from .users import (
+    NON_ACTIONABLE_STATUS_NAMES,
     RESOLVED_STATUS_NAMES,
     _looks_like_report_attachment,
     _looks_like_rk_actor,
@@ -86,9 +87,15 @@ class RepositoryQueryMixin:
         search: str = "",
         sort: str = "updated_on",
         order: str = "desc",
+        assignee_names: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Paginated listing with optional filters."""
-        where, params = self._build_issue_where(status, priority, category, search)
+        """Paginated listing with optional filters.
+
+        ``assignee_names`` restricts to issues assigned to one of the given names
+        (substring match) — pass the logged-in user's names so the personal list
+        excludes other department members' stubs written by the dashboard stats.
+        """
+        where, params = self._build_issue_where(status, priority, category, search, assignee_names=assignee_names)
         allowed_sorts = {"updated_on", "created_on", "priority_name", "issue_id", "subject", "analysis_status"}
         sort_col = sort if sort in allowed_sorts else "updated_on"
         order_dir = "DESC" if order.lower() == "desc" else "ASC"
@@ -105,8 +112,9 @@ class RepositoryQueryMixin:
         priority: str = "",
         category: str = "",
         search: str = "",
+        assignee_names: list[str] | None = None,
     ) -> int:
-        where, params = self._build_issue_where(status, priority, category, search)
+        where, params = self._build_issue_where(status, priority, category, search, assignee_names=assignee_names)
         with self.connect() as conn:
             row = conn.execute(f"SELECT COUNT(*) AS cnt FROM redmine_agent_issues {where}", params).fetchone()
         return int(row["cnt"]) if row else 0
@@ -208,6 +216,8 @@ class RepositoryQueryMixin:
                 continue
 
             open_issues.append(issue)
+            if not self._is_issue_waiting_action(issue):
+                continue
 
             reply_info = self._reply_wait_info(issue, owner_keys)
             if reply_info.get("waiting"):
@@ -321,6 +331,10 @@ class RepositoryQueryMixin:
     @staticmethod
     def _is_issue_resolved(issue: dict[str, Any]) -> bool:
         return bool(issue.get("is_resolved")) or str(issue.get("status_name") or "") in RESOLVED_STATUS_NAMES
+
+    @staticmethod
+    def _is_issue_waiting_action(issue: dict[str, Any]) -> bool:
+        return str(issue.get("status_name") or "").strip() not in NON_ACTIONABLE_STATUS_NAMES
 
     @staticmethod
     def _is_assigned_to_owner(issue: dict[str, Any], owner_keys: set) -> bool:

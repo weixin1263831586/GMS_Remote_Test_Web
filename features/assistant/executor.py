@@ -15,7 +15,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from features.assistant.tools import AgentTool, registry
-from features.devices import device_lock_manager, device_manager, get_or_create_user_state
+from features.devices.locks import device_lock_manager
+from features.devices.manager import device_manager
+from features.devices.support import get_or_create_user_state
 from features.redmine import (
     _name_keys,
     _norm_name,
@@ -98,7 +100,7 @@ def _get_model_by_tool() -> dict[str, type]:
     """Lazy-initialised mapping of tool names to Pydantic request models."""
     global _MODEL_BY_TOOL
     if _MODEL_BY_TOOL is None:
-        from features.devices import (
+        from features.devices.models import (
             ADBForwardStartRequest,
             DeviceActionRequest,
             DeviceLockRequest,
@@ -324,7 +326,7 @@ class ActionExecutor:
     async def _load_device_summaries(self) -> list[dict[str, Any]]:
         """Load device summaries, preferring management payload when available."""
         try:
-            from features.devices import (
+            from features.devices.api import (
                 _build_devices_management_payload,
                 _build_management_props_command,
                 _parse_management_device_props,
@@ -334,14 +336,24 @@ class ActionExecutor:
             config = config_manager.load_config()
             device_ids = await asyncio.to_thread(device_manager.get_connected_devices, True)
             device_data: dict[str, dict[str, str]] = {}
-            ssh = ssh_manager.get_connection(config)
-            if ssh and device_ids:
+
+            # get_connection + execute_command are blocking paramiko calls
+            # (connect health-check + up to 15s command) — run them off the
+            # event loop so summarising devices doesn't stall the agent.
+            def _fetch_props() -> dict[str, dict[str, str]]:
+                conn = ssh_manager.get_connection(config)
+                if not conn or not device_ids:
+                    if conn:
+                        ssh_manager.return_connection(conn)
+                    return {}
                 try:
                     command = _build_management_props_command(device_ids)
-                    output, _, _ = ssh_manager.execute_command(ssh, command, timeout=15)
-                    device_data = _parse_management_device_props(output)
+                    output, _, _ = ssh_manager.execute_command(conn, command, timeout=15)
+                    return _parse_management_device_props(output)
                 finally:
-                    ssh_manager.return_connection(ssh)
+                    ssh_manager.return_connection(conn)
+
+            device_data = await asyncio.to_thread(_fetch_props)
             payload = _build_devices_management_payload(device_ids, device_data, config)
             items = payload.get("devices") or []
             if items:
@@ -366,7 +378,8 @@ class ActionExecutor:
 
     async def _connect_wifi(self, session, request, params) -> ToolResult:
         """连接设备到 WiFi。未指定设备时默认选择一台空闲设备。"""
-        from features.devices import WifiConnectRequest, connect_wifi
+        from features.devices.api import connect_wifi
+        from features.devices.models import WifiConnectRequest
 
         devices = list(params.get("devices") or [])
         if not devices:

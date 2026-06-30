@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from typing import Any
 
@@ -8,6 +9,8 @@ from .users import (
     _name_keys,
     _now,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RepositoryStorageMixin:
@@ -28,7 +31,11 @@ class RepositoryStorageMixin:
                     """,
                     (self._fts_query(query), limit),
                 ).fetchall()
-            except Exception:
+            except Exception as exc:
+                # FTS index/query failure silently degrades to LIKE, which has
+                # far worse recall — log so index corruption or bad queries
+                # don't go unnoticed.
+                logger.warning("search_issues FTS failed, falling back to LIKE: %s", exc)
                 like = f"%{query[:80]}%"
                 rows = conn.execute(
                     """
@@ -107,7 +114,8 @@ class RepositoryStorageMixin:
                     """,
                     (self._fts_query(query), exclude_issue_id, limit),
                 ).fetchall()
-            except Exception:
+            except Exception as exc:
+                logger.warning("search_similar FTS failed, falling back to LIKE: %s", exc)
                 like = f"%{query[:80]}%"
                 rows = conn.execute(
                     """
@@ -224,7 +232,7 @@ class RepositoryStorageMixin:
             pass
 
     @staticmethod
-    def _build_issue_where(status: str = "", priority: str = "", category: str = "", search: str = "") -> tuple:
+    def _build_issue_where(status: str = "", priority: str = "", category: str = "", search: str = "", assignee_names: list[str] | None = None) -> tuple:
         clauses = []
         params: list = []
         if status:
@@ -236,6 +244,14 @@ class RepositoryStorageMixin:
         if category:
             clauses.append("category=?")
             params.append(category)
+        # Restrict to issues assigned to one of the given names (substring match,
+        # so "超群 黄" / "黄 超群" / email all match). Used by the personal issue
+        # list to exclude department-members' stubs written by the dashboard.
+        names = [str(n).strip() for n in (assignee_names or []) if str(n).strip()]
+        if names:
+            name_clauses = " OR ".join("assigned_to_name LIKE ?" for _ in names)
+            clauses.append(f"({name_clauses})")
+            params.extend(f"%{n}%" for n in names)
         if search:
             like = f"%{search[:80]}%"
             clauses.append("(CAST(issue_id AS TEXT) LIKE ? OR subject LIKE ? OR description LIKE ? OR error_info LIKE ? OR summary LIKE ?)")

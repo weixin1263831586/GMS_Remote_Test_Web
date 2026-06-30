@@ -13,6 +13,7 @@ import shlex
 import time
 from typing import Any
 
+from foundation.networking import parse_host_address as _parse_host_address
 from foundation.networking import split_host_port
 
 from .usb import (
@@ -29,13 +30,6 @@ USBIPD_INSTALL_CMD = 'winget install dorssel.usbipd-win --source winget'
 USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行PowerShell执行：
 {install_cmd}
 验证安装：usbipd --version'''
-
-
-def _parse_host_address(host: str) -> tuple[str | None, str]:
-    if '@' in host:
-        username, hostname = host.split('@', 1)
-        return username, hostname
-    return None, host
 
 
 def find_device_host_password(device_host: str, config: dict[str, Any] | None = None) -> str | None:
@@ -455,6 +449,22 @@ class USBIPManager:
                     attached.append(busid)
 
             if not attached:
+                protocol_status = self.probe_protocol_status(ssh)
+                visible_devices = protocol_status.get("adb_ready") or []
+                if visible_devices:
+                    logger.info(
+                        "USB/IP attach commands failed, but ADB devices are already visible: %s",
+                        visible_devices,
+                    )
+                    return list(busids), list(visible_devices)
+                for key in ("fastboot", "recovery", "sideload", "unauthorized", "offline"):
+                    if protocol_status.get(key):
+                        logger.info(
+                            "USB/IP attach commands failed, but protocol %s is visible: %s",
+                            key,
+                            protocol_status.get(key),
+                        )
+                        return list(busids), []
                 return [], []
 
             self.ssh_manager.execute_command(ssh, 'sudo udevadm trigger', timeout=8)

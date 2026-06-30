@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
-import json
 from typing import Any
 
 from . import runtime
@@ -116,6 +116,8 @@ query = sys.argv[2].lower()
 limit = int(sys.argv[3])
 exts = ('.apk', '.jar', '.config', '.xml')
 items = []
+def emit():
+    sys.stdout.write(json.dumps(items, ensure_ascii=False))
 if os.path.isdir(root):
     for current, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if not d.startswith('.')]
@@ -138,16 +140,11 @@ if os.path.isdir(root):
                 'relative_path': os.path.relpath(full, root),
             })
             if len(items) >= limit:
-                print(json.dumps(items, ensure_ascii=False))
+                emit()
                 sys.exit(0)
-print(json.dumps(items, ensure_ascii=False))
+emit()
 """
-    cmd = "python3 -c {} {} {} {}".format(
-        shlex.quote(script),
-        shlex.quote(testcases_path),
-        shlex.quote(query_lower),
-        shlex.quote(str(per_suite_limit)),
-    )
+    cmd = f"python3 -c {shlex.quote(script)} {shlex.quote(testcases_path)} {shlex.quote(query_lower)} {shlex.quote(str(per_suite_limit))}"
     output, _, _ = runtime.ssh_manager.execute_command(ssh, cmd, timeout=60)
     try:
         raw_items = json.loads(output or "[]")

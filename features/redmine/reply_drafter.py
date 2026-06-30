@@ -46,7 +46,16 @@ class ReplyDrafter:
         issue_id = int(issue.get("issue_id") or exclude_issue_id or 0)
         exclude = exclude_issue_id or issue_id
 
-        fact = RedmineCaseExtractor.extract(issue)
+        # Prefer a curated case fact for the target issue when one exists: it
+        # carries the verified, hand-distilled root cause / solution rather than
+        # the raw auto-extracted error_analysis. Fall back to extraction so an
+        # un-curated issue still drafts from its snapshot.
+        issue_id_for_fact = int(issue.get("issue_id") or 0)
+        stored_fact = self.db.get_case_fact(issue_id_for_fact) if issue_id_for_fact else None
+        if stored_fact and self._meaningful_root_case(stored_fact):
+            fact = stored_fact
+        else:
+            fact = RedmineCaseExtractor.extract(issue)
         similar = self.search.search_similar(fact, limit=5, exclude_issue_id=exclude)
 
         # Resolve a mature case: caller may pass one, else find by signature/module.
@@ -79,6 +88,11 @@ class ReplyDrafter:
             ],
             "reply_draft": body,
         }
+
+    @staticmethod
+    def _meaningful_root_case(fact: dict[str, Any]) -> bool:
+        """True when a curated fact carries a distilled root cause worth using."""
+        return len(meaningful_text(fact.get("root_cause"))) >= 20
 
     # ------------------------------------------------------------------
     # Mature case resolution

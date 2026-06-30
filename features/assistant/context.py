@@ -199,15 +199,31 @@ def get_last_tool(session: dict[str, Any]) -> str:
 
 # ==================== Helpers ====================
 
-_CN_NUMBERS = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
-               "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+_CN_DIGITS = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+              "六": 6, "七": 7, "八": 8, "九": 9}
 
 
 def _parse_chinese_number(text: str) -> int:
-    """解析中文数字。"""
+    """解析中文数字(支持 一~九十九,如 十一=11、二十=20、二十三=23)。
+
+    旧实现用单字符 ``in`` 查表,"十一"会先命中"一"误返回 1。这里按十进制的
+    十位/个位组合正确解析。
+    """
+    text = (text or "").strip()
     if text.isdigit():
         return int(text)
-    for cn, num in _CN_NUMBERS.items():
-        if cn in text:
-            return num
+    if not text:
+        return 1
+    # 十位:以"十"为分隔。"十"=10,"十X"=10+X,"X十"=X*10,"X十Y"=X*10+Y。
+    if "十" in text:
+        tens, _, ones = text.partition("十")
+        value = 10
+        if tens:  # 十位有数字,如 "二十"
+            value = _CN_DIGITS.get(tens, 1) * 10
+        if ones:  # 个位有数字,如 "十三" / "二十三"
+            value += _CN_DIGITS.get(ones, 0)
+        return value
+    # 1~9 的单字。
+    if text in _CN_DIGITS:
+        return _CN_DIGITS[text]
     return 1

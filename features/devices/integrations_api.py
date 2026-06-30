@@ -45,7 +45,7 @@ def _resolve_usbip_device_host(request: Request, config: dict | None = None, exp
         selected_config.get("usbip_device_host")
         or selected_config.get("device_host")
         or get_client_display_id_from_request(request)
-        or client_id
+        or ""
     )
 
 
@@ -549,7 +549,13 @@ async def install_usbipd(
                     "error": "Windows host does not have usbipd installed",
                 })
 
-            config["device_host"] = tunnel_host or client_id
+            config["device_host"] = _resolve_usbip_device_host(request, config)
+            if not config["device_host"] or "@" not in config["device_host"]:
+                logger.error(f"[USB/IP Install] No reachable Windows device_host resolved (client_id={client_id})")
+                return error_response(
+                    "无法识别 Windows 设备主机，请在前端页面完成客户端信息识别，或在请求中指定 device_host",
+                    status_code=400,
+                )
 
         device_password = find_device_host_password(config["device_host"], config)
         if not device_password:

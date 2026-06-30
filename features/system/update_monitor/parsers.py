@@ -20,46 +20,81 @@ from .models import *
 from .parsing import *
 
 
-# Three-letter month abbreviation → (month index, capitalized label).
+# Month key → (month index, capitalized label). The index page lists both the
+# 3-letter abbreviation ('may') and the full month name ('february', 'november',
+# ...) as URL directory segments, so we accept both spellings and normalize to
+# the 3-letter key, which the API sort order (CASE month WHEN 'jan' ...) relies on.
 _MAINLINE_MONTHS = {
     'jan': (1, 'January'),
+    'january': (1, 'January'),
     'feb': (2, 'February'),
+    'february': (2, 'February'),
     'mar': (3, 'March'),
+    'march': (3, 'March'),
     'apr': (4, 'April'),
+    'april': (4, 'April'),
     'may': (5, 'May'),
     'jun': (6, 'June'),
+    'june': (6, 'June'),
     'jul': (7, 'July'),
+    'july': (7, 'July'),
     'aug': (8, 'August'),
+    'august': (8, 'August'),
     'sep': (9, 'September'),
+    'september': (9, 'September'),
     'oct': (10, 'October'),
+    'october': (10, 'October'),
     'nov': (11, 'November'),
+    'november': (11, 'November'),
     'dec': (12, 'December'),
+    'december': (12, 'December'),
 }
+
+# Month number (1-12) → canonical 3-letter key, used to emit the recency-checked
+# month as the abbreviation the API sort order keys on.
+_MONTH_INDEX_TO_KEY = {idx: key for key, (idx, _label) in _MAINLINE_MONTHS.items() if len(key) == 3}
 
 # Builds like 15605729 in the "Preload partner zip" row of a PRELOAD notes page.
 _MAINLINE_BUILD_ID_RE = re.compile(r'\b(\d{6,})\b')
-# Matches /release-notes/2026/may/notes-PRELOAD-2026-06-11-v0-1 style links.
-_MAINLINE_PRELOAD_LINK_RE = re.compile(r'/release-notes/(\d{4})/([a-z]{3})/(notes-PRELOAD-[^/?#]+)', re.IGNORECASE)
+# Matches /release-notes/2026/may/notes-PRELOAD-2026-06-11-v0-1 style links. The
+# month directory segment may be a 3-letter abbreviation or a full month name.
+_MAINLINE_PRELOAD_LINK_RE = re.compile(r'/release-notes/(\d{4})/([a-z]+)/(notes-PRELOAD-[^/?#]+)', re.IGNORECASE)
+# Pulls the real build date out of a PRELOAD slug, e.g. notes-PRELOAD-2026-06-09.
+# The URL directory month (e.g. 'may') often lags the slug's true date (06-09),
+# so we trust the slug for both month classification and 12-month recency.
+_MAINLINE_SLUG_DATE_RE = re.compile(r'notes-PRELOAD-(\d{4})-(\d{2})-(\d{2})', re.IGNORECASE)
 
 
 def _extract_mainline_links(doc: html.HtmlElement, base_url: str) -> list[tuple[int, int, str, str]]:
-    """Return ``[(year, month_index, preload_slug, notes_url), ...]`` from index page links."""
+    """Return ``[(year, month_index, preload_slug, notes_url), ...]`` from index page links.
+
+    ``year`` and ``month_index`` come from the **URL directory month**
+    (``/release-notes/2026/may/...``), not the slug date. The slug date is the
+    document publication date and often falls in the next calendar month (e.g.
+    the 'may' directory holds builds published on 06-09 and 06-11). The
+    directory month is how the release is grouped on the index page and is what
+    users expect in the UI.
+    """
     seen: set[str] = set()
     found: list[tuple[int, int, str, str]] = []
     for href in doc.xpath('//a/@href'):
         match = _MAINLINE_PRELOAD_LINK_RE.search(href or '')
         if not match:
             continue
-        year_str, month_str, slug = match.group(1), match.group(2).lower(), match.group(3)
-        month_info = _MAINLINE_MONTHS.get(month_str)
-        if not month_info:
+        dir_year, dir_month, slug = match.group(1), match.group(2).lower(), match.group(3)
+        # Require a recognizable month so non-month directory segments are skipped.
+        if dir_month not in _MAINLINE_MONTHS:
             continue
-        key = f'{year_str}|{month_str}|{slug}'
+        if not _MAINLINE_SLUG_DATE_RE.search(slug):
+            continue
+        year = int(dir_year)
+        month_index = _MAINLINE_MONTHS[dir_month][0]
+        key = f'{year}|{month_index}|{slug}'
         if key in seen:
             continue
         seen.add(key)
         notes_url = urljoin(base_url, href.split('?')[0] + '?authuser=2')
-        found.append((int(year_str), month_info[0], slug, notes_url))
+        found.append((year, month_index, slug, notes_url))
     return found
 
 
@@ -144,10 +179,10 @@ def parse_mainline_release_notes(fetched: FetchedDocument, session=None, *, time
     )
 
     for year, month_index, slug, notes_url in entries:
-        month_key = next(
-            (key for key, (idx, _label) in _MAINLINE_MONTHS.items() if idx == month_index),
-            '',
-        )
+        # month_index is the real build month (1-12); emit the 3-letter key the
+        # API sort order expects. Reverse-lookup of _MAINLINE_MONTHS is ambiguous
+        # (both 'jan' and 'january' map to index 1), so map by number directly.
+        month_key = _MONTH_INDEX_TO_KEY.get(month_index, '')
         month_label = _MAINLINE_MONTHS.get(month_key, (month_index, ''))[1]
 
         build_id, label = '', ''

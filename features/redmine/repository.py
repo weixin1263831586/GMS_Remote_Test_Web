@@ -28,6 +28,7 @@ from .users import (
     owner_knowledge_db_path,
     owner_runtime_config_path,
     owner_user_map_path,
+    refresh_assignee_issue_snapshots,
     save_user_map_payload,
     save_user_map_payload_for_owner,
 )
@@ -67,6 +68,7 @@ __all__ = [
     "owner_knowledge_db_path",
     "owner_runtime_config_path",
     "owner_user_map_path",
+    "refresh_assignee_issue_snapshots",
     "save_user_map_payload",
     "save_user_map_payload_for_owner",
 ]

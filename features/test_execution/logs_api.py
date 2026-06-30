@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from features.devices import get_or_create_user_state, update_user_state_field
+from features.devices.support import get_or_create_user_state, update_user_state_field
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
@@ -155,4 +155,3 @@ async def list_test_logs():
     """List test logs."""
     result = test_logs_manager.list_log_files()
     return JSONResponse(content=result)
-

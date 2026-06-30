@@ -8,15 +8,15 @@ import shutil
 import smtplib
 import threading
 from email.message import EmailMessage
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from features.auth.service import require_authenticated_user
 from features.redmine.agent import RedmineAgent
 from features.redmine.config import config_manager
-from features.redmine.knowledge_repository import RedmineKnowledgeDB
 from features.redmine.dashboard import (
     add_department_profile,
     add_project_profile,
@@ -25,12 +25,15 @@ from features.redmine.dashboard import (
     issue_url_text,
     with_department_profiles_from_users,
 )
+from features.redmine.knowledge_repository import RedmineKnowledgeDB
 from features.redmine.page import page_router
 from features.redmine.repository import (
     DB_PATH,
     DOCS_DIR,
     USER_MAP_PATH,
     RedmineAgentDB,
+    display_names_from_mapping,
+    find_user_mapping_for_names,
     load_redmine_user_map_for_owner,
     load_user_map_payload_for_owner,
     owner_attachments_dir,
@@ -42,13 +45,11 @@ from features.redmine.repository import (
     save_user_map_payload_for_owner,
 )
 from features.redmine.repository import (
-    find_user_mapping_for_names,
-)
-from features.redmine.repository import (
     load_redmine_user_map as _legacy_load_redmine_user_map,
 )
 from features.redmine.scheduler import get_scheduler_config
 from features.redmine.service import RedmineService
+from features.redmine.utils import attachment_content_disposition, sanitize_attachment_filename
 from foundation.config import settings
 
 
@@ -69,12 +70,6 @@ _WORKLOAD_STATS_CACHE: dict[str, Any] = {}
 _PROJECT_STATS_CACHE: dict[str, Any] = {}
 _USER_REDMINE_SERVICES: dict[str, RedmineService] = {}
 _USER_REDMINE_SERVICE_LOCK = threading.Lock()
-_REDMINE_RUNTIME_SECTIONS = {
-    "redmine_auth",
-    "redmine_dashboard",
-    "redmine_stats",
-    "gerrit_dashboard",
-}
 
 
 def configure_redmine_service(service: RedmineService) -> None:
@@ -86,48 +81,59 @@ def configure_redmine_service(service: RedmineService) -> None:
         pass
 
 
-def _migrate_legacy_redmine_data_for_owner(owner_id: str) -> None:
-    target_db = owner_db_path(owner_id)
-    if not target_db.exists() and DB_PATH.exists():
-        target_db.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(DB_PATH, target_db)
-
-    target_docs = owner_docs_dir(owner_id)
-    if not target_docs.exists() and DOCS_DIR.exists():
-        shutil.copytree(DOCS_DIR, target_docs, dirs_exist_ok=True)
-
-    target_user_map = owner_user_map_path(owner_id)
-    if not target_user_map.exists() and USER_MAP_PATH.exists():
-        target_user_map.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(USER_MAP_PATH, target_user_map)
-
-    target_runtime = owner_runtime_config_path(owner_id)
-    if target_runtime.exists():
+def _copy_file_if_missing(source, destination) -> None:
+    source_path = Path(source)
+    destination_path = Path(destination)
+    if not source_path.is_file() or destination_path.exists():
         return
-    legacy_runtime = settings.project_root / "configs/config_runtime.json"
-    if not legacy_runtime.exists():
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_path, destination_path)
+
+
+def _copy_tree_contents_if_missing(source, destination) -> None:
+    source_path = Path(source)
+    destination_path = Path(destination)
+    if not source_path.is_dir():
+        return
+    destination_path.mkdir(parents=True, exist_ok=True)
+    for item in source_path.iterdir():
+        target = destination_path / item.name
+        if target.exists():
+            continue
+        if item.is_dir():
+            shutil.copytree(item, target, symlinks=True)
+        elif item.is_file():
+            shutil.copy2(item, target)
+
+
+def _migrate_legacy_redmine_runtime_config(owner_id: str) -> None:
+    source_path = Path(settings.project_root) / "configs/config_runtime.json"
+    target_path = owner_runtime_config_path(owner_id)
+    if not source_path.is_file() or target_path.exists():
         return
     try:
-        payload = json.loads(legacy_runtime.read_text(encoding="utf-8"))
+        payload = json.loads(source_path.read_text(encoding="utf-8"))
     except Exception:
         return
-    if not isinstance(payload, dict):
+    redmine_auth = payload.get("redmine_auth")
+    if not redmine_auth:
         return
-    migrated = {
-        key: payload[key]
-        for key in _REDMINE_RUNTIME_SECTIONS
-        if key in payload
-    }
-    if migrated:
-        target_runtime.parent.mkdir(parents=True, exist_ok=True)
-        target_runtime.write_text(
-            json.dumps(migrated, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(
+        json.dumps({"redmine_auth": redmine_auth}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _migrate_legacy_redmine_data(owner_id: str) -> None:
+    _copy_file_if_missing(DB_PATH, owner_db_path(owner_id))
+    _copy_tree_contents_if_missing(DOCS_DIR, owner_docs_dir(owner_id))
+    _copy_file_if_missing(USER_MAP_PATH, owner_user_map_path(owner_id))
+    _migrate_legacy_redmine_runtime_config(owner_id)
 
 
 def _build_user_redmine_service(owner_id: str) -> RedmineService:
-    _migrate_legacy_redmine_data_for_owner(owner_id)
+    _migrate_legacy_redmine_data(owner_id)
     user_config = config_manager.for_owner(owner_id)
     repository = RedmineAgentDB(
         db_path=owner_db_path(owner_id),
@@ -168,7 +174,7 @@ def _make_report_analyzer_factory():
         from features.reports.archive import ReportAnalyzer
     except Exception:
         return None
-    return lambda temp_dir=None: ReportAnalyzer(temp_dir or "/tmp/gms_report")
+    return lambda temp_dir=None: ReportAnalyzer(temp_dir)
 
 
 def get_redmine_service_for_owner(owner_id: str) -> RedmineService:
@@ -591,13 +597,14 @@ async def download_issue_attachment(issue_id: int, attachment_id: int, request: 
             att_meta = att
             break
     filename = str((att_meta or {}).get("filename") or f"attachment_{attachment_id}").strip()
+    safe_filename = sanitize_attachment_filename(filename, f"attachment_{attachment_id}")
     content_url = str((att_meta or {}).get("content_url") or "").strip()
 
     client = service.agent._make_client()
-    tmp_path = tempfile.NamedTemporaryFile(delete=False, suffix="_" + filename.replace("/", "_"))
-    tmp_path.close()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_filename}") as tmp_path:
+        tmp_name = tmp_path.name
     try:
-        await client.download_attachment(str(attachment_id), tmp_path.name, content_url)
+        await client.download_attachment(str(attachment_id), tmp_name, content_url)
     except Exception as exc:
         return JSONResponse(status_code=502, content={"success": False, "error": f"Redmine 下载失败: {exc}"})
     finally:
@@ -605,7 +612,7 @@ async def download_issue_attachment(issue_id: int, attachment_id: int, request: 
 
     def _stream_and_cleanup():
         try:
-            with open(tmp_path.name, "rb") as fh:
+            with open(tmp_name, "rb") as fh:
                 while True:
                     chunk = fh.read(1024 * 1024)
                     if not chunk:
@@ -615,15 +622,14 @@ async def download_issue_attachment(issue_id: int, attachment_id: int, request: 
             try:
                 import os as _os
 
-                _os.remove(tmp_path.name)
+                _os.remove(tmp_name)
             except Exception:
                 pass
 
-    safe_name = filename.replace('"', "").replace("\n", "_")
     return StreamingResponse(
         _stream_and_cleanup(),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+        headers={"Content-Disposition": attachment_content_disposition(filename)},
     )
 
 
@@ -644,13 +650,16 @@ async def list_issues(
     order: str = Query("desc"),
 ):
     service = get_redmine_service_for_request(request)
-    raw_issues = service.repository.list_all_issues(limit=limit, offset=offset, status=status, priority=priority, category=category, search=search, sort=sort, order=order)
+    # Restrict the personal issue list to the logged-in user's own issues, so
+    # department-members' stubs (written by the dashboard stats path) don't leak in.
+    owner_names = await _resolve_owner_names(request)
+    raw_issues = service.repository.list_all_issues(limit=limit, offset=offset, status=status, priority=priority, category=category, search=search, sort=sort, order=order, assignee_names=owner_names)
     # Batch-fetch knowledge case facts once (N+1 -> 1) for display enrichment.
     facts_by_id = service.knowledge.get_case_facts_for_issue_ids(
         [int(i.get("issue_id") or 0) for i in raw_issues]
     ) if raw_issues else {}
     issues = [_enrich_issue_for_display(service, issue, facts_by_id) for issue in raw_issues]
-    total = service.repository.count_issues(status=status, priority=priority, category=category, search=search)
+    total = service.repository.count_issues(status=status, priority=priority, category=category, search=search, assignee_names=owner_names)
     return {"success": True, "data": {"items": issues, "total": total, "limit": limit, "offset": offset}}
 
 
@@ -684,6 +693,30 @@ async def _resolve_owner_names(request: Request | None = None, service: RedmineS
         ])
     except Exception:
         pass
+
+    config: dict[str, Any] = {}
+    user_map: list[dict[str, Any]] = []
+    try:
+        if request is not None:
+            config = get_redmine_config_for_request(request).load_config()
+            user_map = load_redmine_user_map_for_owner(_owner_id_from_request(request))
+        else:
+            config = config_manager.load_config()
+            user_map = _legacy_load_redmine_user_map()
+    except Exception:
+        pass
+
+    configured_user = str(
+        ((config.get("redmine_auth") or {}).get("username"))
+        or ((config.get("redmine") or {}).get("username"))
+        or ""
+    ).strip()
+    if configured_user:
+        names.append(configured_user)
+
+    mapped = find_user_mapping_for_names(user_map, names) if user_map and names else None
+    if mapped:
+        names.extend(display_names_from_mapping(mapped))
 
     return list(dict.fromkeys(name for name in names if name))
 
@@ -863,7 +896,7 @@ async def send_department_reminder_email(request: Request):
 @router.post("/sync")
 async def trigger_sync(
     request: Request,
-    max_analyze: int = Query(20, ge=1, le=200),
+    max_analyze: int = Query(20, ge=0, le=200),
     assignee_id: int | None = Query(None, ge=1),
     assignee_name: str = Query(""),
 ):
@@ -1033,6 +1066,7 @@ from . import statistics_api as _statistics_api  # noqa: E402
 router.include_router(_statistics_api.router)
 
 from . import knowledge_api as _knowledge_api  # noqa: E402
+
 
 router.include_router(_knowledge_api.router)
 get_workload_statistics = _statistics_api.get_workload_statistics
