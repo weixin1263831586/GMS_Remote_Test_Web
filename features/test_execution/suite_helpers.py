@@ -196,10 +196,15 @@ def _score_suite_artifact_candidate(candidate: dict[str, Any], search_terms: lis
             reasons.append(term)
 
     if module_norm:
+        exact_module_apk = f"{module_name.lower()}.apk"
+        exact_module_jar = f"{module_name.lower()}.jar"
+        if candidate_name in {exact_module_apk, exact_module_jar}:
+            score += 160
+            reasons.append("exact-module-binary")
         if module_norm in _normalize_suite_match_text(candidate_name) or module_norm in haystack:
             score += 35
             reasons.append(f"module:{module_name}")
-        if candidate_path.endswith(f"/{module_name.lower()}.apk") or candidate_path.endswith(f"/{module_name.lower()}.jar"):
+        if candidate_path.endswith(f"/{exact_module_apk}") or candidate_path.endswith(f"/{exact_module_jar}"):
             score += 60
             reasons.append("module-binary")
         elif f"/{module_name.lower()}/" in candidate_path:
@@ -392,4 +397,3 @@ def _resolve_suite_diagnosis_target(config: dict[str, Any], *, test_type: str = 
         target["match_notes"].append("No APK/JAR artifact candidates found")
 
     return target
-

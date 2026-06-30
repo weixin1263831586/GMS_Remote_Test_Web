@@ -234,6 +234,7 @@ def save_test_report_to_db(
             'test_module': test_params.get('test_module', ''),
             'test_case': test_params.get('test_case', ''),
             'client_id': client_id,
+            'display_client_id': test_params.get('display_client_id') or client_id,
             'devices': test_params.get('devices', []),
             'result_dir': result_dir,
             'suite_path': test_params.get('test_suite', ''),

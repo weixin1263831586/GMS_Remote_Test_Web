@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +50,15 @@ def _now() -> str:
 
 
 RESOLVED_STATUS_NAMES = {"已关闭", "Closed", "已解决", "Resolved", "关闭", "解决"}
+NON_ACTIONABLE_STATUS_NAMES = {
+    "HangUp",
+    "Hang Up",
+    "挂起",
+    "已挂起",
+    "暂停",
+    "待关闭",
+    "Pending Close",
+}
 REPORT_ATTACHMENT_RE = (
     "report",
     "test_result",
@@ -307,20 +316,12 @@ def _looks_like_report_attachment(attachment: dict[str, Any]) -> bool:
 
 def _looks_like_rk_actor(actor: Any) -> bool:
     if isinstance(actor, dict):
-        email = str(actor.get("user_email") or actor.get("email") or actor.get("mail") or "").strip().lower()
-        if email.endswith("@rock-chips.com"):
-            return True
         name = actor.get("user") or actor.get("name") or ""
     else:
         name = actor
     text = str(name or "").strip()
-    lowered = text.lower()
     if not text:
         return False
-    if "rock-chips.com" in lowered or "rockchip" in lowered or lowered.startswith("rk "):
-        return True
-    if "fae" in lowered or "瑞芯" in text:
-        return True
     actor_keys = _name_keys(text)
     for item in load_redmine_user_map():
         for value in display_names_from_mapping(item):
@@ -330,6 +331,56 @@ def _looks_like_rk_actor(actor: Any) -> bool:
     return False
 
 
+def _merge_issue_snapshot(db: Any, issue: dict[str, Any], *, resolved: bool = False) -> None:
+    if not isinstance(issue, dict) or not issue.get("issue_id"):
+        return
+    payload = dict(db.get_issue(int(issue["issue_id"])) or {})
+    payload.update({key: value for key, value in issue.items() if value is not None})
+    if resolved:
+        payload["is_resolved"] = 1
+    db.upsert_issue(payload)
+
+
+async def refresh_assignee_issue_snapshots(
+    client: Any,
+    db: Any,
+    user_id: int,
+    *,
+    issue_limit: int = 500,
+    window_days: int = 0,
+) -> bool:
+    """Refresh open and recently closed snapshots for workload statistics."""
+    changed = False
+    try:
+        live_issues = await client.fetch_open_issue_snapshots_by_assignee(
+            int(user_id),
+            limit=issue_limit,
+            window_days=window_days,
+        )
+    except Exception:
+        live_issues = []
+    for issue in live_issues or []:
+        _merge_issue_snapshot(db, issue, resolved=False)
+        changed = True
+
+    start = ""
+    if int(window_days or 0) > 0:
+        start = (datetime.now() - timedelta(days=int(window_days))).date().isoformat()
+    try:
+        resolved_issues = await client.fetch_resolved_issues_by_assignee(
+            int(user_id),
+            start=start,
+            end="",
+            limit=issue_limit,
+        )
+    except Exception:
+        resolved_issues = []
+    for issue in resolved_issues or []:
+        _merge_issue_snapshot(db, issue, resolved=True)
+        changed = True
+    return changed
+
+
 async def compute_user_overdue_stats(
     client: Any,
     db: Any,
@@ -337,6 +388,7 @@ async def compute_user_overdue_stats(
     stale_days: int = 3,
     issue_limit: int = 500,
     window_days: int = 0,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
     """Compute workload + overdue stats for a single mapped user.
 
@@ -356,19 +408,15 @@ async def compute_user_overdue_stats(
         display_names=owner_names,
         window_days=window_days,
     )
-    if counts.get("open_count") and int(workload.get("open_count") or 0) == 0:
-        try:
-            live_issues = await client.fetch_open_issue_snapshots_by_assignee(
-                user_id,
-                limit=issue_limit,
-                window_days=window_days,
-            )
-        except Exception:
-            live_issues = []
-        for issue in live_issues or []:
-            if isinstance(issue, dict) and issue.get("issue_id"):
-                db.upsert_issue(issue)
-        if live_issues:
+    if force_refresh or (counts.get("open_count") and int(workload.get("open_count") or 0) == 0):
+        changed = await refresh_assignee_issue_snapshots(
+            client,
+            db,
+            user_id,
+            issue_limit=issue_limit,
+            window_days=window_days,
+        )
+        if changed:
             workload = db.get_workload_statistics(
                 owner_names=owner_names,
                 stale_days=stale_days,

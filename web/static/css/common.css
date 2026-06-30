@@ -2098,6 +2098,22 @@ select option {
     margin-bottom: 8px !important;
 }
 
+.report-empty-success {
+    display: grid;
+    gap: 6px;
+    padding: 18px;
+    border: 1px solid rgba(16, 185, 129, 0.32);
+    border-radius: 7px;
+    background: rgba(16, 185, 129, 0.08);
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.report-empty-success b {
+    color: var(--success-color);
+    font-size: 13px;
+}
+
 .report-upload-zone {
     background: var(--light-bg);
     border: 2px dashed var(--border-color);
@@ -2274,6 +2290,91 @@ select option {
     padding: 6px;
     border-radius: 4px;
     margin-top: 8px;
+}
+
+.report-failure-card {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+    border-left: 3px solid var(--danger-color);
+    border-radius: 6px;
+    background: var(--darker-bg);
+}
+
+.report-failure-card-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: start;
+}
+
+.report-failure-title {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.report-failure-title span {
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+.report-failure-title code {
+    color: var(--primary-color);
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.report-failure-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.report-failure-action {
+    min-height: 26px;
+    padding: 4px 9px;
+    border: 0;
+    border-radius: 5px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.report-failure-action.reply {
+    background: #db2777;
+}
+
+.report-failure-action.test {
+    background: #059669;
+}
+
+.report-failure-action.diagnose {
+    background: #2563eb;
+}
+
+.report-failure-reason-label {
+    margin-bottom: 5px;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+@media (max-width: 760px) {
+    .report-failure-card-head {
+        grid-template-columns: 1fr;
+    }
+
+    .report-failure-actions {
+        justify-content: flex-start;
+    }
 }
 
 /* ==================== 日志进度条 ==================== */
@@ -3267,9 +3368,11 @@ select option {
 
 /* ==================== Report Diagnosis Workbench ==================== */
 .report-diagnosis-shell {
-    width: min(96vw, 1480px);
-    max-width: 1480px;
-    height: min(90vh, 920px);
+    width: 96vw;
+    max-width: 1500px;
+    height: 92vh;
+    max-height: 92vh;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -3367,6 +3470,10 @@ select option {
     min-width: 0;
 }
 
+.dx-meta-grid-compact {
+    grid-template-columns: minmax(120px, 0.55fr) minmax(0, 1fr);
+}
+
 .dx-metric {
     padding: 10px 12px;
     border: 1px solid var(--border-color);
@@ -3388,6 +3495,41 @@ select option {
     font-weight: 600;
     line-height: 1.45;
     word-break: break-word;
+}
+
+.dx-locator-list {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.dx-locator-row {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+    min-width: 0;
+    padding: 9px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: rgba(15, 23, 42, 0.42);
+}
+
+.dx-locator-label {
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.6;
+    white-space: nowrap;
+}
+
+.dx-locator-value {
+    min-width: 0;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.6;
+    overflow-x: auto;
+    white-space: nowrap;
 }
 
 .dx-tabs {
@@ -3441,32 +3583,94 @@ select option {
     min-width: 0;
 }
 
-.dx-workflow-step {
-    position: relative;
+.dx-workbench-vertical {
     display: grid;
-    grid-template-columns: 170px minmax(0, 1fr);
     gap: 14px;
     min-width: 0;
 }
 
+.dx-action-section {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 8px;
+}
+
+.dx-action-section .dx-section-title {
+    grid-column: 1 / -1;
+    margin-bottom: 0;
+}
+
+.dx-action-card {
+    width: 100%;
+    min-width: 0;
+    padding: 11px;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: var(--darker-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+    transition: var(--transition-fast);
+}
+
+.dx-action-card:hover {
+    border-color: rgba(59, 130, 246, 0.7);
+    background: var(--light-bg);
+}
+
+.dx-action-card b {
+    display: block;
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dx-action-card span {
+    display: block;
+    margin-top: 3px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.45;
+    word-break: break-word;
+    font-style: normal;
+}
+
+.dx-action-card.primary {
+    border-color: rgba(16, 185, 129, 0.65);
+    background: rgba(16, 185, 129, 0.12);
+}
+
+.dx-compact-line {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.dx-workflow-step {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    min-width: 0;
+}
+
 .dx-workflow-step:not(:last-child)::before {
-    content: '';
-    position: absolute;
-    left: 15px;
-    top: 38px;
-    bottom: -20px;
-    width: 1px;
-    background: var(--border-light);
+    display: none;
 }
 
 .dx-step-label {
-    position: sticky;
-    top: 48px;
-    align-self: start;
-    display: grid;
+    position: relative;
+    top: auto;
+    display: flex;
+    align-items: center;
     grid-template-columns: 32px minmax(0, 1fr);
     gap: 10px;
-    z-index: 1;
+    min-width: 0;
 }
 
 .dx-step-label > span {
@@ -3502,14 +3706,14 @@ select option {
 .dx-two-col,
 .dx-source-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+    grid-template-columns: 1fr;
     gap: 12px;
     min-width: 0;
 }
 
 .dx-solution-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
+    grid-template-columns: 1fr;
     gap: 12px;
     min-width: 0;
 }
@@ -3524,7 +3728,7 @@ select option {
 
 .dx-source-layout .dx-section:first-child,
 .dx-solution-layout .dx-section:first-child {
-    grid-row: span 2;
+    grid-row: auto;
 }
 
 .dx-section-title {
@@ -3594,6 +3798,26 @@ select option {
     min-width: 0;
 }
 
+.dx-details {
+    margin-top: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--light-bg);
+    overflow: hidden;
+}
+
+.dx-details summary {
+    cursor: pointer;
+    padding: 8px 10px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.dx-details .dx-list {
+    padding: 0 10px 10px;
+}
+
 .dx-list-item,
 .dx-candidate,
 .dx-suggestion,
@@ -3603,6 +3827,16 @@ select option {
     border: 1px solid var(--border-color);
     border-radius: 6px;
     background: var(--light-bg);
+}
+
+.dx-list-item.dx-clickable {
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.dx-list-item.dx-clickable:hover {
+    border-color: var(--primary-color);
+    background: var(--lighter-bg);
 }
 
 .dx-list-title {
@@ -3620,6 +3854,17 @@ select option {
     font-size: 11px;
     line-height: 1.55;
     word-break: break-word;
+}
+
+.dx-list-path-inline {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dx-list-path-inline span {
+    color: var(--primary-light);
+    font-weight: 700;
 }
 
 .dx-link {
@@ -3727,19 +3972,6 @@ select option {
 }
 
 @media (max-width: 1100px) {
-    .dx-workflow-step {
-        grid-template-columns: 1fr;
-    }
-
-    .dx-workflow-step:not(:last-child)::before {
-        display: none;
-    }
-
-    .dx-step-label {
-        position: relative;
-        top: auto;
-    }
-
     .dx-two-col,
     .dx-source-layout,
     .dx-solution-layout,
@@ -3750,8 +3982,12 @@ select option {
 
 @media (max-width: 700px) {
     .report-diagnosis-shell {
-        width: 98vw;
-        height: 94vh;
+        width: 96vw;
+        height: 92vh;
+    }
+
+    .dx-meta-grid-compact {
+        grid-template-columns: 1fr;
     }
 
     .dx-tabs {

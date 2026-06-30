@@ -10,7 +10,7 @@ import subprocess
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.devices import DeviceSSHConnection
+from features.devices.support import DeviceSSHConnection
 from features.system.models import VPNConnectRequest
 from features.system.network import (
     _extract_network,
@@ -26,7 +26,12 @@ from features.system.network import (
     resolve_vpn_connection_name,
 )
 from features.system.ssh import SSHD_INSTALL_GUIDE, ssh_manager
-from features.users import get_client_display_id_from_request, get_client_id_from_request, get_client_ip, resolve_tailscale_device_host
+from features.users import (
+    get_client_display_id_from_request,
+    get_client_id_from_request,
+    get_client_ip,
+    resolve_tailscale_device_host,
+)
 from foundation.common_utils import CommonUtils
 from foundation.config import config_manager
 from foundation.errors import handle_api_errors

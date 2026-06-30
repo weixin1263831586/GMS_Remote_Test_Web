@@ -254,8 +254,8 @@ async def execute_on_devices_parallel(devices: list[str], operation_func, ssh, *
 
 # ==================== 设备属性获取 ====================
 
-async def get_device_properties_optimized(device_id: str, ssh) -> dict[str, str]:
-    """获取设备属性 - 一次SSH调用获取所有属性"""
+def get_device_properties_optimized(device_id: str, ssh) -> dict[str, str]:
+    """获取设备属性 - 一次SSH调用获取所有属性(同步,阻塞;调用方应在 to_thread 里跑)。"""
     cmd = f"""adb -s {device_id} shell "
     getprop ro.boot.verifiedbootstate;
     getprop | grep api_level;
@@ -349,9 +349,15 @@ class DeviceSSHConnection:
         # 从连接池获取或创建连接
         self.ssh = runtime.global_state.device_ssh_pool_get(self._pool_key, self.config)
         if not self.ssh:
+            # 避免把内部生成的随机 ID 直接暴露成“主机名”
+            if not self._pool_key or "@" not in self._pool_key:
+                raise HTTPException(
+                    status_code=500,
+                    detail="无效的设备主机配置，请确认已设置 Windows 设备主机 (user@ip)",
+                )
             raise HTTPException(
                 status_code=500,
-                detail=f"无法连接到设备主机: {self._pool_key}"
+                detail=f"无法连接到设备主机: {self._pool_key}，请检查网络、SSH 凭据及目标主机是否可达",
             )
         return self.ssh
 

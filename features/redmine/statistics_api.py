@@ -33,6 +33,7 @@ from .repository import (
     find_user_mapping_for_names,
     load_redmine_user_map_for_owner,
     owner_user_map_path,
+    refresh_assignee_issue_snapshots,
 )
 from features.auth.service import require_authenticated_user
 
@@ -102,13 +103,14 @@ async def get_workload_statistics(
     stale_days: int = Query(20, ge=1, le=30),
     list_limit: int = Query(30, ge=1, le=100),
     name: str = Query(""),
+    refresh: bool = Query(False),
 ):
     service = _service_for_request(request)
     # Check cache
     stats_cfg = _get_redmine_stats_config(request)
     cache_key = f"{_request_user_id(request)}:{stale_days}:{list_limit}:{name}"
     now_ts = datetime.now().timestamp()
-    cached = _check_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, stats_cfg["cache_ttl"], now_ts)
+    cached = _check_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, stats_cfg["cache_ttl"], now_ts, refresh=refresh)
     if cached is not None:
         return {"success": True, "data": {**cached, "cache_hit": True}}
 
@@ -126,6 +128,21 @@ async def get_workload_statistics(
         owner_names = display_names_from_mapping(mapped)
         display_names = owner_names
         live_counts = await _live_counts_for_user(service, int(mapped["id"]))
+        if refresh:
+            try:
+                client = service.agent._make_client()
+                try:
+                    await refresh_assignee_issue_snapshots(
+                        client,
+                        service.repository,
+                        int(mapped["id"]),
+                        issue_limit=max(list_limit, 100),
+                        window_days=stats_cfg["window_days"],
+                    )
+                finally:
+                    await client.close()
+            except Exception:
+                pass
     else:
         owner_names = [n for n in candidate_names if n]
         display_names = owner_names
@@ -154,9 +171,25 @@ async def get_workload_statistics(
     return {"success": True, "data": data}
 
 
-async def _department_user_overdue(client, repository, user: dict[str, Any], stale_days: int, issue_limit: int, window_days: int = 0) -> dict[str, Any]:
+async def _department_user_overdue(
+    client,
+    repository,
+    user: dict[str, Any],
+    stale_days: int,
+    issue_limit: int,
+    window_days: int = 0,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
     try:
-        return await compute_user_overdue_stats(client, repository, user, stale_days, issue_limit, window_days)
+        return await compute_user_overdue_stats(
+            client,
+            repository,
+            user,
+            stale_days,
+            issue_limit,
+            window_days,
+            force_refresh=force_refresh,
+        )
     except Exception as exc:
         return _empty_user_stats(user, error=str(exc))
 
@@ -274,7 +307,15 @@ async def get_department_overdue_statistics(
 
     async def _safe_user(user: dict[str, Any]) -> dict[str, Any]:
         async with semaphore:
-            return await _department_user_overdue(client, service.repository, user, effective_stale_days, effective_issue_limit, window_days)
+            return await _department_user_overdue(
+                client,
+                service.repository,
+                user,
+                effective_stale_days,
+                effective_issue_limit,
+                window_days,
+                force_refresh=refresh,
+            )
 
     try:
         if users:

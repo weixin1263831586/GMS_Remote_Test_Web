@@ -12,10 +12,10 @@ from features.automation.service import AutomationService
 from features.devices import api as devices
 from features.devices import config_explorer_api as device_config_explorer
 from features.devices import config_override_api as device_config_override
-from features.devices import get_or_create_user_state
 from features.devices import integrations_api as device_integrations
 from features.devices.dependencies import configure_device_dependencies
 from features.devices.network import run_local_shell_command
+from features.devices.support import get_or_create_user_state
 from features.firmware import api as firmware
 from features.firmware.apk import (
     _cleanup_files,

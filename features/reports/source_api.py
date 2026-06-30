@@ -94,8 +94,8 @@ async def analyze_report_from_url(request: Request):
                 bool(configured_domain and configured_domain in url.lower())
                 or bool(configured_base_host and configured_base_host == current_host)
             )
-        except ValueError:
-            pass
+        except ValueError as exc:
+            logger.debug("Redmine config unavailable while classifying report URL: %s", exc)
 
         redmine_like_url = _looks_like_redmine_url(url)
         if redmine_like_url and not configured_redmine_match:

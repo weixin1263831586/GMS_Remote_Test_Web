@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import posixpath
+import tempfile
 from contextlib import suppress
+from pathlib import Path
 
 from fastapi import UploadFile
 
@@ -44,6 +47,23 @@ def safe_upload_target_path(
     if os.path.commonpath([base_abs, target_abs]) != base_abs:
         raise ValueError('非法文件路径')
     return target_abs
+
+
+def upload_temp_root(namespace: str = "gms_uploads") -> str:
+    """Return the local temp root used for transient upload state."""
+    safe_namespace = os.path.basename(str(namespace or "gms_uploads").strip()) or "gms_uploads"
+    return str(Path(tempfile.gettempdir()) / safe_namespace)
+
+
+def remote_home_file_path(username: str, filename: str) -> str:
+    """Build a remote SFTP path under an SSH user's home directory."""
+    safe_username = str(username or "").strip()
+    if not safe_username or "/" in safe_username or safe_username in {".", ".."}:
+        raise ValueError("Invalid remote username")
+    safe_filename = os.path.basename(str(filename or "").replace("\\", "/"))
+    if not safe_filename or safe_filename in {".", ".."}:
+        raise ValueError("Invalid remote filename")
+    return posixpath.join("/home", safe_username, safe_filename)
 
 
 def copy_fileobj_to_path(

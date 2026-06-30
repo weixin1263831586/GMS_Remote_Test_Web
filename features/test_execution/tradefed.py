@@ -4,6 +4,7 @@ import contextlib
 import logging
 import os
 import re
+import shlex
 import time
 from typing import Any
 
@@ -21,10 +22,22 @@ logger = logging.getLogger(__name__)
 
 def find_tradefed_binary(ssh, suite_path: str) -> str | None:
     """在指定目录中查找 tradefed 二进制文件"""
-    find_cmd = f"find '{suite_path}' -maxdepth 1 -type f -executable -name '*-tradefed' 2>/dev/null | head -1"
+    find_cmd = f"find {shlex.quote(suite_path)} -maxdepth 1 -type f -executable -name '*-tradefed' 2>/dev/null | head -1"
     output, _, _ = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=10)
     result = output.strip()
     return result if result else None
+
+
+def sanitize_tradefed_console_command(command: str) -> str:
+    """Reject command text that could escape the tradefed console interaction."""
+    command = str(command or '').strip()
+    if not command:
+        return 'list results'
+    if any(char in command for char in '\r\n\x00'):
+        raise ValueError('tradefed command must be a single line')
+    if len(command) > 200:
+        raise ValueError('tradefed command is too long')
+    return command
 
 
 def parse_tradefed_list_results(output: str) -> list[dict[str, Any]]:
@@ -152,16 +165,19 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
         with contextlib.suppress(Exception):
             shell.recv(1024)
 
-        shell.send(f"export PATH={platform_tools_path}:$PATH\n")
+        # shlex.quote every caller-supplied token before it reaches the login
+        # shell — suite_path / tradefed_bin come from the client (WebSocket /
+        # API) and were previously interpolated raw, allowing command injection.
+        shell.send(f"export PATH={shlex.quote(platform_tools_path)}:$PATH\n")
         wait_for_prompt(shell, [r'\$ ', r'\# ', '> '], timeout=2, poll_interval=0.05)
 
-        shell.send(f"cd {suite_path}\n")
+        shell.send(f"cd {shlex.quote(suite_path)}\n")
         wait_for_prompt(shell, [r'\$ ', r'\# ', '> '], timeout=2, poll_interval=0.05)
 
-        shell.send(f"TERM=dumb {tradefed_bin}\n")
+        shell.send(f"TERM=dumb {shlex.quote(tradefed_bin)}\n")
         tradefed_output = wait_for_prompt(shell, ['> ', 'tf> ', r'\(tf\)'], timeout=6, poll_interval=0.1)
 
-        shell.send(f"{command}\n")
+        shell.send(f"{sanitize_tradefed_console_command(command)}\n")
         command_output = wait_for_prompt(shell, ['> ', 'tf> ', r'\(tf\)', 'All done'],
                                          timeout=20, poll_interval=0.1)
 

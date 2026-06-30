@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+
+from features.system.vnc import novnc_url
+from foundation.processes import command_reports_running
+from foundation.security import sanitize_device_ids
 
 from . import runtime
 from .models import DeviceActionRequest
@@ -16,11 +21,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+_command_reports_running = command_reports_running
+
+
 @router.post("/api/devices/scrcpy")
 async def show_device_screens(req: DeviceActionRequest):
     """Display device screen (launch scrcpy mirroring)."""
     try:
-        devices = req.devices
+        devices = sanitize_device_ids(req.devices or [])
 
         config = runtime.config_manager.load_config()
         ubuntu_user = runtime.config_manager.get_ubuntu_user(config)
@@ -40,8 +48,8 @@ async def show_device_screens(req: DeviceActionRequest):
                                 for line in lines
                                 if line.strip() and "\tdevice" in line
                             ]
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning("Failed to auto-detect adb devices for scrcpy: %s", exc)
 
         if not devices:
             return JSONResponse(
@@ -55,7 +63,8 @@ async def show_device_screens(req: DeviceActionRequest):
 
             try:
                 vnc_check_cmd = (
-                    f"curl -s -o /dev/null -w '%{{http_code}}' http://{ubuntu_host}:6080 --connect-timeout 3"
+                    f"curl -s -o /dev/null -w '%{{http_code}}' "
+                    f"{novnc_url(ubuntu_host, autoconnect=False)} --connect-timeout 3"
                 )
                 vnc_output, _, _ = runtime.ssh_manager.execute_command(ssh, vnc_check_cmd, timeout=5)
                 vnc_available = vnc_output.strip() == "200"
@@ -63,9 +72,7 @@ async def show_device_screens(req: DeviceActionRequest):
                 scrcpy_path = config.get("scrcpy_path", "")
                 if scrcpy_path:
                     scrcpy_path = scrcpy_path.replace("${ubuntu_user}", ubuntu_user)
-                    scrcpy_check_cmd = (
-                        f"test -f '{scrcpy_path}' && echo 'exists' || echo 'not_found'"
-                    )
+                    scrcpy_check_cmd = f"test -f {shlex.quote(scrcpy_path)} && echo 'exists' || echo 'not_found'"
                     scrcpy_output, _, scrcpy_code = runtime.ssh_manager.execute_command(
                         ssh, scrcpy_check_cmd
                     )
@@ -111,9 +118,7 @@ async def show_device_screens(req: DeviceActionRequest):
                             f"Detected already mirrored device: {device_id} (PID: {pid_or_error})"
                         )
                     else:
-                        DeviceUtils.kill_process(
-                            ssh, f"scrcpy.*-s {device_id}"
-                        )
+                        DeviceUtils.kill_process(ssh, DeviceUtils.scrcpy_process_pattern(device_id))
 
                 new_devices = [d for d in devices if d not in existing_devices]
 
@@ -151,34 +156,27 @@ async def show_device_screens(req: DeviceActionRequest):
                     y_offset = positions["start_y"]
                     window_width = positions["window_width"]
                     window_height = positions["window_height"]
-                    cmd = (
-                        f"export DISPLAY=:0 && "
-                        f"if [ -f /run/user/1000/gdm/Xauthority ]; then "
-                        f"export XAUTHORITY=/run/user/1000/gdm/Xauthority; "
-                        f"else "
-                        f"export XAUTHORITY=/home/{ubuntu_user}/.Xauthority; "
-                        f"fi && "
-                        f"(nohup {scrcpy_path} -s {device_id} "
-                        f"--max-size 800 "
-                        f"--stay-awake "
-                        f"--window-title '{device_id}' "
-                        f"--window-x {x_offset} "
-                        f"--window-y {y_offset} "
-                        f"--window-width {window_width} "
-                        f"--window-height {window_height} "
-                        f"> /tmp/scrcpy_{device_id}.log 2>&1 &)"
+                    cmd = DeviceUtils.build_scrcpy_command(
+                        scrcpy_path=scrcpy_path,
+                        device_id=device_id,
+                        ubuntu_user=ubuntu_user,
+                        x_offset=x_offset,
+                        y_offset=y_offset,
+                        window_width=window_width,
+                        window_height=window_height,
+                        use_gdm_xauthority_fallback=True,
+                        background=True,
                     )
 
                     runtime.ssh_manager.execute_command(ssh, cmd, timeout=10)
 
                     await asyncio.sleep(0.3)
-                    check_cmd = (
-                        f"pgrep -f 'scrcpy.*-s {device_id}' && echo 'RUNNING' || echo 'NOT_RUNNING'"
-                    )
+                    pattern = DeviceUtils.scrcpy_process_pattern(device_id)
+                    check_cmd = f"pgrep -f -- {shlex.quote(pattern)} && echo 'RUNNING' || echo 'NOT_RUNNING'"
                     check_output, _, _ = runtime.ssh_manager.execute_command(
                         ssh, check_cmd, timeout=5
                     )
-                    is_started = "RUNNING" in check_output
+                    is_started = _command_reports_running(check_output)
 
                     results.append(
                         {
@@ -196,11 +194,7 @@ async def show_device_screens(req: DeviceActionRequest):
                     vnc_sessions.append(
                         {
                             "device": device_id,
-                            "url": (
-                                f"http://{ubuntu_host}:6080/vnc.html?autoconnect=true"
-                                if vnc_available
-                                else None
-                            ),
+                            "url": novnc_url(ubuntu_host) if vnc_available else None,
                             "message": "VNC view available" if vnc_available else "Local display only",
                         }
                     )

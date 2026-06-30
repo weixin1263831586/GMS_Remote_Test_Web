@@ -1511,11 +1511,11 @@
                 <form id="wifi-form" onsubmit="event.preventDefault(); submitWifiConfig();" autocomplete="off">
                 <div class="modal-form-row">
                     <label>Wi-Fi 名称:</label>
-                    <input type="text" id="wifi-ssid" value="AndroidWifi" autocomplete="off" />
+                    <input type="text" id="wifi-ssid" placeholder="留空使用 config.wifi.ssid" autocomplete="off" />
                 </div>
                 <div class="modal-form-row">
                     <label>Wi-Fi 密码:</label>
-                    <input type="password" id="wifi-password" value="1234567890" autocomplete="current-password" />
+                    <input type="password" id="wifi-password" placeholder="留空使用 config.wifi.password" autocomplete="current-password" />
                 </div>
                 </form>
                 <div class="modal-buttons">
@@ -2186,6 +2186,7 @@
         let pendingHostConnection = null;
         const DEFAULT_VNC_HOST = {{ config.ubuntu_host | tojson }};
         const DEFAULT_VNC_PASSWORD = {{ config.vnc_password | default("", true) | tojson }};
+        const NOVNC_WEB_PORT = 6080;
 
         function buildVncUrl(host, password = '') {
             const params = new URLSearchParams({ autoconnect: 'true' });
@@ -2200,7 +2201,7 @@
                 params.set('path', 'websockify');
                 return `/novnc/vnc.html?${params.toString()}`;
             }
-            return `http://${host}:6080/vnc.html?${params.toString()}`;
+            return `http://${host}:${NOVNC_WEB_PORT}/vnc.html?${params.toString()}`;
         }
 
         function normalizeVncUrl(url, password = '') {

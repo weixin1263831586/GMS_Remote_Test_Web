@@ -221,7 +221,8 @@ class ReportAnalysisAgent:
         for path in host_logs:
             try:
                 content = Path(path).read_text(encoding="utf-8", errors="ignore")
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to read host log %s: %s", path, exc)
                 continue
             report = self.host_log_parser.parse_content(content, os.path.dirname(path))
             if report:
@@ -257,7 +258,8 @@ class ReportAnalysisAgent:
         for path in self._failure_html_files(files):
             try:
                 content = Path(path).read_text(encoding="utf-8", errors="ignore")
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to read failures html %s: %s", path, exc)
                 continue
             failures.extend(self._parse_failures_html(content))
         return {"failures": failures[:100]}
@@ -280,7 +282,8 @@ class ReportAnalysisAgent:
         for path in log_files:
             try:
                 content = Path(path).read_text(encoding="utf-8", errors="ignore")
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to read %s log %s: %s", log_type, path, exc)
                 continue
             errors.extend(self._extract_log_errors(content, log_type))
         unique = []
@@ -322,7 +325,8 @@ class ReportAnalysisAgent:
             try:
                 with open(path, "rb") as f:
                     chunks.append(f.read(256 * 1024).decode("utf-8", errors="ignore"))
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to sample report text from %s: %s", path, exc)
                 continue
         return "\n".join(chunks)
 

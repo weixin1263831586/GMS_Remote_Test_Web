@@ -18,6 +18,14 @@ from .utils import DeviceUtils
 logger = logging.getLogger(__name__)
 
 
+ADB_FORWARD_PORT = 5037
+
+
+def _adb_tunnel_kill_command(port: int = ADB_FORWARD_PORT) -> str:
+    """Kill only SSH tunnels owned by this feature, not every adb process."""
+    return f"pkill -f 'ssh .* -L {port}:localhost:{port}|ssh.*-L {port}:localhost:{port}'"
+
+
 class ADBForwardManager:
     """
     ADB转发管理器
@@ -63,8 +71,7 @@ class ADBForwardManager:
                 return {'success': False, 'error': 'SSH连接失败'}
 
             try:
-                # 清理旧的SSH隧道
-                self.ssh_manager.execute_command(ssh, "pkill -f adb; pkill -f 'ssh.*-L 5037'")
+                self.ssh_manager.execute_command(ssh, _adb_tunnel_kill_command())
                 time.sleep(1)
 
                 # 检测设备主机类型
@@ -81,20 +88,27 @@ class ADBForwardManager:
                     }
                 else:
                     # Linux设备主机
-                    start_adb_cmd = f"ssh {device_host} 'adb kill-server; adb -a nodaemon server start &'"
+                    safe_device_host = shlex.quote(device_host)
+                    start_adb_cmd = f"ssh {safe_device_host} 'adb kill-server; adb -a nodaemon server start &'"
                     self.ssh_manager.execute_command(ssh, start_adb_cmd)
                     time.sleep(2)
 
                     # 设置SSH隧道
-                    forward_target = "localhost:5037"
+                    forward_target = f"localhost:{ADB_FORWARD_PORT}"
 
                     if device_password:
                         # 使用sshpass（需要安装）
                         safe_password = shlex.quote(device_password)
-                        forward_cmd = f"SSHPASS={safe_password} sshpass -e ssh -f -N -L 5037:{forward_target} {device_host}"
+                        forward_cmd = (
+                            f"SSHPASS={safe_password} sshpass -e ssh -f -N "
+                            f"-o ExitOnForwardFailure=yes -L {ADB_FORWARD_PORT}:{forward_target} {safe_device_host}"
+                        )
                     else:
                         # 使用密钥认证
-                        forward_cmd = f"ssh -f -N -L 5037:{forward_target} {device_host}"
+                        forward_cmd = (
+                            f"ssh -f -N -o ExitOnForwardFailure=yes "
+                            f"-L {ADB_FORWARD_PORT}:{forward_target} {safe_device_host}"
+                        )
 
                     self.ssh_manager.execute_command(ssh, forward_cmd, timeout=10)
                     time.sleep(3)
@@ -117,13 +131,13 @@ class ADBForwardManager:
                         'message': f'✅ ADB端口转发成功! 设备: {", ".join(devices) if devices else "无"}'
                     }
 
-                self.ssh_manager.return_connection(ssh)
                 return result
 
             except Exception as e:
-                self.ssh_manager.return_connection(ssh)
                 logger.error(f"Error starting ADB forward: {e}")
                 return {'success': False, 'error': str(e)}
+            finally:
+                self.ssh_manager.return_connection(ssh)
 
         except Exception as e:
             logger.error(f"Error in start_forward: {e}")
@@ -146,23 +160,20 @@ class ADBForwardManager:
                 return {'success': False, 'error': 'SSH连接失败'}
 
             try:
-                # 停止SSH隧道和ADB进程
-                self.ssh_manager.execute_command(ssh, "pkill -f 'ssh.*5037'")
-                self.ssh_manager.execute_command(ssh, "pkill -f 'adb.*forward'")
+                self.ssh_manager.execute_command(ssh, _adb_tunnel_kill_command())
                 self.ssh_manager.execute_command(ssh, "adb disconnect")
 
                 # 清除活动隧道记录
                 if client_id and client_id in self.active_tunnels:
                     del self.active_tunnels[client_id]
 
-                self.ssh_manager.return_connection(ssh)
-
                 return {'success': True, 'message': '✅ ADB端口转发已停止'}
 
             except Exception as e:
-                self.ssh_manager.return_connection(ssh)
                 logger.error(f"Error stopping ADB forward: {e}")
                 return {'success': False, 'error': str(e)}
+            finally:
+                self.ssh_manager.return_connection(ssh)
 
         except Exception as e:
             logger.error(f"Error in stop_forward: {e}")

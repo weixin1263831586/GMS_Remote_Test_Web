@@ -154,6 +154,23 @@ UNAUTH001	unauthorized
         self.assertEqual(attached, [])
         self.assertEqual(devices, [])
 
+    def test_attach_devices_accepts_existing_adb_visibility_after_attach_failure(self):
+        class FakeSshManager:
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                if cmd == "adb devices":
+                    return ("List of devices attached\nUSBIP001\tdevice\n", "", 0)
+                if cmd.startswith("sudo usbip attach"):
+                    return ("", "device already attached", 1)
+                return ("", "", 0)
+
+        manager = USBIPManager()
+        manager.ssh_manager = FakeSshManager()
+
+        attached, devices = manager._attach_devices(object(), "172.16.14.64", ["1-1"])
+
+        self.assertEqual(attached, ["1-1"])
+        self.assertEqual(devices, ["USBIP001"])
+
     def test_attach_devices_waits_until_adb_serial_appears(self):
         class FakeSshManager:
             def __init__(self):

@@ -3,6 +3,7 @@
 import base64
 import re
 import urllib.parse
+from pathlib import PurePath
 
 
 REDMINE_ISSUE_PATTERN = r'/issues/(\d+)'
@@ -15,6 +16,8 @@ COMPILED_CONTENT_DISPOSITION_PATTERN = re.compile(
     r"filename\*=UTF-8''([^\;]+)|filename=\"([^\"]+)\"|filename=([^\s;]+)"
 )
 COMPILED_ISSUE_LINK_PATTERN = re.compile(r'href=["\'][^"\']*/issues/(\d+)[^"\']*["\']')
+SAFE_ATTACHMENT_FILENAME_RE = re.compile(r"[^A-Za-z0-9._ -]+")
+MAX_ATTACHMENT_FILENAME_LENGTH = 180
 
 
 def create_basic_auth_header(username: str, password: str) -> dict[str, str]:
@@ -37,6 +40,36 @@ def extract_filename_from_content_disposition(content_disposition: str) -> str |
         return None
     filename = match.group(1) or match.group(2) or match.group(3)
     return urllib.parse.unquote(filename) if filename else None
+
+
+def sanitize_attachment_filename(filename: str | None, default: str = "attachment") -> str:
+    """Return a filesystem/header safe Redmine attachment basename."""
+    name = str(filename or "").strip()
+    name = PurePath(name.replace("\\", "/")).name.strip()
+    name = SAFE_ATTACHMENT_FILENAME_RE.sub("_", name)
+    name = re.sub(r"\s+", " ", name).strip(" .")
+    if not name or name in {".", ".."}:
+        name = default
+    if len(name) > MAX_ATTACHMENT_FILENAME_LENGTH:
+        stem, dot, suffix = name.rpartition(".")
+        if dot and stem:
+            suffix = suffix[:32]
+            max_stem = MAX_ATTACHMENT_FILENAME_LENGTH - len(suffix) - 1
+            name = f"{stem[:max_stem]}.{suffix}"
+        else:
+            name = name[:MAX_ATTACHMENT_FILENAME_LENGTH]
+        name = name.rstrip(" .") or default
+    return name
+
+
+def attachment_content_disposition(filename: str | None) -> str:
+    """Build a safe Content-Disposition header with an RFC 5987 filename field."""
+    safe_name = sanitize_attachment_filename(filename)
+    # sanitize_attachment_filename already restricts the name to [A-Za-z0-9._ -],
+    # so the only remaining unsafe-for-header characters here are non-ascii bytes.
+    ascii_name = safe_name.encode("ascii", "ignore").decode("ascii") or "attachment"
+    encoded_name = urllib.parse.quote(safe_name, safe="")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}"
 
 
 def extract_redmine_issue_id_from_text(text: str) -> str | None:

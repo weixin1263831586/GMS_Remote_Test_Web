@@ -31,7 +31,9 @@ from features.assistant.response import (
     page_quick_actions,
 )
 from features.assistant.tools import registry
-from features.devices import device_lock_manager, device_manager, get_or_create_user_state
+from features.devices.locks import device_lock_manager
+from features.devices.manager import device_manager
+from features.devices.support import get_or_create_user_state
 from features.reports import ReportDiagnosisRequest, test_report_db
 from features.test_execution import (
     SuiteApkAnalyzeRequest,
@@ -313,7 +315,7 @@ def _build_plan(intent: dict[str, Any], selected_devices: list[str], device_deta
             "ssid": intent.get("wifi_ssid") or _wifi["ssid"],
             "password": intent.get("wifi_password") or _wifi["password"],
         })
-        steps.append({"title": "连接 WiFi", "detail": "测试前连接到 AndroidWifi"})
+        steps.append({"title": "连接 WiFi", "detail": f"测试前连接到 {_wifi['ssid']}"})
     steps.append({"title": "启动测试", "detail": intent.get("test_module") or intent.get("test_case") or "按测试套件执行"})
     retry_count = int(intent.get("retry_count") or 0)
     if retry_count:
@@ -679,7 +681,8 @@ async def _run_pre_actions(session: dict[str, Any], plan: dict[str, Any]) -> dic
     for action in actions:
         if action.get("type") != "connect_wifi":
             continue
-        from features.devices import WifiConnectRequest, connect_wifi
+        from features.devices.api import connect_wifi
+        from features.devices.models import WifiConnectRequest
 
         wifi_req = WifiConnectRequest(
             devices=devices,

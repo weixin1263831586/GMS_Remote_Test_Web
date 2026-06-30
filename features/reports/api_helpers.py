@@ -144,10 +144,100 @@ def _redmine_config_manager_for_request(request: Request | None = None):
         return config_manager
     return get_redmine_config_for_request(request)
 
-def _get_knowledge_base():
-    """Lazy-load and return a RedmineKnowledgeBase singleton."""
-    from scripts.redmine_knowledgebase import RedmineKnowledgeBase
-    return RedmineKnowledgeBase()
+def _resolve_redmine_knowledge_service(request: Request | None = None):
+    """Resolve a per-user Redmine knowledge service for diagnosis lookups.
+
+    The diagnosis endpoint must reuse the operator's own synced Redmine data —
+    not a missing module. ``RedmineKnowledgeService.search_similar`` already
+    falls back from the (sparse) case_facts table to the local issue snapshot
+    store via the issue-similarity table, so high-value historical tickets
+    (e.g. a verified multi-display CTS root cause) are recalled even before they
+    are promoted to mature cases.
+
+    Resolution order:
+      1. The authenticated owner on ``request`` (per-user isolation).
+      2. The first per-user store that actually holds data, so an unauthenticated
+         or cross-user diagnosis still benefits from the knowledge base instead
+         of silently reporting "no match".
+      3. ``None`` when nothing is available — callers treat that as "no KB".
+    """
+    from features.auth.service import get_authenticated_user
+    from features.redmine.api import get_redmine_service_for_owner
+
+    if request is not None:
+        try:
+            user = get_authenticated_user(request)
+            if user is not None:
+                return get_redmine_service_for_owner(user.id).knowledge
+        except Exception as exc:  # noqa: BLE001 — diagnosis must never hard-fail
+            logger.debug("Knowledge service resolve from request failed: %s", exc)
+
+    return _fallback_knowledge_service(get_redmine_service_for_owner)
+
+
+# Cached fallback owner resolved once per process; the selected owner only
+# changes when a sync adds data to a different per-user store, so re-scanning
+# the by_user directory + stat'ing every knowledge.sqlite3 on each unauth'd
+# diagnosis request would be wasted work on a hot path.
+_fallback_kb_owner: str | None = None
+_fallback_kb_scanned: bool = False
+
+
+def _fallback_knowledge_service(get_redmine_service_for_owner) -> Any:
+    """Return the knowledge service of the first per-user store with data.
+
+    Memoized across calls so the directory scan + per-store sqlite count only
+    runs once until a process restart.
+    """
+    global _fallback_kb_owner, _fallback_kb_scanned
+    if _fallback_kb_scanned and _fallback_kb_owner:
+        try:
+            return get_redmine_service_for_owner(_fallback_kb_owner).knowledge
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Cached fallback knowledge service stale: %s", exc)
+            _fallback_kb_owner = None
+
+    try:
+        from foundation.config import settings
+
+        root = settings.data_root / "redmine" / "by_user"
+        if root.is_dir():
+            # Pre-filter to dirs that actually have a knowledge DB, then sort by
+            # size once — avoids re-stat'ing the same path inside the loop.
+            candidates = [
+                p for p in root.iterdir()
+                if p.is_dir() and (p / "knowledge.sqlite3").exists()
+            ]
+            candidates.sort(
+                key=lambda p: (p / "knowledge.sqlite3").stat().st_size,
+                reverse=True,
+            )
+            for cand in candidates:
+                owner_id = cand.name
+                try:
+                    service = get_redmine_service_for_owner(owner_id).knowledge
+                    if service and service.list_case_facts(limit=1)["total"] > 0:
+                        _fallback_kb_owner = owner_id
+                        _fallback_kb_scanned = True
+                        return service
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Knowledge service fallback skip %s: %s", owner_id, exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Knowledge service fallback scan failed: %s", exc)
+
+    _fallback_kb_scanned = True
+    return None
+
+
+def _get_knowledge_base(request: Request | None = None):
+    """Resolve the Redmine knowledge service backing diagnosis lookups.
+
+    Returns the per-user :class:`RedmineKnowledgeService` (or ``None``). The old
+    implementation imported a non-existent ``scripts.redmine_knowledgebase``
+    module, so every diagnosis silently reported "no KB match" regardless of
+    what the operator had synced — this delegates to the real per-user service.
+    """
+    return _resolve_redmine_knowledge_service(request)
 
 
 def _extract_class_names_from_text(test_name: str, error_message: str) -> list[str]:
@@ -475,12 +565,25 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
 
 
 def _build_patch_draft(diagnosis: dict[str, Any]) -> str:
-    """Build a draft patch from diagnosis results."""
+    """Build a draft patch from diagnosis results.
+
+    A verified knowledge-base hit takes priority over the speculative AI root
+    cause: when the top KB match is an environment/configuration issue (no code
+    fix), we emit an environment-handling note instead of fabricating a Java
+    diff that would mislead the operator.
+    """
     failure_location = diagnosis.get("failure_location") or {}
     ai_result = diagnosis.get("ai_result") or {}
     suite_target = diagnosis.get("suite_target") or {}
     source_guess = suite_target.get("source_guess") or {}
     source_hits = diagnosis.get("source_search_results") or []
+    kb_results = diagnosis.get("knowledge_base_results") or []
+
+    # If the strongest KB hit points at a non-code (environment/config) root
+    # cause, the correct "patch" is an operational fix, not source edits.
+    env_note = _kb_environment_patch(kb_results)
+    if env_note:
+        return env_note
 
     target_path = source_guess.get("source_path") or ""
     if not target_path and source_hits:
@@ -491,7 +594,14 @@ def _build_patch_draft(diagnosis: dict[str, Any]) -> str:
     if not target_path:
         target_path = "<source file to locate>"
 
-    reason = ai_result.get("root_cause") or diagnosis.get("summary", "") or "Pending confirmation"
+    # Prefer the verified KB root cause over the speculative AI guess.
+    kb_root = ""
+    for hit in kb_results:
+        root = (hit.get("root_cause") or "").strip()
+        if root:
+            kb_root = root
+            break
+    reason = kb_root or ai_result.get("root_cause") or diagnosis.get("summary", "") or "Pending confirmation"
     patch_lines = [
         f"--- a/{target_path}",
         f"+++ b/{target_path}",
@@ -509,6 +619,44 @@ def _build_patch_draft(diagnosis: dict[str, Any]) -> str:
             patch_lines.append(f"+ // {raw_line}")
         patch_lines.append("+ // ----------------------------------------")
     return "\n".join(patch_lines)
+
+
+# Markers that a verified root cause is an environment / configuration issue
+# rather than a source-code defect (so no fabricated code diff is emitted).
+_ENV_ROOT_MARKERS = ("副屏", "多屏", "secondary display", "测试环境", "环境配置", "known limitation", "已知限制")
+
+
+def _kb_environment_patch(kb_results: list[dict[str, Any]]) -> str:
+    """Return an operational-fix note when a KB hit is a non-code issue.
+
+    Scans every hit (not just the top one): the strongest environment root
+    cause may live on a lower-ranked reference ticket (e.g. the verified
+    #618660 sitting under the open duplicate #637450), so restricting to the
+    first hit would miss it.
+    """
+    if not kb_results:
+        return ""
+    best: dict[str, Any] | None = None
+    for hit in kb_results:
+        root = (hit.get("root_cause") or "").strip()
+        solution = (hit.get("solution_summary") or hit.get("solution") or "").strip()
+        haystack = f"{root} {solution}".lower()
+        if any(marker.lower() in haystack for marker in _ENV_ROOT_MARKERS):
+            best = {"root": root, "solution": solution, "id": hit.get("id")}
+            break
+    if best is None:
+        return ""
+    ref = f"#{best['id']}" if best["id"] else ""
+    lines = [
+        f"// 知识库命中 {ref}：本失败为测试环境/配置问题，无需代码补丁。",
+        f"// 根因：{best['root']}",
+        "// 建议处置：",
+    ]
+    for raw in best["solution"].splitlines():
+        text = raw.strip()
+        if text:
+            lines.append(f"//   {text}")
+    return "\n".join(lines)
 
 
 async def _analyze_report_file(

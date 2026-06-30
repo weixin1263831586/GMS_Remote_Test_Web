@@ -11,6 +11,9 @@
 
 // ==================== API Categories ====================
 
+const API_DOCS_VNC_PORT = 5900;
+const API_DOCS_NOVNC_WEB_PORT = 6080;
+
 /**
  * API endpoint to category mapping
  * Used for grouping and filtering endpoints in the API documentation
@@ -391,8 +394,8 @@ const API_DETAILS_MAP = {
         description: '让设备连接到指定的WiFi网络',
         params: [
             { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' },
-            { name: 'ssid', type: 'string', required: false, desc: 'WiFi名称，默认AndroidWifi' },
-            { name: 'password', type: 'string', required: false, desc: 'WiFi密码，默认1234567890' }
+            { name: 'ssid', type: 'string', required: false, desc: 'WiFi名称，留空读取 config.wifi.ssid' },
+            { name: 'password', type: 'string', required: false, desc: 'WiFi密码，留空读取 config.wifi.password' }
         ],
         response: '{ "success": true, "message": "WiFi连接成功" }',
         usage: '配置设备连接到WiFi网络'
@@ -412,7 +415,7 @@ const API_DETAILS_MAP = {
         params: [
             { name: 'devices', type: 'array', required: true, desc: '设备序列号数组' }
         ],
-        response: '{ "success": true, "screens": [{ "device_id": "RF8TC2W4JNH", "port": 5900 }] }',
+        response: `{ "success": true, "screens": [{ "device_id": "RF8TC2W4JNH", "port": ${API_DOCS_VNC_PORT} }] }`,
         usage: '批量查看设备屏幕'
     },
     '/api/reports/list': {
@@ -459,7 +462,7 @@ const API_DETAILS_MAP = {
         title: '获取桌面VNC状态',
         description: '检查桌面VNC服务运行状态',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "running": false, "port": 5900 }',
+        response: `{ "running": false, "port": ${API_DOCS_VNC_PORT} }`,
         usage: '检查VNC服务是否正在运行'
     },
     '/api/desktop/vnc/start': {
@@ -470,7 +473,7 @@ const API_DETAILS_MAP = {
             { name: 'password', type: 'string', required: false, desc: 'SSH密码' },
             { name: 'vnc_password', type: 'string', required: false, desc: 'VNC密码' }
         ],
-        response: '{ "success": true, "port": 5900, "url": "..." }',
+        response: `{ "success": true, "port": ${API_DOCS_VNC_PORT}, "url": "..." }`,
         usage: 'gms-rt-desktop-vnc-start'
     },
     '/api/desktop/vnc/stop': {
@@ -494,7 +497,7 @@ const API_DETAILS_MAP = {
         title: '查询Ubuntu主机桌面VNC状态',
         description: '查询Ubuntu主机桌面VNC服务状态',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "success": true, "running": true, "url": "http://192.168.1.10:6080/vnc.html" }',
+        response: `{ "success": true, "running": true, "url": "http://192.168.1.10:${API_DOCS_NOVNC_WEB_PORT}/vnc.html" }`,
         usage: '检查VNC服务运行状态'
     },
     '/api/desktop/vnc/start': {
@@ -505,7 +508,7 @@ const API_DETAILS_MAP = {
             { name: 'password', type: 'string', required: false, desc: 'SSH登录密码' },
             { name: 'vnc_password', type: 'string', required: false, desc: 'VNC访问密码（可选）' }
         ],
-        response: '{ "success": true, "url": "http://192.168.1.10:6080/vnc.html" }',
+        response: `{ "success": true, "url": "http://192.168.1.10:${API_DOCS_NOVNC_WEB_PORT}/vnc.html" }`,
         usage: '启动Ubuntu主机桌面VNC服务'
     },
     '/api/desktop/vnc/stop': {

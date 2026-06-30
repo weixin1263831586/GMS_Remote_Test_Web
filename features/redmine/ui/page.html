@@ -41,8 +41,8 @@
   </div>
   <div class="btn-group">
     <button id="scanBtn" onclick="startScan()">🔍 扫描</button>
-    <button class="secondary" onclick="triggerSync()">🔄 同步</button>
-    <button class="secondary" onclick="refreshCurrentTab()">刷新</button>
+    <button id="syncBtn" class="secondary" onclick="triggerSync()" title="全量同步指派工单并分析新工单，耗时较长">🔄 全量同步</button>
+    <button id="refreshBtn" class="secondary" onclick="refreshCurrentTab()" title="绕过缓存，重新从 Redmine 拉取当前页数据">刷新</button>
     <button class="secondary" onclick="showResetModal()">🗑️ 重置</button>
     <button class="secondary" onclick="showSettingsModal()" title="设置">⚙️</button>
   </div>

@@ -1,3 +1,5 @@
+from foundation.config import settings
+
 from .api_helpers import (
     AnalysisMode,
     APIRouter,
@@ -25,6 +27,7 @@ from .api_helpers import (
     json,
     logger,
     os,
+    re,
     safe_upload_target_path,
     save_upload_to_path,
     shutil,
@@ -36,6 +39,42 @@ from .api_helpers import (
 
 
 router = APIRouter()
+
+
+def _is_safe_report_delete_dir(result_dir: str) -> bool:
+    """Return whether result_dir looks like a concrete test report directory."""
+    if not result_dir:
+        return False
+
+    target = os.path.abspath(result_dir)
+    protected_roots = {
+        os.path.abspath(os.sep),
+        os.path.abspath(os.path.expanduser("~")),
+        os.path.abspath(os.getcwd()),
+        os.path.abspath(str(settings.data_root)),
+    }
+    if target in protected_roots:
+        return False
+
+    if not os.path.isdir(target):
+        return False
+
+    marker_files = {
+        "test_result.xml",
+        "invocation_summary.txt",
+        "test_result_failures_suite.html",
+    }
+    try:
+        entries = set(os.listdir(target))
+    except OSError:
+        return False
+    if entries.intersection(marker_files):
+        return True
+
+    try:
+        return any(name.startswith("host_log_") and name.endswith(".txt") for name in entries)
+    except OSError:
+        return False
 
 # ==================== Analyze Reports ====================
 
@@ -193,10 +232,10 @@ async def analyze_reports(
 # ==================== Diagnose Report ====================
 
 @router.post("/api/reports/diagnose")
-async def diagnose_report_failure(request: ReportDiagnosisRequest):
+async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request: Request):
     """Diagnose one report failure and locate matching suite APK/JAR source."""
     try:
-        failure_location = StackTraceUtils.extract_failure_location(request.stack_trace or "")
+        failure_location = StackTraceUtils.extract_failure_location(request.stack_trace or "", request.test_name)
         class_names = [c for c in (request.class_names or []) if c]
         if not class_names:
             class_names = _extract_class_names_from_text(request.test_name, request.error_message)
@@ -240,10 +279,71 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest):
 
         async def _search_knowledge_base():
             try:
-                kb = _get_knowledge_base()
+                kb = _get_knowledge_base(http_request)
                 kb_query = " ".join(keywords[:5]) or request.test_name or request.error_message[:80]
-                if kb_query.strip():
-                    return await asyncio.to_thread(kb.search, kb_query, 8)
+                if not kb or not kb_query.strip():
+                    return []
+                # Relevance dimensions extracted from the failure under diagnosis,
+                # used to filter out broad "same-module, wrong-platform/wrong-case"
+                # FTS noise (e.g. an RK3399 Android15 ticket surfacing for an
+                # RK3576 Android16 SearchView failure).
+                probe = {
+                    "test_name": request.test_name or "",
+                    "module": request.module or "",
+                    "android_version": _android_version_from_request(request),
+                }
+
+                def _gather() -> list[dict]:
+                    # Two recall channels — the synced issue store (largest, most
+                    # current) and the curated case_facts — each adapt to the same
+                    # canonical hit shape via _adapt_hit, so dedup + scoring stay
+                    # in one place.
+                    merged: list[dict] = []
+                    seen: set[int] = set()
+
+                    def _adapt(row: dict, source: str, *, issue_store: bool = False) -> None:
+                        iid = int(row.get("issue_id") or 0)
+                        if not iid or iid in seen:
+                            return
+                        seen.add(iid)
+                        if issue_store:
+                            module = row.get("category") or row.get("module") or ""
+                            root_cause = row.get("error_analysis") or ""
+                            error_signature = ""
+                            solution = (row.get("solution") or "")[:600]
+                        else:
+                            module = row.get("module") or ""
+                            root_cause = row.get("root_cause") or ""
+                            error_signature = row.get("error_signature") or ""
+                            solution = row.get("solution") or row.get("reply_template") or ""
+                        merged.append({
+                            "id": iid,
+                            "subject": row.get("subject") or "",
+                            "status_name": row.get("status_name") or "",
+                            "module": module,
+                            "chip_platform": row.get("chip_platform") or row.get("soc_platform") or "",
+                            "android_version": row.get("android_version") or "",
+                            "error_signature": error_signature,
+                            "root_cause": root_cause,
+                            "solution_summary": solution,
+                            "source": source,
+                        })
+
+                    try:
+                        repo = getattr(kb, "issue_repository", None)
+                        if repo is not None:
+                            for issue in repo.search_similar(kb_query, 0, 20):
+                                _adapt(issue, "issue_store", issue_store=True)
+                    except Exception as exc:
+                        logger.debug(f"Issue-store KB recall skipped: {exc}")
+                    try:
+                        for s in kb.search_similar(kb_query, limit=20):
+                            _adapt(s, "case_facts")
+                    except Exception as exc:
+                        logger.debug(f"Case-facts KB recall skipped: {exc}")
+                    return _rank_kb_hits(merged, probe)
+
+                return await asyncio.to_thread(_gather)
             except Exception as kb_error:
                 logger.warning(f"Knowledge base search failed: {kb_error}")
             return []
@@ -322,6 +422,9 @@ async def delete_report(request: Request, timestamp: str = Query(...)):
 
         result_dir = report.get("result_dir")
         if result_dir and os.path.exists(result_dir):
+            if not _is_safe_report_delete_dir(result_dir):
+                logger.warning(f"[DELETE] Refusing unsafe report directory deletion: {result_dir}")
+                return error_response("Unsafe report directory, refusing to delete files", 400)
             try:
                 shutil.rmtree(result_dir)
                 logger.info(f"Deleted report directory: {result_dir}")
@@ -343,11 +446,13 @@ async def delete_report(request: Request, timestamp: str = Query(...)):
 # ==================== Knowledge Base ====================
 
 @router.get("/api/knowledgebase/search")
-async def knowledgebase_search(query: str = Query(..., min_length=1, max_length=256), limit: int = Query(8, ge=1, le=20)):
+async def knowledgebase_search(request: Request, query: str = Query(..., min_length=1, max_length=256), limit: int = Query(8, ge=1, le=20)):
     """Search the local Redmine-derived GMS knowledge base."""
     try:
-        kb = _get_knowledge_base()
-        results = await asyncio.to_thread(kb.search, query.strip(), limit)
+        kb = _get_knowledge_base(request)
+        if not kb:
+            return success_response({"query": query.strip(), "results": [], "count": 0})
+        results = await asyncio.to_thread(kb.search_similar, query.strip(), limit)
         return success_response({"query": query.strip(), "results": results, "count": len(results)})
     except Exception as e:
         logger.error(f"Knowledge base search failed: {e}", exc_info=True)
@@ -355,12 +460,142 @@ async def knowledgebase_search(query: str = Query(..., min_length=1, max_length=
 
 
 @router.get("/api/knowledgebase/stats")
-async def knowledgebase_stats():
+async def knowledgebase_stats(request: Request):
     """Return local Redmine-derived GMS knowledge base stats."""
     try:
-        kb = _get_knowledge_base()
-        stats = await asyncio.to_thread(kb.get_stats)
+        kb = _get_knowledge_base(request)
+        if not kb:
+            return success_response({"stats": {"total": 0, "mature_cases": 0}})
+        data = await asyncio.to_thread(lambda: kb.list_case_facts(limit=1))
+        mature = await asyncio.to_thread(lambda: kb.list_mature_cases(limit=1))
+        stats = {"total": data.get("total", 0), "mature_cases": mature.get("total", 0)}
         return success_response({"stats": stats})
     except Exception as e:
         logger.error(f"Knowledge base stats failed: {e}", exc_info=True)
         return error_response(str(e), status_code=500)
+
+
+# ==================== Knowledge-base relevance ranking ====================
+
+
+def _android_version_from_request(request: ReportDiagnosisRequest) -> str:
+    """Best-effort Android major version from suite_version (e.g. '16_r5' -> '16')."""
+    raw = (getattr(request, "suite_version", "") or "").strip()
+    m = re.match(r"(\d+)", raw)
+    return m.group(1) if m else ""
+
+
+def _test_method_and_class(test_name: str) -> tuple[str, str]:
+    """Return (method_name, simple_class) from 'a.b.C#method' or 'a.b.C'."""
+    test_name = (test_name or "").strip()
+    method = ""
+    cls = test_name
+    if "#" in test_name:
+        cls, method = test_name.split("#", 1)
+    simple_cls = cls.rsplit(".", 1)[-1]
+    return method.strip(), simple_cls.strip()
+
+
+def _rank_kb_hits(hits: list[dict], probe: dict) -> list[dict]:
+    """Filter and re-rank KB hits by relevance to the diagnosed failure.
+
+    The raw FTS recall is broad — it surfaces any ticket sharing the module
+    (e.g. CtsInputMethodTestCases), including cross-platform / cross-case
+    noise. We score each hit against the failure under diagnosis and keep only
+    the genuinely relevant ones, so the operator sees a few precise matches
+    instead of eight loosely-related tickets.
+
+    Scoring (higher = more relevant):
+      exact test method in subject ........ +100  (top tier)
+      exact test class in subject ......... +40
+      same module ........................ +15
+      same Android major version ......... +20
+      verified (Closed/Confirmed) ........ +10
+      curated case_fact ................... +15
+
+    Hard filter: drop hits that match only the module on a different platform
+    *and* lack any case/method overlap — pure cross-platform noise.
+    """
+    method, simple_cls = _test_method_and_class(probe.get("test_name") or "")
+    module = (probe.get("module") or "").strip()
+    probe_android = (probe.get("android_version") or "").strip()
+
+    # Anchor platform from exact-method hits — when the failure has identical
+    # tickets on one platform, a different-platform same-module ticket is noise.
+    anchor_platform = ""
+    if method:
+        for h in hits:
+            if method.lower() in (h.get("subject") or "").lower():
+                anchor_platform = (h.get("chip_platform") or "").upper()
+                if anchor_platform:
+                    break
+
+    def _score(h: dict) -> tuple[float, bool]:
+        subject = (h.get("subject") or "").lower()
+        root = (h.get("root_cause") or "").lower()
+        hay = f"{subject} {root}"
+        s = 0.0
+        case_hit = method and method.lower() in hay
+        cls_hit = simple_cls and simple_cls.lower() in hay
+        if case_hit:
+            s += 100
+        if cls_hit:
+            s += 40
+        if module and module.lower() in hay:
+            s += 15
+        if probe_android:
+            theirs = (h.get("android_version") or "").strip()
+            if theirs and probe_android in theirs:
+                s += 20
+        status = (h.get("status_name") or "").lower()
+        if status in ("closed", "confirmed", "已关闭", "已解决", "resolved"):
+            s += 10
+        if h.get("source") == "case_facts":
+            s += 15
+        # A hit carrying a real, distilled solution/root cause is far more
+        # valuable as a reference than a bare same-module ticket — reward it so
+        # verified historical fixes surface above generic same-module noise.
+        sol = (h.get("solution_summary") or h.get("root_cause") or "")
+        if len(sol.strip()) >= 40:
+            s += 8
+        # Cross-platform noise penalty: same-module only, different platform
+        # from the anchored exact matches, and no case/class overlap.
+        plat = (h.get("chip_platform") or "").upper()
+        keep = True
+        if anchor_platform and plat and plat != anchor_platform and not (case_hit or cls_hit):
+            keep = False
+        return s, keep
+
+    scored = []
+    for h in hits:
+        s, keep = _score(h)
+        if not keep:
+            continue
+        h_out = dict(h)
+        h_out["score"] = round(s, 1)
+        h_out["similarity_level"] = (
+            "exact" if s >= 100 else "high" if s >= 50 else "medium" if s >= 30 else "low"
+        )
+        scored.append((s, h_out))
+
+    # If filtering removed everything (e.g. no anchor could be established and
+    # nothing matched), fall back to the raw recall rather than showing "未命中".
+    # Raw hits carry no score (those are added in _score below), so stamp a
+    # neutral default on each.
+    if not scored:
+        return [{**h, "score": 0.0, "similarity_level": "low"} for h in hits[:5]]
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    ordered = [h for _, h in scored]
+
+    # When we have a precise (exact) match, keep the results tight: the exact
+    # hit plus high-relevance references, with at most two same-module-only
+    # tickets as supporting context. Operators want a few precise matches, not a
+    # wall of loosely-related same-module tickets.
+    has_exact = any(h["similarity_level"] == "exact" for h in ordered)
+    if has_exact:
+        precise = [h for h in ordered if h["similarity_level"] in ("exact", "high")]
+        same_module = [h for h in ordered if h["similarity_level"] not in ("exact", "high")]
+        return (precise + same_module)[:5]
+
+    return ordered[:5]

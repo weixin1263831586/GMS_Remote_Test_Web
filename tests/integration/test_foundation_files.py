@@ -1,12 +1,19 @@
 import io
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from foundation.archives import safe_extract_member_path
 from foundation.database import connect_sqlite
+from foundation.files import create_zip_from_directory
 from foundation.networking import parse_host_address, sanitize_url
-from foundation.uploads import copy_fileobj_to_path, safe_upload_target_path
+from foundation.uploads import (
+    copy_fileobj_to_path,
+    remote_home_file_path,
+    safe_upload_target_path,
+    upload_temp_root,
+)
 
 
 class SafePathTests(unittest.TestCase):
@@ -30,6 +37,20 @@ class SafePathTests(unittest.TestCase):
                 )
             self.assertFalse(destination.exists())
 
+    def test_upload_temp_root_keeps_namespace_under_system_temp(self):
+        root = Path(upload_temp_root('../custom-gms'))
+
+        self.assertEqual(root.name, 'custom-gms')
+        self.assertEqual(root.parent, Path(tempfile.gettempdir()))
+
+    def test_remote_home_file_path_rejects_unsafe_parts(self):
+        self.assertEqual(
+            remote_home_file_path('gms', '../payload.zip'),
+            '/home/gms/payload.zip',
+        )
+        with self.assertRaises(ValueError):
+            remote_home_file_path('../bad', 'payload.zip')
+
 
 class DatabaseTests(unittest.TestCase):
     def test_connect_sqlite_creates_parent_and_commits(self):
@@ -41,6 +62,35 @@ class DatabaseTests(unittest.TestCase):
             with connect_sqlite(path) as connection:
                 value = connection.execute('SELECT value FROM sample').fetchone()[0]
             self.assertEqual(value, 'ok')
+
+
+class ZipFileTests(unittest.TestCase):
+    def test_create_zip_skips_symlink_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'real.log').write_text('ok', encoding='utf-8')
+            (source / 'linked.log').symlink_to(source / 'real.log')
+
+            result = create_zip_from_directory(str(source), base_dir_for_arcnames=str(source))
+
+            self.assertIsNotNone(result)
+            data, count = result
+            self.assertEqual(count, 1)
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                self.assertEqual(archive.namelist(), ['real.log'])
+
+    def test_create_zip_rejects_arcname_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'real.log').write_text('ok', encoding='utf-8')
+
+            result = create_zip_from_directory(str(source), base_dir_for_arcnames=str(root / 'other'))
+
+            self.assertIsNone(result)
 
 
 class NetworkingTests(unittest.TestCase):

@@ -137,6 +137,7 @@ async def list_users():
     """获取所有在线用户列表"""
     now = datetime.now()
     config = runtime.config_manager.load_config()
+    configured_client_hosts = config.get('client_hosts') or {}
 
     # 本地地址列表，不显示在用户列表中
     local_addresses = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
@@ -144,6 +145,27 @@ async def list_users():
 
     with runtime.global_state.user_states_lock:
         temp_users = {}
+        for ip, username in configured_client_hosts.items():
+            ip = str(ip or '').strip()
+            username = str(username or '').strip() or 'unknown'
+            if not ip or ip in local_addresses or ip in vpn_gateway_addresses:
+                continue
+            display_client_id = (
+                f"{username}@{ip}" if username and username != 'unknown' else ip
+            )
+            temp_users[f"configured:{display_client_id}"] = {
+                'client_id': display_client_id,
+                'user_id': '',
+                'username': username,
+                'ip': ip,
+                **get_client_source(ip),
+                'running': False,
+                'devices': [],
+                'last_seen': '',
+                'created_at': '',
+                'configured': True,
+            }
+
         for client_id, state in runtime.global_state.user_states.items():
             # 检查会话是否活跃（最近24小时内有活动）
             if 'last_seen' in state:
@@ -181,10 +203,13 @@ async def list_users():
                 'created_at': state.get('created_at', ''),
             }
 
-            # 如果同一个IP有多个用户记录，优先保留非unknown的用户
-            existing = temp_users.get(ip)
+            # 平台登录用户是状态隔离边界。多用户可能经同一个反向代理或
+            # Tailscale 出口访问，不能按 IP 折叠，否则谁刷新就只剩谁。
+            user_key = f"host:{display_client_id}" if display_client_id else (client_id or ip)
+            temp_users.pop(f"configured:{display_client_id}", None)
+            existing = temp_users.get(user_key)
             if existing is None or (existing['username'] == 'unknown' and username != 'unknown'):
-                temp_users[ip] = user_info
+                temp_users[user_key] = user_info
 
         users = list(temp_users.values())
 

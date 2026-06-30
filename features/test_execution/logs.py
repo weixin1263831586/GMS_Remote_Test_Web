@@ -4,11 +4,16 @@
 处理日志文件列表、下载、保存等功能
 """
 
+import logging
 import os
+import re
 import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 
 class TestLogsManager:
@@ -16,18 +21,40 @@ class TestLogsManager:
 
     def __init__(self):
         web_app_dir = Path(__file__).resolve().parent.parent
+        test_log_root = Path(
+            os.environ.get('GMS_TEST_LOG_ROOT', '/tmp/test-logs')
+        )
         user_logs_dir = Path(
             os.environ.get('GMS_LOG_DIR', str(Path.home() / 'Logs'))
         )
+        self.saved_logs_dir = test_log_root / 'saved'
+        self.downloads_dir = test_log_root / 'downloads'
 
         self.log_dirs = [
             Path('/tmp/xts-root-dir'),
-            Path('/tmp/test-logs'),
-            Path('/tmp/test-logs/saved'),
+            test_log_root,
+            self.saved_logs_dir,
             user_logs_dir,
             web_app_dir / 'logs',
             web_app_dir / 'data' / 'logs'
         ]
+
+    @staticmethod
+    def _safe_log_token(value: str) -> str:
+        token = re.sub(r'[^A-Za-z0-9_-]+', '_', str(value or '').strip()).strip('_-')[:80]
+        return token or 'unknown'
+
+    def _allowed_log_roots(self) -> list[Path]:
+        return [path.resolve() for path in self.log_dirs if path.exists()]
+
+    def _resolve_allowed_log_path(self, file_path: str) -> Path:
+        candidate = Path(file_path).expanduser().resolve()
+        if candidate.suffix != '.log':
+            raise ValueError('仅允许访问 .log 文件')
+        for root in self._allowed_log_roots():
+            if candidate == root or root in candidate.parents:
+                return candidate
+        raise ValueError(f'日志路径不在允许目录内: {file_path}')
 
     def list_log_files(self) -> dict[str, Any]:
         """列出所有日志文件"""
@@ -58,7 +85,13 @@ class TestLogsManager:
 
     def get_log_file(self, file_path: str, max_lines: int = 1000) -> dict[str, Any]:
         """读取日志文件内容"""
-        log_path = Path(file_path)
+        try:
+            log_path = self._resolve_allowed_log_path(file_path)
+        except ValueError as e:
+            return {
+                'success': False,
+                'error': str(e),
+            }
 
         if not log_path.exists():
             return {
@@ -96,11 +129,11 @@ class TestLogsManager:
     ) -> dict[str, Any]:
         """保存当前日志"""
         try:
-            save_dir = Path('/tmp/test-logs/saved')
+            save_dir = self.saved_logs_dir
             save_dir.mkdir(parents=True, exist_ok=True)
 
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f'test_log_{client_id}_{timestamp}.log'
+            filename = f'test_log_{self._safe_log_token(client_id)}_{timestamp}.log'
             file_path = save_dir / filename
 
             file_path.write_text(log_content, encoding='utf-8')
@@ -132,14 +165,14 @@ class TestLogsManager:
         try:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             if output_path is None:
-                zip_dir = Path('/tmp/test-logs/downloads')
+                zip_dir = self.downloads_dir
                 zip_dir.mkdir(parents=True, exist_ok=True)
                 output_path = str(zip_dir / f'logs_{timestamp}.zip')
 
             with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for file_path_str in file_paths:
-                    file_path = Path(file_path_str)
-                    if file_path.exists():
+                    file_path = self._resolve_allowed_log_path(file_path_str)
+                    if file_path.exists() and file_path.is_file():
                         zipf.write(file_path, file_path.name)
 
             return {
@@ -156,6 +189,7 @@ class TestLogsManager:
     def clean_old_logs(self, days: int = 7) -> dict[str, Any]:
         """清理旧日志"""
         cleaned = 0
+        failed = 0
         total_size = 0
         cutoff_time = datetime.now().timestamp() - (days * 86400)
 
@@ -171,12 +205,14 @@ class TestLogsManager:
                         total_size += st.st_size
                         log_file.unlink()
                         cleaned += 1
-                except Exception:
-                    pass
+                except Exception as exc:
+                    failed += 1
+                    logger.warning("Failed to clean old log %s: %s", log_file, exc)
 
         return {
             'success': True,
             'cleaned_files': cleaned,
+            'failed_files': failed,
             'freed_space_mb': round(total_size / (1024 * 1024), 2)
         }
 

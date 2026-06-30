@@ -8,12 +8,13 @@ import re
 import shutil
 import subprocess
 import tarfile
+import tempfile
 import zipfile
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from foundation.archives import ARCHIVE_EXTENSIONS
+from foundation.archives import ARCHIVE_EXTENSIONS, safe_extract_member_path
 from foundation.config import ConfigManager
 
 from .host_parser import HostLogParser
@@ -22,6 +23,10 @@ from .xml_parser import XMLReportParser
 
 
 logger = logging.getLogger(__name__)
+
+
+def default_report_temp_dir() -> str:
+    return os.environ.get('GMS_REPORT_TEMP_DIR') or str(Path(tempfile.gettempdir()) / 'gms_report')
 
 
 def get_opengrok_project_for_android_version(android_version: str, opengrok_config: dict) -> str:
@@ -56,11 +61,29 @@ class ReportFileHandler:
 
     def _extract_zip(self, zip_path: str):
         with zipfile.ZipFile(zip_path, 'r') as zf:
-            zf.extractall(self.temp_dir)
+            for member in zf.infolist():
+                target = safe_extract_member_path(self.temp_dir, member.filename)
+                if member.is_dir():
+                    os.makedirs(target, exist_ok=True)
+                    continue
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with zf.open(member) as src, open(target, 'wb') as dst:
+                    shutil.copyfileobj(src, dst)
 
     def _extract_tar(self, tar_path: str):
         with tarfile.open(tar_path, 'r:*') as tf:
-            tf.extractall(self.temp_dir)
+            for member in tf.getmembers():
+                target = safe_extract_member_path(self.temp_dir, member.name)
+                if member.isdir():
+                    os.makedirs(target, exist_ok=True)
+                    continue
+                if not member.isfile():
+                    continue
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                src = tf.extractfile(member)
+                if src:
+                    with src, open(target, 'wb') as dst:
+                        shutil.copyfileobj(src, dst)
 
     def _extract_7z(self, archive_path: str):
         """使用系统 7z 解压 RAR/7z 等格式。"""
@@ -69,6 +92,7 @@ class ReportFileHandler:
                 ['rar', 'x', '-y', archive_path, self.temp_dir + os.sep],
                 check=True,
                 capture_output=True,
+                timeout=300,
             )
             return
         if not shutil.which('7z'):
@@ -77,6 +101,7 @@ class ReportFileHandler:
             ['7z', 'x', '-y', f'-o{self.temp_dir}', archive_path],
             check=True,
             capture_output=True,
+            timeout=300,
         )
 
     def find_xml_file(self) -> str | None:
@@ -96,11 +121,11 @@ class ReportFileHandler:
 class ReportAnalyzer:
     """报告分析器主类 - 对外统一接口"""
 
-    def __init__(self, temp_dir: str = '/tmp/gms_report'):
-        self.temp_dir = temp_dir
+    def __init__(self, temp_dir: str | None = None):
+        self.temp_dir = temp_dir or default_report_temp_dir()
         self.parser = XMLReportParser()
         self.host_log_parser = HostLogParser()
-        self.file_handler = ReportFileHandler(temp_dir)
+        self.file_handler = ReportFileHandler(self.temp_dir)
         self.report = None
 
     def analyze_file(self, file_path: str) -> dict | None:
@@ -330,7 +355,7 @@ class ReportAnalyzer:
         Returns:
             List[Dict]: 搜索结果列表，每个包含 {project, path, line, type, file_type}
         """
-        web_app_dir = Path(__file__).resolve().parents[1]
+        web_app_dir = Path(__file__).resolve().parents[2]
         codesearch_dir = web_app_dir / 'skills' / 'rk_codesearch'
         codesearch_script = str(codesearch_dir / 'run.py')
 
@@ -361,14 +386,23 @@ class ReportAnalyzer:
                                 if lines[j].strip().startswith('project:'):
                                     project = lines[j].strip().split(':', 1)[1].strip()
                                     break
-                            return [{
+                            item = {
                                 'type': 'definition',
                                 'path': line_text.replace('[definition] ', '').strip() if line_text.startswith('[definition]') else line_text,
                                 'line': line_number,
                                 'file_type': file_type,
                                 'project': project,
                                 'is_exact_location': True,
-                            }][:max_results]
+                            }
+                            with suppress(Exception):
+                                opengrok_config = ConfigManager().load_config().get('opengrok', {})
+                                base_url = opengrok_config.get('base_url', '')
+                                selected_project = project or get_opengrok_project_for_android_version(
+                                    self.report.android_version if self.report else '', opengrok_config
+                                )
+                                if base_url and selected_project:
+                                    self._attach_opengrok_url(item, base_url, selected_project)
+                            return [item][:max_results]
                     # Fall through to class name search
 
             # 没有失败位置时，使用类名搜索定义

@@ -10,6 +10,19 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _safe_zip_arcname(path: str, arcname_base: str, path_prefix: str = '') -> str:
+    path_real = os.path.realpath(path)
+    base_real = os.path.realpath(arcname_base)
+    if path_real != base_real and not path_real.startswith(base_real + os.sep):
+        raise ValueError(f'ZIP source path escapes base: {path}')
+
+    rel_path = os.path.relpath(path_real, base_real)
+    arcname = os.path.normpath(os.path.join(path_prefix, rel_path) if path_prefix else rel_path)
+    if arcname == '.' or arcname.startswith('..' + os.sep) or os.path.isabs(arcname):
+        raise ValueError(f'Unsafe ZIP archive path: {arcname}')
+    return arcname.replace(os.sep, '/')
+
+
 def _write_entries_to_zip(
     zip_file: zipfile.ZipFile,
     source_dir: str,
@@ -20,9 +33,11 @@ def _write_entries_to_zip(
     for root, _directories, filenames in os.walk(source_dir):
         for filename in filenames:
             path = os.path.join(root, filename)
-            rel_path = os.path.relpath(path, arcname_base)
-            arcname = os.path.join(path_prefix, rel_path) if path_prefix else rel_path
             try:
+                if os.path.islink(path):
+                    logger.warning("Skipping symlink while creating ZIP: %s", path)
+                    continue
+                arcname = _safe_zip_arcname(path, arcname_base, path_prefix)
                 zip_file.write(path, arcname)
                 count += 1
             except Exception as exc:
@@ -100,6 +115,8 @@ def list_directory_files(
     for root, _directories, filenames in os.walk(directory):
         for filename in filenames:
             path = os.path.join(root, filename)
+            if os.path.islink(path):
+                continue
             result.append(
                 {
                     'name': filename,

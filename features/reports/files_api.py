@@ -1,3 +1,5 @@
+import shlex
+
 from .api_helpers import (
     APIRouter,
     JSONResponse,
@@ -12,8 +14,90 @@ from .api_helpers import (
     test_report_db,
 )
 
+try:
+    from features.users import get_client_display_id_from_request as _user_display_id_from_request
+    from features.users import get_client_id_from_request as _user_id_from_request
+except Exception:  # pragma: no cover - import fallback for isolated tests
+    _user_display_id_from_request = None
+    _user_id_from_request = None
+
 
 router = APIRouter()
+REPORT_FILE_VIEW_MAX_BYTES = 1024 * 1024
+
+
+def _is_path_under(path: str, root: str) -> bool:
+    target = os.path.abspath(path)
+    base = os.path.abspath(root)
+    return target == base or target.startswith(base + os.sep)
+
+
+def _is_registered_report_file_path(path: str) -> bool:
+    if not path:
+        return False
+    for report in test_report_db.get_reports(limit=500):
+        result_dir = report.get("result_dir")
+        if result_dir and _is_path_under(path, result_dir):
+            return True
+        timestamp = report.get("timestamp", "")
+        if result_dir and timestamp:
+            android_suite_dir = os.path.dirname(os.path.dirname(result_dir))
+            logs_dir = os.path.join(android_suite_dir, "logs", timestamp)
+            if _is_path_under(path, logs_dir):
+                return True
+    return False
+
+
+def _client_identity_aliases(request: Request) -> tuple[str, set[str]]:
+    display_id = ""
+    aliases: set[str] = set()
+    try:
+        if _user_id_from_request:
+            aliases.add(str(_user_id_from_request(request) or "").strip())
+    except Exception:
+        pass
+    try:
+        display_id = str(_user_display_id_from_request(request) or "").strip() if _user_display_id_from_request else ""
+        aliases.add(display_id)
+    except Exception:
+        pass
+    try:
+        legacy_id = str(get_client_id_from_request(request) or "").strip()
+        aliases.add(legacy_id)
+    except Exception:
+        pass
+    try:
+        config = config_manager.load_config()
+        configured_ip = str(config.get("client_ip") or "").strip()
+        username = str(config.get("client_username") or "").strip()
+        if configured_ip and username:
+            aliases.add(f"{username}@{configured_ip}")
+            display_id = display_id or f"{username}@{configured_ip}"
+    except Exception:
+        pass
+    return display_id, {item for item in aliases if item}
+
+
+def _decorate_report_for_client(report: dict, display_id: str, aliases: set[str]) -> dict:
+    item = dict(report)
+    client_id = str(item.get("client_id") or "").strip()
+    stored_display = str(item.get("display_client_id") or item.get("client_name") or "").strip()
+    if stored_display:
+        item["display_client_id"] = stored_display
+    elif display_id and client_id in aliases:
+        item["display_client_id"] = display_id
+    elif item.get("user") and "@" in client_id:
+        item["display_client_id"] = client_id
+    return item
+
+
+def _report_matches_aliases(report: dict, aliases: set[str]) -> bool:
+    values = {
+        str(report.get("client_id") or "").strip(),
+        str(report.get("display_client_id") or "").strip(),
+        str(report.get("client_name") or "").strip(),
+    }
+    return bool(aliases.intersection({item for item in values if item}))
 
 # ==================== List Reports ====================
 
@@ -24,20 +108,27 @@ async def list_reports(request: Request, user_only: bool = False):
     start_time = time.time()
 
     try:
-        client_id_filter = None
+        display_id, aliases = _client_identity_aliases(request)
         if user_only:
-            client_id = get_client_id_from_request(request)
-            config = config_manager.load_config()
-            configured_ip = config.get("client_ip", "")
-            username = config.get("client_username", "unknown")
-
-            if configured_ip and ("@127.0.0.1" in client_id or "@::1" in client_id or "@localhost" in client_id):
-                client_id_filter = f"{username}@{configured_ip}"
-            else:
-                client_id_filter = client_id
+            client_id_filter = next(iter(aliases), None)
+        else:
+            client_id_filter = None
 
         db_start = time.time()
-        all_reports = test_report_db.get_reports(limit=30, user_only=client_id_filter)
+        if user_only and not aliases:
+            all_reports = []
+        elif user_only:
+            candidate_reports = test_report_db.get_reports(limit=200)
+            all_reports = [
+                _decorate_report_for_client(report, display_id, aliases)
+                for report in candidate_reports
+                if _report_matches_aliases(report, aliases)
+            ][:30]
+        else:
+            all_reports = [
+                _decorate_report_for_client(report, display_id, aliases)
+                for report in test_report_db.get_reports(limit=30, user_only=client_id_filter)
+            ]
         db_time = (time.time() - db_start) * 1000
 
         total_time = (time.time() - start_time) * 1000
@@ -117,17 +208,22 @@ async def download_report(
 
         elif path:
             logger.info(f"[DOWNLOAD] View file content: path='{path}'")
+            if not _is_registered_report_file_path(path):
+                return error_response("File path is not part of a registered report", 403)
             config = config_manager.load_config()
             with dependencies.ssh_manager.optional_connection(config) as ssh:
                 if not ssh:
                     return error_response("SSH connection failed", 500)
 
-                cat_cmd = f"cat '{path}' 2>/dev/null"
+                cat_cmd = f"head -c {REPORT_FILE_VIEW_MAX_BYTES + 1} -- {shlex.quote(path)} 2>/dev/null"
                 output, _error, _code = dependencies.ssh_manager.execute_command(
                     ssh,
                     cat_cmd,
                     timeout=30,
                 )
+                truncated = len(output.encode("utf-8", errors="ignore")) > REPORT_FILE_VIEW_MAX_BYTES
+                if truncated:
+                    output = output[:REPORT_FILE_VIEW_MAX_BYTES]
 
                 file_ext = os.path.splitext(path)[1].lower()
                 if file_ext in [".xml", ".html"]:
@@ -137,7 +233,7 @@ async def download_report(
                 else:
                     content_type = "text/plain"
 
-                return JSONResponse(content={"success": True, "content": output, "content_type": content_type})
+                return JSONResponse(content={"success": True, "content": output, "content_type": content_type, "truncated": truncated})
         else:
             return error_response("Please provide report_timestamp or path parameter", 400)
 

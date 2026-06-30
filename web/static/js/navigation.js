@@ -449,6 +449,7 @@ function initWebSocket() {
                     case 'log_update':
                         debugLog('[WebSocket] log_update:', data.log);
                         addNormalizedLogEntry(data);
+                        state.lastLogCount = (state.lastLogCount || 0) + 1;
                         break;
 
                     case 'test_complete':
@@ -527,7 +528,7 @@ function initWebSocket() {
 
                     case 'devices_changed':
                         // USB 设备插拔事件，自动刷新设备列表
-                        console.log('[WebSocket] devices_changed received:', data);
+                        debugLog('[WebSocket] devices_changed received:', data);
                         debugLog('[WebSocket] devices_changed:', data.devices);
                         if (data.notification) {
                             handleRealtimeNotification(data.notification, { toast: false });
@@ -2178,8 +2179,13 @@ async function analyzeSuiteApk(path, options = {}) {
 
         window.apkCurrentTaskId = task.task_id;
         setApkUploadEmpty(false);
-        window.apkPendingOpenTarget = options.openSourcePath ? {
-            filePath: options.openSourcePath,
+        const pendingOpenPaths = Array.from(new Set([
+            options.openSourcePath,
+            options.openFallbackSourcePath
+        ].filter(Boolean)));
+        window.apkPendingOpenTarget = pendingOpenPaths.length ? {
+            filePath: pendingOpenPaths[0],
+            fallbackPaths: pendingOpenPaths.slice(1),
             line: Number(options.openSourceLine || 0) || null
         } : null;
 
@@ -2260,12 +2266,12 @@ const debouncedRefreshDevices = debounce(() => loadDevices(false), 500);
 const debouncedRefreshUsers = debounce(() => loadUsers(false), 500);
 
 function renderDevices() {
-    console.log('[renderDevices] Called, state.devices:', state.devices);
+    debugLog('[renderDevices] Called, state.devices:', state.devices);
     const leftContainer = document.getElementById('device-list-left');
     const rightContainer = document.getElementById('device-list-right');
     const deviceCanvas = document.getElementById('device-canvas');
 
-    console.log('[renderDevices] Containers:', { leftContainer: !!leftContainer, rightContainer: !!rightContainer, deviceCanvas: !!deviceCanvas });
+    debugLog('[renderDevices] Containers:', { leftContainer: !!leftContainer, rightContainer: !!rightContainer, deviceCanvas: !!deviceCanvas });
 
     // Early return if containers not ready
     if (!leftContainer || !rightContainer || !deviceCanvas) {
@@ -5142,8 +5148,13 @@ function startStatusPolling() {
             // 检查是否有 WebSocket 连接
             const hasRealtimeConnection = state.websocket && state.websocket.readyState === WebSocket.OPEN;
 
-            // 如果没有实时连接，获取日志；否则只获取状态
-            const status = await apiCall(hasRealtimeConnection ? '/api/test/status?logs=false' : '/api/test/status');
+            // WebSocket 是实时主通道；测试运行时仍拉增量日志兜底，避免开始测试
+            // 前后的短暂连接切换导致早期日志没有立刻出现在日志区域。
+            const shouldFetchLogs = state.testing || !hasRealtimeConnection;
+            const statusUrl = shouldFetchLogs
+                ? `/api/test/status?since=${encodeURIComponent(String(state.lastLogCount || 0))}`
+                : '/api/test/status?logs=false';
+            const status = await apiCall(statusUrl);
 
             // 检查 USB 监控器状态并提示（仅显示一次）
             if (!shownPyudevWarning && status.usb_monitor) {
@@ -5178,14 +5189,11 @@ function startStatusPolling() {
                 updateVpnStatus(status.vpn_connected);
             }
 
-            // 如果没有实时连接，处理日志更新
-            if (!hasRealtimeConnection && status.logs && status.logs.length > 0) {
-                if (status.logs.length > state.lastLogCount) {
-                    // 显示新增的日志（按 source 路由到对应 Tab）
-                    const newLogs = status.logs.slice(state.lastLogCount);
-                    newLogs.forEach(addNormalizedLogEntry);
-                    state.lastLogCount = status.logs.length;
-                }
+            if (status.logs && status.logs.length > 0) {
+                status.logs.forEach(addNormalizedLogEntry);
+                state.lastLogCount = status.log_count || (state.lastLogCount + status.logs.length);
+            } else if (typeof status.log_count === 'number') {
+                state.lastLogCount = Math.max(state.lastLogCount || 0, status.log_count);
             }
 
             // 动态调整轮询间隔：如果测试正在运行，使用快速轮询；否则退避
@@ -5508,7 +5516,7 @@ function displayTestReports(reports) {
 
     reports.forEach(report => {
         const testType = report.test_type || '-';
-        const displayClient = report.client_id || report.user || '-';
+        const displayClient = report.display_client_id || report.client_name || report.user || report.client_id || '-';
         const passCount = report.pass !== undefined ? report.pass : '-';
         const failCount = report.fail !== undefined ? report.fail : '-';
         const totalCount = report.total !== undefined ? report.total : '-';
@@ -5526,7 +5534,7 @@ function displayTestReports(reports) {
         tr.dataset.suitePath = report.suite_path || '';
 
         tr.innerHTML = `
-            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${displayClient}</td>
+            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${escapeHtml(displayClient)}</td>
             <td style="padding: 4px 6px; text-align: center; font-weight: 700; font-size: 13px; color: ${typeColor};">${testType}</td>
             <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px; color: var(--text-primary);">${escapeHtml(suiteVersion)}</td>
             <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${report.timestamp}</td>
@@ -6873,10 +6881,8 @@ function displayReportAnalysis(data) {
         console.error('[displayReportAnalysis] Summary not generated. summaryDiv:', summaryDiv, 'data.summary:', data.summary);
     }
 
-    // 显示详细信息
-    if (detailsDiv && data.details) {
-        detailsDiv.innerHTML = ``;
-    }
+    // 详情区保留给后续扩展；当前不额外展示报告级操作栏。
+    if (detailsDiv) detailsDiv.innerHTML = '';
 
     // 显示失败用例
     if (failuresDiv && failureList && data.failures && data.failures.length > 0) {
@@ -6917,22 +6923,20 @@ function displayReportAnalysis(data) {
             const escTestCaseName = escapeJsAttr(testCaseName);
 
             return `
-                <div style="background: var(--darker-bg); border-left: 3px solid var(--danger-color); border-radius: 4px; padding: 12px; margin-bottom: 12px; position: relative;">
-                    <!-- 右上角按钮 -->
-                    <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
-                        ${issueIdFromReport ? `<button onclick="openRedmineReplyModal('${escModuleName}', '${escTestCaseName}', '${idx}', '${issueIdFromReport}')" data-reason="${encodeURIComponent(reasonText)}" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(245, 87, 108, 0.3);">📝 Redmine回复</button>` : ''}
-                        <button onclick="goToTestCase('${reportTestType}', '${escModuleName}', '${escTestCaseName}')" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500; box-shadow: 0 2px 4px rgba(56, 249, 215, 0.3);">🧪 单测用例</button>
-                        <button onclick="openReportDiagnosisModal(${idx})" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #00bcd4 0%, #3f51b5 100%); color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-weight: 500;">🤖 报错诊断</button>
+                <div class="report-failure-card">
+                    <div class="report-failure-card-head">
+                        <div class="report-failure-title">
+                            <div>测试模块: <span>${escapeHtml(moduleName)}</span></div>
+                            <div>测试用例: <code>${escapeHtml(testCaseName)}</code></div>
+                        </div>
+                        <div class="report-failure-actions">
+                            ${issueIdFromReport ? `<button class="report-failure-action reply" onclick="openRedmineReplyModal('${escModuleName}', '${escTestCaseName}', '${idx}', '${issueIdFromReport}')" data-reason="${encodeURIComponent(reasonText)}">Redmine回复</button>` : ''}
+                            <button class="report-failure-action test" onclick="goToTestCase('${reportTestType}', '${escModuleName}', '${escTestCaseName}')">单测用例</button>
+                            <button class="report-failure-action diagnose" onclick="openReportDiagnosisModal(${idx})">报错诊断</button>
+                        </div>
                     </div>
-
-                    <div style="margin-bottom: 8px; padding-right: 240px;">
-                        <div style="font-size: 12px; color: var(--text-secondary);">测试模块: <span style="font-weight: 600; color: var(--text-primary);">${moduleName}</span></div>
-                    </div>
-                    <div style="margin-bottom: 8px; padding-right: 240px;">
-                        <div style="font-size: 12px; color: var(--text-secondary);">测试用例: <span style="font-family: 'Courier New', monospace; color: var(--primary-color); word-break: break-all;">${testCaseName}</span></div>
-                    </div>
-                    <div style="padding-right: 240px;">
-                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">报错信息: </div>
+                    <div>
+                        <div class="report-failure-reason-label">报错信息</div>
                         <div class="failure-reason" id="failure-reason-${idx}" style="font-size: 11px; font-family: 'Courier New', monospace; white-space: pre-wrap; word-wrap: break-word;">${formattedStackTrace}</div>
                         <div class="failure-reason-raw" id="failure-reason-raw-${idx}" style="display: none;">${escapeHtml(reasonText)}</div>
                     </div>
@@ -6942,7 +6946,15 @@ function displayReportAnalysis(data) {
 
         failureList.innerHTML = failuresHTML;
     } else if (failuresDiv) {
-        failuresDiv.style.display = 'none';
+        failuresDiv.style.display = 'block';
+        if (failureList) {
+            failureList.innerHTML = `
+                <div class="report-empty-success">
+                    <b>未发现失败用例</b>
+                    <span>这份报告没有可诊断的失败项，可以清除后继续分析下一份报告。</span>
+                </div>
+            `;
+        }
     }
 }
 
@@ -6950,6 +6962,16 @@ function getReportFailureByIndex(failureIndex) {
     const report = window.currentReportAnalysisData;
     if (!report || !Array.isArray(report.failures)) return null;
     return report.failures[failureIndex] || null;
+}
+
+function openReportAnalysisRedmineAgent(issueId = '') {
+    const frame = document.getElementById('redmine-agent-frame');
+    const query = new URLSearchParams();
+    query.set('tab', 'issues');
+    if (issueId) query.set('issue', issueId);
+    if (frame) frame.src = '/redmine-agent?' + query.toString();
+    minimizeReportDiagnosisWorkbench();
+    if (typeof switchPage === 'function') switchPage('redmine-agent', null);
 }
 
 function getReportDiagnosisKey(failureIndex = 0) {
@@ -7034,16 +7056,7 @@ function renderReportDiagnosisLoading(failure, classNames, errorMessage) {
                     <div class="dx-title-main">${escapeHtml(failure.name || failure.test_name || '未知用例')}</div>
                     <span class="dx-status-pill">诊断中</span>
                 </div>
-                <div class="dx-meta-grid">
-                    <div class="dx-metric">
-                        <span class="dx-metric-label">提取类名</span>
-                        <span class="dx-metric-value">${classNames.length ? escapeHtml(classNames.join(', ')) : '无'}</span>
-                    </div>
-                    <div class="dx-metric">
-                        <span class="dx-metric-label">堆栈摘要</span>
-                        <span class="dx-metric-value">${escapeHtml((errorMessage || '').slice(0, 160) || '无')}</span>
-                    </div>
-                </div>
+                <div class="dx-compact-line">${escapeHtml((errorMessage || '').split('\n').slice(0, 2).join('\n') || '正在提取失败上下文...')}</div>
             </div>
         `;
     }
@@ -7127,8 +7140,75 @@ function renderDxMetric(label, value) {
     `;
 }
 
+function renderDxLocatorRow(label, value) {
+    return `
+        <div class="dx-locator-row">
+            <span class="dx-locator-label">${escapeHtml(label)}</span>
+            <span class="dx-locator-value">${escapeHtml(value || '无')}</span>
+        </div>
+    `;
+}
+
 function renderDxEmpty(text) {
     return `<div class="dx-empty">${escapeHtml(text)}</div>`;
+}
+
+function joinSuiteArtifactPath(rootPath, artifactPath) {
+    const artifact = String(artifactPath || '').trim();
+    if (!artifact) return String(rootPath || '').trim();
+    if (artifact.startsWith('/')) return artifact;
+    const root = String(rootPath || '').trim().replace(/\/+$/, '');
+    return root ? `${root}/${artifact.replace(/^\/+/, '')}` : artifact;
+}
+
+function normalizeDiagnosisSourceDisplayPath(path) {
+    const text = String(path || '').trim().replace(/\\/g, '/');
+    if (!text) return '';
+    const srcIndex = text.lastIndexOf('/src/');
+    if (srcIndex >= 0) return text.slice(srcIndex + 5);
+    const packageMatch = text.match(/(?:^|\/)(com|android|org|libcore)\//);
+    if (packageMatch && typeof packageMatch.index === 'number') {
+        return text.slice(text[packageMatch.index] === '/' ? packageMatch.index + 1 : packageMatch.index);
+    }
+    return text;
+}
+
+function getDiagnosisDisplaySourcePath(sourceResults, sourceGuess, sourcePath) {
+    const results = Array.isArray(sourceResults) ? sourceResults : [];
+    const exact = results.find(item => item && item.is_exact_location && (item.path || item.display_path));
+    const first = exact || results.find(item => item && (item.path || item.display_path));
+    return normalizeDiagnosisSourceDisplayPath(
+        (first && (first.path || first.display_path)) ||
+        sourceGuess?.source_path ||
+        sourcePath ||
+        ''
+    );
+}
+
+function getReportIssueIdFromName() {
+    const reportName = window.currentReportName || window.currentReportAnalysisData?.report_name || '';
+    const match = String(reportName || '').match(/^Redmine-(\d+)-/);
+    return match ? match[1] : '';
+}
+
+function buildReportDiagnosisReplyText(data, patchDraft) {
+    const aiResult = data.ai_result || {};
+    const lines = [
+        `**测试模块**: ${data.module || '-'}`,
+        '',
+        `**测试用例**: ${data.test_name || '-'}`,
+        '',
+        '**初步分析**:',
+        aiResult.root_cause || data.summary || aiResult.analysis || '-',
+    ];
+    const suggestions = aiResult.suggestions || [];
+    if (suggestions.length) {
+        lines.push('', '**处理建议**:', suggestions.map((item, idx) => `${idx + 1}. ${item}`).join('\n'));
+    }
+    if (patchDraft) {
+        lines.push('', '**补丁方向**:', '<pre>', patchDraft, '</pre>');
+    }
+    return lines.join('\n');
 }
 
 function renderReportDiagnosis(data) {
@@ -7136,30 +7216,37 @@ function renderReportDiagnosis(data) {
     const diagnosticResult = $('report-diagnostic-result');
     if (!diagnosticResult) return;
 
-    const failureLocation = data.failure_location || {};
     const aiResult = data.ai_result || {};
     const kbResults = data.knowledge_base_results || [];
     const sourceResults = data.source_search_results || [];
     const patchDraft = data.patch_draft || '';
     const stackTrace = data.stack_trace || '';
-    const keywords = data.keywords || [];
     const suiteTarget = data.suite_target || {};
     const suiteArtifact = suiteTarget.artifact || null;
     const artifactCandidates = suiteTarget.artifact_candidates || [];
     const sourceGuess = suiteTarget.source_guess || {};
     const sourcePath = data.source_path || sourceGuess.source_path || '';
+    const suiteArtifactPath = joinSuiteArtifactPath(suiteTarget.suite_root, suiteArtifact ? suiteArtifact.path : '');
+    const displaySourcePath = getDiagnosisDisplaySourcePath(sourceResults, sourceGuess, sourcePath);
     const currentFailureIndex = Number(data.failure_index || 0) || 0;
-    const failureLine = failureLocation.line_number || sourceGuess.line_number || '';
-    const failureFile = failureLocation.file_name
-        ? `${failureLocation.file_name}.${failureLocation.file_type || ''}:${failureLine || 'N/A'}`
-        : '未提取到';
     const suggestions = aiResult.suggestions || [];
+    const issueIdFromReport = getReportIssueIdFromName();
+    const currentFailure = getReportFailureByIndex(currentFailureIndex) || {};
+    const reportTestType = (window.currentReportAnalysisData?.details && window.currentReportAnalysisData.details.test_type) || data.test_type || suiteTarget.test_type || '';
+    const replyDraft = buildReportDiagnosisReplyText(data, patchDraft);
+    const hasExactArtifact = Boolean(suiteArtifact && (
+        (suiteArtifact.reasons || []).includes('exact-module-binary') ||
+        (suiteArtifact.path || '').toLowerCase().endsWith('/' + String(data.module || currentFailure.module || '').toLowerCase() + '.apk') ||
+        (suiteArtifact.path || '').toLowerCase().endsWith('/' + String(data.module || currentFailure.module || '').toLowerCase() + '.jar')
+    ));
 
     window.reportDiagnosis = {
         data,
         target: suiteTarget,
         failureIndex: currentFailureIndex,
         key: (window.reportDiagnosis || {}).key,
+        displaySourcePath,
+        suiteArtifactPath,
         text: [
             `报告: ${data.report_name || ''}`,
             `用例: ${data.test_name || ''}`,
@@ -7168,18 +7255,18 @@ function renderReportDiagnosis(data) {
             `套件版本: ${suiteTarget.suite_version || data.suite_version || ''}`,
             `套件: ${suiteTarget.suite_name || suiteTarget.suite_path || ''}`,
             `构件: ${suiteArtifact ? suiteArtifact.path : ''}`,
-            `源码路径: ${sourcePath}`,
-            `失败位置: ${failureLocation.file_name ? `${failureLocation.file_name}.${failureLocation.file_type}:${failureLocation.line_number}` : '未提取到'}`,
+            `源码路径: ${displaySourcePath || sourcePath}`,
             `根因: ${aiResult.root_cause || data.summary || ''}`,
             `分析: ${aiResult.analysis || ''}`,
             `建议: ${(aiResult.suggestions || []).join('\n')}`,
             `补丁草案:\n${patchDraft}`,
             `堆栈:\n${stackTrace || '无'}`
-        ].join('\n\n')
+        ].join('\n\n'),
+        replyDraft,
+        patchDraft
     };
 
     if (diagnosticSummary) {
-        const keywordChips = keywords.slice(0, 8).map(item => `<span class="dx-chip">${escapeHtml(item)}</span>`).join('');
         diagnosticSummary.innerHTML = `
             <div class="dx-hero">
                 <div class="dx-title-row">
@@ -7190,28 +7277,19 @@ function renderReportDiagnosis(data) {
                         <span class="dx-status-pill">${escapeHtml(suiteTarget.suite_version || data.suite_version || '未知版本')}</span>
                     </div>
                 </div>
-                <div class="dx-meta-grid">
-                    ${renderDxMetric('失败位置', failureFile)}
-                    ${renderDxMetric('源码路径', sourcePath || '未推断')}
-                    ${renderDxMetric('构件置信度', String(suiteTarget.artifact_confidence || 0))}
-                    <div class="dx-metric">
-                        <span class="dx-metric-label">诊断关键词</span>
-                        <span class="dx-chip-row">${keywordChips || '<span class="dx-muted">无</span>'}</span>
-                    </div>
-                </div>
+                <div class="dx-compact-line">${escapeHtml([data.module || currentFailure.module || '', suiteArtifactPath, displaySourcePath].filter(Boolean).join(' | ') || '当前失败项诊断')}</div>
             </div>
         `;
     }
 
     const sourceCards = sourceResults.length > 0
         ? sourceResults.map(item => `
-            <div class="dx-list-item">
+            <div class="dx-list-item${item.url ? ' dx-clickable' : ''}" ${item.url ? `onclick="window.open('${escapeJsAttr(item.url)}', '_blank')"` : ''}>
                 <div class="dx-list-head">
                     <div class="dx-list-title">${escapeHtml(item.type || 'source')}</div>
-                    ${item.url ? `<a class="dx-link" href="${escapeHtml(item.url)}" target="_blank">查看源码</a>` : ''}
+                    ${item.url ? `<a class="dx-link" href="${escapeHtml(item.url)}" target="_blank" onclick="event.stopPropagation()">打开 OpenGrok</a>` : ''}
                 </div>
-                <div class="dx-list-path">${escapeHtml(item.path || item.display_path || '')}</div>
-                <div class="dx-list-meta">行 ${escapeHtml(String(item.line || 'N/A'))}</div>
+                <div class="dx-list-path dx-list-path-inline">${escapeHtml(item.path || item.display_path || '')}${item.line ? `<span>:${escapeHtml(String(item.line))}</span>` : ''}</div>
             </div>
         `).join('')
         : renderDxEmpty('未检索到 OpenGrok 源码结果');
@@ -7226,14 +7304,16 @@ function renderReportDiagnosis(data) {
         `).join('')
         : renderDxEmpty('未命中知识库');
 
-    const candidateCards = artifactCandidates.length > 0
-        ? artifactCandidates.slice(0, 5).map((item, idx) => `
-            <button class="dx-candidate" onclick="openReportDiagnosisArtifactCandidate(${idx})">
-                <span>${escapeHtml(item.path || item.name || '未知构件')}</span>
-                <b>${escapeHtml(String(item.score || 0))}</b>
-            </button>
-        `).join('')
-        : renderDxEmpty('暂无候选构件');
+    const candidateCards = !hasExactArtifact && artifactCandidates.length > 0
+        ? `<details class="dx-details"><summary>候选构件 (${artifactCandidates.length})</summary><div class="dx-list">${
+            artifactCandidates.slice(0, 5).map((item, idx) => `
+                <button class="dx-candidate" onclick="openReportDiagnosisArtifactCandidate(${idx})">
+                    <span>${escapeHtml(item.path || item.name || '未知构件')}</span>
+                    <b>${escapeHtml(String(item.score || 0))}</b>
+                </button>
+            `).join('')
+        }</div></details>`
+        : '';
 
     const suggestionCards = suggestions.length > 0
         ? suggestions.map((s, idx) => `
@@ -7244,9 +7324,24 @@ function renderReportDiagnosis(data) {
         `).join('')
         : renderDxEmpty('暂无解决建议');
 
+    const actionPanel = `
+        <section class="dx-section dx-action-section">
+            <div class="dx-section-title">下一步动作</div>
+            <button type="button" class="dx-action-card" onclick="openReportDiagnosisTestCase('${escapeJsAttr(reportTestType)}', '${escapeJsAttr(data.module || currentFailure.module || '')}', '${escapeJsAttr(data.test_name || currentFailure.name || '')}')">
+                <b>执行单测复现</b>
+                <span>跳到测试页并填入模块/用例</span>
+            </button>
+            ${suiteArtifact ? `<button type="button" class="dx-action-card" onclick="openReportDiagnosisSuiteBrowser()"><b>打开测试套件</b><span>${escapeHtml(suiteArtifact.path || '')}</span></button>` : ''}
+            ${issueIdFromReport ? `<button type="button" class="dx-action-card" onclick="openReportDiagnosisRedmineReply()"><b>Redmine 回复</b><span>基于诊断结论生成回复草稿</span></button>` : ''}
+            ${issueIdFromReport ? `<button type="button" class="dx-action-card" onclick="openReportAnalysisRedmineAgent('${escapeJsAttr(issueIdFromReport)}')"><b>Redmine 工作台</b><span>查看工单历史、附件证据和相似案例</span></button>` : ''}
+        </section>
+    `;
+
     diagnosticResult.innerHTML = `
-        <div class="dx-workflow">
-            <section class="dx-workflow-step dx-workflow-step-analysis">
+        <div class="dx-workbench-vertical">
+            ${actionPanel}
+            <div class="dx-workflow">
+                <section class="dx-workflow-step dx-workflow-step-analysis">
                 <div class="dx-step-label">
                     <span>1</span>
                     <div>
@@ -7268,9 +7363,9 @@ function renderReportDiagnosis(data) {
                         <div class="dx-stack">${escapeHtml(stackTrace || data.error_message || '无')}</div>
                     </div>
                 </div>
-            </section>
+                </section>
 
-            <section class="dx-workflow-step dx-workflow-step-source">
+                <section class="dx-workflow-step dx-workflow-step-source">
                 <div class="dx-step-label">
                     <span>2</span>
                     <div>
@@ -7284,28 +7379,20 @@ function renderReportDiagnosis(data) {
                             <div class="dx-section-title">套件源码定位</div>
                             ${suiteArtifact ? `<button class="btn-xxs btn-primary" onclick="openReportDiagnosisSourcePreview()">反编译并预览源码</button>` : ''}
                         </div>
-                        <div class="dx-meta-grid">
-                            ${renderDxMetric('测试套件', suiteTarget.suite_name || suiteTarget.suite_path || '未定位')}
-                            ${renderDxMetric('套件根目录', suiteTarget.suite_root || '无')}
-                            ${renderDxMetric('APK/JAR 构件', suiteArtifact ? suiteArtifact.path : '未定位到构件')}
-                            ${renderDxMetric('源码路径猜测', sourceGuess.source_path || sourcePath || '未推断')}
-                            ${renderDxMetric('失败行号', String(failureLine || 'N/A'))}
-                            ${renderDxMetric('构件置信度', String(suiteTarget.artifact_confidence || 0))}
+                        <div class="dx-locator-list">
+                            ${renderDxLocatorRow('测试套件', suiteArtifactPath || '未定位')}
+                            ${renderDxLocatorRow('源码路径猜测', displaySourcePath || '未推断')}
                         </div>
-                        ${suiteTarget.match_notes?.length ? `<div class="dx-notes">${escapeHtml(suiteTarget.match_notes.join('\n'))}</div>` : ''}
-                    </div>
-                    <div class="dx-section">
-                        <div class="dx-section-title">候选构件</div>
-                        <div class="dx-list">${candidateCards}</div>
+                        ${candidateCards}
                     </div>
                     <div class="dx-section">
                         <div class="dx-section-title">OpenGrok 源码搜索 <span>${sourceResults.length} 结果</span></div>
                         <div class="dx-list">${sourceCards}</div>
                     </div>
                 </div>
-            </section>
+                </section>
 
-            <section class="dx-workflow-step dx-workflow-step-solution">
+                <section class="dx-workflow-step dx-workflow-step-solution">
                 <div class="dx-step-label">
                     <span>3</span>
                     <div>
@@ -7327,9 +7414,33 @@ function renderReportDiagnosis(data) {
                         <div class="dx-list">${kbCards}</div>
                     </div>
                 </div>
-            </section>
+                </section>
+            </div>
         </div>
     `;
+}
+
+function openReportDiagnosisRedmineReply() {
+    const diag = window.reportDiagnosis || {};
+    const data = diag.data || {};
+    const failureIndex = Number(data.failure_index || diag.failureIndex || 0) || 0;
+    const issueId = getReportIssueIdFromName();
+    if (!issueId) {
+        showToast('当前报告名称未关联 Redmine Issue ID', 'warning');
+        return;
+    }
+    const failure = getReportFailureByIndex(failureIndex) || {};
+    const moduleName = data.module || failure.module || '未知模块';
+    const testName = data.test_name || failure.name || failure.test_name || '未知用例';
+    const modalId = openRedmineReplyModal(moduleName, testName, failureIndex, issueId);
+    const modal = modalId ? document.getElementById(modalId) : null;
+    const area = modal?.querySelector('[data-redmine-reply-text]');
+    if (area && diag.replyDraft) area.value = diag.replyDraft;
+}
+
+function openReportDiagnosisTestCase(testType, moduleName, testCaseName) {
+    minimizeReportDiagnosisWorkbench();
+    goToTestCase(testType, moduleName, testCaseName);
 }
 
 async function copyReportDiagnosis() {
@@ -7356,15 +7467,17 @@ function buildReportDiagnosisSourcePath(target) {
 }
 
 function getReportDiagnosisSourceLocation() {
-    const data = (window.reportDiagnosis || {}).data || {};
+    const diag = window.reportDiagnosis || {};
+    const data = diag.data || {};
     const target = getCurrentReportDiagnosisTarget();
-    const sourcePath = buildReportDiagnosisSourcePath(target);
+    const sourcePath = diag.displaySourcePath || buildReportDiagnosisSourcePath(target);
+    const fallbackSourcePath = buildReportDiagnosisSourcePath(target);
     const lineNumber = Number(
         data?.failure_location?.line_number ||
         target?.source_guess?.line_number ||
         0
     ) || null;
-    return { sourcePath, lineNumber };
+    return { sourcePath, fallbackSourcePath, lineNumber };
 }
 
 function _requireDiagnosisArtifact(msg) {
@@ -7378,8 +7491,9 @@ function _requireDiagnosisArtifact(msg) {
 
 async function openReportDiagnosisSourcePreview() {
     if (!_requireDiagnosisArtifact()) return;
-    const { sourcePath, lineNumber } = getReportDiagnosisSourceLocation();
-    await openReportDiagnosisApkAnalysis({ sourcePath, lineNumber });
+    minimizeReportDiagnosisWorkbench();
+    const { sourcePath, fallbackSourcePath, lineNumber } = getReportDiagnosisSourceLocation();
+    await openReportDiagnosisApkAnalysis({ sourcePath, fallbackSourcePath, lineNumber });
 }
 
 async function openReportDiagnosisArtifactCandidate(index = 0) {
@@ -7394,8 +7508,9 @@ async function openReportDiagnosisArtifactCandidate(index = 0) {
         artifact: candidate,
         artifact_confidence: candidate.score || 0
     };
-    const { sourcePath, lineNumber } = getReportDiagnosisSourceLocation();
-    await openReportDiagnosisApkAnalysis({ sourcePath, lineNumber });
+    minimizeReportDiagnosisWorkbench();
+    const { sourcePath, fallbackSourcePath, lineNumber } = getReportDiagnosisSourceLocation();
+    await openReportDiagnosisApkAnalysis({ sourcePath, fallbackSourcePath, lineNumber });
 }
 
 async function openReportDiagnosisSuiteBrowser() {
@@ -7404,6 +7519,7 @@ async function openReportDiagnosisSuiteBrowser() {
         showToast('未找到可打开的套件构件', 'warning');
         return;
     }
+    minimizeReportDiagnosisWorkbench();
     const artifactPath = target.artifact.path || '';
     const directoryPath = getParentSuitePath(artifactPath);
     if (typeof switchPage === 'function') {
@@ -7420,12 +7536,13 @@ async function openReportDiagnosisSourceFile() {
         showToast('未推断出源码路径', 'warning');
         return;
     }
-    const { sourcePath, lineNumber } = getReportDiagnosisSourceLocation();
+    const { sourcePath, fallbackSourcePath, lineNumber } = getReportDiagnosisSourceLocation();
     if (!sourcePath) {
         showToast('未推断出源码路径', 'warning');
         return;
     }
-    await openReportDiagnosisApkAnalysis({ sourcePath, lineNumber });
+    minimizeReportDiagnosisWorkbench();
+    await openReportDiagnosisApkAnalysis({ sourcePath, fallbackSourcePath, lineNumber });
 }
 
 async function openReportDiagnosisApkAnalysis(options = {}) {
@@ -7434,11 +7551,12 @@ async function openReportDiagnosisApkAnalysis(options = {}) {
 
     const data = (window.reportDiagnosis || {}).data || {};
     const sourcePath = options.sourcePath || buildReportDiagnosisSourcePath(target);
+    const fallbackSourcePath = options.fallbackSourcePath || buildReportDiagnosisSourcePath(target);
     const lineNumber = Number(options.lineNumber || data?.failure_location?.line_number || target?.source_guess?.line_number || 0) || null;
     state.suiteBrowser.selectedSuitePath = target.suite_path || state.suiteBrowser.selectedSuitePath;
-    window.apkPendingOpenTarget = sourcePath ? { filePath: sourcePath, line: lineNumber } : null;
     await analyzeSuiteApk(target.artifact.path, {
         openSourcePath: sourcePath,
+        openFallbackSourcePath: fallbackSourcePath,
         openSourceLine: lineNumber,
         diagnosisTarget: target
     });
@@ -9020,6 +9138,7 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
             updateRedmineFileList(fileInputId, fileListId);
         });
     }
+    return modalId;
 }
 
 function updateRedmineFileList(fileInputId, fileListId) {
@@ -10144,8 +10263,8 @@ async function pollApkStatus() {
                 const target = window.apkPendingOpenTarget;
                 window.apkPendingOpenTarget = null;
                 setTimeout(() => {
-                    viewApkFileAt(target.filePath, target.line || null)
-                        .then(file => enhanceReportDiagnosisWithSource(target.filePath, file?.content || ''))
+                    openApkPendingSourceTarget(target)
+                        .then(file => enhanceReportDiagnosisWithSource(file?.path || target.filePath, file?.content || ''))
                         .catch(() => {});
                 }, 200);
             }
@@ -10547,6 +10666,33 @@ async function viewApkFileAt(filePath, targetLine = null) {
 
     activateApkFileTab(filePath, targetLine);
     return window.apkOpenFiles.get(filePath);
+}
+
+async function openApkPendingSourceTarget(target) {
+    const paths = Array.from(new Set([
+        target?.filePath,
+        ...(Array.isArray(target?.fallbackPaths) ? target.fallbackPaths : [])
+    ].filter(Boolean)));
+    if (paths.length) {
+        switchApkTab('source');
+    }
+    let lastFile = null;
+    for (const filePath of paths) {
+        const file = await viewApkFileAt(filePath, target?.line || null);
+        lastFile = file ? { ...file, path: filePath } : null;
+        if (file && !file.error) return lastFile;
+        if (paths.length > 1 && window.apkOpenFiles?.has(filePath)) {
+            window.apkOpenFiles.delete(filePath);
+        }
+    }
+    if (lastFile?.path) {
+        window.apkOpenFiles.set(lastFile.path, lastFile);
+        activateApkFileTab(lastFile.path, target?.line || null);
+    }
+    if (paths.length) {
+        showToast(`未能自动打开源码: ${paths[0]}`, 'warning');
+    }
+    return lastFile;
 }
 
 function bindApkCodeNavigation(contentEl) {

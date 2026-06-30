@@ -59,6 +59,8 @@ class FirmwareApiTests(unittest.TestCase):
             global_state=SimpleNamespace(
                 apk_analysis_tasks={},
                 apk_analysis_tasks_lock=threading.RLock(),
+                apk_upload_locks={},
+                apk_upload_locks_lock=threading.RLock(),
                 firmware_upload_progress={},
                 firmware_upload_progress_lock=threading.RLock(),
                 websocket_connections={},
@@ -83,7 +85,19 @@ class FirmwareApiTests(unittest.TestCase):
     def test_apk_missing_task_returns_not_found(self):
         response = self.client.get("/api/apk/status/missing-task")
 
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["success"])
+
+    def test_apk_unknown_uuid_task_returns_not_found(self):
+        response = self.client.get("/api/apk/status/00000000-0000-0000-0000-000000000000")
+
         self.assertEqual(response.status_code, 404)
+        self.assertFalse(response.json()["success"])
+
+    def test_apk_delete_rejects_non_uuid_task_id(self):
+        response = self.client.delete("/api/apk/task/not-a-uuid")
+
+        self.assertEqual(response.status_code, 400)
         self.assertFalse(response.json()["success"])
 
     def test_missing_remote_firmware_path_does_not_enter_loader(self):

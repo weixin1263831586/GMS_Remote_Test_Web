@@ -36,6 +36,13 @@
     .modal-body label { font-size:13px; font-weight:600; color:var(--muted); margin-bottom:2px; display:block; }
     .modal-body input { width:100%; padding:8px 10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; font-size:13px; }
     .modal-buttons { display:flex; gap:8px; justify-content:flex-end; margin-top:6px; }
+    .redmine-reply-modal { max-width:760px; }
+    .redmine-reply-modal textarea { width:100%; min-height:280px; resize:vertical; padding:10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; font-size:13px; line-height:1.5; font-family:"Courier New", monospace; }
+    .redmine-reply-drop { width:100%; padding:18px 12px; text-align:center; cursor:pointer; border:2px dashed var(--border); border-radius:6px; background:var(--panel2); color:var(--muted); font-size:12px; transition:border-color .15s, background .15s; }
+    .redmine-reply-drop.drag-over { border-color:#60a5fa; background:#0f1f35; color:#dbeafe; }
+    .redmine-reply-file-list { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+    .redmine-reply-file { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border:1px solid var(--border); border-radius:5px; background:var(--panel2); font-size:12px; }
+    .redmine-reply-file button { padding:2px 8px; font-size:11px; }
 
     /* Tabs — inline in header, left side */
     .tabs { display:flex; gap:0; }
@@ -237,6 +244,8 @@
     .case-scope { font-size:11px; margin-top:2px; }
     .case-sources { font-size:11px; }
     .case-actions { display:flex; gap:8px; margin-top:10px; }
+    .redmine-issue-link { color:#93c5fd; font-weight:700; text-decoration:none; }
+    .redmine-issue-link:hover { color:#bfdbfe; text-decoration:underline; }
     #knowledgeBody .field { margin-bottom:8px; }
     #knowledgeBody textarea { font-size:12px; }
     .case-view-toggle { display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; }

@@ -26,6 +26,7 @@ from features.system.terminal_service import (
     handle_tradefed_list_results,
     refresh_devices_websocket,
 )
+from features.system.vnc import NOVNC_WEB_PORT
 from foundation.config import DEFAULT_SERVER_URL, PROJECT_ROOT, config_manager
 from foundation.errors import handle_api_errors
 from foundation.files import FileUtils
@@ -188,6 +189,7 @@ async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str
 @router.api_route(
     "/gms-assistant/{path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    include_in_schema=False,
 )
 async def proxy_gms_assistant(path: str, request: Request):
     return await _proxy_gms_assistant_path(path, request, proxy_base="/gms-assistant")
@@ -196,6 +198,7 @@ async def proxy_gms_assistant(path: str, request: Request):
 @router.api_route(
     "/public/{path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    include_in_schema=False,
 )
 async def proxy_gms_assistant_public(path: str, request: Request):
     return await _proxy_gms_assistant_path(f"public/{path}", request)
@@ -204,6 +207,7 @@ async def proxy_gms_assistant_public(path: str, request: Request):
 @router.api_route(
     "/assets/{path:path}",
     methods=["GET"],
+    include_in_schema=False,
 )
 async def proxy_gms_assistant_assets(path: str, request: Request):
     return await _proxy_gms_assistant_path(f"assets/{path}", request)
@@ -212,6 +216,7 @@ async def proxy_gms_assistant_assets(path: str, request: Request):
 @router.api_route(
     "/@vite/{path:path}",
     methods=["GET"],
+    include_in_schema=False,
 )
 async def proxy_gms_assistant_vite(path: str, request: Request):
     return await _proxy_gms_assistant_path(f"@vite/{path}", request)
@@ -220,6 +225,7 @@ async def proxy_gms_assistant_vite(path: str, request: Request):
 @router.api_route(
     "/@react-refresh",
     methods=["GET"],
+    include_in_schema=False,
 )
 async def proxy_gms_assistant_react_refresh(request: Request):
     return await _proxy_gms_assistant_path("@react-refresh", request)
@@ -228,6 +234,7 @@ async def proxy_gms_assistant_react_refresh(request: Request):
 @router.api_route(
     "/src/{path:path}",
     methods=["GET"],
+    include_in_schema=False,
 )
 async def proxy_gms_assistant_src(path: str, request: Request):
     return await _proxy_gms_assistant_path(f"src/{path}", request)
@@ -236,6 +243,7 @@ async def proxy_gms_assistant_src(path: str, request: Request):
 @router.api_route(
     "/node_modules/{path:path}",
     methods=["GET"],
+    include_in_schema=False,
 )
 async def proxy_gms_assistant_node_modules(path: str, request: Request):
     return await _proxy_gms_assistant_path(f"node_modules/{path}", request)
@@ -244,6 +252,7 @@ async def proxy_gms_assistant_node_modules(path: str, request: Request):
 @router.api_route(
     "/@id/{path:path}",
     methods=["GET"],
+    include_in_schema=False,
 )
 async def proxy_gms_assistant_vite_id(path: str, request: Request):
     return await _proxy_gms_assistant_path(f"@id/{path}", request)
@@ -252,6 +261,7 @@ async def proxy_gms_assistant_vite_id(path: str, request: Request):
 @router.api_route(
     "/@fs/{path:path}",
     methods=["GET"],
+    include_in_schema=False,
 )
 async def proxy_gms_assistant_vite_fs(path: str, request: Request):
     return await _proxy_gms_assistant_path(f"@fs/{path}", request)
@@ -260,6 +270,7 @@ async def proxy_gms_assistant_vite_fs(path: str, request: Request):
 @router.api_route(
     "/api/public/{path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    include_in_schema=False,
 )
 async def proxy_gms_assistant_public_api(path: str, request: Request):
     return await _proxy_gms_assistant_path(f"api/public/{path}", request)
@@ -768,7 +779,7 @@ def generate_per_api_help_text(method: str, path: str) -> str | None:
             'title': '查询Ubuntu主机桌面VNC状态',
             'description': '查询Ubuntu桌面VNC服务状态（运行中/已停止）和远程访问地址',
             'params': [],
-            'response': '{"success": true, "running": true, "url": "http://xxx:6080/vnc.html"}',
+            'response': f'{{"success": true, "running": true, "url": "http://xxx:{NOVNC_WEB_PORT}/vnc.html"}}',
             'usage': '检查Ubuntu桌面VNC服务是否正在运行，获取远程访问URL'
         },
         '/api/desktop/vnc/start': {
@@ -779,7 +790,7 @@ def generate_per_api_help_text(method: str, path: str) -> str | None:
                 {'name': 'password', 'type': 'string', 'required': False, 'desc': 'SSH登录密码（可选）'},
                 {'name': 'vnc_password', 'type': 'string', 'required': False, 'desc': 'VNC访问密码（可选）'}
             ],
-            'response': '{"success": true, "url": "http://xxx:6080/vnc.html"}',
+            'response': f'{{"success": true, "url": "http://xxx:{NOVNC_WEB_PORT}/vnc.html"}}',
             'usage': '启动Ubuntu桌面的VNC服务，通过浏览器远程访问图形化桌面'
         },
         '/api/desktop/vnc/stop': {

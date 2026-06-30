@@ -18,7 +18,7 @@ import paramiko
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from features.devices import device_lock_manager
+from features.devices.locks import device_lock_manager
 from features.system.ssh import ssh_manager
 from features.system.state import global_state
 from foundation.common_utils import CommonUtils
@@ -37,6 +37,7 @@ class LocalPtyChannel:
         self.env = env or os.environ.copy()
         self.pid, self.fd = pty.fork()
         self.closed = False
+        self._reaped = False
 
         if self.pid == 0:
             try:
@@ -86,14 +87,51 @@ class LocalPtyChannel:
             os.close(self.fd)
         except OSError:
             pass
+
+        self._terminate_child()
+
+    def _terminate_child(self) -> None:
+        """Terminate and reap the PTY child so closed terminals do not become zombies."""
+        if self._reaped:
+            return
+
+        for sig, grace_seconds in (
+            (signal.SIGHUP, 0.2),
+            (signal.SIGTERM, 0.5),
+            (signal.SIGKILL, 0.0),
+        ):
+            try:
+                os.kill(self.pid, sig)
+            except ProcessLookupError:
+                self._reap_child(block=False)
+                return
+            except OSError:
+                self._reap_child(block=False)
+                return
+
+            deadline = time.monotonic() + grace_seconds
+            while True:
+                if self._reap_child(block=False):
+                    return
+                if grace_seconds <= 0 or time.monotonic() >= deadline:
+                    break
+                time.sleep(0.02)
+
+        self._reap_child(block=True)
+
+    def _reap_child(self, *, block: bool) -> bool:
         try:
-            os.kill(self.pid, signal.SIGHUP)
+            waited_pid, _status = os.waitpid(self.pid, 0 if block else os.WNOHANG)
+        except ChildProcessError:
+            self._reaped = True
+            return True
         except OSError:
-            pass
-        try:
-            os.waitpid(self.pid, os.WNOHANG)
-        except OSError:
-            pass
+            return False
+
+        if waited_pid == self.pid:
+            self._reaped = True
+            return True
+        return False
 
 
 def close_terminal_session_resources(session_info: dict[str, Any]):
@@ -314,14 +352,22 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
             'private_key_path': config.get('private_key_path', '~/.ssh/id_rsa')
         }
 
-        ssh = ssh_manager.create_connection(ssh_config)
+        # create_connection + invoke_shell are blocking paramiko calls (connect
+        # timeout up to 5s) — build the channel off the event loop so opening a
+        # terminal doesn't stall other websocket clients.
+        def _open_terminal_channel():
+            conn = ssh_manager.create_connection(ssh_config)
+            if not conn:
+                return None, None
+            ch = conn.invoke_shell(term='xterm-256color')
+            ch.setblocking(0)
+            ch.resize_pty(width=80, height=24)
+            return conn, ch
+
+        ssh, channel = await asyncio.to_thread(_open_terminal_channel)
         if not ssh:
             await websocket.send_json({'type': 'terminal_error', 'error': 'SSH连接失败：请检查用户名、密码或密钥配置'})
             return
-
-        channel = ssh.invoke_shell(term='xterm-256color')
-        channel.setblocking(0)
-        channel.resize_pty(width=80, height=24)
 
         loop = asyncio.get_event_loop()
         with global_state.terminal_lock:

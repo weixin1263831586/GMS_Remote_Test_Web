@@ -40,8 +40,8 @@ class DeviceActionRequest(BaseModel):
 
 
 class WifiConnectRequest(DeviceActionRequest):
-    ssid: str = "AndroidWifi"
-    password: str = "1234567890"
+    ssid: str = ""
+    password: str = ""
 
 
 class DeviceShellRequest(BaseModel):
