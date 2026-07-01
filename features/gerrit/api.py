@@ -208,6 +208,143 @@ async def sync_gerrit_redmine_members(request: Request):
     return {"success": True, "data": _public_config(_dashboard_config_for_request(request), manager=manager)}
 
 
+@router.get("/review-queue")
+async def get_review_queue(
+    request: Request,
+    owner: str = Query(""),
+    refresh: bool = Query(False),
+):
+    """「待我评审」清单：作为 reviewer 仍开放的变更（reviewer:{owner} status:open）。
+
+    与个人统计的「待评审」(owner:me status:open，等我改的) 互补——这里统计等我去评审的。
+    返回归一化后的 change 列表，供个人看板像「待评审」一样直接渲染列表（而非跳查询页）。
+    """
+    from features.gerrit.config import normalize_gerrit_change
+
+    cfg = _dashboard_config_for_request(request)
+    owner_text = str(owner or cfg.get("default_owner") or "").strip()
+    if not owner_text:
+        return {"success": False, "error": "owner is required"}
+    cache_key = f"{_request_user_id(request)}:review:{owner_text}"
+    cached = _get_cache(cache_key, cfg["cache_ttl"], refresh)
+    if cached is not None:
+        return {"success": True, "data": {**cached, "cache_hit": True}}
+    query = f"reviewer:{owner_text} status:open"
+    if not cfg.get("base_url") and not cfg.get("ssh_host"):
+        return {"success": True, "data": {"count": 0, "items": [], "configured": False, "query": query}}
+    result = await _query_gerrit_dual_mode(cfg, query, max_changes=cfg["query_limit"])
+    raw_items = result.get("items") or []
+    items = sorted(
+        (normalize_gerrit_change(raw) for raw in raw_items),
+        key=lambda c: c.get("updated") or c.get("created") or "",
+        reverse=True,
+    )
+    data = {
+        "count": len(items),
+        "items": items,
+        "owner": owner_text,
+        "query": query,
+        "source": result.get("source") or "",
+        "error": result.get("error") or "",
+        "configured": True,
+    }
+    if not data.get("error"):
+        _set_cache(cache_key, data)
+    return {"success": True, "data": {**data, "cache_hit": False}}
+
+
+@router.get("/review-queue/count")
+async def get_review_queue_count(
+    request: Request,
+    owner: str = Query(""),
+    refresh: bool = Query(False),
+):
+    """「待我评审」计数（仅计数，便于部门成员表批量展示）。"""
+    data = await get_review_queue(request, owner=owner, refresh=refresh)
+    if isinstance(data, dict) and data.get("data"):
+        slim = {k: v for k, v in data["data"].items() if k != "items"}
+        return {"success": True, "data": slim}
+    return data
+
+
+@router.get("/connectivity")
+async def check_gerrit_connectivity(request: Request):
+    """探测本机（Web 服务所在主机）到 Gerrit 服务器的可达性。
+
+    Gerrit 查询（REST/SSH）本就从本机发起，因此这里直接在本机探测 ICMP/SSH 端口/HTTPS，
+    完全复现查询的真实网络路径，用于在看板全 0 时区分「Gerrit 不可达」与「真没数据」。
+    """
+    import re as _re
+    import shlex as _shlex
+
+    cfg = _dashboard_config_for_request(request)
+    # base_url 可能带 https:// 前缀和路径，ssh_host 是裸 IP/域名；优先 ssh_host。
+    raw_host = (cfg.get("ssh_host") or cfg.get("base_url") or "").strip()
+    host = raw_host.replace("https://", "").replace("http://", "").split("/")[0].strip()
+    if not host:
+        return {"success": True, "data": {"configured": False, "host": "", "message": "Gerrit 未配置 ssh_host/base_url"}}
+    ssh_port = int(cfg.get("ssh_port") or 29418)
+    safe_host = _shlex.quote(host)
+
+    async def _run(cmd: list[str], timeout: float = 8.0) -> tuple[int, str]:
+        """Run a command on the web host, returning (exit_code, combined_output)."""
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            return 124, "timeout"
+        text = (stdout.decode("utf-8", errors="ignore") + stderr.decode("utf-8", errors="ignore")).strip()
+        return proc.returncode if proc.returncode is not None else 1, text
+
+    # ICMP 可达性
+    ping_code, ping_text = await _run(["ping", "-c", "2", "-W", "2", host])
+    ping_ok = ping_code == 0
+    latency = ""
+    m = _re.search(r"= [\d.]+/([\d.]+)/", ping_text)
+    if m:
+        latency = f"{m.group(1)}ms"
+
+    # SSH 端口（Gerrit 查询实际走的端口）—— /dev/tcp 探测，成功返回 0
+    ssh_port_code, ssh_port_text = await _run(
+        ["bash", "-c", f"timeout 6 bash -c 'cat < /dev/null > /dev/tcp/{safe_host}/{ssh_port}'"], timeout=10
+    )
+    ssh_port_ok = ssh_port_code == 0
+
+    # HTTPS（REST 备用通道）
+    _, https_text = await _run(
+        ["bash", "-c", f"curl -sk -o /dev/null -w '%{{http_code}}' --max-time 6 https://{safe_host}/ || echo 000"],
+        timeout=10,
+    )
+    https_code = https_text.strip().splitlines()[-1] if https_text.strip() else "000"
+    https_ok = https_code not in ("000", "")
+
+    result = {
+        "configured": True,
+        "host": host,
+        "ssh_port": ssh_port,
+        "ping_ok": ping_ok,
+        "latency": latency,
+        "ssh_port_ok": ssh_port_ok,
+        "https_ok": https_ok,
+        "https_code": https_code,
+        "ping_raw": ping_text[:300],
+        "ssh_port_error": "" if ssh_port_ok else ssh_port_text[:200],
+    }
+
+    if ping_ok and (ssh_port_ok or https_ok):
+        verdict, level = "Gerrit 服务器可达——全 0 可能是查询条件/账号权限问题", "ok"
+    else:
+        verdict = f"Gerrit 服务器 {host} 不可达（ICMP/SSH端口{ssh_port}/HTTPS 均不通），请检查本机到 {host} 的网络路由"
+        level = "bad"
+    return {"success": True, "data": {**result, "verdict": verdict, "level": level}}
+
+
 @router.get("/changes")
 async def list_gerrit_changes(request: Request, profile_id: str = Query(""), query: str = Query("")):
     cfg = _dashboard_config_for_request(request)
@@ -390,10 +527,15 @@ async def get_gerrit_department_statistics(
             query = f"owner:{owner_text} status:any"
             result = await _query_gerrit_dual_mode(cfg, query, max_changes=query_limit, page_size=page_size)
             stats = summarize_gerrit_changes(result.get("items") or [], list_limit=list_limit)
+            # 「待成员评审」：该成员作为 reviewer 仍待处理的开放变更计数。
+            review_query = f"reviewer:{owner_text} status:open"
+            review_result = await _query_gerrit_dual_mode(cfg, review_query, max_changes=cfg["query_limit"])
+            pending_review_of_me = len(review_result.get("items") or [])
             return {
                 "owner": owner_text,
                 "name": _display_name(owner_text),
                 "summary": stats["summary"],
+                "summary_extra": {"pending_review_of_me_count": pending_review_of_me},
                 "trends": stats["trends"],
                 "lists": stats["lists"],
                 "query": query,

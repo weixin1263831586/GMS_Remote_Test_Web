@@ -5,6 +5,10 @@
   "local_server": "hcq@10.10.10.206",
   "use_key_auth": false,
   "usbip_vid_pid": "2207:0006",
+  "wifi": {
+    "ssid": "AndroidWifi",
+    "password": "1234567890"
+  },
   "private_key_path": "~/.ssh/id_rsa",
   "vnc_password": "rockchip",
   "vpn_gateways": [
@@ -32,6 +36,63 @@
   "redmine": {
     "domain": "redmine.rock-chips.com",
     "base_url": "https://redmine.rock-chips.com"
+  },
+  "redmine_stats": {
+    "stale_days": 3,
+    "window_days": 60,
+    "cache_ttl": 600
+  },
+  "redmine_auth": {
+    "username": "",
+    "password": ""
+  },
+  "gerrit_dashboard": {
+    "base_url": "https://10.10.10.29",
+    "rest_username": "",
+    "rest_password": "",
+    "rest_verify_ssl": false,
+    "ssh_host": "10.10.10.29",
+    "ssh_user": "",
+    "ssh_port": 29418,
+    "ssh_identity_file": "",
+    "query_limit": 100,
+    "cache_ttl": 600,
+    "default_owner": "chaoqun.huang@rock-chips.com",
+    "chart_date_ranges": {},
+    "department_defaults": {
+      "list_limit": 50,
+      "query_limit": 500,
+      "query_page_size": 500,
+      "max_history_changes": 0
+    },
+    "dashboard_profiles": [
+      {
+        "id": "open",
+        "name": "打开的变更",
+        "query": "status:open limit:100"
+      },
+      {
+        "id": "merged",
+        "name": "最近合入",
+        "query": "status:merged limit:100"
+      }
+    ],
+    "personal_profiles": [
+      {
+        "id": "chaoqun-huang",
+        "name": "chaoqun.huang",
+        "owner": "chaoqun.huang@rock-chips.com"
+      }
+    ],
+    "department_profiles": [
+      {
+        "id": "all",
+        "name": "全部部门",
+        "owners": [
+          "chaoqun.huang@rock-chips.com"
+        ]
+      }
+    ]
   },
   "ai_models": {
     "enabled": true,

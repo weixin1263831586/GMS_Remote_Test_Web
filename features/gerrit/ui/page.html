@@ -86,6 +86,13 @@
     .error { color:#fca5a5; }
     .status-line { margin-bottom:10px; }
     .status-line:empty { display:none; }
+    .conn-banner { display:none; align-items:center; gap:12px; flex-wrap:wrap; margin:12px 16px 0; padding:10px 14px; border-radius:8px; border:1px solid var(--bad); background:rgba(239,68,68,.12); color:#fecaca; font-size:13px; }
+    .conn-banner.show { display:flex; }
+    .conn-banner.ok { border-color:var(--ok); background:rgba(34,197,94,.12); color:#bbf7d0; }
+    .conn-banner .conn-msg { flex:1; min-width:200px; line-height:1.5; }
+    .conn-banner .conn-detail { color:var(--muted); font-size:12px; margin-top:2px; white-space:pre-line; }
+    .conn-banner button { flex-shrink:0; }
+    .review-badge { display:inline-block; min-width:22px; padding:1px 7px; margin-left:6px; border-radius:999px; background:var(--warn); color:#1a1206; font-size:12px; font-weight:700; line-height:1.5; }
     .modal { display:none; position:fixed; inset:0; z-index:100; background:rgba(0,0,0,.68); align-items:center; justify-content:center; padding:18px; }
     .modal.show { display:flex; }
     .modal-content { width:min(720px, 100%); max-height:85vh; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; box-shadow:0 18px 40px rgba(0,0,0,.4); }
@@ -115,6 +122,13 @@
     <button class="secondary" onclick="showSettings()" title="设置">⚙️</button>
   </div>
 </header>
+<div id="connBanner" class="conn-banner">
+  <div class="conn-msg">
+    <div id="connMsg"></div>
+    <div id="connDetail" class="conn-detail"></div>
+  </div>
+  <button class="secondary" onclick="checkGerritRoute()">📡 检查路由</button>
+</div>
 <main>
   <section id="tab-personal" class="tab-content active">
     <div id="personalStatus" class="muted status-line"></div>
@@ -507,7 +521,10 @@ async function loadPersonal(refresh) {
     // owner 跳转后，按后端返回的 profile（由 owner 解析）回填下拉选中项，保持 UI 与数据一致。
     const resolvedProfile = (data.profile || {}).id || '';
     if (requestedOwner && resolvedProfile) currentPersonalProfileId = resolvedProfile;
-    document.getElementById('personalContent').innerHTML = renderDashboard(data);
+    const reviewQueue = await loadPendingReviewQueue(owner, refresh);
+    document.getElementById('personalContent').innerHTML = renderDashboard(data, reviewQueue);
+    // 数据全空且查询报错时，提示用户检查 Gerrit 路由可达性。
+    refreshConnBanner(data);
     trendOwner = owner;
     trendOwners = owner ? [owner] : [];
     trendScope = 'personal';
@@ -517,6 +534,7 @@ async function loadPersonal(refresh) {
     requestedOwner = '';
     document.getElementById('personalContent').innerHTML = placeholderHtml('<span class="error">' + esc(e.message) + '</span>');
     notifyUser('Gerrit 个人统计失败', e.message, 'error');
+    refreshConnBanner({error: e.message, source: ''});
   }
 }
 async function loadDepartment(refresh) {
@@ -559,25 +577,79 @@ function placeholderHtml(innerHtml) {
 function renderSummaryHeader(title, controlsHtml, metaHtml) {
   return '<div class="dashboard-summary-header"><h2 class="dashboard-summary-title">' + esc(title) + '</h2>' + (controlsHtml ? '<div class="dashboard-summary-controls">' + controlsHtml + '</div>' : '') + (metaHtml ? '<div class="muted dashboard-summary-meta">' + metaHtml + '</div>' : '') + '</div>';
 }
-function renderDashboard(data) {
+// 根据 Gerrit 查询结果刷新顶部连接告警条：查询报错或结果为空时提示检查路由。
+async function refreshConnBanner(data) {
+  const banner = document.getElementById('connBanner');
+  const msg = document.getElementById('connMsg');
+  const detail = document.getElementById('connDetail');
+  if (!banner) return;
+  const hasError = !!(data && (data.error || data.rest_error));
+  // 个人/部门统计在 Gerrit 不可达时返回全 0 且无 error（summarize 不透传），
+  // 仅当显式 error 时弹告警，避免「真没数据」也误报。
+  if (!hasError) { banner.classList.remove('show', 'ok'); return; }
+  banner.classList.add('show'); banner.classList.remove('ok');
+  msg.textContent = '⚠️ Gerrit 查询失败，可能是服务器不可达，请检查路由。';
+  detail.textContent = (data.error || '') + (data.rest_error ? (data.error ? ' | ' : '') + data.rest_error : '');
+}
+// 打开「检查路由」弹框：探测 Gerrit 服务器 ICMP/SSH端口/HTTPS 三路可达性。
+async function checkGerritRoute() {
+  const banner = document.getElementById('connBanner');
+  const msg = document.getElementById('connMsg');
+  const detail = document.getElementById('connDetail');
+  if (msg) msg.textContent = '📡 正在探测 Gerrit 服务器可达性...';
+  if (detail) detail.textContent = '';
+  try {
+    const data = await api('/api/gerrit-dashboard/connectivity');
+    if (!data.configured) { if (msg) msg.textContent = 'Gerrit 未配置 ssh_host/base_url，请先在设置里填写。'; return; }
+    const verdict = data.verdict || '';
+    if (data.level === 'ok') { banner.classList.add('ok'); }
+    if (msg) msg.textContent = (data.level === 'ok' ? '✅ ' : '⚠️ ') + verdict;
+    const parts = [];
+    parts.push('ICMP: ' + (data.ping_ok ? '通' + (data.latency ? ' (' + data.latency + ')' : '') : '不通'));
+    parts.push('SSH端口 ' + (data.ssh_port || '?') + ': ' + (data.ssh_port_ok ? '开放' : '不通'));
+    parts.push('HTTPS: ' + (data.https_ok ? data.https_code : '不通'));
+    if (detail) detail.textContent = parts.join('  |  ');
+  } catch (e) {
+    if (msg) msg.textContent = '⚠️ 探测失败: ' + e.message;
+  }
+}
+async function loadPendingReviewQueue(owner, refresh) {
+  if (!owner) return null;
+  try {
+    const url = '/api/gerrit-dashboard/review-queue?owner=' + encodeURIComponent(owner) + '&refresh=' + (refresh ? 'true' : 'false');
+    const data = await api(url);
+    return {count: (typeof data.count === 'number') ? data.count : 0, items: data.items || []};
+  } catch (e) { return null; }
+}
+function renderDashboard(data, pendingMyReview) {
   const isPersonal = currentTab === 'personal';
   const controls = isPersonal ? personalControlsHtml() : '';
   const title = isPersonal ? 'Gerrit 个人提交汇总' : 'Gerrit 提交汇总';
   const s = data.summary || {};
-  return '<section class="list-section">'
-    + renderSummaryHeader(title, controls)
-    + renderCards([
+  const reviewCount = (pendingMyReview && typeof pendingMyReview.count === 'number') ? pendingMyReview.count : null;
+  const cards = [
     {label:'历史提交', value:s.total_count || 0},
     {label:'已合并', value:s.merged_count || 0, className:'ok clickable-stat', onclick:"scrollToSection('sec-merged')"},
     {label:'未合并', value:s.open_count || 0, className:'warn clickable-stat', onclick:"scrollToSection('sec-open')"},
     {label:'待评审', value:s.pending_review_count || 0, className:'bad clickable-stat', onclick:"scrollToSection('sec-pending-review')"},
-    {label:'已废弃', value:s.abandoned_count || 0, className:'clickable-stat', onclick:"scrollToSection('sec-abandoned')"}
-  ]) + '</section><div class="trend-grid">'
+  ];
+  if (isPersonal && reviewCount != null) {
+    cards.push({label:'待我评审', value:reviewCount, className:'warn clickable-stat', onclick:"scrollToSection('sec-review-of-me')"});
+  }
+  cards.push({label:'已废弃', value:s.abandoned_count || 0, className:'clickable-stat', onclick:"scrollToSection('sec-abandoned')"});
+  return '<section class="list-section">'
+    + renderSummaryHeader(title, controls)
+    + renderCards(cards) + '</section><div class="trend-grid">'
     + renderTrend('每天提交', (data.trends || {}).daily || [], 'date', 'personal_daily')
     + renderTrend('每周提交', (data.trends || {}).weekly || [], 'week', 'personal_weekly')
     + renderTrend('每月提交', (data.trends || {}).monthly || [], 'month', 'personal_monthly')
     + renderTrend('每年提交', (data.trends || {}).yearly || [], 'year', 'personal_yearly')
-    + '</div>' + renderLists(data.lists || {});
+    + '</div>' + renderLists(data.lists || {})
+    + renderReviewOfMeList(pendingMyReview);
+}
+function renderReviewOfMeList(pendingMyReview) {
+  if (currentTab !== 'personal' || !pendingMyReview || !Array.isArray(pendingMyReview.items)) return '';
+  return renderChangeList('待我评审', pendingMyReview.items, 'sec-review-of-me');
 }
 function renderCards(cards) {
   return '<div class="stats-grid">' + cards.map(card => '<div class="stat-card ' + esc(card.className || '') + '"' + (card.onclick ? ' onclick="' + card.onclick + '"' : '') + '><div class="value">' + esc(card.value) + '</div><div class="label">' + esc(card.label) + '</div></div>').join('') + '</div>';
@@ -676,8 +748,8 @@ async function saveTrendStartDate() {
 function renderLists(lists, prefix) {
   const idPrefix = prefix || 'sec';
   return renderChangeList('待评审', lists.pending_review || [], idPrefix + '-pending-review')
-    + renderChangeList('最近未合并', lists.open || [], idPrefix + '-open')
-    + renderChangeList('最近已合并', lists.merged || [], idPrefix + '-merged')
+    + renderChangeList('未合并', lists.open || [], idPrefix + '-open')
+    + renderChangeList('已合并', lists.merged || [], idPrefix + '-merged')
     + renderChangeList('已废弃', lists.abandoned || [], idPrefix + '-abandoned');
 }
 function renderChangeList(title, rows, sectionId) {
@@ -696,6 +768,7 @@ function renderDepartmentUsers(users) {
   });
   const rows = sorted.map(user => {
     const s = user.summary || {};
+    const extra = user.summary_extra || {};
     const owner = String(user.owner || '');
     const name = String(user.name || owner.split('@')[0] || '-');
     // 整行可点击跳个人看板；操作列 stopPropagation 避免点「移出」也触发跳转。
@@ -707,11 +780,12 @@ function renderDepartmentUsers(users) {
       + '<td>' + esc(s.merged_count || 0) + '</td>'
       + '<td>' + esc(s.open_count || 0) + '</td>'
       + '<td>' + esc(s.pending_review_count || 0) + '</td>'
+      + '<td>' + esc(extra.pending_review_of_me_count || 0) + '</td>'
       + '<td>' + esc(user.error || '') + '</td>'
       + '<td onclick="event.stopPropagation()"><button class="secondary dept-action-btn" onclick="removeDepartmentOwner(&quot;' + esc(owner) + '&quot;, this)">移出</button></td>'
       + '</tr>';
   }).join('');
-  return '<section class="list-section"><div class="dept-section-head"><h2>成员汇总</h2><span class="muted dept-hint">点击任意成员行可在个人看板查看其详细提交。</span></div><div class="dept-table-wrap"><table class="dept-table"><thead><tr><th>姓名</th><th>邮箱</th><th>历史提交</th><th>已合并</th><th>未合并</th><th>待评审</th><th>错误</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+  return '<section class="list-section"><div class="dept-section-head"><h2>成员汇总</h2><span class="muted dept-hint">点击任意成员行可在个人看板查看其详细提交。</span></div><div class="dept-table-wrap"><table class="dept-table"><thead><tr><th>姓名</th><th>邮箱</th><th>历史提交</th><th>已合并</th><th>未合并</th><th>待评审</th><th>待成员评审</th><th>错误</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
 }
 // 中文数字编号排序键（系统一部<系统二部<…<系统十部）；无编号部门编号记 Infinity 排在后。
 // 用码点而非 localeCompare：拼音序会把“系统二部”排到“系统一部”前面（èr<yī）。

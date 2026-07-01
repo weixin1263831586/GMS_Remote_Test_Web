@@ -27,7 +27,11 @@
   },
   "client_hosts": {
     "127.0.0.1": "str",
-    "172.16.14.66": "str"
+    "172.16.14.175": "str",
+    "172.16.14.64": "str",
+    "172.16.14.65": "str",
+    "172.16.14.66": "str",
+    "172.16.14.76": "str"
   },
   "client_ssh_credentials": [
     {
@@ -122,18 +126,49 @@
     "updated_at": "str",
     "username": "str"
   },
+  "redmine_dashboard": {
+    "dashboard_profiles": [
+      {
+        "aliases": [],
+        "email_to": "str",
+        "id": "str",
+        "issue_limit": "int",
+        "list_limit": "int",
+        "name": "str",
+        "stale_days": "int",
+        "user_ids": [],
+        "window_days": "int"
+      }
+    ],
+    "department_defaults": {
+      "issue_limit": "int",
+      "list_limit": "int"
+    },
+    "email": {
+      "from_addr": "str",
+      "smtp_host": "str",
+      "smtp_port": "int",
+      "use_ssl": "bool",
+      "username": "str"
+    },
+    "project_profiles": []
+  },
+  "redmine_stats": {
+    "cache_ttl": "int",
+    "chart_date_ranges": {},
+    "stale_days": "int",
+    "window_days": "int"
+  },
   "scrcpy_path": "str",
   "script_path": "str",
+  "sidebar_order": [
+    "str"
+  ],
   "suites_path": "str",
   "ubuntu_host": "str",
   "ubuntu_pswd": "str",
   "ubuntu_user": "str",
-  "usbip_devices_source": {
-    "c3d9b8674f4b94f6": {
-      "source": "str",
-      "timestamp": "float"
-    }
-  },
+  "usbip_devices_source": {},
   "usbip_vid_pid": "str",
   "use_key_auth": "bool",
   "vnc_password": "str",
@@ -142,5 +177,9 @@
   ],
   "vpn_target": [
     "str"
-  ]
+  ],
+  "wifi": {
+    "password": "str",
+    "ssid": "str"
+  }
 }
