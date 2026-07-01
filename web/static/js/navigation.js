@@ -428,6 +428,15 @@ function initWebSocket() {
             // 显示可读的 username@ip，而非平台用户安全边界（裸 ID）。
             const displayId = data.display_client_id || clientId;
             addLogEntry(`WebSocket已连接 (${displayId})`, 'success');
+            // WebSocket 成为实时主通道后，把增量游标对齐到服务端当前日志总数，
+            // 避免断连期间的轮询已显示的日志在重连后被再次补发。
+            if (state.testing) {
+                apiCall('/api/test/status?logs=false').then(s => {
+                    if (typeof s.log_count === 'number') {
+                        state.lastLogCount = Math.max(state.lastLogCount || 0, s.log_count);
+                    }
+                }).catch(() => {});
+            }
         };
 
         state.websocket.onclose = () => {
@@ -2511,6 +2520,12 @@ async function remountDevices() {
 
 async function connectWifi() {
     if (!validateDeviceSelection()) return;
+    // 预填 config.wifi 的默认 SSID/密码（已在 loadConfig() 中加载）
+    const wifi = state.config?.wifi || {};
+    const ssidInput = document.getElementById('wifi-ssid');
+    const pwdInput = document.getElementById('wifi-password');
+    if (ssidInput) ssidInput.value = wifi.ssid || '';
+    if (pwdInput) pwdInput.value = wifi.password || '';
     ModalManager.open('wifi-modal');
 }
 
@@ -5273,9 +5288,10 @@ function startStatusPolling() {
             // 检查是否有 WebSocket 连接
             const hasRealtimeConnection = state.websocket && state.websocket.readyState === WebSocket.OPEN;
 
-            // WebSocket 是实时主通道；测试运行时仍拉增量日志兜底，避免开始测试
-            // 前后的短暂连接切换导致早期日志没有立刻出现在日志区域。
-            const shouldFetchLogs = state.testing || !hasRealtimeConnection;
+            // WebSocket 是实时主通道：连接正常时绝不拉增量日志，否则会与 WebSocket
+            // 推送的同一批日志重复显示（两者共用 state.lastLogCount，竞态必现重复）。
+            // 仅当 WebSocket 不可用时才走 since 增量兜底。
+            const shouldFetchLogs = !hasRealtimeConnection;
             const statusUrl = shouldFetchLogs
                 ? `/api/test/status?since=${encodeURIComponent(String(state.lastLogCount || 0))}`
                 : '/api/test/status?logs=false';

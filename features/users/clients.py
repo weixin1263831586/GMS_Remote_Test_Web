@@ -173,7 +173,10 @@ def hide_sensitive_info(config: dict) -> dict:
         return config
     safe = {}
     for key, value in config.items():
-        if any(s in key.lower() for s in _SENSITIVE_FIELDS) and isinstance(value, str) and value:
+        # wifi 节点是测试台共享的 SSID/密码，前端「连接 Wi-Fi」弹框需要明文预填，故整段保留。
+        if key == "wifi" and isinstance(value, dict):
+            safe[key] = value
+        elif any(s in key.lower() for s in _SENSITIVE_FIELDS) and isinstance(value, str) and value:
             safe[key] = _mask_value(value)
         elif isinstance(value, dict):
             safe[key] = hide_sensitive_info(value)

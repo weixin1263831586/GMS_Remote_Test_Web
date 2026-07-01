@@ -135,6 +135,30 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/auth/login"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/auth/logout"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/auth/setup"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/auth/status"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/automation/gerrit/poll"
   },
   {
@@ -283,9 +307,93 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/config-override/apply"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/config-override/disable-verity"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/config-override/enable-verity"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/config-override/entries"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/config-override/entries"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/config-override/entries"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/config-override/entries/all"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/config-override/preview-xml"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/config-override/reboot"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/config-override/revert"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/config-override/status"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/config/ai"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/config/client-ssh-credentials"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/config/client-ssh-credentials"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/config/client-ssh-credentials"
   },
   {
     "methods": [
@@ -358,6 +466,12 @@
       "POST"
     ],
     "path": "/api/devices/bootloader-unlock"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/force-release"
   },
   {
     "methods": [
@@ -469,6 +583,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/gerrit-dashboard/connectivity"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/gerrit-dashboard/department-profiles"
@@ -490,6 +610,18 @@
       "POST"
     ],
     "path": "/api/gerrit-dashboard/personal-profiles"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gerrit-dashboard/review-queue"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gerrit-dashboard/review-queue/count"
   },
   {
     "methods": [
@@ -526,6 +658,12 @@
       "GET"
     ],
     "path": "/api/gms-update-monitor/changes"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-monitor/mainline"
   },
   {
     "methods": [
@@ -668,7 +806,31 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/redmine-agent/cases"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/cases/{issue_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/redmine-agent/config"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/config/credentials"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/config/credentials"
   },
   {
     "methods": [
@@ -708,6 +870,18 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/issues/batch-import"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/issues/import-recent"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/redmine-agent/issues/search"
@@ -720,6 +894,30 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/agent-reply"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/analyze-case"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/attachments/{attachment_id}/download"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/create-internal"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/redmine-agent/issues/{issue_id}/document"
@@ -728,7 +926,85 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/redmine-agent/issues/{issue_id}/draft-reply"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/evaluate-case"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/evaluation"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/redmine-agent/issues/{issue_id}/fetch"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/metadata"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/reference-output"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/reference-outputs"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/similar"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/workbench"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/mature-cases"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/mature-cases/build"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/mature-cases/{case_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/mature-cases/{case_id}/approve"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/mature-cases/{case_id}/create-internal"
   },
   {
     "methods": [
@@ -741,6 +1017,12 @@
       "GET"
     ],
     "path": "/api/redmine-agent/reports/latest"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/reset"
   },
   {
     "methods": [
@@ -759,6 +1041,12 @@
       "GET"
     ],
     "path": "/api/redmine-agent/runs/{run_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/search/similar"
   },
   {
     "methods": [
@@ -1116,9 +1404,21 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/test/suites/modules"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/test/suites/result"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/suites/search"
   },
   {
     "methods": [
@@ -1245,12 +1545,6 @@
       "GET"
     ],
     "path": "/automation"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/config-explorer"
   },
   {
     "methods": [

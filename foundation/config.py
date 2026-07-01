@@ -117,11 +117,10 @@ JADX_TIMEOUT = 600
 REDMINE_ISSUE_ID_CACHE_MAX_SIZE = 100
 TOOLS_DATA_FILE = os.path.join(PROJECT_ROOT, 'data', 'user_tools_data.json')
 
-# 测试用 WiFi 默认值（CTS/GTS 等要求连接 AndroidWifi 热点）。
-# 各处不要再直接写字面量，统一经 config_manager.get_wifi_defaults() 读取，
-# 以便在 config_runtime.json 的 "wifi" 段覆盖。
-DEFAULT_WIFI_SSID = "AndroidWifi"
-DEFAULT_WIFI_PASSWORD = "1234567890"
+# 测试用 WiFi 默认 SSID/密码统一在 config.json 的 wifi 节点配置，
+# 经 config_manager.get_wifi_defaults() 读取（避免在代码里硬编码）。
+DEFAULT_WIFI_SSID = ""
+DEFAULT_WIFI_PASSWORD = ""
 
 # Redmine 默认 base URL。各处不要再直接写字面量，
 # 统一经 config_manager.get_redmine_base_url() 读取（config.redmine.base_url 覆盖此默认）。
@@ -584,11 +583,7 @@ class ConfigManager:
         return config.get('ubuntu_user') or get_ubuntu_user()
 
     def get_wifi_defaults(self, config: dict[str, Any] = None) -> dict[str, str]:
-        """读取测试用 WiFi 默认 SSID/密码（config.wifi 覆盖内置默认值）。
-
-        集中管理曾经散落在多处的 'AndroidWifi' / '1234567890' 硬编码，
-        便于在 config_runtime.json 的 "wifi" 段统一覆盖。
-        """
+        """读取测试用 WiFi 默认 SSID/密码（config.wifi 覆盖内置默认值）"""
         if config is None:
             config = self.load_config()
         wifi_cfg = config.get("wifi") or {}

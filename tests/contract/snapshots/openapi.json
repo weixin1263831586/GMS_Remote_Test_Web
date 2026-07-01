@@ -1062,6 +1062,39 @@
         "title": "USBIPStartRequest",
         "type": "object"
       },
+      "UpsertEntryRequest": {
+        "properties": {
+          "device_id": {
+            "default": "",
+            "title": "Device Id",
+            "type": "string"
+          },
+          "resource_name": {
+            "title": "Resource Name",
+            "type": "string"
+          },
+          "resource_type": {
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "target_package": {
+            "default": "android",
+            "title": "Target Package",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_name",
+          "resource_type",
+          "value"
+        ],
+        "title": "UpsertEntryRequest",
+        "type": "object"
+      },
       "VNCStartRequest": {
         "properties": {
           "force_restart": {
@@ -1174,12 +1207,12 @@
             "type": "array"
           },
           "password": {
-            "default": "1234567890",
+            "default": "",
             "title": "Password",
             "type": "string"
           },
           "ssid": {
-            "default": "AndroidWifi",
+            "default": "",
             "title": "Ssid",
             "type": "string"
           }
@@ -1217,132 +1250,9 @@
         "summary": "Root"
       }
     },
-    "/@fs/{path}": {
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Vite Fs"
-      }
-    },
-    "/@id/{path}": {
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Vite Id"
-      }
-    },
-    "/@react-refresh": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Proxy Gms Assistant React Refresh"
-      }
-    },
-    "/@vite/{path}": {
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Vite"
-      }
-    },
     "/api/adb-forward/start": {
       "post": {
-        "description": "启动ADB转发",
+        "description": "Start ADB port forwarding to the configured device host.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1378,7 +1288,7 @@
     },
     "/api/adb-forward/stop": {
       "post": {
-        "description": "停止ADB转发",
+        "description": "Stop the active ADB port forwarding.",
         "responses": {
           "200": {
             "content": {
@@ -1968,6 +1878,110 @@
           }
         },
         "summary": "Upload Apk"
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Login"
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Logout"
+      }
+    },
+    "/api/auth/setup": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Setup"
+      }
+    },
+    "/api/auth/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Status"
       }
     },
     "/api/automation/gerrit/poll": {
@@ -3047,6 +3061,445 @@
         "summary": "Api List Props"
       }
     },
+    "/api/config-override/apply": {
+      "post": {
+        "description": "Rebuild the overlay APK from all stored overrides, push, reboot.\n\nReturns once the push completes (rebooting=True). The device is offline for\n~40s after this call returns; the UI should poll /status afterward.",
+        "parameters": [
+          {
+            "description": "adb serial；为空时用默认设备",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial；为空时用默认设备",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Apply"
+      }
+    },
+    "/api/config-override/disable-verity": {
+      "post": {
+        "description": "One-time bootstrap: ``adb disable-verity``. Returns needs_reboot; the UI\nthen chains POST /api/config-override/reboot (or skips if already disabled).\nRequired before apply() on a userdebug device whose verity is enforcing.",
+        "parameters": [
+          {
+            "description": "adb serial；为空时用默认设备",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial；为空时用默认设备",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Disable Verity"
+      }
+    },
+    "/api/config-override/enable-verity": {
+      "post": {
+        "description": "Restore verified boot. Returns needs_reboot.",
+        "parameters": [
+          {
+            "description": "adb serial；为空时用默认设备",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial；为空时用默认设备",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Enable Verity"
+      }
+    },
+    "/api/config-override/entries": {
+      "delete": {
+        "description": "Remove one stored override by resource name.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "要删除的资源名",
+            "in": "query",
+            "name": "resource_name",
+            "required": true,
+            "schema": {
+              "description": "要删除的资源名",
+              "title": "Resource Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Remove Entry"
+      },
+      "get": {
+        "description": "List stored overrides for a device.",
+        "parameters": [
+          {
+            "description": "adb serial；为空时用默认设备",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial；为空时用默认设备",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api List Entries"
+      },
+      "post": {
+        "description": "Insert or update one override (validated server-side).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertEntryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Upsert Entry"
+      }
+    },
+    "/api/config-override/entries/all": {
+      "delete": {
+        "description": "Clear all stored overrides for a device (host store only).",
+        "parameters": [
+          {
+            "description": "清空该设备的 host 存储；不触碰设备",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "清空该设备的 host 存储；不触碰设备",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Clear Entries"
+      }
+    },
+    "/api/config-override/preview-xml": {
+      "get": {
+        "description": "Show the manifest + res/values/config.xml that apply() would build.\n\nPure (no device I/O) — useful as a preview and as a test seam.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Preview Xml"
+      }
+    },
+    "/api/config-override/reboot": {
+      "post": {
+        "description": "Reboot the device via the local adb connection (same path as\ndisable/enable-verity, so the device_id is unambiguous).",
+        "parameters": [
+          {
+            "description": "adb serial；为空时用默认设备",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial；为空时用默认设备",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Reboot"
+      }
+    },
+    "/api/config-override/revert": {
+      "post": {
+        "description": "Delete the overlay APK from the device and reboot (host store kept).",
+        "parameters": [
+          {
+            "description": "adb serial；为空时用默认设备",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial；为空时用默认设备",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Revert"
+      }
+    },
+    "/api/config-override/status": {
+      "get": {
+        "description": "Read-only probe of the device's override-readiness.",
+        "parameters": [
+          {
+            "description": "adb serial；为空时用默认设备",
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "adb serial；为空时用默认设备",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Status"
+      }
+    },
     "/api/config/ai": {
       "get": {
         "description": "获取 AI 配置 - 供前端 AI 分析功能使用",
@@ -3061,6 +3514,94 @@
           }
         },
         "summary": "Get Ai Config"
+      }
+    },
+    "/api/config/client-ssh-credentials": {
+      "delete": {
+        "description": "删除一条客户端 SSH 凭据（按 device_host 或 username@host 匹配）。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "default": {},
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Client Ssh Credential"
+      },
+      "get": {
+        "description": "列出已保存的客户端 SSH 凭据（密码脱敏）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Client Ssh Credentials"
+      },
+      "post": {
+        "description": "新增或更新一条客户端 SSH 凭据（按 device_host 增改）。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "default": {},
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Client Ssh Credential"
       }
     },
     "/api/config/opengrok": {
@@ -3428,6 +3969,42 @@
           }
         },
         "summary": "Unlock Bootloader"
+      }
+    },
+    "/api/devices/force-release": {
+      "post": {
+        "description": "Force release platform device occupation locks.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceLockRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Force Release Device Locks"
       }
     },
     "/api/devices/info": {
@@ -3884,7 +4461,7 @@
     },
     "/api/files/progress": {
       "get": {
-        "description": "获取上传进度",
+        "description": "Return the current upload progress for an upload_id (always completed).",
         "parameters": [
           {
             "in": "query",
@@ -4090,6 +4667,22 @@
         "summary": "Update Gerrit Dashboard Config"
       }
     },
+    "/api/gerrit-dashboard/connectivity": {
+      "get": {
+        "description": "探测本机（Web 服务所在主机）到 Gerrit 服务器的可达性。\n\nGerrit 查询（REST/SSH）本就从本机发起，因此这里直接在本机探测 ICMP/SSH 端口/HTTPS，\n完全复现查询的真实网络路径，用于在看板全 0 时区分「Gerrit 不可达」与「真没数据」。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Gerrit Connectivity"
+      }
+    },
     "/api/gerrit-dashboard/department-profiles": {
       "post": {
         "responses": {
@@ -4188,6 +4781,102 @@
           }
         },
         "summary": "Create Gerrit Personal Profile"
+      }
+    },
+    "/api/gerrit-dashboard/review-queue": {
+      "get": {
+        "description": "「待我评审」清单：作为 reviewer 仍开放的变更（reviewer:{owner} status:open）。\n\n与个人统计的「待评审」(owner:me status:open，等我改的) 互补——这里统计等我去评审的。\n返回归一化后的 change 列表，供个人看板像「待评审」一样直接渲染列表（而非跳查询页）。",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "owner",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Review Queue"
+      }
+    },
+    "/api/gerrit-dashboard/review-queue/count": {
+      "get": {
+        "description": "「待我评审」计数（仅计数，便于部门成员表批量展示）。",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "owner",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Review Queue Count"
       }
     },
     "/api/gerrit-dashboard/statistics/department": {
@@ -4581,6 +5270,86 @@
           }
         },
         "summary": "List Gms Update Monitor Changes"
+      }
+    },
+    "/api/gms-update-monitor/mainline": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Year",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Month",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Gms Update Monitor Mainline"
       }
     },
     "/api/gms-update-monitor/packages": {
@@ -5505,15 +6274,49 @@
         "summary": "Search Opengrok"
       }
     },
-    "/api/public/{path}": {
-      "delete": {
+    "/api/redmine-agent/cases": {
+      "get": {
         "parameters": [
           {
-            "in": "path",
-            "name": "path",
-            "required": true,
+            "in": "query",
+            "name": "limit",
+            "required": false,
             "schema": {
-              "title": "Path",
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "module",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Module",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
               "type": "string"
             }
           }
@@ -5538,17 +6341,19 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Proxy Gms Assistant Public Api"
-      },
+        "summary": "List Case Facts"
+      }
+    },
+    "/api/redmine-agent/cases/{issue_id}": {
       "get": {
         "parameters": [
           {
             "in": "path",
-            "name": "path",
+            "name": "issue_id",
             "required": true,
             "schema": {
-              "title": "Path",
-              "type": "string"
+              "title": "Issue Id",
+              "type": "integer"
             }
           }
         ],
@@ -5572,143 +6377,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Proxy Gms Assistant Public Api"
-      },
-      "options": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Public Api"
-      },
-      "patch": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Public Api"
-      },
-      "post": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Public Api"
-      },
-      "put": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Public Api"
+        "summary": "Get Case Fact"
       }
     },
     "/api/redmine-agent/config": {
@@ -5724,6 +6393,36 @@
           }
         },
         "summary": "Get Config"
+      }
+    },
+    "/api/redmine-agent/config/credentials": {
+      "get": {
+        "description": "报告登录用户的 Redmine 凭据是否已配置（不回传明文）。\n\n凭据统一落盘到 configs/config_runtime.json，与统计端点读取的配置一致。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Credentials Status"
+      },
+      "post": {
+        "description": "保存 Redmine 凭据到登录用户的运行时配置。\n\n凭据随登录用户落盘，看板/统计端点据此读取。密码经 Fernet 加密落盘。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Save Credentials"
       }
     },
     "/api/redmine-agent/config/email": {
@@ -5744,7 +6443,7 @@
     },
     "/api/redmine-agent/config/stats": {
       "get": {
-        "description": "Read redmine_stats config for the settings UI — single config load.",
+        "description": "Read redmine_stats config for the settings UI — single config load.\n\nstats_cfg is per-user (same source the POST writes to), so a saved\nstale_days is read back correctly. Dashboard/gerrit remain the shared\norganizational view.",
         "responses": {
           "200": {
             "content": {
@@ -5912,6 +6611,60 @@
         "summary": "List Issues"
       }
     },
+    "/api/redmine-agent/issues/batch-import": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Batch Import Issues"
+      }
+    },
+    "/api/redmine-agent/issues/import-recent": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Recent Issues"
+      }
+    },
     "/api/redmine-agent/issues/search": {
       "get": {
         "parameters": [
@@ -5997,6 +6750,161 @@
         "summary": "Get Issue"
       }
     },
+    "/api/redmine-agent/issues/{issue_id}/agent-reply": {
+      "post": {
+        "description": "Agent-driven reply: online fetch + AI analysis + knowledge-base match.\n\nReturns reply_draft + patch_direction + root_cause. Slower (10-30s) when a\nfresh AI analysis is needed; fast when the issue is already analyzed.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agent Reply"
+      }
+    },
+    "/api/redmine-agent/issues/{issue_id}/analyze-case": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Case"
+      }
+    },
+    "/api/redmine-agent/issues/{issue_id}/attachments/{attachment_id}/download": {
+      "get": {
+        "description": "Proxy-download a Redmine attachment via per-user credentials.\n\nSame-origin (no page navigation / cross-origin redirect): the browser\ndownloads the file directly. The operator's Redmine credentials are used\nserver-side, so private attachments work without a Redmine login prompt.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "title": "Attachment Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Issue Attachment"
+      }
+    },
+    "/api/redmine-agent/issues/{issue_id}/create-internal": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Internal From Issue"
+      }
+    },
     "/api/redmine-agent/issues/{issue_id}/document": {
       "get": {
         "parameters": [
@@ -6031,6 +6939,114 @@
           }
         },
         "summary": "Get Issue Document"
+      }
+    },
+    "/api/redmine-agent/issues/{issue_id}/draft-reply": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Reply"
+      }
+    },
+    "/api/redmine-agent/issues/{issue_id}/evaluate-case": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Evaluate Case"
+      }
+    },
+    "/api/redmine-agent/issues/{issue_id}/evaluation": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Latest Evaluation"
       }
     },
     "/api/redmine-agent/issues/{issue_id}/fetch": {
@@ -6070,6 +7086,404 @@
         "summary": "Fetch And Analyze Issue"
       }
     },
+    "/api/redmine-agent/issues/{issue_id}/metadata": {
+      "post": {
+        "description": "Refresh Redmine issue metadata, journals, and attachment links only.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Issue Metadata"
+      }
+    },
+    "/api/redmine-agent/issues/{issue_id}/reference-output": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Reference Output"
+      }
+    },
+    "/api/redmine-agent/issues/{issue_id}/reference-outputs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Reference Outputs"
+      }
+    },
+    "/api/redmine-agent/issues/{issue_id}/similar": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Similar For Issue"
+      }
+    },
+    "/api/redmine-agent/issues/{issue_id}/workbench": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "similar_limit",
+            "required": false,
+            "schema": {
+              "default": 6,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Similar Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Issue Workbench"
+      }
+    },
+    "/api/redmine-agent/mature-cases": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mature Cases"
+      }
+    },
+    "/api/redmine-agent/mature-cases/build": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Build Mature Case"
+      }
+    },
+    "/api/redmine-agent/mature-cases/{case_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Mature Case"
+      }
+    },
+    "/api/redmine-agent/mature-cases/{case_id}/approve": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Mature Case"
+      }
+    },
+    "/api/redmine-agent/mature-cases/{case_id}/create-internal": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Internal From Case"
+      }
+    },
     "/api/redmine-agent/reminders/email": {
       "post": {
         "responses": {
@@ -6098,6 +7512,21 @@
           }
         },
         "summary": "Get Latest Report"
+      }
+    },
+    "/api/redmine-agent/reset": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reset Redmine Data"
       }
     },
     "/api/redmine-agent/runs": {
@@ -6222,6 +7651,45 @@
           }
         },
         "summary": "Get Run"
+      }
+    },
+    "/api/redmine-agent/search/similar": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Similar"
       }
     },
     "/api/redmine-agent/statistics": {
@@ -6389,7 +7857,6 @@
     },
     "/api/redmine-agent/statistics/resolved-by-date": {
       "get": {
-        "description": "按日期范围查询已解决的 Redmine issue（供趋势柱状图点击查看明细）。",
         "parameters": [
           {
             "description": "起始日期 YYYY-MM-DD（含）",
@@ -6483,11 +7950,17 @@
             "name": "stale_days",
             "required": false,
             "schema": {
-              "default": 20,
-              "maximum": 30,
-              "minimum": 1,
-              "title": "Stale Days",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 30,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stale Days"
             }
           },
           {
@@ -6510,6 +7983,16 @@
               "default": "",
               "title": "Name",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
             }
           }
         ],
@@ -6560,10 +8043,37 @@
             "required": false,
             "schema": {
               "default": 20,
-              "maximum": 100,
-              "minimum": 1,
+              "maximum": 200,
+              "minimum": 0,
               "title": "Max Analyze",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assignee_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Assignee Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assignee_name",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Assignee Name",
+              "type": "string"
             }
           }
         ],
@@ -6587,7 +8097,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Trigger Sync"
+        "summary": "Create Sync"
       }
     },
     "/api/redmine-agent/users": {
@@ -8244,6 +9754,69 @@
         "summary": "List Suite Files"
       }
     },
+    "/api/test/suites/modules": {
+      "get": {
+        "description": "Search latest CTS/VTS/GTS/STS testcases for modules matching a keyword.",
+        "parameters": [
+          {
+            "description": "模块关键词，例如 Camera",
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "description": "模块关键词，例如 Camera",
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "description": "逗号分隔套件类型，例如 cts,vts,gts,sts",
+            "in": "query",
+            "name": "suite_types",
+            "required": false,
+            "schema": {
+              "default": "cts,vts,gts,sts",
+              "description": "逗号分隔套件类型，例如 cts,vts,gts,sts",
+              "title": "Suite Types",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_suite_limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Per Suite Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Suite Modules"
+      }
+    },
     "/api/test/suites/result": {
       "post": {
         "description": "Execute tradefed list results and return test results.",
@@ -8315,6 +9888,65 @@
           }
         },
         "summary": "List Tradefed Results"
+      }
+    },
+    "/api/test/suites/search": {
+      "get": {
+        "description": "Search files/directories by name inside a test suite.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "suite_path",
+            "required": true,
+            "schema": {
+              "title": "Suite Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Suite Files"
       }
     },
     "/api/tools/browse": {
@@ -8595,7 +10227,7 @@
     },
     "/api/users/current": {
       "get": {
-        "description": "获取客户端信息（返回client_id用于WebSocket连接）",
+        "description": "获取当前平台用户信息（返回 user_id 用于 WebSocket 连接）",
         "responses": {
           "200": {
             "content": {
@@ -8817,7 +10449,7 @@
     },
     "/api/vpn/status": {
       "get": {
-        "description": "获取VPN连接状态（多次ping提高可靠性）",
+        "description": "获取VPN连接状态\n\n以\"是否存在活跃的 VPN 类型连接\"为权威判据（与 connect/disconnect 用的\nnmcli 信号一致），ping 仅作为可达性补充信息——避免手动断开后因 ping 目标\n仍可达而误报\"已连接\"。",
         "responses": {
           "200": {
             "content": {
@@ -8833,7 +10465,7 @@
     },
     "/api/websites/load": {
       "get": {
-        "description": "加载用户的工具数据",
+        "description": "Return the calling user's tools/shortcuts data.",
         "responses": {
           "200": {
             "content": {
@@ -8849,7 +10481,7 @@
     },
     "/api/websites/save": {
       "post": {
-        "description": "保存用户的工具数据",
+        "description": "Persist the calling user's tools/shortcuts data.",
         "responses": {
           "200": {
             "content": {
@@ -8865,7 +10497,7 @@
     },
     "/api/websites/sync": {
       "post": {
-        "description": "同步用户的工具数据（智能合并本地和服务器数据）",
+        "description": "Sync the user's tools data, keeping whichever copy (local or server) is newer.",
         "responses": {
           "200": {
             "content": {
@@ -8877,42 +10509,6 @@
           }
         },
         "summary": "Sync User Tools"
-      }
-    },
-    "/assets/{path}": {
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Assets"
       }
     },
     "/automation": {
@@ -8932,24 +10528,6 @@
         "summary": "Automation Page"
       }
     },
-    "/config-explorer": {
-      "get": {
-        "description": "Self-contained HTML page for the config explorer tool card.",
-        "responses": {
-          "200": {
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Config Explorer Page"
-      }
-    },
     "/gerrit-dashboard": {
       "get": {
         "responses": {
@@ -8965,212 +10543,6 @@
           }
         },
         "summary": "Gerrit Dashboard Page"
-      }
-    },
-    "/gms-assistant/{path}": {
-      "delete": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant"
-      },
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant"
-      },
-      "options": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant"
-      },
-      "patch": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant"
-      },
-      "post": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant"
-      },
-      "put": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant"
       }
     },
     "/gms-update-monitor": {
@@ -9205,42 +10577,6 @@
           }
         },
         "summary": "Mainline Known Issues Page"
-      }
-    },
-    "/node_modules/{path}": {
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Node Modules"
       }
     },
     "/novnc": {
@@ -9318,212 +10654,6 @@
         "summary": "Novnc Http Proxy"
       }
     },
-    "/public/{path}": {
-      "delete": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Public"
-      },
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Public"
-      },
-      "options": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Public"
-      },
-      "patch": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Public"
-      },
-      "post": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Public"
-      },
-      "put": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Public"
-      }
-    },
     "/redmine-agent": {
       "get": {
         "responses": {
@@ -9539,42 +10669,6 @@
           }
         },
         "summary": "Redmine Agent Page"
-      }
-    },
-    "/src/{path}": {
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Proxy Gms Assistant Src"
       }
     },
     "/templates/architecture.html": {
