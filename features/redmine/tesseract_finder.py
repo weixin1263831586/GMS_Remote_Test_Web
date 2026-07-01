@@ -6,6 +6,7 @@ so that image OCR works in environments where apt/sudo is unavailable.
 
 from __future__ import annotations
 
+import functools
 import os
 from pathlib import Path
 
@@ -20,8 +21,13 @@ def _tesseract_dir() -> Path:
     return _project_root() / "tools" / "tesseract"
 
 
+@functools.lru_cache(maxsize=1)
 def bundled_tesseract_cmd() -> str | None:
-    """Return the path to the bundled tesseract binary, or None if missing."""
+    """Return the path to the bundled tesseract binary, or None if missing.
+
+    Cached: the binary location is fixed for the process lifetime, so the
+    ``.exists()`` probe runs only once; later calls reuse the result.
+    """
     cmd = _tesseract_dir() / "tesseract"
     return str(cmd) if cmd.exists() else None
 
@@ -40,13 +46,26 @@ def bundled_tesseract_env() -> dict[str, str]:
     return env
 
 
+# The bundled binary path and its env are constant for the process lifetime, so
+# configure once and remember the result. Avoids re-probing (stat) and re-copying
+# os.environ on every OCR call (each image attachment during a scan).
+_configured: bool | None = None
+
+
 def configure_bundled_tesseract() -> bool:
     """If a bundled tesseract exists, update process env so subprocess can find it.
 
-    Returns True when the bundled binary was configured.
+    Idempotent and memoized: the binary path and env are fixed, so this probes
+    the filesystem and mutates ``os.environ`` only once per process. Subsequent
+    calls return the cached result.
     """
+    global _configured
+    if _configured is not None:
+        return _configured
     if bundled_tesseract_cmd() is None:
+        _configured = False
         return False
     for key, value in bundled_tesseract_env().items():
         os.environ[key] = value
+    _configured = True
     return True

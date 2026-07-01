@@ -13,6 +13,7 @@ from typing import Any
 from features.redmine.analysis_attachments import IMAGE_ATTACHMENT_RE, PROCESS_ATTACHMENT_RE
 from features.redmine.client import RedmineClient
 from features.redmine.config import config_manager
+from features.redmine.utils import to_iso8601
 
 
 logger = logging.getLogger(__name__)
@@ -81,11 +82,9 @@ def _now_iso() -> str:
 
 
 def _iso(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, datetime):
-        return value.isoformat(timespec="seconds")
-    return str(value)
+    # Delegate to the shared normalizer so all mixins format Redmine
+    # timestamps identically (handles datetime + space-separated strings).
+    return to_iso8601(value)
 
 
 def _obj_name(value: Any) -> str:

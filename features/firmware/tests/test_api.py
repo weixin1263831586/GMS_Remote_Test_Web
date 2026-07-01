@@ -154,4 +154,10 @@ class FirmwareApiTests(unittest.TestCase):
                     "file_size": "8",
                 },
             )
-            self.assertEqual(resume.json()["uploaded_chunks"], [0])
+            resume_payload = resume.json()
+            self.assertEqual(resume_payload["uploaded_chunks"], [0])
+            self.assertEqual(resume_payload["chunks_uploaded"], 1)
+            self.assertEqual(resume_payload["total_chunks"], 2)
+            self.assertEqual(resume_payload["progress"], 50.0)
+            self.assertEqual(resume_payload["uploaded_size"], 4)
+            self.assertEqual(resume_payload["total_size"], 8)

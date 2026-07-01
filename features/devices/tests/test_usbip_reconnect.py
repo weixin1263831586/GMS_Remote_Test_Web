@@ -795,6 +795,42 @@ UNAUTH001	unauthorized
             with global_state.device_cache_lock:
                 global_state.device_cache = old_cache
 
+    def test_device_list_marks_persisted_usbip_source_when_memory_empty(self):
+        import features.devices.api as devices_router
+
+        old_sources = dict(global_state.usbip_devices_source)
+        old_cache = dict(global_state.device_cache)
+        try:
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+            with global_state.device_cache_lock:
+                global_state.device_cache = {"devices": [], "timestamp": 0}
+
+            request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+            with patch.object(devices_router.device_manager, "get_connected_devices", return_value=["LOCAL001", "USBIP001"]), \
+                    patch.object(devices_router.runtime.config_manager, "get_runtime_config", return_value={
+                        "usbip_devices_source": {
+                            "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1}
+                        }
+                    }), \
+                    patch.object(devices_router, "_prune_inactive_usbip_sources", side_effect=lambda _devices, sources, _config: sources), \
+                    patch.object(devices_router.runtime, "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
+                    patch.object(devices_router.runtime, "get_client_ip", return_value="127.0.0.1"), \
+                    patch.object(devices_router.runtime, "client_manager", SimpleNamespace(get_client_id=lambda _ip: "hcq@127.0.0.1")):
+                response = asyncio.run(devices_router.get_connected_devices(request=request, help=False, force_refresh=True))
+
+            body = json.loads(response.body.decode("utf-8"))
+            devices = {item["device_id"]: item for item in body}
+            self.assertNotIn("is_usbip", devices["LOCAL001"])
+            self.assertTrue(devices["USBIP001"]["is_usbip"])
+            self.assertEqual(devices["USBIP001"]["source"], "hcq@172.16.14.66")
+        finally:
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+                global_state.usbip_devices_source.update(old_sources)
+            with global_state.device_cache_lock:
+                global_state.device_cache = old_cache
+
     def test_usbip_reboot_returns_without_waiting_for_adb_online(self):
         import features.devices.operations_api as operations
 

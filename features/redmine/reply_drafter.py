@@ -26,6 +26,10 @@ from .case_extractor import (
 from .case_search import RedmineCaseSearch
 from .knowledge_repository import RedmineKnowledgeDB
 
+# Historical owner (黄超群) reply block from generated Redmine docs. Compiled
+# once at import instead of on every _extract_owner_reply call.
+_OWNER_REPLY_RE = re.compile(r"^###\s+[^\n]*黄\s*超群[^\n]*\n(?P<body>.*?)(?=^###\s+|^##\s+|\Z)", re.M | re.S)
+
 
 class ReplyDrafter:
     """Compose a customer-facing reply draft for a Redmine issue."""
@@ -202,8 +206,11 @@ class ReplyDrafter:
         signature = fact.get("error_signature") or ""
         root_cause = self._meaningful_text(fact.get("root_cause"))
         solution = self._meaningful_text(fact.get("solution"))
-        best_solution = next((self._candidate_solution_text(s) for s in similar if self._candidate_solution_text(s)), "")
-        best_root = next((self._meaningful_text(s.get("root_cause")) for s in similar if self._meaningful_text(s.get("root_cause"))), "")
+        # Evaluate each candidate's text once (avoids double work in a `next(... if ...)` filter).
+        candidate_solutions = [self._candidate_solution_text(s) for s in similar]
+        best_solution = next((t for t in candidate_solutions if t), "")
+        candidate_roots = [self._meaningful_text(s.get("root_cause")) for s in similar]
+        best_root = next((t for t in candidate_roots if t), "")
 
         lines = [
             f"您好，关于 #{issue_id} {subject}，初步分析如下：",
@@ -250,7 +257,7 @@ class ReplyDrafter:
         if not text:
             return ""
         # Prefer the historical 黄超群 reply block from generated Redmine docs.
-        pattern = re.compile(r"^###\s+[^\n]*黄\s*超群[^\n]*\n(?P<body>.*?)(?=^###\s+|^##\s+|\Z)", re.M | re.S)
+        pattern = _OWNER_REPLY_RE
         matches = [m.group("body").strip() for m in pattern.finditer(text)]
         candidates = [cls._redmine_pre_to_markdown(m) for m in matches if cls._meaningful_text(m)]
         if candidates:

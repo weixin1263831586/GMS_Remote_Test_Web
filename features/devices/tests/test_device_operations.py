@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import unittest
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -21,6 +22,13 @@ class _ConfigManager:
     def get_wifi_defaults(self, config=None):
         wifi = (config or self.load_config()).get("wifi") or {}
         return {"ssid": wifi["ssid"], "password": wifi["password"]}
+
+    def get_runtime_config(self):
+        return {
+            "usbip_devices_source": {
+                "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1},
+            }
+        }
 
 
 class _SshManager:
@@ -57,7 +65,10 @@ class DeviceOperationsTests(unittest.TestCase):
             patch.object(
                 operations_api.runtime,
                 "global_state",
-                SimpleNamespace(usbip_devices_source={}),
+                SimpleNamespace(
+                    usbip_devices_source={},
+                    usbip_devices_source_lock=threading.RLock(),
+                ),
             ),
         ):
             payload = operations_api._build_devices_management_payload(
@@ -68,6 +79,76 @@ class DeviceOperationsTests(unittest.TestCase):
             )
 
         self.assertTrue(payload["devices"][0]["locked_by_self"])
+
+    def test_management_payload_uses_persisted_usbip_source(self):
+        with (
+            patch.object(operations_api.device_lock_manager, "get_all_locks", return_value={}),
+            patch.object(operations_api.runtime, "config_manager", _ConfigManager()),
+            patch.object(operations_api, "_active_usbip_serials", return_value={"USBIP001"}),
+            patch.object(
+                operations_api.runtime,
+                "global_state",
+                SimpleNamespace(
+                    usbip_devices_source={},
+                    usbip_devices_source_lock=threading.RLock(),
+                ),
+            ),
+        ):
+            payload = operations_api._build_devices_management_payload(
+                ["USBIP001", "LOCAL001"],
+                {
+                    "USBIP001": {"serial_no": "USBIP001"},
+                    "LOCAL001": {"serial_no": "LOCAL001"},
+                },
+                {},
+                client_id="alice@10.0.0.8",
+            )
+
+        devices = {device["device_id"]: device for device in payload["devices"]}
+        self.assertEqual(devices["USBIP001"]["source_type"], "usbip")
+        self.assertEqual(devices["USBIP001"]["source_host"], "hcq@172.16.14.66")
+        self.assertEqual(devices["LOCAL001"]["source_type"], "local")
+
+    def test_management_payload_clears_stale_usbip_source_without_active_port(self):
+        runtime_config = {
+            "usbip_devices_source": {
+                "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1},
+            }
+        }
+
+        class ConfigManager(_ConfigManager):
+            def get_runtime_config(self):
+                return runtime_config
+
+            def save_runtime_config(self, config):
+                saved_config = dict(config)
+                runtime_config.clear()
+                runtime_config.update(saved_config)
+                return True
+
+        global_state = SimpleNamespace(
+            usbip_devices_source={
+                "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1},
+            },
+            usbip_devices_source_lock=threading.RLock(),
+        )
+
+        with (
+            patch.object(operations_api.device_lock_manager, "get_all_locks", return_value={}),
+            patch.object(operations_api.runtime, "config_manager", ConfigManager()),
+            patch.object(operations_api.runtime, "global_state", global_state),
+            patch.object(operations_api, "_active_usbip_serials", return_value=set()),
+        ):
+            payload = operations_api._build_devices_management_payload(
+                ["USBIP001"],
+                {"USBIP001": {"serial_no": "USBIP001"}},
+                {},
+                client_id="alice@10.0.0.8",
+            )
+
+        self.assertEqual(payload["devices"][0]["source_type"], "local")
+        self.assertNotIn("USBIP001", global_state.usbip_devices_source)
+        self.assertNotIn("USBIP001", runtime_config.get("usbip_devices_source", {}))
 
     def test_connect_wifi_uses_configured_defaults_when_request_omits_credentials(self):
         ssh_manager = _SshManager()

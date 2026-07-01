@@ -3,7 +3,9 @@
 import base64
 import re
 import urllib.parse
+from datetime import datetime
 from pathlib import PurePath
+from typing import Any
 
 
 REDMINE_ISSUE_PATTERN = r'/issues/(\d+)'
@@ -18,6 +20,61 @@ COMPILED_CONTENT_DISPOSITION_PATTERN = re.compile(
 COMPILED_ISSUE_LINK_PATTERN = re.compile(r'href=["\'][^"\']*/issues/(\d+)[^"\']*["\']')
 SAFE_ATTACHMENT_FILENAME_RE = re.compile(r"[^A-Za-z0-9._ -]+")
 MAX_ATTACHMENT_FILENAME_LENGTH = 180
+
+
+_REDMINE_DATE_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S.%f",
+    "%Y-%m-%d %H:%M:%S.%f",
+    "%Y-%m-%d",
+)
+
+
+def parse_iso(value: Any) -> datetime | None:
+    """Parse a Redmine timestamp into a naive ``datetime`` (or ``None``).
+
+    Accepts datetimes, ISO strings, and the space-separated
+    ``"YYYY-MM-DD HH:MM:SS"`` form python-redmine often returns.
+    """
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo else value
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in _REDMINE_DATE_FORMATS:
+        try:
+            return datetime.strptime(text.replace("Z", ""), fmt)
+        except ValueError:
+            continue
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+    except ValueError:
+        return None
+
+
+def to_iso8601(value: Any) -> str:
+    """Normalize a Redmine timestamp to an ISO 8601 string (``T`` separator).
+
+    Keeping the stored form consistent lets list views sort and compare
+    timestamps uniformly regardless of whether Redmine returned a datetime or
+    a space-separated string.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat(timespec="seconds")
+    text = str(value).strip()
+    if not text:
+        return ""
+    parsed = parse_iso(text)
+    if parsed is not None:
+        return parsed.isoformat(timespec="seconds")
+    # Last resort: collapse a space separator to 'T' if it looks like a timestamp.
+    return text.replace(" ", "T", 1) if len(text) >= 10 and text[4:5] == "-" else text
 
 
 def create_basic_auth_header(username: str, password: str) -> dict[str, str]:

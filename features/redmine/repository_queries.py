@@ -150,7 +150,7 @@ class RepositoryQueryMixin:
     def get_workload_statistics(
         self,
         owner_names: list[str] | None = None,
-        stale_days: int = 3,
+        stale_days: int = 1,
         list_limit: int = 30,
         display_names: list[str] | None = None,
         window_days: int = 0,
@@ -167,7 +167,7 @@ class RepositoryQueryMixin:
         owner_keys = set()
         for name in owner_names or []:
             owner_keys.update(_name_keys(name))
-        stale_after = datetime.now() - timedelta(days=max(1, int(stale_days or 3)))
+        stale_after = datetime.now() - timedelta(days=max(1, int(stale_days or 1)))
         list_limit = max(1, min(int(list_limit or 30), 100))
         now = datetime.now()
         window_cutoff = now - timedelta(days=int(window_days)) if int(window_days or 0) > 0 else None
@@ -367,7 +367,7 @@ class RepositoryQueryMixin:
         if not last_activity:
             return {"waiting": False, "reason": "no_journal_notes"}
         last_user = last_activity.get("user") or ""
-        if _name_matches_keys(last_user, owner_keys) or _looks_like_rk_actor(last_activity):
+        if _name_matches_keys(last_user, owner_keys):
             return {
                 "waiting": False,
                 "reason": "last_reply_is_rk",
@@ -375,6 +375,14 @@ class RepositoryQueryMixin:
                 "last_owner_reply_at": last_activity.get("created_on") or issue.get("updated_on") or "",
                 "last_owner_reply_by": last_user,
                 "last_owner_reply": str(last_activity.get("notes") or "")[:260],
+            }
+        if _looks_like_rk_actor(last_activity):
+            return {
+                "waiting": True,
+                "last_reply_side": "rk_colleague",
+                "last_external_reply_at": last_activity.get("created_on") or issue.get("updated_on") or "",
+                "last_external_reply_by": last_user,
+                "last_external_reply": str(last_activity.get("notes") or "")[:260],
             }
         return {
             "waiting": True,

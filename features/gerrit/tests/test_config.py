@@ -144,9 +144,10 @@ class GerritConfigTests(unittest.TestCase):
             self.assertEqual(runtime["sidebar_order"], ["test"])
             self.assertEqual(runtime["gerrit_dashboard"]["base_url"], "https://10.10.10.29")
 
-    def test_gerrit_request_config_is_isolated_per_user(self):
-        """Gerrit 看板按登录用户隔离：不同用户的 _config_for_request 指向各自的 per-user runtime。"""
+    def test_gerrit_request_config_uses_shared_runtime_config(self):
+        """Gerrit 看板配置统一写到 configs/config_runtime.json，不生成 per-user 配置目录。"""
         import features.gerrit.api as gerrit_api
+        import features.redmine.users as redmine_users
         from features.auth.service import CurrentUser
 
         def request_for(user_id):
@@ -155,15 +156,26 @@ class GerritConfigTests(unittest.TestCase):
                 cookies={},
             )
 
-        alice_cfg = gerrit_api._config_for_request(request_for("alice-isolated"))
-        bob_cfg = gerrit_api._config_for_request(request_for("bob-isolated"))
-        # 不同登录用户拿到各自的 per-user runtime 路径，互不干扰。
-        self.assertNotEqual(
-            str(alice_cfg.runtime_config_path),
-            str(bob_cfg.runtime_config_path),
-        )
-        self.assertIn("alice-isolated", str(alice_cfg.runtime_config_path))
-        self.assertIn("bob-isolated", str(bob_cfg.runtime_config_path))
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "configs").mkdir()
+            (root / "foundation").mkdir()
+            fake_settings = type("S", (), {
+                "project_root": root,
+                "data_root": root,
+            })()
+            with patch.object(redmine_users, "settings", fake_settings):
+                alice_cfg = gerrit_api._config_for_request(request_for("alice-isolated"))
+                bob_cfg = gerrit_api._config_for_request(request_for("bob-isolated"))
+                self.assertEqual(
+                    str(alice_cfg.runtime_config_path),
+                    str(bob_cfg.runtime_config_path),
+                )
+                self.assertEqual(
+                    Path(alice_cfg.runtime_config_path),
+                    root / "configs" / "config_runtime.json",
+                )
+                self.assertFalse((root / "configs" / "redmine_by_user").exists())
 
     def test_gerrit_department_config_is_derived_from_redmine_user_map_when_runtime_config_empty(self):
         import features.gerrit.api as gerrit_api

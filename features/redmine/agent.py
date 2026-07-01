@@ -20,6 +20,7 @@ from features.redmine.analysis_resolution import ResolutionAnalysisMixin
 from features.redmine.analysis_similarity import SimilarityAnalysisMixin
 from features.redmine.client import RedmineClient
 from features.redmine.config import config_manager
+from features.redmine.utils import to_iso8601
 from features.redmine.repository import (
     RESOLVED_STATUS_NAMES as RESOLVED_STATUSES,
 )
@@ -96,26 +97,10 @@ def _now_iso() -> str:
 
 
 def _iso(value: Any) -> str:
-    """Normalize a Redmine timestamp to ISO 8601 with a 'T' separator.
-
-    Redmine/python-redmine may hand back either a ``datetime`` or a string like
-    ``"2026-06-27 09:08:50"`` (space separator). Normalizing on store keeps the
-    DB consistent so list views sort and compare timestamps uniformly.
-    """
-    if value is None:
-        return ""
-    if isinstance(value, datetime):
-        return value.isoformat(timespec="seconds")
-    text = str(value).strip()
-    if not text:
-        return ""
-    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(text, fmt).isoformat(timespec="seconds")
-        except ValueError:
-            continue
-    # Last resort: collapse a space separator to 'T' if it looks like a timestamp.
-    return text.replace(" ", "T", 1) if len(text) >= 10 and text[4:5] == "-" else text
+    """Normalize a Redmine timestamp to ISO 8601 with a 'T' separator."""
+    # Shared implementation lives in features.redmine.utils; the mixins all
+    # delegate to it so every module formats Redmine timestamps identically.
+    return to_iso8601(value)
 
 
 def _obj_name(value: Any) -> str:
@@ -528,7 +513,7 @@ class RedmineAgent(
     def _make_client(self) -> RedmineClient:
         redmine_config = self.config_manager.get_redmine_config()
         creds = self.config_manager.load_redmine_credentials()
-        if not creds:
+        if not creds or not creds.get("username") or not creds.get("password"):
             raise RuntimeError("Redmine credentials not configured")
         return RedmineClient(redmine_config["base_url"], creds.get("username", ""), creds.get("password", ""))
 

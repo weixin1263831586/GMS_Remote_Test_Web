@@ -21,9 +21,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-_command_reports_running = command_reports_running
-
-
 @router.post("/api/devices/scrcpy")
 async def show_device_screens(req: DeviceActionRequest):
     """Display device screen (launch scrcpy mirroring)."""
@@ -176,7 +173,7 @@ async def show_device_screens(req: DeviceActionRequest):
                     check_output, _, _ = runtime.ssh_manager.execute_command(
                         ssh, check_cmd, timeout=5
                     )
-                    is_started = _command_reports_running(check_output)
+                    is_started = command_reports_running(check_output)
 
                     results.append(
                         {

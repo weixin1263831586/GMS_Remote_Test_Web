@@ -502,10 +502,6 @@ class ActionExecutor:
         )
         modules = payload.get("modules") or []
         searched = payload.get("searched_suites") or []
-        counts: dict[str, int] = {}
-        for item in modules:
-            suite_type = str(item.get("suite_type") or "UNKNOWN").upper()
-            counts[suite_type] = counts.get(suite_type, 0) + 1
 
         grouped: dict[str, list[str]] = {}
         for item in modules:
@@ -920,7 +916,7 @@ class ActionExecutor:
         if isinstance(raw_names, str):
             raw_names = [raw_names]
         names = [str(name).strip() for name in raw_names if str(name).strip()]
-        stale_days = int(params.get("stale_days") or 3)
+        stale_days = int(params.get("stale_days") or config_manager.get_redmine_stats_config()["stale_days"])
 
         if not names:
             try:
@@ -939,7 +935,7 @@ class ActionExecutor:
         user_map = load_redmine_user_map()
         resolved = redmine_service.repository.resolve_assignee_names(names)
         try:
-            window_days = int((config_manager.load_config().get("redmine_stats") or {}).get("window_days") or 0)
+            window_days = int(config_manager.get_redmine_stats_config()["window_days"])
         except Exception:
             window_days = 0
         rows = []

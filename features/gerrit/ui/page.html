@@ -142,14 +142,14 @@
     </div>
     <div class="modal-body">
       <div class="form-grid">
-        <div class="field full"><label>REST 地址</label><input id="settingBaseUrl" placeholder="https://10.10.10.29"></div>
+        <div class="field full"><label>REST 地址</label><input id="settingBaseUrl" placeholder="从 config.json 读取"></div>
         <div class="field"><label>REST 用户名</label><input id="settingRestUser" placeholder="Gerrit 用户名"></div>
         <div class="field"><label>REST HTTP Password</label><input id="settingRestPass" type="password" placeholder="留空则保留原密码"></div>
-        <div class="field"><label>SSH Host</label><input id="settingSshHost" placeholder="10.10.10.29"></div>
+        <div class="field"><label>SSH Host</label><input id="settingSshHost" placeholder="从 config.json 读取"></div>
         <div class="field"><label>SSH User</label><input id="settingSshUser" placeholder="SSH 用户名"></div>
         <div class="field"><label>SSH Port</label><input id="settingSshPort" type="number" placeholder="29418"></div>
         <div class="field full"><label>SSH 私钥路径</label><input id="settingSshIdentity" placeholder="/home/hcq/.ssh/id_ed25519_gerrit_dashboard"></div>
-        <div class="field full"><label>默认 Owner</label><input id="settingDefaultOwner" placeholder="chaoqun.huang@rock-chips.com"></div>
+        <div class="field full"><label>默认 Owner</label><input id="settingDefaultOwner" placeholder="从 config.json 读取"></div>
         <div class="field"><label>单页查询数量（≤2000）</label><input id="settingQueryPageSize" type="number" min="1" max="2000" placeholder="500"></div>
         <div class="field"><label>最大历史提交数（0=不限）</label><input id="settingMaxHistory" type="number" min="0" placeholder="0 表示拉取全部历史"></div>
       </div>
@@ -248,13 +248,13 @@ async function init() {
   // 深链恢复到非第一条 profile 时，避免标题姓名与 owner 邮箱首次绘制错位。
   const person = findPersonalProfile(currentPersonalProfileId) || (config.personal_profiles || [])[0] || {};
   const ownerInput = document.getElementById('owner');
-  if (ownerInput) ownerInput.value = person.owner || config.default_owner || 'chaoqun.huang@rock-chips.com';
+  if (ownerInput) ownerInput.value = person.owner || config.default_owner || '';
   if (currentTab === 'personal') await loadPersonal(false);
   else if (currentTab === 'department') await loadDepartment(false);
   else await loadChanges();
 }
 function showSettings() {
-  document.getElementById('settingBaseUrl').value = config.base_url || 'https://10.10.10.29';
+  document.getElementById('settingBaseUrl').value = config.base_url || '';
   document.getElementById('settingRestUser').value = config.rest_username || '';
   document.getElementById('settingRestPass').value = '';
   document.getElementById('settingSshHost').value = config.ssh_host || '';

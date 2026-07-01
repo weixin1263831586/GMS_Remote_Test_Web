@@ -19,7 +19,7 @@ from foundation.dashboard_config import (
 MAX_QUERY_PAGE_SIZE = 2000
 
 DEFAULT_GERRIT_DASHBOARD = {
-    "base_url": "https://10.10.10.29",
+    "base_url": "",
     "rest_username": "",
     "rest_password": "",
     "rest_verify_ssl": False,
@@ -29,7 +29,7 @@ DEFAULT_GERRIT_DASHBOARD = {
     "ssh_identity_file": "",
     "query_limit": 100,
     "cache_ttl": 600,
-    "default_owner": "chaoqun.huang@rock-chips.com",
+    "default_owner": "",
     "chart_date_ranges": {},
     "department_defaults": {
         "list_limit": 50,
@@ -41,12 +41,8 @@ DEFAULT_GERRIT_DASHBOARD = {
         {"id": "open", "name": "打开的变更", "query": "status:open limit:100"},
         {"id": "merged", "name": "最近合入", "query": "status:merged limit:100"},
     ],
-    "personal_profiles": [
-        {"id": "chaoqun-huang", "name": "chaoqun.huang", "owner": "chaoqun.huang@rock-chips.com"},
-    ],
-    "department_profiles": [
-        {"id": "all", "name": "全部部门", "owners": ["chaoqun.huang@rock-chips.com"]},
-    ],
+    "personal_profiles": [],
+    "department_profiles": [],
 }
 
 
@@ -120,9 +116,6 @@ def normalize_gerrit_dashboard_config(raw: dict[str, Any] | None) -> dict[str, A
             "query_page_size": _bounded_int(item.get("query_page_size"), defaults["query_page_size"], 1, MAX_QUERY_PAGE_SIZE),
             "max_history_changes": _bounded_int(item.get("max_history_changes"), defaults["max_history_changes"], 0, 1000000),
         })
-    if not department_profiles:
-        department_profiles = list(DEFAULT_GERRIT_DASHBOARD["department_profiles"])
-
     return {
         "base_url": str(raw.get("base_url") or DEFAULT_GERRIT_DASHBOARD["base_url"]).rstrip("/"),
         "rest_username": str(raw.get("rest_username") or DEFAULT_GERRIT_DASHBOARD["rest_username"]).strip(),
@@ -175,7 +168,11 @@ def select_gerrit_personal_profile(config: dict[str, Any], profile_id: str = "",
     owner_text = str(owner or "").strip()
     if owner_text:
         return {"id": _profile_id(owner_text), "name": owner_text, "owner": owner_text, **((config or {}).get("defaults") or {})}
-    return profiles[0] if profiles else DEFAULT_GERRIT_DASHBOARD["personal_profiles"][0]
+    defaults = (config or {}).get("defaults") or {}
+    default_owner = str((config or {}).get("default_owner") or "").strip()
+    if default_owner:
+        return {"id": _profile_id(default_owner), "name": default_owner, "owner": default_owner, **defaults}
+    return profiles[0] if profiles else {"id": "", "name": "", "owner": "", **defaults}
 
 
 def select_gerrit_department_profile(config: dict[str, Any], profile_id: str = "") -> dict[str, Any]:
@@ -184,7 +181,8 @@ def select_gerrit_department_profile(config: dict[str, Any], profile_id: str = "
     for profile in profiles:
         if profile.get("id") == requested:
             return profile
-    return profiles[0] if profiles else DEFAULT_GERRIT_DASHBOARD["department_profiles"][0]
+    defaults = (config or {}).get("defaults") or {}
+    return profiles[0] if profiles else {"id": "", "name": "", "owners": [], **defaults}
 
 
 def add_gerrit_personal_profile(

@@ -22,23 +22,15 @@ from .internal_issue_creator import InternalIssueCreator
 from .knowledge_repository import RedmineKnowledgeDB
 from .mature_cases import MatureCaseBuilder
 from .reply_drafter import ReplyDrafter
+from .utils import parse_iso
 
 logger = logging.getLogger(__name__)
 
 
 def _parse_iso(value: Any) -> datetime | None:
-    if not value:
-        return None
-    text = str(value).strip()
-    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(text.replace("Z", ""), fmt)
-        except ValueError:
-            continue
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
-    except Exception:
-        return None
+    # Delegate to the shared parser so all Redmine timestamp parsing lives in
+    # one place (utils.parse_iso), consistent with to_iso8601 used elsewhere.
+    return parse_iso(value)
 
 
 class RedmineKnowledgeService:

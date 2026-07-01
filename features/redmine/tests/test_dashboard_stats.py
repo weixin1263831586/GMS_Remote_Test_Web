@@ -99,7 +99,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             self.assertEqual(stats["customer_no_reply_3_days"], 1)
             self.assertEqual([item["issue_id"] for item in stats["lists"]["customer_no_reply_3_days"]], [629401])
 
-    def test_unmapped_rockchip_email_suffix_defaults_to_customer(self):
+    def test_unmapped_rockchip_email_suffix_is_rk_colleague(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
@@ -123,14 +123,15 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 stats = db.get_workload_statistics(owner_names=["黄 超群"], stale_days=3, list_limit=10)
 
             self.assertEqual(stats["no_reply_3_days"], 1)
-            self.assertEqual(stats["rk_colleague_no_reply_3_days"], 0)
+            self.assertEqual(stats["rk_colleague_no_reply_3_days"], 1)
             self.assertEqual(stats["customer_no_reply_3_days"], 0)
-            self.assertEqual(stats["lists"]["no_reply_3_days"][0]["last_external_reply_by"], "未配置RK同事")
+            self.assertEqual(stats["lists"]["rk_colleague_no_reply_3_days"][0]["last_external_reply_by"], "未配置RK同事")
 
     def test_redmine_user_map_name_with_site_suffix_marks_last_replier_as_rk_colleague(self):
         from features.redmine.repository import _looks_like_rk_actor
 
         self.assertTrue(_looks_like_rk_actor({"user": "吴 良清（福州）", "user_email": ""}))
+        self.assertTrue(_looks_like_rk_actor({"user": "", "user_email": "dev@rock-chips.com"}))
 
     def test_unmapped_department_suffix_actor_is_counted_as_customer_reply(self):
         with TemporaryDirectory() as tmp:
@@ -188,6 +189,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 Client(),
                 db,
                 {"id": 1, "name": "韩金锋"},
+                stale_days=3,
             ))
 
         self.assertEqual(stats["owner_names"], ["韩金锋", "韩 金锋"])
@@ -547,7 +549,8 @@ class RedmineDashboardStatsTests(unittest.TestCase):
     def test_redmine_trend_detail_issue_number_links_to_redmine(self):
         source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
         self.assertIn("redmineIssueUrl(issueId)", source)
-        self.assertIn('target="_blank">#', source)
+        self.assertIn('target="_blank" rel="noopener"', source)
+        self.assertIn("'#' + id", source)
 
     def test_gerrit_week_trend_click_uses_iso_week_start(self):
         source = Path("features/gerrit/ui/page.html").read_text(encoding="utf-8")
