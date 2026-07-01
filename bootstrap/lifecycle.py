@@ -4,6 +4,7 @@ import asyncio
 import logging
 import queue
 import sqlite3
+import threading
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
@@ -99,24 +100,15 @@ async def _dispatch_usb_events(app) -> None:
 
 def _start_usb_monitor(app):
     app.state.usb_event_queue = queue.Queue()
-    try:
-        previous_devices = set(device_manager.get_connected_devices())
-        schedule_usbip_reconnect_for_missing_devices(
-            previous_devices,
-            reason='startup persisted USB/IP source check',
-        )
-    except Exception:
-        logger.exception('Failed to get initial devices')
-        previous_devices = set()
+    state = {'previous_devices': set()}
 
     def on_usb_devices_changed(devices):
-        nonlocal previous_devices
         reconcile_observed_usbip_devices(devices)
         visible_devices = filter_suppressed_usbip_devices(devices)
         current_devices = set(visible_devices)
-        connected = list(current_devices - previous_devices)
-        disconnected = list(previous_devices - current_devices)
-        previous_devices = current_devices
+        connected = list(current_devices - state['previous_devices'])
+        disconnected = list(state['previous_devices'] - current_devices)
+        state['previous_devices'] = current_devices
         if disconnected:
             schedule_usbip_reconnect_for_removed_devices(
                 disconnected,
@@ -133,13 +125,33 @@ def _start_usb_monitor(app):
             }
         )
 
-    init_usb_monitor(
-        device_getter=device_manager.get_connected_devices,
-        on_devices_changed=on_usb_devices_changed,
-        check_interval=2.0,
-        use_udev=True,
-    )
-    start_usb_monitor()
+    def start_monitor_in_background():
+        try:
+            previous_devices = set(device_manager.get_connected_devices())
+            state['previous_devices'] = previous_devices
+            schedule_usbip_reconnect_for_missing_devices(
+                previous_devices,
+                reason='startup persisted USB/IP source check',
+            )
+        except Exception:
+            logger.exception('Failed to get initial devices')
+
+        try:
+            init_usb_monitor(
+                device_getter=device_manager.get_connected_devices,
+                on_devices_changed=on_usb_devices_changed,
+                check_interval=2.0,
+                use_udev=True,
+            )
+            start_usb_monitor()
+        except Exception:
+            logger.exception('Failed to start USB monitor')
+
+    threading.Thread(
+        target=start_monitor_in_background,
+        name='USBMonitor-Startup',
+        daemon=True,
+    ).start()
     return asyncio.create_task(_dispatch_usb_events(app))
 
 

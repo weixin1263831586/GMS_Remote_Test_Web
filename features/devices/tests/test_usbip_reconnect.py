@@ -321,6 +321,72 @@ UNAUTH001	unauthorized
         self.assertEqual(saved["device_host"], "hcq@172.16.14.66")
         self.assertEqual(saved["password"], "secret")
 
+    def test_usbip_connect_does_not_overwrite_existing_source_from_other_host(self):
+        import features.devices.integrations_api as integrations
+
+        runtime_config = {
+            "usbip_devices_source": {
+                "RK3576GMS3": {"source": "cp2-share@172.16.14.65", "timestamp": 1},
+            }
+        }
+
+        class FakeConfigManager:
+            def load_config(self):
+                return {
+                    "device_pswd": "secret",
+                    "client_ssh_credentials": [],
+                }
+
+            def get_runtime_config(self):
+                return runtime_config
+
+            def save_runtime_config(self, data):
+                saved = dict(data)
+                runtime_config.clear()
+                runtime_config.update(saved)
+                return True
+
+        class FakeUsbipManager:
+            def start_usbip(self, device_host, device_password, usbip_attach_host=None):
+                return {
+                    "success": True,
+                    "message": "ok",
+                    "device_list": ["RK3576GMS3"],
+                }
+
+        old_sources = dict(global_state.usbip_devices_source)
+        request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+        try:
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+                global_state.usbip_devices_source["RK3576GMS3"] = {
+                    "source": "cp2-share@172.16.14.65",
+                    "timestamp": 1,
+                }
+            with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+                    patch.object(integrations, "usbip_manager", FakeUsbipManager()), \
+                    patch.object(integrations.runtime, "get_client_id_from_request", return_value="waha@172.16.14.64"):
+                response = asyncio.run(integrations.start_usbip(
+                    req=USBIPStartRequest(device_host="waha@172.16.14.64"),
+                    request=request,
+                    help=False,
+                ))
+
+            self.assertEqual(response.status_code, 200)
+            with global_state.usbip_devices_source_lock:
+                self.assertEqual(
+                    global_state.usbip_devices_source["RK3576GMS3"]["source"],
+                    "cp2-share@172.16.14.65",
+                )
+            self.assertEqual(
+                runtime_config["usbip_devices_source"]["RK3576GMS3"]["source"],
+                "cp2-share@172.16.14.65",
+            )
+        finally:
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+                global_state.usbip_devices_source.update(old_sources)
+
     def test_usbip_connect_accepts_transport_before_adb_device_is_ready(self):
         import features.devices.integrations_api as integrations
 
@@ -923,6 +989,7 @@ UNAUTH001	unauthorized
 
         with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
                 patch.object(reconnect, "usbip_manager", fake_usbip), \
+                patch.object(reconnect, "has_blocked_adb_process", return_value=False), \
                 patch.object(reconnect.device_manager, "get_connected_devices", side_effect=lambda force_refresh=True: next(device_sequences)), \
                 patch.object(reconnect, "USBIP_RECONNECT_INTERVAL_SECONDS", 0), \
                 patch.object(reconnect, "USBIP_RECONNECT_STABLE_INTERVAL_SECONDS", 0):

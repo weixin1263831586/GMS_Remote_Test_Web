@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import contextlib
+import os
+import signal
 import subprocess
 import threading
 
@@ -19,16 +22,28 @@ def run_local_shell_command(command: str, timeout: int = 30) -> tuple[str, str, 
     Keep shell-string execution behind this helper so call sites can be audited
     and migrated to argv-based subprocess calls incrementally.
     """
+    process = None
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
             shell=True,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
+            start_new_session=True,
         )
-        return result.stdout, result.stderr, result.returncode
+        stdout, stderr = process.communicate(timeout=timeout)
+        return stdout, stderr, process.returncode
     except subprocess.TimeoutExpired:
+        if process is not None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except Exception as exc:
+                logger.warning("Failed to kill timed out command process group: %s", exc)
+            with contextlib.suppress(Exception):
+                process.communicate(timeout=1)
         return "", "Command timed out", -1
     except Exception as exc:
         return "", str(exc), -1

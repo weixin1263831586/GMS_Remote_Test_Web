@@ -52,6 +52,26 @@ def _safe_upload_token(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", str(value or "").strip())[:120] or "default"
 
 
+def _remote_join(base_dir: str, path: str) -> str:
+    return f"{base_dir.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _resolve_gsi_remote_image(ssh, gms_suite_dir: str, image_path: str, label: str) -> tuple[str | None, str | None]:
+    image_path = str(image_path or "").strip()
+    if not image_path:
+        return "", None
+
+    if image_path.startswith("/") or image_path.startswith("./"):
+        if _remote_file_exists(ssh, image_path):
+            return image_path, None
+        return None, f"{label} not found: {image_path}"
+
+    remote_candidate = _remote_join(gms_suite_dir, image_path)
+    if _remote_file_exists(ssh, remote_candidate):
+        return remote_candidate, None
+    return None, f"{label} not found: {remote_candidate}"
+
+
 def _firmware_upload_session_dir(client_id: str, upload_id: str) -> str:
     return os.path.join(
         _FIRMWARE_CHUNK_ROOT,
@@ -622,17 +642,28 @@ async def burn_gsi(request: Request):
                     scp_client.put(local_misc, remote_misc)
                     scp_client.close()
 
-                # Handle vendor image
+                resolved_system, system_error = _resolve_gsi_remote_image(
+                    ssh,
+                    gms_suite_dir,
+                    system_img,
+                    "System image",
+                )
+                if system_error:
+                    await runtime.release_firmware_devices(client_id, locked_devices)
+                    return error_response(system_error)
+
                 remote_vendor = ""
                 if vendor_img:
-                    if os.path.exists(vendor_img):
-                        vendor_name = os.path.basename(vendor_img)
-                        remote_vendor = os.path.join(gms_suite_dir, vendor_name)
-                        scp_client = scp.SCPClient(ssh.get_transport())
-                        scp_client.put(vendor_img, remote_vendor)
-                        scp_client.close()
-                    else:
-                        remote_vendor = vendor_img
+                    resolved_vendor, vendor_error = _resolve_gsi_remote_image(
+                        ssh,
+                        gms_suite_dir,
+                        vendor_img,
+                        "Vendor boot image",
+                    )
+                    if vendor_error:
+                        await runtime.release_firmware_devices(client_id, locked_devices)
+                        return error_response(vendor_error)
+                    remote_vendor = resolved_vendor or ""
 
                 results = []
 
@@ -641,11 +672,11 @@ async def burn_gsi(request: Request):
                         await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Starting GSI burn for {len(devices)} devices...", "log_type": "info"})
 
                 for device in devices:
-                    img_args = f"--system {system_img}"
+                    img_args = f"--system {shlex.quote(resolved_system)}"
                     if remote_vendor:
-                        img_args += f" --vendor {remote_vendor}"
+                        img_args += f" --vendor {shlex.quote(remote_vendor)}"
 
-                    burn_cmd = f"{remote_script} {device} {img_args}"
+                    burn_cmd = f"{shlex.quote(remote_script)} {shlex.quote(device)} {img_args}"
 
                     if client_id in runtime.global_state.websocket_connections:
                         with contextlib.suppress(Exception):
@@ -707,20 +738,35 @@ async def burn_gsi(request: Request):
                             except Exception:
                                 pass
 
-                await runtime.release_firmware_devices(client_id, locked_devices)
+                try:
+                    await runtime.release_firmware_devices(client_id, locked_devices)
+                except Exception as release_error:
+                    logger.warning("[GSI Burn] Failed to release device locks: %s", release_error)
 
                 all_success = all(r["success"] for r in results)
                 if all_success:
-                    runtime.store_notification(client_id, "GSI burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "results": results})
+                    try:
+                        runtime.store_notification(client_id, "GSI burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "results": results})
+                    except Exception as notify_error:
+                        logger.warning("[GSI Burn] Failed to store success notification: %s", notify_error)
                     return JSONResponse(content={"success": True, "message": "GSI burn completed successfully", "results": results})
                 else:
                     failed = [r.get("device") for r in results if not r.get("success")]
-                    runtime.store_notification(client_id, "GSI burn failed", f"Failed: {', '.join(failed)}", "error", "firmware", {"devices": devices, "results": results})
+                    try:
+                        runtime.store_notification(client_id, "GSI burn failed", f"Failed: {', '.join(failed)}", "error", "firmware", {"devices": devices, "results": results})
+                    except Exception as notify_error:
+                        logger.warning("[GSI Burn] Failed to store failure notification: %s", notify_error)
                     return error_response("Some devices failed", results=results)
 
             except Exception as e:
-                runtime.store_notification(client_id, "GSI burn error", str(e)[:300], "error", "firmware", {"devices": devices})
-                await runtime.release_firmware_devices(client_id, locked_devices)
+                try:
+                    runtime.store_notification(client_id, "GSI burn error", str(e)[:300], "error", "firmware", {"devices": devices})
+                except Exception as notify_error:
+                    logger.warning("[GSI Burn] Failed to store error notification: %s", notify_error)
+                try:
+                    await runtime.release_firmware_devices(client_id, locked_devices)
+                except Exception as release_error:
+                    logger.warning("[GSI Burn] Failed to release device locks after error: %s", release_error)
                 return error_response(str(e))
 
     except Exception as e:

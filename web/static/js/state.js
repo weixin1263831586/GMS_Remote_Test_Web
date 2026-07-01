@@ -17,6 +17,7 @@ const state = {
     usernameDetectShown: false,
     config: null,
     fileBrowser: { currentPath: '', selectedFile: null, targetInputId: null, mode: null },
+    gsiVendorFile: null,
     suiteBrowser: { selectedSuitePath: '', currentPath: '', highlightPath: '' },
     domCache: {},
     lastLogCount: 0,
