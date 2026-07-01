@@ -338,6 +338,9 @@ function checkPendingFirmwareUpload() {
     if (uploadInProgress === 'true') {
         const fileName = sessionStorage.getItem('firmwareUploadFileName');
         const fileSize = sessionStorage.getItem('firmwareUploadFileSize');
+        const uploadId = sessionStorage.getItem('firmwareUploadId') || `${fileName || ''}:${fileSize || ''}`;
+        const warningKey = `firmwareUploadWarningShown:${uploadId}`;
+        const warningShown = sessionStorage.getItem(warningKey) === 'true';
         const startTime = parseInt(sessionStorage.getItem('firmwareUploadStartTime') || '0');
         const elapsed = Date.now() - startTime;
 
@@ -351,18 +354,20 @@ function checkPendingFirmwareUpload() {
             return;
         }
 
-        // 显示警告：上传已中断
-        const message = `⚠️ 固件上传已中断: ${fileName}\n` +
-                       `上次进度: ${progress.toFixed(1)}% (${formatBytes(uploadedSize)}/${formatBytes(totalSize)})\n` +
-                       `中断时间: ${Math.floor(elapsed / 1000)}秒前\n\n` +
-                       `重新选择同一文件后会自动从已上传分片继续。`;
+        if (!warningShown) {
+            const message = `⚠️ 固件上传已中断: ${fileName}\n` +
+                           `上次进度: ${progress.toFixed(1)}% (${formatBytes(uploadedSize)}/${formatBytes(totalSize)})\n` +
+                           `中断时间: ${Math.floor(elapsed / 1000)}秒前\n\n` +
+                           `重新选择同一文件后会自动从已上传分片继续。`;
 
-        addLogEntry(message, 'warning');
-        showToast('固件上传已暂停，请重新选择同一文件续传', 'warning');
-        createLocalNotification('固件上传中断', `${fileName} 上传中断于 ${progress.toFixed(1)}%`, 'warning', 'firmware-upload', {
-            filename: fileName,
-            progress
-        });
+            addLogEntry(message, 'warning');
+            showToast('固件上传已暂停，请重新选择同一文件续传', 'warning');
+            createLocalNotification('固件上传中断', `${fileName} 上传中断于 ${progress.toFixed(1)}%`, 'warning', 'firmware-upload', {
+                filename: fileName,
+                progress
+            });
+            sessionStorage.setItem(warningKey, 'true');
+        }
 
         // 显示进度条为警告状态（黄色）
         if (progress > 0 && totalSize > 0) {
@@ -2691,8 +2696,9 @@ function browseLocalFileForFirmware() {
                 target.value = file.name;  // 只显示文件名
                 const savedName = sessionStorage.getItem('firmwareUploadFileName');
                 const savedSize = parseInt(sessionStorage.getItem('firmwareUploadFileSize') || '0');
+                const savedLastModified = parseInt(sessionStorage.getItem('firmwareUploadLastModified') || '-1');
                 const interrupted = sessionStorage.getItem('firmwareUploadInterrupted') === 'true';
-                if (interrupted && savedName === file.name && savedSize === file.size) {
+                if (interrupted && savedName === file.name && savedSize === file.size && savedLastModified === (file.lastModified || 0)) {
                     showToast(`已选择同一固件，将从已上传分片续传: ${file.name}`, 'info');
                     addLogEntry(`已选择同一固件，准备断点续传: ${file.name}`, 'info');
                 } else {
@@ -2762,7 +2768,8 @@ async function submitFirmwareBurn() {
                 0,
                 0,
                 selectedFirmwareFile.size,
-                uploadId
+                uploadId,
+                selectedFirmwareFile.lastModified || 0
             );
 
             // 添加beforeunload事件监听，警告用户不要刷新
@@ -2808,7 +2815,8 @@ async function submitFirmwareBurn() {
                             progress,
                             uploadedSize,
                             selectedFirmwareFile.size,
-                            uploadId
+                            uploadId,
+                            selectedFirmwareFile.lastModified || 0
                         );
                         updateUploadProgress(progress, selectedFirmwareFile.name, uploadedSize, selectedFirmwareFile.size);
                     }
@@ -2925,28 +2933,94 @@ async function browseLocalFileForGsiSystem() {
     await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
 }
 
-// Browse local file for GSI vendor image (from local computer)
+// Browse local file for GSI vendor image
 function browseLocalFileForGsiVendor() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '*.img';
+    let input = document.getElementById('gsi-vendor-file-input');
+    if (!input) {
+        input = document.createElement('input');
+        input.type = 'file';
+        input.id = 'gsi-vendor-file-input';
+        input.accept = '*.img';
+        input.style.display = 'none';
+        document.body.appendChild(input);
+    }
+
     input.onchange = (e) => {
         const file = e.target.files[0];
-        if (file) {
-            const target = document.getElementById('gsi-vendor');
-            if (target) {
-                target.value = file.path || file.name;
-                showToast(`已选择Vendor镜像: ${file.name}`, 'info');
-            }
+        if (!file) return;
+        state.gsiVendorFile = file;
+        const target = document.getElementById('gsi-vendor');
+        if (target) {
+            target.value = file.name;
         }
+        showToast(`已选择本机Vendor Boot镜像: ${file.name}`, 'info');
+        addLogEntry(`已选择本机Vendor Boot镜像: ${file.name}`, 'info');
     };
     input.click();
+}
+
+// Browse remote file for GSI vendor image
+async function browseRemoteFileForGsiVendor() {
+    state.gsiVendorFile = null;
+    const input = document.getElementById('gsi-vendor-file-input');
+    if (input) {
+        input.value = '';
+    }
+
+    const title = '选择Vendor Boot镜像';
+
+    state.fileBrowser.mode = 'gsi-vendor';
+    state.fileBrowser.targetInputId = 'gsi-vendor';
+    state.fileBrowser.selectedFile = null;
+
+    document.getElementById('file-browser-title').textContent = title;
+    ModalManager.open('file-browser-modal');
+
+    const defaultUser = getDefaultUbuntuUser();
+    await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
+}
+
+async function uploadGsiVendorBootToTestHost(file) {
+    const defaultUser = getDefaultUbuntuUser();
+    const targetDir = `/home/${defaultUser}/GMS-Suite`;
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('path', targetDir);
+
+    addLogEntry(`正在上传Vendor Boot镜像到测试主机: ${file.name}`, 'info');
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener('progress', (e) => {
+            if (!e.lengthComputable) return;
+            const percentage = (e.loaded / e.total) * 100;
+            updateUploadProgress(percentage, file.name, e.loaded, e.total);
+        });
+        xhr.addEventListener('load', () => {
+            let result = {};
+            try {
+                result = JSON.parse(xhr.responseText || '{}');
+            } catch (_e) {
+                reject(new Error('Vendor Boot上传响应解析失败'));
+                return;
+            }
+            if (xhr.status === 200 && result.success) {
+                updateUploadProgress(100, file.name, file.size, file.size);
+                addLogEntry(`Vendor Boot镜像上传完成: ${result.remote_path}`, 'success');
+                resolve(result.remote_path);
+                return;
+            }
+            reject(new Error(result.error || `Vendor Boot上传失败: HTTP ${xhr.status}`));
+        });
+        xhr.addEventListener('error', () => reject(new Error('Vendor Boot上传网络错误')));
+        xhr.open('POST', '/api/terminal/push');
+        xhr.send(formData);
+    });
 }
 
 async function submitGsiBurn() {
     const scriptPath = document.getElementById('gsi-script').value.trim();
     const systemImg = document.getElementById('gsi-system').value.trim();
-    const vendorImg = document.getElementById('gsi-vendor').value.trim();
+    let vendorImg = document.getElementById('gsi-vendor').value.trim();
 
     if (!scriptPath) {
         showToast('请选择GSI烧写脚本', 'error');
@@ -2957,11 +3031,25 @@ async function submitGsiBurn() {
         return;
     }
 
-    await executeBurnOperation('/api/burn/gsi', {
-        system_img: systemImg,
-        vendor_img: document.getElementById('gsi-vendor').value.trim(),
-        script_path: document.getElementById('gsi-script').value.trim()
-    }, '烧写GSI', closeGsiModal);
+    try {
+        if (state.gsiVendorFile) {
+            vendorImg = await uploadGsiVendorBootToTestHost(state.gsiVendorFile);
+            const vendorInput = document.getElementById('gsi-vendor');
+            if (vendorInput) {
+                vendorInput.value = vendorImg;
+            }
+            state.gsiVendorFile = null;
+        }
+
+        await executeBurnOperation('/api/burn/gsi', {
+            system_img: systemImg,
+            vendor_img: vendorImg,
+            script_path: scriptPath
+        }, '烧写GSI', closeGsiModal);
+    } catch (error) {
+        showToast(error.message, 'error');
+        addLogEntry(`GSI Vendor Boot准备失败: ${error.message}`, 'error');
+    }
 }
 
 async function burnSerialNumber() {
@@ -3045,6 +3133,15 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
             operation: operationName,
             endpoint
         });
+    } finally {
+        try {
+            await loadDevices(true);
+            if (typeof currentPage !== 'undefined' && currentPage === 'devices' && typeof loadDevicesManagement === 'function') {
+                await loadDevicesManagement();
+            }
+        } catch (refreshError) {
+            console.warn('[Burn] Failed to refresh devices after operation:', refreshError);
+        }
     }
 }
 
@@ -4165,21 +4262,25 @@ function getFirmwareUploadId(file) {
 function getReusableFirmwareUploadId(file) {
     const savedName = sessionStorage.getItem('firmwareUploadFileName');
     const savedSize = parseInt(sessionStorage.getItem('firmwareUploadFileSize') || '0');
+    const savedLastModified = parseInt(sessionStorage.getItem('firmwareUploadLastModified') || '-1');
     const savedId = sessionStorage.getItem('firmwareUploadId');
-    if (savedId && savedName === file.name && savedSize === file.size) {
+    if (savedId && savedName === file.name && savedSize === file.size && savedLastModified === (file.lastModified || 0)) {
         return savedId;
     }
     return getFirmwareUploadId(file);
 }
 
-function saveFirmwareUploadState(fileName, fileSize, startTime, progress = 0, uploadedSize = 0, totalSize = 0, uploadId = '') {
+function saveFirmwareUploadState(fileName, fileSize, startTime, progress = 0, uploadedSize = 0, totalSize = 0, uploadId = '', lastModified = 0) {
     sessionStorage.setItem('firmwareUploadInProgress', 'true');
     sessionStorage.setItem('firmwareUploadFileName', fileName);
     sessionStorage.setItem('firmwareUploadFileSize', fileSize);
+    sessionStorage.setItem('firmwareUploadLastModified', String(lastModified || 0));
     sessionStorage.setItem('firmwareUploadStartTime', startTime.toString());
     if (uploadId) {
         sessionStorage.setItem('firmwareUploadId', uploadId);
+        sessionStorage.removeItem(`firmwareUploadWarningShown:${uploadId}`);
     }
+    sessionStorage.removeItem('firmwareUploadInterrupted');
     if (progress > 0) {
         sessionStorage.setItem('firmwareUploadProgress', progress.toString());
         sessionStorage.setItem('firmwareUploadedSize', uploadedSize.toString());
@@ -4194,10 +4295,15 @@ function clearFirmwareUploadState() {
     sessionStorage.removeItem('firmwareUploadInProgress');
     sessionStorage.removeItem('firmwareUploadFileName');
     sessionStorage.removeItem('firmwareUploadFileSize');
+    sessionStorage.removeItem('firmwareUploadLastModified');
     sessionStorage.removeItem('firmwareUploadStartTime');
     sessionStorage.removeItem('firmwareUploadProgress');
     sessionStorage.removeItem('firmwareUploadedSize');
     sessionStorage.removeItem('firmwareTotalSize');
+    const uploadId = sessionStorage.getItem('firmwareUploadId');
+    if (uploadId) {
+        sessionStorage.removeItem(`firmwareUploadWarningShown:${uploadId}`);
+    }
     sessionStorage.removeItem('firmwareUploadId');
     sessionStorage.removeItem('firmwareUploadInterrupted');
 }
@@ -4459,6 +4565,11 @@ function confirmFileSelection() {
         fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
+            state.gsiVendorFile = null;
+            const localVendorInput = document.getElementById('gsi-vendor-file-input');
+            if (localVendorInput) {
+                localVendorInput.value = '';
+            }
             addLogEntry(`已选择Vendor镜像: ${fullPath}`, 'info');
         }
         closeFileBrowserModal();

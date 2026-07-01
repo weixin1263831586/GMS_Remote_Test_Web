@@ -120,8 +120,23 @@ async def get_connected_devices(
     client_id = runtime.get_client_id_from_request(request)
     get_or_create_user_state(client_id)
 
+    now = datetime.now().timestamp()
+    if not force_refresh:
+        with runtime.global_state.device_cache_lock:
+            cached_devices = runtime.global_state.device_cache.get("devices") or []
+            cache_timestamp = runtime.global_state.device_cache.get("timestamp", 0)
+        if cached_devices and now - cache_timestamp < runtime.device_cache_ttl:
+            return JSONResponse(content=cached_devices)
+
     # Refresh device list first
     raw_devices = await asyncio.to_thread(device_manager.get_connected_devices, force_refresh)
+    if not raw_devices:
+        with runtime.global_state.device_cache_lock:
+            cached_devices = runtime.global_state.device_cache.get("devices") or []
+        if cached_devices:
+            logger.warning("[Device] ADB scan returned no devices; keeping cached device list")
+            return JSONResponse(content=cached_devices)
+
     reconnect.reconcile_observed_usbip_devices(raw_devices)
     devices = reconnect.filter_suppressed_usbip_devices(raw_devices)
 
@@ -131,7 +146,6 @@ async def get_connected_devices(
     current_device_set = set(devices)
 
     # Check cache
-    now = datetime.now().timestamp()
     if not force_refresh and now - runtime.global_state.device_cache["timestamp"] < runtime.device_cache_ttl:
         cached_devices = runtime.global_state.device_cache["devices"]
         cached_device_set = {

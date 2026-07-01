@@ -17,7 +17,7 @@ from foundation.security import sanitize_device_ids
 
 from . import reconnect, runtime
 from .locks import device_lock_manager
-from .manager import device_manager
+from .manager import device_manager, has_blocked_adb_process
 from .models import DeviceActionRequest, DeviceLockRequest, DeviceShellRequest, WifiConnectRequest
 from .screens_api import router as screens_router
 from .support import SSHConnection, broadcast_device_lock_update
@@ -281,6 +281,46 @@ def _build_devices_management_payload(
     return {"devices": devices_info}
 
 
+def _cached_management_payload() -> dict[str, Any] | None:
+    with runtime.global_state.device_cache_lock:
+        cached_devices = runtime.global_state.device_cache.get("devices") or []
+    if not cached_devices:
+        return None
+
+    devices_info = []
+    for device in cached_devices:
+        if not isinstance(device, dict):
+            continue
+        device_id = device.get("device_id") or device.get("serial_no") or device.get("serial")
+        if not device_id:
+            continue
+        devices_info.append(
+            {
+                "device_id": device_id,
+                "serial_no": device_id,
+                "model": device.get("model") or "",
+                "android_version": device.get("android_version") or "",
+                "battery_level": device.get("battery_level") or "",
+                "soc_model": device.get("soc_model") or "",
+                "source_type": "usbip" if device.get("is_usbip") else "local",
+                "source_host": device.get("source") or device.get("source_host") or "-",
+                "status": device.get("status") or "online",
+                "locked_by": device.get("locked_by") or "",
+                "locked_username": device.get("locked_username") or "",
+                "locked_client_id": device.get("locked_client_id") or "",
+                "locked_by_self": bool(device.get("locked_by_self")),
+            }
+        )
+    if not devices_info:
+        return None
+    return {
+        "devices": devices_info,
+        "success": True,
+        "source": "cache",
+        "warning": "ADB scan returned no devices; using cached device list",
+    }
+
+
 @router.get("/api/devices/management")
 async def devices_management(request: Request):
     """Device management page - get detailed management info for all devices."""
@@ -288,6 +328,18 @@ async def devices_management(request: Request):
         config = runtime.config_manager.load_config()
 
         if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
+            if has_blocked_adb_process():
+                cached_payload = _cached_management_payload()
+                if cached_payload:
+                    return JSONResponse(content=cached_payload)
+                return JSONResponse(
+                    content={
+                        "devices": [],
+                        "success": True,
+                        "source": "local",
+                        "warning": "Local adb server is blocked; skipped adb scan",
+                    }
+                )
             output, error, code = await asyncio.to_thread(
                 runtime.run_local_shell_command, "adb devices", 5
             )
@@ -301,6 +353,9 @@ async def devices_management(request: Request):
 
             device_ids = DeviceUtils.parse_adb_devices(output)
             if not device_ids:
+                cached_payload = _cached_management_payload()
+                if cached_payload:
+                    return JSONResponse(content=cached_payload)
                 return JSONResponse(
                     content={"devices": [], "success": True, "source": "local"}
                 )
@@ -328,6 +383,9 @@ async def devices_management(request: Request):
             device_ids = DeviceUtils.parse_adb_devices(output)
 
             if not device_ids:
+                cached_payload = _cached_management_payload()
+                if cached_payload:
+                    return JSONResponse(content=cached_payload)
                 return JSONResponse(content={"devices": []})
 
             props_cmd = _build_management_props_command(device_ids)

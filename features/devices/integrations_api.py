@@ -284,23 +284,53 @@ async def start_usbip(
             logger.info(f"[USB/IP Start] Set connected=True for device_host={device_host}")
 
             if device_list:
+                existing_sources = {}
                 with runtime.global_state.usbip_devices_source_lock:
-                    for device_id in device_list:
-                        runtime.global_state.usbip_devices_source[device_id] = {
-                            "source": windows_device_host,
-                            "timestamp": time.time(),
-                        }
-                logger.info(f"[USB/IP Start] Recorded device source: {windows_device_host} for devices: {device_list}")
+                    existing_sources.update(runtime.global_state.usbip_devices_source)
+                try:
+                    runtime_sources = (
+                        runtime.config_manager.get_runtime_config() or {}
+                    ).get("usbip_devices_source") or {}
+                    if isinstance(runtime_sources, dict):
+                        existing_sources.update(runtime_sources)
+                except Exception as e:
+                    logger.warning("[USB/IP Start] Failed to read existing device sources: %s", e)
+
+                source_updates = {}
+                for device_id in device_list:
+                    existing_source = str(
+                        (existing_sources.get(device_id) or {}).get("source") or ""
+                    ).strip()
+                    if existing_source and existing_source != windows_device_host:
+                        logger.info(
+                            "[USB/IP Start] Keep existing source for %s: %s (new request: %s)",
+                            device_id,
+                            existing_source,
+                            windows_device_host,
+                        )
+                        continue
+                    source_updates[device_id] = {
+                        "source": windows_device_host,
+                        "timestamp": time.time(),
+                    }
+
+                with runtime.global_state.usbip_devices_source_lock:
+                    runtime.global_state.usbip_devices_source.update(source_updates)
+                logger.info(
+                    "[USB/IP Start] Recorded device source: %s for devices: %s; skipped existing: %s",
+                    windows_device_host,
+                    sorted(source_updates),
+                    sorted(set(device_list) - set(source_updates)),
+                )
 
                 # Persist USB/IP device sources to config
                 try:
                     existing_runtime = runtime.config_manager.get_runtime_config()
                     usbip_sources = existing_runtime.get("usbip_devices_source", {})
-                    for device_id in device_list:
-                        usbip_sources[device_id] = {"source": windows_device_host, "timestamp": time.time()}
+                    usbip_sources.update(source_updates)
                     existing_runtime["usbip_devices_source"] = usbip_sources
                     if runtime.config_manager.save_runtime_config(existing_runtime):
-                        logger.info(f"[USB/IP Start] Persisted device sources for {len(device_list)} devices")
+                        logger.info(f"[USB/IP Start] Persisted device sources for {len(source_updates)} devices")
                 except Exception as e:
                     logger.warning(f"[USB/IP Start] Failed to persist device sources: {e}")
 

@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
-from features.firmware import api, runtime
+from features.firmware import api, firmware_api, runtime
 
 
 class FakeConfigManager:
@@ -114,6 +114,41 @@ class FirmwareApiTests(unittest.TestCase):
             {"success": False, "error": "Firmware not found: /tmp/not-found.img"},
         )
         self.assertFalse(any("reboot loader" in command for command, _ in fake_ssh.commands))
+
+    def test_gsi_relative_vendor_image_resolves_under_suite_dir(self):
+        fake_ssh = FakeSshManager("__GMS_REMOTE_FILE_FOUND__\n")
+        runtime.configure_runtime(ssh_manager=fake_ssh)
+
+        resolved, error = firmware_api._resolve_gsi_remote_image(
+            fake_ssh,
+            "/home/hcq/GMS-Suite",
+            "vendor_boot-debug.img",
+            "Vendor boot image",
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(resolved, "/home/hcq/GMS-Suite/vendor_boot-debug.img")
+        self.assertIn(
+            "test -f /home/hcq/GMS-Suite/vendor_boot-debug.img",
+            fake_ssh.commands[0][0],
+        )
+
+    def test_gsi_missing_relative_vendor_image_returns_error(self):
+        fake_ssh = FakeSshManager("__GMS_REMOTE_FILE_MISSING__\n")
+        runtime.configure_runtime(ssh_manager=fake_ssh)
+
+        resolved, error = firmware_api._resolve_gsi_remote_image(
+            fake_ssh,
+            "/home/hcq/GMS-Suite",
+            "vendor_boot-debug.img",
+            "Vendor boot image",
+        )
+
+        self.assertIsNone(resolved)
+        self.assertEqual(
+            error,
+            "Vendor boot image not found: /home/hcq/GMS-Suite/vendor_boot-debug.img",
+        )
 
     def test_firmware_chunk_upload_can_resume_without_locking_devices(self):
         lock_calls = []

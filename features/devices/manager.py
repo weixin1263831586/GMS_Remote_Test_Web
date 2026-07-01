@@ -4,6 +4,7 @@
 import logging
 import re
 import subprocess
+import threading
 from typing import Any
 
 from foundation.networking import is_local_host
@@ -13,6 +14,38 @@ from .utils import DeviceUtils
 
 
 logger = logging.getLogger(__name__)
+_local_adb_devices_lock = threading.Lock()
+
+
+def has_blocked_adb_process() -> bool:
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "stat,args"],
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+    except Exception:
+        return False
+
+    adb_waiting_count = 0
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(maxsplit=1)
+        if len(fields) != 2:
+            continue
+        stat, args = fields
+        argv0 = args.split(maxsplit=1)[0]
+        is_adb = argv0 == "adb" or argv0.endswith("/adb")
+        if not is_adb:
+            continue
+        if stat.startswith("D"):
+            return True
+        if "devices" in args or "fork-server server" in args:
+            adb_waiting_count += 1
+    if adb_waiting_count >= 5:
+        logger.warning("[Device] Found %s pending adb processes; treating local adb as unhealthy", adb_waiting_count)
+        return True
+    return False
 
 
 class DeviceManager:
@@ -49,12 +82,20 @@ class DeviceManager:
         config = self.config_manager.load_config()
 
         if ssh is None and is_local_host(config.get('ubuntu_host', '')):
+            acquired = False
             try:
+                if has_blocked_adb_process():
+                    logger.warning("[Device] Local adb server is blocked in kernel state; skipping adb devices scan")
+                    return []
+                acquired = _local_adb_devices_lock.acquire(blocking=False)
+                if not acquired:
+                    logger.warning("[Device] Local adb devices query skipped because a previous query is still running")
+                    return []
                 result = subprocess.run(
                     ['adb', 'devices'],
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=5
                 )
                 if result.returncode != 0:
                     logger.warning(f"[Device] Local adb devices failed: {result.stderr.strip()}")
@@ -66,6 +107,9 @@ class DeviceManager:
             except Exception as e:
                 logger.error(f"[Device] Error getting local devices: {e}")
                 return []
+            finally:
+                if acquired:
+                    _local_adb_devices_lock.release()
 
         if ssh is None:
             ssh = self.ssh_manager.get_connection(config)
@@ -311,4 +355,3 @@ class DeviceManager:
 
 # 全局设备管理器实例
 device_manager = DeviceManager()
-

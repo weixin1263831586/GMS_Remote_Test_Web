@@ -28,6 +28,7 @@ class DeviceLifecycleTests(unittest.TestCase):
 
         with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
                 patch.object(reconnect, "usbip_manager", FakeUsbipManager()), \
+                patch.object(reconnect, "has_blocked_adb_process", return_value=False), \
                 patch.object(reconnect, "USBIP_RECONNECT_INTERVAL_SECONDS", 60):
             self.assertTrue(reconnect.schedule_usbip_reconnect("host", reason="test"))
             self.assertTrue(attempted.wait(timeout=1))

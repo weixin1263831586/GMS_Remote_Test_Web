@@ -22,7 +22,7 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260601-01"></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260624-shell-audit" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260701-burn-refresh-devices" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -789,6 +789,12 @@
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('serial_no')">
                                 设备序列号 <span id="sort-serial_no">↕</span>
                             </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('source_host')">
+                                来源主机 <span id="sort-source_host">↕</span>
+                            </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('source_type')">
+                                来源类型 <span id="sort-source_type">↕</span>
+                            </th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('model')">
                                 设备型号 <span id="sort-model">↕</span>
                             </th>
@@ -803,12 +809,6 @@
                             </th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('status')">
                                 状态 <span id="sort-status">↕</span>
-                            </th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('source_type')">
-                                来源类型 <span id="sort-source_type">↕</span>
-                            </th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('source_host')">
-                                来源主机 <span id="sort-source_host">↕</span>
                             </th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('locked_by')">
                                 占用用户 <span id="sort-locked_by">↕</span>
@@ -1705,8 +1705,9 @@
                 <div class="modal-form-row">
                     <label>Vendor Boot 镜像:</label>
                     <div class="input-with-btn">
-                        <input type="text" id="gsi-vendor" placeholder="Vendor Boot 镜像(可选)" />
-                        <button class="btn-small" onclick="browseLocalFileForGsiVendor()">📁</button>
+                        <input type="text" id="gsi-vendor" placeholder="选择本机文件或输入服务器Vendor Boot路径(可选)" />
+                        <button class="btn-small" onclick="browseLocalFileForGsiVendor()">本机</button>
+                        <button class="btn-small" onclick="browseRemoteFileForGsiVendor()">服务器</button>
                     </div>
                 </div>
                 <div class="modal-info-text">
@@ -2794,6 +2795,12 @@
                         <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
                             ${device.serial_no || '-'}
                         </td>
+                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
+                            ${device.source_host || '-'}
+                        </td>
+                        <td style="padding: 4px 6px; text-align: center;">
+                            ${sourceTypeBadge}
+                        </td>
                         <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
                             ${device.model || '-'}
                         </td>
@@ -2808,12 +2815,6 @@
                         </td>
                         <td style="padding: 4px 6px; text-align: center;">
                             ${statusBadge}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center;">
-                            ${sourceTypeBadge}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
-                            ${device.source_host || '-'}
                         </td>
                         <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
                             ${device.locked_by || '-'}

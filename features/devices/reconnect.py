@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from . import runtime
-from .manager import device_manager
+from .manager import device_manager, has_blocked_adb_process
 from .usbip import find_device_host_password, usbip_manager
 
 
@@ -285,6 +285,12 @@ def _reconnect_worker(
                 return
             if attempt > 1 and stop_event.wait(USBIP_RECONNECT_INTERVAL_SECONDS):
                 return
+            if has_blocked_adb_process():
+                logger.warning(
+                    "[USB/IP Reconnect] paused for %s because local adb is blocked in kernel state",
+                    device_host,
+                )
+                return
 
             config = runtime.config_manager.load_config(force_reload=True)
             device_password = find_device_host_password(device_host, config) or config.get("device_pswd", "")
@@ -377,6 +383,12 @@ def _usbip_devices_stable(
         if stop_event.is_set():
             return False
         if check_index and stop_event.wait(USBIP_RECONNECT_STABLE_INTERVAL_SECONDS):
+            return False
+        if has_blocked_adb_process():
+            logger.warning(
+                "[USB/IP Reconnect] stable check paused for %s because local adb is blocked",
+                device_host,
+            )
             return False
         current = set(device_manager.get_connected_devices(force_refresh=True))
         if not observed.issubset(current):
