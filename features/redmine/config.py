@@ -86,6 +86,8 @@ class RedmineConfig:
     def load_redmine_credentials(self) -> dict[str, str]:
         runtime = self.manager.get_runtime_config()
         saved = runtime.get("redmine_auth") or {}
+        if not saved:
+            saved = (self.manager.load_config(force_reload=True).get("redmine_auth") or {})
         encrypted = saved.get("encrypted_password")
         if encrypted:
             try:
@@ -103,7 +105,10 @@ class RedmineConfig:
                 }
             except Exception:
                 return {}
-        return {"username": "", "password": ""}
+        return {
+            "username": str(saved.get("username") or ""),
+            "password": str(saved.get("password") or ""),
+        }
 
     def save_redmine_credentials(
         self,

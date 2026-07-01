@@ -8,7 +8,7 @@ from typing import Any
 
 
 DEFAULT_REDMINE_STATS = {
-    "stale_days": 20,
+    "stale_days": 3,
     "window_days": 60,
     "cache_ttl": 600,
     "chart_date_ranges": {},

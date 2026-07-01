@@ -19,7 +19,7 @@ from features.redmine.tesseract_finder import (
     bundled_tesseract_cmd,
     configure_bundled_tesseract,
 )
-from features.redmine.utils import sanitize_attachment_filename
+from features.redmine.utils import sanitize_attachment_filename, to_iso8601
 
 
 if TYPE_CHECKING:
@@ -101,11 +101,9 @@ def _now_iso() -> str:
 
 
 def _iso(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, datetime):
-        return value.isoformat(timespec="seconds")
-    return str(value)
+    # Delegate to the shared normalizer so all mixins format Redmine
+    # timestamps identically (handles datetime + space-separated strings).
+    return to_iso8601(value)
 
 
 def _obj_name(value: Any) -> str:
@@ -285,10 +283,13 @@ class AttachmentAnalysisMixin:
         except Exception:
             return ""
         try:
-            if bundled_tesseract_cmd():
+            # bundled_tesseract_cmd() and configure_bundled_tesseract() are both
+            # cached after the first call, so this per-image check stays cheap.
+            cmd = bundled_tesseract_cmd()
+            if cmd:
                 configure_bundled_tesseract()
                 import pytesseract.pytesseract as _pt
-                _pt.tesseract_cmd = bundled_tesseract_cmd()
+                _pt.tesseract_cmd = cmd
             with Image.open(path) as image:
                 return str(pytesseract.image_to_string(image, lang="chi_sim+eng") or "")
         except Exception as exc:

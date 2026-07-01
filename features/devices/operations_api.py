@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shlex
 from datetime import datetime
 from typing import Any
@@ -29,15 +30,148 @@ router = APIRouter()
 
 
 def _known_usbip_device_ids() -> set:
-    device_ids = set()
-    with runtime.global_state.usbip_devices_source_lock:
-        device_ids.update(runtime.global_state.usbip_devices_source.keys())
+    return set(_known_usbip_sources().keys())
+
+
+def _known_usbip_sources() -> dict[str, dict[str, Any]]:
+    """Return USB/IP source records from persisted, in-memory, and manager state.
+
+    Later sources override earlier ones so a current attach result wins over
+    older persisted runtime data, while persisted data still survives restarts.
+    """
+    from features.devices.usbip import usbip_manager
+
+    sources: dict[str, dict[str, Any]] = {}
+
     runtime_sources = (runtime.config_manager.get_runtime_config() or {}).get(
         "usbip_devices_source"
     ) or {}
     if isinstance(runtime_sources, dict):
-        device_ids.update(str(device_id) for device_id in runtime_sources if device_id)
-    return device_ids
+        for device_id, source in runtime_sources.items():
+            if device_id and isinstance(source, dict):
+                sources[str(device_id)] = dict(source)
+
+    with runtime.global_state.usbip_devices_source_lock:
+        for device_id, source in runtime.global_state.usbip_devices_source.items():
+            if device_id and isinstance(source, dict):
+                sources[str(device_id)] = dict(source)
+
+    for device_id, source in (getattr(usbip_manager, "device_sources", {}) or {}).items():
+        if device_id and isinstance(source, dict):
+            sources[str(device_id)] = dict(source)
+
+    return sources
+
+
+def _source_host_token(source: str) -> str:
+    source = str(source or "").strip()
+    if "@" in source:
+        return source.rsplit("@", 1)[1].strip()
+    return source
+
+
+def _active_usbip_source_hosts(config: dict[str, Any]) -> set[str] | None:
+    """Return remote hosts currently attached through usbip on the test host."""
+    command = "usbip port"
+    try:
+        if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
+            output, _error, code = runtime.run_local_shell_command(command, 10)
+        else:
+            with SSHConnection(config) as ssh:
+                output, _error, code = runtime.ssh_manager.execute_command(
+                    ssh, command, timeout=10
+                )
+        if code != 0:
+            return None
+    except Exception as exc:
+        logger.info("[USB/IP] Failed to query active usbip ports: %s", exc)
+        return None
+
+    hosts: set[str] = set()
+    for line in (output or "").splitlines():
+        match = re.search(r"\b(?:Remote|remote)\s+host\s*[:=]\s*([^\s]+)", line)
+        if match:
+            hosts.add(match.group(1).strip())
+        hosts.update(re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", line))
+    return hosts
+
+
+def _run_on_test_host(config: dict[str, Any], command: str, timeout: int = 10):
+    if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
+        return runtime.run_local_shell_command(command, timeout)
+    with SSHConnection(config) as ssh:
+        return runtime.ssh_manager.execute_command(ssh, command, timeout=timeout)
+
+
+def _active_usbip_serials(config: dict[str, Any]) -> set[str] | None:
+    """Return ADB serials currently backed by Linux USB/IP vhci devices."""
+    command = (
+        "for f in $(find /sys/devices/platform/vhci_hcd* -name serial -type f 2>/dev/null); do "
+        "[ -f \"$f\" ] || continue; "
+        "s=$(cat \"$f\" 2>/dev/null); "
+        "[ -n \"$s\" ] && [ \"$s\" != \"vhci_hcd.0\" ] && echo \"$s\"; "
+        "done | sort -u"
+    )
+    try:
+        output, _error, code = _run_on_test_host(config, command, timeout=10)
+        if code != 0:
+            return None
+    except Exception as exc:
+        logger.info("[USB/IP] Failed to query active usbip serials: %s", exc)
+        return None
+    return {line.strip() for line in (output or "").splitlines() if line.strip()}
+
+
+def _clear_usbip_source_record(device_id: str, sources: dict[str, dict[str, Any]]) -> None:
+    from features.devices.usbip import usbip_manager
+
+    with runtime.global_state.usbip_devices_source_lock:
+        runtime.global_state.usbip_devices_source.pop(device_id, None)
+
+    getattr(usbip_manager, "device_sources", {}).pop(device_id, None)
+    sources.pop(device_id, None)
+
+    try:
+        runtime_config = runtime.config_manager.get_runtime_config()
+        runtime_sources = runtime_config.get("usbip_devices_source", {})
+        if isinstance(runtime_sources, dict) and device_id in runtime_sources:
+            runtime_sources.pop(device_id, None)
+            runtime_config["usbip_devices_source"] = runtime_sources
+            runtime.config_manager.save_runtime_config(runtime_config)
+    except Exception as exc:
+        logger.warning("[USB/IP] Failed to clear stale source for %s: %s", device_id, exc)
+
+
+def _prune_inactive_usbip_sources(
+    device_ids: list[str],
+    sources: dict[str, dict[str, Any]],
+    config: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Drop stale USB/IP records for devices now visible without an active port."""
+    current_usbip_devices = [device_id for device_id in device_ids if device_id in sources]
+    if not current_usbip_devices:
+        return sources
+
+    active_serials = _active_usbip_serials(config)
+    active_hosts = None if active_serials is not None else _active_usbip_source_hosts(config)
+    if active_serials is None and active_hosts is None:
+        return sources
+
+    for device_id in current_usbip_devices:
+        stale = False
+        if active_serials is not None:
+            stale = device_id not in active_serials
+        else:
+            source_host = _source_host_token(sources.get(device_id, {}).get("source", ""))
+            stale = bool(source_host and source_host not in active_hosts)
+
+        if stale:
+            logger.info(
+                "[USB/IP] Clearing stale source for %s; no active USB/IP transport",
+                device_id,
+            )
+            _clear_usbip_source_record(device_id, sources)
+    return sources
 
 
 def _device_results(results, operation_name):
@@ -100,15 +234,17 @@ def _build_devices_management_payload(
     config: dict[str, Any],
     client_id: str | None = None,
 ) -> dict[str, Any]:
-    from features.devices.usbip import usbip_manager
-
     client_id = client_id or runtime.client_manager.get_client_id("127.0.0.1")
     locks = device_lock_manager.get_all_locks()
     devices_info = []
     ubuntu_host = runtime.config_manager.get_ubuntu_host(config)
     ubuntu_user = runtime.config_manager.get_ubuntu_user(config)
 
-    all_usbip_sources = {**runtime.global_state.usbip_devices_source, **usbip_manager.device_sources}
+    all_usbip_sources = _prune_inactive_usbip_sources(
+        device_ids,
+        _known_usbip_sources(),
+        config,
+    )
     for device_id in device_ids:
         props = device_data.get(device_id, {})
         lock_info = locks.get(device_id, {})

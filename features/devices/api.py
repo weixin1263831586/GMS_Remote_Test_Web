@@ -28,6 +28,12 @@ from .operations_api import (
     _build_devices_management_payload as _build_devices_management_payload,
 )
 from .operations_api import (
+    _known_usbip_sources as _known_usbip_sources,
+)
+from .operations_api import (
+    _prune_inactive_usbip_sources as _prune_inactive_usbip_sources,
+)
+from .operations_api import (
     _build_management_props_command as _build_management_props_command,
 )
 from .operations_api import (
@@ -138,6 +144,14 @@ async def get_connected_devices(
 
     devices_with_status = []
 
+    usbip_sources = _prune_inactive_usbip_sources(
+        devices,
+        _known_usbip_sources(),
+        runtime.config_manager.load_config()
+        if hasattr(runtime.config_manager, "load_config")
+        else {},
+    )
+
     for device_id in devices:
         device_info = {"device_id": device_id, "status": "online", "locked": False}
 
@@ -160,9 +174,9 @@ async def get_connected_devices(
             device_info["locked_by_self"] = False
 
         # Check USB/IP source
-        if device_id in runtime.global_state.usbip_devices_source:
-            source = runtime.global_state.usbip_devices_source[device_id]
-            device_info["source"] = source["source"]
+        if device_id in usbip_sources:
+            source = usbip_sources[device_id]
+            device_info["source"] = source.get("source", "")
             device_info["is_usbip"] = True
 
         devices_with_status.append(device_info)

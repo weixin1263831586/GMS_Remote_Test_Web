@@ -88,17 +88,24 @@ async function uploadFileInChunks(file, url, options = {}) {
             const xhr = new XMLHttpRequest();
             xhr.addEventListener('load', () => {
                 if (xhr.status !== 200) {
-                    resolve([]);
+                    resolve({ uploaded_chunks: [] });
                     return;
                 }
                 try {
                     const result = JSON.parse(xhr.responseText);
-                    resolve(Array.isArray(result.uploaded_chunks) ? result.uploaded_chunks : []);
+                    resolve({
+                        uploaded_chunks: Array.isArray(result.uploaded_chunks) ? result.uploaded_chunks : [],
+                        chunks_uploaded: result.chunks_uploaded || 0,
+                        total_chunks: result.total_chunks || totalChunks,
+                        progress: result.progress || 0,
+                        uploaded_size: result.uploaded_size || 0,
+                        total_size: result.total_size || fileSize,
+                    });
                 } catch (_e) {
-                    resolve([]);
+                    resolve({ uploaded_chunks: [] });
                 }
             });
-            xhr.addEventListener('error', () => resolve([]));
+            xhr.addEventListener('error', () => resolve({ uploaded_chunks: [] }));
             xhr.open('POST', url);
             applyHeaders(xhr);
             xhr.send(formData);
@@ -195,13 +202,23 @@ async function uploadFileInChunks(file, url, options = {}) {
     // 并发上传所有块
     try {
         if (resume && checkExisting) {
-            const existing = await checkUploadedChunks();
+            const existingStatus = await checkUploadedChunks();
+            const existing = existingStatus.uploaded_chunks || [];
             uploadedChunks = new Set(existing.map(Number).filter(idx => idx >= 0 && idx < totalChunks));
             if (uploadedChunks.size === totalChunks && totalChunks > 0) {
                 uploadedChunks.delete(totalChunks - 1);
             }
             if (uploadedChunks.size && onProgress) {
                 onProgress((uploadedChunks.size / totalChunks) * 100, uploadedChunks.size, totalChunks);
+            }
+            if (uploadedChunks.size && options.onResume) {
+                options.onResume({
+                    ...existingStatus,
+                    uploaded_chunks: Array.from(uploadedChunks),
+                    chunks_uploaded: uploadedChunks.size,
+                    total_chunks: totalChunks,
+                    progress: (uploadedChunks.size / totalChunks) * 100,
+                });
             }
             chunkDebugLog(`[ChunkUpload] Resume found: ${uploadedChunks.size}/${totalChunks}`);
         }

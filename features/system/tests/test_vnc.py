@@ -1,11 +1,11 @@
 import unittest
 from unittest.mock import patch
 
+from foundation.processes import command_reports_running
 from features.system.vnc import (
     NOVNC_WEB_PORT,
     VNC_PORT,
     VNCManager,
-    _command_reports_running,
     novnc_url,
     vnc_password_temp_path,
 )
@@ -13,8 +13,8 @@ from features.system.vnc import (
 
 class VNCManagerTests(unittest.TestCase):
     def test_command_reports_running_requires_exact_line(self):
-        self.assertTrue(_command_reports_running("123\nRUNNING\n"))
-        self.assertFalse(_command_reports_running("NOT_RUNNING\n"))
+        self.assertTrue(command_reports_running("123\nRUNNING\n"))
+        self.assertFalse(command_reports_running("NOT_RUNNING\n"))
 
     def test_vnc_helpers_keep_default_ports_centralized(self):
         self.assertEqual(novnc_url("192.168.0.2"), "http://192.168.0.2:6080/vnc.html?autoconnect=true")

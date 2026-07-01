@@ -62,8 +62,6 @@ X11VNC_DISPLAY_PATTERN = x11vnc_display_pattern()
 WEBSOCKIFY_PATTERN = websockify_pattern()
 
 
-# Re-export for callers/tests that import it from this module.
-_command_reports_running = command_reports_running
 
 
 class VNCManager:
@@ -359,7 +357,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             # 检查并启动x11vnc
             check_x11_cmd = f"pgrep -f -- {shlex.quote(X11VNC_DISPLAY_PATTERN)} && echo 'RUNNING' || echo 'NOT_RUNNING'"
             stdout, _, _ = self.ssh_manager.execute_command(ssh, check_x11_cmd)
-            x11vnc_running = _command_reports_running(stdout)
+            x11vnc_running = command_reports_running(stdout)
 
             # 如果x11vnc正在运行，检查是否使用了密码模式
             if x11vnc_running and not vnc_password:
@@ -392,7 +390,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             # 检查并启动websockify
             check_ws_cmd = f"pgrep -f -- {shlex.quote(WEBSOCKIFY_PATTERN)} && echo 'RUNNING' || echo 'NOT_RUNNING'"
             stdout, _, _ = self.ssh_manager.execute_command(ssh, check_ws_cmd)
-            websockify_running = _command_reports_running(stdout)
+            websockify_running = command_reports_running(stdout)
 
             if not websockify_running:
                 novnc_cmd = (

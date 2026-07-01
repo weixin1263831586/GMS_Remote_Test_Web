@@ -62,7 +62,7 @@ let allApiDocs = []; // 所有API文档数据（已排序）
 let currentCategoryFilter = 'all';
 let currentMethodFilter = 'all';
 const API_DOCS_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存（生产环境）
-const FIRMWARE_UPLOAD_TIMEOUT = 10 * 60 * 1000; // 10分钟上传超时
+const FIRMWARE_UPLOAD_TIMEOUT = 24 * 60 * 60 * 1000; // 服务端分片保留24小时
 const apiDetailsCache = new Map();
 
 // API表格列宽配置 (与HTML模板保持一致: 25%, 18%, 17%, 40%)
@@ -355,10 +355,10 @@ function checkPendingFirmwareUpload() {
         const message = `⚠️ 固件上传已中断: ${fileName}\n` +
                        `上次进度: ${progress.toFixed(1)}% (${formatBytes(uploadedSize)}/${formatBytes(totalSize)})\n` +
                        `中断时间: ${Math.floor(elapsed / 1000)}秒前\n\n` +
-                       `请重新选择同一文件，系统会从已上传分片继续。`;
+                       `重新选择同一文件后会自动从已上传分片继续。`;
 
         addLogEntry(message, 'warning');
-        showToast('固件上传已中断，请重新上传', 'warning');
+        showToast('固件上传已暂停，请重新选择同一文件续传', 'warning');
         createLocalNotification('固件上传中断', `${fileName} 上传中断于 ${progress.toFixed(1)}%`, 'warning', 'firmware-upload', {
             filename: fileName,
             progress
@@ -2689,7 +2689,15 @@ function browseLocalFileForFirmware() {
             const target = document.getElementById('firmware-path');
             if (target) {
                 target.value = file.name;  // 只显示文件名
-                showToast(`已选择固件文件: ${file.name}`, 'info');
+                const savedName = sessionStorage.getItem('firmwareUploadFileName');
+                const savedSize = parseInt(sessionStorage.getItem('firmwareUploadFileSize') || '0');
+                const interrupted = sessionStorage.getItem('firmwareUploadInterrupted') === 'true';
+                if (interrupted && savedName === file.name && savedSize === file.size) {
+                    showToast(`已选择同一固件，将从已上传分片续传: ${file.name}`, 'info');
+                    addLogEntry(`已选择同一固件，准备断点续传: ${file.name}`, 'info');
+                } else {
+                    showToast(`已选择固件文件: ${file.name}`, 'info');
+                }
             }
         }
     };
@@ -2734,7 +2742,7 @@ async function submitFirmwareBurn() {
 
         const warnBeforeRefresh = (e) => {
             e.preventDefault();
-            e.returnValue = '固件上传中，刷新将中断上传！确定要离开吗？';
+            e.returnValue = '固件上传中，刷新会暂停浏览器上传；重新选择同一文件后可从已上传分片续传。确定要离开吗？';
             return e.returnValue;
         };
         const cleanupUploadState = () => {
@@ -2781,6 +2789,12 @@ async function submitFirmwareBurn() {
                     uploadId,
                     extraFormData: {
                         firmware_path: firmwarePath,
+                    },
+                    onResume: (status) => {
+                        const progress = status.progress || 0;
+                        const uploadedSize = status.uploaded_size || Math.round((status.chunks_uploaded / status.total_chunks) * selectedFirmwareFile.size);
+                        addLogEntry(`检测到已上传分片，继续上传: ${progress.toFixed(1)}% (${formatBytes(uploadedSize)}/${formatBytes(selectedFirmwareFile.size)})`, 'info');
+                        showToast('检测到已上传分片，正在续传', 'info');
                     },
                     onProgress: (progress, uploadedChunks, totalChunks) => {
                         const uploadedSize = Math.min(

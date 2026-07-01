@@ -893,21 +893,6 @@ async def send_department_reminder_email(request: Request):
     return {"success": True, "data": {"to": to_addr, "subject": subject, "body": body_text, **result}}
 
 
-@router.post("/sync")
-async def trigger_sync(
-    request: Request,
-    max_analyze: int = Query(20, ge=0, le=200),
-    assignee_id: int | None = Query(None, ge=1),
-    assignee_name: str = Query(""),
-):
-    return await start_redmine_agent_sync(
-        request,
-        max_analyze=max_analyze,
-        assignee_id=assignee_id,
-        assignee_name=assignee_name,
-    )
-
-
 @router.post("/issues/{issue_id}/fetch")
 async def fetch_and_analyze_issue(issue_id: int, request: Request):
     """Fetch a single issue from Redmine and analyze it."""
@@ -1001,8 +986,7 @@ async def update_stats_config(request: Request):
 async def get_credentials_status(request: Request):
     """报告登录用户的 Redmine 凭据是否已配置（不回传明文）。
 
-    凭据随登录用户落盘到 per-user runtime（data/redmine/by_user/<owner>/），
-    与统计端点的数据源一致。
+    凭据统一落盘到 configs/config_runtime.json，与统计端点读取的配置一致。
     """
     manager = get_redmine_config_for_request(request)
     creds = manager.load_redmine_credentials() or {}

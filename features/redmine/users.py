@@ -33,11 +33,11 @@ def owner_attachments_dir(owner_id: str) -> Path:
 
 
 def owner_runtime_config_path(owner_id: str) -> Path:
-    return owner_redmine_root(owner_id) / "config_runtime.json"
+    return settings.project_root / "configs/config_runtime.json"
 
 
 def owner_user_map_path(owner_id: str) -> Path:
-    return owner_redmine_root(owner_id) / "redmine_user_map.json"
+    return USER_MAP_PATH
 
 
 def owner_knowledge_db_path(owner_id: str) -> Path:
@@ -253,7 +253,14 @@ def load_redmine_user_map_for_owner(owner_id: str) -> list[dict[str, Any]]:
 
 
 def load_user_map_payload_for_owner(owner_id: str) -> dict[str, Any]:
-    return _load_user_map_payload_from(owner_user_map_path(owner_id))
+    owner_path = owner_user_map_path(owner_id)
+    if owner_path.exists():
+        return _load_user_map_payload_from(owner_path)
+    # 无 per-user 副本时直接返回全局 payload，不在此处落盘——避免任意
+    # owner（含测试用假用户）首次访问就在 configs/ 下产生残留副本。
+    # per-user 副本只在用户显式保存自己的 user_map 时由
+    # save_user_map_payload_for_owner 写入。
+    return _load_user_map_payload_from(USER_MAP_PATH)
 
 
 def save_user_map_payload_for_owner(owner_id: str, payload: dict[str, Any]) -> None:
@@ -316,12 +323,20 @@ def _looks_like_report_attachment(attachment: dict[str, Any]) -> bool:
 
 def _looks_like_rk_actor(actor: Any) -> bool:
     if isinstance(actor, dict):
+        email = str(actor.get("user_email") or actor.get("email") or actor.get("mail") or "").strip().lower()
+        if email.endswith("@rock-chips.com"):
+            return True
         name = actor.get("user") or actor.get("name") or ""
     else:
         name = actor
     text = str(name or "").strip()
     if not text:
         return False
+    lowered = text.lower()
+    if "rock-chips.com" in lowered or "rockchip" in lowered or lowered.startswith("rk "):
+        return True
+    if "fae" in lowered or "瑞芯" in text:
+        return True
     actor_keys = _name_keys(text)
     for item in load_redmine_user_map():
         for value in display_names_from_mapping(item):
@@ -385,7 +400,7 @@ async def compute_user_overdue_stats(
     client: Any,
     db: Any,
     user: dict[str, Any],
-    stale_days: int = 3,
+    stale_days: int,
     issue_limit: int = 500,
     window_days: int = 0,
     force_refresh: bool = False,

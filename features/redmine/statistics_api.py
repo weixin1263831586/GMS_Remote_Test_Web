@@ -52,8 +52,8 @@ def _request_user_id(request: Request | None) -> str:
         return getattr(user, "id", "") or "legacy"
 
 
-# 看板/统计读登录用户的隔离数据源：per-user 凭据、per-user DB、per-user 配置与 user_map。
-# 这是多用户隔离模式下的正确形态——配置存在 data/redmine/by_user/<owner>/config_runtime.json。
+# 看板/统计数据仍按登录用户隔离；配置统一读写 configs/config_runtime.json 和
+# configs/redmine_user_map.json，避免生成额外 per-user 配置目录。
 def _service_for_request(request: Request | None):
     return get_redmine_service_for_request(request)
 
@@ -100,7 +100,7 @@ async def _live_counts_for_user(service, user_id: int) -> dict[str, Any]:
 @router.get("/statistics/workload")
 async def get_workload_statistics(
     request: Request = None,
-    stale_days: int = Query(20, ge=1, le=30),
+    stale_days: int | None = Query(None, ge=1, le=30),
     list_limit: int = Query(30, ge=1, le=100),
     name: str = Query(""),
     refresh: bool = Query(False),
@@ -108,6 +108,7 @@ async def get_workload_statistics(
     service = _service_for_request(request)
     # Check cache
     stats_cfg = _get_redmine_stats_config(request)
+    stale_days = int(stale_days or stats_cfg["stale_days"])
     cache_key = f"{_request_user_id(request)}:{stale_days}:{list_limit}:{name}"
     now_ts = datetime.now().timestamp()
     cached = _check_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, stats_cfg["cache_ttl"], now_ts, refresh=refresh)

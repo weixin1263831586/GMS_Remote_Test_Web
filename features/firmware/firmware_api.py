@@ -91,9 +91,25 @@ async def _handle_firmware_chunk_upload(form, client_id: str):
 
     if str(form.get("check_chunks") or "").strip() in {"1", "true", "yes"}:
         uploaded_chunks = _read_uploaded_chunks(session_dir)
+        try:
+            total_chunks = int(form.get("total_chunks") or 0)
+            file_size = int(form.get("file_size") or 0)
+        except (TypeError, ValueError):
+            total_chunks = 0
+            file_size = 0
+        uploaded_size = 0
+        if total_chunks > 0:
+            for path in _firmware_chunk_paths(session_dir, total_chunks):
+                if os.path.exists(path):
+                    uploaded_size += os.path.getsize(path)
         return JSONResponse(content={
             "success": True,
             "uploaded_chunks": sorted(uploaded_chunks),
+            "chunks_uploaded": len(uploaded_chunks),
+            "total_chunks": total_chunks,
+            "progress": round((len(uploaded_chunks) / total_chunks) * 100, 2) if total_chunks else 0,
+            "uploaded_size": uploaded_size,
+            "total_size": file_size,
             "upload_id": upload_id,
         }), None
 

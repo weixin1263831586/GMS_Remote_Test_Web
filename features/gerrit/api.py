@@ -44,8 +44,7 @@ def _request_user_id(request: Request) -> str:
 
 
 def _config_for_request(request: Request):
-    # Gerrit 看板读登录用户的隔离配置（data/redmine/by_user/<owner>/config_runtime.json）。
-    # 多用户隔离模式下，配置与凭据随登录用户落盘；端点据此读写 per-user runtime。
+    # Gerrit 看板配置统一读写 configs/config_runtime.json。
     return config_manager.for_owner(_request_user_id(request))
 
 
@@ -430,11 +429,12 @@ def _public_config(cfg: dict[str, Any], manager=None) -> dict[str, Any]:
 
 def _redmine_department_options(manager=None) -> list[dict[str, str]]:
     rows: dict[str, str] = {}
-    for user in load_redmine_user_map():
-        profile_id = str(user.get("department_id") or "").strip()
-        if not profile_id:
+    cfg = manager.get_gerrit_dashboard_config() if manager is not None else {}
+    for profile in (cfg.get("department_profiles") or []):
+        profile_id = str(profile.get("id") or "").strip()
+        if not profile_id or profile_id == "all":
             continue
-        rows.setdefault(profile_id, str(user.get("department") or profile_id).strip() or profile_id)
+        rows.setdefault(profile_id, str(profile.get("name") or profile_id).strip() or profile_id)
     return [
         {"id": profile_id, "name": name}
         for profile_id, name in sorted(rows.items(), key=lambda item: item[1])
