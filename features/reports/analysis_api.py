@@ -1,3 +1,5 @@
+import sqlite3
+
 from foundation.config import settings
 
 from .api_helpers import (
@@ -39,6 +41,40 @@ from .api_helpers import (
 
 
 router = APIRouter()
+
+_MAINLINE_DB_PATH = settings.data_root / 'mainline_known_issues.sqlite3'
+
+
+def _query_mainline_exemptions(request: "ReportDiagnosisRequest") -> list[dict]:
+    """Look up Mainline known-issue exemptions for the failing test.
+
+    Read-only; degrades to an empty list when the DB is absent or the query
+    fails (mirrors the graceful degradation of the other recall channels).
+    """
+    if not _MAINLINE_DB_PATH.exists():
+        return []
+    # Imported lazily to avoid pulling the whole `features.system` package
+    # (whose __init__ imports back into features.reports) at module load time.
+    from features.system.mainline_issues.repository import (  # noqa: I001
+        init_db as _init_mainline_db,
+        query_exemption_match as _query_mainline_exemption_match,
+    )
+
+    conn = sqlite3.connect(str(_MAINLINE_DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        _init_mainline_db(conn)
+        # test_type is validated against MAINLINE_ISSUE_TYPES inside the matcher
+        # (VTS/unknown → ''), so no separate mapping layer is needed here.
+        return _query_mainline_exemption_match(
+            conn,
+            test_module=request.module,
+            test_case=request.test_name,
+            issue_type=request.test_type,
+            limit=10,
+        )
+    finally:
+        conn.close()
 
 
 def _is_safe_report_delete_dir(result_dir: str) -> bool:
@@ -229,6 +265,88 @@ async def analyze_reports(
         return error_response("Report analysis failed", 500, message=str(e))
 
 
+# ==================== Analyze Suite Log Directory ====================
+
+def _resolve_suite_log_dir(suite_path: str, rel_path: str, config) -> tuple[str, str | None]:
+    """Resolve a browsed suite-relative path to an absolute log directory.
+
+    Mirrors the path semantics of ``GET /api/test/suites/files`` so the
+    "报告分析" button on a logs subfolder analyzes the exact folder the user
+    sees. Returns ``(abs_path, error_message)``; on success error_message is
+    None. Enforces that the resolved path stays inside the configured suites
+    root (no ``..`` escape), so a malicious ``path`` cannot point elsewhere.
+    """
+    raw = (suite_path or "").replace("\\", "/").strip().rstrip("/")
+    if not raw or not raw.startswith("/"):
+        return "", "无效的测试套件路径"
+
+    # suite_path points at the .../tools dir; the suite root is its parent.
+    suite_root = raw[:-len("/tools")] if raw.endswith("/tools") else raw
+
+    rel = (rel_path or "").replace("\\", "/").strip().strip("/")
+    parts = [p for p in rel.split("/") if p and p != "."]
+    if any(p == ".." for p in parts):
+        return "", "非法路径"
+
+    base = (config.get("suites_path") or "").replace("\\", "/").strip().rstrip("/")
+    if base and not (suite_root == base or suite_root.startswith(base + "/")):
+        return "", "测试套件不在配置的套件目录内"
+
+    abs_path = suite_root if not parts else f"{suite_root}/{'/'.join(parts)}"
+    return abs_path, None
+
+
+@router.post("/api/reports/analyze-log-dir")
+async def analyze_suite_log_dir(
+    suite_path: str = Form(...),
+    path: str = Form(default=""),
+):
+    """Analyze a test-run log folder browsed from the suite browser.
+
+    Triggered by the per-folder "报告分析" button inside a ``.../logs`` dir.
+    Resolves ``suite_path``+``path`` to an absolute directory (same semantics
+    as the suite file browser) and runs the host-log analyzer over it. The
+    analyzer walks the tree recursively, so pointing it at a
+    ``logs/<timestamp>`` folder finds the nested ``inv_*/host_log_*.txt``.
+
+    The suite directory must be readable from the web host itself. When the
+    configured test host is remote and the path is not mounted locally, the
+    caller gets a clear error instead of a silent failure.
+    """
+    config = config_manager.load_config()
+    abs_path, err = _resolve_suite_log_dir(suite_path, path, config)
+    if err:
+        return error_response(err, 400)
+
+    if not os.path.isdir(abs_path):
+        return error_response(
+            "日志目录在 Web 服务器本地不可访问",
+            400,
+            message=(
+                f"无法访问 {abs_path}：该路径位于远程测试主机，Web 服务器无法直接读取。"
+                "请将报告文件夹打包后通过上传模式分析。"
+            ),
+        )
+
+    try:
+        analyzer = ReportAnalyzer()
+        result = await asyncio.to_thread(analyzer.analyze_log_dir, abs_path)
+    except Exception as e:
+        logger.error(f"[Report Analysis] Suite log-dir analysis failed: {e}")
+        return error_response("Report analysis failed", 500, message=str(e))
+
+    if not result:
+        return error_response(
+            "未找到可分析的日志",
+            400,
+            message=f"在 {abs_path} 下未找到 host_log_*.txt，无法解析报告。",
+        )
+
+    result["report_type"] = "log"
+    result["report_name"] = os.path.basename(abs_path.rstrip("/")) or "suite log"
+    return JSONResponse(content={"success": True, "data": result, "mode": "suite_log_dir"})
+
+
 # ==================== Diagnose Report ====================
 
 @router.post("/api/reports/diagnose")
@@ -348,10 +466,19 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
                 logger.warning(f"Knowledge base search failed: {kb_error}")
             return []
 
-        suite_target, ai_result, kb_results = await asyncio.gather(
+        async def _search_mainline_exemptions():
+            """Recall Google Mainline known-issue exemptions for this failure."""
+            try:
+                return await asyncio.to_thread(_query_mainline_exemptions, request)
+            except Exception as exc:
+                logger.debug(f"Mainline exemption lookup skipped: {exc}")
+                return []
+
+        suite_target, ai_result, kb_results, mainline_exemptions = await asyncio.gather(
             _resolve_suite_target(),
             _run_ai_analysis(),
             _search_knowledge_base(),
+            _search_mainline_exemptions(),
         )
 
         source_search_results = []
@@ -393,6 +520,8 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
             "source_search_results": source_search_results[:10],
             "knowledge_base_results": kb_results[:8],
             "suite_target": suite_target,
+            "mainline_exemptions": mainline_exemptions,
+            "mainline_exempt": bool(mainline_exemptions),
         }
         diagnosis["summary"] = ai_result.get("root_cause") or ai_result.get("analysis") or "Diagnosis orchestration complete"
         diagnosis["patch_draft"] = _build_patch_draft(diagnosis)

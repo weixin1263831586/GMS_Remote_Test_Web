@@ -4,15 +4,15 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from features.auth import require_elevated_admin
+from features.users.clients import get_client_display_id_from_request
 from foundation.networking import split_host_port
 from foundation.responses import error_response
 
-from . import runtime
-from . import reconnect
-from features.users.clients import get_client_display_id_from_request
+from . import reconnect, runtime
 from .adb_forward import adb_forward_manager
 from .manager import device_manager
 from .models import ADBForwardStartRequest, USBIPDisconnectRequest, USBIPStartRequest
@@ -415,8 +415,12 @@ def _invalidate_device_cache() -> None:
 async def stop_usbip(
     request: Request,
     req: USBIPDisconnectRequest | None = Body(default=None),
+    _elevated=Depends(require_elevated_admin),
 ):
-    """Stop USB/IP forwarding (supports specifying host)."""
+    """Stop USB/IP forwarding (supports specifying host).
+
+    Sensitive: disconnects/removes device forwarding, so requires admin elevation.
+    """
     config = runtime.config_manager.load_config()
     client_id = runtime.get_client_id_from_request(request)
     tailscale_mode = False

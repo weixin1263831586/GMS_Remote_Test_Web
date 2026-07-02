@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+import shlex
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -274,9 +276,6 @@ async def check_gerrit_connectivity(request: Request):
     Gerrit 查询（REST/SSH）本就从本机发起，因此这里直接在本机探测 ICMP/SSH 端口/HTTPS，
     完全复现查询的真实网络路径，用于在看板全 0 时区分「Gerrit 不可达」与「真没数据」。
     """
-    import re as _re
-    import shlex as _shlex
-
     cfg = _dashboard_config_for_request(request)
     # base_url 可能带 https:// 前缀和路径，ssh_host 是裸 IP/域名；优先 ssh_host。
     raw_host = (cfg.get("ssh_host") or cfg.get("base_url") or "").strip()
@@ -284,7 +283,7 @@ async def check_gerrit_connectivity(request: Request):
     if not host:
         return {"success": True, "data": {"configured": False, "host": "", "message": "Gerrit 未配置 ssh_host/base_url"}}
     ssh_port = int(cfg.get("ssh_port") or 29418)
-    safe_host = _shlex.quote(host)
+    safe_host = shlex.quote(host)
 
     async def _run(cmd: list[str], timeout: float = 8.0) -> tuple[int, str]:
         """Run a command on the web host, returning (exit_code, combined_output)."""
@@ -306,7 +305,7 @@ async def check_gerrit_connectivity(request: Request):
     ping_code, ping_text = await _run(["ping", "-c", "2", "-W", "2", host])
     ping_ok = ping_code == 0
     latency = ""
-    m = _re.search(r"= [\d.]+/([\d.]+)/", ping_text)
+    m = re.search(r"= [\d.]+/([\d.]+)/", ping_text)
     if m:
         latency = f"{m.group(1)}ms"
 

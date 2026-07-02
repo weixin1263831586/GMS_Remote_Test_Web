@@ -5,7 +5,9 @@ from .service import (
     CurrentUser,
     auth_service,
     get_authenticated_user,
+    is_elevated,
     require_authenticated_user,
+    require_elevated_admin,
     require_role,
 )
 
@@ -16,7 +18,9 @@ __all__ = [
     "CurrentUser",
     "auth_service",
     "get_authenticated_user",
+    "is_elevated",
     "require_authenticated_user",
+    "require_elevated_admin",
     "require_role",
     "router",
 ]

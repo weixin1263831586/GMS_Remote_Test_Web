@@ -21,6 +21,9 @@ PASSWORD_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
 SESSION_ABSOLUTE_HOURS = int(os.getenv("GMS_SESSION_ABSOLUTE_HOURS", "8"))
 SESSION_IDLE_HOURS = int(os.getenv("GMS_SESSION_IDLE_HOURS", "2"))
+# How long a "sensitive operation" elevation (re-auth as admin) stays valid on a
+# session before the user must re-enter admin credentials. Short by design.
+ELEVATION_MINUTES = int(os.getenv("GMS_ELEVATION_MINUTES", "15"))
 
 
 def _utcnow() -> datetime:
@@ -96,6 +99,13 @@ class AuthService:
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_platform_sessions_user ON platform_sessions(user_id)"
                 )
+                # Migration: add elevated_until to track temporary admin elevation
+                # for sensitive operations (remove user / disconnect device).
+                existing_cols = {
+                    row[1] for row in conn.execute("PRAGMA table_info('platform_sessions')").fetchall()
+                }
+                if "elevated_until" not in existing_cols:
+                    conn.execute("ALTER TABLE platform_sessions ADD COLUMN elevated_until TEXT")
                 conn.commit()
             self._initialized = True
 
@@ -258,6 +268,59 @@ class AuthService:
             )
             conn.commit()
 
+    def elevate_session(self, token: str, admin_user: CurrentUser, *, minutes: int | None = None) -> bool:
+        """Stamp a temporary admin elevation onto the current session.
+
+        Called after the caller has re-authenticated with admin credentials
+        (verified via :meth:`authenticate`). Marks the session as elevated for
+        :data:`ELEVATION_MINUTES` by default. Pass ``minutes`` to override the
+        window (e.g. admin login grants elevation for the whole session so the
+        user is not re-prompted for sensitive operations). Returns True if the
+        session was found/updated.
+        """
+        if admin_user.role != "admin":
+            return False
+        token_hash = self.hash_token(token)
+        elevated_until = _utcnow() + timedelta(minutes=minutes if minutes is not None else ELEVATION_MINUTES)
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE platform_sessions
+                SET elevated_until = ?
+                WHERE token_hash = ? AND revoked_at IS NULL
+                """,
+                (_to_iso(elevated_until), token_hash),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def get_elevated_until(self, token: str | None) -> str | None:
+        """Return the ISO elevation-expiry timestamp for a session, or None.
+
+        None means the session is not currently elevated. An expired elevation
+        (past ``elevated_until``) is treated as not elevated.
+        """
+        if not token:
+            return None
+        token_hash = self.hash_token(token)
+        now = _utcnow()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT elevated_until FROM platform_sessions
+                WHERE token_hash = ? AND revoked_at IS NULL
+                """,
+                (token_hash,),
+            ).fetchone()
+        if not row or not row["elevated_until"]:
+            return None
+        try:
+            if _from_iso(row["elevated_until"]) <= now:
+                return None
+        except Exception:
+            return None
+        return row["elevated_until"]
+
     def get_user_for_token(self, token: str | None, *, refresh: bool = True) -> CurrentUser | None:
         if not token:
             return None
@@ -338,3 +401,34 @@ def require_role(*roles: str):
         return user
 
     return dependency
+
+
+def is_elevated(request: Request) -> bool:
+    """Whether the current session has a live admin elevation for this request.
+
+    Cached on request.state so multiple dependency checks within one request
+    don't each hit the DB.
+    """
+    if getattr(request.state, "is_elevated", None) is not None:
+        return bool(request.state.is_elevated)
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    elevated_until = auth_service.get_elevated_until(token)
+    request.state.is_elevated = bool(elevated_until)
+    return bool(elevated_until)
+
+
+def require_elevated_admin(request: Request) -> CurrentUser:
+    """Dependency for sensitive operations (remove user / disconnect device).
+
+    Requires an authenticated admin session that has been recently elevated
+    (re-confirmed admin credentials within :data:`ELEVATION_MINUTES`). A
+    non-elevated or non-admin caller gets 403 with ``elevation_required`` so the
+    frontend can prompt for admin credentials and replay the request.
+    """
+    user = require_authenticated_user(request)
+    if user.role != "admin" or not is_elevated(request):
+        raise HTTPException(
+            status_code=403,
+            detail={"message": "Elevation required", "elevation_required": True},
+        )
+    return user

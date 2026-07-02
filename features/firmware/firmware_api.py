@@ -560,6 +560,10 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
 
                     runtime.store_notification(client_id, "Firmware burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "firmware": firmware_name})
                     await runtime.release_firmware_devices(client_id, locked_devices)
+                    # 设备锁已释放，通知前端刷新 ADB 设备状态（避免界面仍显示锁定）
+                    if client_id in runtime.global_state.websocket_connections:
+                        with contextlib.suppress(Exception):
+                            await runtime.safe_websocket_send(client_id, {"type": "firmware_burn_complete", "devices": devices, "success": True})
                     return success_response(message="Firmware burn completed successfully")
                 else:
                     error_output = final_output or stderr.read().decode("utf-8", errors="ignore")
@@ -749,6 +753,10 @@ async def burn_gsi(request: Request):
                         runtime.store_notification(client_id, "GSI burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "results": results})
                     except Exception as notify_error:
                         logger.warning("[GSI Burn] Failed to store success notification: %s", notify_error)
+                    # 设备锁已释放，通知前端刷新 ADB 设备状态
+                    if client_id in runtime.global_state.websocket_connections:
+                        with contextlib.suppress(Exception):
+                            await runtime.safe_websocket_send(client_id, {"type": "firmware_burn_complete", "devices": devices, "success": True})
                     return JSONResponse(content={"success": True, "message": "GSI burn completed successfully", "results": results})
                 else:
                     failed = [r.get("device") for r in results if not r.get("success")]

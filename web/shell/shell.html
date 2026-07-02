@@ -685,11 +685,12 @@
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">连接时间</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">最后活跃</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">占用设备</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 90px;">操作</th>
                         </tr>
                     </thead>
                     <tbody id="users-table-body">
                         <tr>
-                            <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
                             </td>
                         </tr>
@@ -1653,6 +1654,40 @@
         </div>
     </div>
 
+    <!-- 管理员提权弹框（敏感操作：移除用户/设备） -->
+    <div id="elevate-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">🔐 管理员验证</span>
+                <span class="modal-close" onclick="cancelElevate()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="elevate-form" onsubmit="event.preventDefault(); submitElevateForm();" autocomplete="off">
+                    <div class="modal-form-row">
+                        <label>操作:</label>
+                        <input type="text" id="elevate-action-label" readonly value="需要管理员权限" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>管理员用户名:</label>
+                        <input type="text" id="elevate-username" placeholder="管理员账号" autocomplete="username" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>管理员密码:</label>
+                        <input type="password" id="elevate-password" placeholder="管理员密码" onkeypress="if(event.key==='Enter'){event.preventDefault();submitElevateForm();}" autocomplete="current-password" />
+                    </div>
+                </form>
+                <div class="modal-ssh-info">
+                    <small>该操作需要管理员权限。验证通过后 15 分钟内执行同类操作无需重复输入。</small>
+                </div>
+                <div id="elevate-message" class="auth-message" style="color: var(--danger-color); min-height: 16px;"></div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="cancelElevate()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitElevateForm()">提权</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 烧写固件弹框 -->
     <div id="firmware-modal" class="modal">
         <div class="modal-content">
@@ -2541,6 +2576,36 @@
             }
         }
 
+        // 移除配置型用户（从 config_runtime.client_hosts 删除）。二次确认后调 DELETE。
+        async function removeUser(ip, btn) {
+            if (!ip) return;
+            if (!confirm(`确定移除用户 ${ip} 吗？\n（仅删除其配置映射，不影响当前会话；测试中的用户不可移除）`)) return;
+            // Sensitive operation: require temporary admin elevation.
+            const granted = window.requestElevatedAccess
+                ? await window.requestElevatedAccess(`移除用户 ${ip}`)
+                : true;
+            if (!granted) return;
+            if (btn) { btn.disabled = true; btn.textContent = '...'; }
+            try {
+                const resp = await fetch('/api/users/remove', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip })
+                });
+                const data = await resp.json();
+                if (resp.ok && data.success) {
+                    if (typeof showToast === 'function') showToast(`已移除用户 ${ip}`, 'success');
+                    loadUsersList();
+                } else {
+                    alert(data.detail?.message || data.error || '移除失败');
+                    if (btn) { btn.disabled = false; btn.textContent = '移除'; }
+                }
+            } catch (e) {
+                alert('移除失败: ' + e.message);
+                if (btn) { btn.disabled = false; btn.textContent = '移除'; }
+            }
+        }
+
         // 启动用户列表自动刷新（仅当在 users 页面时）
         function startUsersAutoRefresh() {
             if (usersRefreshInterval) return;
@@ -2575,7 +2640,7 @@
             if (users.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                        <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                             暂无在线用户
                         </td>
                     </tr>
@@ -2595,6 +2660,11 @@
                 const devices = user.devices && user.devices.length > 0 ? user.devices.join(', ') : '-';
                 const sourceLabel = user.source_label || '-';
                 const sourceColor = user.source === 'internal' ? 'var(--primary-color)' : (user.source === 'public' ? 'var(--warning-color)' : 'var(--text-secondary)');
+                // 仅「配置型」用户（来自 config_runtime.client_hosts）可移除；临时会话用户无配置条目，不显示按钮。
+                const safeIp = String(user.ip || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                const removeCell = user.configured
+                    ? `<button class="btn-xxs" style="background: var(--danger-color, #e74c3c);" onclick="removeUser('${safeIp}', this)">移除</button>`
+                    : '<span class="muted" style="font-size:11px;color:var(--text-secondary);">临时会话</span>';
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
@@ -2619,6 +2689,9 @@
                         </td>
                         <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
                             ${devices}
+                        </td>
+                        <td style="padding: 4px 6px; text-align: center;">
+                            ${removeCell}
                         </td>
                     </tr>
                 `;

@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from foundation.config import settings
 
-from .repository import init_db
+from .repository import escape_like, init_db
 
 
 router = APIRouter()
@@ -134,8 +134,7 @@ async def list_mainline_known_issues(
     where = []
     params: list[str | int] = []
     if q:
-        safe_q = q.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-        like = f'%{safe_q}%'
+        like = f'%{escape_like(q)}%'
         where.append(
             '('
             'test_module LIKE ? OR test_case LIKE ? OR exemption_id LIKE ? OR '

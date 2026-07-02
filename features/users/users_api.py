@@ -3,10 +3,10 @@
 import logging
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import get_authenticated_user
+from features.auth import get_authenticated_user, require_elevated_admin
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response
 
@@ -129,6 +129,44 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
         })
     else:
         return error_response("保存配置失败", 500)
+
+
+@router.delete("/api/users/remove")
+@handle_api_errors
+async def remove_configured_user(request: Request, _elevated=Depends(require_elevated_admin)):
+    """从配置的 client_hosts 中移除一个用户（按 IP）。
+
+    仅能移除「配置型」用户（来自 config_runtime.client_hosts）。临时会话用户
+    （仅活跃、未配置）无配置条目，不在此处理范围。正在测试中的用户禁止移除。
+    需要管理员提权（近期二次认证）。
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    ip = str(body.get("ip") or "").strip()
+    if not ip:
+        return error_response("ip is required", 400)
+
+    existing_runtime = runtime.config_manager.get_runtime_config()
+    client_hosts = dict(existing_runtime.get("client_hosts") or {})
+    if ip not in client_hosts:
+        return error_response(f"用户 {ip} 不在配置列表中（可能只是临时会话，无需移除）", 404)
+
+    # 正在测试中的用户禁止移除，避免删配置的同时其测试设备锁残留。
+    with runtime.global_state.user_states_lock:
+        for state in runtime.global_state.user_states.values():
+            if state.get("client_ip") == ip and state.get("running", False):
+                return error_response(f"用户 {ip} 正在测试中，请等待其测试结束后再移除", 409)
+
+    del client_hosts[ip]
+    runtime_config = runtime.config_manager.prepare_client_config({"client_hosts": client_hosts})
+    if not runtime.config_manager.save_runtime_config(runtime_config):
+        return error_response("保存配置失败", 500)
+
+    client_manager.client_hosts = client_hosts
+    logger.info(f"[Remove User] removed configured user {ip}")
+    return JSONResponse(content={"success": True, "ip": ip})
 
 
 @router.get("/api/users/list")

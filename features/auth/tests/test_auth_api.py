@@ -59,6 +59,76 @@ class AuthApiTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200)
         self.assertTrue(login.json()["authenticated"])
 
+    def _setup_admin_and_user(self):
+        """Create an admin (via setup) + a normal user, return session cookies."""
+        self.client.post(
+            "/api/auth/setup",
+            json={"username": "admin", "password": "strongpass1"},
+        )
+        # Create a normal user directly in the store, then log it in.
+        auth_service.create_user("alice", "alicepass1", role="user")
+        admin_cookie = self.client.cookies.get("gms_session")
+        # Log out admin, log in alice to grab her cookie.
+        self.client.post("/api/auth/logout")
+        self.client.post("/api/auth/login", json={"username": "alice", "password": "alicepass1"})
+        user_cookie = self.client.cookies.get("gms_session")
+        return admin_cookie, user_cookie
+
+    def _set_session(self, cookie_value):
+        if cookie_value:
+            self.client.cookies.set("gms_session", cookie_value)
+        else:
+            self.client.cookies.clear()
+
+    def test_admin_login_is_elevated_for_whole_session(self):
+        # Admin created via setup is immediately elevated (no re-prompt needed).
+        self.client.post(
+            "/api/auth/setup",
+            json={"username": "admin", "password": "strongpass1"},
+        )
+        self.assertTrue(self.client.get("/api/auth/status").json()["elevated"])
+
+        # A sensitive endpoint does NOT return 403-elevation for a just-logged-in
+        # admin (it may 404 for a non-existent ip, but NOT 403-elevation).
+        resp = self.client.request("DELETE", "/api/users/remove", json={"ip": "1.2.3.4"})
+        self.assertNotEqual(
+            (resp.status_code, resp.json().get("detail", {}).get("elevation_required")),
+            (403, True),
+        )
+
+    def test_admin_relogin_stays_elevated(self):
+        # Setup creates + logs in the admin (elevated), then we log out and back
+        # in via /login — elevation must be re-granted on the new session.
+        self.client.post(
+            "/api/auth/setup",
+            json={"username": "admin", "password": "strongpass1"},
+        )
+        self.client.post("/api/auth/logout")
+        self.client.post("/api/auth/login", json={"username": "admin", "password": "strongpass1"})
+        self.assertTrue(self.client.get("/api/auth/status").json()["elevated"])
+
+    def test_normal_user_not_elevated_and_blocked_from_sensitive_endpoint(self):
+        # The elevation-on-login only applies to admins; a normal user stays
+        # non-elevated and the sensitive endpoint still demands elevation.
+        _admin_cookie, user_cookie = self._setup_admin_and_user()
+        self._set_session(user_cookie)
+
+        self.assertFalse(self.client.get("/api/auth/status").json()["elevated"])
+        resp = self.client.request("DELETE", "/api/users/remove", json={"ip": "1.2.3.4"})
+        self.assertEqual(resp.status_code, 403)
+        self.assertTrue(resp.json()["detail"]["elevation_required"])
+
+    def test_elevation_rejects_non_admin(self):
+        _admin_cookie, user_cookie = self._setup_admin_and_user()
+        self._set_session(user_cookie)
+        # A normal user cannot elevate even with their own correct password.
+        elev = self.client.post(
+            "/api/auth/elevate",
+            json={"username": "alice", "password": "alicepass1"},
+        )
+        self.assertEqual(elev.status_code, 403)
+        self.assertFalse(elev.json().get("elevated", False))
+
 
 if __name__ == "__main__":
     unittest.main()
