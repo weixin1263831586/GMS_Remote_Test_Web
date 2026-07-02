@@ -612,6 +612,15 @@ function initWebSocket() {
                         }
                         break;
 
+                    case 'firmware_burn_complete':
+                        // 固件/GSI 烧写完成且设备锁已释放：自动刷新 ADB 设备状态，
+                        // 避免界面仍显示"锁定/Allocated"需手动点刷新。
+                        debugLog('[WebSocket] firmware_burn_complete:', data);
+                        loadDevices(true).catch(err => {
+                            console.error('[WebSocket] refresh after firmware burn failed:', err);
+                        });
+                        break;
+
                     case 'file_upload_progress':
                         // 文件上传进度更新（通用，用于固件上传等）
                         updateUploadProgress(data.percentage, data.filename, data.uploaded_size, data.total_size);
@@ -1945,6 +1954,8 @@ async function loadSuiteBrowserDirectory(path = '') {
         const result = await apiCall(`/api/test/suites/files?${params.toString()}`);
         const data = result.data || {};
         state.suiteBrowser.currentPath = data.path || '';
+        // 保留解析后的套件根绝对路径，供"报告分析"等需要绝对路径的操作使用。
+        state.suiteBrowser.suiteRoot = data.suite_root || '';
         renderSuiteBreadcrumb(state.suiteBrowser.currentPath);
         renderSuiteFiles(data.items || []);
     } catch (error) {
@@ -2014,6 +2025,57 @@ function renderSuiteFiles(items) {
     }
 }
 
+function isSuiteLogsFolderPath(currentPath) {
+    // 当前浏览路径位于某个 .../logs 目录内（例如 "android-vts/logs" 或
+    // "android-vts/logs/2026.06.25_10.57.05"）。用路径段判断，避免误匹配
+    // 名字里含 "logs" 的目录（如 "catalogs"）。
+    const segs = (currentPath || '').split('/').filter(Boolean);
+    return segs.some(seg => seg.toLowerCase() === 'logs');
+}
+
+async function analyzeSuiteLogDir(relPath) {
+    // 复用现有的报告分析页与展示逻辑：切到 report-analysis 页，调用专门的
+    // 日志目录分析端点，结果交给 displayReportAnalysis 渲染。
+    const suitePath = state.suiteBrowser.selectedSuitePath;
+    if (!suitePath) {
+        showToast('请先选择测试套件', 'warning');
+        return;
+    }
+    const folderName = (relPath || '').split('/').filter(Boolean).pop() || '日志目录';
+
+    const sidebarItem = document.querySelector('[data-page="report-analysis"]');
+    if (sidebarItem) sidebarItem.click();
+
+    setTimeout(async () => {
+        showToast(`正在分析 ${folderName} ...`, 'info');
+        try {
+            const formData = new FormData();
+            formData.append('suite_path', suitePath);
+            formData.append('path', relPath || '');
+            const resp = await fetch('/api/reports/analyze-log-dir', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await resp.json().catch(() => ({ success: false }));
+            if (!data.success) {
+                notifyOperationResult('报告分析失败', data.message || data.error || '未知错误', 'error', 'report-analysis', { path: relPath });
+                return;
+            }
+            displayReportAnalysis(data.data);
+            notifyOperationResult(
+                '报告分析完成',
+                data.data?.report_name || folderName,
+                'success',
+                'report-analysis',
+                { path: relPath }
+            );
+        } catch (e) {
+            console.error('[Reports] analyzeSuiteLogDir error:', e);
+            notifyOperationResult('报告分析失败', e.message, 'error', 'report-analysis', { path: relPath });
+        }
+    }, 300);
+}
+
 function createSuiteFileRow(item) {
     const row = document.createElement('div');
     row.className = 'suite-file-row';
@@ -2063,6 +2125,20 @@ function createSuiteFileRow(item) {
         actions.appendChild(openBtn);
 
         if (!item.isParent) {
+            // 在 logs 目录内（如 android-vts/logs/<timestamp>）为每个测试运行文件夹
+            // 提供"报告分析"，复用 host_log 解析能力。
+            if (isSuiteLogsFolderPath(state.suiteBrowser.currentPath)) {
+                const analyzeLogBtn = document.createElement('button');
+                analyzeLogBtn.className = 'btn-xs';
+                analyzeLogBtn.textContent = '报告分析';
+                analyzeLogBtn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    setSuiteBrowserHighlightedPath(item.path || '');
+                    analyzeSuiteLogDir(item.path || '');
+                });
+                actions.appendChild(analyzeLogBtn);
+            }
+
             const copyBtn = document.createElement('button');
             copyBtn.className = 'btn-xs';
             copyBtn.textContent = '分享链接';
@@ -3329,8 +3405,13 @@ async function setupUsbipForward() {
     debugLog('[setupUsbipForward] Called, state.usbipConnected =', state.usbipConnected);
 
     if (state.usbipConnected) {
-        // 断开连接
+        // 断开连接（敏感操作：需管理员提权）
         debugLog('[setupUsbipForward] Disconnecting...');
+        const granted = await requestElevatedAccess('断开/移除设备');
+        if (!granted) {
+            addLogEntry('已取消断开设备（需要管理员权限）', 'warning');
+            return;
+        }
         try {
             btn.textContent = '📱 断开中...';
             btn.disabled = true;
@@ -3516,6 +3597,14 @@ function closeDevicePasswordModal() {
 
 // ==================== Username Detection Modal ====================
 function showUsernameDetectModal(clientIp) {
+    // Platform login takes priority: if the auth gate (platform login) is up,
+    // don't stack the client-host detection modal on top of it. The client-host
+    // detection will be re-triggered by the next API call once authenticated.
+    const authGate = document.getElementById('auth-gate');
+    if (authGate && authGate.style.display === 'flex') {
+        debugLog('[UsernameDetect] Skipped: platform auth-gate is showing');
+        return;
+    }
     document.getElementById('username-detect-ip').value = clientIp;
     document.getElementById('username-detect-username').value = '';
     document.getElementById('username-detect-password').value = '';
@@ -3525,6 +3614,131 @@ function showUsernameDetectModal(clientIp) {
 
 function closeUsernameDetectModal() {
     ModalManager.close('username-detect-modal');
+}
+
+// ==================== Admin elevation (sensitive operations) ====================
+
+let _elevationExpiryTimer = null;
+
+function _clearElevationExpiryTimer() {
+    if (_elevationExpiryTimer) {
+        clearTimeout(_elevationExpiryTimer);
+        _elevationExpiryTimer = null;
+    }
+}
+
+function _markElevated(elevatedUntilIso) {
+    state.elevated = true;
+    state.elevatedUntil = elevatedUntilIso || null;
+    _clearElevationExpiryTimer();
+    if (elevatedUntilIso) {
+        const ms = new Date(elevatedUntilIso).getTime() - Date.now();
+        if (ms > 0) {
+            _elevationExpiryTimer = setTimeout(() => {
+                state.elevated = false;
+                state.elevatedUntil = null;
+                debugLog('[Elevation] expired, admin elevation cleared');
+            }, ms);
+        }
+    }
+}
+
+/**
+ * Ensure the current session has temporary admin elevation before running a
+ * sensitive action. Resolves true if already elevated or after successful
+ * re-authentication; false if the user cancels or fails.
+ *
+ * @param {string} actionLabel - what the elevation is for (shown in the modal)
+ * @returns {Promise<boolean>}
+ */
+async function requestElevatedAccess(actionLabel = '需要管理员权限') {
+    if (state.elevated) {
+        debugLog('[Elevation] already elevated, skipping prompt');
+        return true;
+    }
+    const modal = document.getElementById('elevate-modal');
+    if (!modal) {
+        showToast('提权弹框未加载，无法执行此操作', 'error');
+        return false;
+    }
+    const labelEl = document.getElementById('elevate-action-label');
+    if (labelEl) labelEl.textContent = actionLabel;
+    const userEl = document.getElementById('elevate-username');
+    const pwdEl = document.getElementById('elevate-password');
+    const msgEl = document.getElementById('elevate-message');
+    if (userEl) userEl.value = '';
+    if (pwdEl) pwdEl.value = '';
+    if (msgEl) msgEl.textContent = '';
+    // Prefill the current username for convenience.
+    if (userEl && state.currentUser?.username) userEl.value = state.currentUser.username;
+
+    return new Promise(resolve => {
+        const onGranted = (elevatedUntilIso) => {
+            _markElevated(elevatedUntilIso);
+            ModalManager.close('elevate-modal');
+            resolve(true);
+        };
+        const onCancel = () => {
+            ModalManager.close('elevate-modal');
+            resolve(false);
+        };
+        // Wire one-shot handlers via onClose + submit; store for cleanup.
+        window._elevateResolve = { onGranted, onCancel };
+        ModalManager.onClose('elevate-modal', () => {
+            if (window._elevateResolve) {
+                window._elevateResolve.onCancel();
+                window._elevateResolve = null;
+            }
+        });
+        ModalManager.open('elevate-modal');
+        setTimeout(() => pwdEl && pwdEl.focus(), 0);
+    });
+}
+
+async function submitElevateForm() {
+    const username = document.getElementById('elevate-username')?.value.trim() || '';
+    const password = document.getElementById('elevate-password')?.value || '';
+    const msgEl = document.getElementById('elevate-message');
+    const submitBtn = document.querySelector('#elevate-modal .btn-primary');
+    if (msgEl) msgEl.textContent = '';
+    if (!username || !password) {
+        if (msgEl) msgEl.textContent = '请输入管理员用户名和密码';
+        return;
+    }
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '验证中...'; }
+    try {
+        const response = await fetch('/api/auth/elevate', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const result = await response.json().catch(() => ({ success: false, error: '响应解析失败' }));
+        if (!response.ok || result.success === false) {
+            if (msgEl) msgEl.textContent = result.error || result.message || '管理员凭证无效';
+            return;
+        }
+        const resolve = window._elevateResolve;
+        if (resolve) {
+            const until = result.elevated_until || null;
+            window._elevateResolve = null;
+            resolve.onGranted(until);
+        }
+    } catch (error) {
+        if (msgEl) msgEl.textContent = error.message || '提权失败';
+    } finally {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '提权'; }
+    }
+}
+
+function cancelElevate() {
+    const resolve = window._elevateResolve;
+    if (resolve) {
+        window._elevateResolve = null;
+        resolve.onCancel();
+    } else {
+        ModalManager.close('elevate-modal');
+    }
 }
 
 function handleUsernameDetectKeyPress(event) {
@@ -7334,14 +7548,23 @@ function getReportIssueIdFromName() {
 
 function buildReportDiagnosisReplyText(data, patchDraft) {
     const aiResult = data.ai_result || {};
-    const lines = [
+    const lines = [];
+    const exemptions = Array.isArray(data.mainline_exemptions) ? data.mainline_exemptions : [];
+    if (exemptions.length) {
+        const ids = exemptions.map(item => item.exemption_id).filter(Boolean).join(', ');
+        lines.push(
+            `**Mainline 已知豁免**: 该用例命中 Google Mainline 已知豁免（exemption ${ids || '未知'}，${exemptions[0].test_module || data.module || ''}），通常无需本地修复。`,
+            '',
+        );
+    }
+    lines.push(
         `**测试模块**: ${data.module || '-'}`,
         '',
         `**测试用例**: ${data.test_name || '-'}`,
         '',
         '**初步分析**:',
         aiResult.root_cause || data.summary || aiResult.analysis || '-',
-    ];
+    );
     const suggestions = aiResult.suggestions || [];
     if (suggestions.length) {
         lines.push('', '**处理建议**:', suggestions.map((item, idx) => `${idx + 1}. ${item}`).join('\n'));
@@ -7360,6 +7583,7 @@ function renderReportDiagnosis(data) {
     const aiResult = data.ai_result || {};
     const kbResults = data.knowledge_base_results || [];
     const sourceResults = data.source_search_results || [];
+    const exemptions = Array.isArray(data.mainline_exemptions) ? data.mainline_exemptions : [];
     const patchDraft = data.patch_draft || '';
     const stackTrace = data.stack_trace || '';
     const suiteTarget = data.suite_target || {};
@@ -7397,6 +7621,7 @@ function renderReportDiagnosis(data) {
             `套件: ${suiteTarget.suite_name || suiteTarget.suite_path || ''}`,
             `构件: ${suiteArtifact ? suiteArtifact.path : ''}`,
             `源码路径: ${displaySourcePath || sourcePath}`,
+            `Mainline 豁免: ${exemptions.length ? exemptions.map(i => `${i.exemption_id}(${i.issue_type || ''})`).join(', ') : '无'}`,
             `根因: ${aiResult.root_cause || data.summary || ''}`,
             `分析: ${aiResult.analysis || ''}`,
             `建议: ${(aiResult.suggestions || []).join('\n')}`,
@@ -7465,6 +7690,29 @@ function renderReportDiagnosis(data) {
         `).join('')
         : renderDxEmpty('暂无解决建议');
 
+    const exemptionBanner = exemptions.length
+        ? `<section class="dx-section dx-exempt-banner">
+            <div class="dx-exempt-head">
+                <span class="dx-exempt-badge">✓ 已豁免</span>
+                <span class="dx-exempt-title">命中 Google Mainline 已知豁免（通常无需本地修复）</span>
+            </div>
+            <div class="dx-exempt-list">
+                ${exemptions.map(item => `
+                    <div class="dx-exempt-item">
+                        <div class="dx-exempt-item-head">
+                            <b class="dx-exempt-id">exemption ${escapeHtml(String(item.exemption_id || ''))}</b>
+                            <span class="dx-exempt-meta">${escapeHtml([item.issue_type, item.test_module].filter(Boolean).join(' · '))}</span>
+                            ${item.match_kind === 'fuzzy' ? '<span class="dx-exempt-kind">模糊匹配</span>' : ''}
+                            ${item.source_url ? `<a class="dx-link" href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener">来源</a>` : ''}
+                        </div>
+                        <div class="dx-exempt-case">${escapeHtml(item.test_case || '')}</div>
+                        ${item.issue_text ? `<div class="dx-exempt-text">${escapeHtml(String(item.issue_text).slice(0, 280))}</div>` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        </section>`
+        : '';
+
     const actionPanel = `
         <section class="dx-section dx-action-section">
             <div class="dx-section-title">下一步动作</div>
@@ -7480,6 +7728,7 @@ function renderReportDiagnosis(data) {
 
     diagnosticResult.innerHTML = `
         <div class="dx-workbench-vertical">
+            ${exemptionBanner}
             ${actionPanel}
             <div class="dx-workflow">
                 <section class="dx-workflow-step dx-workflow-step-analysis">
@@ -9044,6 +9293,9 @@ window.openReportDiagnosisModal = openReportDiagnosisModal;
 window.closeReportDiagnosisWorkbench = closeReportDiagnosisWorkbench;
 window.minimizeReportDiagnosisWorkbench = minimizeReportDiagnosisWorkbench;
 window.restoreReportDiagnosisWorkbench = restoreReportDiagnosisWorkbench;
+window.requestElevatedAccess = requestElevatedAccess;
+window.submitElevateForm = submitElevateForm;
+window.cancelElevate = cancelElevate;
 window.rerunReportDiagnosis = rerunReportDiagnosis;
 window.copyReportDiagnosis = copyReportDiagnosis;
 window.openReportDiagnosisSourcePreview = openReportDiagnosisSourcePreview;

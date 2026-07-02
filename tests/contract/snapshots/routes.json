@@ -135,6 +135,12 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/auth/elevate"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/auth/login"
   },
   {
@@ -1118,6 +1124,12 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/reports/analyze-log-dir"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/reports/analyze-url"
   },
   {
@@ -1479,6 +1491,12 @@
       "GET"
     ],
     "path": "/api/users/list"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/users/remove"
   },
   {
     "methods": [

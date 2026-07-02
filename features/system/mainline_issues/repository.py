@@ -13,6 +13,10 @@ DEFAULT_INDEX_URL = 'https://docs.partner.android.com/mainline/release/release-n
 DEFAULT_DB_PATH = Path('data/mainline_known_issues.sqlite3')
 KNOWN_ISSUE_HEADING_RE = re.compile(r'^(MTS|CTS|GTS)\s+known issues\b.*:$', flags=re.IGNORECASE)
 PRODUCT_SECTIONS = ('Android', 'Android Go')
+# Canonical Mainline issue_type whitelist. Both the heading regex, the list
+# endpoint filter, and query_exemption_match refer to the same set, so a future
+# addition (e.g. VTS once it gets release-notes entries) only edits one place.
+MAINLINE_ISSUE_TYPES = ('MTS', 'CTS', 'GTS')
 
 
 
@@ -298,3 +302,91 @@ def upsert_issues(conn: sqlite3.Connection, issues: list[KnownIssue], timestamp:
             for issue in issues
         ],
     )
+
+
+# Columns returned to consumers (diagnosis, UI) when matching exemptions.
+_EXEMPTION_SELECT_COLUMNS = (
+    'exemption_id, issue_type, product_section, test_module, test_case, '
+    'android_versions, category, release_label, issue_text, source_url, last_seen_at'
+)
+
+
+def _strip_test_case_param(test_case: str) -> str:
+    """Drop a trailing parameterization suffix so `Foo#bar[0]` matches `Foo#bar`.
+
+    Mainline release notes list parameterized variants as distinct rows
+    (e.g. ``renderFormContentWhenEnabled[0]``, ``...[1]``). A report failure only
+    carries the method name, so we normalize both sides to the bare method when a
+    precise match fails.
+    """
+    return re.sub(r'\[[^\]]*\]\s*$', '', test_case).strip()
+
+
+def escape_like(value: str) -> str:
+    """Escape LIKE wildcards so user-supplied text is matched literally.
+
+    Shared by the list endpoint's keyword filter and the exemption matcher, so
+    the escape rule (and its ``ESCAPE "\\"`` clause) stays in one place.
+    """
+    return value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
+
+def query_exemption_match(
+    conn: sqlite3.Connection,
+    *,
+    test_module: str | None = None,
+    test_case: str | None = None,
+    issue_type: str | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """Find Mainline known-issue exemptions matching a failing test.
+
+    Match priority:
+      1. Exact ``test_module`` + ``test_case`` (case-insensitive module).
+      2. Fallback to ``test_module`` + ``test_case LIKE '...#<method>%'`` to cover
+         parameterized DB variants such as ``renderFormContentWhenEnabled[0]``.
+
+    ``issue_type`` (when provided and in :data:`MAINLINE_ISSUE_TYPES`) tightens
+    both passes; when omitted every issue_type is eligible and the actual type is
+    returned.
+
+    Read-only; reuses the index built by :func:`init_db`.
+    """
+    module = (test_module or '').strip()
+    case = (test_case or '').strip()
+    if not module or not case:
+        return []
+
+    itype = (issue_type or '').strip().upper()
+    if itype not in MAINLINE_ISSUE_TYPES:
+        itype = ''
+
+    def _run(where: str, params: list, *, match_kind: str) -> list[dict]:
+        sql = (
+            f'SELECT {_EXEMPTION_SELECT_COLUMNS} FROM mainline_known_issues '
+            f'WHERE {where} '
+            'ORDER BY release_year DESC, source_url DESC, exemption_id '
+            'LIMIT ?'
+        )
+        rows = conn.execute(sql, [*params, limit]).fetchall()
+        return [{**dict(row), 'match_kind': match_kind} for row in rows]
+
+    type_clause = 'AND issue_type = ?' if itype else ''
+    type_params = [itype] if itype else []
+
+    # Pass 1: exact match. Module is case-insensitive (CTS module casing varies
+    # across report parsers); test_case uses the bare FQN.
+    bare_case = _strip_test_case_param(case)
+    where_exact = f'test_module = ? COLLATE NOCASE AND test_case = ? {type_clause}'
+    hits = _run(where_exact, [module, bare_case, *type_params], match_kind='exact')
+    if hits:
+        return hits
+
+    # Pass 2: fuzzy fallback on the method segment, catching parameterized rows.
+    if '#' in bare_case:
+        cls, method = bare_case.split('#', 1)
+        like = f'{escape_like(cls)}#{escape_like(method)}%'
+        where_fuzzy = f'test_module = ? COLLATE NOCASE AND test_case LIKE ? ESCAPE "\\" {type_clause}'
+        return _run(where_fuzzy, [module, like, *type_params], match_kind='fuzzy')
+
+    return []

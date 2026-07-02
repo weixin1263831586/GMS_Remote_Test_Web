@@ -15,10 +15,14 @@ const state = {
     currentUser: null,
     authReady: false,
     usernameDetectShown: false,
+    // Temporary admin elevation for sensitive operations (remove user/device).
+    // Populated from /api/auth/status (elevated/elevated_until).
+    elevated: false,
+    elevatedUntil: null,
     config: null,
     fileBrowser: { currentPath: '', selectedFile: null, targetInputId: null, mode: null },
     gsiVendorFile: null,
-    suiteBrowser: { selectedSuitePath: '', currentPath: '', highlightPath: '' },
+    suiteBrowser: { selectedSuitePath: '', currentPath: '', highlightPath: '', suiteRoot: '' },
     domCache: {},
     lastLogCount: 0,
     currentLogTab: 'system',

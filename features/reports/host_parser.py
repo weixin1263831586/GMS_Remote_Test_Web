@@ -171,6 +171,16 @@ class HostLogParser:
 
         return 'Unknown'
 
+    # A tradefed host_log line begins with a "MM-DD HH:MM:SS L/Tag:" prefix.
+    # Multi-line failure bodies (e.g. a test's stderr dumped verbatim) have NO
+    # such prefix, so a new timestamped line marks the next log entry and the
+    # end of the current failure body — even when that body contains blank lines.
+    _NEW_LOG_LINE_RE = re.compile(r'^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b')
+
+    @classmethod
+    def _is_new_log_line(cls, line: str) -> bool:
+        return bool(cls._NEW_LOG_LINE_RE.match(line))
+
     def _extract_failures(self, log_content: str) -> list[TestFailure]:
         """提取失败信息"""
         failures = []
@@ -209,20 +219,29 @@ class HostLogParser:
                 failure_lines = [line]
                 j = i + 1
 
-                # 收集后续的非空行，直到遇到下一个FAILURE或空行
+                # 收集后续行，直到遇到下一条新的日志条目。失败体本身可能跨多行
+                # 且包含空行（如 SELinux genfscon 报告分多段输出），所以不能仅凭
+                # 空行截断；真正的边界是下一行重新出现 "MM-DD HH:MM:SS L/Tag:" 前缀。
                 while j < len(lines):
-                    next_line = lines[j].strip()
-                    # 停止条件：遇到新的FAILURE、空行、时间戳行等
+                    next_raw = lines[j]
+                    next_line = next_raw.strip()
+                    # 空行属于失败体内部，跳过空行判定继续收集。
+                    if not next_line:
+                        failure_lines.append(next_raw)
+                        j += 1
+                        continue
+                    # 停止条件：遇到新的 FAILURE/ASSUMPTION_FAILURE，或一条新的
+                    # 带时间戳前缀的日志行（新条目开始），或明显的结构边界。
                     if ('FAILURE:' in next_line or
-                        not next_line or
-                        next_line.startswith('[') or
-                        next_line.startswith('TestInvocation') or
-                        next_line.startswith('---') or
-                        'completed in' in next_line or
-                        'TestInvocation: Starting invocation' in next_line):
+                        self._is_new_log_line(next_raw) or
+                        next_line.startswith('TestInvocation: Starting invocation')):
                         break
-                    failure_lines.append(lines[j])
+                    failure_lines.append(next_raw)
                     j += 1
+
+                # 去掉尾部误收集的空行
+                while failure_lines and not failure_lines[-1].strip():
+                    failure_lines.pop()
 
                 # 组合多行失败信息
                 full_failure_text = '\n'.join(failure_lines)

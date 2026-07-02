@@ -200,6 +200,24 @@
         "title": "Body_analyze_reports_api_reports_analyze_post",
         "type": "object"
       },
+      "Body_analyze_suite_log_dir_api_reports_analyze_log_dir_post": {
+        "properties": {
+          "path": {
+            "default": "",
+            "title": "Path",
+            "type": "string"
+          },
+          "suite_path": {
+            "title": "Suite Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "suite_path"
+        ],
+        "title": "Body_analyze_suite_log_dir_api_reports_analyze_log_dir_post",
+        "type": "object"
+      },
       "Body_upload_apk_api_apk_upload_post": {
         "properties": {
           "chunk_index": {
@@ -1878,6 +1896,44 @@
           }
         },
         "summary": "Upload Apk"
+      }
+    },
+    "/api/auth/elevate": {
+      "post": {
+        "description": "Re-authenticate as admin to temporarily unlock sensitive operations.\n\nVerifies the supplied credentials belong to an admin, then stamps a short\nelevation window onto the caller's current session. The session must already\nexist (the user is logged in); elevation just grants admin-level actions\n(remove user / disconnect device) for ``ELEVATION_MINUTES``.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Elevate"
       }
     },
     "/api/auth/login": {
@@ -8179,6 +8235,42 @@
         "summary": "Analyze Reports"
       }
     },
+    "/api/reports/analyze-log-dir": {
+      "post": {
+        "description": "Analyze a test-run log folder browsed from the suite browser.\n\nTriggered by the per-folder \"报告分析\" button inside a ``.../logs`` dir.\nResolves ``suite_path``+``path`` to an absolute directory (same semantics\nas the suite file browser) and runs the host-log analyzer over it. The\nanalyzer walks the tree recursively, so pointing it at a\n``logs/<timestamp>`` folder finds the nested ``inv_*/host_log_*.txt``.\n\nThe suite directory must be readable from the web host itself. When the\nconfigured test host is remote and the path is not mounted locally, the\ncaller gets a clear error instead of a silent failure.",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_suite_log_dir_api_reports_analyze_log_dir_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Suite Log Dir"
+      }
+    },
     "/api/reports/analyze-url": {
       "post": {
         "description": "Download and analyze test report from URL (supports Redmine attachment auto-download).",
@@ -10096,7 +10188,7 @@
     },
     "/api/usbip/disconnect": {
       "post": {
-        "description": "Stop USB/IP forwarding (supports specifying host).",
+        "description": "Stop USB/IP forwarding (supports specifying host).\n\nSensitive: disconnects/removes device forwarding, so requires admin elevation.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10291,6 +10383,22 @@
           }
         },
         "summary": "List Users"
+      }
+    },
+    "/api/users/remove": {
+      "delete": {
+        "description": "从配置的 client_hosts 中移除一个用户（按 IP）。\n\n仅能移除「配置型」用户（来自 config_runtime.client_hosts）。临时会话用户\n（仅活跃、未配置）无配置条目，不在此处理范围。正在测试中的用户禁止移除。\n需要管理员提权（近期二次认证）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Remove Configured User"
       }
     },
     "/api/users/set-username": {

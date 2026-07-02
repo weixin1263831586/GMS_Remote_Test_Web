@@ -36,6 +36,10 @@ function applyClientIdentityHeadersToXhr(xhr) {
 }
 
 async function apiCall(url, method = 'GET', data = null) {
+    return _apiCallOnce(url, method, data, { _elevationRetried: false });
+}
+
+async function _apiCallOnce(url, method, data, opts) {
     try {
         const options = {
             method,
@@ -91,7 +95,26 @@ async function apiCall(url, method = 'GET', data = null) {
             if (response.status === 401 && result.auth_required) {
                 showAuthGate(Boolean(result.setup_required));
             }
-            const error = new Error(result.error || result.message || 'Request failed');
+            // Sensitive operation needs temporary admin elevation: prompt for
+            // admin credentials, and on success replay this exact request once.
+            const detail = result && typeof result === 'object' ? result.detail : null;
+            const needsElevation = response.status === 403
+                && detail
+                && (detail.elevation_required || (typeof detail === 'object' && detail.elevation_required));
+            if (needsElevation && !opts._elevationRetried) {
+                debugLog('[apiCall] 403 elevation_required — prompting for admin credentials');
+                const granted = await (window.requestElevatedAccess
+                    ? window.requestElevatedAccess('需要管理员权限执行此操作')
+                    : Promise.resolve(false));
+                if (granted) {
+                    return _apiCallOnce(url, method, data, { _elevationRetried: true });
+                }
+            }
+            const error = new Error(
+                (detail && (detail.message || detail.detail)) ||
+                result.error || result.message || 'Request failed'
+            );
+            if (needsElevation) error.suppressToast = true;
             if (result.need_password) {
                 error.needPassword = true;
                 error.suppressToast = true;
@@ -177,7 +200,27 @@ async function submitAuthForm() {
         state.clientId = result.client_id || result.user?.id || null;
         state.authReady = true;
         hideAuthGate();
-        window.location.reload();
+        // If the client-host detection modal is already open (e.g. the user was
+        // filling it in when a background 401 raised the auth gate), recover
+        // state incrementally instead of reloading, so that modal survives.
+        const detectOpen = typeof ModalManager !== 'undefined' && ModalManager.isOpen('username-detect-modal');
+        if (detectOpen) {
+            debugLog('[Auth] Login succeeded with username-detect open; recovering state without reload');
+            state.usernameDetectShown = true;  // keep the already-open modal, don't re-trigger
+            try {
+                const cur = await fetch('/api/users/current', { credentials: 'same-origin' });
+                if (cur.ok) {
+                    const ud = await cur.json();
+                    if (ud.client_id) state.clientId = ud.client_id;
+                }
+            } catch (e) {
+                debugLog('[Auth] post-login /api/users/current refresh failed:', e);
+            }
+        } else {
+            // No conflicting modal: a full reload is the simplest way to refresh
+            // all auth-gated data and re-run initialization.
+            window.location.reload();
+        }
     } catch (error) {
         if (message) message.textContent = error.message;
     } finally {
@@ -201,6 +244,8 @@ async function ensureAuthenticatedBeforeAppStart() {
     state.currentUser = status.user || null;
     state.clientId = status.user?.id || null;
     state.authReady = true;
+    state.elevated = Boolean(status.elevated);
+    state.elevatedUntil = status.elevated_until || null;
     hideAuthGate();
     return true;
 }
