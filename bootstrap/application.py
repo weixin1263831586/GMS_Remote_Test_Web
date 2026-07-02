@@ -101,22 +101,6 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         if current_user:
             request.state.current_user = current_user
 
-        if path.startswith('/api/') and not _is_public_path(path, request.method):
-            if not current_user:
-                response = JSONResponse(
-                    status_code=401,
-                    content={
-                        'success': False,
-                        'error': 'Authentication required',
-                        'auth_required': True,
-                        'setup_required': auth_service.setup_required(),
-                    },
-                )
-                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-                response.headers['X-Content-Type-Options'] = 'nosniff'
-                response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-                return response
-
         source = classify_request_source(
             request.headers.get('user-agent', ''),
             path,

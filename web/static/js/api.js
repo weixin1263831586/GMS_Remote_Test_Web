@@ -92,9 +92,9 @@ async function _apiCallOnce(url, method, data, opts) {
         }
 
         if (!response.ok) {
-            if (response.status === 401 && result.auth_required) {
-                showAuthGate(Boolean(result.setup_required));
-            }
+            // Ordinary client usage is anonymous. Do not show the platform
+            // login gate for background 401s; sensitive actions use the
+            // elevation_required path below.
             // Sensitive operation needs temporary admin elevation: prompt for
             // admin credentials, and on success replay this exact request once.
             const detail = result && typeof result === 'object' ? result.detail : null;
@@ -238,8 +238,13 @@ async function logoutCurrentUser() {
 async function ensureAuthenticatedBeforeAppStart() {
     const status = await fetchAuthStatus();
     if (!status.authenticated) {
-        showAuthGate(Boolean(status.setup_required));
-        return false;
+        state.currentUser = null;
+        state.clientId = null;
+        state.authReady = true;
+        state.elevated = false;
+        state.elevatedUntil = null;
+        hideAuthGate();
+        return true;
     }
     state.currentUser = status.user || null;
     state.clientId = status.user?.id || null;

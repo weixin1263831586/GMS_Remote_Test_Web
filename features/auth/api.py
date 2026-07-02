@@ -56,10 +56,6 @@ async def auth_elevate(request: Request, req: dict):
     exist (the user is logged in); elevation just grants admin-level actions
     (remove user / disconnect device) for ``ELEVATION_MINUTES``.
     """
-    current = get_authenticated_user(request)
-    if not current:
-        return error_response("请先登录", status_code=401)
-
     admin = auth_service.authenticate(
         str(req.get("username", "")),
         str(req.get("password", "")),
@@ -67,18 +63,20 @@ async def auth_elevate(request: Request, req: dict):
     if not admin or admin.role != "admin":
         return error_response("管理员凭证无效", status_code=403)
 
-    token = request.cookies.get(AUTH_COOKIE_NAME)
-    if not token or not auth_service.elevate_session(token, admin):
+    token = request.cookies.get(AUTH_COOKIE_NAME) or auth_service.create_session(admin.id)
+    if not auth_service.elevate_session(token, admin):
         return error_response("无法提权当前会话", status_code=400)
 
     elevated_until = auth_service.get_elevated_until(token)
-    return JSONResponse(
+    response = JSONResponse(
         content={
             "success": True,
             "elevated": True,
             "elevated_until": elevated_until,
         }
     )
+    _set_session_cookie(response, token)
+    return response
 
 
 @router.post("/setup")

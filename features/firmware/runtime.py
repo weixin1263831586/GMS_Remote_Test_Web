@@ -22,6 +22,7 @@ gsi_progress_max: int = 95
 gsi_progress_poll_interval: float = 1
 lock_firmware_devices: Any = None
 release_firmware_devices: Any = None
+firmware_share_store: Any = None
 
 
 def configure_runtime(**values: Any) -> None:

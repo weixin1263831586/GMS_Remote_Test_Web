@@ -409,6 +409,17 @@ function getDefaultUbuntuUser() {
 
 // ==================== WebSocket Connection (FastAPI) ====================
 function initWebSocket() {
+    if (state.websocket && (
+        state.websocket.readyState === WebSocket.OPEN
+        || state.websocket.readyState === WebSocket.CONNECTING
+    )) {
+        return;
+    }
+    if (state.websocketReconnectTimer) {
+        clearTimeout(state.websocketReconnectTimer);
+        state.websocketReconnectTimer = null;
+    }
+
     // 获取客户端ID
     apiCall('/api/users/current', 'GET').then(data => {
         const clientId = data.client_id || 'unknown';
@@ -420,9 +431,13 @@ function initWebSocket() {
         const wsUrl = `${protocol}//${window.location.host}/api/system/websocket/${encodeURIComponent(clientId)}`;
 
         debugLog(`[WebSocket] Connecting to: ${wsUrl}`);
-        state.websocket = new WebSocket(wsUrl);
+        const websocket = new WebSocket(wsUrl);
+        state.websocket = websocket;
 
-        state.websocket.onopen = () => {
+        websocket.onopen = () => {
+            if (state.websocket !== websocket) {
+                return;
+            }
             debugLog('[WebSocket] Connected');
             updateConnectionStatus(true);
             // 显示可读的 username@ip，而非平台用户安全边界（裸 ID）。
@@ -439,22 +454,33 @@ function initWebSocket() {
             }
         };
 
-        state.websocket.onclose = () => {
+        websocket.onclose = () => {
+            if (state.websocket !== websocket) {
+                return;
+            }
             debugLog('[WebSocket] Disconnected');
+            state.websocket = null;
             updateConnectionStatus(false);
             addLogEntry('WebSocket连接已断开', 'warning');
             // 5秒后重连
-            setTimeout(() => {
+            state.websocketReconnectTimer = setTimeout(() => {
+                state.websocketReconnectTimer = null;
                 debugLog('[WebSocket] Attempting to reconnect...');
                 initWebSocket();
             }, 5000);
         };
 
-        state.websocket.onerror = (error) => {
+        websocket.onerror = (error) => {
+            if (state.websocket !== websocket) {
+                return;
+            }
             debugLog('[WebSocket] Error:', error);
         };
 
-        state.websocket.onmessage = (event) => {
+        websocket.onmessage = (event) => {
+            if (state.websocket !== websocket) {
+                return;
+            }
             try {
                 const data = JSON.parse(event.data);
                 const messageType = data.type;
@@ -2817,6 +2843,308 @@ async function browseRemoteFileForFirmware() {
     await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
 }
 
+function firmwareShareSetValidation(message, type = 'info') {
+    const el = document.getElementById('firmware-share-validation');
+    if (!el) return;
+    const colorMap = {
+        success: 'var(--success-color)',
+        error: 'var(--danger-color)',
+        warning: 'var(--warning-color)',
+        info: 'var(--text-secondary)',
+    };
+    el.style.color = colorMap[type] || colorMap.info;
+    el.textContent = message || '';
+}
+
+function shareFirmware() {
+    const input = document.getElementById('firmware-share-remote');
+    if (input && !input.value.trim()) {
+        input.value = 'hcq@10.10.10.206:/home/hcq/7_Android17_0622/rockdev/Image-rk3576s_u-userdebug';
+    }
+    firmwareShareSetValidation('');
+    ModalManager.open('firmware-share-modal');
+    loadFirmwareShares();
+}
+
+async function browseRemoteFileForFirmwareShare() {
+    state.fileBrowser.mode = 'firmware-share';
+    state.fileBrowser.targetInputId = 'firmware-share-remote';
+    state.fileBrowser.selectedFile = null;
+    state.fileBrowser.remoteHost = '10.10.10.206';
+    state.fileBrowser.remoteUser = 'hcq';
+    document.getElementById('file-browser-title').textContent = '选择共享固件';
+    ModalManager.open('file-browser-modal');
+    await loadFileDirectory('/home/hcq');
+}
+
+function closeFirmwareShareModal() {
+    ModalManager.close('firmware-share-modal');
+}
+
+async function firmwareShareApi(path, options = {}) {
+    const response = await fetch(path, {
+        credentials: 'same-origin',
+        headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+        ...options,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) {
+        throw new Error(data.error || data.detail || `HTTP ${response.status}`);
+    }
+    return data;
+}
+
+// ---- 远端固件主机密码：会话级缓存 + 弹框 ----
+function _shareFirmwarePwdKey(host) {
+    return `firmware_share_pwd_${host || 'default'}`;
+}
+function getShareFirmwarePassword(host) {
+    return sessionStorage.getItem(_shareFirmwarePwdKey(host)) || '';
+}
+function setShareFirmwarePassword(host, password) {
+    if (password) {
+        sessionStorage.setItem(_shareFirmwarePwdKey(host), password);
+    } else {
+        sessionStorage.removeItem(_shareFirmwarePwdKey(host));
+    }
+}
+
+let _firmwareSharePasswordResolver = null;
+function promptFirmwareSharePassword(host, message) {
+    return new Promise((resolve) => {
+        _firmwareSharePasswordResolver = resolve;
+        document.getElementById('firmware-share-password-host').value = host || '';
+        const input = document.getElementById('firmware-share-password-input');
+        input.value = '';
+        const info = document.querySelector('#firmware-share-password-modal .modal-info-text');
+        if (info) {
+            info.textContent = message
+                ? `⚠️ ${message}（仅本会话使用，不持久保存）`
+                : '⚠️ 连接远端固件主机认证失败，请输入该主机的 SSH 登录密码（仅本会话使用，不持久保存）。';
+        }
+        ModalManager.open('firmware-share-password-modal');
+        setTimeout(() => input.focus(), 50);
+    });
+}
+function closeFirmwareSharePasswordModal() {
+    ModalManager.close('firmware-share-password-modal');
+    if (_firmwareSharePasswordResolver) {
+        const resolver = _firmwareSharePasswordResolver;
+        _firmwareSharePasswordResolver = null;
+        resolver(null);
+    }
+}
+function handleFirmwareSharePasswordKeyPress(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        submitFirmwareSharePassword();
+    }
+}
+function submitFirmwareSharePassword() {
+    const password = document.getElementById('firmware-share-password-input').value;
+    ModalManager.close('firmware-share-password-modal');
+    if (_firmwareSharePasswordResolver) {
+        const resolver = _firmwareSharePasswordResolver;
+        _firmwareSharePasswordResolver = null;
+        resolver(password || null);
+    }
+}
+
+// 带认证重试的固件分享 API 调用：
+// body 为普通对象（不含 password）；首次用会话缓存密码，遇 401 弹框让用户输入后重试一次。
+// host 用于缓存密码与弹框展示。返回与 firmwareShareApi 一致的成功数据；失败抛 Error。
+async function firmwareShareApiWithAuth(path, body, host) {
+    const buildOptions = (password) => ({
+        method: 'POST',
+        body: JSON.stringify({ ...body, ...(password ? { password } : {}) }),
+    });
+    const cached = getShareFirmwarePassword(host);
+    const response = await fetch(path, {
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        ...buildOptions(cached),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+        const message = data.error || '连接远端固件主机认证失败';
+        const password = await promptFirmwareSharePassword(host, message);
+        if (!password) {
+            throw new Error(message);
+        }
+        setShareFirmwarePassword(host, password);
+        const retry = await fetch(path, {
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            ...buildOptions(password),
+        });
+        const retryData = await retry.json().catch(() => ({}));
+        if (!retry.ok || retryData.success === false) {
+            // 密码错误也清除缓存，避免反复用错密码
+            if (retry.status === 401) setShareFirmwarePassword(host, '');
+            throw new Error(retryData.error || retryData.detail || `HTTP ${retry.status}`);
+        }
+        return retryData;
+    }
+    if (!response.ok || data.success === false) {
+        throw new Error(data.error || data.detail || `HTTP ${response.status}`);
+    }
+    return data;
+}
+
+function firmwareShareRemoteText(record) {
+    const user = record.user ? `${record.user}@` : '';
+    return `${user}${record.host}:${record.path}`;
+}
+
+function firmwareShareDate(ts) {
+    if (!ts) return '-';
+    const date = new Date(Number(ts) * 1000);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleString();
+}
+
+async function loadFirmwareShares() {
+    const tbody = document.getElementById('firmware-share-list');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="5" style="padding: 14px; color: var(--text-secondary); text-align: center;">加载中...</td></tr>';
+    try {
+        const result = await firmwareShareApi('/api/firmware-shares');
+        const records = result.data?.records || [];
+        if (!records.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="padding: 14px; color: var(--text-secondary); text-align: center;">暂无共享固件</td></tr>';
+            return;
+        }
+        tbody.innerHTML = records.map(record => {
+            const name = escapeHtml(record.name || record.filename || record.id);
+            const remote = escapeHtml(firmwareShareRemoteText(record));
+            const id = escapeHtml(record.id);
+            const title = escapeHtml(`${firmwareShareRemoteText(record)}\n创建: ${firmwareShareDate(record.created_at)}\n修改: ${firmwareShareDate(record.mtime)}`);
+            return `
+                <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="padding: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${name}">${name}</td>
+                    <td style="padding: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 12px;" title="${title}">${remote}</td>
+                    <td style="padding: 8px; text-align: right;">${formatBytes(record.size || 0, true) || '-'}</td>
+                    <td style="padding: 8px; text-align: center;">${record.downloads || 0}</td>
+                    <td style="padding: 8px; text-align: center; white-space: nowrap;">
+                        <button class="btn-xxs" onclick="copyFirmwareShareLink('${id}')">分享</button>
+                        <button class="btn-xxs" onclick="downloadFirmwareShare('${id}')">下载</button>
+                        <button class="btn-xxs" onclick="deleteFirmwareShare('${id}')">删除</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="5" style="padding: 14px; color: var(--danger-color); text-align: center;">${escapeHtml(error.message)}</td></tr>`;
+    }
+}
+
+// 从 "user@host:/path" 中解析出 host，用于密码缓存与弹框展示。
+function parseShareFirmwareHost(remote) {
+    const match = String(remote || '').trim().match(/^(?:[^@:/]+@)?([^:/]+):/);
+    return match ? match[1] : '';
+}
+
+async function validateFirmwareShare() {
+    const remote = document.getElementById('firmware-share-remote')?.value?.trim() || '';
+    if (!remote) {
+        firmwareShareSetValidation('请输入远端固件路径', 'error');
+        return;
+    }
+    firmwareShareSetValidation('正在校验远端固件...', 'info');
+    try {
+        const result = await firmwareShareApiWithAuth('/api/firmware-shares/validate', { remote }, parseShareFirmwareHost(remote));
+        const info = result.data || {};
+        firmwareShareSetValidation(`校验通过: ${info.filename || ''} ${formatBytes(info.size || 0)} 修改时间 ${firmwareShareDate(info.mtime)}`, 'success');
+    } catch (error) {
+        firmwareShareSetValidation(error.message, 'error');
+    }
+}
+
+async function createFirmwareShare() {
+    const remote = document.getElementById('firmware-share-remote')?.value?.trim() || '';
+    const name = document.getElementById('firmware-share-name')?.value?.trim() || '';
+    const expiresDays = parseInt(document.getElementById('firmware-share-expire-days')?.value || '0', 10) || 0;
+    if (!remote) {
+        firmwareShareSetValidation('请输入远端固件路径', 'error');
+        return;
+    }
+    firmwareShareSetValidation('正在创建分享...', 'info');
+    try {
+        await firmwareShareApiWithAuth('/api/firmware-shares', { remote, name, expires_days: expiresDays }, parseShareFirmwareHost(remote));
+        firmwareShareSetValidation('固件分享已创建', 'success');
+        showToast('固件分享已创建', 'success');
+        await loadFirmwareShares();
+    } catch (error) {
+        firmwareShareSetValidation(error.message, 'error');
+        showToast(`创建分享失败: ${error.message}`, 'error');
+    }
+}
+
+async function ensureFirmwareShareReady(id) {
+    if (!id) return;
+    try {
+        await firmwareShareApi(`/api/firmware-shares/${encodeURIComponent(id)}/check`);
+        return true;
+    } catch (error) {
+        const message = error.message || '远端认证失败';
+        if (!message.includes('认证失败') && !message.includes('Authentication')) {
+            showToast(`共享固件校验失败: ${message}`, 'error');
+            return false;
+        }
+        const password = await promptFirmwareSharePassword('', '该共享固件缺少有效远端 SSH 密码，请输入后保存到此分享记录');
+        if (!password) {
+            showToast('已取消操作', 'warning');
+            return false;
+        }
+        try {
+            await firmwareShareApi(`/api/firmware-shares/${encodeURIComponent(id)}/credentials`, {
+                method: 'POST',
+                body: JSON.stringify({ password }),
+            });
+            showToast('远端凭据已更新', 'success');
+            await loadFirmwareShares();
+            return true;
+        } catch (saveError) {
+            showToast(`远端凭据更新失败: ${saveError.message}`, 'error');
+            return false;
+        }
+    }
+}
+
+async function downloadFirmwareShare(id) {
+    if (!await ensureFirmwareShareReady(id)) return;
+    triggerDownload(`/api/firmware-shares/${encodeURIComponent(id)}/download`, '');
+}
+
+async function copyFirmwareShareLink(id) {
+    if (!id) return;
+    if (!await ensureFirmwareShareReady(id)) return;
+    const url = `${window.location.origin}/api/firmware-shares/${encodeURIComponent(id)}/download`;
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(url);
+        } else {
+            fallbackCopyText(url);
+        }
+        showToast('分享链接已复制，已登录客户端可直接打开下载', 'success');
+    } catch (error) {
+        fallbackCopyText(url);
+        showToast('分享链接已复制，已登录客户端可直接打开下载', 'success');
+    }
+}
+
+async function deleteFirmwareShare(id) {
+    const confirmed = await showConfirmDialog('删除共享固件', '确定删除这条固件分享记录吗？不会删除远端固件文件。');
+    if (!confirmed) return;
+    try {
+        await firmwareShareApi(`/api/firmware-shares/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        showToast('固件分享已删除', 'success');
+        await loadFirmwareShares();
+    } catch (error) {
+        showToast(`删除失败: ${error.message}`, 'error');
+    }
+}
+
 async function submitFirmwareBurn() {
     const firmwarePath = document.getElementById('firmware-path').value.trim();
     if (!firmwarePath) {
@@ -4616,6 +4944,10 @@ async function browseRemoteFile(mode) {
 
 async function loadFileDirectory(path) {
     try {
+        if (state.fileBrowser.mode === 'firmware-share') {
+            await loadFirmwareShareRemoteDirectory(path);
+            return;
+        }
         const result = await apiCall('/api/files/list', 'POST', { path });
 
         if (result.success) {
@@ -4627,6 +4959,37 @@ async function loadFileDirectory(path) {
     } catch (error) {
         showToast('加载文件列表失败: ' + error.message, 'error');
     }
+}
+
+async function loadFirmwareShareRemoteDirectory(path) {
+    const host = state.fileBrowser.remoteHost || '10.10.10.206';
+    try {
+        const result = await firmwareShareApiWithAuth('/api/firmware-shares/browse', {
+            host,
+            user: state.fileBrowser.remoteUser || 'hcq',
+            path,
+        }, host);
+        const data = result.data || {};
+        state.fileBrowser.currentPath = data.path || path;
+        state.fileBrowser.remoteHost = data.host || state.fileBrowser.remoteHost || host;
+        state.fileBrowser.remoteUser = data.user || state.fileBrowser.remoteUser || 'hcq';
+        renderFileList(data.files || []);
+    } catch (error) {
+        showToast('加载远端固件目录失败: ' + error.message, 'error');
+        renderFirmwareShareBrowseError(host, error.message);
+    }
+}
+
+function renderFirmwareShareBrowseError(host, message) {
+    const list = document.getElementById('file-browser-list');
+    if (!list) return;
+    list.innerHTML = `
+        <div class="file-browser-item" style="cursor: default; flex-direction: column; align-items: flex-start; gap: 6px;">
+            <div style="color: var(--danger-color);">⚠️ 无法加载远端固件目录</div>
+            <div style="color: var(--text-secondary); font-size: 12px;">主机 ${escapeHtml(host || '')}：${escapeHtml(message || '')}</div>
+            <div style="color: var(--text-muted); font-size: 11px;">请确认主机可达且 SSH 凭据正确；若仍失败可关闭后重试。</div>
+        </div>
+    `;
 }
 
 function renderFileList(files) {
@@ -4812,6 +5175,19 @@ function confirmFileSelection() {
                 localFirmwareInput.value = '';
             }
             addLogEntry(`已选择固件文件: ${fullPath}`, 'info');
+        }
+        closeFileBrowserModal();
+    } else if (state.fileBrowser.mode === 'firmware-share') {
+        if (isDirectory) {
+            showToast('请选择一个固件文件，而非文件夹', 'warning');
+            return;
+        }
+        fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
+        if (targetInput) {
+            const user = state.fileBrowser.remoteUser || 'hcq';
+            const host = state.fileBrowser.remoteHost || '10.10.10.206';
+            targetInput.value = `${user}@${host}:${fullPath}`;
+            addLogEntry(`已选择共享固件: ${targetInput.value}`, 'info');
         }
         closeFileBrowserModal();
     } else if (state.fileBrowser.mode === 'utility-tool') {
@@ -5746,6 +6122,8 @@ window.showSnackbar = function showSnackbar(title, message, level = 'info', dura
 const _modalCloseHandlers = {
     'config-modal': closeModal,
     'firmware-modal': closeFirmwareModal,
+    'firmware-share-modal': closeFirmwareShareModal,
+    'firmware-share-password-modal': closeFirmwareSharePasswordModal,
     'file-browser-modal': closeFileBrowserModal,
     'gsi-modal': closeGsiModal,
     'sn-modal': closeSnModal
