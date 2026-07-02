@@ -40,63 +40,121 @@ def sanitize_tradefed_console_command(command: str) -> str:
     return command
 
 
-def parse_tradefed_list_results(output: str) -> list[dict[str, Any]]:
-    """解析 tradefed list results 命令输出，支持 STS 和 VTS/CTS 两种格式"""
+_RESULT_DIR_RE = re.compile(r"\b\d{4}\.\d{2}\.\d{2}(?:[_\d.]+)?\b")
+
+
+def _split_result_header(header_line: str) -> list[str]:
+    """把 tradefed 原始表头行拆成列名列表，保留原始列名。
+
+    tradefed 表头形如:
+        "Session  Pass  Fail  Warning  Modules Complete  Result Directory  ..."
+    按两个以上空格切分即可得到各列；"Modules Complete"、"Result Directory"、
+    "Device serial(s)"、"Build ID"、"Test Plan" 各自是单列（含内部空格）。
+    """
+    # 去掉回车与首尾空白后，按 2+ 空格分段。
+    return [seg.strip() for seg in re.split(r"\s{2,}", header_line.replace("\r", "").strip()) if seg.strip()]
+
+
+def parse_tradefed_list_results(output: str) -> dict[str, Any]:
+    """解析 tradefed ``list results`` 命令输出。
+
+    不同套件输出列不一致：CTS/GTS 含 ``Warning`` 列、且 ``Modules Complete``
+    形如 ``1 of 1``；VTS/STS 无 ``Warning`` 列；设备序列号可能由多个以空格
+    分隔的 token 组成（如 ``RK3576GMS2, RK357603``）。因此不依赖固定列下标，
+    而是以表头检测 ``Warning`` 列、并以时间戳样式的 ``Result Directory``
+    作为锚点向两侧解析。
+    """
     cleaned_output = strip_ansi_codes(output)
 
-    results = []
-    lines = cleaned_output.strip().split('\n')
+    results: list[dict[str, Any]] = []
+    columns: list[str] = []
+    lines = cleaned_output.split('\n')
     header_found = False
 
     for line in lines:
+        stripped = line.strip()
+
         if not header_found:
             if 'Session' in line and 'Pass' in line and 'Fail' in line:
                 header_found = True
+                columns = _split_result_header(line)
             continue
 
-        line = line.strip()
-        if not line or line.startswith('=====') or line.startswith('------'):
+        if not stripped or stripped.startswith('=====') or stripped.startswith('------'):
+            continue
+        # 跳过 tradefed 提示符回显行（如 "vts-tf >"、"cts-console >"）。
+        if '>' in stripped and 'Session' not in stripped:
             continue
 
-        if '>' in line and 'Session' not in line:
+        parts = stripped.split()
+        if len(parts) < 6:
             continue
 
-        parts = line.split()
-        if len(parts) >= 10:
-            try:
-                has_of_keyword = len(parts) > 4 and parts[4] == 'of'
+        # 以时间戳样式的结果目录作为稳定锚点（兼容 2026.06.25_10.57.05 与
+        # 2026.07.01_17.02.29.859_2402 两种格式）。
+        dir_index = next(
+            (i for i, p in enumerate(parts) if _RESULT_DIR_RE.fullmatch(p)),
+            None,
+        )
+        if dir_index is None:
+            continue
 
-                if has_of_keyword:
-                    result_entry = {
-                        'session': parts[0],
-                        'pass': int(parts[1]),
-                        'fail': int(parts[2]),
-                        'modules': parts[3],
-                        'modules_total': parts[5],
-                        'result_directory': parts[6],
-                        'test_plan': parts[7],
-                        'device_serial': parts[8],
-                        'build_id': parts[9],
-                        'product': parts[10] if len(parts) > 10 else ''
-                    }
-                else:
-                    result_entry = {
-                        'session': parts[0],
-                        'pass': int(parts[1]),
-                        'fail': int(parts[2]),
-                        'modules': parts[3],
-                        'modules_total': parts[4],
-                        'result_directory': parts[5],
-                        'test_plan': parts[6],
-                        'device_serial': parts[7],
-                        'build_id': parts[8],
-                        'product': parts[9] if len(parts) > 9 else ''
-                    }
-                results.append(result_entry)
-            except (ValueError, IndexError):
-                continue
+        try:
+            # 锚点左侧：session pass fail [warning] modules [of] modules_total
+            session = parts[0]
+            pass_count = int(parts[1])
+            fail_count = int(parts[2])
+            modules = ''
+            modules_total = ''
+            warning = ''
+            if dir_index >= 4 and parts[dir_index - 2] == 'of':
+                modules = parts[dir_index - 3]
+                modules_total = parts[dir_index - 1]
+            elif dir_index >= 3:
+                modules = parts[dir_index - 1]
+            # CTS/GTS 在 fail 与 modules 之间多一列 Warning。
+            if 'warning' in str(columns).lower():
+                try:
+                    warning = str(int(parts[3]))
+                except (ValueError, IndexError):
+                    warning = ''
 
-    return results
+            # 锚点右侧：test_plan device_serial(s)... build_id product
+            tail = parts[dir_index + 1:]
+            test_plan = tail[0] if len(tail) > 0 else ''
+            build_id = ''
+            product = ''
+            device_tokens: list[str] = []
+            if len(tail) >= 4:
+                # product 是最后一个 token；build_id 是倒数第二个。
+                product = tail[-1]
+                build_id = tail[-2]
+                device_tokens = tail[1:-2]
+            elif len(tail) == 3:
+                build_id = tail[-1]
+                device_tokens = tail[1:-1]
+            elif len(tail) == 2:
+                device_tokens = tail[1:]
+
+            result_entry = {
+                'session': session,
+                'pass': pass_count,
+                'fail': fail_count,
+                'warning': warning,
+                'modules': modules,
+                'modules_total': modules_total,
+                'result_directory': parts[dir_index],
+                'test_plan': test_plan,
+                'device_serial': ' '.join(device_tokens),
+                'build_id': build_id,
+                'product': product,
+            }
+            results.append(result_entry)
+        except (ValueError, IndexError):
+            continue
+
+    return {'columns': columns, 'results': results}
+
 
 
 def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: str = "list results") -> tuple:
@@ -122,13 +180,21 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
 
     platform_tools_path = PLATFORM_TOOLS_PATH
 
-    def wait_for_prompt(shell, prompt_patterns, timeout=10, poll_interval=0.05):
-        """智能等待 shell 提示符出现（优化版）"""
+    def wait_for_prompt(shell, prompt_patterns, timeout=10, poll_interval=0.05, require_stable=False):
+        """智能等待 shell 提示符出现（优化版）
+
+        ``require_stable`` 适用于 tradefed 控制台命令（如 ``list results``）：
+        这类命令的输出会异步产生，且 tradefed 可能在结果真正打印前就再次
+        回显提示符（例如 ``vts-tf >``）。此时仅在"看到提示符"就返回会漏掉
+        结果表。开启 ``require_stable`` 后，必须满足"最后一行是提示符 且
+        输出长度已连续多次未变化"才返回，从而等到延迟到达的结果输出。
+        """
         output = ""
         start_time = time.time()
         last_output_time = start_time
         last_output_length = 0
         stable_count = 0
+        prompt_seen = False
 
         while time.time() - start_time < timeout:
             try:
@@ -136,20 +202,31 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
                 if chunk:
                     output += chunk
                     last_output_time = time.time()
+                else:
+                    # recv 返回空：连接暂无数据，仍参与稳定性计数。
+                    pass
 
-                    for pattern in prompt_patterns:
-                        current_line = output.split('\n')[-1:][0] if output.split('\n') else ''
-                        if re.search(pattern, current_line):
-                            return output
+                current_line = output.split('\n')[-1:][0] if output.split('\n') else ''
+                matched_prompt = any(re.search(pattern, current_line) for pattern in prompt_patterns)
 
-                    current_length = len(output)
-                    if current_length == last_output_length:
-                        stable_count += 1
-                        if stable_count >= 3:
+                if matched_prompt and not require_stable:
+                    return output
+
+                current_length = len(output)
+                if current_length == last_output_length:
+                    stable_count += 1
+                    if require_stable:
+                        # 等到提示符出现且输出稳定，避免漏掉异步延迟的结果表。
+                        if matched_prompt and stable_count >= 5:
                             return output
-                    else:
-                        stable_count = 0
-                        last_output_length = current_length
+                    elif stable_count >= 3:
+                        return output
+                else:
+                    stable_count = 0
+                    last_output_length = current_length
+
+                if matched_prompt:
+                    prompt_seen = True
             except Exception:
                 if time.time() - last_output_time > STABLE_OUTPUT_TIMEOUT:
                     return output
@@ -179,7 +256,7 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
 
         shell.send(f"{sanitize_tradefed_console_command(command)}\n")
         command_output = wait_for_prompt(shell, ['> ', 'tf> ', r'\(tf\)', 'All done'],
-                                         timeout=20, poll_interval=0.1)
+                                         timeout=30, poll_interval=0.1, require_stable=True)
 
         time.sleep(0.5)
 

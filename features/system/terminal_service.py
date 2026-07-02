@@ -524,13 +524,14 @@ async def handle_tradefed_list_results(client_id: str, websocket: WebSocket, dat
         ssh_manager.return_connection(ssh)
 
         if code == 0:
-            results = parse_tradefed_list_results(output)
+            parsed = parse_tradefed_list_results(output)
             await websocket.send_json({
                 'type': 'tradefed_list_results',
                 'success': True,
                 'output': output,
-                'results': results,
-                'count': len(results),
+                'columns': parsed.get('columns', []),
+                'results': parsed.get('results', []),
+                'count': len(parsed.get('results', [])),
                 'command': f"cd '{suite_path}' && {tradefed_bin} list results"
             })
         else:

@@ -972,9 +972,14 @@
                             <div id="suite-browser-title" class="suite-browser-title">请选择测试套件</div>
                             <div id="suite-browser-path" class="suite-browser-path">-</div>
                         </div>
-                        <button id="btn-add-local-suite" class="btn-xs" onclick="showAddLocalSuiteDialog()" style="white-space: nowrap; height: 28px;">
-                            ➕ 添加本地路径
-                        </button>
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <button id="btn-test-results" class="btn-xs" onclick="openTestResultsModal()" style="white-space: nowrap; height: 28px;" title="执行 tradefed list results 查看该套件的测试结果">
+                                📋 测试结果列表
+                            </button>
+                            <button id="btn-add-local-suite" class="btn-xs" onclick="showAddLocalSuiteDialog()" style="white-space: nowrap; height: 28px;">
+                                ➕ 添加本地路径
+                            </button>
+                        </div>
                     </div>
                     <div id="suite-browser-breadcrumb" class="suite-browser-breadcrumb"></div>
                     <div class="suite-search-bar">
@@ -1766,6 +1771,25 @@
         </div>
     </div>
 
+    <!-- 测试结果列表弹框 (tradefed list results) -->
+    <div id="test-results-modal" class="modal" style="z-index: 10090;">
+        <div class="modal-content" style="max-width: min(1100px, 95vw); width: 95vw; height: 80vh; max-height: 80vh;">
+            <div class="modal-header">
+                <span class="modal-title">测试结果列表 <span id="test-results-modal-suite" style="font-size: 12px; color: var(--text-secondary); font-weight: normal;"></span></span>
+                <span class="modal-close" onclick="closeTestResultsModal()">&times;</span>
+            </div>
+            <div class="modal-body" style="display: flex; flex-direction: column; height: 100%; overflow: hidden;">
+                <div class="modal-info-text" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span id="test-results-modal-status">点击某一行测试结果可跳转到对应目录</span>
+                    <button class="btn-xxs" onclick="loadTestResults(true)">🔄 刷新</button>
+                </div>
+                <div id="test-results-list" style="flex: 1; overflow: auto; margin-top: 10px; border: 1px solid var(--border-color); border-radius: 8px;">
+                    <div style="padding: 20px; color: var(--text-secondary); text-align: center;">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 烧写固件弹框 -->
     <div id="firmware-modal" class="modal">
         <div class="modal-content">
@@ -2063,6 +2087,7 @@
                 <div class="modal-form-row">
                     <label>套件路径:</label>
                     <input type="text" id="local-suite-path-input" class="host-input" placeholder="~/GMS-Suite/android-cts-verifier-16.1_r2/" onkeydown="handleAddLocalSuiteKeydown(event)" autocomplete="off" />
+                    <button class="btn-xxs" onclick="browseLocalSuitePath()" style="white-space: nowrap; padding: 6px 10px; flex-shrink: 0;">浏览</button>
                 </div>
                 </form>
                 <div class="modal-info-text" style="margin-top: 10px;">
