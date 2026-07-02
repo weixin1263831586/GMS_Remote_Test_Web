@@ -329,8 +329,15 @@ async def list_tradefed_results(
             if code != 0:
                 return error_response(error or f"Command failed with exit code: {code}", status_code=500, raw_output=output)
 
-            results = parse_tradefed_list_results(output)
-            return JSONResponse(content={"success": True, "results": results, "count": len(results), "raw_output": output, "cached": False})
+            parsed = parse_tradefed_list_results(output)
+            return JSONResponse(content={
+                "success": True,
+                "columns": parsed.get("columns", []),
+                "results": parsed.get("results", []),
+                "count": len(parsed.get("results", [])),
+                "raw_output": output,
+                "cached": False,
+            })
         except Exception:
             runtime.ssh_manager.return_connection(ssh)
             raise
