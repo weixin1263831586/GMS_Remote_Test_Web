@@ -2299,6 +2299,8 @@ select option {
     padding: 6px;
     border-radius: 4px;
     margin-top: 8px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .report-failure-card {

@@ -7257,14 +7257,12 @@ function displayReportAnalysis(data) {
             const testCaseName = failure.name || '未知用例';
 
             // 格式化完整堆栈信息，保留换行和缩进
-            // 每行开头添加 4 个空格缩进
             const formattedStackTrace = (reasonText || '无失败原因')
                 .split('\n')
                 .map(line => '&nbsp;&nbsp;&nbsp;&nbsp;' + line
                     .replace(/&/g, '&amp;')
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;')
-                    .replace(/ /g, '&nbsp;')
                 )
                 .join('<br>');
 
