@@ -1688,6 +1688,84 @@
         </div>
     </div>
 
+    <!-- 共享固件弹框 -->
+    <div id="firmware-share-modal" class="modal" style="z-index: 10040;">
+        <div class="modal-content" style="max-width: min(1380px, 97vw); width: 97vw; height: 92vh; max-height: 92vh;">
+            <div class="modal-header">
+                <span class="modal-title">共享固件</span>
+                <span class="modal-close" onclick="closeFirmwareShareModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 12px; align-items: end;">
+                    <div class="modal-form-row" style="margin-bottom: 0;">
+                        <label>远端固件:</label>
+                        <div class="input-with-btn">
+                            <input type="text" id="firmware-share-remote" placeholder="hcq@10.10.10.206:/home/hcq/7_Android17_0622/rockdev/Image-rk3576s_u-userdebug" />
+                            <button class="btn-small" onclick="browseRemoteFileForFirmwareShare()">本机</button>
+                        </div>
+                    </div>
+                    <div class="modal-form-row" style="margin-bottom: 0;">
+                        <label>有效期:</label>
+                        <select id="firmware-share-expire-days" style="height: 36px; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                            <option value="0">长期有效</option>
+                            <option value="1">1 天</option>
+                            <option value="7">7 天</option>
+                            <option value="30">30 天</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-form-row" style="margin-top: 10px;">
+                    <label>显示名称:</label>
+                    <input type="text" id="firmware-share-name" placeholder="可选，默认使用文件名" />
+                </div>
+                <div id="firmware-share-validation" class="modal-info-text" style="min-height: 20px;"></div>
+                <div class="modal-buttons" style="justify-content: flex-start; margin-top: 8px;">
+                    <button class="btn-xxs" onclick="validateFirmwareShare()">校验</button>
+                    <button class="btn-xxs btn-primary" onclick="createFirmwareShare()">创建分享</button>
+                    <button class="btn-xxs" onclick="loadFirmwareShares()">刷新列表</button>
+                </div>
+                <div style="margin-top: 12px; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; height: calc(92vh - 238px); min-height: 360px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                        <thead style="position: sticky; top: 0; z-index: 1;">
+                            <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                                <th style="padding: 8px; text-align: left; width: 22%;">名称</th>
+                                <th style="padding: 8px; text-align: left; width: 40%;">远端路径</th>
+                                <th style="padding: 8px; text-align: right; width: 10%;">大小</th>
+                                <th style="padding: 8px; text-align: center; width: 10%;">下载</th>
+                                <th style="padding: 8px; text-align: center; width: 18%;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="firmware-share-list">
+                            <tr><td colspan="5" style="padding: 14px; color: var(--text-secondary); text-align: center;">暂无共享固件</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 共享固件远端密码弹框 -->
+    <div id="firmware-share-password-modal" class="modal" style="z-index: 10080;">
+        <div class="modal-content" style="max-width: 460px;">
+            <div class="modal-header">
+                <span class="modal-title">远端固件主机认证</span>
+                <span class="modal-close" onclick="closeFirmwareSharePasswordModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="firmware-share-password-host" />
+                <div class="modal-info-text">连接远端固件主机认证失败，请输入 SSH 密码。</div>
+                <div class="modal-form-row">
+                    <label>SSH 密码:</label>
+                    <input type="password" id="firmware-share-password-input" placeholder="仅本会话使用，不持久保存" onkeypress="handleFirmwareSharePasswordKeyPress(event)" autocomplete="current-password" />
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="closeFirmwareSharePasswordModal()">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitFirmwareSharePassword()">继续</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 烧写固件弹框 -->
     <div id="firmware-modal" class="modal">
         <div class="modal-content">
@@ -1780,7 +1858,7 @@
     </div>
 
     <!-- 文件浏览器弹框 -->
-    <div id="file-browser-modal" class="modal">
+    <div id="file-browser-modal" class="modal" style="z-index: 10060;">
         <div class="modal-content" style="max-width: 700px;">
             <div class="modal-header">
                 <span class="modal-title" id="file-browser-title">浏览文件</span>
@@ -2099,7 +2177,7 @@
     </div>
 
     <!-- 统一确认对话框 -->
-    <div id="confirm-modal" class="modal">
+    <div id="confirm-modal" class="modal" style="z-index: 10090;">
         <div class="modal-content" style="max-width: 400px;">
             <div class="modal-header">
                 <span class="modal-title" id="confirm-title">确认操作</span>
@@ -4457,21 +4535,27 @@
                 if (result.success && result.tools) {
                     debugLog('[ToolsSync] Data loaded from server:', result.last_updated);
 
-                    // 检查服务器数据是否比本地数据更新
-                    const localData = localStorage.getItem(CATEGORIES_STORAGE_KEY);
                     if (result.tools && Object.keys(result.tools).length > 0) {
-                        // 如果本地没有数据，或者服务器有更新的数据，使用服务器数据
-                        if (!localData || Object.keys(JSON.parse(localData || '{}')).length === 0) {
-                            categorizedTools = result.tools;
-                            saveCategories();
-                            renderToolsGrid();
-                            showToast('已从服务器恢复工具数据', 'success');
-                        }
+                        categorizedTools = filterWebsiteOnlyTools(result.tools);
+                        localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categorizedTools));
+                        renderToolsGrid();
                     }
                 }
             } catch (error) {
                 console.error('[ToolsSync] Error loading data from server:', error);
             }
+        }
+
+        function filterWebsiteOnlyTools(toolsByCategory) {
+            const filtered = {};
+            Object.entries(toolsByCategory || {}).forEach(([category, tools]) => {
+                const list = Array.isArray(tools) ? tools : [];
+                const websiteTools = list.filter(tool => tool && tool.url);
+                if (websiteTools.length > 0) {
+                    filtered[category] = websiteTools;
+                }
+            });
+            return filtered;
         }
 
 
@@ -5149,6 +5233,15 @@
             '其他工具': { icon: '🔧', color: '#8e8e93' },
         };
         const UT_BUILTIN_TOOLS = {
+            '烧写工具': [
+                {
+                    icon: '📦',
+                    title: '共享固件',
+                    description: '登记编译服务器上的固件路径，其他客户端可直接从远端主机流式下载',
+                    action: 'shareFirmware',
+                    builtin_id: 'builtin-share-firmware'
+                }
+            ],
             '测试工具': [
                 {
                     icon: '📦',
@@ -5245,10 +5338,17 @@
                         file_path: 'scrcpy-linux-x86_64-v3.3.4.tar.gz'
                     }
                 ],
-                '烧写工具': [
-                    {
-                        icon: '🔥',
-                        title: 'upgrade_tool',
+            '烧写工具': [
+                {
+                    icon: '📦',
+                    title: '共享固件',
+                    description: '登记编译服务器上的固件路径，其他客户端可直接从远端主机流式下载',
+                    action: 'shareFirmware',
+                    builtin_id: 'builtin-share-firmware'
+                },
+                {
+                    icon: '🔥',
+                    title: 'upgrade_tool',
                         description: 'Rockchip固件烧写工具，用于将固件镜像烧写到设备eMMC/NVMe存储',
                         file_path: 'upgrade_tool'
                     },
@@ -5456,7 +5556,9 @@
             card.dataset.toolIndex = index;
             card.draggable = true;
             card.style.cssText = `background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: grab; min-width: 100px; max-width: 130px; min-height: 118px;`;
-            if (tool.url) {
+            if (tool.action === 'shareFirmware') {
+                card.addEventListener('click', () => shareFirmware());
+            } else if (tool.url) {
                 card.addEventListener('click', () => openToolLink(tool.url));
             } else if (tool.file_path && tool.action !== 'mainline-sync') {
                 card.addEventListener('click', () => ut_downloadTool(tool.file_path, tool.title));
@@ -5493,6 +5595,7 @@
             actions.style.cssText = 'display: flex; gap: 3px; width: 100%; margin-top: auto;';
 
             const isSyncTool = tool.action === 'mainline-sync' || tool.action === 'gms-update-sync';
+            const isShareFirmwareTool = tool.action === 'shareFirmware';
             // sync 工具显示触发按钮
             if (isSyncTool) {
                 const downloadBtn = document.createElement('button');
@@ -5514,7 +5617,7 @@
             // 有 file_path 且无 url 的下载型工具不显示下载按钮（点击卡片即下载）
             // 只有有 url 的非内置工具才显示下载按钮
             const isDownloadOnlyTool = !isSyncTool && tool.file_path && !tool.url;
-            if (!tool.builtin_id && !isSyncTool && !isDownloadOnlyTool) {
+            if (!tool.builtin_id && !isSyncTool && !isShareFirmwareTool && !isDownloadOnlyTool) {
                 const downloadBtn = document.createElement('button');
                 downloadBtn.textContent = '下载';
                 downloadBtn.title = '下载文件';

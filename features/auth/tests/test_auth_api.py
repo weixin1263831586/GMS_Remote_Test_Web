@@ -19,12 +19,13 @@ class AuthApiTests(unittest.TestCase):
         self.client.close()
         self.tmp.cleanup()
 
-    def test_api_requires_authentication(self):
+    def test_current_user_allows_anonymous_client_identity(self):
         response = self.client.get("/api/users/current")
 
-        self.assertEqual(response.status_code, 401)
-        self.assertTrue(response.json()["auth_required"])
-        self.assertTrue(response.json()["setup_required"])
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIsNone(payload["user"])
+        self.assertTrue(payload["client_id"])
 
     def test_setup_creates_admin_session_and_header_cannot_spoof_identity(self):
         setup = self.client.post(
@@ -128,6 +129,22 @@ class AuthApiTests(unittest.TestCase):
         )
         self.assertEqual(elev.status_code, 403)
         self.assertFalse(elev.json().get("elevated", False))
+
+    def test_elevation_can_start_from_anonymous_session(self):
+        self.client.post(
+            "/api/auth/setup",
+            json={"username": "admin", "password": "strongpass1"},
+        )
+        self.client.post("/api/auth/logout")
+
+        elev = self.client.post(
+            "/api/auth/elevate",
+            json={"username": "admin", "password": "strongpass1"},
+        )
+
+        self.assertEqual(elev.status_code, 200)
+        self.assertTrue(elev.json()["elevated"])
+        self.assertTrue(self.client.cookies.get("gms_session"))
 
 
 if __name__ == "__main__":

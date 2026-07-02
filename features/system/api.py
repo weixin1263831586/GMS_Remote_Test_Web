@@ -27,6 +27,7 @@ from features.system.terminal_service import (
     refresh_devices_websocket,
 )
 from features.system.vnc import NOVNC_WEB_PORT
+from features.users import runtime as users_runtime
 from foundation.config import DEFAULT_SERVER_URL, PROJECT_ROOT, config_manager
 from foundation.errors import handle_api_errors
 from foundation.files import FileUtils
@@ -67,6 +68,41 @@ def init_templates(templates):
     """Initialize Jinja2 templates reference from the main app."""
     global _templates
     _templates = templates
+
+
+def _get_websocket_client_ip(websocket: WebSocket) -> str:
+    """Resolve browser client IP for WebSocket requests."""
+    for header in ("x-forwarded-for", "x-real-ip"):
+        value = (websocket.headers.get(header) or "").strip()
+        if value:
+            return value.split(",")[0].strip()
+    return websocket.client.host if websocket.client else "unknown"
+
+
+def _get_websocket_client_identity(websocket: WebSocket, path_client_id: str) -> tuple[str, str, str]:
+    """Return (state client id, display id, username) for WebSocket state."""
+    user = auth_service.get_user_for_token(websocket.cookies.get(AUTH_COOKIE_NAME))
+    client_ip = _get_websocket_client_ip(websocket)
+    if user:
+        display_id = f"{user.username}@{client_ip}" if client_ip and client_ip != "unknown" else user.username
+        if path_client_id.startswith("terminal_"):
+            return path_client_id, display_id, user.username
+        return user.id, display_id, user.username
+
+    username = "unknown"
+    try:
+        config = config_manager.load_config()
+        username = str((config.get("client_hosts") or {}).get(client_ip) or "").strip() or "unknown"
+    except Exception:
+        username = "unknown"
+
+    display_id = f"{username}@{client_ip}" if username != "unknown" and client_ip != "unknown" else client_ip
+    if path_client_id.startswith("terminal_"):
+        return path_client_id, display_id or path_client_id, username
+    resolved_id = display_id or path_client_id or "unknown"
+    if path_client_id and path_client_id != resolved_id:
+        logger.debug("WebSocket anonymous client_id adjusted: path=%s resolved=%s", path_client_id, resolved_id)
+    return resolved_id, display_id or resolved_id, username
 
 
 # ==================== Root Page ====================
@@ -603,18 +639,29 @@ async def get_api_help(api_path: str | None = None):
 @router.websocket("/api/system/websocket/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """WebSocket连接端点"""
-    user = auth_service.get_user_for_token(websocket.cookies.get(AUTH_COOKIE_NAME))
-    if not user:
-        await websocket.close(code=1008)
-        return
-    if client_id != user.id:
-        logger.warning("WebSocket client_id mismatch: path=%s auth=%s", client_id, user.id)
-    client_id = user.id
+    client_id, display_client_id, username = _get_websocket_client_identity(websocket, client_id)
+    client_ip = _get_websocket_client_ip(websocket)
 
     await websocket.accept()
+    if users_runtime.get_or_create_user_state:
+        users_runtime.get_or_create_user_state(client_id)
+    else:
+        with global_state.user_states_lock:
+            global_state.user_states.setdefault(client_id, {
+                "running": False,
+                "devices": [],
+                "created_at": datetime.now().isoformat(),
+                "last_seen": datetime.now().isoformat(),
+            })
+    with global_state.user_states_lock:
+        state = global_state.user_states.get(client_id)
+        if state is not None:
+            state["client_username"] = username
+            state["client_ip"] = client_ip
+            state["display_client_id"] = display_client_id
     with global_state.websocket_connections_lock:
         global_state.websocket_connections[client_id] = websocket
-    logger.info(f"WebSocket client connected: {client_id}")
+    logger.info(f"WebSocket client connected: {client_id} ({display_client_id})")
 
     try:
         while True:
@@ -663,7 +710,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     finally:
         # 清理WebSocket连接
         with global_state.websocket_connections_lock:
-            if client_id in global_state.websocket_connections:
+            if global_state.websocket_connections.get(client_id) is websocket:
                 del global_state.websocket_connections[client_id]
 
         # 清理终端SSH会话（如果存在）

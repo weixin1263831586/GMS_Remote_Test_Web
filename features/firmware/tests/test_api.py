@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
-from features.firmware import api, firmware_api, runtime
+from features.firmware import api, firmware_api, runtime, shares_api
 
 
 class FakeConfigManager:
@@ -72,6 +72,7 @@ class FirmwareApiTests(unittest.TestCase):
             lock_firmware_devices=fake_lock_firmware_devices,
             release_firmware_devices=fake_release_firmware_devices,
             project_root=".",
+            firmware_share_store=None,
         )
         app = FastAPI()
         app.include_router(api.router)
@@ -196,3 +197,243 @@ class FirmwareApiTests(unittest.TestCase):
             self.assertEqual(resume_payload["progress"], 50.0)
             self.assertEqual(resume_payload["uploaded_size"], 4)
             self.assertEqual(resume_payload["total_size"], 8)
+
+    def test_firmware_share_rejects_path_outside_allowed_prefixes(self):
+        config = {"firmware_shares": {"allowed_prefixes": ["/home/hcq/"]}}
+
+        with self.assertRaises(ValueError):
+            shares_api._validate_remote_path("/etc/passwd", config)
+
+    def test_firmware_share_parses_suffix_range(self):
+        self.assertEqual(shares_api._parse_range("bytes=-100", 1000), (900, 999, 100))
+
+    def test_create_firmware_share_persists_remote_record(self):
+        with TemporaryDirectory() as tmp:
+            runtime.configure_runtime(firmware_share_store=f"{tmp}/shares.json")
+            with (
+                patch(
+                    "features.firmware.shares_api._stat_remote",
+                    return_value={
+                        "host": "10.10.10.206",
+                        "user": "hcq",
+                        "path": "/home/hcq/build/Image-rk3576s_u-user",
+                        "filename": "Image-rk3576s_u-user",
+                        "size": 1234,
+                        "mtime": 100,
+                    },
+                ),
+                patch(
+                    "features.firmware.shares_api.get_client_username_from_request",
+                    return_value="tester",
+                ),
+            ):
+                response = self.client.post(
+                    "/api/firmware-shares",
+                    json={
+                        "remote": "hcq@10.10.10.206:/home/hcq/build/Image-rk3576s_u-user",
+                        "name": "daily build",
+                    },
+                )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertTrue(payload["success"])
+            self.assertEqual(payload["data"]["record"]["name"], "daily build")
+            self.assertEqual(payload["data"]["record"]["size"], 1234)
+            self.assertNotIn("password", payload["data"]["record"])
+            stored = shares_api._load_records()
+            self.assertIsNone(stored[0].get("password"))
+
+    def test_create_firmware_share_stores_supplied_password_for_download(self):
+        with TemporaryDirectory() as tmp:
+            runtime.configure_runtime(firmware_share_store=f"{tmp}/shares.json")
+            with (
+                patch(
+                    "features.firmware.shares_api._stat_remote",
+                    return_value={
+                        "host": "10.10.10.206",
+                        "user": "hcq",
+                        "path": "/home/hcq/build/update.img",
+                        "filename": "update.img",
+                        "size": 1234,
+                        "mtime": 100,
+                    },
+                ),
+                patch(
+                    "features.firmware.shares_api.get_client_username_from_request",
+                    return_value="tester",
+                ),
+            ):
+                self.client.post(
+                    "/api/firmware-shares",
+                    json={
+                        "remote": "hcq@10.10.10.206:/home/hcq/build/update.img",
+                        "password": "s3cret",
+                    },
+                )
+
+            stored = shares_api._load_records()
+            self.assertEqual(stored[0].get("password"), "s3cret")
+
+    def test_update_firmware_share_credentials_stores_password(self):
+        with TemporaryDirectory() as tmp:
+            runtime.configure_runtime(firmware_share_store=f"{tmp}/shares.json")
+            shares_api._save_records([{
+                "id": "share1",
+                "name": "update.img",
+                "host": "10.10.10.206",
+                "user": "hcq",
+                "path": "/home/hcq/build/update.img",
+                "filename": "update.img",
+                "size": 1234,
+                "mtime": 100,
+            }])
+            with patch(
+                "features.firmware.shares_api._stat_remote",
+                return_value={
+                    "host": "10.10.10.206",
+                    "user": "hcq",
+                    "path": "/home/hcq/build/update.img",
+                    "filename": "update.img",
+                    "size": 1234,
+                    "mtime": 100,
+                },
+            ) as stat_remote:
+                response = self.client.post(
+                    "/api/firmware-shares/share1/credentials",
+                    json={"password": "fixed"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(shares_api._load_records()[0]["password"], "fixed")
+            self.assertEqual(stat_remote.call_args.kwargs["password"], "fixed")
+
+    def test_firmware_share_check_uses_stored_password(self):
+        with TemporaryDirectory() as tmp:
+            runtime.configure_runtime(firmware_share_store=f"{tmp}/shares.json")
+            shares_api._save_records([{
+                "id": "share1",
+                "name": "update.img",
+                "host": "10.10.10.206",
+                "user": "hcq",
+                "path": "/home/hcq/build/update.img",
+                "filename": "update.img",
+                "size": 1234,
+                "mtime": 100,
+                "password": "stored",
+            }])
+            with patch(
+                "features.firmware.shares_api._stat_remote",
+                return_value={
+                    "host": "10.10.10.206",
+                    "user": "hcq",
+                    "path": "/home/hcq/build/update.img",
+                    "filename": "update.img",
+                    "size": 1234,
+                    "mtime": 100,
+                },
+            ) as stat_remote:
+                response = self.client.get("/api/firmware-shares/share1/check")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(stat_remote.call_args.kwargs["password"], "stored")
+
+    def test_firmware_share_credentials_use_password_fallback(self):
+        creds = shares_api._host_credentials("10.10.10.206", "hcq", {"ubuntu_pswd": "rockchip"})
+
+        self.assertEqual(creds["username"], "hcq")
+        self.assertEqual(creds["password"], "rockchip")
+
+    def test_firmware_share_browse_uses_remote_directory_listing(self):
+        with (
+            patch(
+                "features.firmware.shares_api._list_remote_dir",
+                return_value={
+                    "host": "10.10.10.206",
+                    "user": "hcq",
+                    "path": "/home/hcq/build",
+                    "files": [{"name": "Image-rk3576s_u-userdebug", "type": "file", "size": 10}],
+                },
+            ),
+        ):
+            response = self.client.post(
+                "/api/firmware-shares/browse",
+                json={"host": "10.10.10.206", "user": "hcq", "path": "/home/hcq/build"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["data"]["files"][0]["name"], "Image-rk3576s_u-userdebug")
+
+    def test_firmware_share_browse_auth_failure_returns_401(self):
+        with patch(
+            "features.firmware.shares_api._list_remote_dir",
+            side_effect=shares_api._AuthError("远端认证失败（用户名/密码/密钥不匹配）"),
+        ):
+            response = self.client.post(
+                "/api/firmware-shares/browse",
+                json={"host": "10.10.10.206", "user": "hcq", "path": "/home/hcq/build"},
+            )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(response.json()["success"])
+
+    def test_firmware_share_browse_forwards_password(self):
+        captured = {}
+
+        def _spy(host, user, path, config, password=None):
+            captured["password"] = password
+            return {"host": host, "user": user, "path": path, "files": []}
+
+        with patch("features.firmware.shares_api._list_remote_dir", side_effect=_spy):
+            self.client.post(
+                "/api/firmware-shares/browse",
+                json={
+                    "host": "10.10.10.206",
+                    "user": "hcq",
+                    "path": "/home/hcq/build",
+                    "password": "s3cret",
+                },
+            )
+
+        self.assertEqual(captured["password"], "s3cret")
+
+    def test_sftp_client_prefers_supplied_password(self):
+        captured = {}
+
+        class _FakeSftp:
+            def stat(self, path):
+                captured["called"] = True
+
+            def close(self):
+                pass
+
+        class _FakeClient:
+            def __init__(self):
+                self._connect_kwargs = None
+
+            def set_missing_host_key_policy(self, policy):
+                pass
+
+            def connect(self, **kwargs):
+                self._connect_kwargs = kwargs
+                captured["password"] = kwargs.get("password")
+
+            def open_sftp(self):
+                return _FakeSftp()
+
+            def close(self):
+                pass
+
+        with (
+            patch("features.firmware.shares_api.paramiko.SSHClient", return_value=_FakeClient()),
+            patch("features.firmware.shares_api._host_credentials", return_value={
+                "hostname": "10.10.10.206", "username": "hcq", "password": None,
+                "key_filename": None, "port": 22,
+            }),
+        ):
+            with shares_api._sftp_client("10.10.10.206", "hcq", {}, password="override"):
+                pass
+
+        self.assertEqual(captured["password"], "override")

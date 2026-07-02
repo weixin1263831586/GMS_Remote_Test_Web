@@ -1,6 +1,7 @@
 """Assets router - file listing, favicon, and user tools APIs."""
 
 import html
+import contextlib
 import json
 import logging
 import mimetypes
@@ -17,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from features.system.icon_fetcher import IconFetcher
 from features.system.ssh import ssh_manager
 from features.users import get_client_id_from_request
+from features.users.clients import get_client_display_id_from_request
 from foundation.config import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, TOOLS_DATA_FILE, config_manager
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
@@ -368,13 +370,30 @@ def _save_user_tools_entry(all_tools_data, client_id, tools, request):
     return save_tools_data(all_tools_data)
 
 
+def _tools_data_keys_for_request(request: Request) -> list[str]:
+    keys = []
+    with contextlib.suppress(Exception):
+        keys.append(get_client_display_id_from_request(request))
+    with contextlib.suppress(Exception):
+        keys.append(get_client_id_from_request(request))
+    return [key for index, key in enumerate(keys) if key and key not in keys[:index]]
+
+
+def _tools_data_primary_key_for_request(request: Request) -> str:
+    with contextlib.suppress(Exception):
+        display_id = get_client_display_id_from_request(request)
+        if display_id:
+            return display_id
+    return get_client_id_from_request(request)
+
+
 @router.post("/api/websites/save")
 @handle_api_errors
 async def save_user_tools(request: Request):
     """Persist the calling user's tools/shortcuts data."""
     try:
         data = await request.json()
-        client_id = get_client_id_from_request(request)
+        client_id = _tools_data_primary_key_for_request(request)
 
         if not client_id:
             return error_response('Unable to identify user', status_code=400)
@@ -401,14 +420,18 @@ async def save_user_tools(request: Request):
 async def load_user_tools(request: Request):
     """Return the calling user's tools/shortcuts data."""
     try:
-        client_id = get_client_id_from_request(request)
+        client_id = _tools_data_primary_key_for_request(request)
 
         if not client_id:
             return error_response('Unable to identify user', status_code=400)
 
         all_tools_data = load_tools_data()
 
-        user_data = all_tools_data.get(client_id, {})
+        user_data = {}
+        for key in _tools_data_keys_for_request(request):
+            user_data = all_tools_data.get(key, {})
+            if user_data:
+                break
         tools = user_data.get('tools', {})
         last_updated = user_data.get('last_updated')
 
@@ -431,7 +454,7 @@ async def sync_user_tools(request: Request):
     """Sync the user's tools data, keeping whichever copy (local or server) is newer."""
     try:
         data = await request.json()
-        client_id = get_client_id_from_request(request)
+        client_id = _tools_data_primary_key_for_request(request)
 
         if not client_id:
             return error_response('Unable to identify user', status_code=400)
@@ -443,7 +466,11 @@ async def sync_user_tools(request: Request):
             return error_response('Invalid local tools data', status_code=400)
 
         all_tools_data = load_tools_data()
-        server_user_data = all_tools_data.get(client_id, {})
+        server_user_data = {}
+        for key in _tools_data_keys_for_request(request):
+            server_user_data = all_tools_data.get(key, {})
+            if server_user_data:
+                break
         server_tools = server_user_data.get('tools', {})
         server_timestamp = server_user_data.get('last_updated')
 

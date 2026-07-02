@@ -4,8 +4,6 @@ import ipaddress
 import logging
 from typing import Any
 
-from fastapi import HTTPException
-
 from features.auth import get_authenticated_user
 from foundation.networking import parse_host_address
 
@@ -16,15 +14,16 @@ logger = logging.getLogger(__name__)
 
 
 def get_client_id_from_request(request) -> str:
-    """Return the authenticated platform user id.
+    """Return a stable client id for runtime state.
 
-    This is the security boundary for user-scoped runtime state. It must not
-    trust client-controlled IP or username headers.
+    Platform login is optional for ordinary client usage. Authenticated users
+    keep their account id; anonymous clients fall back to username@ip resolved
+    from server-side client host config and request metadata.
     """
     user = get_authenticated_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    return user.id
+    if user:
+        return user.id
+    return get_client_display_id_from_request(request)
 
 
 def get_client_ip(request, fallback_ip: str | None = None) -> str:

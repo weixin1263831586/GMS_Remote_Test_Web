@@ -229,6 +229,16 @@ async def list_users():
             if ip in local_addresses or ip in vpn_gateway_addresses:
                 continue
 
+            configured_username = str(configured_client_hosts.get(ip) or '').strip()
+            is_configured = bool(configured_username)
+            if is_configured and (
+                not username
+                or username == 'unknown'
+                or (configured_username and username != configured_username)
+            ):
+                username = configured_username
+                display_client_id = f"{username}@{ip}" if ip and ip != 'unknown' else username
+
             user_info = {
                 'client_id': display_client_id,
                 'user_id': client_id,
@@ -239,12 +249,15 @@ async def list_users():
                 'devices': state.get('devices', []),
                 'last_seen': state.get('last_seen', ''),
                 'created_at': state.get('created_at', ''),
+                'configured': is_configured,
             }
 
             # 平台登录用户是状态隔离边界。多用户可能经同一个反向代理或
             # Tailscale 出口访问，不能按 IP 折叠，否则谁刷新就只剩谁。
             user_key = f"host:{display_client_id}" if display_client_id else (client_id or ip)
             temp_users.pop(f"configured:{display_client_id}", None)
+            if is_configured and configured_username:
+                temp_users.pop(f"configured:{configured_username}@{ip}", None)
             existing = temp_users.get(user_key)
             if existing is None or (existing['username'] == 'unknown' and username != 'unknown'):
                 temp_users[user_key] = user_info
