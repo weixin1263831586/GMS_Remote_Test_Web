@@ -36,6 +36,7 @@ from .repository import (
     refresh_assignee_issue_snapshots,
 )
 from features.auth.service import require_authenticated_user
+from features.users.clients import get_client_id_from_request
 
 
 router = APIRouter()
@@ -49,7 +50,7 @@ def _request_user_id(request: Request | None) -> str:
     except Exception:
         # 未登录时回退到 state.current_user（内部直接调用场景），再退到 legacy。
         user = getattr(getattr(request, "state", None), "current_user", None)
-        return getattr(user, "id", "") or "legacy"
+        return getattr(user, "id", "") or get_client_id_from_request(request) or "legacy"
 
 
 # 看板/统计数据仍按登录用户隔离；配置统一读写 configs/config_runtime.json 和
@@ -60,6 +61,25 @@ def _service_for_request(request: Request | None):
 
 def _config_for_request(request: Request | None):
     return get_redmine_config_for_request(request)
+
+
+def _missing_credentials_payload() -> dict[str, Any]:
+    return {
+        "success": True,
+        "data": {
+            "configured": False,
+            "error": "Redmine credentials not configured",
+            "message": "请先在 Redmine 看板设置中保存 Redmine 账号和密码/API 密码。",
+        },
+    }
+
+
+def _has_redmine_credentials(request: Request | None) -> bool:
+    try:
+        creds = _config_for_request(request).load_redmine_credentials() or {}
+    except Exception:
+        return False
+    return bool(str(creds.get("username") or "").strip() and str(creds.get("password") or "").strip())
 
 
 def _user_map_for_request(request: Request | None) -> list[dict[str, Any]]:
@@ -79,22 +99,60 @@ def _user_map_mtime_for_request(request: Request | None) -> float:
 
 
 async def _live_counts_for_user(service, user_id: int) -> dict[str, Any]:
-    """Fetch full count + resolved trends from Redmine for a user id.
+    """Fetch full issue counts from Redmine for a user id.
 
-    Both calls are independent Redmine round-trips, so they run concurrently.
-    Returns {} on failure (callers fall back to local-DB snapshots).
+    The resolved trend query can scan thousands of closed issues and block the
+    first dashboard paint. Workload endpoints use local DB trends when present;
+    live Redmine is used here only to correct total/open/closed counters.
     """
     client = service.agent._make_client()
     try:
-        counts, trends = await asyncio.gather(
-            client.count_issues_by_assignee(user_id),
-            client.resolved_trends_by_assignee(user_id),
-        )
-        return {**counts, **trends}
+        return await client.count_issues_by_assignee(user_id)
     except Exception:
         return {}
     finally:
         await client.close()
+
+
+def _redmine_user_names(user: Any) -> list[str]:
+    first = str(getattr(user, "firstname", "") or "").strip()
+    last = str(getattr(user, "lastname", "") or "").strip()
+    login = str(getattr(user, "login", "") or "").strip()
+    mail = str(getattr(user, "mail", "") or getattr(user, "email", "") or "").strip()
+    names = [
+        f"{first} {last}".strip(),
+        f"{last} {first}".strip(),
+        mail,
+        login,
+    ]
+    return list(dict.fromkeys(name for name in names if name))
+
+
+async def _current_redmine_user(service) -> Any | None:
+    client = service.agent._make_client()
+    try:
+        return await client.get_current_user()
+    except Exception:
+        return None
+    finally:
+        await client.close()
+
+
+async def _current_redmine_user_mapping(service) -> dict[str, Any] | None:
+    user = await _current_redmine_user(service)
+    if user is None:
+        return None
+    try:
+        user_id = int(getattr(user, "id"))
+    except (TypeError, ValueError):
+        return None
+    names = _redmine_user_names(user)
+    return {
+        "id": user_id,
+        "name": names[0] if names else str(user_id),
+        "aliases": names[1:],
+        "email": str(getattr(user, "mail", "") or getattr(user, "email", "") or "").strip(),
+    }
 
 
 @router.get("/statistics/workload")
@@ -105,6 +163,8 @@ async def get_workload_statistics(
     name: str = Query(""),
     refresh: bool = Query(False),
 ):
+    if not _has_redmine_credentials(request):
+        return _missing_credentials_payload()
     service = _service_for_request(request)
     # Check cache
     stats_cfg = _get_redmine_stats_config(request)
@@ -145,8 +205,14 @@ async def get_workload_statistics(
             except Exception:
                 pass
     else:
-        owner_names = [n for n in candidate_names if n]
-        display_names = owner_names
+        current_user = None if name else await _current_redmine_user_mapping(service)
+        if current_user:
+            owner_names = display_names_from_mapping(current_user)
+            display_names = owner_names
+            live_counts = await _live_counts_for_user(service, int(current_user["id"]))
+        else:
+            owner_names = [n for n in candidate_names if n]
+            display_names = owner_names
     # Collect extra names from run history for matching only, not display
     extra_names = []
     if not name:
@@ -204,6 +270,8 @@ async def get_resolved_issues_by_date(
     profile_id: str = Query("", description="部门看板 profile_id；传入时按部门配置展开成员和别名"),
     limit: int = Query(500, ge=1, le=2000),
 ):
+    if not _has_redmine_credentials(request):
+        return _missing_credentials_payload()
     service = _service_for_request(request)
     """按日期范围查询已解决的 Redmine issue（供趋势柱状图点击查看明细）。"""
     owner_names = [n.strip() for n in names.split(",") if n.strip()] if names else []
@@ -281,6 +349,8 @@ async def get_department_overdue_statistics(
     profile_id: str = Query(""),
     refresh: bool = Query(False),
 ):
+    if not _has_redmine_credentials(request):
+        return _missing_credentials_payload()
     service = _service_for_request(request)
     now_ts = datetime.now().timestamp()
     stats_cfg = _get_redmine_stats_config(request)
@@ -299,6 +369,10 @@ async def get_department_overdue_statistics(
         return {"success": True, "data": {**cached, "cache_hit": True}}
 
     users = filter_users_for_profile(_user_map_for_request(request), profile)
+    if not users and str(profile.get("id") or "") == "all":
+        current_user = await _current_redmine_user_mapping(service)
+        if current_user:
+            users = [current_user]
     try:
         client = service.agent._make_client()
     except Exception as exc:
@@ -361,6 +435,8 @@ async def get_project_statistics(
     profile_id: str = Query(""),
     refresh: bool = Query(False),
 ):
+    if not _has_redmine_credentials(request):
+        return _missing_credentials_payload()
     service = _service_for_request(request)
     now_ts = datetime.now().timestamp()
     manager = _config_for_request(request)

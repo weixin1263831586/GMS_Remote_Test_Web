@@ -241,9 +241,19 @@ let pendingDepartmentTargetSelect = 'departmentProfile';
 let pendingTrendChartKey = '';
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 async function api(url, options) {
-  const r = await fetch(url, options || {});
-  const data = await r.json();
-  if (!data.success) throw new Error(data.error || '请求失败');
+  const r = await fetch(url, {credentials: 'same-origin', cache: 'no-store', ...(options || {})});
+  const text = await r.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (e) {
+    throw new Error((r.status ? 'HTTP ' + r.status + ': ' : '') + (text || e.message).slice(0, 180));
+  }
+  if (!r.ok) {
+    const detail = data.error || data.detail || ('HTTP ' + r.status);
+    throw new Error(r.status === 401 ? '登录状态已失效，请刷新后重新登录' : detail);
+  }
+  if (!data.success) throw new Error(data.error || data.detail || '请求失败');
   return data.data || data;
 }
 async function init() {
@@ -577,19 +587,25 @@ function placeholderHtml(innerHtml) {
 function renderSummaryHeader(title, controlsHtml, metaHtml) {
   return '<div class="dashboard-summary-header"><h2 class="dashboard-summary-title">' + esc(title) + '</h2>' + (controlsHtml ? '<div class="dashboard-summary-controls">' + controlsHtml + '</div>' : '') + (metaHtml ? '<div class="muted dashboard-summary-meta">' + metaHtml + '</div>' : '') + '</div>';
 }
-// 根据 Gerrit 查询结果刷新顶部连接告警条：查询报错或结果为空时提示检查路由。
+// 根据 Gerrit 查询结果刷新顶部连接告警条：只有明确网络/连接类错误才提示检查路由。
 async function refreshConnBanner(data) {
   const banner = document.getElementById('connBanner');
   const msg = document.getElementById('connMsg');
   const detail = document.getElementById('connDetail');
   if (!banner) return;
-  const hasError = !!(data && (data.error || data.rest_error));
-  // 个人/部门统计在 Gerrit 不可达时返回全 0 且无 error（summarize 不透传），
-  // 仅当显式 error 时弹告警，避免「真没数据」也误报。
-  if (!hasError) { banner.classList.remove('show', 'ok'); return; }
+  const errorText = [data && data.error, data && data.rest_error].filter(Boolean).join(' | ');
+  const routeLike = /(timed?\s*out|timeout|unreachable|no route|network|connection refused|connection reset|name or service not known|could not resolve|无法|不可达|路由)/i.test(errorText);
+  const authLike = /(401|403|auth|permission|forbidden|unauthorized|not permitted|认证|权限)/i.test(errorText);
+  if (!errorText) { banner.classList.remove('show', 'ok'); return; }
   banner.classList.add('show'); banner.classList.remove('ok');
-  msg.textContent = '⚠️ Gerrit 查询失败，可能是服务器不可达，请检查路由。';
-  detail.textContent = (data.error || '') + (data.rest_error ? (data.error ? ' | ' : '') + data.rest_error : '');
+  if (routeLike && !authLike) {
+    msg.textContent = '⚠️ Gerrit 查询失败，可能是服务器不可达，请检查路由。';
+  } else if (authLike) {
+    msg.textContent = '⚠️ Gerrit 查询失败，请检查账号、HTTP Password 或 SSH 权限。';
+  } else {
+    msg.textContent = '⚠️ Gerrit 查询失败，请检查查询条件或账号权限。';
+  }
+  detail.textContent = errorText;
 }
 // 打开「检查路由」弹框：探测 Gerrit 服务器 ICMP/SSH端口/HTTPS 三路可达性。
 async function checkGerritRoute() {

@@ -41,7 +41,7 @@ async function loadStatsConfig() {
 
 // ---- API helper ----
 async function api(url, options) {
-  const r = await fetch(url, options || {});
+  const r = await fetch(url, {credentials: 'same-origin', cache: 'no-store', ...(options || {})});
   const text = await r.text();
   let data = {};
   try {
@@ -49,7 +49,10 @@ async function api(url, options) {
   } catch (e) {
     throw new Error((r.status ? 'HTTP ' + r.status + ': ' : '') + (text || e.message).slice(0, 180));
   }
-  if (!r.ok) throw new Error(data.error || data.detail || ('HTTP ' + r.status));
+  if (!r.ok) {
+    const detail = data.error || data.detail || ('HTTP ' + r.status);
+    throw new Error(r.status === 401 ? '登录状态已失效，请刷新后重新登录' : detail);
+  }
   if (!data.success) throw new Error(data.error || '请求失败');
   return data.data || data;
 }

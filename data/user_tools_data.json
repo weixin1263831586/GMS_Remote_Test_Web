@@ -41,6 +41,11 @@
                     "icon": "http://10.10.10.205:8091/assets/common/images/gitbucket.png?20260330150942",
                     "title": "GitBucket",
                     "url": "http://10.10.10.205:8091/Chaoqun/hcq"
+                },
+                {
+                    "icon": "/static/icons/favicons/d4f6df6f3bc2a81f9d39408db2dab539670a5c53849c8457892005f4cdeed4df.png",
+                    "title": "二部大模型",
+                    "url": "http://172.16.14.248:3000/"
                 }
             ],
             "Google": [
@@ -113,7 +118,7 @@
                 }
             ]
         },
-        "last_updated": "2026-05-23T15:08:14.693181",
+        "last_updated": "2026-07-03T16:01:04.349056",
         "client_ip": "172.16.14.66"
     }
 }
