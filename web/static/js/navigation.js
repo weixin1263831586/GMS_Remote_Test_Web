@@ -972,6 +972,11 @@ async function loadDevices(forceRefresh = false) {
         const url = forceRefresh ? '/api/devices/list?force_refresh=1' : '/api/devices/list';
         const devices = await apiCall(url);
         state.devices = devices;
+        // 首次加载设备时拉取当前用户的分组定义（用于 ADB 区按"关注"筛选）
+        if (!state.deviceGroupsLoaded) {
+            await loadDeviceGroups();
+            state.deviceGroupsLoaded = true;
+        }
         renderDevices();
 
         // 显示设备信息，包含序列号
@@ -2577,9 +2582,20 @@ function renderDevices() {
     deviceCanvas.style.alignItems = '';
 
     // 将设备交替分配到左右两栏
+    // ADB 区按"关注"筛选：开启且有关注分组时，只显示属于任一关注分组的设备
+    const followedIds = new Set(
+        (state.deviceGroups || []).filter(g => g.followed).flatMap(g => g.device_ids || [])
+    );
+    const visibleDevices = (state.followFilter && followedIds.size > 0)
+        ? state.devices.filter(d => {
+            const id = typeof d === 'string' ? d : d.device_id;
+            return followedIds.has(id);
+        })
+        : state.devices;
+
     const leftDevices = [];
     const rightDevices = [];
-    state.devices.forEach((device, index) => {
+    visibleDevices.forEach((device, index) => {
         // Handle both string device IDs and device objects
         const deviceId = typeof device === 'string' ? device : device.device_id;
         const isLocked = typeof device === 'object' && device.locked;
@@ -2594,47 +2610,7 @@ function renderDevices() {
 
     // 使用DocumentFragment优化DOM操作
     // Event delegation is used on the containers (setup below), so no individual onclick needed
-    const renderDeviceItem = ({ deviceId, isLocked, lockedBy }) => {
-        const div = document.createElement('div');
-        const isSelected = state.selectedDevices.has(deviceId);
-        div.className = `device-item ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`;
-        div.dataset.deviceId = deviceId;
-        if (isLocked) div.dataset.locked = 'true';
-
-        div.title = isLocked ? `已被 ${lockedBy} 占用` : '点击选择设备';
-
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.className = 'device-checkbox';
-        checkbox.checked = isSelected;
-        if (isLocked) checkbox.disabled = true;
-
-        const info = document.createElement('div');
-        info.className = 'device-info';
-
-        const idDiv = document.createElement('div');
-        idDiv.className = 'device-id';
-        idDiv.textContent = deviceId;
-        info.appendChild(idDiv);
-
-        if (isLocked) {
-            const lockStatus = document.createElement('div');
-            lockStatus.className = 'lock-status';
-            // 直接显示后端发送的完整值 (username@ip格式)
-            lockStatus.textContent = `🔒 ${lockedBy}`;
-            info.appendChild(lockStatus);
-        }
-
-        const status = document.createElement('span');
-        status.className = 'device-status';
-        status.textContent = isLocked ? 'Allocated' : 'Available';
-
-        div.appendChild(checkbox);
-        div.appendChild(info);
-        div.appendChild(status);
-
-        return div;
-    };
+    const renderDeviceItem = (info) => buildDeviceItemEl(info);
 
     // 渲染左侧栏
     const leftFragment = document.createDocumentFragment();
@@ -2669,6 +2645,79 @@ function renderDevices() {
     setupDeviceDelegation(leftContainer);
     setupDeviceDelegation(rightContainer);
 }
+
+// 构建单个设备项 DOM（renderDevices 奇偶分栏与分组视图共用）
+function buildDeviceItemEl({ deviceId, isLocked, lockedBy }) {
+    const div = document.createElement('div');
+    const isSelected = state.selectedDevices.has(deviceId);
+    div.className = `device-item ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`;
+    div.dataset.deviceId = deviceId;
+    if (isLocked) div.dataset.locked = 'true';
+    div.title = isLocked ? `已被 ${lockedBy} 占用` : '点击选择设备';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'device-checkbox';
+    checkbox.checked = isSelected;
+    if (isLocked) checkbox.disabled = true;
+
+    const info = document.createElement('div');
+    info.className = 'device-info';
+    const idDiv = document.createElement('div');
+    idDiv.className = 'device-id';
+    idDiv.textContent = deviceId;
+    info.appendChild(idDiv);
+    if (isLocked) {
+        const lockStatus = document.createElement('div');
+        lockStatus.className = 'lock-status';
+        lockStatus.textContent = `🔒 ${lockedBy}`;
+        info.appendChild(lockStatus);
+    }
+
+    const status = document.createElement('span');
+    status.className = 'device-status';
+    status.textContent = isLocked ? 'Allocated' : 'Available';
+
+    div.appendChild(checkbox);
+    div.appendChild(info);
+    div.appendChild(status);
+    return div;
+}
+
+// 加载分组定义（GET /api/device-groups）
+async function loadDeviceGroups() {
+    try {
+        const res = await apiCall('/api/device-groups', 'GET');
+        state.deviceGroups = (res && (res.data?.groups || res.groups)) || [];
+    } catch (e) {
+        debugLog('[loadDeviceGroups] error:', e);
+        state.deviceGroups = [];
+    }
+    syncFollowFilterBtn();
+}
+
+// 主页 ADB 区"只看关注"开关
+function toggleFollowFilter() {
+    state.followFilter = !state.followFilter;
+    localStorage.setItem('gms_follow_filter', state.followFilter ? '1' : '0');
+    syncFollowFilterBtn();
+    renderDevices();
+}
+
+function syncFollowFilterBtn() {
+    const btn = $('btn-follow-filter');
+    if (!btn) return;
+    const hasFollowed = (state.deviceGroups || []).some(g => g.followed);
+    btn.classList.toggle('active', state.followFilter && hasFollowed);
+    btn.disabled = !hasFollowed;
+    btn.title = hasFollowed
+        ? (state.followFilter ? '当前只显示关注分组的设备，点击显示全部' : '点击只显示关注分组的设备')
+        : '请先在设备管理页"关注"一个分组';
+}
+window.toggleFollowFilter = toggleFollowFilter;
+
+// 设备分组的交互逻辑（视图切换/筛选/弹框/自动分组）由设备管理页面提供，
+// 因为它们绑定设备管理页的 allDevices 与表格渲染，不属于主页 ADB 设备区。
 
 function toggleDevice(deviceId) {
     if (state.selectedDevices.has(deviceId)) {

@@ -1,6 +1,7 @@
 """Configuration and Tailscale routes - config CRUD, sidebar order, Tailscale status."""
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -147,6 +148,74 @@ def normalize_sidebar_visible_pages(raw_pages: Any) -> list[str]:
 
 
 _tailscale_start_lock = asyncio.Lock()
+
+
+# 设备分组配色盘（与品牌渐变一致的几色）
+_DEVICE_GROUP_COLORS = ("#3b82f6", "#764ba2", "#10b981", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899")
+
+
+def _default_group_color(index: int) -> str:
+    """按索引循环取一个默认配色。"""
+    return _DEVICE_GROUP_COLORS[index % len(_DEVICE_GROUP_COLORS)]
+
+
+def normalize_device_groups(raw: Any) -> list[dict[str, Any]]:
+    """校验设备分组定义，返回规整后的 groups 列表。
+
+    每个分组形如 {"id","name","color","device_ids": [...]}。设备序列号去重；
+    允许一台设备同时属于多个分组（OR 语义）。非法项被静默丢弃而非整体失败。
+    """
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400, detail="groups 必须是数组")
+
+    normalized = []
+    seen_ids = set()
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+
+        group_id = str(item.get("id") or "").strip()
+        if not group_id or group_id in seen_ids:
+            continue
+        seen_ids.add(group_id)
+
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+
+        color = str(item.get("color") or "").strip() or _default_group_color(idx)
+
+        device_ids_raw = item.get("device_ids", [])
+        device_ids = []
+        seen_dev = set()
+        if isinstance(device_ids_raw, list):
+            for dev in device_ids_raw:
+                if not isinstance(dev, str):
+                    continue
+                dev = dev.strip()
+                if dev and dev not in seen_dev:
+                    device_ids.append(dev)
+                    seen_dev.add(dev)
+
+        normalized.append(
+            {
+                "id": group_id,
+                "name": name,
+                "color": color,
+                "device_ids": device_ids,
+                "followed": bool(item.get("followed", False)),
+            }
+        )
+    return normalized
+
+
+def build_device_group_map(groups: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """由 groups 列表反查 device_id -> [group_id, ...] 映射（供 /devices/list join）。"""
+    mapping: dict[str, list[str]] = {}
+    for group in groups:
+        for dev in group.get("device_ids", []):
+            mapping.setdefault(dev, []).append(group["id"])
+    return mapping
 
 
 # ==================== Routes ====================
@@ -419,3 +488,212 @@ async def save_sidebar_order(req: dict = Body(default={})):
             'visible_pages': existing_runtime.get('sidebar_visible_pages', []),
         })
     return error_response("保存侧边栏排序失败", status_code=500)
+
+
+# ==================== 设备分组（per-user）====================
+
+# 设备分组按登录用户隔离：每人一份 data/user_prefs/<username>/device_groups.json。
+# 未登录（匿名）时回退到全局 runtime config 的 device_groups，保持旧行为兼容。
+
+
+def _current_username(request: Request | None) -> str | None:
+    """取当前登录用户名；未登录返回 None（走全局匿名回退）。"""
+    if request is None:
+        return None
+    try:
+        from features.auth import get_authenticated_user
+        user = get_authenticated_user(request)
+    except Exception:
+        return None
+    return getattr(user, 'username', None) if user else None
+
+
+def _device_groups_dir(username: str) -> str:
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'user_prefs', username)
+    os.makedirs(base, exist_ok=True)
+    return base
+
+
+def _device_groups_path(username: str) -> str:
+    return os.path.join(_device_groups_dir(username), 'device_groups.json')
+
+
+def _anonymous_groups_key() -> str:
+    return 'device_groups'
+
+
+def _load_groups(username: str | None) -> list[dict[str, Any]]:
+    """读取并规整指定用户的 device_groups。username 为 None 时走全局（匿名回退）。"""
+    if not username:
+        if config_manager is None:
+            return []
+        try:
+            raw = config_manager.get_runtime_config().get(_anonymous_groups_key(), [])
+        except Exception:
+            return []
+        return normalize_device_groups(raw)
+    path = _device_groups_path(username)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    return normalize_device_groups(data.get('groups', []) if isinstance(data, dict) else data)
+
+
+def _save_groups(username: str | None, groups: list[dict[str, Any]]) -> bool:
+    if not username:
+        if config_manager is None:
+            return False
+        try:
+            existing = config_manager.get_runtime_config()
+            existing[_anonymous_groups_key()] = groups
+            return config_manager.save_runtime_config(existing)
+        except Exception:
+            return False
+    path = _device_groups_path(username)
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump({'groups': groups}, f, ensure_ascii=False, indent=2)
+        return True
+    except OSError:
+        return False
+
+
+@router.get("/api/device-groups")
+async def get_device_groups(request: Request):
+    """获取当前用户的设备分组定义。"""
+    username = _current_username(request)
+    return success_response({'groups': _load_groups(username)})
+
+
+@router.post("/api/device-groups")
+async def mutate_device_groups(request: Request, req: dict = Body(default={})):
+    """设备分组增删改 / 重排 / 分配设备（per-user）。
+
+    action:
+      create  {name, color?, device_ids?, followed?}      -> 新建分组（id 后端生成）
+      update  {id, name?, color?, device_ids?, followed?} -> 更新分组字段
+      delete  {id}                                         -> 删除分组（其设备归未分组）
+      reorder {ids: [id,...]}                              -> 按给定顺序重排
+      assign  {id, device_ids, mode: "set"|"add"|"remove"}-> 设置/追加/移除组内设备
+    """
+    action = (req.get('action') or '').strip()
+    if action not in {'create', 'update', 'delete', 'reorder', 'assign'}:
+        return error_response("action 必须是 create/update/delete/reorder/assign", status_code=400)
+
+    username = _current_username(request)
+    groups = _load_groups(username)
+
+    if action == 'create':
+        name = str(req.get('name') or '').strip()
+        if not name:
+            return error_response("分组名称不能为空", status_code=400)
+        group_id = _gen_group_id(groups)
+        device_ids = _coerce_device_ids(req.get('device_ids'))
+        groups.append({
+            'id': group_id,
+            'name': name,
+            'color': str(req.get('color') or '').strip() or _default_group_color(len(groups)),
+            'device_ids': device_ids,
+            'followed': bool(req.get('followed', False)),
+        })
+        _enforce_exclusive(groups, group_id, device_ids)
+
+    elif action == 'update':
+        group = _find_group(groups, req.get('id'))
+        if not group:
+            return error_response("分组不存在", status_code=404)
+        if 'name' in req:
+            name = str(req.get('name') or '').strip()
+            if not name:
+                return error_response("分组名称不能为空", status_code=400)
+            group['name'] = name
+        if 'color' in req:
+            color = str(req.get('color') or '').strip()
+            if color:
+                group['color'] = color
+        if 'device_ids' in req:
+            group['device_ids'] = _coerce_device_ids(req.get('device_ids'))
+            _enforce_exclusive(groups, group['id'], group['device_ids'])
+        if 'followed' in req:
+            group['followed'] = bool(req.get('followed'))
+
+    elif action == 'delete':
+        group_id = str(req.get('id') or '').strip()
+        groups = [g for g in groups if g['id'] != group_id]
+
+    elif action == 'reorder':
+        ids = [str(x).strip() for x in (req.get('ids') or []) if isinstance(x, str)]
+        by_id = {g['id']: g for g in groups}
+        ordered = [by_id[i] for i in ids if i in by_id]
+        # 追加未在 ids 中出现的分组，保持其原相对顺序
+        ordered.extend([g for g in groups if g['id'] not in ids])
+        groups = ordered
+
+    elif action == 'assign':
+        group = _find_group(groups, req.get('id'))
+        if not group:
+            return error_response("分组不存在", status_code=404)
+        mode = (req.get('mode') or 'set').strip()
+        incoming = set(_coerce_device_ids(req.get('device_ids')))
+        if mode == 'set':
+            group['device_ids'] = list(incoming)
+            _enforce_exclusive(groups, group['id'], group['device_ids'])
+        elif mode == 'add':
+            existing = set(group['device_ids']) | incoming
+            group['device_ids'] = list(existing)
+            _enforce_exclusive(groups, group['id'], list(incoming))
+        elif mode == 'remove':
+            existing = set(group['device_ids']) - incoming
+            group['device_ids'] = list(existing)
+        else:
+            return error_response("mode 必须是 set/add/remove", status_code=400)
+
+    if not _save_groups(username, groups):
+        return error_response("保存设备分组失败", status_code=500)
+    return success_response({'groups': groups})
+
+
+def _coerce_device_ids(raw: Any) -> list[str]:
+    """把任意输入规整成去重的非空设备序列号列表。"""
+    if not isinstance(raw, list):
+        return []
+    seen, result = set(), []
+    for dev in raw:
+        if not isinstance(dev, str):
+            continue
+        dev = dev.strip()
+        if dev and dev not in seen:
+            seen.add(dev)
+            result.append(dev)
+    return result
+
+
+def _enforce_exclusive(groups: list[dict[str, Any]], owner_id: str, device_ids: list[str]) -> None:
+    """互斥语义：device_ids 这些设备只能属于 owner_id 这一组，从其他组移除。"""
+    owned = set(device_ids)
+    for g in groups:
+        if g['id'] == owner_id:
+            continue
+        g['device_ids'] = [d for d in g.get('device_ids', []) if d not in owned]
+
+
+def _find_group(groups: list[dict[str, Any]], group_id: Any) -> dict[str, Any] | None:
+    gid = str(group_id or '').strip()
+    for g in groups:
+        if g['id'] == gid:
+            return g
+    return None
+
+
+def _gen_group_id(existing: list[dict[str, Any]]) -> str:
+    """生成不与现有 id 冲突的分组 id（g_ 前缀 + 6 位）。"""
+    import secrets
+    taken = {g['id'] for g in existing}
+    while True:
+        gid = 'g_' + secrets.token_hex(3)
+        if gid not in taken:
+            return gid

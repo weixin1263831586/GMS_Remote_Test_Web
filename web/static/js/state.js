@@ -23,6 +23,14 @@ const state = {
     fileBrowser: { currentPath: '', selectedFile: null, targetInputId: null, mode: null },
     gsiVendorFile: null,
     suiteBrowser: { selectedSuitePath: '', currentPath: '', highlightPath: '', suiteRoot: '' },
+    // 设备分组：groups 是分组定义数组；groupView 开关分组视图；groupFilter 筛选的组 id（''=全部）
+    deviceGroups: [],
+    deviceGroupsLoaded: false,
+    groupView: localStorage.getItem('gms_group_view') === '1',
+    groupFilter: '',
+    // 主页 ADB 区：是否只显示"关注"分组里的设备（无关注分组时显示全部）
+    followFilter: localStorage.getItem('gms_follow_filter') !== '0',
+    collapsedGroups: new Set(JSON.parse(localStorage.getItem('gms_collapsed_groups') || '[]')),
     domCache: {},
     lastLogCount: 0,
     currentLogTab: 'system',

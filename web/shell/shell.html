@@ -528,6 +528,7 @@
                     <!-- ADB 控制按钮 -->
                     <div class="adb-button-frame">
                         <button class="btn-xxs" onclick="refreshDevices()">🔄 刷新设备</button>
+                        <button class="btn-xxs" id="btn-follow-filter" onclick="toggleFollowFilter()" title="只显示我在设备管理页"关注"的分组设备">⭐ 只看关注</button>
                         <button class="btn-xxs" onclick="selectAllDevices()">✅ 全选设备</button>
                         <button class="btn-xxs" onclick="rebootDevices()">⏻ 重启设备</button>
                         <button id="btn-remount-devices" class="btn-xxs" onclick="remountDevices()">⏻ Remount</button>
@@ -764,7 +765,21 @@
 
         <!-- 设备管理页面 -->
         <div class="container page-content" id="page-devices">
-            <div class="section-title">📱 设备管理</div>
+            <div style="position: relative; margin-bottom: 6px;">
+                <div class="section-title" style="margin: 0;">📱 设备管理</div>
+                <div class="device-group-toolbar" style="position: absolute; top: 0; right: 0;">
+                    <button class="btn-xxs" onclick="openCreateGroupModal()" title="新建分组">➕ 新建分组</button>
+                    <select class="btn-xxs" onchange="autoGroupDevices(this.value); this.value=''" title="按属性自动分组">
+                        <option value="">⊞ 自动分组…</option>
+                        <option value="model">按机型 (model)</option>
+                        <option value="android_version">按 Android 版本</option>
+                        <option value="build_type">按构建类型 (build_type)</option>
+                    </select>
+                    <select class="btn-xxs" id="device-group-filter" onchange="onGroupFilterChange()" title="按组筛选" style="max-width:160px;">
+                        <option value="">全部设备</option>
+                    </select>
+                </div>
+            </div>
 
             <!-- 设备统计卡片 -->
             <div style="display: flex; gap: 15px; margin-bottom: 10px;">
@@ -782,39 +797,40 @@
                 </div>
             </div>
 
+
             <!-- 设备列表 -->
             <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('serial_no')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 140px;" onclick="sortDevices('serial_no')">
                                 设备序列号 <span id="sort-serial_no">↕</span>
                             </th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('source_host')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('source_host')">
                                 来源主机 <span id="sort-source_host">↕</span>
                             </th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('source_type')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 110px;" onclick="sortDevices('source_type')">
                                 来源类型 <span id="sort-source_type">↕</span>
                             </th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('model')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 120px;" onclick="sortDevices('model')">
                                 设备型号 <span id="sort-model">↕</span>
                             </th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 130px;" onclick="sortDevices('soc_model')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('soc_model')">
                                 SOC <span id="sort-soc_model">↕</span>
                             </th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('android_version')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 130px;" onclick="sortDevices('android_version')">
                                 Android版本 <span id="sort-android_version">↕</span>
                             </th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('battery_level')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 90px;" onclick="sortDevices('battery_level')">
                                 电池电量 <span id="sort-battery_level">↕</span>
                             </th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 100px;" onclick="sortDevices('status')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 90px;" onclick="sortDevices('status')">
                                 状态 <span id="sort-status">↕</span>
                             </th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 200px;" onclick="sortDevices('locked_by')">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 130px;" onclick="sortDevices('locked_by')">
                                 占用用户 <span id="sort-locked_by">↕</span>
                             </th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">操作</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 300px;">操作</th>
                         </tr>
                     </thead>
                     <tbody id="devices-table-body">
@@ -2101,6 +2117,34 @@
         </div>
     </div>
 
+    <!-- 新建/编辑设备分组弹框 -->
+    <div id="device-group-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header">
+                <span class="modal-title" id="device-group-modal-title">新建分组</span>
+                <span class="modal-close" onclick="ModalManager.close('device-group-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row">
+                    <label>分组名称:</label>
+                    <input type="hidden" id="device-group-edit-id"/>
+                    <input type="text" id="device-group-name" class="host-input" placeholder="如：产线A / Android17回归" autocomplete="off"/>
+                </div>
+                <div class="modal-form-row" style="align-items:flex-start;">
+                    <label>成员设备:</label>
+                    <div id="device-group-picklist" class="group-picklist" style="flex:1; max-height:240px; overflow-y:auto;"></div>
+                </div>
+                <div class="modal-info-text" style="margin-top:8px;">
+                    💡 离线设备也可勾选保留在组内，重新上线后自动归位
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" onclick="ModalManager.close('device-group-modal')">取消</button>
+                    <button class="btn-xxs btn-primary" onclick="submitDeviceGroup()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 解压测试套件弹框 -->
     <div id="extract-suite-modal" class="modal" style="display: none;" onkeydown="handleExtractSuiteKeydown(event)">
         <div class="modal-content" style="max-width: 620px;">
@@ -2842,12 +2886,18 @@
 
                 if (data.devices) {
                     allDevices = data.devices;
-                    displayDevicesManagement(allDevices);
                 } else if (data.data) {
                     // 兼容旧格式
                     allDevices = data.data;
-                    displayDevicesManagement(allDevices);
                 }
+
+                // 首次进入设备管理页时拉取分组定义
+                if (!state.deviceGroupsLoaded) {
+                    await mgmtLoadGroups();
+                    state.deviceGroupsLoaded = true;
+                }
+                displayDevicesManagement(filteredDevicesForView());
+                if (state.deviceGroups.length > 0) setupMgmtGroupDelegation();
 
                 // 启动自动刷新（每10秒）
                 if (!devicesRefreshInterval) {
@@ -2901,7 +2951,8 @@
                 return currentSort.direction === 'asc' ? result : -result;
             });
 
-            displayDevicesManagement(sortedDevices);
+            // 统一走 filteredDevicesForView（内部已按 currentSort 排序，并应用分组筛选）
+            displayDevicesManagement(filteredDevicesForView());
         }
 
         function displayDevicesManagement(devices) {
@@ -2929,7 +2980,7 @@
             }
 
             // 渲染设备列表
-            tbody.innerHTML = devices.map(device => {
+            const renderDeviceRow = (device) => {
                 const serialNo = device.serial_no || device.device_id || '';
                 const serialAttr = escapeIconAttr(serialNo);
                 const actionButtonStyle = 'width: 92px; min-width: 92px; font-size: 12px; padding: 4px 8px;';
@@ -3004,8 +3055,297 @@
                         </td>
                     </tr>
                 `;
-            }).join('');
+            };
+
+            // 有分组则按组分段（每组独立表格 + 组标题行）；无分组则平铺
+            if (state.deviceGroups.length > 0) {
+                tbody.innerHTML = renderDevicesManagementGrouped(devices, renderDeviceRow);
+            } else {
+                tbody.innerHTML = devices.map(renderDeviceRow).join('');
+            }
         }
+
+        // ===== 设备分组：交互与渲染（绑定设备管理页 allDevices / 表格）=====
+
+        // 拉取分组定义，刷新筛选下拉与开关按钮态
+        async function mgmtLoadGroups() {
+            try {
+                const res = await apiCall('/api/device-groups', 'GET');
+                // apiCall 返回完整响应体 {success, data:{groups}}；兼容直接返回 groups 的情况
+                state.deviceGroups = (res && (res.data?.groups || res.groups)) || [];
+            } catch (e) {
+                console.error('[mgmtLoadGroups] error:', e);
+                state.deviceGroups = [];
+            }
+            mgmtUpdateFilterDropdown();
+            const btn = document.getElementById('btn-toggle-groupview');
+            if (btn) btn.classList.toggle('active', state.groupView);
+        }
+
+        // 刷新"按组筛选"下拉
+        function mgmtUpdateFilterDropdown() {
+            const sel = document.getElementById('device-group-filter');
+            if (!sel) return;
+            const cur = state.groupFilter;
+            sel.innerHTML = '<option value="">全部设备</option>' +
+                (state.deviceGroups || []).map(g =>
+                    `<option value="${g.id}"${g.id === cur ? ' selected' : ''}>${escapeHtml(g.name)}</option>`
+                ).join('');
+        }
+
+        // 按 currentSort 排序 allDevices（复用 sortDevices 的比较逻辑）
+        function sortedAllDevices() {
+            const field = currentSort.field;
+            if (!field) return [...allDevices];
+            const dir = currentSort.direction === 'asc' ? 1 : -1;
+            return [...allDevices].sort((a, b) => {
+                let aVal = a[field] || '';
+                let bVal = b[field] || '';
+                if (field === 'source_type') {
+                    aVal = a.source_type === 'local' ? '0' : '1';
+                    bVal = b.source_type === 'local' ? '0' : '1';
+                } else if (field === 'status') {
+                    aVal = a.status === 'online' ? '0' : '1';
+                    bVal = b.status === 'online' ? '0' : '1';
+                } else if (field === 'battery_level') {
+                    return dir * ((parseInt(a.battery_level) || 0) - (parseInt(b.battery_level) || 0));
+                }
+                return dir * String(aVal).localeCompare(String(bVal), undefined, { numeric: true });
+            });
+        }
+
+        // 筛选 + 排序后，交给渲染的设备列表
+        function filteredDevicesForView() {
+            let list = sortedAllDevices();
+            if (state.groupFilter) {
+                // 筛选模式：只显示属于选中组的设备（一台设备可属多组，OR 命中）
+                list = list.filter(d => Array.isArray(d.groups) && d.groups.includes(state.groupFilter));
+            }
+            return list;
+        }
+
+        // 分组视图渲染：每个分组一行标题（colspan）+ 组内设备行；未分组归"未分组"段
+        // 表头行 HTML（分组视图每组前重复一次，列宽由 table-layout:fixed 首行统一）
+        function deviceHeaderRowHtml() {
+            const th = (label, field, width) => {
+                const arrow = field ? ` <span>${currentSort.field === field ? (currentSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span>` : '';
+                const click = field ? ` onclick="sortDevices('${field}')"` : '';
+                const w = width ? ` width:${width}px;` : '';
+                const cursor = field ? ' cursor:pointer;' : '';
+                return `<th style="padding:5px 6px;text-align:center;font-size:13px;color:var(--text-secondary);${w}${cursor}">${label}${arrow}</th>`;
+            };
+            return `<tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                ${th('设备序列号','serial_no',140)}${th('来源主机','source_host',150)}${th('来源类型','source_type',110)}${th('设备型号','model',120)}${th('SOC','soc_model',100)}${th('Android版本','android_version',130)}${th('电池电量','battery_level',90)}${th('状态','status',90)}${th('占用用户','locked_by',130)}${th('操作','',300)}
+            </tr>`;
+        }
+
+        function renderDevicesManagementGrouped(devices, renderRow) {
+            const entryBySerial = new Map(devices.map(d => [String(d.serial_no || d.device_id || ''), d]));
+            const sections = [];
+
+            const groupsToShow = (state.deviceGroups || []).filter(g =>
+                !state.groupFilter || g.id === state.groupFilter
+            );
+
+            groupsToShow.forEach(group => {
+                const members = (group.device_ids || [])
+                    .map(id => entryBySerial.get(String(id)))
+                    .filter(Boolean);
+                if (members.length === 0 && state.groupFilter) return;
+                sections.push(mgmtGroupTitleRow(group, members.length, false));
+                if (!state.collapsedGroups.has(group.id)) {
+                    sections.push(deviceHeaderRowHtml());
+                    sections.push(members.map(renderRow).join(''));
+                }
+            });
+
+            // 全部模式下，未分组设备单独一段
+            if (!state.groupFilter) {
+                const ungrouped = devices.filter(d => !Array.isArray(d.groups) || d.groups.length === 0);
+                if (ungrouped.length > 0) {
+                    const ug = { id: '__ungrouped__', name: '未分组', color: '#888', followed: false, device_ids: ungrouped.map(d => d.serial_no || d.device_id) };
+                    sections.push(mgmtGroupTitleRow(ug, ungrouped.length, true));
+                    if (!state.collapsedGroups.has('__ungrouped__')) {
+                        sections.push(deviceHeaderRowHtml());
+                        sections.push(ungrouped.map(renderRow).join(''));
+                    }
+                }
+            }
+            return sections.join('');
+        }
+
+        // 分组标题行（跨全部列）：组名/色块/计数/关注/编辑/删除/折叠
+        function mgmtGroupTitleRow(group, count, isUngrouped) {
+            const collapsed = state.collapsedGroups.has(group.id);
+            const followed = !!group.followed;
+            const toggle = `<span class="device-group-toggle" data-mgmt-toggle="${group.id}" style="cursor:pointer;">${collapsed ? '▶' : '▼'}</span>`;
+            const color = `<span class="device-group-color" style="background:${group.color}"></span>`;
+            const name = `<span class="device-group-name">${escapeHtml(group.name)}</span>`;
+            const cnt = `<span class="device-group-count">${count}</span>`;
+            const followBtn = isUngrouped ? '' :
+                `<button class="btn-xxs" data-mgmt-follow="${group.id}" title="关注后主页ADB设备区只显示关注的分组" style="padding:2px 6px;font-size:11px;${followed ? 'background:var(--warning-color);' : ''}">${followed ? '★ 已关注' : '☆ 关注'}</button>`;
+            const ops = isUngrouped ? '' :
+                `<span style="margin-left:auto; display:flex; gap:4px;">
+                    ${followBtn}
+                    <button class="btn-xxs" data-mgmt-edit="${group.id}" style="padding:2px 6px;font-size:11px;">✏️ 编辑</button>
+                    <button class="btn-xxs" data-mgmt-del="${group.id}" style="padding:2px 6px;font-size:11px;">🗑️ 删除</button>
+                </span>`;
+            return `<tr class="device-group-row" style="background: var(--lighter-bg);">
+                <td colspan="10" style="padding:6px 8px;">
+                    <div class="device-group-header" style="background:transparent;border:none;">${toggle}${color}${name}${cnt}${ops}</div>
+                </td>
+            </tr>`;
+        }
+
+        // 表格事件委托：折叠/编辑/删除（仅绑定一次）
+        function setupMgmtGroupDelegation() {
+            const tbody = document.getElementById('devices-table-body');
+            if (!tbody || tbody._mgmtDelegated) return;
+            tbody._mgmtDelegated = true;
+            tbody.addEventListener('click', async (e) => {
+                const tEl = e.target.closest('[data-mgmt-toggle]');
+                if (tEl) {
+                    const gid = tEl.dataset.mgmtToggle;
+                    if (state.collapsedGroups.has(gid)) state.collapsedGroups.delete(gid);
+                    else state.collapsedGroups.add(gid);
+                    localStorage.setItem('gms_collapsed_groups', JSON.stringify([...state.collapsedGroups]));
+                    displayDevicesManagement(filteredDevicesForView());
+                    return;
+                }
+                const editEl = e.target.closest('[data-mgmt-edit]');
+                if (editEl) { openEditGroupModal(editEl.dataset.mgmtEdit); return; }
+                const followEl = e.target.closest('[data-mgmt-follow]');
+                if (followEl) {
+                    const gid = followEl.dataset.mgmtFollow;
+                    const g = (state.deviceGroups || []).find(x => x.id === gid);
+                    if (!g) return;
+                    const nextFollowed = !g.followed;
+                    try {
+                        await apiCall('/api/device-groups', 'POST', { action: 'update', id: gid, followed: nextFollowed });
+                        await mgmtLoadGroups();
+                        displayDevicesManagement(filteredDevicesForView());
+                        showToast(nextFollowed ? '已关注，主页ADB区将只显示关注分组' : '已取消关注', 'success');
+                    } catch (err) { showToast(`操作失败: ${err.message}`, 'error'); }
+                    return;
+                }
+                const delEl = e.target.closest('[data-mgmt-del]');
+                if (delEl) {
+                    const gid = delEl.dataset.mgmtDel;
+                    const g = (state.deviceGroups || []).find(x => x.id === gid);
+                    if (!g) return;
+                    if (!confirm(`确定删除分组「${g.name}」？组内设备将变为未分组。`)) return;
+                    try {
+                        await apiCall('/api/device-groups', 'POST', { action: 'delete', id: gid });
+                        await mgmtLoadGroups();
+                        displayDevicesManagement(filteredDevicesForView());
+                        showToast('分组已删除', 'success');
+                    } catch (err) { showToast(`删除失败: ${err.message}`, 'error'); }
+                }
+            });
+        }
+
+        // ===== 工具栏交互 =====
+        function toggleGroupView() {
+            state.groupView = !state.groupView;
+            localStorage.setItem('gms_group_view', state.groupView ? '1' : '0');
+            const btn = document.getElementById('btn-toggle-groupview');
+            if (btn) btn.classList.toggle('active', state.groupView);
+            setupMgmtGroupDelegation();
+            displayDevicesManagement(filteredDevicesForView());
+        }
+        window.toggleGroupView = toggleGroupView;
+
+        function onGroupFilterChange() {
+            const sel = document.getElementById('device-group-filter');
+            state.groupFilter = sel ? sel.value : '';
+            displayDevicesManagement(filteredDevicesForView());
+        }
+        window.onGroupFilterChange = onGroupFilterChange;
+
+        // ===== 新建/编辑分组弹框 =====
+        function openCreateGroupModal() {
+            const modal = document.getElementById('device-group-modal');
+            if (!modal) return;
+            document.getElementById('device-group-modal-title').textContent = '新建分组';
+            document.getElementById('device-group-edit-id').value = '';
+            document.getElementById('device-group-name').value = '';
+            // 预填：筛选模式下预选当前筛选组的成员；否则预选当前可见设备
+            const preset = state.groupFilter
+                ? (allDevices.filter(d => Array.isArray(d.groups) && d.groups.includes(state.groupFilter))
+                            .map(d => d.serial_no || d.device_id))
+                : [];
+            renderGroupDevicePicker(preset);
+            ModalManager.open('device-group-modal');
+            setTimeout(() => document.getElementById('device-group-name').focus(), 50);
+        }
+        window.openCreateGroupModal = openCreateGroupModal;
+
+        function openEditGroupModal(groupId) {
+            const group = (state.deviceGroups || []).find(g => g.id === groupId);
+            if (!group) return;
+            const modal = document.getElementById('device-group-modal');
+            if (!modal) return;
+            document.getElementById('device-group-modal-title').textContent = '编辑分组';
+            document.getElementById('device-group-edit-id').value = group.id;
+            document.getElementById('device-group-name').value = group.name;
+            renderGroupDevicePicker(group.device_ids);
+            ModalManager.open('device-group-modal');
+        }
+
+        // 弹框设备勾选列表：全部已知设备（在线 + 组内离线）
+        function renderGroupDevicePicker(checkedIds) {
+            const container = document.getElementById('device-group-picklist');
+            if (!container) return;
+            const checked = new Set((checkedIds || []).map(String));
+            const onlineIds = allDevices.map(d => String(d.serial_no || d.device_id || ''));
+            const known = new Set([...onlineIds, ...checked]);
+            const onlineSet = new Set(onlineIds);
+            const html = [...known].map(id => {
+                const isOnline = onlineSet.has(id);
+                return `<label class="group-pick-item">
+                    <input type="checkbox" value="${escapeHtml(id)}" ${checked.has(id) ? 'checked' : ''}/>
+                    <span>${escapeHtml(id)}</span>
+                    ${isOnline ? '' : '<span class="group-pick-off" title="当前离线">（离线）</span>'}
+                </label>`;
+            }).join('');
+            container.innerHTML = html || '<div class="empty-message">暂无设备</div>';
+        }
+
+        async function submitDeviceGroup() {
+            const id = document.getElementById('device-group-edit-id').value.trim();
+            const name = document.getElementById('device-group-name').value.trim();
+            if (!name) { showToast('请输入分组名称', 'error'); return; }
+            const picked = [...document.getElementById('device-group-picklist')
+                .querySelectorAll('input[type=checkbox]:checked')].map(cb => cb.value);
+            const body = id
+                ? { action: 'update', id, name, device_ids: picked }
+                : { action: 'create', name, device_ids: picked };
+            try {
+                await apiCall('/api/device-groups', 'POST', body);
+                showToast(id ? '分组已更新' : '分组已创建', 'success');
+                ModalManager.close('device-group-modal');
+                await mgmtLoadGroups();
+                displayDevicesManagement(filteredDevicesForView());
+            } catch (e) {
+                showToast(`保存失败: ${e.message}`, 'error');
+            }
+        }
+        window.submitDeviceGroup = submitDeviceGroup;
+
+        async function autoGroupDevices(by) {
+            if (!by) return;
+            try {
+                showToast(`正在按 ${by} 分组，需读取设备属性，请稍候...`, 'info');
+                await apiCall('/api/device-groups/auto', 'POST', { by });
+                await mgmtLoadGroups();
+                setupMgmtGroupDelegation();
+                displayDevicesManagement(filteredDevicesForView());
+                showToast('自动分组完成', 'success');
+            } catch (e) {
+                showToast(`自动分组失败: ${e.message}`, 'error');
+            }
+        }
+        window.autoGroupDevices = autoGroupDevices;
 
         async function forceReleaseDeviceLock(serialNo) {
             if (!serialNo || serialNo === '-') {
