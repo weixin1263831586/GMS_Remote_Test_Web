@@ -8,6 +8,7 @@ import mimetypes
 import os
 import re
 import shlex
+import time
 import urllib.parse
 import uuid
 from typing import Any
@@ -32,20 +33,50 @@ from .suites import get_default_suites_path, is_config_host_local
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_SUITES_CACHE: dict[str, Any] = {}
+_SUITES_CACHE_TS: dict[str, float] = {}
+_SUITES_CACHE_TTL_SECONDS = 300
+
+
+def _get_cached_suites(base_path: str) -> dict[str, Any] | None:
+    """Return cached suite discovery result if still fresh."""
+    now = time.time()
+    ts = _SUITES_CACHE_TS.get(base_path, 0)
+    if now - ts < _SUITES_CACHE_TTL_SECONDS:
+        return _SUITES_CACHE.get(base_path)
+    return None
+
+
+def _set_cached_suites(base_path: str, payload: dict[str, Any]) -> None:
+    """Store suite discovery result with timestamp."""
+    _SUITES_CACHE[base_path] = payload
+    _SUITES_CACHE_TS[base_path] = time.time()
+
 
 # ==================== List Suites ====================
 
 @router.get("/api/test/suites")
 @handle_api_errors
-async def list_suites(base_path: str = None):
+async def list_suites(base_path: str = None, force_refresh: bool = Query(False)):
     """List all available test suites."""
     config = runtime.config_manager.load_config()
     base_path = base_path or config.get("suites_path") or get_default_suites_path(config)
+
+    cached = None if force_refresh else _get_cached_suites(base_path)
+    if cached is not None:
+        logger.debug("[TestSuites] Returning cached suite list for %s", base_path)
+        return JSONResponse(content={**cached, "cached": True})
+
     suites = _get_available_test_suites(config, base_path)
-    return JSONResponse(content={
-        "success": True, "suites": suites, "count": len(suites),
-        "base_path": base_path, "source": "local" if is_config_host_local(config) else "ssh",
-    })
+    payload = {
+        "success": True,
+        "suites": suites,
+        "count": len(suites),
+        "base_path": base_path,
+        "source": "local" if is_config_host_local(config) else "ssh",
+    }
+    _set_cached_suites(base_path, payload)
+    return JSONResponse(content={**payload, "cached": False})
 
 
 @router.get("/api/test/suites/modules")

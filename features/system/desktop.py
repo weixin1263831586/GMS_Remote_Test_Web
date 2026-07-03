@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import time
 
 import aiohttp
 import paramiko
@@ -20,6 +21,19 @@ from foundation.responses import error_response, success_response
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Short-lived cache for VNC *status* (not start/stop). get_vnc_status runs
+# several serial SSH probes each time the desktop page loads; the process
+# state it reports barely changes second-to-second, so we cache the result
+# briefly. Any start/stop invalidates it immediately so stale state never
+# survives a user action.
+_VNC_STATUS_TTL = 10.0
+_vnc_status_cache: dict[str, float] = {"ts": 0.0, "value": None}
+
+
+def _invalidate_vnc_status_cache() -> None:
+    _vnc_status_cache["ts"] = 0.0
+    _vnc_status_cache["value"] = None
 
 def default_novnc_upstream_http() -> str:
     return f"http://127.0.0.1:{NOVNC_WEB_PORT}"
@@ -43,8 +57,13 @@ def build_novnc_upstream_url(path: str, query_string: bytes = b"") -> str:
 @router.get("/api/desktop/vnc/status")
 async def get_desktop_vnc_status():
     """获取VNC状态"""
+    now = time.monotonic()
+    if _vnc_status_cache["value"] is not None and now - _vnc_status_cache["ts"] < _VNC_STATUS_TTL:
+        return success_response(_vnc_status_cache["value"])
     try:
         result = await asyncio.to_thread(vnc_manager.get_vnc_status)
+        _vnc_status_cache["ts"] = now
+        _vnc_status_cache["value"] = result
         return success_response(result)
     except Exception as e:
         logger.error(f"Error getting VNC status: {e}")
@@ -71,6 +90,7 @@ async def start_desktop_vnc(req: VNCStartRequest | None = Body(default=None)):
     # start_vnc runs several blocking SSH calls + sleeps (up to ~30s) — keep it
     # off the event loop so VNC start doesn't freeze every other request.
     result = await asyncio.to_thread(vnc_manager.start_vnc, host, password, vnc_password, force_restart=force_restart)
+    _invalidate_vnc_status_cache()
     return JSONResponse(content=result)
 
 
@@ -84,6 +104,7 @@ async def start_desktop_vnc_legacy(req: VNCStartRequest | None = Body(default=No
 async def stop_desktop_vnc():
     """停止Ubuntu主机桌面VNC"""
     result = await asyncio.to_thread(vnc_manager.stop_vnc)
+    _invalidate_vnc_status_cache()
     return JSONResponse(content=result)
 
 

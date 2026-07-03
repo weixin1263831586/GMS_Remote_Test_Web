@@ -55,11 +55,12 @@ async def record_security_page_view(req: SecurityPageViewRequest, request: Reque
 @handle_api_errors
 async def list_security_audit_logs(
     limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     source: str | None = Query(None),
     action_type: str | None = Query(None),
     q: str | None = Query(None, max_length=120)
 ):
-    """查询安全审计记录。"""
+    """查询安全审计记录（支持分页）。"""
     if source and source not in {'web', 'cli'}:
         return ApiResponse.error("source 参数无效", status_code=400)
     if action_type and action_type not in {'api', 'page_view', 'page_visit'}:
@@ -67,6 +68,7 @@ async def list_security_audit_logs(
     result = await asyncio.to_thread(
         security_audit_logger.read_events,
         limit,
+        offset,
         source,
         action_type,
         q

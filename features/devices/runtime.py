@@ -16,7 +16,7 @@ get_client_ip: Any = None
 client_manager: Any = None
 run_local_shell_command: Any = None
 project_root: Any = None
-device_cache_ttl: float = 5
+device_cache_ttl: float = 15
 
 
 def configure_runtime(
@@ -34,7 +34,7 @@ def configure_runtime(
     selected_client_manager: Any = None,
     selected_run_local_shell_command: Any = None,
     selected_project_root: Any = None,
-    selected_device_cache_ttl: float = 5,
+    selected_device_cache_ttl: float = 15,
 ) -> None:
     global config_manager, global_state, ssh_manager, store_notification
     global generate_help_or_continue, get_client_id_from_request

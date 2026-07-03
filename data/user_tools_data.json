@@ -92,6 +92,11 @@
                     "url": "https://chatgpt.com"
                 },
                 {
+                    "icon": "/static/icons/favicons/d3a51b309f9d26d8db7c0a81d8fc264114cb1c7b5d2aebb558c8eaa51a11cd55.png",
+                    "title": "Codex",
+                    "url": "https://chatgpt.com/codex/cloud/settings/analytics"
+                },
+                {
                     "icon": "https://cdn.deepseek.com/chat/icon.png",
                     "title": "DeepSeek",
                     "url": "https://chat.deepseek.com/"
@@ -118,7 +123,7 @@
                 }
             ]
         },
-        "last_updated": "2026-07-03T16:01:04.349056",
+        "last_updated": "2026-07-03T17:26:59.370683",
         "client_ip": "172.16.14.66"
     }
 }

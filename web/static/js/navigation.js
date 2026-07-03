@@ -291,12 +291,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🔌 现在初始化WebSocket（需要clientId）
     initWebSocket();
 
+    // 📱 设备列表是测试页的关键数据，立即触发，避免 F5 后空等（之前被埋在
+    // 1s 延迟里，叠加后端扫描耗时，导致 ADB 设备区显示很慢）。
+    loadDevices();
+
     // ⚙️ 延迟加载非关键数据（避免阻塞关键请求）
     setTimeout(() => {
         loadConfig().catch(error => {
             console.warn('[Init] Config load failed, using defaults:', error);
         });
-        loadDevices();
         loadTestSuites();
         checkInitialTestStatus().catch(error => {
             console.warn('[Init] Test status check failed:', error);
@@ -972,12 +975,15 @@ async function loadDevices(forceRefresh = false) {
         const url = forceRefresh ? '/api/devices/list?force_refresh=1' : '/api/devices/list';
         const devices = await apiCall(url);
         state.devices = devices;
-        // 首次加载设备时拉取当前用户的分组定义（用于 ADB 区按"关注"筛选）
-        if (!state.deviceGroupsLoaded) {
-            await loadDeviceGroups();
-            state.deviceGroupsLoaded = true;
-        }
+        // 先用已有数据渲染设备，让 ADB 区立刻显示，不被分组加载阻塞
         renderDevices();
+        // 首次加载时并行拉取分组定义（用于按"关注"筛选），到位后再重渲染一次
+        if (!state.deviceGroupsLoaded) {
+            state.deviceGroupsLoaded = true;
+            loadDeviceGroups()
+                .then(() => renderDevices())
+                .catch((err) => debugLog('[Devices] loadDeviceGroups failed:', err));
+        }
 
         // 显示设备信息，包含序列号
         let deviceInfo = `已刷新设备列表，找到 ${devices.length} 台设备`;
@@ -1032,7 +1038,8 @@ async function loadTestSuites(forceRefresh = false) {
 
     _loadSuitesPromise = (async () => {
         try {
-            const response = await apiCall('/api/test/suites');
+            const url = forceRefresh ? '/api/test/suites?force_refresh=1' : '/api/test/suites';
+            const response = await apiCall(url);
 
             if (response.success && response.suites) {
                 testSuitesCache = response.suites;
@@ -1040,7 +1047,7 @@ async function loadTestSuites(forceRefresh = false) {
                 if (typeof renderTestSuiteBrowserList === 'function') {
                     renderTestSuiteBrowserList();
                 }
-                debugLog('[loadTestSuites] 已加载测试套件:', response.count, '个');
+                debugLog('[loadTestSuites] 已加载测试套件:', response.count, '个', response.cached ? '(缓存)' : '(实时)');
                 return testSuitesCache;
             } else {
                 showToast('加载测试套件失败', 'error');
@@ -11952,9 +11959,19 @@ function recordSecurityPageView(pageName) {
     }).catch(error => debugLog('[SecurityAudit] page view record failed:', error));
 }
 
+let securityAuditState = {
+    offset: 0,
+    limit: 100,
+    loading: false,
+    hasMore: false,
+    currentFilterParams: null,
+    recordsCache: []
+};
+
 function getSecurityAuditFilterParams() {
     const params = new URLSearchParams();
-    params.set('limit', '300');
+    params.set('limit', String(securityAuditState.limit));
+    params.set('offset', String(securityAuditState.offset));
 
     const source = $('audit-source-filter')?.value || '';
     const actionType = $('audit-type-filter')?.value || '';
@@ -11966,33 +11983,96 @@ function getSecurityAuditFilterParams() {
     return params;
 }
 
-async function loadSecurityAudit() {
+async function loadSecurityAudit(reset = false) {
     const tbody = $('security-audit-table-body');
     if (!tbody) return;
 
-    tbody.innerHTML = `
-        <tr>
-            <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
-                加载中...
-            </td>
-        </tr>
-    `;
+    if (securityAuditState.loading) return;
+    securityAuditState.loading = true;
 
-    try {
-        const params = getSecurityAuditFilterParams();
-        const result = await apiCall(`/api/security-audit/logs?${params.toString()}`);
-        const payload = result.data || {};
-        updateSecurityAuditStats(payload.stats || {});
-        renderSecurityAuditRows(payload.records || []);
-    } catch (error) {
+    if (reset) {
+        securityAuditState.offset = 0;
+        securityAuditState.recordsCache = [];
+        securityAuditState.hasMore = false;
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" style="padding: 40px; text-align: center; color: var(--danger-color);">
-                    加载失败: ${escapeHtml(error.message)}
+                <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                    加载中...
                 </td>
             </tr>
         `;
     }
+
+    try {
+        const params = getSecurityAuditFilterParams();
+        securityAuditState.currentFilterParams = params.toString();
+        const result = await apiCall(`/api/security-audit/logs?${params.toString()}`);
+        const payload = result.data || {};
+        const fetchedRecords = payload.records || [];
+        securityAuditState.hasMore = payload.has_more || false;
+
+        if (reset) {
+            securityAuditState.recordsCache = fetchedRecords;
+            renderSecurityAuditRows(securityAuditState.recordsCache);
+        } else {
+            securityAuditState.recordsCache.push(...fetchedRecords);
+            appendSecurityAuditRows(fetchedRecords);
+        }
+        updateSecurityAuditStats(payload.stats || {});
+    } catch (error) {
+        if (reset) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" style="padding: 40px; text-align: center; color: var(--danger-color);">
+                        加载失败: ${escapeHtml(error.message)}
+                    </td>
+                </tr>
+            `;
+        } else {
+            showToast('加载更多审计记录失败: ' + error.message, 'error');
+        }
+    } finally {
+        securityAuditState.loading = false;
+        updateSecurityAuditLoadMoreButton();
+    }
+}
+
+function updateSecurityAuditLoadMoreButton() {
+    const wrapper = $('audit-load-more-wrapper');
+    if (!wrapper) return;
+    if (securityAuditState.hasMore) {
+        wrapper.innerHTML = `
+            <button class="btn-xs" id="audit-load-more-btn" onclick="loadMoreSecurityAudit()">
+                加载更多
+            </button>
+        `;
+    } else {
+        wrapper.innerHTML = '';
+    }
+}
+
+async function loadMoreSecurityAudit() {
+    if (!securityAuditState.hasMore || securityAuditState.loading) return;
+    securityAuditState.offset += securityAuditState.limit;
+    await loadSecurityAudit(false);
+}
+
+function appendSecurityAuditRows(records) {
+    const tbody = $('security-audit-table-body');
+    if (!tbody) return;
+
+    if (!records.length) return;
+
+    const html = buildSecurityAuditRowsHtml(records);
+    const temp = document.createElement('tbody');
+    temp.innerHTML = html;
+    while (temp.firstChild) {
+        tbody.appendChild(temp.firstChild);
+    }
+
+    tbody.querySelectorAll('[data-audit-id]').forEach(row => {
+        row.addEventListener('click', () => showSecurityAuditDetail(row.dataset.auditId));
+    });
 }
 
 function updateSecurityAuditStats(stats) {
@@ -12044,7 +12124,15 @@ function renderSecurityAuditRows(records) {
         return;
     }
 
-    tbody.innerHTML = records.map(record => {
+    tbody.innerHTML = buildSecurityAuditRowsHtml(records);
+
+    tbody.querySelectorAll('[data-audit-id]').forEach(row => {
+        row.addEventListener('click', () => showSecurityAuditDetail(row.dataset.auditId));
+    });
+}
+
+function buildSecurityAuditRowsHtml(records) {
+    return records.map(record => {
         const userIpText = `${record.username || 'unknown'} / ${record.client_ip || '-'}`;
         const path = record.page ? `#${record.page}` : (record.path || '');
         const detail = [
@@ -12074,10 +12162,6 @@ function renderSecurityAuditRows(records) {
             </tr>
         `;
     }).join('');
-
-    tbody.querySelectorAll('[data-audit-id]').forEach(row => {
-        row.addEventListener('click', () => showSecurityAuditDetail(row.dataset.auditId));
-    });
 }
 
 function formatAuditJson(value) {

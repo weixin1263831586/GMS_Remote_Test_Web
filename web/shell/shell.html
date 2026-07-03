@@ -84,8 +84,8 @@
                 'automation': 'GMS ATS - GMS 远程测试',
                 'redmine-agent': 'Redmine - GMS 远程测试',
                 'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
-                'agent': '对话Agent - GMS 远程测试',
-                'notes': '知识笔记 - GMS 远程测试'
+                'notes': '知识笔记 - GMS 远程测试',
+                'agent': '对话Agent - GMS 远程测试'
             };
             const saveCurrentPageCookie = (pageName) => {
                 document.cookie = 'gms_current_page=' + encodeURIComponent(pageName) + '; path=/; max-age=31536000; SameSite=Lax';
@@ -398,15 +398,15 @@
                     <span class="sidebar-icon">🔀</span>
                     <span class="sidebar-text">Gerrit看板</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="agent" data-page-order="18" onclick="switchPage('agent', event)">
-                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
-                    <span class="sidebar-icon">💬</span>
-                    <span class="sidebar-text">对话Agent</span>
-                </a>
                 <a href="#" class="sidebar-item" data-page="notes" data-page-order="19" onclick="switchPage('notes', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📝</span>
                     <span class="sidebar-text">知识笔记</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="agent" data-page-order="18" onclick="switchPage('agent', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">💬</span>
+                    <span class="sidebar-text">对话Agent</span>
                 </a>
             </nav>
 
@@ -737,19 +737,19 @@
             </div>
 
             <div style="display: grid; grid-template-columns: 120px 140px minmax(180px, 1fr) auto auto; gap: 8px; align-items: center; margin-bottom: 10px;">
-                <select id="audit-source-filter" class="combo-box" onchange="loadSecurityAudit()">
+                <select id="audit-source-filter" class="combo-box" onchange="loadSecurityAudit(true)">
                     <option value="">全部来源</option>
                     <option value="web">Web</option>
                     <option value="cli">CLI</option>
                 </select>
-                <select id="audit-type-filter" class="combo-box" onchange="loadSecurityAudit()">
+                <select id="audit-type-filter" class="combo-box" onchange="loadSecurityAudit(true)">
                     <option value="">全部类型</option>
                     <option value="page_view">页面访问</option>
                     <option value="api">接口操作</option>
                     <option value="page_visit">入口访问</option>
                 </select>
-                <input id="audit-search-input" class="entry-field" type="text" placeholder="搜索用户、IP、接口、页面" onkeydown="if(event.key==='Enter') loadSecurityAudit()" />
-                <button class="btn-xs" onclick="loadSecurityAudit()">🔄 刷新</button>
+                <input id="audit-search-input" class="entry-field" type="text" placeholder="搜索用户、IP、接口、页面" onkeydown="if(event.key==='Enter') loadSecurityAudit(true)" />
+                <button class="btn-xs" onclick="loadSecurityAudit(true)">🔄 刷新</button>
                 <button class="btn-xs" onclick="exportSecurityAudit()">📥 导出</button>
             </div>
 
@@ -773,6 +773,7 @@
                         </tr>
                     </tbody>
                 </table>
+                <div id="audit-load-more-wrapper" style="padding: 14px; text-align: center;"></div>
             </div>
         </div>
 
@@ -2617,12 +2618,23 @@
             const defaultHost = '{{ config.ubuntu_user }}@{{ config.ubuntu_host }}';
             const defaultUrl = buildVncUrl(DEFAULT_VNC_HOST, DEFAULT_VNC_PASSWORD);
 
-            // 如果是默认主机，也需要先启动VNC服务
+            // 如果是默认主机，只需要检查默认主机 VNC 是否已在运行
             if (currentHost.id === 'default') {
                 // 检查 iframe 是否已经是默认主机的 URL
                 if (vncFrame.src.includes(defaultUrl) || vncFrame.src.includes('{{ config.ubuntu_host }}')) {
                     debugLog('[Desktop] Already on default host');
                     return;
+                }
+                // 先轻量探测 VNC 状态，避免每次切回都走启动流程
+                try {
+                    const status = await apiCall('/api/desktop/vnc/status');
+                    if (status.running) {
+                        debugLog('[Desktop] Default host VNC already running, using status url');
+                        vncFrame.src = normalizeVncUrl(status.url || defaultUrl, currentHost.vnc_password || DEFAULT_VNC_PASSWORD);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('[Desktop] VNC status check failed, falling back to start:', e);
                 }
                 // 需要切换回默认主机，先启动VNC服务
                 debugLog('[Desktop] Switching to default host, starting VNC first');
@@ -2636,9 +2648,12 @@
                 return;
             }
 
-            // 切换到其他主机时，需要调用API
+            // 切换到其他主机时，先检查状态再决定是否调用启动 API
             try {
                 showToast(`正在连接到 ${currentHost.name}...`, 'info');
+
+                // 远程主机没有独立状态接口；start_vnc 内部会快速检查进程，
+                // 已运行时直接返回 url，因此仍调用 start 但不再显示“启动中”。
                 const response = await fetch('/api/desktop/vnc/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -4233,8 +4248,8 @@
             'automation': 'GMS ATS - GMS 远程测试',
             'redmine-agent': 'Redmine - GMS 远程测试',
             'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
-            'agent': '对话Agent - GMS 远程测试',
-            'notes': '知识笔记 - GMS 远程测试'
+            'notes': '知识笔记 - GMS 远程测试',
+            'agent': '对话Agent - GMS 远程测试'
         };
 
         const SIDEBAR_VISIBLE_STORAGE_KEY = 'gms_sidebar_visible_pages';
@@ -4536,7 +4551,7 @@
             }
 
             if (pageName === 'security-audit') {
-                loadSecurityAudit();
+                loadSecurityAudit(true);
             }
             if (pageName === 'devices') {
                 loadDevicesManagement();
