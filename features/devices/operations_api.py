@@ -233,12 +233,17 @@ def _build_devices_management_payload(
     device_data: dict[str, dict[str, str]],
     config: dict[str, Any],
     client_id: str | None = None,
+    username: str | None = None,
 ) -> dict[str, Any]:
     client_id = client_id or runtime.client_manager.get_client_id("127.0.0.1")
     locks = device_lock_manager.get_all_locks()
     devices_info = []
     ubuntu_host = runtime.config_manager.get_ubuntu_host(config)
     ubuntu_user = runtime.config_manager.get_ubuntu_user(config)
+
+    # 设备 -> 所属分组 id 列表（按当前用户的 per-user 分组；局部 import 规避循环依赖）
+    from features.users.config_api import _load_groups, build_device_group_map
+    group_map = build_device_group_map(_load_groups(username))
 
     all_usbip_sources = _prune_inactive_usbip_sources(
         device_ids,
@@ -275,6 +280,7 @@ def _build_devices_management_payload(
                     if device_id in locks
                     else False
                 ),
+                "groups": group_map.get(device_id, []),
             }
         )
 
@@ -319,6 +325,16 @@ def _cached_management_payload() -> dict[str, Any] | None:
         "source": "cache",
         "warning": "ADB scan returned no devices; using cached device list",
     }
+
+
+def _mgmt_username(request: Request) -> str | None:
+    """取当前登录用户名（用于 per-user 分组 join）；未登录返回 None。"""
+    try:
+        from features.auth import get_authenticated_user
+        user = get_authenticated_user(request)
+    except Exception:
+        return None
+    return getattr(user, "username", None) if user else None
 
 
 @router.get("/api/devices/management")
@@ -374,6 +390,7 @@ async def devices_management(request: Request):
                 _parse_management_device_props(props_output),
                 config,
                 runtime.get_client_id_from_request(request),
+                _mgmt_username(request),
             )
             payload.update({"success": True, "source": "local"})
             return JSONResponse(content=payload)
@@ -397,6 +414,7 @@ async def devices_management(request: Request):
                     _parse_management_device_props(props_output),
                     config,
                     runtime.get_client_id_from_request(request),
+                    _mgmt_username(request),
                 )
             )
 

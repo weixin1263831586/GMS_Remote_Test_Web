@@ -158,6 +158,14 @@ async def get_connected_devices(
 
     devices_with_status = []
 
+    # 设备 -> 所属分组 id 列表（按当前用户读取其 per-user 分组；局部 import 规避循环依赖）
+    from features.users.config_api import (
+        _current_username,
+        _load_groups,
+        build_device_group_map,
+    )
+    group_map = build_device_group_map(_load_groups(_current_username(request)))
+
     usbip_sources = _prune_inactive_usbip_sources(
         devices,
         _known_usbip_sources(),
@@ -168,6 +176,9 @@ async def get_connected_devices(
 
     for device_id in devices:
         device_info = {"device_id": device_id, "status": "online", "locked": False}
+
+        # 所属分组（仅内存查表，不增加网络往返）
+        device_info["groups"] = group_map.get(device_id, [])
 
         # Check lock status
         client_ip = runtime.get_client_ip(request)
@@ -441,3 +452,86 @@ async def get_device_info(req: DeviceActionRequest):
 
 
 router.include_router(operations_router)
+
+
+# ==================== 设备分组：按属性自动分组 ====================
+
+
+# 自动分组可用的属性维度 -> get_device_info 返回的 base_info 键
+_AUTO_GROUP_KEYS = {
+    "model": "model",
+    "android_version": "android_version",
+    "build_type": "build_type",
+}
+
+
+@router.post("/api/device-groups/auto")
+@handle_api_errors
+async def auto_group_devices(request: Request, req: dict = Body(default={})):
+    """按设备属性（model / android_version / build_type）一键生成分组定义（per-user）。
+
+    结果写回当前用户的 device_groups（变成可再手动微调的持久分组），并返回新分组列表。
+    每个分组名形如 "model: Pixel 7"，id 形如 "auto_<dim>_<sanitized>"。
+    """
+    from features.users.config_api import (
+        _current_username,
+        _load_groups,
+        _save_groups,
+        normalize_device_groups,
+    )
+
+    dim = (req.get("by") or "").strip()
+    info_key = _AUTO_GROUP_KEYS.get(dim)
+    if not info_key:
+        return _api_error(
+            "by 必须是 model/android_version/build_type", status_code=400
+        )
+
+    # 当前在线设备（用缓存即可，避免重复 SSH 扫描）
+    raw_devices = await asyncio.to_thread(device_manager.get_connected_devices)
+    if not raw_devices:
+        return _api_success({"groups": []}, "当前无在线设备")
+
+    # 收集每台设备的属性值
+    value_to_devices: dict[str, list[str]] = {}
+    with SSHConnection() as ssh:
+        for device_id in raw_devices:
+            base_info = await asyncio.to_thread(
+                device_manager.get_device_info, device_id, ssh
+            )
+            value = str(base_info.get(info_key) or "未知").strip() or "未知"
+            value_to_devices.setdefault(value, []).append(device_id)
+
+    def _sanitize(value: str) -> str:
+        return re.sub(r"[^a-zA-Z0-9_-]+", "_", value).strip("_") or "unknown"
+
+    username = _current_username(request)
+    existing_groups = _load_groups(username)
+    # 去掉旧的 auto_<dim>_ 分组，保留用户手建分组
+    kept = [
+        g for g in existing_groups
+        if not g["id"].startswith(f"auto_{dim}_")
+    ]
+
+    new_groups = list(kept)
+    for value, devs in value_to_devices.items():
+        gid = f"auto_{dim}_{_sanitize(value)}"
+        # 若与手建分组 id 冲突则跳过该值，避免覆盖用户数据
+        if any(g["id"] == gid for g in new_groups):
+            gid = f"{gid}_{devs[0][:4]}"
+        new_groups.append({
+            "id": gid,
+            "name": f"{dim}: {value}",
+            "device_ids": devs,
+        })
+
+    # 规整一次（补 color、去重 device_ids、followed 默认 False）
+    new_groups = normalize_device_groups(new_groups)
+    # 互斥语义：自动分出的组之间互斥（同一设备只进一个 auto 组），也从手建组抢回设备
+    from features.users.config_api import _enforce_exclusive
+    for g in new_groups:
+        if g["id"].startswith(f"auto_{dim}_"):
+            _enforce_exclusive(new_groups, g["id"], g["device_ids"])
+    _save_groups(username, new_groups)
+
+    return _api_success({"groups": new_groups}, f"已按 {dim} 生成 {len(value_to_devices)} 个分组")
