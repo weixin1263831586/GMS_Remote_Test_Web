@@ -41,6 +41,7 @@ from features.redmine.dashboard import (
 )
 from features.reports import api as reports
 from features.reports.dependencies import configure_report_dependencies
+from features import notes
 from features.system import api as system
 from features.system import assets, audit, desktop, integrations
 from features.system import notifications_api as notifications
@@ -117,6 +118,8 @@ ALL_ROUTERS = [
     integrations.router,
     mainline_known_issues.router,
     notifications.router,
+    notes.router,
+    notes.page_router,
     redmine.router,
     redmine.page_router,
     redmine_reply.router,

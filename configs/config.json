@@ -83,7 +83,13 @@
       {
         "id": "chaoqun-huang",
         "name": "chaoqun.huang",
-        "owner": "chaoqun.huang@rock-chips.com"
+        "owner": "chaoqun.huang@rock-chips.com",
+        "department_id": "",
+        "department": "",
+        "list_limit": 50,
+        "query_limit": 500,
+        "query_page_size": 500,
+        "max_history_changes": 0
       }
     ],
     "department_profiles": [
@@ -92,7 +98,11 @@
         "name": "全部部门",
         "owners": [
           "chaoqun.huang@rock-chips.com"
-        ]
+        ],
+        "list_limit": 50,
+        "query_limit": 500,
+        "query_page_size": 500,
+        "max_history_changes": 0
       }
     ]
   },

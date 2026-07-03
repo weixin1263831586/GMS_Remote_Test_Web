@@ -296,6 +296,27 @@ def _resolve_suite_log_dir(suite_path: str, rel_path: str, config) -> tuple[str,
     return abs_path, None
 
 
+def _suite_result_dir_for_log_dir(suite_path: str, log_dir: str) -> str | None:
+    suite_root = (suite_path or "").replace("\\", "/").strip().rstrip("/")
+    if suite_root.endswith("/tools"):
+        suite_root = suite_root[:-len("/tools")]
+    if not suite_root:
+        return None
+    normalized = os.path.normpath(log_dir)
+    parts = normalized.split(os.sep)
+    if "logs" not in parts:
+        return None
+    logs_index = parts.index("logs")
+    if len(parts) <= logs_index + 1:
+        return None
+    timestamp = parts[logs_index + 1]
+    if not re.match(r"^\d{4}\.\d{2}\.\d{2}_\d{2}\.\d{2}\.\d{2}(?:\.\d+)?(?:_\d+)?$", timestamp):
+        return None
+    candidate = os.path.join(suite_root, "results", timestamp)
+    xml_path = os.path.join(candidate, "test_result.xml")
+    return candidate if os.path.isfile(xml_path) else None
+
+
 @router.post("/api/reports/analyze-log-dir")
 async def analyze_suite_log_dir(
     suite_path: str = Form(...),
@@ -330,7 +351,18 @@ async def analyze_suite_log_dir(
 
     try:
         analyzer = ReportAnalyzer()
-        result = await asyncio.to_thread(analyzer.analyze_log_dir, abs_path)
+        result_dir = _suite_result_dir_for_log_dir(suite_path, abs_path)
+        if result_dir:
+            result = await asyncio.to_thread(
+                analyzer.analyze_file,
+                os.path.join(result_dir, "test_result.xml"),
+            )
+            if result:
+                result["report_type"] = "xml"
+                result["report_name"] = os.path.basename(result_dir.rstrip("/")) or "suite result"
+                result["result_dir"] = result_dir
+        else:
+            result = await asyncio.to_thread(analyzer.analyze_log_dir, abs_path)
     except Exception as e:
         logger.error(f"[Report Analysis] Suite log-dir analysis failed: {e}")
         return error_response("Report analysis failed", 500, message=str(e))
@@ -342,8 +374,8 @@ async def analyze_suite_log_dir(
             message=f"在 {abs_path} 下未找到 host_log_*.txt，无法解析报告。",
         )
 
-    result["report_type"] = "log"
-    result["report_name"] = os.path.basename(abs_path.rstrip("/")) or "suite log"
+    result.setdefault("report_type", "log")
+    result.setdefault("report_name", os.path.basename(abs_path.rstrip("/")) or "suite log")
     return JSONResponse(content={"success": True, "data": result, "mode": "suite_log_dir"})
 
 
