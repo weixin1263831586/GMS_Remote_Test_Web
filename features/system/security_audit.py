@@ -45,6 +45,57 @@ class SecurityAuditLogger:
         self.max_read_lines = max_read_lines
         self._lock = threading.Lock()
         os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
+        # Parsed-record cache keyed on the log file's mtime. The audit log is
+        # append-only, so its mtime changes exactly when a record is added —
+        # reading it inside the same lock as writes gives a cheap invalidation
+        # signal. Without this, every page load re-read the whole file and
+        # json.loads'd up to 5000 lines (the security-audit page was slow).
+        self._cache_mtime: float | None = None
+        self._cache_records: list[dict[str, Any]] = []
+        self._cache_stats: dict[str, int] = {'total': 0, 'web': 0, 'cli': 0, 'api': 0, 'page_view': 0, 'errors': 0}
+
+    def _load_parsed_cache(self) -> tuple[list[dict[str, Any]], dict[str, int]]:
+        """Return (records_most_recent_first, full_stats), refreshing the
+        mtime-keyed cache only when the log file has changed."""
+        if not os.path.exists(self.log_path):
+            self._cache_mtime = None
+            self._cache_records = []
+            self._cache_stats = {'total': 0, 'web': 0, 'cli': 0, 'api': 0, 'page_view': 0, 'errors': 0}
+            return self._cache_records, self._cache_stats
+
+        mtime = os.path.getmtime(self.log_path)
+        if self._cache_mtime == mtime and self._cache_records:
+            return self._cache_records, self._cache_stats
+
+        with self._lock, open(self.log_path, encoding='utf-8') as f:
+            lines: Iterable[str] = deque(f, maxlen=self.max_read_lines)
+
+        records: list[dict[str, Any]] = []
+        stats = {'total': 0, 'web': 0, 'cli': 0, 'api': 0, 'page_view': 0, 'errors': 0}
+        for line in reversed(list(lines)):
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            record_source = record.get('source') or 'unknown'
+            record_type = record.get('action_type') or 'api'
+            status_code = int(record.get('status_code') or 0)
+
+            stats['total'] += 1
+            if record_source in ('web', 'cli'):
+                stats[record_source] += 1
+            if record_type in ('api', 'page_view'):
+                stats[record_type] += 1
+            if status_code >= 400:
+                stats['errors'] += 1
+
+            records.append(record)
+
+        self._cache_mtime = mtime
+        self._cache_records = records
+        self._cache_stats = stats
+        return records, stats
 
     def sanitize_value(self, key: str, value: Any) -> Any:
         if _WORD_BOUNDARY_PATTERN.search(key):
@@ -128,38 +179,26 @@ class SecurityAuditLogger:
     def read_events(
         self,
         limit: int = 200,
+        offset: int = 0,
         source: str | None = None,
         action_type: str | None = None,
         query: str | None = None,
     ) -> dict[str, Any]:
         limit = max(1, min(int(limit or 200), 1000))
-        records = []
-        stats = {'total': 0, 'web': 0, 'cli': 0, 'api': 0, 'page_view': 0, 'errors': 0}
+        offset = max(0, int(offset or 0))
+        empty_stats = {'total': 0, 'web': 0, 'cli': 0, 'api': 0, 'page_view': 0, 'errors': 0}
 
-        if not os.path.exists(self.log_path):
-            return {'records': [], 'stats': stats}
+        cached_records, stats = self._load_parsed_cache()
+        if not cached_records:
+            return {'records': [], 'stats': empty_stats, 'offset': offset, 'limit': limit, 'has_more': False}
 
         query_lower = (query or '').strip().lower()
-        with self._lock, open(self.log_path, encoding='utf-8') as f:
-            lines: Iterable[str] = deque(f, maxlen=self.max_read_lines)
-
-        for line in reversed(list(lines)):
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
+        records: list[dict[str, Any]] = []
+        skipped = 0
+        # cached_records is already newest-first; filtering is pure in-memory work.
+        for record in cached_records:
             record_source = record.get('source') or 'unknown'
             record_type = record.get('action_type') or 'api'
-            status_code = int(record.get('status_code') or 0)
-
-            stats['total'] += 1
-            if record_source in ('web', 'cli'):
-                stats[record_source] += 1
-            if record_type in ('api', 'page_view'):
-                stats[record_type] += 1
-            if status_code >= 400:
-                stats['errors'] += 1
 
             if source and record_source != source:
                 continue
@@ -173,10 +212,19 @@ class SecurityAuditLogger:
                 if query_lower not in haystack:
                     continue
 
+            if skipped < offset:
+                skipped += 1
+                continue
             if len(records) < limit:
                 records.append(self.compact_record(record))
 
-        return {'records': records, 'stats': stats}
+        return {
+            'records': records,
+            'stats': stats,
+            'offset': offset,
+            'limit': limit,
+            'has_more': len(records) == limit,
+        }
 
     def get_event(self, event_id: str) -> dict[str, Any] | None:
         if not event_id or not os.path.exists(self.log_path):
