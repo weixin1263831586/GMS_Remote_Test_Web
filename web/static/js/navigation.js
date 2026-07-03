@@ -2167,6 +2167,31 @@ function renderSuiteBreadcrumb(path) {
     rootBtn.addEventListener('click', () => loadSuiteBrowserDirectory(''));
     breadcrumb.appendChild(rootBtn);
 
+    // 当前位于运行文件夹 results/<ts> 或 logs/<ts> 时，在面包屑右侧显示互跳按钮：
+    // results 显示「跳到 logs」，logs 显示「跳到 results」。无论在目录内浏览多深，
+    // 只要路径前缀是 results/<ts> 或 logs/<ts> 即可互跳（保留 <ts>）。
+    const runKind = (parts.length >= 2 && (parts[0].toLowerCase() === 'results' || parts[0].toLowerCase() === 'logs'))
+        ? parts[0].toLowerCase()
+        : '';
+    if (runKind) {
+        const sibling = runKind === 'results' ? 'logs' : 'results';
+        const sibBtn = document.createElement('button');
+        sibBtn.className = 'btn-xs';
+        sibBtn.textContent = `跳到 ${sibling}`;
+        sibBtn.title = `跳转到 ${sibling}/${parts[1]}`;
+        // 面包屑为普通块级布局，float 右靠使按钮固定在右侧。
+        sibBtn.style.cssFloat = 'right';
+        sibBtn.addEventListener('click', () => {
+            const target = `${sibling}/${parts[1]}`;
+            state.suiteBrowser.highlightPath = target;
+            loadSuiteBrowserDirectory(target).then(() => {
+                setSuiteBrowserHighlightedPath(target);
+                showToast(`已跳转到 ${target}`, 'success');
+            });
+        });
+        breadcrumb.appendChild(sibBtn);
+    }
+
     if (parts.length === 0) return;
 
     let current = '';
@@ -2214,6 +2239,24 @@ function renderSuiteFiles(items) {
     if (activeRow) {
         activeRow.scrollIntoView({ block: 'center' });
     }
+}
+
+function isSuiteResultsFolderPath(currentPath) {
+    // 当前浏览路径位于某个 .../results 目录内（例如 "android-vts/results" 或
+    // "android-vts/results/2026.06.25_10.57.05"）。
+    const segs = (currentPath || '').split('/').filter(Boolean);
+    return segs.some(seg => seg.toLowerCase() === 'results');
+}
+
+// item 是否为一个测试运行文件夹 results/<ts> 或 logs/<ts>——恰好两段、首段为
+// results/logs。用 item 自身 path 判断（而非 currentPath），避免在
+// logs/2026.06.25_10.57.05 内部对 inv_* 子文件夹也误判为运行文件夹而错误显示
+// 下载/互跳按钮，导致跳转到不存在的 logs/.../results/inv_*。
+function getSuiteRunFolderKind(itemPath) {
+    const segs = (itemPath || '').split('/').filter(Boolean);
+    if (segs.length !== 2) return '';
+    const head = segs[0].toLowerCase();
+    return (head === 'results' || head === 'logs') ? head : '';
 }
 
 function isSuiteLogsFolderPath(currentPath) {
@@ -2303,22 +2346,54 @@ function createSuiteFileRow(item) {
     actions.className = 'suite-file-actions';
 
     if (item.type === 'directory') {
+        // 下载 + 互跳 只对真正的运行文件夹 results/<ts>、logs/<ts> 显示（按 item 自身
+        // path 精确判断），避免在 logs/<ts>/inv_* 这类深层子目录误显示导致跳转到
+        // 不存在的 logs/.../results/inv_*。
+        const runKind = !item.isParent ? getSuiteRunFolderKind(item.path || '') : '';
+        const isRunnableFolder = Boolean(runKind);
+        const inResults = runKind === 'results';
+        const inLogs = runKind === 'logs';
+        // 「报告分析」沿用原宽松语义：只要当前位于 logs 目录树内即可（含 inv_* 子目录）。
+        const inLogsTree = !item.isParent && isSuiteLogsFolderPath(state.suiteBrowser.currentPath);
+
         const openBtn = document.createElement('button');
         openBtn.className = 'btn-xs';
-        openBtn.textContent = item.isParent ? '返回' : '打开';
-        openBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            if (!item.isParent) {
-                setSuiteBrowserHighlightedPath(item.path || '');
-            }
-            loadSuiteBrowserDirectory(item.path || '');
-        });
+        // results/logs 目录内的时间戳运行文件夹：首按钮为「下载」(打包整个文件夹)。
+        // 其余目录（含 .. 返回行）保持「打开」。
+        openBtn.textContent = isRunnableFolder ? '下载' : (item.isParent ? '返回' : '打开');
+        if (isRunnableFolder) {
+            openBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                downloadSuiteDir(item.path || '', item.name);
+            });
+        } else {
+            openBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                if (!item.isParent) {
+                    setSuiteBrowserHighlightedPath(item.path || '');
+                }
+                loadSuiteBrowserDirectory(item.path || '');
+            });
+        }
         actions.appendChild(openBtn);
 
         if (!item.isParent) {
-            // 在 logs 目录内（如 android-vts/logs/<timestamp>）为每个测试运行文件夹
-            // 提供"报告分析"，复用 host_log 解析能力。
-            if (isSuiteLogsFolderPath(state.suiteBrowser.currentPath)) {
+            //   - results/<ts>: + 「logs」互跳
+            //   - logs/<ts>:   + 「results」互跳 + 保留「报告分析」
+            // 行体点击/双击仍可进入子目录，导航能力不丢。
+            if (isRunnableFolder) {
+                const sibling = inResults ? 'logs' : 'results';
+                const sibBtn = document.createElement('button');
+                sibBtn.className = 'btn-xs';
+                sibBtn.textContent = sibling;
+                sibBtn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    jumpSuiteSiblingFolder(item.path || '', sibling);
+                });
+                actions.appendChild(sibBtn);
+            }
+
+            if (inLogsTree) {
                 const analyzeLogBtn = document.createElement('button');
                 analyzeLogBtn.className = 'btn-xs';
                 analyzeLogBtn.textContent = '报告分析';
@@ -2373,7 +2448,14 @@ function createSuiteFileRow(item) {
         });
         actions.appendChild(copyBtn);
 
-        row.addEventListener('dblclick', () => downloadSuiteFile(item.path, item.name));
+        row.addEventListener('dblclick', () => {
+            // HTML 报告双击在浏览器新标签页内联预览；其余文件仍下载。
+            if (isSuiteHtmlFile(item.name)) {
+                openSuiteFileInline(item.path);
+            } else {
+                downloadSuiteFile(item.path, item.name);
+            }
+        });
     }
 
     row.append(icon, main, actions);
@@ -2413,6 +2495,22 @@ function renderSuiteFileEmpty(message) {
     }
 }
 
+function isSuiteHtmlFile(name) {
+    // 是否为可在浏览器内联预览的 HTML 文件（test_result.html 等报告）。
+    return /\.(html?|htm)$/i.test(name || '');
+}
+
+function openSuiteFileInline(path) {
+    // 用 inline=true 让后端返回 Content-Disposition: inline，浏览器新标签页内联渲染。
+    if (!state.suiteBrowser.selectedSuitePath || !path) return;
+    const params = new URLSearchParams({
+        suite_path: state.suiteBrowser.selectedSuitePath,
+        path,
+        inline: 'true'
+    });
+    window.open(`/api/test/suites/download?${params.toString()}`, '_blank');
+}
+
 function downloadSuiteFile(path, filename = '') {
     if (!state.suiteBrowser.selectedSuitePath || !path) return;
     const params = new URLSearchParams({
@@ -2436,6 +2534,53 @@ function downloadSuiteFile(path, filename = '') {
     document.body.appendChild(link);
     link.click();
     link.remove();
+}
+
+function downloadSuiteDir(path, name = '') {
+    // 后端把整个文件夹打包成 zip 流式回传（保持目录树）。复用 downloadSuiteFile
+    // 的隐藏 iframe 模式，避免浏览器把流响应当作页面跳转。
+    if (!state.suiteBrowser.selectedSuitePath || !path) return;
+    const params = new URLSearchParams({
+        suite_path: state.suiteBrowser.selectedSuitePath,
+        path
+    });
+    let frame = document.getElementById('suite-download-frame');
+    if (!frame) {
+        frame = document.createElement('iframe');
+        frame.id = 'suite-download-frame';
+        frame.name = 'suite-download-frame';
+        frame.style.display = 'none';
+        document.body.appendChild(frame);
+    }
+    const link = document.createElement('a');
+    link.href = `/api/test/suites/download-dir?${params.toString()}`;
+    link.download = `${name || path.split('/').pop() || 'download'}.zip`;
+    link.target = frame.name;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    showToast(`正在打包下载 ${name || path} ...`, 'info');
+    link.click();
+    link.remove();
+}
+
+function jumpSuiteSiblingFolder(itemPath, sibling) {
+    // 在 results/<ts> 与 logs/<ts> 之间互跳。itemPath 是相对套件根的完整路径，
+    // 形如 "results/2026.06.25_10.57.05"——把首段(results/logs)替换为 sibling
+    // 即得目标 "logs/2026.06.25_10.57.05"。注意 currentPath 仅是当前所在目录
+    // (如 "results")，不能拿来推同级，必须用 item 自身的完整 path。
+    const parts = (itemPath || '').split('/').filter(Boolean);
+    if (parts.length < 2) {
+        showToast('无法定位同级目录', 'warning');
+        return;
+    }
+    parts[0] = sibling;
+    const target = parts.join('/');
+    closeTestResultsModal();
+    state.suiteBrowser.highlightPath = target;
+    loadSuiteBrowserDirectory(target).then(() => {
+        setSuiteBrowserHighlightedPath(target);
+        showToast(`已跳转到 ${target}`, 'success');
+    });
 }
 
 async function analyzeSuiteApk(path, options = {}) {

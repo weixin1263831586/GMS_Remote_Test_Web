@@ -131,6 +131,36 @@ name_lower = target.lower()
 emit({"success": True, "real_path": target, "name": os.path.basename(target), "size": st.st_size, "modified": int(st.st_mtime), "is_apk": name_lower.endswith(".apk"), "is_jar": name_lower.endswith(".jar")})
 """
 
+# 把一个目录打包成远程临时 zip，返回 zip 路径与文件夹名。供「下载文件夹」用：
+# 浏览器无法在一次响应里下载保持目录结构的多个文件，统一打包成 zip 流式回传，
+# 解压后顶层即为被下载的文件夹名。
+SUITE_DIR_ZIP_SCRIPT = _SUITE_SCRIPT_PREAMBLE + r"""
+import tempfile, zipfile
+if not os.path.isdir(target):
+    emit({"success": False, "error": "Directory not found"})
+    sys.exit(0)
+fd, zip_path = tempfile.mkstemp(suffix=".zip", prefix="suite_dl_")
+os.close(fd)
+try:
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for current, dirs, files in os.walk(target):
+            for name in files:
+                full_path = os.path.join(current, name)
+                real_full = os.path.realpath(full_path)
+                if real_full != root and not real_full.startswith(root + os.sep):
+                    continue
+                arc = os.path.relpath(full_path, target)
+                zipf.write(full_path, arc)
+    st = os.stat(zip_path)
+    emit({"success": True, "zip_path": zip_path, "name": os.path.basename(target), "size": st.st_size})
+except Exception as e:
+    try:
+        os.remove(zip_path)
+    except OSError:
+        pass
+    emit({"success": False, "error": str(e)})
+"""
+
 SUITE_FILE_SEARCH_SCRIPT = _SUITE_SCRIPT_PREAMBLE + r"""
 query = sys.argv[3].lower()
 limit = int(sys.argv[4])
@@ -315,8 +345,12 @@ async def search_suite_files(
 
 @router.get("/api/test/suites/download")
 @handle_api_errors
-async def download_suite_file(suite_path: str = Query(...), path: str = Query(...)):
-    """Download a specified file from test suite directory."""
+async def download_suite_file(suite_path: str = Query(...), path: str = Query(...), inline: bool = Query(False)):
+    """Download a specified file from test suite directory.
+
+    inline=True 时返回 Content-Disposition: inline，让浏览器内联显示（用于双击
+    预览 HTML 报告等），而非强制下载。
+    """
     config = runtime.config_manager.load_config()
     try:
         suite_root, _, remote_path = _build_suite_remote_path(suite_path, path, config)
@@ -360,9 +394,75 @@ async def download_suite_file(suite_path: str = Query(...), path: str = Query(..
                 finally:
                     runtime.ssh_manager.return_connection(ssh)
 
+    if inline:
+        disposition = "inline"
+    else:
+        disposition = f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{quoted_filename}'
+
     return StreamingResponse(
         iter_remote_file(),
         media_type=media_type,
+        headers={
+            "Content-Disposition": disposition,
+            "Content-Length": str(info.get("size", 0)),
+        },
+    )
+
+
+@router.get("/api/test/suites/download-dir")
+@handle_api_errors
+async def download_suite_directory(suite_path: str = Query(...), path: str = Query(...)):
+    """Download a directory from the test suite as a zip archive (folder tree preserved)."""
+    config = runtime.config_manager.load_config()
+    try:
+        suite_root, _, remote_path = _build_suite_remote_path(suite_path, path, config)
+    except ValueError as e:
+        return ApiResponse.error(str(e), status_code=400)
+
+    ssh = runtime.ssh_manager.get_connection(config)
+    if not ssh:
+        return ssh_connection_failed_response()
+
+    try:
+        info = _run_suite_file_script(ssh, SUITE_DIR_ZIP_SCRIPT, suite_root, remote_path)
+        if not info.get("success"):
+            runtime.ssh_manager.return_connection(ssh)
+            return ApiResponse.error(info.get("error", "Directory not found"), status_code=404)
+
+        sftp = ssh.open_sftp()
+        remote_file = sftp.open(info["zip_path"], "rb")
+    except Exception:
+        runtime.ssh_manager.return_connection(ssh)
+        raise
+
+    folder_name = info.get("name") or os.path.basename(remote_path) or "download"
+    filename = f"{folder_name}.zip"
+    ascii_filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename) or "download.zip"
+    quoted_filename = urllib.parse.quote(filename)
+    zip_path = info["zip_path"]
+
+    def iter_remote_dir():
+        try:
+            while True:
+                chunk = remote_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            try:
+                remote_file.close()
+            finally:
+                # 清理远程临时 zip，再归还连接。
+                with contextlib.suppress(Exception):
+                    sftp.remove(zip_path)
+                try:
+                    sftp.close()
+                finally:
+                    runtime.ssh_manager.return_connection(ssh)
+
+    return StreamingResponse(
+        iter_remote_dir(),
+        media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{quoted_filename}',
             "Content-Length": str(info.get("size", 0)),
