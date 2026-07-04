@@ -8471,6 +8471,7 @@ function renderReportDiagnosis(data) {
             ${suiteArtifact ? `<button type="button" class="dx-action-card" onclick="openReportDiagnosisSuiteBrowser()"><b>打开测试套件</b><span>${escapeHtml(suiteArtifact.path || '')}</span></button>` : ''}
             ${issueIdFromReport ? `<button type="button" class="dx-action-card" onclick="openReportDiagnosisRedmineReply()"><b>Redmine 回复</b><span>基于诊断结论生成回复草稿</span></button>` : ''}
             ${issueIdFromReport ? `<button type="button" class="dx-action-card" onclick="openReportAnalysisRedmineAgent('${escapeJsAttr(issueIdFromReport)}')"><b>Redmine 工作台</b><span>查看工单历史、附件证据和相似案例</span></button>` : ''}
+            <button type="button" class="dx-action-card" onclick="saveDiagnosisToWiki()"><b>📥 存为Wiki</b><span>把诊断结论沉淀到知识库</span></button>
         </section>
     `;
 
@@ -8597,6 +8598,55 @@ async function copyReportDiagnosis() {
 
 function getCurrentReportDiagnosisTarget() {
     return (window.reportDiagnosis || {}).target || null;
+}
+
+async function saveDiagnosisToWiki() {
+    const diag = window.reportDiagnosis || {};
+    const data = diag.data || {};
+    if (!data || Object.keys(data).length === 0) {
+        showToast('暂无诊断结果可保存', 'warning');
+        return;
+    }
+    const moduleName = data.module || '';
+    const testName = data.test_name || '';
+    const aiResult = data.ai_result || {};
+    const reportName = data.report_name || (window.currentReportAnalysisData && window.currentReportAnalysisData.timestamp) || '';
+    const reportTimestamp = (window.currentReportAnalysisData && window.currentReportAnalysisData.timestamp) || reportName;
+    const issueId = getReportIssueIdFromName();
+    const kbHit = (data.knowledge_base_results || []).map(k => `- ${k.subject || k.error_signature || ''}: ${k.solution_summary || k.root_cause || ''}`).join('\n');
+
+    const content = [
+        `# ${moduleName ? moduleName + (testName ? '#' + testName : '') : '测试诊断'}`,
+        '',
+        `**测试用例:** ${testName || '未知'}`,
+        `**模块:** ${moduleName || '未知'}`,
+        `**报告:** ${reportName || '未知'}`,
+        '',
+        '## 报错信息',
+        '```',
+        (data.error_message || '').slice(0, 4000),
+        '```',
+        aiResult.root_cause ? `\n## 根因\n${aiResult.root_cause}` : '',
+        aiResult.analysis ? `\n## 分析\n${aiResult.analysis}` : '',
+        aiResult.suggestions && aiResult.suggestions.length ? `\n## 建议\n${aiResult.suggestions.map(s => '- ' + s).join('\n')}` : '',
+        kbHit ? `\n## 知识库命中\n${kbHit}` : '',
+    ].filter(Boolean).join('\n');
+
+    const links = {};
+    if (reportTimestamp) links.report_timestamps = [String(reportTimestamp)];
+    if (issueId) links.redmine_issue_ids = [parseInt(issueId, 10) || issueId];
+
+    try {
+        await window.saveToWiki({
+            content,
+            notebook: '测试问题库',
+            related_module: moduleName ? (moduleName + (testName ? '::' + testName : '')) : '',
+            links: Object.keys(links).length ? links : undefined
+        });
+        showToast('已存入知识库「测试问题库」', 'success');
+    } catch (e) {
+        showToast('存为Wiki失败: ' + e.message, 'error');
+    }
 }
 
 function buildReportDiagnosisSourcePath(target) {
@@ -10046,6 +10096,7 @@ window.submitElevateForm = submitElevateForm;
 window.cancelElevate = cancelElevate;
 window.rerunReportDiagnosis = rerunReportDiagnosis;
 window.copyReportDiagnosis = copyReportDiagnosis;
+window.saveDiagnosisToWiki = saveDiagnosisToWiki;
 window.openReportDiagnosisSourcePreview = openReportDiagnosisSourcePreview;
 window.openReportDiagnosisSuiteBrowser = openReportDiagnosisSuiteBrowser;
 window.openReportDiagnosisArtifactCandidate = openReportDiagnosisArtifactCandidate;

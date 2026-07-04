@@ -84,7 +84,7 @@
                 'automation': 'GMS ATS - GMS 远程测试',
                 'redmine-agent': 'Redmine - GMS 远程测试',
                 'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
-                'notes': '知识笔记 - GMS 远程测试',
+                'notes': '知识库 / Wiki - GMS 远程测试',
                 'agent': '对话Agent - GMS 远程测试'
             };
             const saveCurrentPageCookie = (pageName) => {
@@ -400,8 +400,8 @@
                 </a>
                 <a href="#" class="sidebar-item" data-page="notes" data-page-order="19" onclick="switchPage('notes', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
-                    <span class="sidebar-icon">📝</span>
-                    <span class="sidebar-text">知识笔记</span>
+                    <span class="sidebar-icon">📚</span>
+                    <span class="sidebar-text">知识库</span>
                 </a>
                 <a href="#" class="sidebar-item" data-page="agent" data-page-order="18" onclick="switchPage('agent', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
@@ -1366,9 +1366,9 @@
             </div>
         </div>
 
-        <!-- 知识笔记页面 -->
+        <!-- 知识库 / Wiki 页面 -->
         <div class="container page-content" id="page-notes">
-            <div class="section-title">📝 知识笔记</div>
+            <div class="section-title">📚 知识库 / Wiki</div>
             <div style="display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1.2fr); gap: 10px; height: calc(100vh - 90px);">
                 <!-- 左：笔记本 + 标签 -->
                 <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
@@ -1419,11 +1419,23 @@
                 <div class="modal-body" style="display: flex; flex-direction: column; height: 100%; overflow: hidden;">
                     <div class="modal-form-row" style="margin-bottom: 8px;">
                         <label>笔记本:</label>
-                        <input type="text" id="notes-create-notebook" placeholder="可选，如 Android调试" list="notes-notebook-options" />
+                        <input type="text" id="notes-create-notebook" placeholder="可选，如 测试问题库" list="notes-notebook-options" />
                         <datalist id="notes-notebook-options"></datalist>
                     </div>
                     <div class="modal-info-text" style="margin-bottom: 4px;">粘贴笔记原文（命令、配置、diff…），AI 会自动整理成结构化笔记、打标签、生成摘要。</div>
                     <textarea id="notes-create-content" placeholder="在此粘贴笔记内容…" style="flex: 1; width: 100%; resize: none; font-family: monospace; font-size: 12px;"></textarea>
+                    <details style="margin-top:6px;font-size:12px;">
+                        <summary style="cursor:pointer;color:var(--text-secondary);">关联信息（可选，用于外链与智能关联）</summary>
+                        <div class="modal-form-row" style="margin-top:6px;">
+                            <label>关联模块:</label>
+                            <input type="text" id="notes-create-related-module" placeholder="格式 module::test_case，留空则不参与智能关联" />
+                        </div>
+                        <div class="modal-form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+                            <input type="text" id="notes-create-link-reports" placeholder="报告时间戳,逗号分隔" />
+                            <input type="text" id="notes-create-link-issues" placeholder="Redmine工单号,逗号分隔" />
+                            <input type="text" id="notes-create-link-changes" placeholder="Gerrit change号,逗号分隔" />
+                        </div>
+                    </details>
                     <div id="notes-create-status" class="modal-info-text" style="min-height: 16px; margin-top: 6px;"></div>
                     <div class="modal-buttons" style="margin-top: 6px;">
                         <button class="btn-xxs" onclick="notesCloseCreate()">取消</button>
@@ -1433,11 +1445,11 @@
             </div>
         </div>
 
-        <!-- 上传笔记文件弹框 -->
+        <!-- 上传知识库文件弹框 -->
         <div id="notes-upload-modal" class="modal" style="z-index: 10091;">
             <div class="modal-content" style="max-width: 520px;">
                 <div class="modal-header">
-                    <span class="modal-title">上传文件到知识笔记</span>
+                    <span class="modal-title">上传文件到知识库</span>
                     <span class="modal-close" onclick="notesCloseUpload()">&times;</span>
                 </div>
                 <div class="modal-body">
@@ -4278,7 +4290,7 @@
             'automation': 'GMS ATS - GMS 远程测试',
             'redmine-agent': 'Redmine - GMS 远程测试',
             'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
-            'notes': '知识笔记 - GMS 远程测试',
+            'notes': '知识库 / Wiki - GMS 远程测试',
             'agent': '对话Agent - GMS 远程测试'
         };
 
@@ -4675,7 +4687,7 @@
         // 将 switchPage 导出到全局作用域，供外部脚本调用
         window.switchPage = switchPage;
 
-        // ==================== 知识笔记 ====================
+        // ==================== 知识库 / Wiki ====================
         const notesState = {
             initialized: false,
             notebook: '',
@@ -4835,12 +4847,83 @@
                 ${tagsHtml ? `<div style="margin-bottom:10px;">${tagsHtml}</div>` : ''}
                 ${note.summary ? `<div class="report-failure-card" style="font-size:13px;line-height:1.6;margin-bottom:10px;">${notesEscape(note.summary)}</div>` : ''}
                 <div style="font-size:13px;line-height:1.7;word-break:break-word;">${notesMarkdown(visibleContent)}</div>
+                ${notesRenderLinks(note)}
+                <div id="notes-related-area"></div>
                 ${isLong && !notesState.detailExpanded ? `
                     <div style="position:sticky;bottom:0;margin-top:10px;padding:10px 0;background:linear-gradient(transparent,var(--light-bg) 30%);text-align:center;">
                         <button class="btn-xs btn-primary" onclick="notesToggleDetail()">展开全文</button>
                     </div>
                 ` : ''}
             `;
+            notesLoadRelated(note);
+        }
+
+        // 外链区：渲染关联的报告 / Redmine 工单 / Gerrit 补丁，点击跳转。
+        function notesRenderLinks(note) {
+            const links = note && note.links ? note.links : {};
+            const reports = links.report_timestamps || [];
+            const issues = links.redmine_issue_ids || [];
+            const changes = links.gerrit_change_ids || [];
+            if (!reports.length && !issues.length && !changes.length) return '';
+            const chip = (label, onclick, title) =>
+                `<button class="btn-xs" style="margin:2px;" onclick="${onclick}" title="${notesEscape(title || '')}">${notesEscape(label)}</button>`;
+            const parts = [];
+            reports.forEach(ts => parts.push(chip('📊 ' + ts, `notesJumpReport('${notesEscape(ts)}')`, '查看测试报告')));
+            issues.forEach(id => parts.push(chip('🎫 #' + id, `notesJumpRedmine('${id}')`, '查看 Redmine 工单')));
+            changes.forEach(id => parts.push(chip('🔧 ' + id, `notesJumpGerrit('${id}')`, '查看 Gerrit 补丁')));
+            return `<div class="report-failure-card" style="margin-top:10px;font-size:12px;">
+                <div style="font-weight:600;margin-bottom:4px;">🔗 关联链接</div>
+                <div>${parts.join('')}</div>
+            </div>`;
+        }
+
+        function notesJumpReport(timestamp) {
+            if (typeof switchPage === 'function') switchPage('reports', null);
+            // 报告页会按时间戳定位；如该页有暴露的查找函数则调用。
+            if (typeof window.openReportByTimestamp === 'function') window.openReportByTimestamp(timestamp);
+        }
+        function notesJumpRedmine(issueId) {
+            if (typeof switchPage === 'function') switchPage('redmine-agent', null);
+        }
+        function notesJumpGerrit(changeId) {
+            if (typeof switchPage === 'function') switchPage('gerrit-dashboard', null);
+        }
+
+        // 智能关联区：根据 related_module 异步聚合历史报告 + 成熟案例。
+        async function notesLoadRelated(note) {
+            const area = document.getElementById('notes-related-area');
+            if (!area) return;
+            const rm = String(note.related_module || '').trim();
+            if (!rm) { area.innerHTML = ''; return; }
+            area.innerHTML = '<div class="report-failure-card" style="margin-top:10px;font-size:12px;color:var(--text-secondary);">关联中…</div>';
+            try {
+                const data = await notesFetch('/api/notes/' + encodeURIComponent(note.note_id) + '/related');
+                area.innerHTML = notesRenderRelated(data, rm);
+            } catch (e) {
+                area.innerHTML = '';
+            }
+        }
+
+        function notesRenderRelated(data, rm) {
+            const reports = data.reports || [];
+            const cases = data.redmine_cases || [];
+            if (!reports.length && !cases.length) return '';
+            const row = (text, onclick, sub) =>
+                `<div style="padding:4px 6px;cursor:pointer;border-radius:4px;" onmouseover="this.style.background='var(--border-color)'" onmouseout="this.style.background=''" onclick="${onclick}">
+                    <div style="font-size:12px;">${notesEscape(text)}</div>${sub ? `<div style="font-size:11px;color:var(--text-secondary);">${notesEscape(sub)}</div>` : ''}
+                </div>`;
+            let html = '<div class="report-failure-card" style="margin-top:10px;font-size:12px;">';
+            html += `<div style="font-weight:600;margin-bottom:4px;">🧩 智能关联 <span style="color:var(--text-secondary);font-weight:normal;">(${rm})</span></div>`;
+            if (reports.length) {
+                html += `<div style="margin-top:4px;color:var(--text-secondary);">历史报告 (${reports.length})</div>`;
+                reports.forEach(r => html += row(`📊 ${r.test_type || ''} ${r.test_case || ''}`, `notesJumpReport('${notesEscape(r.timestamp || '')}')`, `${r.timestamp || ''} · ${r.status || ''}`));
+            }
+            if (cases.length) {
+                html += `<div style="margin-top:6px;color:var(--text-secondary);">Redmine 成熟案例 (${cases.length})</div>`;
+                cases.forEach(c => html += row(`🎫 ${c.title || ''}`, `notesJumpRedmine('${(c.source_issue_ids && c.source_issue_ids[0]) || ''}')`, `${c.chip_platform || ''} ${c.android_version || ''}`));
+            }
+            html += '</div>';
+            return html;
         }
 
         function notesToggleDetail() {
@@ -4885,6 +4968,10 @@
         function notesOpenCreate() {
             document.getElementById('notes-create-content').value = '';
             document.getElementById('notes-create-notebook').value = notesState.notebook || '';
+            const rm = document.getElementById('notes-create-related-module'); if (rm) rm.value = '';
+            const lr = document.getElementById('notes-create-link-reports'); if (lr) lr.value = '';
+            const li = document.getElementById('notes-create-link-issues'); if (li) li.value = '';
+            const lc = document.getElementById('notes-create-link-changes'); if (lc) lc.value = '';
             document.getElementById('notes-create-status').textContent = '';
             ModalManager.open('notes-create-modal');
         }
@@ -4893,20 +4980,34 @@
             ModalManager.close('notes-create-modal');
         }
 
+        function _notesParseLinkList(elId) {
+            const raw = (document.getElementById(elId) || {}).value || '';
+            return raw.split(',').map(s => s.trim()).filter(Boolean);
+        }
+
         async function notesSubmitCreate() {
             const status = document.getElementById('notes-create-status');
             const content = document.getElementById('notes-create-content').value || '';
             const notebook = document.getElementById('notes-create-notebook').value || '';
+            const relatedModule = ((document.getElementById('notes-create-related-module') || {}).value || '').trim();
+            const reports = _notesParseLinkList('notes-create-link-reports');
+            const issues = _notesParseLinkList('notes-create-link-issues').map(s => parseInt(s, 10)).filter(n => !isNaN(n));
+            const changes = _notesParseLinkList('notes-create-link-changes').map(s => parseInt(s, 10)).filter(n => !isNaN(n));
             if (!content.trim()) {
                 if (status) status.textContent = '请输入笔记内容';
                 return;
+            }
+            const body = {content, notebook};
+            if (relatedModule) body.related_module = relatedModule;
+            if (reports.length || issues.length || changes.length) {
+                body.links = {report_timestamps: reports, redmine_issue_ids: issues, gerrit_change_ids: changes};
             }
             if (status) status.textContent = '正在整理并保存...';
             try {
                 const note = await notesFetch('/api/notes', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({content, notebook})
+                    body: JSON.stringify(body)
                 });
                 notesCloseCreate();
                 notesState.selectedId = note.note_id;
@@ -5001,8 +5102,26 @@
             initNotesPage, notesNewNotebook, notesOpenCreate, notesCloseCreate,
             notesSubmitCreate, notesOpenUpload, notesCloseUpload, notesHandleFileSelect,
             notesSearch, notesAsk, notesDelete, notesSelectNotebook, notesSelectTag, notesOpenDetail,
-            notesToggleDetail
+            notesToggleDetail, notesRenderLinks, notesLoadRelated,
+            notesJumpReport, notesJumpRedmine, notesJumpGerrit
         });
+
+        // 「存为Wiki」通用入口：供诊断页 / Redmine / Gerrit iframe 调用。
+        // payload: {content, notebook, related_module?, links?}
+        async function saveToWiki(payload) {
+            const resp = await fetch('/api/notes', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
+                body: JSON.stringify(payload)
+            });
+            const result = await resp.json().catch(() => ({}));
+            if (!resp.ok || result.success === false) {
+                throw new Error(result.error || result.message || '存为Wiki失败');
+            }
+            return result.data !== undefined ? result.data : result;
+        }
+        Object.assign(window, {saveToWiki});
 
         // ==================== 自动获取网站图标 ====================
         const commonSiteEmojis = {
