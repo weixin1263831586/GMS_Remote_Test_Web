@@ -98,18 +98,29 @@ def _user_map_mtime_for_request(request: Request | None) -> float:
     return path.stat().st_mtime if path.exists() else 0
 
 
-async def _live_counts_for_user(service, user_id: int) -> dict[str, Any]:
-    """Fetch full issue counts from Redmine for a user id.
+async def _live_stats_for_user(service, user_id: int) -> dict[str, Any]:
+    """Fetch full issue counts + resolved trends from Redmine for a user id.
 
-    The resolved trend query can scan thousands of closed issues and block the
-    first dashboard paint. Workload endpoints use local DB trends when present;
-    live Redmine is used here only to correct total/open/closed counters.
+    The local DB only holds issues synced for the configured sync user, so a
+    personal dashboard's resolved-by-day/week/month/year bars would otherwise
+    under-count anyone whose closed issues were never synced. We pull the full
+    closed-issue trend live from Redmine (same channel the department view uses)
+    so the bars match Gerrit's "show everything" behaviour. Trends are cached
+    client-side (``_ASSIGNEE_TREND_CACHE``); on any failure we fall back to the
+    local-DB trends the repository already returned.
     """
     client = service.agent._make_client()
     try:
-        return await client.count_issues_by_assignee(user_id)
-    except Exception:
-        return {}
+        data: dict[str, Any] = {}
+        try:
+            data.update(await client.count_issues_by_assignee(user_id))
+        except Exception:
+            pass
+        try:
+            data.update(await client.resolved_trends_by_assignee(user_id))
+        except Exception:
+            pass
+        return data
     finally:
         await client.close()
 
@@ -180,7 +191,7 @@ async def get_workload_statistics(
     # resolved trends (the local DB only holds partial snapshots), so the
     # personal dashboard's closed/total/resolved-trend numbers are accurate.
     user_map = _user_map_for_request(request)
-    live_counts: dict[str, Any] = {}
+    live_stats: dict[str, Any] = {}
     candidate_names = [name] if name else []
     if not candidate_names:
         candidate_names = await _resolve_owner_names(request, service)
@@ -188,7 +199,7 @@ async def get_workload_statistics(
     if mapped:
         owner_names = display_names_from_mapping(mapped)
         display_names = owner_names
-        live_counts = await _live_counts_for_user(service, int(mapped["id"]))
+        live_stats = await _live_stats_for_user(service, int(mapped["id"]))
         if refresh:
             try:
                 client = service.agent._make_client()
@@ -209,7 +220,7 @@ async def get_workload_statistics(
         if current_user:
             owner_names = display_names_from_mapping(current_user)
             display_names = owner_names
-            live_counts = await _live_counts_for_user(service, int(current_user["id"]))
+            live_stats = await _live_stats_for_user(service, int(current_user["id"]))
         else:
             owner_names = [n for n in candidate_names if n]
             display_names = owner_names
@@ -231,8 +242,12 @@ async def get_workload_statistics(
         display_names=display_names,
         window_days=stats_cfg["window_days"],
     )
-    if live_counts:
-        data.update(live_counts)
+    if live_stats:
+        # Live total/open/closed counters always win (the local DB snapshot is
+        # incomplete for non-sync users). Resolved trends only override the
+        # local-DB bars when the live fetch actually returned them, so a
+        # Redmine outage falls back to whatever the DB has instead of blanks.
+        data.update(live_stats)
     data["generated_at"] = datetime.now().isoformat(timespec="seconds")
     _update_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, now_ts, data)
     return {"success": True, "data": data}

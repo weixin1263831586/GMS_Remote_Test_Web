@@ -399,7 +399,126 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             self.assertEqual(result["data"]["lists"]["no_reply_3_days"], [])
             self.assertEqual(db.get_issue(632190)["status_name"], "HangUp")
 
-    def test_resolved_by_date_profile_id_fetches_all_department_members_live(self):
+    def test_personal_workload_uses_live_resolved_trends_over_incomplete_db(self):
+        """Personal dashboard bars must reflect ALL closed issues from Redmine,
+        not just the subset synced to the local DB. The live trend channel
+        (resolved_trends_by_assignee) overrides the local-DB bars so a user
+        like 黄超群 sees the same full history Gerrit shows."""
+        import asyncio
+
+        import features.redmine.api as redmine_router
+        from features.auth.service import CurrentUser
+
+        live_trends = {
+            "resolved_daily": [{"date": "2026-06-04", "count": 10}, {"date": "2026-05-18", "count": 9}],
+            "resolved_weekly": [{"week": "2026-W23", "count": 18}],
+            "resolved_monthly": [{"month": "2026-06", "count": 62}, {"month": "2026-05", "count": 32}],
+            "resolved_yearly": [{"year": "2026", "count": 101}],
+        }
+
+        class Client:
+            async def count_issues_by_assignee(self, user_id):
+                return {"total_owned": 101, "open_count": 4, "closed_count": 97}
+
+            async def resolved_trends_by_assignee(self, user_id):
+                return live_trends
+
+            async def close(self):
+                pass
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            # Local DB only knows about ONE closed issue — far less than the 97
+            # Redmine actually has. Without the live override the bars would
+            # show count=1 instead of the full history.
+            db.upsert_issue(_issue(700001, "黄 超群", status_name="已解决", closed_on="2026-06-12"))
+            service = SimpleNamespace(
+                repository=db,
+                agent=SimpleNamespace(_make_client=lambda: Client()),
+            )
+            request = SimpleNamespace(
+                state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
+                cookies={},
+            )
+            stats_api = redmine_router._statistics_api
+            with patch.object(stats_api, "_service_for_request", return_value=service), patch.object(
+                stats_api,
+                "_user_map_for_request",
+                return_value=[{"id": 1, "name": "黄 超群"}],
+            ), patch.object(
+                stats_api,
+                "_get_redmine_stats_config",
+                return_value={"stale_days": 3, "window_days": 60, "cache_ttl": 600},
+            ):
+                result = asyncio.run(stats_api.get_workload_statistics(
+                    request,
+                    stale_days=3,
+                    list_limit=30,
+                    name="黄 超群",
+                ))
+
+            self.assertTrue(result["success"])
+            # Live counts override the partial local snapshot.
+            self.assertEqual(result["data"]["total_owned"], 101)
+            self.assertEqual(result["data"]["closed_count"], 97)
+            # Live full-history trends override the incomplete local-DB bars.
+            self.assertEqual(result["data"]["resolved_monthly"], [{"month": "2026-06", "count": 62}, {"month": "2026-05", "count": 32}])
+            self.assertEqual(result["data"]["resolved_yearly"], [{"year": "2026", "count": 101}])
+            self.assertEqual(result["data"]["resolved_daily"], live_trends["resolved_daily"])
+
+    def test_personal_workload_falls_back_to_db_trends_when_live_fails(self):
+        """When the live trend fetch fails, the personal dashboard must keep
+        showing the local-DB trends instead of going blank."""
+        import asyncio
+
+        import features.redmine.api as redmine_router
+        from features.auth.service import CurrentUser
+
+        class Client:
+            async def count_issues_by_assignee(self, user_id):
+                raise RuntimeError("redmine unreachable")
+
+            async def resolved_trends_by_assignee(self, user_id):
+                raise RuntimeError("redmine unreachable")
+
+            async def close(self):
+                pass
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db.upsert_issue(_issue(700002, "黄 超群", status_name="已解决", closed_on="2026-06-12"))
+            service = SimpleNamespace(
+                repository=db,
+                agent=SimpleNamespace(_make_client=lambda: Client()),
+            )
+            request = SimpleNamespace(
+                state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
+                cookies={},
+            )
+            stats_api = redmine_router._statistics_api
+            with patch.object(stats_api, "_service_for_request", return_value=service), patch.object(
+                stats_api,
+                "_user_map_for_request",
+                return_value=[{"id": 1, "name": "黄 超群"}],
+            ), patch.object(
+                stats_api,
+                "_get_redmine_stats_config",
+                return_value={"stale_days": 3, "window_days": 60, "cache_ttl": 600},
+            ):
+                result = asyncio.run(stats_api.get_workload_statistics(
+                    request,
+                    stale_days=3,
+                    list_limit=30,
+                    name="黄 超群",
+                ))
+
+            self.assertTrue(result["success"])
+            # Live fetch failed → local-DB trend (1 closed issue on 2026-06-12) survives.
+            self.assertEqual(result["data"]["resolved_daily"], [{"date": "2026-06-12", "count": 1}])
+
+
         import asyncio
 
         import features.redmine.api as redmine_router

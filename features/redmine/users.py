@@ -300,8 +300,15 @@ def find_user_mapping_for_names(user_map: list[dict[str, Any]], names: list[str]
 
 
 def _sorted_slice(bucket: dict[str, int], key_name: str, limit: int) -> list[dict[str, Any]]:
-    """Return [{key_name: k, count: v}] sorted by key ascending, last *limit* items."""
-    return [{key_name: k, "count": bucket[k]} for k in sorted(bucket.keys())[-limit:]]
+    """Return [{key_name: k, count: v}] sorted by key ascending.
+
+    If *limit* is positive, keep only the last *limit* items (the most recent
+    non-empty buckets). If *limit* is zero or negative, return every bucket.
+    """
+    keys = sorted(bucket.keys())
+    if limit > 0:
+        keys = keys[-limit:]
+    return [{key_name: k, "count": bucket[k]} for k in keys]
 
 
 def _looks_like_report_attachment(attachment: dict[str, Any]) -> bool:
