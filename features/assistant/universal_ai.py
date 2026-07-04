@@ -57,16 +57,24 @@ class UniversalAIAnalyzer:
         # 默认使用 OpenAI 格式
         return self.API_FORMAT_OPENAI
 
-    def get_primary_provider(self) -> str | None:
-        """获取主要提供商"""
+    def get_primary_provider(self, preferred: str | None = None) -> str | None:
+        """获取主要提供商。
+
+        Args:
+            preferred: 若指定且该 provider 已启用，则优先返回它；否则按原逻辑选择。
+        """
         if not self.config.get('enabled', False):
             return None
 
-        # 使用配置中的 primary_provider，默认为第一个启用的提供商
-        primary = self.config.get('primary_provider')
         providers = self.config.get('providers', {})
 
-        # 如果指定了主要提供商且已启用，返回它
+        if preferred:
+            if providers.get(preferred, {}).get('enabled', False):
+                return preferred
+
+        # 使用配置中的 primary_provider，默认为第一个启用的提供商
+        primary = self.config.get('primary_provider')
+
         if primary and providers.get(primary, {}).get('enabled', False):
             return primary
 
@@ -76,6 +84,65 @@ class UniversalAIAnalyzer:
                 return provider_name
 
         return None
+
+    def generate(self, user_prompt: str, system_prompt: str = '', max_tokens: int | None = None,
+                 preferred_provider: str | None = None) -> dict:
+        """通用文本生成：用已配置的主 provider 调用大模型，返回纯文本。
+
+        与 analyze_test_failure 不同，不强制 JSON、不绑定测试失败语义，
+        供周报总结等通用场景复用 provider 选择 / HTTP 调用 / 响应解析。
+
+        Args:
+            preferred_provider: 优先使用的 provider 名称；若未启用或不存在，则回退到主 provider。
+
+        Returns:
+            {'success': bool, 'content': str, 'provider': str, 'error': str}
+        """
+        try:
+            provider_name = self.get_primary_provider(preferred=preferred_provider)
+            if not provider_name:
+                return {'success': False, 'error': '未配置可用的 AI 提供商'}
+            provider_config = self.config.get('providers', {}).get(provider_name, {})
+            api_key = provider_config.get('api_key', '')
+            base_url = provider_config.get('base_url')
+            model = provider_config.get('model')
+            if not api_key:
+                return {'success': False, 'error': f'{provider_name} API密钥未配置'}
+            if not base_url or not model:
+                return {'success': False, 'error': f'{provider_name} base_url/model 未配置'}
+
+            api_format = self._get_api_format(provider_name, provider_config)
+            messages = []
+            if system_prompt:
+                messages.append({'role': 'system', 'content': system_prompt})
+            messages.append({'role': 'user', 'content': user_prompt})
+            tokens = max_tokens or provider_config.get('max_tokens', 2000)
+
+            if api_format == self.API_FORMAT_ANTHROPIC:
+                url = f"{base_url}/v1/messages" if not base_url.endswith('/messages') else base_url
+                headers = {"x-api-key": api_key, "Content-Type": "application/json", "anthropic-version": "2023-06-01"}
+                data = {"model": model, "max_tokens": tokens, "messages": messages,
+                        "system": system_prompt or None, "disable_thinking": True, "skip_reasoning": True}
+                data = {k: v for k, v in data.items() if v is not None}
+            else:
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                data = {"model": model, "messages": messages, "temperature": provider_config.get('temperature', 0.3),
+                        "max_tokens": tokens, "disable_thinking": True, "skip_reasoning": True,
+                        "enable_thinking": False}
+                url = f"{base_url}/v1/chat/completions" if not (base_url.endswith('/chat/completions') or base_url.endswith('/completions')) else base_url
+
+            response = requests.post(url, headers={'Connection': 'keep-alive', **headers}, json=data, timeout=self.timeout)
+            if response.status_code != 200:
+                try:
+                    err = response.json().get('error', {}).get('message', f'HTTP {response.status_code}')
+                except Exception:
+                    err = f'HTTP {response.status_code}: {response.text[:100]}'
+                return {'success': False, 'error': f'{provider_name} API错误: {err}', 'provider': provider_name}
+
+            content = self._parse_response_raw(response.json(), api_format)
+            return {'success': True, 'content': content.strip(), 'provider': provider_name}
+        except Exception as e:
+            return {'success': False, 'error': f'{provider_name}调用失败: {e!s}'}
 
     def analyze_test_failure(
         self,
@@ -180,7 +247,8 @@ class UniversalAIAnalyzer:
                     "temperature": config.get('temperature', 0.3),
                     "max_tokens": config.get('max_tokens', 2000),
                     "disable_thinking": True,
-                    "skip_reasoning": True
+                    "skip_reasoning": True,
+                    "enable_thinking": False
                 }
                 url = f"{base_url}/v1/chat/completions" if not (base_url.endswith('/chat/completions') or base_url.endswith('/completions')) else base_url
 
@@ -225,8 +293,9 @@ class UniversalAIAnalyzer:
 
                     # 如果 content 为空，检查是否为推理模型且被截断
                     finish_reason = choice.get('finish_reason', '')
-                    if not content and message.get('reasoning'):
-                        reasoning = message.get('reasoning', '')
+                    # GLM-5.x 把推理过程放在 reasoning_content；其他模型可能用 reasoning
+                    reasoning = message.get('reasoning_content') or message.get('reasoning') or ''
+                    if not content and reasoning:
 
                         # 检查是否因长度限制被截断
                         if finish_reason == 'length':
@@ -320,6 +389,9 @@ class UniversalAIAnalyzer:
             content = message.get('content') or ''
             if not content and message.get('reasoning'):
                 content = message.get('reasoning', '')
+            # 兜底：GLM-5.x 等推理模型在关闭 thinking 失败时，正文可能只在 reasoning_content
+            if not content and message.get('reasoning_content'):
+                content = message.get('reasoning_content', '')
             if not content:
                 content = choice.get('text', '')
             return content
