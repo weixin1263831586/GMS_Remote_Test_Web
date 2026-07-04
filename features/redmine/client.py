@@ -352,10 +352,10 @@ class RedmineClient(RedmineAttachmentMixin):
                     buckets[granularity][key] = buckets[granularity].get(key, 0) + 1
 
         data = {
-            "resolved_daily": _sorted_slice(buckets["day"], "date", 90),
-            "resolved_weekly": _sorted_slice(buckets["week"], "week", 52),
-            "resolved_monthly": _sorted_slice(buckets["month"], "month", 24),
-            "resolved_yearly": _sorted_slice(buckets["year"], "year", 10),
+            "resolved_daily": _sorted_slice(buckets["day"], "date", 0),
+            "resolved_weekly": _sorted_slice(buckets["week"], "week", 0),
+            "resolved_monthly": _sorted_slice(buckets["month"], "month", 0),
+            "resolved_yearly": _sorted_slice(buckets["year"], "year", 0),
         }
         _ASSIGNEE_TREND_CACHE[cache_key] = (time.time(), {key: list(value) for key, value in data.items()})
         return data

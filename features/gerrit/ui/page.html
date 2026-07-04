@@ -54,10 +54,10 @@
     .trend-body::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
     .trend-body::-webkit-scrollbar-thumb:hover { background:var(--muted); }
     .bar-row { display:flex; align-items:center; gap:6px; margin:4px 0; font-size:12px; padding-right:8px; min-height:18px; }
-    .bar-label { width:86px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .bar-track { flex:1; height:8px; background:#202838; border-radius:999px; overflow:hidden; }
+    .bar-label { flex:0 0 auto; min-width:0; max-width:86px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:8px; }
+    .bar-track { flex:1; height:8px; background:#202838; border-radius:999px; overflow:hidden; min-width:40px; }
     .bar-fill { height:100%; min-width:3px; background:var(--primary); border-radius:999px; }
-    .bar-count { width:32px; text-align:right; color:var(--muted); }
+    .bar-count { flex-shrink:0; width:28px; text-align:right; color:var(--muted); }
     .list-section { margin-bottom:16px; }
     .list-section[id], .owner-detail[id] { scroll-margin-top:86px; }
     .owner-detail { margin-bottom:16px; }
