@@ -980,6 +980,11 @@ function renderIssueCard(item) {
   const failures = item.failures_json || [];
   const ai = item.ai_json || {};
   const attachments = item.attachment_links || [];
+  // 缓存原始富数据，供「存为Wiki」按钮按 issue_id 取回（避免序列化复杂对象进 onclick）
+  if (item.issue_id) {
+    window.__issueCardCache = window.__issueCardCache || {};
+    window.__issueCardCache[String(item.issue_id)] = item;
+  }
 
   // Extract seven fields
   const title = esc(item.subject || ai.title || '-');
@@ -1107,6 +1112,7 @@ function renderIssueCard(item) {
       <button class="ka-btn primary" onclick="agentReplyDraft(${item.issue_id}, this)" title="复用报告分析风格生成 Redmine 回复草稿、根因和补丁方向">✉️ Redmine回复</button>
       <button class="ka-btn" onclick="refreshIssueMetadata(${item.issue_id})" title="只刷新Redmine历史回复和附件元数据，不下载附件">🔄 刷新附件元数据</button>
       <button class="ka-btn" onclick="toggleIssueWorkbench(${item.issue_id})" title="展开相似工单、历史回复和附件解析摘要">🧩 展开依据</button>
+      <button class="ka-btn" onclick="saveIssueToWiki(${item.issue_id})" title="把该工单存入 Wiki「Redmine问题沉淀」分类，并建立外链">📥 存为Wiki</button>
     </div>
     <div id="issue-workbench-${item.issue_id}" class="issue-workbench" style="display:none"></div>
   </div>`;
@@ -1123,6 +1129,62 @@ function renderReferenceCard(r) {
       <span class="ref-title">${esc(r.subject || '')}</span>
     </div>
   </div>`;
+}
+
+async function saveIssueToWiki(issueId) {
+  const item = (window.__issueCardCache || {})[String(issueId)];
+  if (!item) {
+    notifyUser('数据缺失', '未找到该工单的富化数据，请重新打开工单后再试', 'error');
+    return;
+  }
+  const subject = item.subject || ('Redmine #' + issueId);
+  const module = item.module || '';
+  const parts = [];
+  parts.push('# ' + subject);
+  parts.push('');
+  parts.push('- **Redmine Issue**: #' + issueId);
+  if (module) parts.push('- **模块**: ' + module);
+  if (item.priority) parts.push('- **优先级**: ' + item.priority);
+  if (item.status) parts.push('- **状态**: ' + item.status);
+  parts.push('');
+  const problemDesc = _buildProblemDescription(item, item.attachment_links || []);
+  if (problemDesc && String(problemDesc).trim() && String(problemDesc).trim() !== '-') {
+    parts.push('## 问题描述');
+    parts.push('');
+    parts.push(String(problemDesc).trim());
+    parts.push('');
+  }
+  const errorAnalysis = item.error_analysis || (item.ai_json || {}).root_cause_guess || '';
+  if (errorAnalysis && String(errorAnalysis).trim() && String(errorAnalysis).trim() !== '-') {
+    parts.push('## 错误分析 / 根因');
+    parts.push('');
+    parts.push(String(errorAnalysis).trim());
+    parts.push('');
+  }
+  const solution = item.solution || (item.ai_json || {}).solution || '';
+  if (solution && String(solution).trim() && String(solution).trim() !== '-') {
+    parts.push('## 解决方案');
+    parts.push('');
+    parts.push(String(solution).trim());
+    parts.push('');
+  }
+  const content = parts.join('\n');
+  const payload = {
+    content: content,
+    notebook: 'Redmine问题沉淀',
+    related_module: module || '',
+    links: { redmine_issue_ids: [Number(issueId)] }
+  };
+  try {
+    await api('/api/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    notifyUser('已存为Wiki', '已存入「Redmine问题沉淀」并关联 Redmine #' + issueId, 'success');
+  } catch (e) {
+    notifyUser('存为Wiki失败', (e && e.message) || String(e), 'error');
+  }
 }
 
 function _buildProblemDescription(item, attachments) {

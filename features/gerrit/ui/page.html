@@ -79,6 +79,8 @@
     .dept-action-btn { width:48px; min-width:48px; max-width:48px; padding:0; text-align:center; overflow:hidden; white-space:nowrap; }
     .change-title { max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .change-title a { margin-right:8px; }
+    .gerrit-wiki-btn { margin-left:8px; padding:1px 6px; font-size:11px; line-height:1.4; cursor:pointer; border:1px solid var(--border,#ddd); background:var(--surface,#f6f8fa); border-radius:4px; color:inherit; flex:none; }
+    .gerrit-wiki-btn:hover { background:var(--accent,#eef3ff); }
     .trend-title-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; min-height:30px; }
     .trend-title-row h2 { margin:0; }
     .trend-start-btn { width:30px; min-width:30px; padding:0; background:#30394a; color:var(--muted); }
@@ -991,9 +993,59 @@ function renderRow(item) {
   const url = changeUrl(item);
   const id = item._number || item.number || item.id || item.changeId || '-';
   const subject = item.subject || '-';
-  return '<tr><td><div class="change-title">' + (url ? '<a href="' + esc(url) + '" target="_blank">#' + esc(id) + '</a>' : '#' + esc(id)) + '<span title="' + esc(subject) + '">' + esc(subject) + '</span></div></td><td>' + esc(item.project || '-') + '</td><td>' + esc(item.branch || '-') + '</td><td>' + esc(item.status || '-') + '</td><td>' + esc((item.owner || {}).name || (item.owner || {}).email || '-') + '</td><td>' + esc(item.updated || item.lastUpdated || item.createdOn || item.created || '-') + '</td></tr>';
+  // 缓存原始 change，供「存为Wiki」按钮按 change id 取回
+  if (id !== '-') {
+    window.__changeCache = window.__changeCache || {};
+    window.__changeCache[String(id)] = item;
+  }
+  return '<tr><td><div class="change-title">' + (url ? '<a href="' + esc(url) + '" target="_blank">#' + esc(id) + '</a>' : '#' + esc(id)) + '<span title="' + esc(subject) + '">' + esc(subject) + '</span>' + '<button class="gerrit-wiki-btn" title="把该补丁存入 Wiki「Gerrit补丁说明」分类，并建立外链" onclick="event.preventDefault();event.stopPropagation();saveChangeToWiki(\'' + esc(String(id)) + '\')">📥Wiki</button>' + '</div></td><td>' + esc(item.project || '-') + '</td><td>' + esc(item.branch || '-') + '</td><td>' + esc(item.status || '-') + '</td><td>' + esc((item.owner || {}).name || (item.owner || {}).email || '-') + '</td><td>' + esc(item.updated || item.lastUpdated || item.createdOn || item.created || '-') + '</td></tr>';
 }
 init();
+async function saveChangeToWiki(changeId) {
+  const item = (window.__changeCache || {})[String(changeId)];
+  if (!item) {
+    notifyUser('数据缺失', '未找到该补丁的缓存数据，请重新加载看板后再试', 'error');
+    return;
+  }
+  const id = item._number || item.number || item.id || item.changeId || changeId;
+  const subject = item.subject || ('Gerrit #' + id);
+  const project = item.project || '';
+  const owner = (item.owner || {}).name || (item.owner || {}).email || '-';
+  const branch = item.branch || '-';
+  const status = item.status || '-';
+  const url = changeUrl(item);
+  const parts = [];
+  parts.push('# ' + subject);
+  parts.push('');
+  parts.push('- **Gerrit Change**: #' + id);
+  if (project) parts.push('- **项目**: ' + project);
+  if (branch && branch !== '-') parts.push('- **分支**: ' + branch);
+  parts.push('- **状态**: ' + status);
+  parts.push('- **Owner**: ' + owner);
+  if (url) parts.push('- **链接**: ' + url);
+  parts.push('');
+  parts.push('## 说明');
+  parts.push('');
+  parts.push('（待补充：补丁背景、改动要点、风险与回归验证。）');
+  parts.push('');
+  const content = parts.join('\n');
+  const payload = {
+    content: content,
+    notebook: 'Gerrit补丁说明',
+    related_module: project || '',
+    links: { gerrit_change_ids: [Number(id)] }
+  };
+  try {
+    await api('/api/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    notifyUser('已存为Wiki', '已存入「Gerrit补丁说明」并关联 #' + id, 'success');
+  } catch (e) {
+    notifyUser('存为Wiki失败', (e && e.message) || String(e), 'error');
+  }
+}
 </script>
 </body>
 </html>

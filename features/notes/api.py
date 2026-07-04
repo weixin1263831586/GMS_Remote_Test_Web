@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import json
 import uuid
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from foundation.uploads import save_upload_to_path
 
 from .service import NotesService
 from .storage import UPLOAD_DIR
+from . import relations as _relations
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,26 @@ def _list_preview(note: dict[str, Any]) -> dict[str, Any]:
     item["content"] = content[:LIST_CONTENT_PREVIEW_CHARS]
     item["raw_content"] = raw_content[:LIST_CONTENT_PREVIEW_CHARS] if raw_content else ""
     item["content_truncated"] = len(content) > LIST_CONTENT_PREVIEW_CHARS
+    return item
+
+
+def _decorate_note(note: dict[str, Any]) -> dict[str, Any]:
+    """统一反序列化 links 为 dict，前端拿到的永远是对象。"""
+    if not note:
+        return note
+    item = dict(note)
+    raw = item.get("links") or "{}"
+    try:
+        links = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        links = {}
+    if not isinstance(links, dict):
+        links = {}
+    # 保证三个键齐全，前端可无脑读取。
+    links.setdefault("report_timestamps", [])
+    links.setdefault("redmine_issue_ids", [])
+    links.setdefault("gerrit_change_ids", [])
+    item["links"] = links
     return item
 
 
@@ -82,10 +104,14 @@ async def create_note(request: Request):
     notebook = str(data.get("notebook") or "")
     if not content.strip():
         return error_response("笔记内容不能为空", 400)
-    note = await asyncio.to_thread(_service.create_from_text, user_id, content, notebook)
+    links = data.get("links")
+    related_module = str(data.get("related_module") or "")
+    note = await asyncio.to_thread(
+        _service.create_from_text, user_id, content, notebook, links, related_module
+    )
     if isinstance(note, dict) and note.get("error"):
         return error_response(note["error"], 400)
-    return success_response(data=note, message="笔记已创建")
+    return success_response(data=_decorate_note(note), message="笔记已创建")
 
 
 @router.get("")
@@ -103,7 +129,9 @@ async def list_notes(
         notes = _service.storage.search(user_id, q.strip(), limit=limit)
     else:
         notes = _service.storage.list_notes(user_id, notebook=notebook, tag=tag, limit=limit)
-    return success_response(data={"notes": [_list_preview(note) for note in notes], "count": len(notes)})
+    return success_response(
+        data={"notes": [_decorate_note(_list_preview(note)) for note in notes], "count": len(notes)}
+    )
 
 
 @router.get("/{note_id}")
@@ -113,7 +141,7 @@ async def get_note(request: Request, note_id: str):
     note = _service.storage.get_note(user_id, note_id)
     if not note:
         return error_response("笔记不存在", 404)
-    return success_response(data=note)
+    return success_response(data=_decorate_note(note))
 
 
 @router.put("/{note_id}")
@@ -121,11 +149,15 @@ async def get_note(request: Request, note_id: str):
 async def update_note(request: Request, note_id: str):
     user_id = _user(request)
     data = await request.json()
-    allowed = {k: v for k, v in data.items() if k in ("notebook", "title", "content", "tags", "summary", "keywords")}
+    allowed = {
+        k: v
+        for k, v in data.items()
+        if k in ("notebook", "title", "content", "tags", "summary", "keywords", "links", "related_module")
+    }
     note = _service.storage.update_note(user_id, note_id, allowed)
     if not note:
         return error_response("笔记不存在", 404)
-    return success_response(data=note, message="已更新")
+    return success_response(data=_decorate_note(note), message="已更新")
 
 
 @router.delete("/{note_id}")
@@ -145,8 +177,14 @@ async def upload_note_file(
     request: Request,
     file: UploadFile | None = File(None),
     notebook: str = Form(""),
+    related_module: str = Form(""),
+    links: str = Form(""),
 ):
-    """上传文件 → 解析 → AI 结构化 → 存为笔记。支持 PDF/TXT/MD/代码/DOCX/图片。"""
+    """上传文件 → 解析 → AI 结构化 → 存为笔记。支持 PDF/TXT/MD/代码/DOCX/图片。
+
+    related_module / links 可选：与「存为Wiki」一样建立外链与反向关联。
+    links 为 JSON 字符串（{report_timestamps,redmine_issue_ids,gerrit_change_ids}）。
+    """
     if not file or not file.filename:
         return error_response("未提供文件", 400)
 
@@ -162,10 +200,37 @@ async def upload_note_file(
     except ValueError as exc:
         return error_response(str(exc), 400)
 
-    note = await asyncio.to_thread(_service.create_from_file, user_id, str(dest_path), safe_name, notebook)
+    # 解析可选 links（JSON 字符串），空则不传。
+    parsed_links: Any = None
+    if links.strip():
+        try:
+            parsed_links = json.loads(links)
+        except (ValueError, TypeError):
+            return error_response("links 不是合法 JSON", 400)
+
+    note = await asyncio.to_thread(
+        _service.create_from_file,
+        user_id,
+        str(dest_path),
+        safe_name,
+        notebook,
+        parsed_links,
+        related_module,
+    )
     if isinstance(note, dict) and note.get("error"):
         return error_response(note["error"], 400)
-    return success_response(data=note, message=f"已解析 {safe_name} 并创建笔记")
+
+    # 把上传原件目录改名为最终 note_id，便于删除笔记时清理（约定 <upload>/<user>/<note_id>/）。
+    final_id = note.get("note_id") if isinstance(note, dict) else None
+    if final_id and final_id != note_tmp_id:
+        final_dir = Path(UPLOAD_DIR) / user_id / final_id
+        try:
+            if not final_dir.exists():
+                dest_dir.rename(final_dir)
+        except OSError:
+            pass  # 重命名失败不影响笔记可用性
+
+    return success_response(data=_decorate_note(note), message=f"已解析 {safe_name} 并创建笔记")
 
 
 # ==================== 智能问答 ====================
@@ -178,4 +243,18 @@ async def ask_notes(request: Request):
     question = str(data.get("question") or "")
     limit = int(data.get("limit") or 8)
     result = await asyncio.to_thread(_service.ask, user_id, question, limit)
+    return success_response(data=result)
+
+
+# ==================== 反向关联 ====================
+@router.get("/{note_id}/related")
+@handle_api_errors
+async def get_note_related(request: Request, note_id: str):
+    """根据笔记的 related_module 聚合历史报告 + Redmine 成熟案例。"""
+    user_id = _user(request)
+    note = _service.storage.get_note(user_id, note_id)
+    if not note:
+        return error_response("笔记不存在", 404)
+    related_module = note.get("related_module") or ""
+    result = await asyncio.to_thread(_relations.build_related, request, related_module, note_id)
     return success_response(data=result)

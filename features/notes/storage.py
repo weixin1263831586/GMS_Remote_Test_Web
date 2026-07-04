@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 import sqlite3
 import uuid
@@ -15,13 +17,67 @@ from typing import Any
 
 from foundation.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 DB_PATH: Path = settings.data_root / "notes/notes.sqlite3"
 UPLOAD_DIR: Path = settings.data_root / "notes/uploads"
 
+# 预置固定分类：Wiki 的顶层知识分区。list_notebooks 会把它们合并进返回结果
+# （count=0 也显示，置顶去重）。新建笔记可直接把 notebook 写成其中之一。
+PRESET_NOTEBOOKS = [
+    "测试问题库",
+    "设备接入文档",
+    "固件烧录文档",
+    "Redmine问题沉淀",
+    "Gerrit补丁说明",
+    "FAQ",
+]
+
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def _normalize_links(raw: Any) -> str:
+    """把 links 规范化为合法 JSON 字符串。
+
+    接受 dict / JSON 字符串 / None，统一序列化成
+    {"report_timestamps": [...], "redmine_issue_ids": [...], "gerrit_change_ids": [...]}。
+    前端拿到时由 API 层反序列化回 dict。
+    """
+    if raw is None:
+        raw = {}
+    if isinstance(raw, str):
+        raw = raw.strip()
+        if not raw:
+            raw = {}
+        else:
+            try:
+                raw = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    links: dict[str, list] = {
+        "report_timestamps": [],
+        "redmine_issue_ids": [],
+        "gerrit_change_ids": [],
+    }
+    for key in links:
+        value = raw.get(key)
+        if isinstance(value, list):
+            cleaned: list = []
+            for v in value:
+                if v is None:
+                    continue
+                # 数字保持数字（issue_id/change_id 可能为 int），其余保持原样。
+                if isinstance(v, (int, float)):
+                    cleaned.append(int(v) if isinstance(v, float) and v.is_integer() else v)
+                elif str(v) != "":
+                    cleaned.append(v)
+            links[key] = cleaned
+    return json.dumps(links, ensure_ascii=False)
 
 
 # FTS5 查询：长 token 精确匹配，短 token 前缀匹配，OR 连接（仿 redmine _fts_query）。
@@ -105,11 +161,67 @@ class NotesStorage:
                     note_id UNINDEXED,
                     title,
                     content,
+                    raw_content,
                     tags,
                     summary,
                     keywords
                 );
                 """
+            )
+            # 非破坏性加列：老库（缺 links / related_module）自动补列，原数据填默认值。
+            existing = {row["name"] for row in conn.execute("PRAGMA table_info(notes)")}
+            if "links" not in existing:
+                conn.execute("ALTER TABLE notes ADD COLUMN links TEXT DEFAULT '{}'")
+            if "related_module" not in existing:
+                conn.execute("ALTER TABLE notes ADD COLUMN related_module TEXT DEFAULT ''")
+            # FTS 表升级：老 FTS 缺 raw_content 列时重建并回填，确保大文档全文可搜。
+            # FTS5 虚拟表不支持 ALTER，只能 DROP + CREATE + 重新索引。
+            self._upgrade_fts_schema(conn)
+
+    @staticmethod
+    def _upgrade_fts_schema(conn: sqlite3.Connection) -> None:
+        """老 FTS 表（无 raw_content 列）幂等升级为含 raw_content 的新 schema 并回填。"""
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='notes_fts'"
+        ).fetchone()
+        if not row:
+            return  # 新库已用新 schema 建好
+        sql_text = row["sql"] or ""
+        if "raw_content" in sql_text:
+            return  # 已是新 schema
+        logger.info("[Notes] 升级 FTS schema：加入 raw_content 列并回填全文索引")
+        conn.execute("DROP TABLE IF EXISTS notes_fts")
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE notes_fts USING fts5(
+                note_id UNINDEXED,
+                title,
+                content,
+                raw_content,
+                tags,
+                summary,
+                keywords
+            )
+            """
+        )
+        # 回填：把现有 notes 重新写入 FTS（含 raw_content 全文）。
+        rows = conn.execute(
+            "SELECT note_id, title, content, raw_content, tags, summary, keywords FROM notes"
+        ).fetchall()
+        for r in rows:
+            conn.execute(
+                """INSERT INTO notes_fts
+                   (note_id, title, content, raw_content, tags, summary, keywords)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    r["note_id"],
+                    r["title"] or "",
+                    r["content"] or "",
+                    r["raw_content"] or "",
+                    r["tags"] or "",
+                    r["summary"] or "",
+                    r["keywords"] or "",
+                ),
             )
 
     def _connect(self) -> sqlite3.Connection:
@@ -133,6 +245,8 @@ class NotesStorage:
             "tags": payload.get("tags") or "",
             "summary": payload.get("summary") or "",
             "keywords": payload.get("keywords") or "",
+            "links": _normalize_links(payload.get("links")),
+            "related_module": (payload.get("related_module") or "").strip(),
             "created_at": payload.get("created_at") or now,
             "updated_at": payload.get("updated_at") or now,
         }
@@ -140,10 +254,10 @@ class NotesStorage:
             conn.execute(
                 """INSERT INTO notes (note_id, user_id, notebook, title, content,
                    raw_content, source, source_file, tags, summary, keywords,
-                   created_at, updated_at)
+                   links, related_module, created_at, updated_at)
                    VALUES (:note_id, :user_id, :notebook, :title, :content,
                    :raw_content, :source, :source_file, :tags, :summary, :keywords,
-                   :created_at, :updated_at)""",
+                   :links, :related_module, :created_at, :updated_at)""",
                 record,
             )
             if record["notebook"]:
@@ -157,12 +271,18 @@ class NotesStorage:
         return record
 
     def update_note(self, user_id: str, note_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
-        allowed = ["notebook", "title", "content", "tags", "summary", "keywords"]
+        allowed = ["notebook", "title", "content", "tags", "summary", "keywords", "related_module"]
+        # links 单独规范化，不直接拼进 SET 占位符。
         fields = [f for f in allowed if f in updates]
+        if "links" in updates:
+            fields.append("links")
         if not fields:
             return self.get_note(user_id, note_id)
         sets = ", ".join(f"{f} = ?" for f in fields) + ", updated_at = ?"
-        values = [updates[f] for f in fields] + [_now(), note_id, user_id]
+        values: list[Any] = []
+        for f in fields:
+            values.append(_normalize_links(updates[f]) if f == "links" else updates[f])
+        values += [_now(), note_id, user_id]
         with self._connect() as conn:
             cur = conn.execute(
                 f"UPDATE notes SET {sets} WHERE note_id = ? AND user_id = ?", values
@@ -192,7 +312,20 @@ class NotesStorage:
             )
             conn.execute("DELETE FROM notes_fts WHERE note_id = ?", (note_id,))
             conn.commit()
-            return cur.rowcount > 0
+        if cur.rowcount > 0:
+            # 清理上传原件目录（按约定路径 <upload_dir>/<user_id>/<note_id>/），避免孤儿堆积。
+            self._cleanup_upload_dir(user_id, note_id)
+        return cur.rowcount > 0
+
+    def _cleanup_upload_dir(self, user_id: str, note_id: str) -> None:
+        import shutil
+
+        target = self.upload_dir / user_id / note_id
+        try:
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+        except Exception as exc:  # 清理失败不影响删除结果
+            logger.debug("[Notes] 清理上传目录失败 %s: %s", target, exc)
 
     def get_note(self, user_id: str, note_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -233,7 +366,19 @@ class NotesStorage:
                    ORDER BY n.name COLLATE NOCASE""",
                 (user_id,),
             ).fetchall()
-            return [dict(r) for r in rows]
+            user_notebooks = {r["name"]: dict(r) for r in rows}
+
+        # 合并预置分类：预置项置顶（count=0 也显示），用户自建项随后，去重。
+        merged: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for name in PRESET_NOTEBOOKS:
+            seen.add(name)
+            merged.append({"name": name, "count": user_notebooks.get(name, {"count": 0})["count"]})
+        for name, nb in user_notebooks.items():
+            if name not in seen:
+                seen.add(name)
+                merged.append(nb)
+        return merged
 
     def list_tags(self, user_id: str, limit: int = 100) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -289,7 +434,7 @@ class NotesStorage:
     ) -> list[dict[str, Any]]:
         if not terms:
             return []
-        fields = ("title", "content", "raw_content", "tags", "summary", "keywords")
+        fields = ("title", "content", "raw_content", "tags", "summary", "keywords", "related_module")
         where_parts: list[str] = []
         params: list[Any] = [user_id]
         for term in terms[:12]:
@@ -318,16 +463,19 @@ class NotesStorage:
         try:
             conn.execute("DELETE FROM notes_fts WHERE note_id = ?", (payload.get("note_id"),))
             conn.execute(
-                """INSERT INTO notes_fts (note_id, title, content, tags, summary, keywords)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO notes_fts
+                   (note_id, title, content, raw_content, tags, summary, keywords)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     payload.get("note_id"),
                     payload.get("title") or "",
                     payload.get("content") or "",
+                    payload.get("raw_content") or "",
                     payload.get("tags") or "",
                     payload.get("summary") or "",
                     payload.get("keywords") or "",
                 ),
             )
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as exc:
+            # FTS 写失败不应阻断笔记写入，但要留日志便于排查索引不一致。
+            logger.warning("[Notes] FTS 索引写入失败 note_id=%s: %s", payload.get("note_id"), exc)

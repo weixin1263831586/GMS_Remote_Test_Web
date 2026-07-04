@@ -120,6 +120,7 @@ ALL_ROUTERS = [
     notifications.router,
     notes.router,
     notes.page_router,
+    notes.knowledge_api.router,
     redmine.router,
     redmine.page_router,
     redmine_reply.router,

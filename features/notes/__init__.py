@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from . import knowledge_api
 from .api import page_router, router
 
-__all__ = ["router", "page_router"]
+__all__ = ["router", "page_router", "knowledge_api"]

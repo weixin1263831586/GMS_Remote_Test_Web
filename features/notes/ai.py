@@ -182,12 +182,46 @@ def _best_excerpt(content: str, question: str, size: int = 1500) -> str:
 
 
 # ---------- 两个业务 prompt ----------
+
+# 单段精炼输入上限与分段阈值（字符）。
+_STRUCTURE_CHUNK = 6000
+_STRUCTURE_LARGE_THRESHOLD = 8000  # 超过此长度走分段精炼。
+# 大文档分段精炼的段数上限与并行度。段数越多 AI 调用越多越慢，故封顶。
+_MAX_SEGMENTS = 8
+_SEGMENT_PARALLELISM = 4
+
+
+def _chunk_text(text: str, size: int) -> list[str]:
+    """按大致段落边界把长文本切成 <= size 的块（尽量在换行处断开）。"""
+    chunks: list[str] = []
+    start = 0
+    n = len(text)
+    while start < n:
+        end = min(start + size, n)
+        if end < n:
+            # 向后找最近的换行，避免把一行/一个命令从中间切断。
+            nl = text.rfind("\n", start, end)
+            if nl > start + size // 2:
+                end = nl + 1
+        chunks.append(text[start:end])
+        start = end
+    return chunks
+
+
 def structure_note(raw_text: str) -> dict[str, Any]:
     """结构化一条笔记。返回 {title, tags, summary, keywords, content}。
 
+    短文本一次精炼；超长文本分段精炼后合并，避免只读到开头。
     失败/未配置时返回空字段，调用方降级（标题取首行）。
     """
-    truncated = raw_text[:6000]
+    text = raw_text or ""
+    if len(text) > _STRUCTURE_LARGE_THRESHOLD:
+        return _structure_note_large(text)
+    return _structure_note_single(text[:_STRUCTURE_CHUNK])
+
+
+def _structure_note_single(text: str, *, is_segment: bool = False) -> dict[str, Any]:
+    """精炼单段文本。is_segment=True 时不输出全局 title/summary（分段调用用）。"""
     prompt = (
         "你是知识笔记整理助手。把下面这段可能杂乱的笔记整理成结构化 Markdown，"
         "并输出严格 JSON（不要 markdown 代码块，不要多余文字），字段：\n"
@@ -197,7 +231,7 @@ def structure_note(raw_text: str) -> dict[str, Any]:
         '- keywords: 3-8 个关键词数组\n'
         '- content: 整理后的 Markdown 正文（命令用代码块，保留原始命令/路径/diff，'
         "补充必要分组小标题，不要臆造内容）\n\n"
-        f"笔记原文：\n{truncated}\n\n只输出 JSON。"
+        f"笔记原文：\n{text}\n\n只输出 JSON。"
     )
     raw = call_model(prompt)
     parsed = _parse_json(raw)
@@ -212,13 +246,76 @@ def structure_note(raw_text: str) -> dict[str, Any]:
     }
 
 
+def _structure_note_large(text: str) -> dict[str, Any]:
+    """大文档分段精炼：每段独立精炼正文，再合并 title/tags/summary/keywords。
+
+    性能：先按 _MAX_SEGMENTS 上限重新切块（避免超长文档切出几十段、串行调用几十秒到数分钟），
+    再用线程池并行精炼各段。每段失败时用该段原文兜底，不丢内容。
+
+    - 第一段产生全局 title/summary；
+    - tags/keywords 取所有段的并集去重；
+    - content 为各段精炼正文按顺序拼接。
+    """
+    # 按段数上限反推每段大小：总长 / 上限段数，但不小于单段阈值（保证每段不超模型输入上限）。
+    n = len(text)
+    if n <= _STRUCTURE_CHUNK:
+        chunks = [text]
+    else:
+        target_chunk = max(_STRUCTURE_CHUNK, (n + _MAX_SEGMENTS - 1) // _MAX_SEGMENTS)
+        chunks = _chunk_text(text, target_chunk)
+    if not chunks:
+        return {}
+
+    # 并行精炼各段（保留顺序）。
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _process(chunk: str) -> dict[str, Any]:
+        seg = _structure_note_single(chunk)
+        if seg:
+            return seg
+        # 失败兜底：原文进 content，不丢失。
+        return {"content": chunk.strip(), "tags": "", "keywords": "", "title": "", "summary": ""}
+
+    segments: list[dict[str, Any]] = [None] * len(chunks)  # type: ignore[list-item]
+    with ThreadPoolExecutor(max_workers=_SEGMENT_PARALLELISM) as pool:
+        for idx, result in enumerate(pool.map(_process, chunks)):
+            segments[idx] = result
+    segments = [s for s in segments if s]
+    if not segments:
+        return {}
+
+    merged_content = "\n\n".join(s.get("content") or "" for s in segments if (s.get("content") or "").strip())
+    # 全局标题/摘要取第一段；tags/keywords 全段并集去重。
+    first = segments[0]
+    tags_set: list[str] = []
+    kw_set: list[str] = []
+
+    def _add(items: list[str], sink: list[str]) -> None:
+        for it in items:
+            it = it.strip()
+            if it and it not in sink:
+                sink.append(it)
+
+    for s in segments:
+        _add([t for t in (s.get("tags") or "").split(",") if t.strip()], tags_set)
+        _add([k for k in (s.get("keywords") or "").split(",") if k.strip()], kw_set)
+    return {
+        "title": first.get("title") or "",
+        "tags": ",".join(tags_set[:8]),
+        "summary": first.get("summary") or "",
+        "keywords": ",".join(kw_set[:12]),
+        "content": merged_content,
+    }
+
+
 def answer_question(question: str, contexts: list[dict[str, Any]]) -> dict[str, Any]:
     """基于召回的笔记片段回答问题。返回 {answer, source_note_ids}。"""
     if not contexts:
         return {"answer": "知识库中暂无相关笔记，无法回答。", "source_note_ids": []}
     blocks = []
     for i, ctx in enumerate(contexts, 1):
-        excerpt = _best_excerpt(ctx.get("content") or "", question)
+        # 大文档原文较长，每条取较大的最佳命中片段（默认 1500 偏小）。
+        excerpt = _best_excerpt(ctx.get("content") or "", question, size=2800)
         blocks.append(
             f"[笔记{i}] 标题: {ctx.get('title', '')}\n标签: {ctx.get('tags', '')}\n内容:\n{excerpt}"
         )
