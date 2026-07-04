@@ -1870,6 +1870,36 @@
         </div>
     </div>
 
+    <!-- 周报总结弹框 -->
+    <div id="weekly-report-modal" class="modal" style="z-index: 10040;">
+        <div class="modal-content" style="max-width: 1500px; width: 96vw; height: 92vh; max-height: 92vh;">
+            <div class="modal-header">
+                <span class="modal-title">周报总结</span>
+                <span class="modal-close" onclick="closeWeeklyReportModal()">&times;</span>
+            </div>
+            <div class="modal-body" style="display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <label style="display:flex; align-items:center; gap:4px; font-size:13px;">成员
+                        <select id="weekly-report-member" onchange="onWeeklyReportMemberChange()" style="height: 32px; padding: 0 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); max-width: 220px;">
+                        </select>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; font-size:13px;">起
+                        <input type="date" id="weekly-report-start" style="height: 32px; padding: 4px 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" />
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; font-size:13px;">止
+                        <input type="date" id="weekly-report-end" style="height: 32px; padding: 4px 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" />
+                    </label>
+                    <button class="btn-xxs btn-primary" onclick="generateWeeklyReport()">生成</button>
+                    <button class="btn-xxs" id="weekly-report-ai-btn" onclick="generateWeeklyReportAi()" title="重新生成 AI 周报总结">✨ 重新总结</button>
+                    <button class="btn-xxs" onclick="copyWeeklyReportMarkdown()">复制 Markdown</button>
+                    <button class="btn-xxs" onclick="downloadWeeklyReport()">下载 .md</button>
+                    <span id="weekly-report-status" style="font-size: 12px; color: var(--text-secondary);"></span>
+                </div>
+                <div id="weekly-report-content" style="flex: 1; min-height: 0; overflow: auto; padding: 4px 2px; font-size: 13px; line-height: 1.6;"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- 共享固件远端密码弹框 -->
     <div id="firmware-share-password-modal" class="modal" style="z-index: 10080;">
         <div class="modal-content" style="max-width: 460px;">
@@ -6070,9 +6100,19 @@
             '设备工具': { icon: '📱', color: '#4285f4' },
             '烧写工具': { icon: '🔥', color: '#ea4335' },
             '测试工具': { icon: '✅', color: '#7c3aed' },
+            '报告工具': { icon: '📅', color: '#0ea5e9' },
             '其他工具': { icon: '🔧', color: '#8e8e93' },
         };
         const UT_BUILTIN_TOOLS = {
+            '报告工具': [
+                {
+                    icon: '📅',
+                    title: '周报总结',
+                    description: '基于 Redmine/Gerrit 个人看板数据生成上周周报（可自定义起止日期）',
+                    action: 'openWeeklyReport',
+                    builtin_id: 'builtin-weekly-report'
+                }
+            ],
             '烧写工具': [
                 {
                     icon: '📦',
@@ -6138,6 +6178,564 @@
         let ut_categoryMeta = {};
         let ut_editingCategory = null;
         let ut_editingTool = null;
+
+        // ==================== 周报总结 ====================
+        // 周报正文 = 精炼版 (数字 + Top 主题清单)；详细流水单作为可折叠附录保留。
+        // 支持「我自己」(个人端点) 与「部门成员」(department 端点，单选成员) 两种归属。
+        let weeklyReportMarkdown = '';
+        let weeklyReportMembers = [];
+
+        function _isoDate(d) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        }
+
+        function _defaultLastWeekRange() {
+            // 上周一 → 上周日 (完整自然周)
+            const today = new Date();
+            const thisMonday = new Date(today);
+            thisMonday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+            const lastMonday = new Date(thisMonday);
+            lastMonday.setDate(thisMonday.getDate() - 7);
+            const lastSunday = new Date(lastMonday);
+            lastSunday.setDate(lastMonday.getDate() + 6);
+            return [_isoDate(lastMonday), _isoDate(lastSunday)];
+        }
+
+        function _esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        }
+
+        function openWeeklyReport() {
+            const [s, e] = _defaultLastWeekRange();
+            const startInput = document.getElementById('weekly-report-start');
+            const endInput = document.getElementById('weekly-report-end');
+            if (startInput && !startInput.value) startInput.value = s;
+            if (endInput && !endInput.value) endInput.value = e;
+            ModalManager.open('weekly-report-modal');
+            loadWeeklyReportMembers().then(() => generateWeeklyReport());
+        }
+
+        function closeWeeklyReportModal() {
+            ModalManager.close('weekly-report-modal');
+        }
+
+        async function loadWeeklyReportMembers() {
+            const sel = document.getElementById('weekly-report-member');
+            if (!sel) return;
+            const keep = sel.value;
+            try {
+                const resp = await fetch('/api/reports/weekly-report/department');
+                const result = await resp.json().catch(() => ({ success: false }));
+                if (!result.success) return;
+                weeklyReportMembers = (result.data || {}).members || [];
+                sel.innerHTML = weeklyReportMembers.map(m => `<option value="${_esc(m.owner)}">${_esc(m.name)}</option>`).join('');
+                // 去掉「我自己」后，默认选第一个成员（若无成员则保留原样）
+                if (!keep && weeklyReportMembers.length) sel.value = weeklyReportMembers[0].owner;
+                else if (keep) sel.value = keep;
+            } catch (e) { /* 静默：成员名单非必需，失败则只保留「我自己」 */ }
+        }
+
+        function onWeeklyReportMemberChange() {
+            generateWeeklyReport();
+        }
+
+        // 把「我自己」与「部门成员」两种后端响应归一成统一形态：
+        // { range, name, redmine, gerrit, themes:{redmine,gerrit} }
+        function _normalizeReportData(result) {
+            const d = result.data || {};
+            if (d.member) {
+                const m = d.member;
+                return {
+                    range: d.range || {},
+                    name: m.name || m.owner || '成员',
+                    redmine: m.redmine || {},
+                    gerrit: m.gerrit || {},
+                    themes: m.themes || { redmine: [], gerrit: [] },
+                    generated_at: d.generated_at,
+                };
+            }
+            const rm = d.redmine || {};
+            const ownerNames = (rm.owner_names || []);
+            return {
+                range: d.range || {},
+                name: ownerNames.length ? ownerNames.join(' / ') : '当前用户',
+                redmine: rm,
+                gerrit: d.gerrit || {},
+                themes: d.themes || { redmine: [], gerrit: [] },
+                generated_at: d.generated_at,
+            };
+        }
+
+        async function generateWeeklyReport() {
+            const start = (document.getElementById('weekly-report-start') || {}).value || '';
+            const end = (document.getElementById('weekly-report-end') || {}).value || '';
+            const owner = (document.getElementById('weekly-report-member') || {}).value || '';
+            const content = document.getElementById('weekly-report-content');
+            const status = document.getElementById('weekly-report-status');
+            if (!start || !end) {
+                if (status) status.textContent = '请选择起止日期';
+                return;
+            }
+            if (content) content.innerHTML = '<div style="color: var(--text-secondary); padding: 12px;">正在生成周报...</div>';
+            if (status) status.textContent = '';
+            try {
+                const base = `/api/reports/weekly-report`;
+                const url = owner
+                    ? `${base}/department?owner=${encodeURIComponent(owner)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+                    : `${base}?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+                const resp = await fetch(url);
+                const result = await resp.json().catch(() => ({ success: false }));
+                if (!result.success) {
+                    if (content) content.innerHTML = `<div style="color: var(--danger-color); padding: 12px;">生成失败：${result.error || result.message || '未知错误'}</div>`;
+                    return;
+                }
+                const data = _normalizeReportData(result);
+                window.__weeklyReportData = data;
+                weeklyReportMarkdown = buildWeeklyReportMarkdown(data);
+                if (content) content.innerHTML = renderWeeklyReportHtml(data);
+                if (status) status.textContent = `已生成 · ${data.range.label || ''} (${data.range.start} ~ ${data.range.end})`;
+                // 默认自动生成 AI 总结（静默：失败不弹 toast，显示错误条供重试）
+                generateWeeklyReportAi(true);
+            } catch (err) {
+                if (content) content.innerHTML = `<div style="color: var(--danger-color); padding: 12px;">生成失败：${err.message}</div>`;
+            }
+        }
+
+        async function generateWeeklyReportAi(silent) {
+            const d = window.__weeklyReportData;
+            if (!d) { if (!silent) showToast('请先生成周报', 'warning'); return; }
+            const btn = document.getElementById('weekly-report-ai-btn');
+            const status = document.getElementById('weekly-report-status');
+            if (btn) { btn.disabled = true; btn.textContent = '✨ 总结中...'; }
+            if (status) status.textContent = 'AI 正在阅读工单详情并总结...';
+            try {
+                const owner = (document.getElementById('weekly-report-member') || {}).value || '';
+                const resp = await fetch('/api/reports/weekly-report/ai-summary', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        start: (d.range || {}).start, end: (d.range || {}).end,
+                        owner, name: d.name || '',
+                        redmine: d.redmine, gerrit: d.gerrit,
+                    }),
+                });
+                const result = await resp.json().catch(() => ({ success: false }));
+                if (!result.success) {
+                    if (!silent) showToast('AI 总结失败：' + (result.error || '未知错误'), 'error');
+                    if (status) status.textContent = 'AI 总结失败：' + (result.error || '未配置 AI') + '（可点「重新总结」重试）';
+                    renderWeeklyReportAiError(result.error || '未配置 AI');
+                    return;
+                }
+                d.aiSummary = (result.data || {}).summary || '';
+                d.aiProvider = (result.data || {}).provider || '';
+                weeklyReportMarkdown = buildWeeklyReportMarkdown(d);
+                renderWeeklyReportAi(d);
+                if (status) status.textContent = `AI 总结已生成（${d.aiProvider}，读取 ${result.data.issue_count} 个工单）`;
+            } catch (err) {
+                if (!silent) showToast('AI 总结失败：' + err.message, 'error');
+                if (status) status.textContent = 'AI 总结失败（可点「重新总结」重试）';
+                renderWeeklyReportAiError(err.message);
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '✨ 重新总结'; }
+            }
+        }
+
+        function renderWeeklyReportAiError(msg) {
+            const content = document.getElementById('weekly-report-content');
+            if (!content) return;
+            let box = document.getElementById('weekly-report-ai');
+            if (!box) {
+                box = document.createElement('div');
+                box.id = 'weekly-report-ai';
+                content.insertBefore(box, content.firstChild);
+            }
+            box.innerHTML = `<div style="background: var(--card-bg); border:1px dashed var(--border-color); border-radius:8px; padding:10px 14px; margin-bottom:12px; color: var(--text-secondary); font-size:13px;">✨ AI 总结未生成：${_esc(msg || '未知原因')}。可点击「✨ 重新总结」重试。</div>`;
+        }
+
+        // 把 AI 总结渲染/插入到报告顶部（#weekly-report-ai 区块）
+        function renderWeeklyReportAi(d) {
+            const content = document.getElementById('weekly-report-content');
+            if (!content || !d.aiSummary) return;
+            let box = document.getElementById('weekly-report-ai');
+            if (!box) {
+                box = document.createElement('div');
+                box.id = 'weekly-report-ai';
+                content.insertBefore(box, content.firstChild);
+            }
+            const html = _renderMarkdownLite(d.aiSummary);
+            box.innerHTML = `
+                <div style="background: linear-gradient(135deg, var(--primary-color, #2563eb), #7c3aed); color: white; border-radius:10px; padding:12px 16px; margin-bottom:14px;">
+                    <div style="font-weight:700; margin-bottom:8px; display:flex; align-items:center; gap:6px; font-size:14px;">✨ AI 周报总结 ${d.aiProvider ? `<span style="font-size:11px; opacity:0.8; font-weight:400;">· ${_esc(d.aiProvider)}</span>` : ''}</div>
+                    <div style="background: rgba(255,255,255,0.14); border-radius:8px; padding:12px 14px; line-height:1.75; font-size:13px;">${html}</div>
+                </div>`;
+        }
+
+        // 轻量 Markdown 渲染：支持 ## / ### 标题、有序无序列表、粗体、空行分段。
+        // 比正则一次性替换更可控，避免列表项被 <p> 错误包裹。
+        function _renderMarkdownLite(md) {
+            const lines = String(md || '').split('\n');
+            const out = [];
+            let i = 0;
+            const inline = (s) => _esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.15);padding:0 3px;border-radius:3px;">$1</code>');
+            while (i < lines.length) {
+                let line = lines[i];
+                const trimmed = line.trim();
+                if (!trimmed) { i++; continue; }
+                if (/^## /.test(trimmed)) {
+                    out.push(`<h4 style="margin:10px 0 4px; font-size:13.5px;">${inline(trimmed.slice(3))}</h4>`);
+                    i++; continue;
+                }
+                if (/^### /.test(trimmed)) {
+                    out.push(`<div style="margin:8px 0 2px; font-weight:700; font-size:13px;">${inline(trimmed.slice(4))}</div>`);
+                    i++; continue;
+                }
+                // 列表块（连续的 - /* / 数字. 项）
+                if (/^([-*]|\d+\.)\s+/.test(trimmed)) {
+                    const items = [];
+                    while (i < lines.length && /^([-*]|\d+\.)\s+/.test(lines[i].trim())) {
+                        items.push(inline(lines[i].trim().replace(/^([-*]|\d+\.)\s+/, '')));
+                        i++;
+                    }
+                    out.push(`<ul style="margin:3px 0 6px 4px; padding:0; list-style:none;">${items.map(it => `<li style="margin:3px 0; padding-left:14px; position:relative;"><span style="position:absolute;left:0;top:0;">•</span>${it}</li>`).join('')}</ul>`);
+                    continue;
+                }
+                // 普通段落
+                out.push(`<p style="margin:4px 0;">${inline(trimmed)}</p>`);
+                i++;
+            }
+            return out.join('');
+        }
+
+        function _themesText(themes, max) {
+            const arr = (themes || []).slice(0, max || 8);
+            return arr.map(t => `${t.tag}×${t.count}`).join('、');
+        }
+
+        function _themesChips(themes, max) {
+            const arr = (themes || []).slice(0, max || 8);
+            if (!arr.length) return '<span style="color: var(--text-muted);">—</span>';
+            return arr.map(t => `<span style="display:inline-block; background: var(--light-bg); border:1px solid var(--border-color); border-radius:10px; padding:1px 8px; margin:2px 4px 2px 0; font-size:12px;">${_esc(t.tag)} <b style="color: var(--primary-color);">${t.count}</b></span>`).join('');
+        }
+
+        function buildWeeklyReportMarkdown(data) {
+            const r = data.range || {};
+            const rm = data.redmine || {};
+            const gr = data.gerrit || {};
+            const themes = data.themes || {};
+            const rmOk = rm.available !== false;
+            const grOk = gr.available !== false;
+            const lines = [];
+            lines.push(`# 周报 · ${data.name || ''}`);
+            lines.push('');
+            lines.push(`**周期**：${r.start} ~ ${r.end}（${r.label || '自定义'}）`);
+            lines.push(`**生成时间**：${data.generated_at || ''}`);
+            lines.push('');
+
+            // AI 总结（若有，置于最前）
+            if (data.aiSummary) {
+                lines.push(`## ✨ 本周工作总结（AI）`);
+                lines.push('');
+                lines.push(data.aiSummary);
+                lines.push('');
+            }
+
+            // 一句话总结
+            const summaryParts = [];
+            if (rmOk) summaryParts.push(`关闭 ${rm.resolved_this_period || 0} 个 Redmine 工单`);
+            if (grOk) summaryParts.push(`合并 ${gr.merged_this_period || 0} 个 Gerrit 提交、新增 ${gr.new_this_period || 0} 个`);
+            lines.push(`> 本周${summaryParts.length ? summaryParts.join('，') : '暂无可用数据'}。`);
+            lines.push('');
+
+            // 主题清单
+            if ((themes.redmine && themes.redmine.length) || (themes.gerrit && themes.gerrit.length)) {
+                lines.push(`**本周关键词**：`);
+                if (themes.redmine && themes.redmine.length) lines.push(`- 工单：${_themesText(themes.redmine)}`);
+                if (themes.gerrit && themes.gerrit.length) lines.push(`- 提交：${_themesText(themes.gerrit)}`);
+                lines.push('');
+            }
+
+            // —— 本周工作内容（周报核心：实际做了什么）——
+            lines.push(`## 本周工作内容`);
+            const mergedItems = grOk ? ((gr.lists || {}).merged || []) : [];
+            const newItems = grOk ? ((gr.lists || {}).new || []) : [];
+            const waitingItems = rmOk ? ((rm.lists || {}).waiting_my_reply || []) : [];
+            const staleItems = rmOk ? ((rm.lists || {}).no_reply_3_days || []) : [];
+            const _isMechMd = (subj) => /^(bump|version bump|bump version|cherry pick|revert)/i.test(subj || '');
+            const mergedMajorMd = mergedItems.filter(it => !_isMechMd(it.subject));
+            const mergedMinorMd = mergedItems.filter(it => _isMechMd(it.subject));
+            const pushList = (title, items, fmt) => {
+                const arr = Array.isArray(items) ? items : [];
+                if (!arr.length) return;
+                lines.push(`### ${title}（${arr.length}）`);
+                arr.slice(0, 30).forEach(it => lines.push(`- ${fmt(it)}`));
+                lines.push('');
+            };
+            // Redmine 工单：标题 + (若有)最新进展展开说明解决了什么
+            const pushIssueList = (title, items) => {
+                const arr = Array.isArray(items) ? items : [];
+                if (!arr.length) return;
+                lines.push(`### ${title}（${arr.length}）`);
+                arr.slice(0, 10).forEach(it => {
+                    const head = `#${it.issue_id || it.id || '?'} ${it.subject || ''}`.trim();
+                    const reply = (it.last_external_reply || '').trim();
+                    if (reply) {
+                        lines.push(`- ${head}`);
+                        lines.push(`  - 最新进展${it.last_external_reply_by ? '（' + it.last_external_reply_by + '）' : ''}：${reply.slice(0, 300)}`);
+                    } else {
+                        lines.push(`- ${head}`);
+                    }
+                });
+                lines.push('');
+            };
+            pushList('Gerrit 合并 · 主要（代码已合入）', mergedMajorMd, it => `${it.number || it.id || '?'} ${it.subject || ''}`.trim());
+            if (mergedMinorMd.length) {
+                lines.push(`> 另有 ${mergedMinorMd.length} 个版本/例行合并（Bump version 等），详见完整明细。`);
+                lines.push('');
+            }
+            pushList('Gerrit 新增/进行中', newItems.filter(it => !_isMechMd(it.subject)), it => `${it.number || it.id || '?'} ${it.subject || ''}`.trim());
+            if (rmOk && rm.resolved_this_period) {
+                lines.push(`### Redmine 本周关闭（${rm.resolved_this_period}）`);
+                lines.push(`> 本周共关闭/解决 ${rm.resolved_this_period} 个工单（明细见看板）。`);
+                lines.push('');
+            }
+            pushIssueList('跟进中的工单', waitingItems);
+            pushIssueList('超 3 天未回复（需关注）', staleItems);
+
+            // —— 数据汇总（折叠）——
+            lines.push(`<details><summary>数据汇总</summary>`);
+            lines.push('');
+            lines.push(`### Redmine 工单`);
+            if (!rmOk) {
+                lines.push(`> 暂不可用：${rm.error || '未配置 Redmine 凭证'}`);
+            } else {
+                lines.push(`- 本周关闭/解决：**${rm.resolved_this_period || 0}**`);
+                lines.push(`- 当前名下工单：${rm.total_owned || 0}（其中开放 ${rm.open_count || 0}）`);
+                lines.push(`- 待我回复：${rm.waiting_my_reply || 0}；超 3 天未回复：${rm.no_reply_3_days || 0}`);
+            }
+            lines.push('');
+            lines.push(`### Gerrit 提交`);
+            if (!grOk) {
+                lines.push(`> 暂不可用：${gr.error || '未配置 Gerrit'}`);
+            } else {
+                lines.push(`- 本周合并：**${gr.merged_this_period || 0}**；本周新增/进行中：${gr.new_this_period || 0}`);
+                lines.push(`- 待我评审：${gr.review_queue_count == null ? '-' : gr.review_queue_count}；当前开放变更：${gr.open_count || 0}`);
+            }
+            lines.push('');
+            // 全量明细
+            if (rmOk) {
+                pushList('当前开放工单', (rm.lists || {}).open_issues, it => `#${it.issue_id || it.id || '?'} ${it.subject || ''}`.trim());
+            }
+            lines.push(`</details>`);
+            return lines.join('\n');
+        }
+
+        function renderWeeklyReportHtml(data) {
+            const r = data.range || {};
+            const rm = data.redmine || {};
+            const gr = data.gerrit || {};
+            const themes = data.themes || {};
+            const rmOk = rm.available !== false;
+            const grOk = gr.available !== false;
+
+            const statCard = (label, value, color) => `
+                <div style="background: var(--card-bg); border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; flex:1 1 110px; min-width:110px;">
+                    <div style="font-size:12px; color: var(--text-secondary);">${_esc(label)}</div>
+                    <div style="font-size:22px; font-weight:700; color: ${color || 'var(--text-primary)'}; margin-top:2px;">${_esc(value)}</div>
+                </div>`;
+
+            const summaryParts = [];
+            if (rmOk) summaryParts.push(`关闭 <b>${rm.resolved_this_period || 0}</b> 个 Redmine 工单`);
+            if (grOk) summaryParts.push(`合并 <b>${gr.merged_this_period || 0}</b> 个 Gerrit 提交、新增 <b>${gr.new_this_period || 0}</b> 个`);
+            const summary = summaryParts.length ? `本周${summaryParts.join('，')}。` : '本周暂无可用数据。';
+
+            const hasThemes = (themes.redmine && themes.redmine.length) || (themes.gerrit && themes.gerrit.length);
+
+            let redmineStats, gerritStats;
+            if (!rmOk) {
+                redmineStats = `<div style="color: var(--text-secondary); padding:6px 0;">暂不可用：${_esc(rm.error || '未配置 Redmine 凭证')}</div>`;
+            } else {
+                redmineStats = `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:6px 0;">
+                    ${statCard('本周关闭', rm.resolved_this_period || 0, 'var(--success-color)')}
+                    ${statCard('名下工单', rm.total_owned || 0)}
+                    ${statCard('开放', rm.open_count || 0)}
+                    ${statCard('待我回复', rm.waiting_my_reply || 0, 'var(--warning-color, #f59e0b)')}
+                    ${statCard('超3天未回复', rm.no_reply_3_days || 0, 'var(--danger-color)')}
+                </div>`;
+            }
+            if (!grOk) {
+                gerritStats = `<div style="color: var(--text-secondary); padding:6px 0;">暂不可用：${_esc(gr.error || '未配置 Gerrit')}</div>`;
+            } else {
+                gerritStats = `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:6px 0;">
+                    ${statCard('本周合并', gr.merged_this_period || 0, 'var(--success-color)')}
+                    ${statCard('本周新增/进行中', gr.new_this_period || 0)}
+                    ${statCard('待我评审', (gr.review_queue_count == null ? '-' : gr.review_queue_count), 'var(--warning-color, #f59e0b)')}
+                    ${statCard('当前开放变更', gr.open_count || 0)}
+                </div>`;
+            }
+
+            // 「本周工作」：直接列出本周实际做的事（合并的提交 / 新增 / 关注工单标题），
+            // 这是周报的正文核心，而不是只给一堆数字。默认展示前若干条，其余进折叠明细。
+            const changeFmt = it => `<b>${_esc(it.number || it.id || '?')}</b> ${_esc(it.subject || '')}`;
+            const issueFmt = it => `<b>#${_esc(it.issue_id || it.id || '?')}</b> ${_esc(it.subject || '')}`;
+            const INLINE_LIMIT = 6;
+            const inlineList = (items, fmt, limit) => {
+                const arr = (Array.isArray(items) ? items : []).slice(0, limit || INLINE_LIMIT);
+                if (!arr.length) return '';
+                return `<ul style="margin:4px 0 0 18px; padding:0; color: var(--text-secondary);">${arr.map(it => `<li style="margin:3px 0;">${fmt(it)}</li>`).join('')}</ul>`;
+            };
+
+            const mergedItems = grOk ? ((gr.lists || {}).merged || []) : [];
+            const newItems = grOk ? ((gr.lists || {}).new || []) : [];
+            const waitingItems = rmOk ? ((rm.lists || {}).waiting_my_reply || []) : [];
+            const staleItems = rmOk ? ((rm.lists || {}).no_reply_3_days || []) : [];
+
+            // 「代表性」判定：Gerrit 机械提交 (Bump version / version bump) 归到「其他」简列，
+            // 其余为有实质内容的提交；Redmine 工单若有最新进展(last_external_reply) 则展开说明。
+            const _isMechanical = (subj) => /^(bump|version bump|bump version|cherry pick|revert)/i.test(subj || '');
+            const mergedMajor = mergedItems.filter(it => !_isMechanical(it.subject));
+            const mergedMinor = mergedItems.filter(it => _isMechanical(it.subject));
+            const newMajor = newItems.filter(it => !_isMechanical(it.subject));
+
+            // Redmine 工单项：标题 + (若有)最新进展展开。limit 限制展示条数。
+            const issueBlock = (items, limit) => {
+                const arr = (Array.isArray(items) ? items : []).slice(0, limit || 6);
+                if (!arr.length) return '';
+                return arr.map(it => {
+                    const head = issueFmt(it);
+                    const reply = (it.last_external_reply || '').trim();
+                    const replyBy = it.last_external_reply_by ? `（${_esc(it.last_external_reply_by)}）` : '';
+                    const tail = reply ? `<div style="margin:2px 0 4px 0; padding:2px 6px; background: var(--card-bg); border-left:2px solid var(--border-color); font-size:12px; color: var(--text-secondary);">最新进展${replyBy}：${_esc(reply.slice(0, 300))}</div>` : '';
+                    return `<li style="margin:5px 0; list-style:none;">${head}${tail}</li>`;
+                }).join('');
+            };
+            const changeBlock = (items, limit) => {
+                const arr = (Array.isArray(items) ? items : []).slice(0, limit || 8);
+                if (!arr.length) return '';
+                return arr.map(it => `<li style="margin:3px 0;">${changeFmt(it)}</li>`).join('');
+            };
+
+            const workHtml = (() => {
+                if (!grOk && !rmOk) {
+                    return '<div style="color: var(--text-muted); padding:6px 0;">本周暂无可用数据。</div>';
+                }
+                // 分组标题样式（Redmine = 工单蓝 / Gerrit = 提交绿）
+                const groupHead = (text, color) => `<div style="margin-top:10px; padding-bottom:3px; border-bottom:1px solid var(--border-color); font-weight:700; color:${color}; font-size:13px;">${text}</div>`;
+                const parts = [];
+                // —— Gerrit 代码提交 ——
+                const gParts = [];
+                if (mergedMajor.length) {
+                    gParts.push(`<div style="margin-top:6px;"><b style="color: var(--success-color);">本周合并 · 主要（${mergedMajor.length}）</b><ul style="margin:4px 0 0 0; padding:0; color: var(--text-secondary);">${changeBlock(mergedMajor, 8)}</ul></div>`);
+                }
+                if (mergedMinor.length) {
+                    gParts.push(`<div style="margin-top:6px;"><b style="color: var(--text-muted);">本周合并 · 版本/例行（${mergedMinor.length}）</b><ul style="margin:4px 0 0 18px; padding:0; color: var(--text-muted); font-size:12px;">${mergedMinor.map(it => `<li>${changeFmt(it)}</li>`).join('')}</ul></div>`);
+                }
+                if (newMajor.length) {
+                    gParts.push(`<div style="margin-top:6px;"><b>本周新增/进行中（${newItems.length}）</b><ul style="margin:4px 0 0 18px; padding:0; color: var(--text-secondary);">${changeBlock(newMajor, 6)}</ul></div>`);
+                }
+                if (gParts.length) parts.push(groupHead('🟢 Gerrit 代码提交', 'var(--success-color)') + gParts.join(''));
+                // —— Redmine 工单 ——
+                const rParts = [];
+                if (waitingItems.length) {
+                    rParts.push(`<div style="margin-top:6px;"><b style="color: var(--warning-color, #f59e0b);">跟进中的工单（${waitingItems.length}）</b><ul style="margin:4px 0 0 0; padding:0;">${issueBlock(waitingItems, 6)}</ul></div>`);
+                }
+                if (staleItems.length) {
+                    rParts.push(`<div style="margin-top:6px;"><b style="color: var(--danger-color);">超3天未回复 · 需关注（${staleItems.length}）</b><ul style="margin:4px 0 0 0; padding:0;">${issueBlock(staleItems, 6)}</ul></div>`);
+                }
+                if (rmOk && rm.resolved_this_period) {
+                    rParts.unshift(`<div style="margin-top:6px; color: var(--text-secondary);">本周关闭/解决 <b style="color: var(--success-color);">${rm.resolved_this_period}</b> 个工单。</div>`);
+                }
+                if (rParts.length) parts.push(groupHead('🔵 Redmine 工单', 'var(--primary-color)') + rParts.join(''));
+                if (!parts.length) return '<div style="color: var(--text-muted); padding:6px 0;">本周暂无合并/新增提交或待处理工单。</div>';
+                return parts.join('');
+            })();
+
+            // 详细明细 (可折叠) —— 全量列表
+            const listBlock = (title, items, fmt) => {
+                const arr = Array.isArray(items) ? items : [];
+                if (!arr.length) return '';
+                const rows = arr.slice(0, 30).map(it => `<li style="margin:2px 0;">${fmt(it)}</li>`).join('');
+                return `<div style="margin-top:8px;"><div style="font-weight:600; color: var(--text-primary);">${_esc(title)}（${arr.length}）</div><ul style="margin:4px 0 0 18px; padding:0; color: var(--text-secondary);">${rows}</ul></div>`;
+            };
+            let detailInner = '';
+            if (rmOk) {
+                detailInner += `<div style="font-weight:700; color: var(--primary-color); margin-top:6px; padding-bottom:3px; border-bottom:1px solid var(--border-color);">🔵 Redmine 工单</div>`;
+                detailInner += listBlock('待我回复', waitingItems, issueFmt);
+                detailInner += listBlock('超 3 天未回复', staleItems, issueFmt);
+                detailInner += listBlock('当前开放工单', (rm.lists || {}).open_issues, issueFmt);
+            }
+            if (grOk) {
+                detailInner += `<div style="font-weight:700; color: var(--success-color); margin-top:10px; padding-bottom:3px; border-bottom:1px solid var(--border-color);">🟢 Gerrit 代码提交</div>`;
+                detailInner += listBlock('本周合并', mergedItems, changeFmt);
+                detailInner += listBlock('本周新增/进行中', newItems, changeFmt);
+            }
+            const detailHtml = detailInner
+                ? `<details style="margin-top:12px; border-top:1px dashed var(--border-color); padding-top:8px;"><summary style="cursor:pointer; color: var(--text-secondary); font-weight:600;">完整明细（点击展开）</summary><div style="margin-top:6px;">${detailInner}</div></details>`
+                : '';
+
+            const themesHtml = hasThemes ? `
+                <div style="margin-top:8px;">
+                    <div style="font-weight:600; color: var(--text-primary); margin-bottom:2px;">本周关键词</div>
+                    ${themes.redmine && themes.redmine.length ? `<div style="margin:2px 0;"><span style="color: var(--text-secondary); font-size:12px;">工单：</span>${_themesChips(themes.redmine)}</div>` : ''}
+                    ${themes.gerrit && themes.gerrit.length ? `<div style="margin:2px 0;"><span style="color: var(--text-secondary); font-size:12px;">提交：</span>${_themesChips(themes.gerrit)}</div>` : ''}
+                </div>` : '';
+
+            return `
+                <div style="background: var(--light-bg); border:1px solid var(--border-color); border-left:3px solid var(--primary-color); border-radius:6px; padding:8px 12px; margin-bottom:10px;">
+                    <div style="font-size:12px; color: var(--text-secondary);">${_esc(r.start)} ~ ${_esc(r.end)}（${_esc(r.label || '自定义')}） · ${_esc(data.name || '')}</div>
+                    <div style="margin-top:4px;">${summary}</div>
+                    ${themesHtml}
+                </div>
+                <h3 style="margin:10px 0 2px; color: var(--text-primary);">本周工作</h3>
+                ${workHtml}
+                <details style="margin-top:10px;"><summary style="cursor:pointer; color: var(--text-secondary); font-size:12px;">数据汇总（关闭/名下/开放/待评审…）</summary>
+                    <h4 style="margin:8px 0 2px; color: var(--text-primary);">Redmine 工单</h4>
+                    ${redmineStats}
+                    <h4 style="margin:8px 0 2px; color: var(--text-primary);">Gerrit 提交</h4>
+                    ${gerritStats}
+                </details>
+                ${detailHtml}`;
+        }
+
+        function copyWeeklyReportMarkdown() {
+            if (!weeklyReportMarkdown) { showToast('请先生成周报', 'warning'); return; }
+            const done = () => showToast('Markdown 已复制', 'success');
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(weeklyReportMarkdown).then(done).catch(() => _fallbackCopy(weeklyReportMarkdown, done));
+            } else {
+                _fallbackCopy(weeklyReportMarkdown, done);
+            }
+        }
+
+        function _fallbackCopy(text, cb) {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = text; document.body.appendChild(ta); ta.select();
+                document.execCommand('copy'); document.body.removeChild(ta); cb();
+            } catch (e) { showToast('复制失败', 'error'); }
+        }
+
+        function downloadWeeklyReport() {
+            if (!weeklyReportMarkdown) { showToast('请先生成周报', 'warning'); return; }
+            const d = window.__weeklyReportData || {};
+            const r = d.range || {};
+            const safeName = (d.name || '周报').replace(/[\\/:*?"<>|/\s]+/g, '_');
+            const name = `${safeName}_${r.start || ''}_${r.end || ''}.md`;
+            const blob = new Blob([weeklyReportMarkdown], { type: 'text/markdown;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = name; document.body.appendChild(a); a.click();
+            document.body.removeChild(a); URL.revokeObjectURL(url);
+        }
+        window.openWeeklyReport = openWeeklyReport;
+        window.closeWeeklyReportModal = closeWeeklyReportModal;
+        window.generateWeeklyReport = generateWeeklyReport;
+        window.onWeeklyReportMemberChange = onWeeklyReportMemberChange;
+        window.generateWeeklyReportAi = generateWeeklyReportAi;
+        window.copyWeeklyReportMarkdown = copyWeeklyReportMarkdown;
+        window.downloadWeeklyReport = downloadWeeklyReport;
 
         function ut_getCategoryInfo(category) {
             return ut_categoryMeta[category] || UT_DEFAULT_CATEGORIES[category] || { icon: '📁', color: '#8e8e93' };
@@ -6396,7 +6994,9 @@
             card.dataset.toolIndex = index;
             card.draggable = true;
             card.style.cssText = `background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: grab; min-width: 100px; max-width: 130px; min-height: 118px;`;
-            if (tool.action === 'shareFirmware') {
+            if (tool.action === 'openWeeklyReport') {
+                card.addEventListener('click', () => openWeeklyReport());
+            } else if (tool.action === 'shareFirmware') {
                 card.addEventListener('click', () => shareFirmware());
             } else if (tool.url) {
                 card.addEventListener('click', () => openToolLink(tool.url));

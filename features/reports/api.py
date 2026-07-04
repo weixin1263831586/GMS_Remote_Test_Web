@@ -2,13 +2,14 @@
 
 from fastapi import APIRouter
 
-from . import analysis_api, files_api, source_api
+from . import analysis_api, files_api, source_api, weekly_report_api
 
 
 router = APIRouter()
 router.include_router(files_api.router)
 router.include_router(source_api.router)
 router.include_router(analysis_api.router)
+router.include_router(weekly_report_api.router)
 
 list_reports = files_api.list_reports
 download_report = files_api.download_report

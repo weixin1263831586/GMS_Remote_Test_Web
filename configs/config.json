@@ -111,12 +111,12 @@
     "primary_provider": "zhipu",
     "providers": {
       "glm_local": {
-        "name": "GLM-5.1 Local",
+        "name": "GLM-5.2 Local",
         "enabled": true,
         "api_key": "sk-n59SFal6iyndmvp3EjnFjiyTXs6jYPlQ5U88QY8tBYYNIi9v",
-        "model": "glm-5.1-local",
+        "model": "GLM-5.2",
         "base_url": "http://172.16.14.248:3000",
-        "api_format": "anthropic",
+        "api_format": "openai",
         "temperature": 0.3,
         "max_tokens": 4000
       },
