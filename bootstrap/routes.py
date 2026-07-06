@@ -16,6 +16,7 @@ from features.devices import integrations_api as device_integrations
 from features.devices.dependencies import configure_device_dependencies
 from features.devices.network import run_local_shell_command
 from features.devices.support import get_or_create_user_state
+from features.email import api as email
 from features.firmware import api as firmware
 from features.firmware.apk import (
     _cleanup_files,
@@ -110,6 +111,7 @@ ALL_ROUTERS = [
     device_config_explorer.router,
     device_config_override.router,
     device_integrations.router,
+    email.router,
     firmware.router,
     gerrit_dashboard.router,
     gerrit_dashboard.page_router,

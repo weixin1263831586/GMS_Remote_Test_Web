@@ -5,9 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-import smtplib
 import threading
-from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
@@ -267,64 +265,18 @@ def _department_from_profiles(profile_ids: list[str]) -> dict[str, str]:
 
 
 def _send_reminder_email(to_addr: str, subject: str, body: str, manager=None) -> dict[str, Any]:
+    """发送部门提醒邮件。
+
+    SMTP 发送逻辑（含 163 企业邮兼容、SSL/TLS 判定、认证错误兜底）已统一到
+    :func:`features.email.service.send_email`，这里仅做透传，保持调用方与返回
+    结构 ``{"sent", "mode", "error"}`` 不变。
+    """
+    from features.email.service import send_email  # 延迟导入避免循环依赖
+
     selected_manager = manager or config_manager
-    dashboard_cfg = selected_manager.load_config().get("redmine_dashboard") or {}
-    email_cfg = dashboard_cfg.get("email") or {}
-    smtp_host = str(email_cfg.get("smtp_host") or "").strip()
-    # from_addr 默认值统一来自 config.json 的 redmine_dashboard.email.default_from_addr
-    default_from = str(email_cfg.get("default_from_addr") or "").strip()
-    from_addr = str(email_cfg.get("from_addr") or email_cfg.get("username") or default_from).strip()
-    if not smtp_host:
-        return {"sent": False, "mode": "unconfigured", "error": "SMTP 未配置，请在设置中填写 smtp_host"}
-
-    smtp_port = int(email_cfg.get("smtp_port") or 465)
-    username = str(email_cfg.get("username") or "").strip()
-    password = str(email_cfg.get("password") or "").strip()
-    is_qiye_163 = smtp_host.lower().endswith("qiye.163.com")
-    # 163 企业邮要求发件人与登录账号一致；缺省（default_from）或与账号不符时，强制对齐
-    if is_qiye_163 and username and (not from_addr or from_addr == default_from or from_addr != username):
-        from_addr = username
-    use_ssl = bool(email_cfg.get("use_ssl", smtp_port == 465))
-    use_tls = bool(email_cfg.get("use_tls", not use_ssl and smtp_port != 465))
-    timeout = int(email_cfg.get("timeout") or 10)
-
-    # 注意：SMTP 授权码 与 Redmine 网页登录/API 密码是两回事，不能互相兜底。
-    # 163 企业邮用错误凭据会被服务器直接断开连接（而非返回认证失败码），
-    # 因此这里必须用专门的 SMTP 授权码；为空时直接返回明确错误，引导用户填写。
-    if is_qiye_163 and (not username or not password):
-        return {"sent": False, "mode": "unconfigured", "error": "163 企业邮箱 SMTP 需要用户名和授权码（注意：是邮箱 SMTP 授权码，不是 Redmine 登录密码），请在 Redmine 看板「设置 → SMTP」中填写"}
-
-    message = EmailMessage()
-    message["From"] = from_addr
-    message["To"] = to_addr
-    message["Subject"] = subject
-    message.set_content(body)
-    try:
-        if use_ssl:
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=timeout) as smtp:
-                if username and password:
-                    smtp.login(username, password)
-                smtp.send_message(message)
-        else:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=timeout) as smtp:
-                if use_tls:
-                    smtp.starttls()
-                if username and password:
-                    smtp.login(username, password)
-                smtp.send_message(message)
-    except smtplib.SMTPAuthenticationError as exc:
-        return {
-            "sent": False,
-            "mode": "smtp",
-            "error": f"SMTP认证失败，请在设置中填写企业邮箱SMTP授权码/密码，发件人需与账号一致: {exc}",
-        }
-    except smtplib.SMTPServerDisconnected as exc:
-        return {
-            "sent": False,
-            "mode": "smtp",
-            "error": f"SMTP连接被服务器关闭，请检查企业邮箱SMTP授权码/密码、账号是否开启SMTP服务，发件人需与账号一致: {exc}",
-        }
-    return {"sent": True, "mode": "smtp"}
+    result = send_email(to_addr, subject, body, manager=selected_manager)
+    # 仅保留对外约定的字段（sent/mode/error），丢弃 send_email 附加的明细
+    return {"sent": result["sent"], "mode": result["mode"], "error": result.get("error")}
 
 
 def _check_ttl_cache(cache_dict: dict, cache_key: str, ttl: int, now_ts: float, refresh: bool = False) -> dict | None:
