@@ -259,15 +259,18 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 manager.config_path = str(configs / "config.json")
                 manager.runtime_config_path = str(configs / "config_runtime.json")
                 manager.invalidate_cache()
-                with patch("features.redmine.api.smtplib.SMTP") as smtp_cls:
+                with patch("features.email.service.smtplib.SMTP") as smtp_cls:
                     smtp = smtp_cls.return_value.__enter__.return_value
 
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
 
-                    self.assertEqual(result, {"sent": True, "mode": "smtp"})
-                    message = smtp.send_message.call_args.args[0]
-                    self.assertEqual(message["From"], "trac@rock-chips.com")
-                    self.assertEqual(message["To"], "dev@example.com")
+                    self.assertEqual(result, {"sent": True, "mode": "smtp", "error": None})
+                    # sendmail(from_addr, recipients, raw_mime)
+                    from_addr, recipients, raw = smtp.sendmail.call_args.args
+                    from email import message_from_string
+                    msg = message_from_string(raw)
+                    self.assertEqual(msg["From"], "trac@rock-chips.com")
+                    self.assertEqual(msg["To"], "dev@example.com")
                     self.assertNotIn("mailto", result)
             finally:
                 manager.config_path = old_config_path
@@ -312,7 +315,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 # 即便 Redmine 凭证里有登录密码，也不应被用作 SMTP 授权码
                 with (
                     patch.object(manager, "load_redmine_credentials", return_value={"username": "chaoqun.huang@rock-chips.com", "password": "redmine-login-secret"}),
-                    patch("features.redmine.api.smtplib.SMTP_SSL") as smtp_cls,
+                    patch("features.email.service.smtplib.SMTP_SSL") as smtp_cls,
                 ):
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
 
@@ -337,15 +340,16 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                     encoding="utf-8",
                 )
                 manager.invalidate_cache()
-                with patch("features.redmine.api.smtplib.SMTP_SSL") as smtp_cls:
+                with patch("features.email.service.smtplib.SMTP_SSL") as smtp_cls:
                     smtp = smtp_cls.return_value.__enter__.return_value
 
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
 
-                    self.assertEqual(result, {"sent": True, "mode": "smtp"})
+                    self.assertEqual(result, {"sent": True, "mode": "smtp", "error": None})
                     smtp.login.assert_called_once_with("chaoqun.huang@rock-chips.com", "smtp-auth-code")
-                    message = smtp.send_message.call_args.args[0]
-                    self.assertEqual(message["From"], "chaoqun.huang@rock-chips.com")
+                    _from, _recipients, raw = smtp.sendmail.call_args.args
+                    from email import message_from_string
+                    self.assertEqual(message_from_string(raw)["From"], "chaoqun.huang@rock-chips.com")
             finally:
                 manager.config_path = old_config_path
                 manager.runtime_config_path = old_runtime_path
@@ -382,14 +386,15 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 manager.config_path = str(configs / "config.json")
                 manager.runtime_config_path = str(configs / "config_runtime.json")
                 manager.invalidate_cache()
-                with patch("features.redmine.api.smtplib.SMTP_SSL") as smtp_cls:
+                with patch("features.email.service.smtplib.SMTP_SSL") as smtp_cls:
                     smtp = smtp_cls.return_value.__enter__.return_value
 
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
 
-                    self.assertEqual(result, {"sent": True, "mode": "smtp"})
-                    message = smtp.send_message.call_args.args[0]
-                    self.assertEqual(message["From"], "chaoqun.huang@rock-chips.com")
+                    self.assertEqual(result, {"sent": True, "mode": "smtp", "error": None})
+                    _from, _recipients, raw = smtp.sendmail.call_args.args
+                    from email import message_from_string
+                    self.assertEqual(message_from_string(raw)["From"], "chaoqun.huang@rock-chips.com")
             finally:
                 manager.config_path = old_config_path
                 manager.runtime_config_path = old_runtime_path
@@ -428,7 +433,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 manager.config_path = str(configs / "config.json")
                 manager.runtime_config_path = str(configs / "config_runtime.json")
                 manager.invalidate_cache()
-                with patch("features.redmine.api.smtplib.SMTP_SSL", side_effect=smtplib.SMTPServerDisconnected("Connection unexpectedly closed")):
+                with patch("features.email.service.smtplib.SMTP_SSL", side_effect=smtplib.SMTPServerDisconnected("Connection unexpectedly closed")):
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
 
                     self.assertFalse(result["sent"])

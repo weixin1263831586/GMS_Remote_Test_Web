@@ -70,6 +70,8 @@ def parse_tradefed_list_results(output: str) -> dict[str, Any]:
     columns: list[str] = []
     lines = cleaned_output.split('\n')
     header_found = False
+    # CTS/GTS 头部多一列 Warning；表头确定后不变，循环外预计算一次。
+    _has_warning_col = False
 
     for line in lines:
         stripped = line.strip()
@@ -78,6 +80,7 @@ def parse_tradefed_list_results(output: str) -> dict[str, Any]:
             if 'Session' in line and 'Pass' in line and 'Fail' in line:
                 header_found = True
                 columns = _split_result_header(line)
+                _has_warning_col = any(c.lower() == 'warning' for c in columns)
             continue
 
         if not stripped or stripped.startswith('=====') or stripped.startswith('------'):
@@ -113,7 +116,7 @@ def parse_tradefed_list_results(output: str) -> dict[str, Any]:
             elif dir_index >= 3:
                 modules = parts[dir_index - 1]
             # CTS/GTS 在 fail 与 modules 之间多一列 Warning。
-            if 'warning' in str(columns).lower():
+            if _has_warning_col:
                 try:
                     warning = str(int(parts[3]))
                 except (ValueError, IndexError):
@@ -181,56 +184,95 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
     platform_tools_path = PLATFORM_TOOLS_PATH
 
     def wait_for_prompt(shell, prompt_patterns, timeout=10, poll_interval=0.05, require_stable=False):
-        """智能等待 shell 提示符出现（优化版）
+        """智能等待 shell 提示符出现（非阻塞轮询版）
+
+        关键：用短 socket timeout 让 recv 快速返回，避免无数据时阻塞数秒。
+        这样输出"已稳定"（连续 N 轮长度不变 + 匹配到提示符）能在毫秒级被
+        识别，而不是靠 STABLE_OUTPUT_TIMEOUT 兜底等到秒级。
 
         ``require_stable`` 适用于 tradefed 控制台命令（如 ``list results``）：
         这类命令的输出会异步产生，且 tradefed 可能在结果真正打印前就再次
         回显提示符（例如 ``vts-tf >``）。此时仅在"看到提示符"就返回会漏掉
         结果表。开启 ``require_stable`` 后，必须满足"最后一行是提示符 且
         输出长度已连续多次未变化"才返回，从而等到延迟到达的结果输出。
+
+        对 ``list results`` 额外要求：输出中必须包含 ``Session`` 表头（即
+        结果表已到达），否则即使输出"稳定"也继续等待。这能避免 GTS 启动时
+        先输出 Notice 短暂停顿导致过早返回的问题。
         """
+        # 短 socket timeout：recv 无数据时快速返回（抛 socket.timeout），
+        # 让轮询频率与 stable_count 累加不被阻塞拉长。
+        recv_timeout = min(poll_interval, 0.1)
+        with contextlib.suppress(Exception):
+            shell.settimeout(recv_timeout)
+
         output = ""
         start_time = time.time()
         last_output_time = start_time
         last_output_length = 0
         stable_count = 0
-        prompt_seen = False
+        # stable 阈值：require_stable 命令的输出整块到达后，连续稳定 N 轮即返回。
+        # 选 3 轮 × poll_interval(0.1s) = 0.3s 无新数据，足以确认 tradefed
+        # 控制台已把结果表打完；普通命令用 2 轮更快。
+        stable_threshold = 3 if require_stable else 2
+        needs_table_header = require_stable and command == "list results"
+
+        def _check_done():
+            """检测输出是否已到提示符且稳定。返回 True 表示可返回。
+
+            抽成函数是因为：数据可能在某次 recv 的 chunk 里整块到达（含末尾
+            提示符），之后 recv 再无新数据会持续抛 timeout 进 except 分支。
+            若只在 try 分支判断提示符，except 路径就永远累加不到 stable_count。
+            因此每次循环（无论是否收到新数据）都要判断一次。
+            """
+            nonlocal stable_count, last_output_length
+            # 只取末行用 rfind，避免对整个 output 做 split（每次 poll 都会
+            # 调用，split 是 O(n) 分配，整体 O(n²)）。
+            i = output.rfind('\n')
+            current_line = output[i + 1:] if i != -1 else output
+            matched_prompt = any(re.search(pattern, current_line) for pattern in prompt_patterns)
+
+            if matched_prompt and not require_stable:
+                return True
+
+            current_length = len(output)
+            if current_length == last_output_length:
+                stable_count += 1
+                if matched_prompt and stable_count >= stable_threshold:
+                    # list results 必须等到表头出现，避免启动 Notice 后短暂
+                    # 停顿被误判为输出稳定。
+                    if needs_table_header and 'Session' not in output:
+                        return False
+                    return True
+            else:
+                stable_count = 0
+                last_output_length = current_length
+            return False
 
         while time.time() - start_time < timeout:
+            received = False
             try:
                 chunk = shell.recv(RECV_BUFFER_SIZE).decode('utf-8', errors='ignore')
                 if chunk:
                     output += chunk
                     last_output_time = time.time()
-                else:
-                    # recv 返回空：连接暂无数据，仍参与稳定性计数。
-                    pass
-
-                current_line = output.split('\n')[-1:][0] if output.split('\n') else ''
-                matched_prompt = any(re.search(pattern, current_line) for pattern in prompt_patterns)
-
-                if matched_prompt and not require_stable:
-                    return output
-
-                current_length = len(output)
-                if current_length == last_output_length:
-                    stable_count += 1
-                    if require_stable:
-                        # 等到提示符出现且输出稳定，避免漏掉异步延迟的结果表。
-                        if matched_prompt and stable_count >= 5:
-                            return output
-                    elif stable_count >= 3:
-                        return output
-                else:
-                    stable_count = 0
-                    last_output_length = current_length
-
-                if matched_prompt:
-                    prompt_seen = True
+                    received = True
+                # recv 返回空串：连接暂无数据，仍参与稳定性计数。
             except Exception:
-                if time.time() - last_output_time > STABLE_OUTPUT_TIMEOUT:
+                # socket.timeout：若已超 STABLE_OUTPUT_TIMEOUT 无新数据，兜底返回。
+                if time.time() - last_output_time > STABLE_OUTPUT_TIMEOUT and output:
                     return output
-            time.sleep(POLL_INTERVAL)
+
+            # require_stable 命令刚收到数据时，输出必然未稳定，检测必返回
+            # False（只是浪费一次正则）；跳过直到 recv 不再有新数据再检测。
+            # 非 require_stable 命令靠"首次匹配提示符即返回"，必须每次都检测。
+            if not (received and require_stable) and _check_done():
+                return output
+
+            # 活跃流式传输时（刚收到数据）立刻回去 recv，不睡；仅在空闲时
+            # sleep 让出 CPU，此时 settimeout(recv_timeout) 已限制空闲节奏。
+            if not received:
+                time.sleep(poll_interval)
 
         return output
 
@@ -238,7 +280,6 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
     try:
         shell = ssh.invoke_shell()
         shell.settimeout(3)
-
         with contextlib.suppress(Exception):
             shell.recv(1024)
 
@@ -258,23 +299,21 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
         command_output = wait_for_prompt(shell, ['> ', 'tf> ', r'\(tf\)', 'All done'],
                                          timeout=30, poll_interval=0.1, require_stable=True)
 
-        time.sleep(0.5)
-
         shell.send("exit\n")
         wait_for_prompt(shell, [r'\$ ', r'\# '], timeout=2, poll_interval=0.05)
 
         output = tradefed_output + command_output
-        max_retries = 10
-        for _ in range(max_retries):
-            try:
-                chunk = shell.recv(16384).decode('utf-8', errors='ignore')
+        # 捞残余输出：连接即将关闭，用短 timeout 快速排空，避免阻塞。
+        with contextlib.suppress(Exception):
+            shell.settimeout(0.2)
+            for _ in range(5):
+                try:
+                    chunk = shell.recv(16384).decode('utf-8', errors='ignore')
+                except Exception:
+                    break
                 if not chunk:
                     break
                 output += chunk
-                time.sleep(0.1)
-            except Exception:
-                break
-
         with contextlib.suppress(Exception):
             shell.close()
 

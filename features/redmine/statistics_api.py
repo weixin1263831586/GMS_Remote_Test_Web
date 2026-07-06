@@ -111,6 +111,8 @@ async def _live_stats_for_user(service, user_id: int) -> dict[str, Any]:
     """
     client = service.agent._make_client()
     try:
+        # 两个 Redmine 实时接口都通过 to_thread 复用同一 python-redmine
+        # Session（非线程安全），故必须串行调用；任一失败不影响另一个。
         data: dict[str, Any] = {}
         try:
             data.update(await client.count_issues_by_assignee(user_id))

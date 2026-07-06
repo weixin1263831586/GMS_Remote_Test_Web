@@ -315,7 +315,7 @@ async def create_firmware_share(request: Request):
         name = str(payload.get("name") or "").strip()
         expires_days = int(payload.get("expires_days") or 0)
         host, user, path = _parse_remote_spec(remote)
-        password = (payload.get("password") or None) and str(payload.get("password")) or None
+        password = payload.get("password") or None
         config = runtime.config_manager.load_config()
         info = _stat_remote(host, user, path, config, password=password)
         username = get_client_username_from_request(request)
@@ -346,7 +346,7 @@ async def validate_firmware_share(request: Request):
     try:
         payload = await request.json()
         host, user, path = _parse_remote_spec(str(payload.get("remote") or "").strip())
-        password = (payload.get("password") or None) and str(payload.get("password")) or None
+        password = payload.get("password") or None
         config = runtime.config_manager.load_config()
         info = _stat_remote(host, user, path, config, password=password)
         return success_response(data=info)
@@ -367,7 +367,7 @@ async def browse_firmware_share_remote(request: Request):
             host = str(payload.get("host") or "10.10.10.206").strip()
             user = str(payload.get("user") or "hcq").strip() or None
             path = str(PurePosixPath(str(payload.get("path") or "/home/hcq")))
-        password = (payload.get("password") or None) and str(payload.get("password")) or None
+        password = payload.get("password") or None
         config = runtime.config_manager.load_config()
         info = _list_remote_dir(host, user, path, config, password=password)
         return success_response(data=info)

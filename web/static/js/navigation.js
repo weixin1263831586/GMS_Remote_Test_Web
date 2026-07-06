@@ -10087,6 +10087,7 @@ window.showSshdInstallGuide = showSshdInstallGuide;
 window.closeSshdInstallGuide = closeSshdInstallGuide;
 window.autoInstallUsbipd = autoInstallUsbipd;
 window.resetReportAnalysis = resetReportAnalysis;
+window.sendReportAnalysisEmail = sendReportAnalysisEmail;
 window.openReportDiagnosisModal = openReportDiagnosisModal;
 window.closeReportDiagnosisWorkbench = closeReportDiagnosisWorkbench;
 window.minimizeReportDiagnosisWorkbench = minimizeReportDiagnosisWorkbench;
@@ -10442,6 +10443,85 @@ function resetReportAnalysis() {
     }
 
     debugLog('[resetReportAnalysis] Report analysis reset complete');
+}
+
+/**
+ * 将当前报告分析结果作为 HTML 邮件发送。
+ * 复用 POST /api/email/send（SMTP 配置来自 Redmine 看板设置）。
+ */
+async function sendReportAnalysisEmail() {
+    const data = window.currentReportAnalysisData;
+    if (!data || !data.summary) {
+        showToast('请先生成报告分析结果', 'warning');
+        return;
+    }
+    const to = prompt('收件人邮箱（多个用逗号或分号分隔）：', '');
+    if (!to || !to.trim()) return;
+    const cc = (prompt('抄送（可留空，多个用逗号或分号分隔）：', '') || '').trim();
+
+    const esc = (s) => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    const s = data.summary || {};
+    const d = data.details || {};
+    const reportName = data.report_name || data.test_result?.test_name || '测试报告';
+    const rows = [
+        ['测试类型', d.test_type],
+        ['套件版本', d.suite_version],
+        ['Android版本', d.android_version],
+        ['SOC平台', d.soc_platform],
+        ['总用例数', s.total],
+        ['通过', s.pass],
+        ['失败', s.fail],
+        ['通过率', s.pass_rate],
+    ].filter(([, v]) => v !== undefined && v !== null && v !== '');
+
+    const summaryHtml = rows.map(([k, v]) =>
+        `<tr><td style="padding:4px 12px 4px 0;color:#666;">${esc(k)}</td><td style="padding:4px 0;"><b>${esc(v)}</b></td></tr>`
+    ).join('');
+
+    const failures = Array.isArray(data.failures) ? data.failures : [];
+    const failureHtml = failures.length ? `
+        <h3 style="margin:18px 0 8px;">❌ 失败用例（${failures.length}）</h3>
+        ${failures.map((f, i) => `
+            <div style="border:1px solid #eee;border-radius:6px;padding:10px;margin-bottom:8px;">
+                <div><b>${i + 1}. ${esc(f.name || '未知用例')}</b> <span style="color:#888;">[${esc(f.module || '未知模块')}]</span></div>
+                <pre style="white-space:pre-wrap;background:#fafafa;padding:8px;margin-top:6px;font-size:12px;border-radius:4px;">${esc(f.reason || '无失败原因')}</pre>
+            </div>
+        `).join('')}
+    ` : '<p style="color:#888;">无失败用例 🎉</p>';
+
+    const body = `
+        <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#222;max-width:760px;">
+            <h2 style="margin:0 0 12px;">📊 测试报告分析：${esc(reportName)}</h2>
+            <table style="border-collapse:collapse;font-size:13px;">${summaryHtml}</table>
+            ${failureHtml}
+        </div>`;
+
+    const subject = `测试报告分析 - ${reportName}（通过率 ${s.pass_rate || 'N/A'}）`;
+    try {
+        const resp = await fetch('/api/email/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                to: to.trim(),
+                cc: cc || undefined,
+                subject,
+                body,
+                is_html: true,
+                sender_name: '报告分析',
+            }),
+        });
+        const result = await resp.json().catch(() => ({ success: false }));
+        if (result.success) {
+            showToast(`邮件已发送至 ${result.data.to.length} 位收件人`, 'success');
+        } else {
+            showToast('邮件发送失败：' + (result.error || '未知错误'), 'error');
+        }
+    } catch (err) {
+        showToast('邮件发送失败：' + (err.message || err), 'error');
+    }
 }
 
 /**

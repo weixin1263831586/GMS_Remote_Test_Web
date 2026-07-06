@@ -143,22 +143,10 @@ def _parse_json(raw: str) -> dict[str, Any] | None:
 
 
 def _question_terms(question: str) -> list[str]:
-    text = (question or "").strip().lower()
-    if not text:
-        return []
-    terms: list[str] = []
-    terms.extend(t for t in re.split(r"\s+", text) if t)
-    terms.extend(re.findall(r"[a-z0-9][a-z0-9_.+-]*", text))
-    terms.extend(re.findall(r"[\u4e00-\u9fff]{2,}", text))
-    for cjk in re.findall(r"[\u4e00-\u9fff]{3,}", text):
-        terms.extend(cjk[i : i + 2] for i in range(len(cjk) - 1))
-    result: list[str] = []
-    seen: set[str] = set()
-    for term in terms:
-        if term and term not in seen:
-            seen.add(term)
-            result.append(term)
-    return result
+    """\u590d\u7528 storage._search_terms \u7684\u4e2d\u82f1\u6587\u5206\u8bcd\uff0c\u4fdd\u8bc1\u95ee\u7b54\u4e0e\u68c0\u7d22\u7528\u540c\u4e00\u5957\u89c4\u5219\u3002"""
+    from features.notes.storage import _search_terms
+
+    return _search_terms(question)
 
 
 def _best_excerpt(content: str, question: str, size: int = 1500) -> str:
