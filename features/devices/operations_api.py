@@ -395,7 +395,23 @@ async def devices_management(request: Request):
             payload.update({"success": True, "source": "local"})
             return JSONResponse(content=payload)
 
-        with SSHConnection(config) as ssh:
+        ssh = runtime.ssh_manager.get_connection(config)
+        if not ssh:
+            logger.warning("[Device Management] SSH unavailable")
+            cached_payload = _cached_management_payload()
+            if cached_payload:
+                payload = dict(cached_payload)
+                payload.update({"success": True, "stale": True, "warning": "SSH connection failed; showing cached device data"})
+                return JSONResponse(content=payload)
+            return JSONResponse(content={
+                "success": False,
+                "devices": [],
+                "source": "ssh",
+                "error": "SSH connection failed",
+                "warning": "设备主机 SSH 连接失败，请检查主机、账号、密码或密钥配置。",
+            })
+
+        try:
             output, _, _ = runtime.ssh_manager.execute_command(ssh, "adb devices", timeout=5)
             device_ids = DeviceUtils.parse_adb_devices(output)
 
@@ -417,9 +433,11 @@ async def devices_management(request: Request):
                     _mgmt_username(request),
                 )
             )
+        finally:
+            runtime.ssh_manager.return_connection(ssh)
 
     except Exception as e:
-        logger.error(f"Error getting devices management: {e}")
+        logger.error(f"Error getting devices management: {e}", exc_info=True)
         return JSONResponse(
             content={"success": False, "error": str(e)}, status_code=500
         )

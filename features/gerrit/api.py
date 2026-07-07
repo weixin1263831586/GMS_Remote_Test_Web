@@ -67,6 +67,53 @@ def _dashboard_config_for_request(request: Request) -> dict[str, Any]:
     )
 
 
+def _name_by_email(request: Request) -> dict[str, str]:
+    """邮箱→中文姓名映射：redmine_user_map → personal_profiles.name（后者不覆盖前者）。
+
+    统一供部门成员解析/统计展示等所有需要 owner 邮箱→中文姓名 的场景调用，
+    避免各调用点重复 reach 配置与 redmine_user_map。
+    """
+    cfg = _dashboard_config_for_request(request)
+    name_by_email: dict[str, str] = {}
+    try:
+        for entry in _redmine_users_for_request(request):
+            email = str(entry.get("email") or "").strip().lower()
+            name = str(entry.get("name") or "").strip()
+            if email and name:
+                name_by_email[email] = name
+    except Exception:
+        pass
+    for p in cfg.get("personal_profiles") or []:
+        email = str(p.get("owner") or "").strip().lower()
+        name = str(p.get("name") or "").strip()
+        if email and name and email not in name_by_email:
+            name_by_email[email] = name
+    return name_by_email
+
+
+def _display_name(owner_text: str, name_by_email: dict[str, str]) -> str:
+    """owner 邮箱 → 中文姓名，回退邮箱前缀，再回退原文/占位。"""
+    key = str(owner_text or "").strip().lower()
+    return name_by_email.get(key) or str(owner_text or "").split("@")[0] or owner_text or "-"
+
+
+def list_department_members(request: Request, profile_id: str = "") -> list[dict[str, str]]:
+    """部门 profile 的成员列表 [{owner(邮箱), name(中文姓名)}]。
+
+    邮箱→中文姓名优先级：redmine_user_map → personal_profiles.name → 邮箱前缀。
+    供部门周报等跨模块消费者调用，避免各自 reach 进 gerrit 的内部配置/解析细节。
+    """
+    cfg = _dashboard_config_for_request(request)
+    profile = select_gerrit_department_profile(cfg, profile_id)
+    owners = _owners_for_department_profile(cfg, profile)
+    name_by_email = _name_by_email(request)
+
+    members: list[dict[str, str]] = []
+    for owner_text in owners:
+        members.append({"owner": owner_text, "name": _display_name(owner_text, name_by_email)})
+    return members
+
+
 @router.get("/config")
 async def get_gerrit_dashboard_config(request: Request):
     manager = _config_for_request(request)
@@ -504,26 +551,8 @@ async def get_gerrit_department_statistics(
 
     semaphore = asyncio.Semaphore(4)
 
-    # owner 邮箱 → 中文姓名映射：redmine_user_map 优先，personal_profiles.name 次之，
-    # 最后回退邮箱前缀。供部门成员表显示中文姓名。
-    owner_names: dict[str, str] = {}
-    try:
-        for entry in _redmine_users_for_request(request):
-            email = str(entry.get("email") or "").strip().lower()
-            name = str(entry.get("name") or "").strip()
-            if email and name:
-                owner_names[email] = name
-    except Exception:
-        pass
-    for p in cfg.get("personal_profiles") or []:
-        email = str(p.get("owner") or "").strip().lower()
-        name = str(p.get("name") or "").strip()
-        if email and name and email not in owner_names:
-            owner_names[email] = name
-
-    def _display_name(owner_text: str) -> str:
-        key = str(owner_text or "").strip().lower()
-        return owner_names.get(key) or str(owner_text or "").split("@")[0] or owner_text or "-"
+    # owner 邮箱 → 中文姓名映射，复用统一解析（与部门成员列表/周报一致）。
+    name_by_email = _name_by_email(request)
 
     async def _owner_stats(owner_text: str) -> dict[str, Any]:
         async with semaphore:
@@ -536,7 +565,7 @@ async def get_gerrit_department_statistics(
             pending_review_of_me = len(review_result.get("items") or [])
             return {
                 "owner": owner_text,
-                "name": _display_name(owner_text),
+                "name": _display_name(owner_text, name_by_email),
                 "summary": stats["summary"],
                 "summary_extra": {"pending_review_of_me_count": pending_review_of_me},
                 "trends": stats["trends"],
@@ -607,7 +636,8 @@ def _get_cache(cache_key: str, ttl: int, refresh: bool) -> dict[str, Any] | None
 
 
 def _set_cache(cache_key: str, data: dict[str, Any]) -> None:
-    _STATS_CACHE.clear()
+    # Only update this key — clearing the whole dict would evict other users'
+    # freshly-written entries under concurrent requests.
     _STATS_CACHE[cache_key] = {"cached_at_ts": datetime.now().timestamp(), "data": data}
 
 

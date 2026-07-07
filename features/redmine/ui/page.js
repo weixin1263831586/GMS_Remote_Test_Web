@@ -11,7 +11,7 @@ let currentPage = 1;
 const pageSize = 15;
 let currentRunId = '';
 let statsUserInitialized = false;
-let statsConfig = {stale_days: 20, window_days: 60, cache_ttl: 600, redmine: {base_url: 'https://redmine.rock-chips.com'}, dashboard: {profiles: [], defaults: {list_limit: 50, issue_limit: 500}}};
+let statsConfig = {stale_days: 20, window_days: 60, cache_ttl: 600, freshness_days: 180, redmine: {base_url: 'https://redmine.rock-chips.com'}, dashboard: {profiles: [], defaults: {list_limit: 50, issue_limit: 500}}};
 let departmentProfileId = '';
 let projectProfileId = '';
 // 趋势明细点击上下文：当前看板作用的指派人姓名列表（个人=[name]，部门=全员）
@@ -840,6 +840,7 @@ function showSettingsModal() {
       document.getElementById('settingStaleDays').value = statsConfig.stale_days || 20;
       document.getElementById('settingWindowDays').value = statsConfig.window_days || 0;
       document.getElementById('settingCacheTtl').value = statsConfig.cache_ttl || 600;
+      document.getElementById('settingFreshnessDays').value = statsConfig.freshness_days || 180;
       // SMTP fields from statsConfig (returned by get_stats_config)
       var cfg = await api('/api/redmine-agent/config/stats');
       var email = (cfg.dashboard || {}).email || {};
@@ -862,12 +863,13 @@ async function saveSettings() {
   var stale = parseInt(document.getElementById('settingStaleDays').value) || 20;
   var window_ = parseInt(document.getElementById('settingWindowDays').value) || 60;
   var cacheTtl = parseInt(document.getElementById('settingCacheTtl').value) || 600;
+  var freshnessDays = parseInt(document.getElementById('settingFreshnessDays').value) || 180;
   try {
     // Save stats config
     var result = await api('/api/redmine-agent/config/stats', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({stale_days: stale, window_days: window_, cache_ttl: cacheTtl})
+      body: JSON.stringify({stale_days: stale, window_days: window_, cache_ttl: cacheTtl, freshness_days: freshnessDays})
     });
     if (result) { statsConfig = Object.assign({}, statsConfig, result); _statsConfigCacheTs = Date.now(); }
     // Save SMTP config
@@ -1170,13 +1172,15 @@ async function saveIssueToWiki(issueId) {
   }
   const content = parts.join('\n');
   const payload = {
-    content: content,
-    notebook: 'Redmine问题沉淀',
+    content_md: content,
+    space_id: 'issues',
+    title: `Redmine #${issueId} ${item.subject || ''}`.trim(),
+    source: 'redmine',
     related_module: module || '',
     links: { redmine_issue_ids: [Number(issueId)] }
   };
   try {
-    await api('/api/notes', {
+    await api('/api/knowledge/docs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

@@ -67,7 +67,22 @@ async def list_suites(base_path: str = None, force_refresh: bool = Query(False))
         logger.debug("[TestSuites] Returning cached suite list for %s", base_path)
         return JSONResponse(content={**cached, "cached": True})
 
-    suites = _get_available_test_suites(config, base_path)
+    try:
+        suites = _get_available_test_suites(config, base_path)
+    except RuntimeError as exc:
+        if "SSH connection failed" in str(exc):
+            logger.warning("[TestSuites] SSH unavailable while listing suites: %s", exc)
+            return JSONResponse(content={
+                "success": False,
+                "suites": [],
+                "count": 0,
+                "base_path": base_path,
+                "source": "ssh",
+                "error": "SSH connection failed",
+                "warning": "测试套件主机 SSH 连接失败，请检查主机、账号、密码或密钥配置。",
+                "cached": False,
+            })
+        raise
     payload = {
         "success": True,
         "suites": suites,

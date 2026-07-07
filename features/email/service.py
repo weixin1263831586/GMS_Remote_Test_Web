@@ -18,6 +18,7 @@ from email.encoders import encode_base64
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 from typing import Any
 
 
@@ -46,6 +47,26 @@ def _load_email_config(manager) -> dict[str, Any]:
     return dashboard_cfg.get("email") or {}
 
 
+def _resolve_allowed_attachment(path: str, allowed_roots: list[str | os.PathLike[str]]) -> Path | None:
+    """Return a real attachment path only if it lives under an allowed root."""
+    if not path:
+        return None
+    try:
+        candidate = Path(path).expanduser().resolve(strict=True)
+    except OSError:
+        return None
+    if not candidate.is_file():
+        return None
+    for root in allowed_roots:
+        try:
+            root_path = Path(root).expanduser().resolve(strict=True)
+        except OSError:
+            continue
+        if candidate == root_path or root_path in candidate.parents:
+            return candidate
+    return None
+
+
 def send_email(
     to: str | list[str],
     subject: str,
@@ -54,6 +75,7 @@ def send_email(
     is_html: bool = False,
     cc: str | list[str] | None = None,
     attachment_paths: list[str] | None = None,
+    allowed_attachment_roots: list[str | os.PathLike[str]] | None = None,
     sender_name: str | None = None,
     manager=None,
 ) -> dict[str, Any]:
@@ -61,8 +83,8 @@ def send_email(
 
     - ``to`` / ``cc``：字符串（逗号/分号分隔）或列表。
     - ``is_html``：True 时 body 作为 HTML 正文。
-    - ``attachment_paths``：附件绝对/相对路径列表；路径不存在的项会跳过并记录到
-      ``error``（但不阻断发送）。
+    - ``attachment_paths``：附件路径列表；默认拒绝读取。只有落在
+      ``allowed_attachment_roots`` 下的普通文件才会作为附件发送。
     - ``sender_name``：发件人昵称；缺省用配置里的 username 或 from_addr。
     - ``manager``：redmine owner-aware config manager（必传）。
     """
@@ -119,21 +141,27 @@ def send_email(
 
     # 处理附件（参考 rk-email send_email.py）
     missing_attachments: list[str] = []
+    blocked_attachments: list[str] = []
+    allowed_roots = list(allowed_attachment_roots or [])
     for path in attachment_paths or []:
-        abs_path = os.path.abspath(path)
-        if not os.path.exists(abs_path):
-            missing_attachments.append(abs_path)
+        abs_path = os.path.abspath(str(path))
+        resolved = _resolve_allowed_attachment(str(path), allowed_roots)
+        if resolved is None:
+            if os.path.exists(abs_path):
+                blocked_attachments.append(abs_path)
+            else:
+                missing_attachments.append(abs_path)
             continue
         try:
-            filename = os.path.basename(abs_path)
-            with open(abs_path, "rb") as fh:
+            filename = resolved.name
+            with resolved.open("rb") as fh:
                 part = MIMEBase("application", "octet-stream")
                 part.set_payload(fh.read())
             encode_base64(part)
             part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
             message.attach(part)
         except Exception as exc:  # 单个附件失败不阻断整体发送
-            missing_attachments.append(f"{abs_path} ({exc})")
+            missing_attachments.append(f"{resolved} ({exc})")
 
     # 真正的 SMTP 接收者列表 = to + cc 去重
     smtp_recipients = list({*final_to_list, *final_cc_list})
@@ -173,4 +201,6 @@ def send_email(
     }
     if missing_attachments:
         result["attachments_missing"] = missing_attachments
+    if blocked_attachments:
+        result["attachments_blocked"] = blocked_attachments
     return result

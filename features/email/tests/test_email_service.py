@@ -132,13 +132,14 @@ class SendEmailTests(unittest.TestCase):
     @patch("features.email.service.smtplib.SMTP_SSL")
     def test_attachment_present_and_missing(self, smtp_cls):
         smtp = smtp_cls.return_value.__enter__.return_value
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".md") as fh:
-            fh.write(b"# weekly report")
-            good_path = fh.name
-        try:
+        with tempfile.TemporaryDirectory() as tmp:
+            good_path = os.path.join(tmp, "weekly.md")
+            with open(good_path, "wb") as fh:
+                fh.write(b"# weekly report")
             result = send_email(
                 "a@x.com", "主题", "正文",
                 attachment_paths=[good_path, "/nonexistent/file.xyz"],
+                allowed_attachment_roots=[tmp],
                 manager=_fake_manager(QIYE_CFG),
             )
             self.assertTrue(result["sent"])
@@ -152,8 +153,32 @@ class SendEmailTests(unittest.TestCase):
             ]
             self.assertEqual(len(attachments), 1)
             self.assertIn("/nonexistent/file.xyz", result["attachments_missing"][0])
+
+    @patch("features.email.service.smtplib.SMTP_SSL")
+    def test_attachment_paths_blocked_without_allowed_roots(self, smtp_cls):
+        smtp = smtp_cls.return_value.__enter__.return_value
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".md") as fh:
+            fh.write(b"# private")
+            blocked_path = fh.name
+        try:
+            result = send_email(
+                "a@x.com", "主题", "正文",
+                attachment_paths=[blocked_path],
+                manager=_fake_manager(QIYE_CFG),
+            )
+
+            self.assertTrue(result["sent"])
+            self.assertIn(blocked_path, result["attachments_blocked"])
+            _from, _recipients, raw = smtp.sendmail.call_args.args
+            msg = message_from_string(raw)
+            attachments = [
+                part.get_filename()
+                for part in msg.walk()
+                if part.get_content_disposition() == "attachment"
+            ]
+            self.assertEqual(attachments, [])
         finally:
-            os.unlink(good_path)
+            os.unlink(blocked_path)
 
     @patch("features.email.service.smtplib.SMTP_SSL")
     def test_smtp_auth_error_returned(self, smtp_cls):

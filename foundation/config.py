@@ -758,6 +758,7 @@ def get_ubuntu_host() -> str:
                     s.settimeout(2)
                     s.connect(('8.8.8.8', 53))
                     _cached_ubuntu_host = s.getsockname()[0]
-            except Exception:
+            except Exception as exc:
+                logger.debug("Could not detect local ubuntu host via UDP probe: %s", exc)
                 _cached_ubuntu_host = ''
     return _cached_ubuntu_host

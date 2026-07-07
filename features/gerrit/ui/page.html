@@ -1030,13 +1030,15 @@ async function saveChangeToWiki(changeId) {
   parts.push('');
   const content = parts.join('\n');
   const payload = {
-    content: content,
-    notebook: 'Gerrit补丁说明',
+    content_md: content,
+    space_id: 'issues',
+    title: `Gerrit ${id} ${subject || ''}`.trim(),
+    source: 'gerrit',
     related_module: project || '',
     links: { gerrit_change_ids: [Number(id)] }
   };
   try {
-    await api('/api/notes', {
+    await api('/api/knowledge/docs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

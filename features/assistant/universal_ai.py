@@ -4,8 +4,10 @@
 
 import json
 import logging
+import os
 import re
 import time
+from urllib.parse import urlparse
 
 import requests
 
@@ -15,6 +17,36 @@ logger = logging.getLogger(__name__)
 EMOJI_TARGET = "🎯"
 EMOJI_CHART = "📊"
 EMOJI_CHECK = "✅"
+
+
+def _is_local_provider(provider_name: str, config: dict) -> bool:
+    base_url = str(config.get('base_url') or '')
+    host = (urlparse(base_url).hostname or '').lower()
+    return (
+        'local' in str(provider_name or '').lower()
+        or host in {'localhost', '127.0.0.1', '0.0.0.0'}
+        or host.startswith('10.')
+        or host.startswith('172.16.')
+        or host.startswith('192.168.')
+    )
+
+
+def _auth_headers(provider_name: str, config: dict, header_name: str = 'Authorization') -> dict:
+    api_key = str(config.get('api_key') or '').strip()
+    if not api_key and _is_local_provider(provider_name, config):
+        api_key = os.getenv('GMS_LOCAL_AI_API_KEY', '').strip()
+    if not api_key:
+        # 没有可用 token 就明确报错，避免静默发出无鉴权请求被反代以
+        # "Invalid token" 拒绝（看起来像是网络/模型问题）。本地 provider 的
+        # token 可在 config 的 api_key 或环境变量 GMS_LOCAL_AI_API_KEY 提供。
+        raise ValueError(
+            f'{provider_name} API密钥未配置（请在 ai_models.providers.{provider_name}'
+            f'.api_key 或环境变量 GMS_LOCAL_AI_API_KEY 中设置）'
+        )
+    if header_name == 'x-api-key':
+        return {'x-api-key': api_key}
+    return {'Authorization': f'Bearer {api_key}'}
+
 
 class UniversalAIAnalyzer:
     """通用AI模型分析器"""
@@ -103,11 +135,8 @@ class UniversalAIAnalyzer:
             if not provider_name:
                 return {'success': False, 'error': '未配置可用的 AI 提供商'}
             provider_config = self.config.get('providers', {}).get(provider_name, {})
-            api_key = provider_config.get('api_key', '')
             base_url = provider_config.get('base_url')
             model = provider_config.get('model')
-            if not api_key:
-                return {'success': False, 'error': f'{provider_name} API密钥未配置'}
             if not base_url or not model:
                 return {'success': False, 'error': f'{provider_name} base_url/model 未配置'}
 
@@ -120,12 +149,12 @@ class UniversalAIAnalyzer:
 
             if api_format == self.API_FORMAT_ANTHROPIC:
                 url = f"{base_url}/v1/messages" if not base_url.endswith('/messages') else base_url
-                headers = {"x-api-key": api_key, "Content-Type": "application/json", "anthropic-version": "2023-06-01"}
+                headers = {**_auth_headers(provider_name, provider_config, 'x-api-key'), "Content-Type": "application/json", "anthropic-version": "2023-06-01"}
                 data = {"model": model, "max_tokens": tokens, "messages": messages,
                         "system": system_prompt or None, "disable_thinking": True, "skip_reasoning": True}
                 data = {k: v for k, v in data.items() if v is not None}
             else:
-                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                headers = {**_auth_headers(provider_name, provider_config), "Content-Type": "application/json"}
                 data = {"model": model, "messages": messages, "temperature": provider_config.get('temperature', 0.3),
                         "max_tokens": tokens, "disable_thinking": True, "skip_reasoning": True,
                         "enable_thinking": False}
@@ -206,10 +235,6 @@ class UniversalAIAnalyzer:
                                 error_message: str, stack_trace: str | None, source_code: str | None) -> dict:
         """Call the provider AI model to analyze a test failure."""
         try:
-            api_key = config.get('api_key', '')
-            if not api_key:
-                return {'success': False, 'error': f'{provider_name} API密钥未配置'}
-
             base_url = config.get('base_url')
             model = config.get('model')
 
@@ -225,7 +250,7 @@ class UniversalAIAnalyzer:
             if api_format == self.API_FORMAT_ANTHROPIC:
                 url = f"{base_url}/v1/messages" if not base_url.endswith('/messages') else base_url
                 headers = {
-                    "x-api-key": api_key,
+                    **_auth_headers(provider_name, config, 'x-api-key'),
                     "Content-Type": "application/json",
                     "anthropic-version": "2023-06-01"
                 }
@@ -238,7 +263,7 @@ class UniversalAIAnalyzer:
                 }
             else:
                 headers = {
-                    "Authorization": f"Bearer {api_key}",
+                    **_auth_headers(provider_name, config),
                     "Content-Type": "application/json"
                 }
                 data = {

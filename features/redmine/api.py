@@ -235,6 +235,14 @@ def _clear_stats_caches() -> None:
     _PROJECT_STATS_CACHE.clear()
 
 
+def _clear_historical_trend_cache() -> None:
+    """清除历史趋势长期缓存（缓存所有权在 client 模块，委托其统一入口）。"""
+    # 延迟导入避免 api↔client 层在模块加载期耦合；缓存失效逻辑应紧邻其所有者。
+    from features.redmine.client import clear_historical_trend_cache
+
+    clear_historical_trend_cache()
+
+
 def _get_redmine_base_url(request: Request | None = None) -> str:
     manager = get_redmine_config_for_request(request) if request is not None else config_manager
     return manager.get_redmine_base_url()
@@ -913,6 +921,12 @@ async def update_stats_config(request: Request):
         stats["window_days"] = max(0, min(365, int(body["window_days"])))
     if "cache_ttl" in body:
         stats["cache_ttl"] = max(0, min(3600, int(body["cache_ttl"])))
+    freshness_changed = False
+    if "freshness_days" in body:
+        new_freshness = max(1, min(3650, int(body["freshness_days"])))
+        if stats.get("freshness_days") != new_freshness:
+            freshness_changed = True
+        stats["freshness_days"] = new_freshness
     if "chart_date_ranges" in body and isinstance(body.get("chart_date_ranges"), dict):
         current_ranges = dict(stats.get("chart_date_ranges") or {})
         for key, value in body.get("chart_date_ranges", {}).items():
@@ -933,6 +947,9 @@ async def update_stats_config(request: Request):
     if not manager.save_redmine_stats_config(stats):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save stats config"})
     _clear_stats_caches()
+    if freshness_changed:
+        # Boundary moved: rebuild historical buckets on next request.
+        _clear_historical_trend_cache()
     return {"success": True, "data": manager.get_redmine_stats_config()}
 
 

@@ -6,10 +6,10 @@
 import logging
 import re
 import socket
-import subprocess
-import time
 from typing import Any
 from urllib.parse import urlparse
+
+from foundation import networking
 
 
 logger = logging.getLogger(__name__)
@@ -36,14 +36,8 @@ class CommonUtils:
                 continue
         return data.decode('utf-8', errors='replace')
 
-    # 本地主机标识列表
-    LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1']
-
-    # Cached local IPs with TTL
-    _cached_local_ips = None
-    _cached_local_ips_time = 0.0
-    _LOCAL_IPS_TTL = 60.0  # seconds
-
+    # NOTE: 本机 IP 探测/缓存已在 foundation.networking 中实现为唯一权威版本
+    # （get_local_ips / is_local_host），这里仅做转发以保持旧调用兼容。
     @classmethod
     def get_local_ip(cls) -> str | None:
         """
@@ -60,66 +54,15 @@ class CommonUtils:
 
     @classmethod
     def get_local_ips(cls) -> set:
-        """获取本机所有可识别 IP 地址（带 60 秒缓存）。"""
-        now = time.time()
-        if cls._cached_local_ips is not None and (now - cls._cached_local_ips_time) < cls._LOCAL_IPS_TTL:
-            return cls._cached_local_ips
-
-        local_ips = set(cls.LOCAL_HOSTS)
-        local_ip = cls.get_local_ip()
-        if local_ip:
-            local_ips.add(local_ip)
-
-        try:
-            for info in socket.getaddrinfo(socket.gethostname(), None):
-                addr = info[4][0]
-                if addr:
-                    local_ips.add(addr)
-        except Exception as e:
-            logger.debug(f"Failed to getaddrinfo local host: {e}")
-
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-                sock.connect(('8.8.8.8', 80))
-                local_ips.add(sock.getsockname()[0])
-        except Exception as e:
-            logger.debug(f"Failed to detect outbound local IP: {e}")
-
-        try:
-            result = subprocess.run(
-                ['hostname', '-I'],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
-            if result.returncode == 0:
-                local_ips.update(ip for ip in result.stdout.split() if ip)
-        except Exception as e:
-            logger.debug(f"Failed to run hostname -I: {e}")
-
-        cls._cached_local_ips = local_ips
-        cls._cached_local_ips_time = now
-        return local_ips
+        """获取本机所有可识别 IP 地址（带 60 秒缓存）。委托给 foundation.networking。"""
+        return networking.get_local_ips()
 
     @classmethod
     def is_local_host(cls, host: str) -> bool:
         """
-        检查是否为本地主机
-
-        Args:
-            host: 主机地址
-
-        Returns:
-            是否为本地主机
+        检查是否为本地主机。委托给 foundation.networking 的权威实现。
         """
-        if not host:
-            return False
-
-        if '@' in host:
-            host = host.rsplit('@', 1)[1]
-
-        host = host.strip().strip('[]')
-        return host in cls.get_local_ips()
+        return networking.is_local_host(host)
 
     @classmethod
     def sanitize_url(cls, url: str) -> str:
