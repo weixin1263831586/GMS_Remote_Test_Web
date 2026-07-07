@@ -83,6 +83,45 @@ def _bool_param(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "on", "yes"}
 
 
+async def _gather_weekly_sources(
+    request: Request,
+    start: date,
+    end: date,
+    *,
+    want_rm: bool,
+    want_gr: bool,
+    want_a17: bool,
+    want_gms: bool,
+    redmine_name: str | None = None,
+    gerrit_owner: str | None = None,
+    android17_owner: str | None = None,
+) -> dict[str, dict[str, Any]]:
+    """四路并发采集周报数据源，返回 {"redmine","gerrit","android17","gms_test"}。
+
+    各路互不依赖，asyncio.gather 并发（耗时 ≈ 最慢一路）。未启用的来源返回
+    {"available": None} 占位，保证下游解构永远拿到四个键。get_weekly_report 与
+    get_weekly_report_department 共用此函数，避免两处复制 fan-out + 索引逻辑。
+    gms_test 走 tradefed list results（paramiko socket IO，每次阻塞系统调用释放
+    GIL），可与 redmine/gerrit 安全同池并发。
+    """
+    coros: list = []
+    keys: list[str] = []
+    if want_rm:
+        coros.append(_collect_redmine(request, start, end, name=redmine_name)); keys.append("redmine")
+    if want_gr:
+        coros.append(_collect_gerrit(request, start, end, owner=gerrit_owner)); keys.append("gerrit")
+    if want_a17:
+        coros.append(_collect_android17(start, end, owner=android17_owner)); keys.append("android17")
+    if want_gms:
+        coros.append(_collect_gms_test(start, end)); keys.append("gms_test")
+    gathered = await asyncio.gather(*coros) if coros else []
+    # keys 与 gathered 一一对齐；未启用的来源填占位，保证下游解构永远拿到四个键。
+    sources = dict(zip(keys, gathered))
+    for k in ("redmine", "gerrit", "android17", "gms_test"):
+        sources.setdefault(k, {"available": None})
+    return sources
+
+
 # ---------------------------------------------------------------------------
 # Android17 腾讯文档解析
 # ---------------------------------------------------------------------------
@@ -331,13 +370,11 @@ def _run_tradefed_list_results(suite: dict[str, Any], config: dict[str, Any]) ->
             suite_path=suite.get("tools_path") or "",
             tradefed_bin=suite.get("full_path") or "",
         )
-        logger.warning("[Weekly][GMS] %s list results code=%s output_len=%s output_head=%s",
-            suite.get('version') or suite.get('test_type'), code, len(output),
-            output[:500].replace('\n', ' | '))
         if code != 0:
+            logger.warning("[Weekly][GMS] %s list results failed code=%s",
+                suite.get('version') or suite.get('test_type'), code)
             return []
         parsed = parse_tradefed_list_results(output)
-        logger.warning("[Weekly][GMS] %s parsed results=%s", suite.get('version') or suite.get('test_type'), len(parsed.get('results') or []))
         return parsed.get("results") or []
     except Exception:
         logger.debug("[Weekly] tradefed list results 失败: %s", suite.get("version"), exc_info=True)
@@ -357,7 +394,6 @@ async def _collect_gms_test(start: date, end: date) -> dict[str, Any]:
     config = te_runtime.config_manager.load_config()
     base_path = config.get("suites_path") or get_default_suites_path(config)
     suites = _get_available_test_suites(config, base_path)
-    logger.warning("[Weekly][GMS] suites found: %s", [s.get('version') or s.get('test_type') for s in suites])
     if not suites:
         return {"available": False, "error": f"GMS 套件目录为空或不存在: {base_path}"}
 
@@ -375,7 +411,6 @@ async def _collect_gms_test(start: date, end: date) -> dict[str, Any]:
     async def run_one(suite: dict[str, Any]) -> list[dict[str, Any]]:
         async with sem:
             sessions = await asyncio.to_thread(_run_tradefed_list_results, suite, config)
-            logger.warning("[Weekly][GMS] %s sessions=%s", suite.get('version') or suite.get('test_type'), len(sessions or []))
             return sessions
 
     sessions_per_suite = await asyncio.gather(*(run_one(s) for s in suites))
@@ -385,9 +420,6 @@ async def _collect_gms_test(start: date, end: date) -> dict[str, Any]:
     for suite, sessions in zip(suites, sessions_per_suite):
         for s in sessions or []:
             dt = _parse_result_timestamp(s.get("result_directory") or "")
-            logger.warning("[Weekly][GMS] raw session: plan=%s suite_type=%s platform=%s ts=%s dt=%s in_range=%s",
-                s.get('test_plan'), suite.get('test_type'), _gms_platform_from_device(s.get('device_serial') or ''),
-                s.get('result_directory'), dt, start <= dt.date() <= end if dt else None)
             if not dt or not (start <= dt.date() <= end):
                 continue
             try:
@@ -399,7 +431,6 @@ async def _collect_gms_test(start: date, end: date) -> dict[str, Any]:
                 continue
             platform = _gms_platform_from_device(s.get("device_serial") or "")
             module = _gms_module(s.get("test_plan"), suite.get("test_type"))
-            logger.warning("[Weekly][GMS] accepted: platform=%s module=%s pass=%s fail=%s", platform, module, p, f)
             key = (platform, module)
             prev = latest.get(key)
             if prev is None or dt > prev["_dt"]:
@@ -507,36 +538,17 @@ async def _collect_redmine(request: Request, start: date, end: date, name: str =
 def _resolved_issues_summary(
     request: Request, owner_names: list[str], start: date, end: date, limit: int = 30
 ) -> list[dict[str, Any]]:
-    """返回本周已关闭工单的摘要列表（issue_id / subject / closed_on）。"""
+    """返回本周已关闭工单的摘要列表（issue_id / subject / closed_on）。
+
+    直接复用仓库公共方法 ``list_resolved_in_range``（已统一 owner 宽匹配 + 字符串
+    区间比较语义），这里只投影成摘要三列。
+    """
     try:
         from features.redmine.api import get_redmine_service_for_request
-        from features.redmine.users import _name_keys
 
-        owner_keys: set = set()
-        for n in owner_names or []:
-            owner_keys.update(_name_keys(n))
-        end_next = (end + timedelta(days=1)).isoformat()
         repo = get_redmine_service_for_request(request).repository
-        with repo.connect() as conn:
-            if owner_keys:
-                like_clauses = " OR ".join(["assigned_to_name LIKE ?"] * len(owner_keys))
-                params = [f"%{k}%" for k in owner_keys]
-                rows = conn.execute(
-                    f"SELECT issue_id, subject, closed_on FROM redmine_agent_issues "
-                    f"WHERE is_resolved = 1 AND closed_on IS NOT NULL AND closed_on != '' "
-                    f"AND closed_on >= ? AND closed_on < ? "
-                    f"AND ({like_clauses}) "
-                    f"ORDER BY closed_on DESC LIMIT ?",
-                    [start.isoformat(), end_next, *params, limit],
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT issue_id, subject, closed_on FROM redmine_agent_issues "
-                    "WHERE is_resolved = 1 AND closed_on IS NOT NULL AND closed_on != '' "
-                    "AND closed_on >= ? AND closed_on < ? "
-                    "ORDER BY closed_on DESC LIMIT ?",
-                    [start.isoformat(), end_next, limit],
-                ).fetchall()
+        end_next = (end + timedelta(days=1)).isoformat()
+        rows = repo.list_resolved_in_range(owner_names, start.isoformat(), end_next, limit=limit)
         return [
             {"issue_id": r["issue_id"], "subject": r["subject"] or "", "closed_on": r["closed_on"] or ""}
             for r in rows
@@ -617,29 +629,13 @@ async def get_weekly_report(
     want_gr = _bool_param(include_gerrit)
     want_a17 = _bool_param(include_android17)
     want_gms = _bool_param(include_gms_test)
-    coros = []
-    names = []
-    import time as _t
-    async def _timed(nm, c):
-        _s = _t.time()
-        try:
-            r = await c
-        except Exception:
-            logger.warning("TIMING %s ERR %.2fs", nm, _t.time()-_s); raise
-        logger.warning("TIMING %s %.2fs", nm, _t.time()-_s)
-        return r
-    if want_rm:  coros.append(_timed("redmine",  _collect_redmine(request, start_date, end_date))); names.append("redmine")
-    if want_gr:  coros.append(_timed("gerrit",   _collect_gerrit(request, start_date, end_date))); names.append("gerrit")
-    if want_a17: coros.append(_timed("android17", _collect_android17(start_date, end_date))); names.append("android17")
-    if want_gms: coros.append(_timed("gms_test", _collect_gms_test(start_date, end_date))); names.append("gms_test")
-    _gs = _t.time()
-    results = await asyncio.gather(*coros) if coros else []
-    logger.warning("TIMING gather_total %.2fs", _t.time()-_gs)
-    ri = 0
-    redmine   = results[ri] if want_rm  else {"available": None}; ri += int(want_rm)
-    gerrit    = results[ri] if want_gr  else {"available": None}; ri += int(want_gr)
-    android17 = results[ri] if want_a17 else {"available": None}; ri += int(want_a17)
-    gms_test  = results[ri] if want_gms else {"available": None}
+    sources = await _gather_weekly_sources(
+        request, start_date, end_date,
+        want_rm=want_rm, want_gr=want_gr, want_a17=want_a17, want_gms=want_gms,
+    )
+    redmine, gerrit, android17, gms_test = (
+        sources["redmine"], sources["gerrit"], sources["android17"], sources["gms_test"],
+    )
 
     member = {
         "owner": "",
@@ -777,40 +773,13 @@ def _resolve_range(start: str, end: str) -> tuple[date, date, bool] | Any:
 def _resolve_department_members(request: Request, profile_id: str) -> list[dict[str, str]]:
     """从 Gerrit 部门 profile 解析成员列表 [{owner(邮箱), name(中文姓名)}]。
 
-    中文姓名优先 redmine_user_map，其次 personal_profiles.name，最后邮箱前缀。
+    复用 gerrit 公共方法 ``list_department_members``，邮箱→中文姓名解析（redmine
+    user_map → personal_profiles.name → 邮箱前缀）统一在 gerrit 侧维护，避免周报
+    reach 进 gerrit 的内部配置与映射细节。
     """
-    from features.gerrit.api import (
-        _dashboard_config_for_request,
-        _redmine_users_for_request,
-        _owners_for_department_profile,
-    )
-    from features.gerrit.config import select_gerrit_department_profile
+    from features.gerrit.api import list_department_members
 
-    cfg = _dashboard_config_for_request(request)
-    profile = select_gerrit_department_profile(cfg, profile_id)
-    owners = _owners_for_department_profile(cfg, profile)
-
-    name_by_email: dict[str, str] = {}
-    try:
-        for entry in _redmine_users_for_request(request):
-            email = str(entry.get("email") or "").strip().lower()
-            name = str(entry.get("name") or "").strip()
-            if email and name:
-                name_by_email[email] = name
-    except Exception:
-        pass
-    for p in cfg.get("personal_profiles") or []:
-        email = str(p.get("owner") or "").strip().lower()
-        name = str(p.get("name") or "").strip()
-        if email and name and email not in name_by_email:
-            name_by_email[email] = name
-
-    members = []
-    for owner_text in owners:
-        key = str(owner_text or "").strip().lower()
-        name = name_by_email.get(key) or str(owner_text or "").split("@")[0] or owner_text
-        members.append({"owner": owner_text, "name": name})
-    return members
+    return list_department_members(request, profile_id)
 
 
 @router.get("/api/reports/weekly-report/department")
@@ -847,17 +816,16 @@ async def get_weekly_report_department(
     want_gr = _bool_param(include_gerrit)
     want_a17 = _bool_param(include_android17)
     want_gms = _bool_param(include_gms_test)
-    coros = []
-    if want_rm:  coros.append(_collect_redmine(request, start_date, end_date, name=member_name))
-    if want_gr:  coros.append(_collect_gerrit(request, start_date, end_date, owner=owner))
-    if want_a17: coros.append(_collect_android17(start_date, end_date, owner=member_name or "黄超群"))
-    if want_gms: coros.append(_collect_gms_test(start_date, end_date))
-    results = await asyncio.gather(*coros) if coros else []
-    ri = 0
-    redmine   = results[ri] if want_rm  else {"available": None}; ri += int(want_rm)
-    gerrit    = results[ri] if want_gr  else {"available": None}; ri += int(want_gr)
-    android17 = results[ri] if want_a17 else {"available": None}; ri += int(want_a17)
-    gms_test  = results[ri] if want_gms else {"available": None}
+    sources = await _gather_weekly_sources(
+        request, start_date, end_date,
+        want_rm=want_rm, want_gr=want_gr, want_a17=want_a17, want_gms=want_gms,
+        redmine_name=member_name,
+        gerrit_owner=owner,
+        android17_owner=member_name or "黄超群",
+    )
+    redmine, gerrit, android17, gms_test = (
+        sources["redmine"], sources["gerrit"], sources["android17"], sources["gms_test"],
+    )
 
     member = {
         "owner": owner,
@@ -930,7 +898,6 @@ def _collect_representative_issues(
     只取少量(limit)，避免把上千工单全喂给 AI。
     """
     from features.redmine.api import get_redmine_service_for_request
-    from features.redmine.users import _name_keys
 
     lists = redmine.get("lists") or {}
     candidate_ids: list[int] = []
@@ -949,53 +916,32 @@ def _collect_representative_issues(
     try:
         repo = get_redmine_service_for_request(request).repository
 
-        # 1) 本周关闭的工单：按 owner + closed_on 区间直接在 SQL 过滤。
-        #    closed_on 可能是 '2026-06-26' 或 '2026-06-26T07:16:08'，用字符串区间
-        #    比较 (>= start, < end+1day) 兼容两种格式。
-        owner_keys: set = set()
-        for n in owner_names or []:
-            owner_keys.update(_name_keys(n))
-        end_next = (end + timedelta(days=1)).isoformat()
+        # 1) 本周关闭的工单：复用仓库公共 list_resolved_in_range（统一 owner 宽匹配 +
+        #    字符串区间比较），返回完整解码行。
         try:
-            with repo.connect() as conn:
-                if owner_keys:
-                    # 按 assigned_to_name 做宽匹配（姓名可能带空格/不同写法）
-                    like_clauses = " OR ".join(
-                        ["assigned_to_name LIKE ?"] * len(owner_keys)
-                    )
-                    params = [f"%{k}%" for k in owner_keys]
-                    rows = conn.execute(
-                        f"SELECT * FROM redmine_agent_issues "
-                        f"WHERE is_resolved = 1 AND closed_on IS NOT NULL AND closed_on != '' "
-                        f"AND closed_on >= ? AND closed_on < ? "
-                        f"AND ({like_clauses}) "
-                        f"ORDER BY closed_on DESC LIMIT 50",
-                        [start.isoformat(), end_next, *params],
-                    ).fetchall()
-                else:
-                    rows = conn.execute(
-                        "SELECT * FROM redmine_agent_issues "
-                        "WHERE is_resolved = 1 AND closed_on IS NOT NULL AND closed_on != '' "
-                        "AND closed_on >= ? AND closed_on < ? "
-                        "ORDER BY closed_on DESC LIMIT 50",
-                        [start.isoformat(), end_next],
-                    ).fetchall()
-            for row in rows:
-                decoded = repo._decode_row(row)
+            end_next = (end + timedelta(days=1)).isoformat()
+            for decoded in repo.list_resolved_in_range(owner_names, start.isoformat(), end_next, limit=50):
                 decoded["_category"] = "closed_this_period"
                 issues.append(decoded)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("weekly report: list_resolved_in_range failed: %s", exc, exc_info=True)
 
-        # 2) 开放/跟进类：从 workload lists 取完整行
-        for iid in candidate_ids:
-            if len(issues) >= limit * 2:
-                break
-            row = repo.get_issue(iid)
-            if row:
-                issues.append(row)
-    except Exception:
-        pass
+        # 2) 开放/跟进类：批量取回候选工单完整行（复用仓库公共 get_issues_by_ids，
+        #    旧版逐个 get_issue 是 N+1），保持 candidate_ids 原始顺序便于 AI 阅读。
+        wanted = [iid for iid in candidate_ids if len(issues) < limit * 2]
+        if wanted:
+            try:
+                by_id = {it["issue_id"]: it for it in repo.get_issues_by_ids(wanted)}
+                for iid in wanted:
+                    if len(issues) >= limit * 2:
+                        break
+                    row = by_id.get(iid)
+                    if row:
+                        issues.append(row)
+            except Exception as exc:
+                logger.warning("weekly report: get_issues_by_ids failed: %s", exc, exc_info=True)
+    except Exception as exc:
+        logger.warning("weekly report: representative issue collection failed: %s", exc, exc_info=True)
     return issues[:limit * 2]
 
 

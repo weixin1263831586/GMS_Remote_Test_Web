@@ -185,10 +185,12 @@ async def _run_test_background(
                 script_size = os.path.getsize(local_script)
                 size_kb = script_size / 1024
                 await log_callback(f"Uploading: run_GMS_Test_Auto.sh -> {remote_script} ({size_kb:.2f}KB)", "info")
-                with ssh.open_sftp() as sftp:
-                    sftp.put(local_script, remote_script)
-                _, stdout, stderr = ssh.exec_command(f"chmod +x {shlex.quote(remote_script)}")
-                stdout.read()
+                def _upload_and_chmod():
+                    with ssh.open_sftp() as sftp:
+                        sftp.put(local_script, remote_script)
+                    _, stdout, _stderr = ssh.exec_command(f"chmod +x {shlex.quote(remote_script)}")
+                    stdout.read()
+                await asyncio.to_thread(_upload_and_chmod)
                 await log_callback(f"Upload complete ({size_kb:.2f}KB)", "success")
             except FileNotFoundError:
                 await log_callback("Local script not found, using remote script", "warning")
@@ -346,7 +348,9 @@ async def _run_test_background(
 
             await log_callback(f"Executing command: {command}", "info")
 
-            _stdin, stdout, stderr = ssh.exec_command(command_full, get_pty=True)
+            _stdin, stdout, stderr = await asyncio.to_thread(
+                lambda: ssh.exec_command(command_full, get_pty=True)
+            )
 
             while not stdout.channel.exit_status_ready():
                 user_state = get_or_create_user_state(client_id)
@@ -354,17 +358,19 @@ async def _run_test_background(
                     await log_callback("Test stopped by user", "warning")
                     with contextlib.suppress(Exception):
                         if process_group_id:
-                            find_cmd = find_env_pgid_command(process_group_id)
-                            _stdin, pid_stdout, _stderr = ssh.exec_command(find_cmd)
-                            pids = parse_pid_lines(pid_stdout.read().decode("utf-8", errors="replace"))
-                            for pid in pids:
-                                for kill_cmd in kill_pid_tree_commands(pid):
-                                    ssh.exec_command(kill_cmd)
+                            def _kill_pgid():
+                                find_cmd = find_env_pgid_command(process_group_id)
+                                _stdin, pid_stdout, _stderr = ssh.exec_command(find_cmd)
+                                pids = parse_pid_lines(pid_stdout.read().decode("utf-8", errors="replace"))
+                                for pid in pids:
+                                    for kill_cmd in kill_pid_tree_commands(pid):
+                                        ssh.exec_command(kill_cmd)
+                            await asyncio.to_thread(_kill_pgid)
                     break
 
                 if stdout.channel.recv_ready():
                     try:
-                        data = stdout.channel.recv(65536).decode("utf-8", errors="replace")
+                        data = (await asyncio.to_thread(stdout.channel.recv, 65536)).decode("utf-8", errors="replace")
                         if data:
                             for line in data.split("\n"):
                                 if line.strip():
@@ -374,7 +380,7 @@ async def _run_test_background(
 
                 if stderr.channel.recv_stderr_ready():
                     try:
-                        error_data = stderr.channel.recv_stderr(65536).decode("utf-8", errors="replace")
+                        error_data = (await asyncio.to_thread(stderr.channel.recv_stderr, 65536)).decode("utf-8", errors="replace")
                         if error_data:
                             for line in error_data.split("\n"):
                                 if line.strip():
@@ -384,11 +390,11 @@ async def _run_test_background(
 
                 await asyncio.sleep(0.05)
 
-            exit_code = stdout.channel.recv_exit_status()
+            exit_code = await asyncio.to_thread(stdout.channel.recv_exit_status)
 
             if stdout.channel.recv_ready():
                 try:
-                    remaining_data = stdout.channel.recv(65536).decode("utf-8", errors="replace")
+                    remaining_data = (await asyncio.to_thread(stdout.channel.recv, 65536)).decode("utf-8", errors="replace")
                     if remaining_data:
                         for line in remaining_data.split("\n"):
                             if line.strip():
@@ -398,7 +404,7 @@ async def _run_test_background(
 
             if stderr.channel.recv_stderr_ready():
                 try:
-                    remaining_error = stderr.channel.recv_stderr(65536).decode("utf-8", errors="replace")
+                    remaining_error = (await asyncio.to_thread(stderr.channel.recv_stderr, 65536)).decode("utf-8", errors="replace")
                     if remaining_error:
                         for line in remaining_error.split("\n"):
                             if line.strip():
@@ -490,26 +496,26 @@ async def stop_test(
                 find_cmd = find_env_pgid_command(process_group_id)
                 user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminating test process group: {process_group_id}...")
 
-                output, _error, _code = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=10)
-                pids = parse_pid_lines(output)
-                if pids:
-                    for pid in pids:
+                def _find_and_kill(find_command: str) -> int:
+                    out, _e, _c = runtime.ssh_manager.execute_command(ssh, find_command, timeout=10)
+                    found_pids = parse_pid_lines(out)
+                    for pid in found_pids:
                         for command in kill_pid_tree_commands(pid):
                             runtime.ssh_manager.execute_command(ssh, command)
-                        killed_count += 1
+                    return len(found_pids)
+
+                killed = await asyncio.to_thread(_find_and_kill, find_cmd)
+                if killed:
+                    killed_count += killed
 
                     await asyncio.sleep(1)
                     user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminated {killed_count} test processes")
                     return success_response(message="Test stopped")
 
                 fallback_cmd = find_arg_pgid_command(process_group_id)
-                output2, _error2, _code2 = runtime.ssh_manager.execute_command(ssh, fallback_cmd, timeout=10)
-                pids = parse_pid_lines(output2)
-                if pids:
-                    for pid in pids:
-                        for command in kill_pid_tree_commands(pid):
-                            runtime.ssh_manager.execute_command(ssh, command)
-                        killed_count += 1
+                killed = await asyncio.to_thread(_find_and_kill, fallback_cmd)
+                if killed:
+                    killed_count += killed
 
                     await asyncio.sleep(1)
                     user_state["logs"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Terminated {killed_count} test processes (command match)")

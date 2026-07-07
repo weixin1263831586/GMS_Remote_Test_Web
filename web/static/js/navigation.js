@@ -1041,11 +1041,15 @@ async function loadTestSuites(forceRefresh = false) {
             const url = forceRefresh ? '/api/test/suites?force_refresh=1' : '/api/test/suites';
             const response = await apiCall(url);
 
-            if (response.success && response.suites) {
-                testSuitesCache = response.suites;
+            if (response.suites) {
+                testSuitesCache = response.suites || [];
                 renderTestSuitesDropdown();
                 if (typeof renderTestSuiteBrowserList === 'function') {
                     renderTestSuiteBrowserList();
+                }
+                if (response.success === false) {
+                    showToast(response.warning || response.error || '测试套件主机不可用', 'warning');
+                    return testSuitesCache;
                 }
                 debugLog('[loadTestSuites] 已加载测试套件:', response.count, '个', response.cached ? '(缓存)' : '(实时)');
                 return testSuitesCache;

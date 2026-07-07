@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -38,6 +39,8 @@ from .repository import (
 from features.auth.service import require_authenticated_user
 from features.users.clients import get_client_id_from_request
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -98,7 +101,7 @@ def _user_map_mtime_for_request(request: Request | None) -> float:
     return path.stat().st_mtime if path.exists() else 0
 
 
-async def _live_stats_for_user(service, user_id: int) -> dict[str, Any]:
+async def _live_stats_for_user(service, user_id: int, freshness_days: int = 180) -> dict[str, Any]:
     """Fetch full issue counts + resolved trends from Redmine for a user id.
 
     The local DB only holds issues synced for the configured sync user, so a
@@ -108,20 +111,27 @@ async def _live_stats_for_user(service, user_id: int) -> dict[str, Any]:
     so the bars match Gerrit's "show everything" behaviour. Trends are cached
     client-side (``_ASSIGNEE_TREND_CACHE``); on any failure we fall back to the
     local-DB trends the repository already returned.
+
+    ``freshness_days`` 仅实时拉取近 N 天的关闭趋势，更早的冻结进长期缓存，
+    避免每次翻满全量历史分页。
     """
-    client = service.agent._make_client()
+    try:
+        client = service.agent._make_client()
+    except Exception as exc:
+        logger.warning("Redmine live stats client unavailable for user %s: %s", user_id, exc)
+        return {}
     try:
         # 两个 Redmine 实时接口都通过 to_thread 复用同一 python-redmine
         # Session（非线程安全），故必须串行调用；任一失败不影响另一个。
         data: dict[str, Any] = {}
         try:
             data.update(await client.count_issues_by_assignee(user_id))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Redmine live count_issues_by_assignee failed for user %s: %s", user_id, exc, exc_info=True)
         try:
-            data.update(await client.resolved_trends_by_assignee(user_id))
-        except Exception:
-            pass
+            data.update(await client.resolved_trends_by_assignee(user_id, freshness_days=freshness_days))
+        except Exception as exc:
+            logger.warning("Redmine live resolved_trends_by_assignee failed for user %s: %s", user_id, exc, exc_info=True)
         return data
     finally:
         await client.close()
@@ -176,12 +186,11 @@ async def get_workload_statistics(
     name: str = Query(""),
     refresh: bool = Query(False),
 ):
-    if not _has_redmine_credentials(request):
-        return _missing_credentials_payload()
     service = _service_for_request(request)
     # Check cache
     stats_cfg = _get_redmine_stats_config(request)
     stale_days = int(stale_days or stats_cfg["stale_days"])
+    freshness_days = int(stats_cfg.get("freshness_days") or 180)
     cache_key = f"{_request_user_id(request)}:{stale_days}:{list_limit}:{name}"
     now_ts = datetime.now().timestamp()
     cached = _check_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, stats_cfg["cache_ttl"], now_ts, refresh=refresh)
@@ -201,7 +210,7 @@ async def get_workload_statistics(
     if mapped:
         owner_names = display_names_from_mapping(mapped)
         display_names = owner_names
-        live_stats = await _live_stats_for_user(service, int(mapped["id"]))
+        live_stats = await _live_stats_for_user(service, int(mapped["id"]), freshness_days=freshness_days)
         if refresh:
             try:
                 client = service.agent._make_client()
@@ -222,7 +231,7 @@ async def get_workload_statistics(
         if current_user:
             owner_names = display_names_from_mapping(current_user)
             display_names = owner_names
-            live_stats = await _live_stats_for_user(service, int(current_user["id"]))
+            live_stats = await _live_stats_for_user(service, int(current_user["id"]), freshness_days=freshness_days)
         else:
             owner_names = [n for n in candidate_names if n]
             display_names = owner_names
@@ -287,8 +296,6 @@ async def get_resolved_issues_by_date(
     profile_id: str = Query("", description="部门看板 profile_id；传入时按部门配置展开成员和别名"),
     limit: int = Query(500, ge=1, le=2000),
 ):
-    if not _has_redmine_credentials(request):
-        return _missing_credentials_payload()
     service = _service_for_request(request)
     """按日期范围查询已解决的 Redmine issue（供趋势柱状图点击查看明细）。"""
     owner_names = [n.strip() for n in names.split(",") if n.strip()] if names else []

@@ -77,6 +77,58 @@ class RepositoryQueryMixin:
             row = conn.execute("SELECT * FROM redmine_agent_issues WHERE issue_id=?", (issue_id,)).fetchone()
         return self._decode_row(row) if row else None
 
+    def get_issues_by_ids(self, issue_ids: list[int]) -> list[dict[str, Any]]:
+        """Batch fetch full decoded issues by id (single query; order unspecified).
+
+        Replaces N× ``get_issue`` round-trips for callers that already hold a list
+        of ids (e.g. the weekly report's representative-issue gather).
+        """
+        ids = [int(i) for i in issue_ids if i]
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM redmine_agent_issues WHERE issue_id IN ({placeholders})",
+                ids,
+            ).fetchall()
+        return [self._decode_row(row) for row in rows]
+
+    def list_resolved_in_range(
+        self,
+        owner_names: list[str] | None,
+        start_iso: str,
+        end_iso: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Full decoded issues closed in ``[start_iso, end_iso)`` (string compare).
+
+        ``owner_names`` is matched loosely against ``assigned_to_name`` via
+        ``_name_keys`` (handles spacing/aliasing variants); ``None``/empty means
+        no owner filter. ``closed_on`` may be a bare date or full ISO timestamp,
+        hence the string-range compare ``>= start AND < end``. Used by the weekly
+        report's "resolved this period" list and the AI representative-issue gather.
+        """
+        owner_keys: set = set()
+        for n in owner_names or []:
+            owner_keys.update(_name_keys(n))
+        base = (
+            "FROM redmine_agent_issues "
+            "WHERE is_resolved = 1 AND closed_on IS NOT NULL AND closed_on != '' "
+            "AND closed_on >= ? AND closed_on < ?"
+        )
+        params: list[Any] = [start_iso, end_iso]
+        if owner_keys:
+            like_clauses = " OR ".join(["assigned_to_name LIKE ?"] * len(owner_keys))
+            base += f" AND ({like_clauses})"
+            params += [f"%{k}%" for k in owner_keys]
+        sql = f"SELECT * {base} ORDER BY closed_on DESC LIMIT ?"
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [self._decode_row(row) for row in rows]
+
     def list_all_issues(
         self,
         limit: int = 20,

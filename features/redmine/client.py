@@ -17,11 +17,27 @@ import aiohttp
 from redminelib import Redmine
 
 from features.redmine.attachments import RedmineAttachmentMixin
-from features.redmine.models import _ASSIGNEE_COUNT_CACHE, _ASSIGNEE_TREND_CACHE, _CACHE_TTL_SECONDS
+from features.redmine.models import (
+    _ASSIGNEE_COUNT_CACHE,
+    _ASSIGNEE_TREND_CACHE,
+    _ASSIGNEE_TREND_HISTORICAL_CACHE,
+    _CACHE_TTL_SECONDS,
+    _HISTORICAL_TTL_SECONDS,
+)
 from features.redmine.users import _parse_dt, _sorted_slice, _time_key
 
 
 logger = logging.getLogger(__name__)
+
+
+def clear_historical_trend_cache() -> None:
+    """清除历史趋势长期缓存。
+
+    仅在 ``freshness_days`` 变化（近期/历史边界移动）或显式重置时调用，使历史
+    分桶在下一次请求时重建。缓存的所有权属于本模块（resolved_trends_by_assignee
+    读写它），故失效入口也集中在此，避免调用方 reach 进 models 的私有字典。
+    """
+    _ASSIGNEE_TREND_HISTORICAL_CACHE.clear()
 
 
 class RedmineClient(RedmineAttachmentMixin):
@@ -327,38 +343,156 @@ class RedmineClient(RedmineAttachmentMixin):
         _ASSIGNEE_COUNT_CACHE[cache_key] = (time.time(), dict(data))
         return data
 
-    async def resolved_trends_by_assignee(self, assignee_id: int, limit: int = 5000) -> dict[str, list[dict[str, Any]]]:
-        """Aggregate closed issue trends for a Redmine user from issue stubs."""
+    async def resolved_trends_by_assignee(
+        self,
+        assignee_id: int,
+        freshness_days: int = 180,
+        limit: int = 5000,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Aggregate closed issue trends for a Redmine user, split by freshness.
+
+        近 ``freshness_days`` 天关闭的工单每次实时拉取（``closed_on>=cutoff``
+        服务端过滤，通常仅 1~2 页），结果进短期缓存（``_CACHE_TTL_SECONDS``）。
+        更早关闭的工单趋势基本冻结，故拉全量一次后冻结进长期缓存
+        （``_ASSIGNEE_TREND_HISTORICAL_CACHE``，7 天）。两段按 granularity
+        合并后返回，与原单段返回结构一致。
+
+        ``freshness_days`` 越大，历史段越小、实时段越大；设为 3650 即等同
+        旧行为（全部实时）。任一段拉取失败时回退到另一段已有结果，保证
+        Redmine 抖动时不至于整片空白。
+        """
+        granularity_fields = {
+            "day": "resolved_daily",
+            "week": "resolved_weekly",
+            "month": "resolved_monthly",
+            "year": "resolved_yearly",
+        }
+        label_keys = {"day": "date", "week": "week", "month": "month", "year": "year"}
+
         cache_key = int(assignee_id)
-        cached = _ASSIGNEE_TREND_CACHE.get(cache_key)
-        if cached and time.time() - cached[0] < _CACHE_TTL_SECONDS:
+        cutoff_date = (datetime.now() - timedelta(days=int(freshness_days))).date()
+
+        # 近期段与历史段共用同一份「按 closed_on 拉取并分桶」逻辑，差异仅在
+        # 过滤条件、缓存表与 TTL；抽取为 _fetch_trend_segment 避免两份近似副本。
+        recent_data = await self._fetch_trend_segment(
+            cache_key,
+            assignee_id=assignee_id,
+            limit=limit,
+            filters={"closed_on": f">={cutoff_date.isoformat()}"},
+            keep_predicate=lambda closed_at: closed_at.date() >= cutoff_date,
+            cache=_ASSIGNEE_TREND_CACHE,
+            ttl=_CACHE_TTL_SECONDS,
+            label="recent",
+            granularity_fields=granularity_fields,
+            label_keys=label_keys,
+        )
+        historical_data = await self._fetch_trend_segment(
+            cache_key,
+            assignee_id=assignee_id,
+            limit=limit,
+            # 服务端就过滤掉近期段，避免历史段重复扫描近期窗口后客户端再丢弃。
+            filters={"closed_on": f"<{cutoff_date.isoformat()}"},
+            keep_predicate=lambda closed_at: closed_at.date() < cutoff_date,
+            cache=_ASSIGNEE_TREND_HISTORICAL_CACHE,
+            ttl=_HISTORICAL_TTL_SECONDS,
+            label="historical",
+            granularity_fields=granularity_fields,
+            label_keys=label_keys,
+        )
+
+        # ---- 合并两段 ----
+        return self._merge_trend_fields(recent_data, historical_data, granularity_fields, label_keys)
+
+    async def _fetch_trend_segment(
+        self,
+        cache_key: int,
+        *,
+        assignee_id: int,
+        limit: int,
+        filters: dict[str, Any],
+        keep_predicate,
+        cache: dict[int, tuple],
+        ttl: float,
+        label: str,
+        granularity_fields: dict[str, str],
+        label_keys: dict[str, str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Fetch one closed-issue trend segment (cache-first) and bucket it.
+
+        未命中缓存时按 ``filters`` 服务端过滤拉取，再按 ``keep_predicate`` 二次
+        过滤（防御服务端过滤不支持该语法的部署），分桶后写入 ``cache``。拉取
+        失败时返回空段（仍写缓存，TTL 由调用方决定：近期段短、历史段长）。
+        """
+        cached = cache.get(cache_key)
+        if cached and time.time() - cached[0] < ttl:
             return {key: list(value) for key, value in cached[1].items()}
 
-        issues = await self.fetch_issues_by_assignee(
-            assignee_id=int(assignee_id),
-            status_id="closed",
-            limit=limit,
-            sort="closed_on:desc",
-        )
-        buckets: dict[str, dict[str, int]] = {"day": {}, "week": {}, "month": {}, "year": {}}
-
-        for issue in issues:
-            closed_at = _parse_dt(getattr(issue, "closed_on", None)) or _parse_dt(getattr(issue, "updated_on", None))
-            if not closed_at:
-                continue
-            for granularity in ("day", "week", "month", "year"):
-                key = _time_key(closed_at, granularity)
-                if key:
-                    buckets[granularity][key] = buckets[granularity].get(key, 0) + 1
-
-        data = {
-            "resolved_daily": _sorted_slice(buckets["day"], "date", 0),
-            "resolved_weekly": _sorted_slice(buckets["week"], "week", 0),
-            "resolved_monthly": _sorted_slice(buckets["month"], "month", 0),
-            "resolved_yearly": _sorted_slice(buckets["year"], "year", 0),
-        }
-        _ASSIGNEE_TREND_CACHE[cache_key] = (time.time(), {key: list(value) for key, value in data.items()})
+        buckets: dict[str, dict[str, int]] = {g: {} for g in granularity_fields}
+        data: dict[str, list[dict[str, Any]]] = {field: [] for field in granularity_fields.values()}
+        try:
+            issues = await self.fetch_issues_by_assignee(
+                assignee_id=int(assignee_id),
+                status_id="closed",
+                limit=limit,
+                sort="closed_on:desc",
+                filters=filters,
+            )
+            for issue in issues:
+                closed_at = _parse_dt(getattr(issue, "closed_on", None)) or _parse_dt(
+                    getattr(issue, "updated_on", None)
+                )
+                if not closed_at or not keep_predicate(closed_at):
+                    continue
+                self._bump_trend(buckets, closed_at, granularity_fields.keys())
+            data = self._format_trend(buckets, granularity_fields, label_keys)
+        except Exception as exc:
+            logger.warning(
+                "Redmine %s trend fetch failed for assignee %s: %s", label, assignee_id, exc, exc_info=True
+            )
+        cache[cache_key] = (time.time(), {key: list(value) for key, value in data.items()})
         return data
+
+    @staticmethod
+    def _bump_trend(
+        buckets: dict[str, dict[str, int]],
+        closed_at: datetime,
+        granularities,
+    ) -> None:
+        for granularity in granularities:
+            key = _time_key(closed_at, granularity)
+            if key:
+                buckets[granularity][key] = buckets[granularity].get(key, 0) + 1
+
+    @staticmethod
+    def _format_trend(
+        buckets: dict[str, dict[str, int]],
+        granularity_fields: dict[str, str],
+        label_keys: dict[str, str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        return {
+            field: _sorted_slice(buckets[granularity], label_keys[granularity], 0)
+            for granularity, field in granularity_fields.items()
+        }
+
+    @staticmethod
+    def _merge_trend_fields(
+        recent: dict[str, list[dict[str, Any]]],
+        historical: dict[str, list[dict[str, Any]]],
+        granularity_fields: dict[str, str],
+        label_keys: dict[str, str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Merge recent + historical trend rows per granularity, summing counts."""
+        merged: dict[str, list[dict[str, Any]]] = {}
+        for granularity, field in granularity_fields.items():
+            label_key = label_keys[granularity]
+            counts: dict[str, int] = {}
+            for row in (historical.get(field) or []) + (recent.get(field) or []):
+                label = str(row.get(label_key) or "").strip()
+                if not label:
+                    continue
+                counts[label] = counts.get(label, 0) + int(row.get("count") or 0)
+            merged[field] = _sorted_slice(counts, label_key, 0)
+        return merged
 
     async def fetch_resolved_issues_by_assignee(
         self,

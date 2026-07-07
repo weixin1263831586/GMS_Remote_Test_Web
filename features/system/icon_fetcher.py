@@ -835,7 +835,8 @@ async def fetch_website_icon(url: str, timeout: int = 10) -> dict[str, Any]:
         await fetcher.close()
 
 
-# 测试函数
+# Manual diagnostic entry point (python -m features.system.icon_fetcher).
+# Not imported by any production code; only invoked via the __main__ block below.
 async def test_icon_fetcher():
     """测试图标获取功能"""
     test_urls = [

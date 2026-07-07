@@ -443,7 +443,7 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                     local_firmware_path = None
 
                     if firmware_path.startswith("/") or firmware_path.startswith("./"):
-                        if _remote_file_exists(ssh, firmware_path):
+                        if await asyncio.to_thread(_remote_file_exists, ssh, firmware_path):
                             remote_firmware = firmware_path
                         elif os.path.exists(firmware_path):
                             local_firmware_path = firmware_path
@@ -454,7 +454,7 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                         local_firmware_path = firmware_path
                     else:
                         remote_candidate = os.path.join(gms_suite_dir, firmware_path)
-                        if _remote_file_exists(ssh, remote_candidate):
+                        if await asyncio.to_thread(_remote_file_exists, ssh, remote_candidate):
                             remote_firmware = remote_candidate
                         else:
                             await runtime.release_firmware_devices(client_id, locked_devices)
@@ -485,14 +485,14 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                 # Enter Loader mode
                 for device in devices:
                     cmd = f"adb -s {device} reboot loader"
-                    runtime.ssh_manager.execute_command(ssh, cmd, timeout=5)
+                    await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, cmd, timeout=5)
 
                 await asyncio.sleep(8)
 
                 # Check Loader devices
                 quoted_suite_dir = shlex.quote(gms_suite_dir)
                 check_cmd = f"cd {quoted_suite_dir} && ./upgrade_tool ld"
-                output, _, _ = runtime.ssh_manager.execute_command(ssh, check_cmd, timeout=5)
+                output, _, _ = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, check_cmd, timeout=5)
 
                 if "List of rockusb connected(0)" in output or "List of rockusb connected" not in output:
                     await runtime.release_firmware_devices(client_id, locked_devices)
@@ -505,7 +505,9 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                     with contextlib.suppress(Exception):
                         await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": "Starting firmware burn...", "log_type": "info"})
 
-                _stdin, stdout, stderr = ssh.exec_command(burn_cmd, get_pty=True, timeout=300)
+                _stdin, stdout, stderr = await asyncio.to_thread(
+                    lambda: ssh.exec_command(burn_cmd, get_pty=True, timeout=300)
+                )
                 output_buffer = []
 
                 firmware_burn_start = False
@@ -516,7 +518,7 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
                     current_time = asyncio.get_event_loop().time()
 
                     if stdout.channel.recv_ready():
-                        chunk = stdout.channel.recv(1024).decode("utf-8", errors="ignore")
+                        chunk = (await asyncio.to_thread(stdout.channel.recv, 1024)).decode("utf-8", errors="ignore")
                         output_buffer.append(chunk)
                         clean_chunk = strip_ansi_codes(chunk)
 
@@ -631,10 +633,12 @@ async def burn_gsi(request: Request):
                 remote_script = os.path.join(gms_suite_dir, "run_GSI_Burn.sh")
 
                 if os.path.exists(local_script):
-                    scp_client = scp.SCPClient(ssh.get_transport())
-                    scp_client.put(local_script, remote_script)
-                    scp_client.close()
-                    runtime.ssh_manager.execute_command(ssh, f"chmod +x {shlex.quote(remote_script)}")
+                    def _upload_gsi_script():
+                        scp_client = scp.SCPClient(ssh.get_transport())
+                        scp_client.put(local_script, remote_script)
+                        scp_client.close()
+                        runtime.ssh_manager.execute_command(ssh, f"chmod +x {shlex.quote(remote_script)}")
+                    await asyncio.to_thread(_upload_gsi_script)
                 else:
                     return error_response(f"GSI burn script not found: {local_script}")
 
@@ -646,7 +650,8 @@ async def burn_gsi(request: Request):
                     scp_client.put(local_misc, remote_misc)
                     scp_client.close()
 
-                resolved_system, system_error = _resolve_gsi_remote_image(
+                resolved_system, system_error = await asyncio.to_thread(
+                    _resolve_gsi_remote_image,
                     ssh,
                     gms_suite_dir,
                     system_img,
@@ -658,7 +663,8 @@ async def burn_gsi(request: Request):
 
                 remote_vendor = ""
                 if vendor_img:
-                    resolved_vendor, vendor_error = _resolve_gsi_remote_image(
+                    resolved_vendor, vendor_error = await asyncio.to_thread(
+                        _resolve_gsi_remote_image,
                         ssh,
                         gms_suite_dir,
                         vendor_img,
@@ -686,12 +692,14 @@ async def burn_gsi(request: Request):
                         with contextlib.suppress(Exception):
                             await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Burning device: {device}", "log_type": "info"})
 
-                    _stdin, stdout, stderr = ssh.exec_command(burn_cmd, get_pty=True, timeout=600)
+                    _stdin, stdout, stderr = await asyncio.to_thread(
+                        lambda: ssh.exec_command(burn_cmd, get_pty=True, timeout=600)
+                    )
                     output_buffer = []
 
                     while not stdout.channel.exit_status_ready():
                         if stdout.channel.recv_ready():
-                            chunk = stdout.channel.recv(1024).decode("utf-8", errors="ignore")
+                            chunk = (await asyncio.to_thread(stdout.channel.recv, 1024)).decode("utf-8", errors="ignore")
                             output_buffer.append(chunk)
                             clean_chunk = strip_ansi_codes(chunk)
 

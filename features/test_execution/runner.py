@@ -190,12 +190,13 @@ class TestRunner:
 
             await log_callback(f"📤 上传文件: run_GMS_Test_Auto.sh → {remote_script} ({size_kb:.2f}KB)", 'info')
 
-            sftp = ssh.open_sftp()
-            sftp.put(local_script, remote_script)
-            sftp.close()
-
-            # 设置可执行权限
-            self.ssh_manager.execute_command(ssh, f"chmod +x {shlex.quote(remote_script)}")
+            def _upload_and_chmod():
+                sftp = ssh.open_sftp()
+                sftp.put(local_script, remote_script)
+                sftp.close()
+                # 设置可执行权限
+                self.ssh_manager.execute_command(ssh, f"chmod +x {shlex.quote(remote_script)}")
+            await asyncio.to_thread(_upload_and_chmod)
 
             await log_callback(f"🔐 已设置可执行权限: {remote_script}", 'info')
             await log_callback(f"✅ 上传完成 ({size_kb:.2f}KB)", 'success')
@@ -292,13 +293,15 @@ class TestRunner:
         """异步执行测试命令"""
         try:
             # 执行命令（使用PTY获取实时输出）
-            _, stdout, stderr = ssh.exec_command(command, get_pty=True)
+            _, stdout, stderr = await asyncio.to_thread(
+                lambda: ssh.exec_command(command, get_pty=True)
+            )
 
             # 实时读取输出
             while not stdout.channel.exit_status_ready():
                 if stdout.channel.recv_ready():
                     try:
-                        data = stdout.channel.recv(65536).decode('utf-8', errors='replace')
+                        data = (await asyncio.to_thread(stdout.channel.recv, 65536)).decode('utf-8', errors='replace')
                         if data:
                             lines = data.split('\n')
                             for line in lines:
@@ -309,7 +312,7 @@ class TestRunner:
 
                 if stderr.channel.recv_stderr_ready():
                     try:
-                        error = stderr.channel.recv_stderr(65536).decode('utf-8', errors='replace')
+                        error = (await asyncio.to_thread(stderr.channel.recv_stderr, 65536)).decode('utf-8', errors='replace')
                         if error:
                             lines = error.split('\n')
                             for line in lines:
@@ -321,7 +324,7 @@ class TestRunner:
                 await asyncio.sleep(0.05)
 
             # 获取退出码
-            exit_code = stdout.channel.recv_exit_status()
+            exit_code = await asyncio.to_thread(stdout.channel.recv_exit_status)
 
             if exit_code == 0:
                 await log_callback(f"✅ 测试完成 (exit code: {exit_code})", 'success')
@@ -377,42 +380,42 @@ class TestRunner:
                 await log_callback("❌ SSH连接失败", 'error')
                 return False
 
-            def _kill_and_finish(pids: list, msg: str) -> int:
-                """Kill processes and mark test as stopped. Returns number killed."""
+            def _find_pids(find_command: str) -> str:
+                out, _e, _c = self.ssh_manager.execute_command(ssh, find_command, timeout=10)
+                return out
+
+            def _kill_pids_and_release(pids: list) -> int:
+                """Kill processes (sync SSH) and release the connection. Returns count."""
                 killed_count = 0
                 for pid in parse_pid_lines("\n".join(pids)):
                     for command in kill_pid_tree_commands(pid):
                         self.ssh_manager.execute_command(ssh, command)
                     killed_count += 1
                 self.ssh_manager.return_connection(ssh)
+                return killed_count
+
+            def _finish_stopped() -> None:
                 test_info['status'] = 'stopped'
                 test_info['end_time'] = datetime.now().isoformat()
-                return killed_count
 
             # 方法1: 使用进程组ID杀死进程
             if process_group_id:
                 find_cmd = find_env_pgid_command(process_group_id)
-                stdout, _, code = self.ssh_manager.execute_command(
-                    ssh,
-                    find_cmd,
-                    timeout=10,
-                )
+                stdout = await asyncio.to_thread(_find_pids, find_cmd)
 
                 if stdout.strip():
-                    killed = _kill_and_finish(stdout.strip().split('\n'), '')
+                    killed = await asyncio.to_thread(_kill_pids_and_release, stdout.strip().split('\n'))
+                    _finish_stopped()
                     await log_callback(f"✅ 已终止 {killed} 个测试进程", 'success')
                     return bool(killed)
 
                 # 回退：尝试通过命令行参数查找
                 fallback_cmd = find_arg_pgid_command(process_group_id)
-                stdout, _, code = self.ssh_manager.execute_command(
-                    ssh,
-                    fallback_cmd,
-                    timeout=10,
-                )
+                stdout = await asyncio.to_thread(_find_pids, fallback_cmd)
 
                 if stdout.strip():
-                    killed = _kill_and_finish(stdout.strip().split('\n'), '')
+                    killed = await asyncio.to_thread(_kill_pids_and_release, stdout.strip().split('\n'))
+                    _finish_stopped()
                     await log_callback(f"✅ 已终止 {killed} 个测试进程（命令行匹配）", 'success')
                     return bool(killed)
 
@@ -420,12 +423,11 @@ class TestRunner:
             tradefed_bin = TRADEFED_BINARY_MAP.get(test_type, 'tradefed')
             kill_cmd = tradefed_kill_command(tradefed_bin)
 
-            stdout, _, code = self.ssh_manager.execute_command(
-                ssh,
-                kill_cmd,
-                timeout=10,
-            )
-            self.ssh_manager.return_connection(ssh)
+            def _kill_tradefed_and_release() -> int:
+                _out, _e, code = self.ssh_manager.execute_command(ssh, kill_cmd, timeout=10)
+                self.ssh_manager.return_connection(ssh)
+                return code
+            code = await asyncio.to_thread(_kill_tradefed_and_release)
 
             if code == 0:
                 await log_callback(f"✅ {test_type.upper()} tradefed 进程已终止", 'success')

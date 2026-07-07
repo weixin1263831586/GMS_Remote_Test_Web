@@ -84,7 +84,7 @@
                 'automation': 'GMS ATS - GMS 远程测试',
                 'redmine-agent': 'Redmine - GMS 远程测试',
                 'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
-                'notes': '知识笔记 - GMS 远程测试',
+                'notes': '个人知识库 - GMS 远程测试',
                 'agent': '对话Agent - GMS 远程测试'
             };
             const saveCurrentPageCookie = (pageName) => {
@@ -401,7 +401,7 @@
                 <a href="#" class="sidebar-item" data-page="notes" data-page-order="19" onclick="switchPage('notes', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📚</span>
-                    <span class="sidebar-text">知识笔记</span>
+                    <span class="sidebar-text">个人知识库</span>
                 </a>
                 <a href="#" class="sidebar-item" data-page="agent" data-page-order="18" onclick="switchPage('agent', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
@@ -1367,104 +1367,68 @@
             </div>
         </div>
 
-        <!-- 知识笔记 页面 -->
+        <!-- 个人知识库 页面 -->
         <div class="container page-content" id="page-notes">
-            <div class="section-title">📚 知识笔记</div>
-            <div style="display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1.2fr); gap: 10px; height: calc(100vh - 90px);">
-                <!-- 左：笔记本 + 标签 -->
+            <div class="section-title">📚 个人知识库</div>
+            <div style="display:grid;grid-template-columns:220px 300px minmax(0,1fr);gap:10px;height:calc(100vh - 90px);">
                 <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
                     <div style="padding: 8px 10px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 13px; font-weight: 600;">笔记本</span>
-                        <button class="btn-xs" onclick="notesNewNotebook()" style="padding: 1px 6px; font-size: 10px;">＋</button>
+                        <span style="font-size:13px;font-weight:600;">知识库</span>
+                        <button class="btn-xs" onclick="kbNewSpace()" style="padding:1px 6px;font-size:10px;">＋</button>
                     </div>
-                    <div id="notes-notebook-list" style="overflow-y: auto; padding: 4px; flex: 1;"></div>
-                    <div style="padding: 6px 10px; border-top: 1px solid var(--border-color); font-size: 12px; font-weight: 600; color: var(--text-secondary);">标签</div>
-                    <div id="notes-tag-list" style="overflow-y: auto; padding: 4px 8px 8px; max-height: 35%;"></div>
-                </div>
-                <!-- 中：笔记列表 -->
-                <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
-                    <div style="padding: 8px; border-bottom: 1px solid var(--border-color); display: flex; gap: 6px; flex-wrap: wrap;">
-                        <button class="btn-xs btn-primary" onclick="notesOpenCreate()" style="white-space: nowrap;">📝 新建</button>
-                        <button class="btn-xs" onclick="notesOpenUpload()" style="white-space: nowrap;">📤 上传文件</button>
-                        <input type="text" id="notes-search-input" class="combo-box" placeholder="全库搜索笔记内容…" style="flex: 1; min-width: 80px; height: 26px; font-size: 12px;" onkeydown="if(event.key==='Enter')notesSearch()" />
-                        <button class="btn-xs" onclick="notesSearch()" style="white-space: nowrap;">🔍</button>
-                    </div>
-                    <div id="notes-list" style="overflow-y: auto; flex: 1; padding: 4px;">
-                        <div class="suite-empty">加载中…</div>
+                    <div id="kb-space-list" style="padding:6px;overflow-y:auto;"></div>
+                    <div style="padding:8px 10px;border-top:1px solid var(--border-color);font-size:12px;font-weight:600;color:var(--text-secondary);">目录</div>
+                    <div id="kb-tree" style="overflow-y:auto;padding:4px 6px;flex:1;"></div>
+                    <div style="padding:8px 10px;border-top:1px solid var(--border-color);display:flex;gap:6px;">
+                        <button class="btn-xs" onclick="kbNewFolder()" style="flex:1;">新目录</button>
+                        <button class="btn-xs btn-primary" onclick="kbNewDoc()" style="flex:1;">新文档</button>
                     </div>
                 </div>
-                <!-- 右：详情 / 问答 -->
                 <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
-                    <div id="notes-detail" style="overflow-y: auto; flex: 1; padding: 12px;">
-                        <div class="suite-empty" style="text-align:center; padding: 40px 10px;">从中间选择一条笔记，或点击「📝 新建」</div>
+                    <div style="padding:8px;border-bottom:1px solid var(--border-color);display:flex;gap:6px;">
+                        <input type="text" id="kb-search-input" class="combo-box" placeholder="全库搜索文档、标签、附件..." style="flex:1;height:28px;font-size:12px;" onkeydown="if(event.key==='Enter')kbSearch()" />
+                        <button class="btn-xs" onclick="kbSearch()">搜索</button>
                     </div>
-                    <div style="border-top: 1px solid var(--border-color); padding: 8px;">
-                        <div style="font-size:12px;font-weight:600;margin-bottom:6px;">AI Agent 全库问答</div>
-                        <div style="display: flex; gap: 6px; align-items: flex-start;">
-                            <textarea id="notes-ask-input" placeholder="全库提问，例如：GMS测试怎么跑？" style="flex: 1; min-height: 40px; max-height: 80px; resize: vertical; font-size: 12px; padding: 6px;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();notesAsk();}"></textarea>
-                            <button class="btn-xs btn-primary" onclick="notesAsk()" style="white-space: nowrap;">💬 提问</button>
+                    <div id="kb-doc-list" style="overflow-y:auto;flex:1;padding:6px;"><div class="suite-empty">加载中...</div></div>
+                    <div style="border-top:1px solid var(--border-color);padding:8px;">
+                        <button class="btn-xs" onclick="kbOpenUpload()" style="width:100%;">上传文件入库</button>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+                    <div id="kb-editor" style="display:flex;flex-direction:column;flex:1;min-height:0;">
+                        <div style="padding:8px;border-bottom:1px solid var(--border-color);display:flex;gap:6px;align-items:center;">
+                            <input id="kb-doc-title" class="combo-box" placeholder="文档标题" style="flex:1;height:30px;font-size:15px;font-weight:600;" />
+                            <button class="btn-xs" onclick="kbToggleFavorite()">收藏</button>
+                            <button class="btn-xs btn-primary" onclick="kbSaveDoc()">保存</button>
+                            <button class="btn-xs" onclick="kbDeleteCurrent()">删除</button>
                         </div>
-                        <div id="notes-ask-result" style="margin-top: 6px;"></div>
+                        <div style="padding:8px;border-bottom:1px solid var(--border-color);display:flex;gap:6px;">
+                            <input id="kb-doc-tags" class="combo-box" placeholder="标签，逗号分隔" style="flex:1;height:26px;font-size:12px;" />
+                            <button class="btn-xs" onclick="kbAsk()">问答</button>
+                        </div>
+                        <textarea id="kb-doc-content" placeholder="记录知识、排查过程、配置、命令、结论..." style="flex:1;min-height:0;border:0;background:transparent;color:var(--text-color);padding:12px;font-family:Consolas,monospace;font-size:13px;line-height:1.6;resize:none;"></textarea>
+                    </div>
+                    <div id="kb-side-info" style="border-top:1px solid var(--border-color);padding:8px;max-height:28%;overflow:auto;font-size:12px;color:var(--text-secondary);">
+                        选择或新建一篇文档。
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- 新建/编辑笔记弹框 -->
-        <div id="notes-create-modal" class="modal" style="z-index: 10090;">
-            <div class="modal-content" style="max-width: 760px; height: 80vh; max-height: 80vh;">
-                <div class="modal-header">
-                    <span class="modal-title" id="notes-create-title">新建笔记</span>
-                    <span class="modal-close" onclick="notesCloseCreate()">&times;</span>
-                </div>
-                <div class="modal-body" style="display: flex; flex-direction: column; height: 100%; overflow: hidden;">
-                    <div class="modal-form-row" style="margin-bottom: 8px;">
-                        <label>笔记本:</label>
-                        <input type="text" id="notes-create-notebook" placeholder="可选，如 测试问题库" list="notes-notebook-options" />
-                        <datalist id="notes-notebook-options"></datalist>
-                    </div>
-                    <div class="modal-info-text" style="margin-bottom: 4px;">粘贴笔记原文（命令、配置、diff…），AI 会自动整理成结构化笔记、打标签、生成摘要。</div>
-                    <textarea id="notes-create-content" placeholder="在此粘贴笔记内容…" style="flex: 1; width: 100%; resize: none; font-family: monospace; font-size: 12px;"></textarea>
-                    <details style="margin-top:6px;font-size:12px;">
-                        <summary style="cursor:pointer;color:var(--text-secondary);">关联信息（可选，用于外链与智能关联）</summary>
-                        <div class="modal-form-row" style="margin-top:6px;">
-                            <label>关联模块:</label>
-                            <input type="text" id="notes-create-related-module" placeholder="格式 module::test_case，留空则不参与智能关联" />
-                        </div>
-                        <div class="modal-form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
-                            <input type="text" id="notes-create-link-reports" placeholder="报告时间戳,逗号分隔" />
-                            <input type="text" id="notes-create-link-issues" placeholder="Redmine工单号,逗号分隔" />
-                            <input type="text" id="notes-create-link-changes" placeholder="Gerrit change号,逗号分隔" />
-                        </div>
-                    </details>
-                    <div id="notes-create-status" class="modal-info-text" style="min-height: 16px; margin-top: 6px;"></div>
-                    <div class="modal-buttons" style="margin-top: 6px;">
-                        <button class="btn-xxs" onclick="notesCloseCreate()">取消</button>
-                        <button class="btn-xxs btn-primary" onclick="notesSubmitCreate()">保存（AI 整理）</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 上传知识库文件弹框 -->
-        <div id="notes-upload-modal" class="modal" style="z-index: 10091;">
+        <div id="kb-upload-modal" class="modal" style="z-index: 10091;">
             <div class="modal-content" style="max-width: 520px;">
                 <div class="modal-header">
                     <span class="modal-title">上传文件到知识库</span>
-                    <span class="modal-close" onclick="notesCloseUpload()">&times;</span>
+                    <span class="modal-close" onclick="kbCloseUpload()">&times;</span>
                 </div>
                 <div class="modal-body">
-                    <div class="modal-info-text">支持 PDF / TXT / MD / 代码 / DOCX / 图片(OCR)，上传后自动解析 + AI 结构化整理。</div>
-                    <div class="modal-form-row">
-                        <label>笔记本:</label>
-                        <input type="text" id="notes-upload-notebook" placeholder="可选" list="notes-notebook-options" />
-                    </div>
-                    <div id="notes-upload-zone" style="border: 2px dashed var(--border-color); border-radius: 8px; padding: 24px; text-align: center; cursor: pointer; margin: 10px 0;" onclick="document.getElementById('notes-upload-input').click()">
-                        <div style="font-size: 28px;">📤</div>
+                    <div class="modal-info-text">支持 PDF / TXT / MD / 代码 / DOCX，上传后解析正文并作为当前目录文档。</div>
+                    <div style="border:2px dashed var(--border-color);border-radius:8px;padding:24px;text-align:center;cursor:pointer;margin:10px 0;" onclick="document.getElementById('kb-upload-input').click()">
+                        <div style="font-size:28px;">📤</div>
                         <div style="font-size: 13px; margin-top: 6px;">点击选择或拖拽文件到此处</div>
-                        <input type="file" id="notes-upload-input" style="display: none;" onchange="notesHandleFileSelect(this)" multiple />
+                        <input type="file" id="kb-upload-input" style="display:none;" onchange="kbHandleFileSelect(this)" multiple />
                     </div>
-                    <div id="notes-upload-status" class="modal-info-text" style="min-height: 16px;"></div>
+                    <div id="kb-upload-status" class="modal-info-text" style="min-height:16px;"></div>
                 </div>
             </div>
         </div>
@@ -4298,7 +4262,7 @@
             'automation': 'GMS ATS - GMS 远程测试',
             'redmine-agent': 'Redmine - GMS 远程测试',
             'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
-            'notes': '知识笔记 - GMS 远程测试',
+            'notes': '个人知识库 - GMS 远程测试',
             'agent': '对话Agent - GMS 远程测试'
         };
 
@@ -4695,438 +4659,300 @@
         // 将 switchPage 导出到全局作用域，供外部脚本调用
         window.switchPage = switchPage;
 
-        // ==================== 知识笔记 ====================
-        const notesState = {
+        // ==================== 个人知识库 ====================
+        const kbState = {
             initialized: false,
-            notebook: '',
-            tag: '',
-            selectedId: '',
-            detailNote: null,
-            detailExpanded: false
+            spaces: [],
+            nodes: [],
+            currentSpace: 'gms',
+            currentParent: '',
+            currentDocId: '',
+            currentNodeId: '',
+            currentFavorite: false,
+            dirty: false,
         };
-        const NOTES_DETAIL_PREVIEW_CHARS = 4200;
 
-        function notesApiData(result) {
+        function kbApiData(result) {
             if (result && result.success === false) throw new Error(result.error || '请求失败');
             return result && result.data !== undefined ? result.data : result;
         }
 
-        async function notesFetch(url, options) {
-            const response = await fetch(url, { credentials: 'same-origin', ...(options || {}) });
+        async function kbFetch(url, options) {
+            const response = await fetch(url, {credentials: 'same-origin', ...(options || {})});
             const result = await response.json().catch(() => ({}));
-            if (!response.ok || result.success === false) {
-                throw new Error(result.error || result.message || `HTTP ${response.status}`);
-            }
-            return notesApiData(result);
+            if (!response.ok || result.success === false) throw new Error(result.error || result.message || `HTTP ${response.status}`);
+            return kbApiData(result);
         }
 
-        function notesEscape(text) {
-            return String(text == null ? '' : text)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
+        function kbEsc(text) {
+            return String(text == null ? '' : text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
-        function notesMarkdown(text) {
-            return notesEscape(text)
-                .replace(/```([\s\S]*?)```/g, '<pre style="white-space:pre-wrap;background:var(--darker-bg);padding:10px;border-radius:6px;overflow:auto;"><code>$1</code></pre>')
-                .replace(/^### (.*)$/gm, '<h4>$1</h4>')
-                .replace(/^## (.*)$/gm, '<h3>$1</h3>')
-                .replace(/^# (.*)$/gm, '<h2>$1</h2>')
-                .replace(/\n/g, '<br>');
-        }
-
-        function notesSnippet(text, size = 140) {
+        function kbSnippet(text, size = 120) {
             const value = String(text || '').replace(/\s+/g, ' ').trim();
             return value.length > size ? value.slice(0, size) + '...' : value;
         }
 
         async function initNotesPage() {
-            if (notesState.initialized) {
-                return;
-            }
-            notesState.initialized = true;
-            await notesRefresh();
+            if (kbState.initialized) return;
+            kbState.initialized = true;
+            const content = document.getElementById('kb-doc-content');
+            const title = document.getElementById('kb-doc-title');
+            const tags = document.getElementById('kb-doc-tags');
+            [content, title, tags].forEach(el => { if (el) el.addEventListener('input', () => kbState.dirty = true); });
+            await kbRefreshAll();
         }
 
-        async function notesRefresh() {
-            await Promise.all([notesLoadMeta(), notesLoadList()]);
+        async function kbRefreshAll() {
+            // 三个加载互不依赖各自的返回值，并发跑省一次往返。
+            await Promise.all([kbLoadSpaces(), kbLoadTree(), kbLoadDocs()]);
         }
 
-        async function notesLoadMeta() {
-            try {
-                const [notebooksData, tagsData] = await Promise.all([
-                    notesFetch('/api/notes/meta/notebooks'),
-                    notesFetch('/api/notes/meta/tags')
-                ]);
-                const notebooks = notebooksData.notebooks || [];
-                const tags = tagsData.tags || [];
-                const notebookList = document.getElementById('notes-notebook-list');
-                const options = document.getElementById('notes-notebook-options');
-                if (notebookList) {
-                    notebookList.innerHTML = [
-                        `<button class="btn-xs" style="width:100%;margin-bottom:6px;text-align:left;${notesState.notebook ? '' : 'border-color:var(--primary-color);'}" onclick="notesSelectNotebook('')">全部笔记</button>`,
-                        ...notebooks.map(item => `<button class="btn-xs" style="width:100%;margin-bottom:6px;text-align:left;${notesState.notebook === item.name ? 'border-color:var(--primary-color);' : ''}" onclick="notesSelectNotebook('${notesEscape(item.name)}')">${notesEscape(item.name)} <span style="color:var(--text-secondary)">(${item.count || 0})</span></button>`)
-                    ].join('');
-                }
-                if (options) {
-                    options.innerHTML = notebooks.map(item => `<option value="${notesEscape(item.name)}"></option>`).join('');
-                }
-                const tagList = document.getElementById('notes-tag-list');
-                if (tagList) {
-                    tagList.innerHTML = tags.length ? tags.map(item => `<button class="btn-xs" style="margin:0 4px 6px 0;${notesState.tag === item.tag ? 'border-color:var(--primary-color);' : ''}" onclick="notesSelectTag('${notesEscape(item.tag)}')">${notesEscape(item.tag)} ${item.count || 0}</button>`).join('') : '<div class="suite-empty" style="font-size:12px;">暂无标签</div>';
-                }
-            } catch (e) {
-                console.error('[Notes] load meta failed:', e);
-            }
+        async function kbLoadSpaces() {
+            const data = await kbFetch('/api/knowledge/spaces');
+            kbState.spaces = data.spaces || [];
+            if (!kbState.spaces.find(s => s.space_id === kbState.currentSpace) && kbState.spaces.length) kbState.currentSpace = kbState.spaces[0].space_id;
+            const box = document.getElementById('kb-space-list');
+            if (!box) return;
+            box.innerHTML = kbState.spaces.map(sp => `
+                <button class="btn-xs" style="width:100%;margin-bottom:6px;text-align:left;${sp.space_id === kbState.currentSpace ? 'border-color:var(--primary-color);' : ''}" onclick="kbSelectSpace('${kbEsc(sp.space_id)}')">
+                    ${kbEsc(sp.name)} <span style="color:var(--text-secondary)">(${sp.doc_count || 0})</span>
+                </button>
+            `).join('');
         }
 
-        async function notesLoadList() {
-            const list = document.getElementById('notes-list');
-            if (list) list.innerHTML = '<div class="suite-empty" style="padding:24px;text-align:center;">加载中...</div>';
-            try {
-                const q = document.getElementById('notes-search-input')?.value || '';
-                const params = new URLSearchParams();
-                if (q.trim()) params.set('q', q.trim());
-                if (notesState.notebook) params.set('notebook', notesState.notebook);
-                if (notesState.tag) params.set('tag', notesState.tag);
-                const data = await notesFetch('/api/notes' + (params.toString() ? '?' + params.toString() : ''));
-                const notes = data.notes || [];
-                if (!list) return;
-                if (!notes.length) {
-                    list.innerHTML = '<div class="suite-empty" style="padding:32px 10px;text-align:center;">暂无笔记</div>';
-                    return;
-                }
-                list.innerHTML = notes.map(note => `
-                    <div class="report-failure-card" data-note-id="${notesEscape(note.note_id)}" style="cursor:pointer;margin-bottom:8px;${notesState.selectedId === note.note_id ? 'border-color:var(--primary-color);' : ''}" onclick="notesOpenDetail('${notesEscape(note.note_id)}')">
-                        <div style="font-weight:600;margin-bottom:4px;">${notesEscape(note.title || '无标题')}</div>
-                        <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;">${notesEscape(note.summary || notesSnippet(note.content, 110))}</div>
-                        <div style="margin-top:6px;">${String(note.tags || '').split(',').filter(Boolean).map(tag => `<span class="badge">${notesEscape(tag)}</span>`).join(' ')}</div>
-                    </div>
-                `).join('');
-                if (!notesState.selectedId) notesRenderEmptyDetail(notes.length);
-            } catch (e) {
-                if (list) list.innerHTML = `<div class="suite-empty" style="padding:24px;color:var(--danger-color);">${notesEscape(e.message)}</div>`;
-            }
-        }
-
-        function notesRenderEmptyDetail(count) {
-            const detail = document.getElementById('notes-detail');
-            if (!detail) return;
-            notesState.detailNote = null;
-            notesState.detailExpanded = false;
-            detail.innerHTML = `
-                <div class="suite-empty" style="text-align:center;padding:40px 10px;">
-                    ${count ? `共 ${count} 条笔记，从中间选择一条查看详情。` : '暂无笔记，点击「新建」或「上传文件」。'}
-                </div>
-            `;
-        }
-
-        function notesMarkSelected() {
-            document.querySelectorAll('#notes-list .report-failure-card').forEach(card => {
-                const selected = card.getAttribute('data-note-id') === notesState.selectedId;
-                card.style.borderColor = selected ? 'var(--primary-color)' : '';
+        async function kbLoadTree() {
+            const data = await kbFetch('/api/knowledge/tree?space_id=' + encodeURIComponent(kbState.currentSpace));
+            kbState.nodes = data.nodes || [];
+            const tree = document.getElementById('kb-tree');
+            if (!tree) return;
+            const children = {};
+            kbState.nodes.forEach(n => {
+                const pid = n.parent_id || '';
+                (children[pid] = children[pid] || []).push(n);
             });
-        }
-
-        function notesRenderDetail(note) {
-            const detail = document.getElementById('notes-detail');
-            if (!detail || !note) return;
-            notesState.detailNote = note;
-            const content = String(note.content || '');
-            const isLong = content.length > NOTES_DETAIL_PREVIEW_CHARS;
-            const visibleContent = isLong && !notesState.detailExpanded
-                ? content.slice(0, NOTES_DETAIL_PREVIEW_CHARS)
-                : content;
-            const tagsHtml = String(note.tags || '').split(',').filter(Boolean).map(tag => `<span class="badge">${notesEscape(tag)}</span>`).join(' ');
-            detail.innerHTML = `
-                <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:12px;">
-                    <div style="min-width:0;">
-                        <h3 style="margin:0 0 6px;font-size:18px;line-height:1.35;word-break:break-word;">${notesEscape(note.title || '无标题')}</h3>
-                        <div style="font-size:12px;color:var(--text-secondary);">${notesEscape(note.notebook || '未归档')} · ${notesEscape(note.updated_at || '')}</div>
-                    </div>
-                    <div style="display:flex;gap:6px;flex-shrink:0;">
-                        ${isLong ? `<button class="btn-xs" onclick="notesToggleDetail()">${notesState.detailExpanded ? '收起' : '展开全文'}</button>` : ''}
-                        <button class="btn-xs" onclick="notesDelete('${notesEscape(note.note_id)}')">删除</button>
-                    </div>
-                </div>
-                ${tagsHtml ? `<div style="margin-bottom:10px;">${tagsHtml}</div>` : ''}
-                ${note.summary ? `<div class="report-failure-card" style="font-size:13px;line-height:1.6;margin-bottom:10px;">${notesEscape(note.summary)}</div>` : ''}
-                <div style="font-size:13px;line-height:1.7;word-break:break-word;">${notesMarkdown(visibleContent)}</div>
-                ${notesRenderLinks(note)}
-                <div id="notes-related-area"></div>
-                ${isLong && !notesState.detailExpanded ? `
-                    <div style="position:sticky;bottom:0;margin-top:10px;padding:10px 0;background:linear-gradient(transparent,var(--light-bg) 30%);text-align:center;">
-                        <button class="btn-xs btn-primary" onclick="notesToggleDetail()">展开全文</button>
-                    </div>
-                ` : ''}
-            `;
-            notesLoadRelated(note);
-        }
-
-        // 外链区：渲染关联的报告 / Redmine 工单 / Gerrit 补丁，点击跳转。
-        function notesRenderLinks(note) {
-            const links = note && note.links ? note.links : {};
-            const reports = links.report_timestamps || [];
-            const issues = links.redmine_issue_ids || [];
-            const changes = links.gerrit_change_ids || [];
-            if (!reports.length && !issues.length && !changes.length) return '';
-            const chip = (label, onclick, title) =>
-                `<button class="btn-xs" style="margin:2px;" onclick="${onclick}" title="${notesEscape(title || '')}">${notesEscape(label)}</button>`;
-            const parts = [];
-            reports.forEach(ts => parts.push(chip('📊 ' + ts, `notesJumpReport('${notesEscape(ts)}')`, '查看测试报告')));
-            issues.forEach(id => parts.push(chip('🎫 #' + id, `notesJumpRedmine('${id}')`, '查看 Redmine 工单')));
-            changes.forEach(id => parts.push(chip('🔧 ' + id, `notesJumpGerrit('${id}')`, '查看 Gerrit 补丁')));
-            return `<div class="report-failure-card" style="margin-top:10px;font-size:12px;">
-                <div style="font-weight:600;margin-bottom:4px;">🔗 关联链接</div>
-                <div>${parts.join('')}</div>
-            </div>`;
-        }
-
-        function notesJumpReport(timestamp) {
-            if (typeof switchPage === 'function') switchPage('reports', null);
-            // 报告页会按时间戳定位；如该页有暴露的查找函数则调用。
-            if (typeof window.openReportByTimestamp === 'function') window.openReportByTimestamp(timestamp);
-        }
-        function notesJumpRedmine(issueId) {
-            if (typeof switchPage === 'function') switchPage('redmine-agent', null);
-        }
-        function notesJumpGerrit(changeId) {
-            if (typeof switchPage === 'function') switchPage('gerrit-dashboard', null);
-        }
-
-        // 智能关联区：根据 related_module 异步聚合历史报告 + 成熟案例。
-        async function notesLoadRelated(note) {
-            const area = document.getElementById('notes-related-area');
-            if (!area) return;
-            const rm = String(note.related_module || '').trim();
-            if (!rm) { area.innerHTML = ''; return; }
-            area.innerHTML = '<div class="report-failure-card" style="margin-top:10px;font-size:12px;color:var(--text-secondary);">关联中…</div>';
-            try {
-                const data = await notesFetch('/api/notes/' + encodeURIComponent(note.note_id) + '/related');
-                area.innerHTML = notesRenderRelated(data, rm);
-            } catch (e) {
-                area.innerHTML = '';
+            function render(pid, depth) {
+                return (children[pid] || []).map(n => {
+                    const isDoc = n.type === 'doc';
+                    const active = (isDoc && n.doc_id === kbState.currentDocId) || (!isDoc && n.node_id === kbState.currentParent);
+                    const click = isDoc ? `kbOpenDoc('${kbEsc(n.doc_id)}')` : `kbSelectFolder('${kbEsc(n.node_id)}')`;
+                    return `
+                        <div>
+                            <button class="btn-xs" style="width:100%;margin-bottom:4px;text-align:left;padding-left:${6 + depth * 14}px;${active ? 'border-color:var(--primary-color);' : ''}" onclick="${click}">
+                                ${isDoc ? '📄' : '📁'} ${kbEsc(n.title)}
+                            </button>
+                            ${!isDoc ? render(n.node_id, depth + 1) : ''}
+                        </div>
+                    `;
+                }).join('');
             }
+            tree.innerHTML = `<button class="btn-xs" style="width:100%;margin-bottom:6px;text-align:left;${kbState.currentParent ? '' : 'border-color:var(--primary-color);'}" onclick="kbSelectFolder('')">全部文档</button>` + (render('', 0) || '<div class="suite-empty" style="font-size:12px;padding:8px;">暂无目录</div>');
         }
 
-        function notesRenderRelated(data, rm) {
-            const reports = data.reports || [];
-            const cases = data.redmine_cases || [];
-            if (!reports.length && !cases.length) return '';
-            const row = (text, onclick, sub) =>
-                `<div style="padding:4px 6px;cursor:pointer;border-radius:4px;" onmouseover="this.style.background='var(--border-color)'" onmouseout="this.style.background=''" onclick="${onclick}">
-                    <div style="font-size:12px;">${notesEscape(text)}</div>${sub ? `<div style="font-size:11px;color:var(--text-secondary);">${notesEscape(sub)}</div>` : ''}
-                </div>`;
-            let html = '<div class="report-failure-card" style="margin-top:10px;font-size:12px;">';
-            html += `<div style="font-weight:600;margin-bottom:4px;">🧩 智能关联 <span style="color:var(--text-secondary);font-weight:normal;">(${rm})</span></div>`;
-            if (reports.length) {
-                html += `<div style="margin-top:4px;color:var(--text-secondary);">历史报告 (${reports.length})</div>`;
-                reports.forEach(r => html += row(`📊 ${r.test_type || ''} ${r.test_case || ''}`, `notesJumpReport('${notesEscape(r.timestamp || '')}')`, `${r.timestamp || ''} · ${r.status || ''}`));
-            }
-            if (cases.length) {
-                html += `<div style="margin-top:6px;color:var(--text-secondary);">Redmine 成熟案例 (${cases.length})</div>`;
-                cases.forEach(c => html += row(`🎫 ${c.title || ''}`, `notesJumpRedmine('${(c.source_issue_ids && c.source_issue_ids[0]) || ''}')`, `${c.chip_platform || ''} ${c.android_version || ''}`));
-            }
-            html += '</div>';
-            return html;
-        }
-
-        function notesToggleDetail() {
-            if (!notesState.detailNote) return;
-            notesState.detailExpanded = !notesState.detailExpanded;
-            notesRenderDetail(notesState.detailNote);
-        }
-
-        async function notesOpenDetail(noteId) {
-            notesState.selectedId = noteId;
-            notesState.detailExpanded = false;
-            notesMarkSelected();
-            const detail = document.getElementById('notes-detail');
-            if (detail) detail.innerHTML = '<div class="suite-empty" style="padding:24px;text-align:center;">加载中...</div>';
-            try {
-                const note = await notesFetch('/api/notes/' + encodeURIComponent(noteId));
-                notesRenderDetail(note);
-                notesMarkSelected();
-            } catch (e) {
-                if (detail) detail.innerHTML = `<div class="suite-empty" style="padding:24px;color:var(--danger-color);">${notesEscape(e.message)}</div>`;
-            }
-        }
-
-        function notesSelectNotebook(name) {
-            notesState.notebook = name || '';
-            notesLoadMeta();
-            notesLoadList();
-        }
-
-        function notesSelectTag(tag) {
-            notesState.tag = notesState.tag === tag ? '' : tag;
-            notesLoadMeta();
-            notesLoadList();
-        }
-
-        function notesSearch() {
-            notesState.selectedId = '';
-            notesRenderEmptyDetail(0);
-            notesLoadList();
-        }
-
-        function notesOpenCreate() {
-            document.getElementById('notes-create-content').value = '';
-            document.getElementById('notes-create-notebook').value = notesState.notebook || '';
-            const rm = document.getElementById('notes-create-related-module'); if (rm) rm.value = '';
-            const lr = document.getElementById('notes-create-link-reports'); if (lr) lr.value = '';
-            const li = document.getElementById('notes-create-link-issues'); if (li) li.value = '';
-            const lc = document.getElementById('notes-create-link-changes'); if (lc) lc.value = '';
-            document.getElementById('notes-create-status').textContent = '';
-            ModalManager.open('notes-create-modal');
-        }
-
-        function notesCloseCreate() {
-            ModalManager.close('notes-create-modal');
-        }
-
-        function _notesParseLinkList(elId) {
-            const raw = (document.getElementById(elId) || {}).value || '';
-            return raw.split(',').map(s => s.trim()).filter(Boolean);
-        }
-
-        async function notesSubmitCreate() {
-            const status = document.getElementById('notes-create-status');
-            const content = document.getElementById('notes-create-content').value || '';
-            const notebook = document.getElementById('notes-create-notebook').value || '';
-            const relatedModule = ((document.getElementById('notes-create-related-module') || {}).value || '').trim();
-            const reports = _notesParseLinkList('notes-create-link-reports');
-            const issues = _notesParseLinkList('notes-create-link-issues').map(s => parseInt(s, 10)).filter(n => !isNaN(n));
-            const changes = _notesParseLinkList('notes-create-link-changes').map(s => parseInt(s, 10)).filter(n => !isNaN(n));
-            if (!content.trim()) {
-                if (status) status.textContent = '请输入笔记内容';
+        async function kbLoadDocs() {
+            const box = document.getElementById('kb-doc-list');
+            if (box) box.innerHTML = '<div class="suite-empty" style="padding:20px;text-align:center;">加载中...</div>';
+            const q = (document.getElementById('kb-search-input') || {}).value || '';
+            const params = new URLSearchParams();
+            params.set('space_id', kbState.currentSpace);
+            if (q.trim()) params.set('q', q.trim());
+            if (!q.trim() && kbState.currentParent) params.set('parent_id', kbState.currentParent);
+            const url = q.trim() ? '/api/knowledge/search?' + params.toString() : '/api/knowledge/docs?' + params.toString();
+            const data = await kbFetch(url);
+            const docs = data.docs || data.items || [];
+            if (!box) return;
+            if (!docs.length) {
+                box.innerHTML = '<div class="suite-empty" style="padding:28px;text-align:center;">暂无文档</div>';
                 return;
             }
-            const body = {content, notebook};
-            if (relatedModule) body.related_module = relatedModule;
-            if (reports.length || issues.length || changes.length) {
-                body.links = {report_timestamps: reports, redmine_issue_ids: issues, gerrit_change_ids: changes};
+            box.innerHTML = docs.map(doc => `
+                <div class="report-failure-card" data-doc-id="${kbEsc(doc.doc_id)}" style="cursor:pointer;margin-bottom:8px;${doc.doc_id === kbState.currentDocId ? 'border-color:var(--primary-color);' : ''}" onclick="kbOpenDoc('${kbEsc(doc.doc_id)}')">
+                    <div style="font-weight:600;margin-bottom:4px;">${doc.favorite ? '★ ' : ''}${kbEsc(doc.title || '无标题')}</div>
+                    <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;">${kbEsc(doc.summary || kbSnippet(doc.content_md || doc.raw_content, 110))}</div>
+                    <div style="margin-top:6px;">${(doc.tags || []).map(t => `<span class="badge">${kbEsc(t)}</span>`).join(' ')}</div>
+                </div>
+            `).join('');
+        }
+
+        function kbSelectSpace(spaceId) {
+            kbState.currentSpace = spaceId || 'gms';
+            kbState.currentParent = '';
+            kbState.currentDocId = '';
+            kbClearEditor();
+            kbRefreshAll();
+        }
+
+        function kbSelectFolder(nodeId) {
+            kbState.currentParent = nodeId || '';
+            kbLoadTree();
+            kbLoadDocs();
+        }
+
+        function kbClearEditor() {
+            const title = document.getElementById('kb-doc-title');
+            const tags = document.getElementById('kb-doc-tags');
+            const content = document.getElementById('kb-doc-content');
+            if (title) title.value = '';
+            if (tags) tags.value = '';
+            if (content) content.value = '';
+            kbState.currentDocId = '';
+            kbState.currentNodeId = '';
+            kbState.currentFavorite = false;
+            kbState.dirty = false;
+            const info = document.getElementById('kb-side-info');
+            if (info) info.innerHTML = '选择或新建一篇文档。';
+        }
+
+        async function kbOpenDoc(docId) {
+            const doc = await kbFetch('/api/knowledge/docs/' + encodeURIComponent(docId));
+            kbState.currentDocId = doc.doc_id;
+            kbState.currentNodeId = doc.node_id;
+            kbState.currentFavorite = !!doc.favorite;
+            kbState.currentParent = doc.parent_id || '';
+            document.getElementById('kb-doc-title').value = doc.title || '';
+            document.getElementById('kb-doc-tags').value = (doc.tags || []).join(', ');
+            document.getElementById('kb-doc-content').value = doc.content_md || '';
+            kbState.dirty = false;
+            kbRenderInfo(doc);
+            kbLoadTree();
+            kbLoadDocs();
+        }
+
+        function kbRenderInfo(doc) {
+            const info = document.getElementById('kb-side-info');
+            if (!info) return;
+            const links = doc.links || [];
+            const attachments = doc.attachments || [];
+            info.innerHTML = `
+                <div><b>更新：</b>${kbEsc(doc.updated_at || '')}</div>
+                <div><b>来源：</b>${kbEsc(doc.source || 'manual')}</div>
+                ${doc.summary ? `<div style="margin-top:6px;"><b>摘要：</b>${kbEsc(doc.summary)}</div>` : ''}
+                ${links.length ? `<div style="margin-top:6px;"><b>关联：</b>${links.map(l => `${kbEsc(l.target_type)}:${kbEsc(l.target_id)}`).join('<br>')}</div>` : ''}
+                ${attachments.length ? `<div style="margin-top:6px;"><b>附件：</b>${attachments.map(a => kbEsc(a.original_name)).join('<br>')}</div>` : ''}
+            `;
+        }
+
+        async function kbNewSpace() {
+            const name = prompt('知识库名称');
+            if (!name || !name.trim()) return;
+            const sp = await kbFetch('/api/knowledge/spaces', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim()})});
+            kbState.currentSpace = sp.space_id;
+            await kbRefreshAll();
+        }
+
+        async function kbNewFolder() {
+            const title = prompt('目录名称');
+            if (!title || !title.trim()) return;
+            await kbFetch('/api/knowledge/folders', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({space_id:kbState.currentSpace, parent_id:kbState.currentParent, title:title.trim()})});
+            await kbLoadTree();
+        }
+
+        async function kbNewDoc() {
+            const doc = await kbFetch('/api/knowledge/docs', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({space_id:kbState.currentSpace, parent_id:kbState.currentParent, title:'新文档', content_md:'# 新文档\n\n'})});
+            await kbRefreshAll();
+            await kbOpenDoc(doc.doc_id);
+        }
+
+        async function kbSaveDoc() {
+            const title = (document.getElementById('kb-doc-title') || {}).value || '';
+            const tags = (document.getElementById('kb-doc-tags') || {}).value || '';
+            const content = (document.getElementById('kb-doc-content') || {}).value || '';
+            if (!content.trim()) { showToast('文档内容不能为空', 'warning'); return; }
+            let doc;
+            if (kbState.currentDocId) {
+                doc = await kbFetch('/api/knowledge/docs/' + encodeURIComponent(kbState.currentDocId), {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title, tags, content_md:content, raw_content:content})});
+            } else {
+                doc = await kbFetch('/api/knowledge/docs', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({space_id:kbState.currentSpace, parent_id:kbState.currentParent, title, tags, content_md:content})});
             }
-            if (status) status.textContent = '正在整理并保存...';
-            try {
-                const note = await notesFetch('/api/notes', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(body)
-                });
-                notesCloseCreate();
-                notesState.selectedId = note.note_id;
-                await notesRefresh();
-                await notesOpenDetail(note.note_id);
-            } catch (e) {
-                if (status) status.textContent = e.message;
-            }
+            kbState.dirty = false;
+            showToast('已保存', 'success');
+            await kbRefreshAll();
+            await kbOpenDoc(doc.doc_id);
         }
 
-        function notesOpenUpload() {
-            document.getElementById('notes-upload-notebook').value = notesState.notebook || '';
-            document.getElementById('notes-upload-status').textContent = '';
-            document.getElementById('notes-upload-input').value = '';
-            ModalManager.open('notes-upload-modal');
+        async function kbToggleFavorite() {
+            if (!kbState.currentDocId) return;
+            const doc = await kbFetch('/api/knowledge/docs/' + encodeURIComponent(kbState.currentDocId), {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({favorite: kbState.currentFavorite ? 0 : 1})});
+            await kbOpenDoc(doc.doc_id);
         }
 
-        function notesCloseUpload() {
-            ModalManager.close('notes-upload-modal');
+        async function kbDeleteCurrent() {
+            if (!kbState.currentNodeId || !confirm('删除当前文档？')) return;
+            await kbFetch('/api/knowledge/nodes/' + encodeURIComponent(kbState.currentNodeId), {method:'DELETE'});
+            kbClearEditor();
+            await kbRefreshAll();
         }
 
-        async function notesHandleFileSelect(input) {
+        function kbSearch() { kbLoadDocs(); }
+
+        function kbOpenUpload() {
+            document.getElementById('kb-upload-input').value = '';
+            document.getElementById('kb-upload-status').textContent = '';
+            ModalManager.open('kb-upload-modal');
+        }
+        function kbCloseUpload() { ModalManager.close('kb-upload-modal'); }
+
+        async function kbHandleFileSelect(input) {
             const files = Array.from(input.files || []);
-            const status = document.getElementById('notes-upload-status');
-            const notebook = document.getElementById('notes-upload-notebook').value || '';
+            const status = document.getElementById('kb-upload-status');
             if (!files.length) return;
             try {
                 for (let i = 0; i < files.length; i++) {
                     if (status) status.textContent = `上传解析中 ${i + 1}/${files.length}: ${files[i].name}`;
                     const form = new FormData();
                     form.append('file', files[i]);
-                    form.append('notebook', notebook);
-                    const note = await notesFetch('/api/notes/upload', {method: 'POST', body: form});
-                    notesState.selectedId = note.note_id || notesState.selectedId;
+                    form.append('space_id', kbState.currentSpace);
+                    form.append('parent_id', kbState.currentParent);
+                    const doc = await kbFetch('/api/knowledge/upload', {method:'POST', body:form});
+                    kbState.currentDocId = doc.doc_id;
                 }
-                notesCloseUpload();
-                await notesRefresh();
-                if (notesState.selectedId) await notesOpenDetail(notesState.selectedId);
+                kbCloseUpload();
+                await kbRefreshAll();
+                if (kbState.currentDocId) await kbOpenDoc(kbState.currentDocId);
             } catch (e) {
                 if (status) status.textContent = e.message;
             }
         }
 
-        function notesNewNotebook() {
-            const name = prompt('笔记本名称');
-            if (!name) return;
-            notesState.notebook = name.trim();
-            notesOpenCreate();
-        }
-
-        async function notesAsk() {
-            const input = document.getElementById('notes-ask-input');
-            const resultBox = document.getElementById('notes-ask-result');
-            const question = input ? input.value.trim() : '';
-            if (!question) return;
-            if (resultBox) resultBox.innerHTML = '<div class="suite-empty" style="padding:10px;">思考中...</div>';
-            try {
-                const data = await notesFetch('/api/notes/ask', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({question, limit: 8})
-                });
-                if (resultBox) {
-                    const contexts = Array.isArray(data.contexts) ? data.contexts : [];
-                    const sourcesHtml = contexts.length ? `
-                        <div style="margin-top:8px;font-size:12px;color:var(--text-secondary);">引用来源</div>
-                        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;">
-                            ${contexts.map(ctx => `<button class="btn-xs" onclick="notesOpenDetail('${notesEscape(ctx.note_id)}')" title="${notesEscape(ctx.title || '')}">${notesEscape(notesSnippet(ctx.title || '未命名笔记', 24))}</button>`).join('')}
+        async function kbAsk() {
+            const question = prompt('全库提问');
+            if (!question || !question.trim()) return;
+            const data = await kbFetch('/api/knowledge/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:question.trim(), space_id:kbState.currentSpace})});
+            const info = document.getElementById('kb-side-info');
+            if (info) {
+                const contexts = Array.isArray(data.contexts) ? data.contexts : [];
+                const sources = contexts.length ? `
+                    <div style="font-weight:600;margin-top:10px;margin-bottom:6px;">来源</div>
+                    ${contexts.map((ctx, i) => `
+                        <div style="border:1px solid var(--border-color);border-radius:6px;padding:6px;margin-bottom:6px;">
+                            <button class="btn-xs" onclick="kbOpenDoc('${kbEsc(ctx.doc_id)}')" style="margin-bottom:4px;">[${i + 1}] ${kbEsc(ctx.title || '无标题')}</button>
+                            <div style="color:var(--text-secondary);line-height:1.5;">${kbEsc(kbSnippet(ctx.snippet || ctx.summary || '', 180))}</div>
                         </div>
-                    ` : '<div style="margin-top:8px;font-size:12px;color:var(--text-secondary);">未召回到相关笔记。</div>';
-                    resultBox.innerHTML = `
-                        <div class="report-failure-card" style="font-size:13px;line-height:1.6;">
-                            ${notesMarkdown(data.answer || '')}
-                            ${sourcesHtml}
-                        </div>
-                    `;
-                }
-            } catch (e) {
-                if (resultBox) resultBox.innerHTML = `<div style="color:var(--danger-color);font-size:12px;">${notesEscape(e.message)}</div>`;
+                    `).join('')}
+                ` : '';
+                info.innerHTML = `
+                    <div style="font-weight:600;margin-bottom:6px;">问答结果 ${data.mode === 'ai' && data.provider ? `<span style="font-weight:normal;color:var(--text-secondary);">(${kbEsc(data.provider)})</span>` : ''}</div>
+                    <div style="white-space:pre-wrap;color:var(--text-color);line-height:1.6;">${kbEsc(data.answer || '')}</div>
+                    ${sources}
+                `;
             }
         }
 
-        async function notesDelete(noteId) {
-            if (!confirm('删除这条笔记？')) return;
-            await notesFetch('/api/notes/' + encodeURIComponent(noteId), {method: 'DELETE'});
-            notesState.selectedId = '';
-            document.getElementById('notes-detail').innerHTML = '<div class="suite-empty" style="text-align:center; padding: 40px 10px;">从中间选择一条笔记，或点击「📝 新建」</div>';
-            await notesRefresh();
-        }
+        Object.assign(window, {initNotesPage, kbNewSpace, kbSelectSpace, kbSelectFolder, kbNewFolder, kbNewDoc, kbOpenDoc, kbSaveDoc, kbToggleFavorite, kbDeleteCurrent, kbSearch, kbOpenUpload, kbCloseUpload, kbHandleFileSelect, kbAsk});
 
-        Object.assign(window, {
-            initNotesPage, notesNewNotebook, notesOpenCreate, notesCloseCreate,
-            notesSubmitCreate, notesOpenUpload, notesCloseUpload, notesHandleFileSelect,
-            notesSearch, notesAsk, notesDelete, notesSelectNotebook, notesSelectTag, notesOpenDetail,
-            notesToggleDetail, notesRenderLinks, notesLoadRelated,
-            notesJumpReport, notesJumpRedmine, notesJumpGerrit
-        });
-
-        // 「存为Wiki」通用入口：供诊断页 / Redmine / Gerrit iframe 调用。
-        // payload: {content, notebook, related_module?, links?}
         async function saveToWiki(payload) {
-            const resp = await fetch('/api/notes', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                credentials: 'same-origin',
-                body: JSON.stringify(payload)
-            });
+            const body = {
+                space_id: payload.space_id || 'issues',
+                title: payload.title || '',
+                content_md: payload.content || payload.content_md || '',
+                tags: payload.tags || '',
+                source: payload.source || 'diagnosis',
+                links: payload.links,
+                related_module: payload.related_module,
+            };
+            const resp = await fetch('/api/knowledge/docs', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body:JSON.stringify(body)});
             const result = await resp.json().catch(() => ({}));
-            if (!resp.ok || result.success === false) {
-                throw new Error(result.error || result.message || '存为Wiki失败');
-            }
+            if (!resp.ok || result.success === false) throw new Error(result.error || result.message || '存入知识库失败');
             return result.data !== undefined ? result.data : result;
         }
         Object.assign(window, {saveToWiki});

@@ -84,7 +84,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
 
             runtime = json.loads((configs / "config_runtime.json").read_text(encoding="utf-8"))
             self.assertEqual(runtime["sidebar_order"], ["test"])
-            expected = {"stale_days": 20, "window_days": 60, "cache_ttl": 0, "chart_date_ranges": {}}
+            expected = {"stale_days": 20, "window_days": 60, "cache_ttl": 0, "freshness_days": 180, "chart_date_ranges": {}}
             self.assertEqual(runtime["redmine_stats"], expected)
             self.assertEqual(manager.get_redmine_stats_config(), expected)
 

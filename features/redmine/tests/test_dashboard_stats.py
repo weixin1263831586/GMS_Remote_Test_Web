@@ -210,7 +210,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                     journals=[{"user": "客户", "created_on": "2020-01-01T00:00:00", "notes": "请处理"}],
                 )]
 
-            async def resolved_trends_by_assignee(self, user_id):
+            async def resolved_trends_by_assignee(self, user_id, freshness_days=180, limit=5000):
                 return {}
 
         with TemporaryDirectory() as tmp:
@@ -246,7 +246,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                     journals=[{"user": "客户", "created_on": "2026-06-01T00:00:00", "notes": "目前没有问题，后续再 closed。"}],
                 )]
 
-            async def resolved_trends_by_assignee(self, user_id):
+            async def resolved_trends_by_assignee(self, user_id, freshness_days=180, limit=5000):
                 return {}
 
         with TemporaryDirectory() as tmp:
@@ -299,7 +299,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                     "updated_on": "2026-06-30T10:00:00",
                 }]
 
-            async def resolved_trends_by_assignee(self, user_id):
+            async def resolved_trends_by_assignee(self, user_id, freshness_days=180, limit=5000):
                 return {}
 
         with TemporaryDirectory() as tmp:
@@ -342,7 +342,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             async def count_issues_by_assignee(self, user_id):
                 return {"total_owned": 1, "open_count": 1, "closed_count": 0}
 
-            async def resolved_trends_by_assignee(self, user_id):
+            async def resolved_trends_by_assignee(self, user_id, freshness_days=180, limit=5000):
                 return {}
 
             async def fetch_open_issue_snapshots_by_assignee(self, assignee_id, limit, window_days):
@@ -420,7 +420,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             async def count_issues_by_assignee(self, user_id):
                 return {"total_owned": 101, "open_count": 4, "closed_count": 97}
 
-            async def resolved_trends_by_assignee(self, user_id):
+            async def resolved_trends_by_assignee(self, user_id, freshness_days=180, limit=5000):
                 return live_trends
 
             async def close(self):
@@ -479,7 +479,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             async def count_issues_by_assignee(self, user_id):
                 raise RuntimeError("redmine unreachable")
 
-            async def resolved_trends_by_assignee(self, user_id):
+            async def resolved_trends_by_assignee(self, user_id, freshness_days=180, limit=5000):
                 raise RuntimeError("redmine unreachable")
 
             async def close(self):

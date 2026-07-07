@@ -12,9 +12,11 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
+from features.auth.service import require_authenticated_user
 from foundation.responses import error_response, success_response
 from features.email.service import send_email
 from features.redmine.api import get_redmine_config_for_request
+from foundation.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -33,6 +35,7 @@ async def send_email_endpoint(request: Request):
     - attachment_paths (可选): list[str]
     - sender_name (可选): str
     """
+    require_authenticated_user(request)
     body = await request.json()
     to = body.get("to")
     subject = str(body.get("subject") or "").strip()
@@ -52,6 +55,10 @@ async def send_email_endpoint(request: Request):
         kwargs["cc"] = body.get("cc")
     if body.get("attachment_paths"):
         kwargs["attachment_paths"] = body.get("attachment_paths")
+        kwargs["allowed_attachment_roots"] = [
+            settings.data_root / "reports",
+            settings.data_root / "redmine",
+        ]
     if body.get("sender_name"):
         kwargs["sender_name"] = str(body.get("sender_name")).strip()
 

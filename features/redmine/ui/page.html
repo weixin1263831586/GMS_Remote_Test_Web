@@ -228,6 +228,11 @@
         <input type="number" id="settingCacheTtl" min="0" max="3600" placeholder="600">
         <div style="font-size:11px;color:var(--muted);margin-top:2px">统计数据缓存时间，期间内重复访问直接返回缓存</div>
       </div>
+      <div>
+        <label>趋势实时拉新窗口 (freshness_days)</label>
+        <input type="number" id="settingFreshnessDays" min="1" max="3650" placeholder="默认 180">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">近 N 天的已解决趋势每次实时拉取；更早的趋势走 7 天长期缓存，加快首屏。设大（如 3650）即全部实时</div>
+      </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
       <div>
         <label>Redmine 账号</label>

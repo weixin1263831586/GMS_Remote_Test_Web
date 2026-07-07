@@ -11,6 +11,10 @@ DEFAULT_REDMINE_STATS = {
     "stale_days": 3,
     "window_days": 60,
     "cache_ttl": 600,
+    # 近 N 天的趋势数据每次实时拉取 Redmine；更早的已关闭工单趋势冻结进
+    # 长期缓存（_ASSIGNEE_TREND_HISTORICAL_CACHE），因为半年前关闭的工单其
+    # 趋势计数几乎不再变化。设为上限 3650 即等同"全部实时拉取"。
+    "freshness_days": 180,
     "chart_date_ranges": {},
 }
 
@@ -58,6 +62,7 @@ def normalize_redmine_stats_config(raw: dict[str, Any] | None) -> dict[str, int]
         "stale_days": _bounded_int(raw.get("stale_days"), DEFAULT_REDMINE_STATS["stale_days"], 1, 30),
         "window_days": _bounded_int(raw.get("window_days"), DEFAULT_REDMINE_STATS["window_days"], 0, 365),
         "cache_ttl": _bounded_int(raw.get("cache_ttl"), DEFAULT_REDMINE_STATS["cache_ttl"], 0, 3600),
+        "freshness_days": _bounded_int(raw.get("freshness_days"), DEFAULT_REDMINE_STATS["freshness_days"], 1, 3650),
         "chart_date_ranges": chart_date_ranges,
     }
 

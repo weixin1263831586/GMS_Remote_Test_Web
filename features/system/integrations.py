@@ -392,8 +392,13 @@ async def get_vpn_status():
     with ssh_manager.optional_connection(config) as ssh:
         if not ssh:
             return JSONResponse(
-                content={"success": False, "error": "SSH连接失败"},
-                status_code=500
+                content={
+                    "success": False,
+                    "connected": False,
+                    "source": "ssh",
+                    "error": "SSH连接失败",
+                    "warning": "VPN 状态主机 SSH 连接失败，请检查主机、账号、密码或密钥配置。",
+                }
             )
 
         # 权威判据：是否存在活跃的 VPN 类型连接（与 disconnect 使用同一信号）。
