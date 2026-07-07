@@ -29,6 +29,21 @@ let pendingDepartmentTargetSelect = '';
 let pendingTrendChartKey = '';
 let projectOpenOnly = false;
 
+function getSelectedStatsAssignee() {
+  var input = document.getElementById('syncAssigneeInput');
+  var explicit = input ? String(input.value || '').trim() : '';
+  if (explicit) return explicit;
+  if (currentTab !== 'stats') return '';
+  var select = document.getElementById('statsUserSelect');
+  var selected = select ? String(select.value || '').trim() : '';
+  if (selected && selected !== '加载中...') return selected;
+  try {
+    return (new URLSearchParams(window.location.search).get('name') || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
 // ---- Load stats config from backend (cached 60s) ----
 let _statsConfigCacheTs = 0;
 async function loadStatsConfig() {
@@ -480,7 +495,7 @@ async function refreshCurrentTab() {
 }
 
 async function refreshRedmineSnapshots() {
-  const assignee = (document.getElementById('syncAssigneeInput') || {}).value || '';
+  const assignee = getSelectedStatsAssignee();
   const params = new URLSearchParams({max_analyze: '0'});
   if (assignee) params.set('assignee_name', assignee);
   const started = await api(`/api/redmine-agent/sync?${params}`, {method:'POST'});
@@ -1759,6 +1774,9 @@ async function loadStatistics(force) {
       api('/api/redmine-agent/statistics'),
       api(workloadUrl)
     ]);
+    if (force && workload.refresh_warning) {
+      notifyUser('Redmine刷新未完全成功', workload.refresh_warning, 'warning');
+    }
     const lists = workload.lists || {};
     const meta = workload.meta || {};
     updateRedmineTrendNames(selectedName, meta);
@@ -1915,7 +1933,7 @@ async function startScan() {
 }
 
 async function triggerSync() {
-  const assignee = (document.getElementById('syncAssigneeInput') || {}).value || '';
+  const assignee = getSelectedStatsAssignee();
   const target = assignee ? `「${assignee}」名下的` : '指派给你的';
   if (!confirm(`确认全量同步 ${target} Redmine 工单？这可能需要几分钟。`)) return;
   const params = new URLSearchParams({max_analyze: '30'});
@@ -1964,6 +1982,11 @@ async function waitForRun(runId, label, options) {
     try {
       const status = await api('/api/redmine-agent/status');
       if (!status.running) {
+        const last = status.last_result || {};
+        if (last.status === 'failed' || last.error) {
+          notifyUser('RedmineAgent ' + label + '失败', last.error || ('任务 ' + runId + ' 执行失败'), 'error');
+          return;
+        }
         if (reload) refreshCurrentTab();
         notifyUser('RedmineAgent ' + label + '完成', '任务 ' + runId + ' 已完成', 'success');
         return;

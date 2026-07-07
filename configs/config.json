@@ -41,6 +41,7 @@
     "stale_days": 3,
     "window_days": 60,
     "cache_ttl": 600,
+    "freshness_days": 90,
     "chart_date_ranges": {}
   },
   "redmine_auth": {
