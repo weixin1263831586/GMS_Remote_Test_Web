@@ -24,7 +24,7 @@ from features.redmine.models import (
     _CACHE_TTL_SECONDS,
     _HISTORICAL_TTL_SECONDS,
 )
-from features.redmine.users import _parse_dt, _sorted_slice, _time_key
+from features.redmine.users import RESOLVED_STATUS_NAMES, _parse_dt, _sorted_slice, _time_key
 
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,59 @@ class RedmineClient(RedmineAttachmentMixin):
         """Fetch issue journals through python-redmine."""
         issue = await self.get_issue(issue_id, include=["journals"])
         return list(getattr(issue, "journals", []) or [])
+
+    async def fetch_issue_metadata_snapshot(self, issue_id: int) -> dict[str, Any]:
+        """Fetch one issue's current metadata and journals for live dashboards."""
+
+        def _obj_name(obj: Any) -> str:
+            if isinstance(obj, dict):
+                return str(obj.get("name") or "")
+            return str(getattr(obj, "name", "") or obj or "")
+
+        def _obj_email(obj: Any) -> str:
+            if obj is None:
+                return ""
+            return str(getattr(obj, "mail", "") or getattr(obj, "email", "") or getattr(obj, "login", "") or "")
+
+        def _detail() -> dict[str, Any]:
+            issue = self._redmine.issue.get(int(issue_id), include=["journals"])
+            journals = []
+            for item in getattr(issue, "journals", []) or []:
+                details = []
+                for detail in getattr(item, "details", []) or []:
+                    details.append({
+                        "property": str(getattr(detail, "property", "")),
+                        "name": str(getattr(detail, "name", "")),
+                        "old_value": str(getattr(detail, "old_value", "")),
+                        "new_value": str(getattr(detail, "new_value", "")),
+                    })
+                journals.append({
+                    "id": str(getattr(item, "id", "")),
+                    "user": _obj_name(getattr(item, "user", None)),
+                    "user_email": _obj_email(getattr(item, "user", None)),
+                    "created_on": str(getattr(item, "created_on", "") or ""),
+                    "notes": str(getattr(item, "notes", "") or "")[:2000],
+                    "details": details,
+                })
+            status_name = _obj_name(getattr(issue, "status", None))
+            return {
+                "issue_id": int(getattr(issue, "id", 0) or 0),
+                "subject": str(getattr(issue, "subject", "") or ""),
+                "status_name": status_name,
+                "priority_name": _obj_name(getattr(issue, "priority", None)),
+                "assigned_to_name": _obj_name(getattr(issue, "assigned_to", None)),
+                "created_on": str(getattr(issue, "created_on", "") or ""),
+                "updated_on": str(getattr(issue, "updated_on", "") or ""),
+                "closed_on": str(getattr(issue, "closed_on", "") or ""),
+                "description": str(getattr(issue, "description", "") or ""),
+                "journals_json": journals,
+                "attachments_json": [],
+                "failures_json": [],
+                "is_resolved": int(status_name in RESOLVED_STATUS_NAMES),
+                "last_scanned_at": datetime.now().isoformat(timespec="seconds"),
+            }
+
+        return await asyncio.to_thread(_detail)
 
     async def get_current_user(self) -> Any:
         """Fetch the authenticated Redmine user."""

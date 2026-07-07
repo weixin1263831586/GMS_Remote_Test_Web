@@ -277,6 +277,62 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             self.assertEqual(stats["overdue_issues"], [])
             self.assertEqual(refreshed["status_name"], "HangUp")
 
+    def test_department_user_stats_force_refresh_rechecks_stale_issue_metadata(self):
+        import asyncio
+
+        from features.redmine.repository import compute_user_overdue_stats
+
+        class Client:
+            async def count_issues_by_assignee(self, user_id):
+                return {"total_owned": 1, "open_count": 1, "closed_count": 0}
+
+            async def fetch_open_issue_snapshots_by_assignee(self, assignee_id, limit, window_days):
+                return []
+
+            async def fetch_resolved_issues_by_assignee(self, assignee_id, start="", end="", limit=2000):
+                return []
+
+            async def fetch_issue_metadata_snapshot(self, issue_id):
+                assert issue_id == 637669
+                return _issue(
+                    637669,
+                    "黄 超群",
+                    status_name="Confirmed",
+                    journals=[
+                        {"user": "成 者", "created_on": "2026-07-02T08:26:55", "notes": "黄工，你好。麻烦抽时间帮看下这个问题，感谢。"},
+                        {"user": "黄 超群", "created_on": "2026-07-07T07:44:20", "notes": "具体是哪个测试项有问题？"},
+                    ],
+                )
+
+            async def resolved_trends_by_assignee(self, user_id, freshness_days=180, limit=5000):
+                return {}
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db.upsert_issue(_issue(
+                637669,
+                "黄 超群",
+                status_name="Confirmed",
+                journals=[{"user": "成 者", "created_on": "2026-07-02T08:26:55", "notes": "黄工，你好。麻烦抽时间帮看下这个问题，感谢。"}],
+            ))
+
+            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+                mocked_datetime.now.return_value = datetime(2026, 7, 7, 12, 0, 0)
+                mocked_datetime.min = datetime.min
+                mocked_datetime.fromisoformat = datetime.fromisoformat
+                stats = asyncio.run(compute_user_overdue_stats(
+                    Client(),
+                    db,
+                    {"id": 1, "name": "黄 超群"},
+                    stale_days=3,
+                    issue_limit=50,
+                    force_refresh=True,
+                ))
+
+            self.assertEqual(stats["no_reply_3_days"], 0)
+            self.assertEqual(stats["overdue_issues"], [])
+
     def test_department_user_stats_force_refresh_marks_closed_snapshot_resolved(self):
         import asyncio
 
@@ -398,6 +454,82 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             self.assertEqual(result["data"]["no_reply_3_days"], 0)
             self.assertEqual(result["data"]["lists"]["no_reply_3_days"], [])
             self.assertEqual(db.get_issue(632190)["status_name"], "HangUp")
+
+    def test_personal_workload_refresh_rechecks_stale_issue_metadata(self):
+        import asyncio
+
+        import features.redmine.api as redmine_router
+        from features.auth.service import CurrentUser
+
+        class Client:
+            async def count_issues_by_assignee(self, user_id):
+                return {"total_owned": 1, "open_count": 1, "closed_count": 0}
+
+            async def resolved_trends_by_assignee(self, user_id, freshness_days=180, limit=5000):
+                return {}
+
+            async def fetch_open_issue_snapshots_by_assignee(self, assignee_id, limit, window_days):
+                return []
+
+            async def close(self):
+                pass
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db.upsert_issue(_issue(
+                634719,
+                "黄 超群",
+                status_name="Confirmed",
+                journals=[{"user": "美格 智能", "created_on": "2026-07-01T02:25:00", "notes": "build log 也帮忙确认下"}],
+            ))
+
+            async def refresh_issue_metadata(issue_id):
+                self.assertEqual(issue_id, 634719)
+                db.upsert_issue(_issue(
+                    634719,
+                    "黄 超群",
+                    status_name="Confirmed",
+                    journals=[
+                        {"user": "美格 智能", "created_on": "2026-07-01T02:25:00", "notes": "build log 也帮忙确认下"},
+                        {"user": "黄 超群", "created_on": "2026-07-06T09:30:00", "notes": "已回复客户"},
+                    ],
+                ))
+                return {"success": True}
+
+            service = SimpleNamespace(
+                repository=db,
+                agent=SimpleNamespace(_make_client=lambda: Client()),
+                refresh_issue_metadata=refresh_issue_metadata,
+            )
+            request = SimpleNamespace(
+                state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
+                cookies={},
+            )
+            stats_api = redmine_router._statistics_api
+            with patch.object(stats_api, "_service_for_request", return_value=service), patch.object(
+                stats_api,
+                "_user_map_for_request",
+                return_value=[{"id": 1, "name": "黄 超群", "aliases": ["黄超群"]}],
+            ), patch.object(
+                stats_api,
+                "_get_redmine_stats_config",
+                return_value={"stale_days": 3, "window_days": 60, "cache_ttl": 600},
+            ), patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+                mocked_datetime.now.return_value = datetime(2026, 7, 7, 12, 0, 0)
+                mocked_datetime.min = datetime.min
+                mocked_datetime.fromisoformat = datetime.fromisoformat
+                result = asyncio.run(stats_api.get_workload_statistics(
+                    request,
+                    stale_days=3,
+                    list_limit=30,
+                    name="黄 超群",
+                    refresh=True,
+                ))
+
+            self.assertTrue(result["success"])
+            self.assertEqual(result["data"]["no_reply_3_days"], 0)
+            self.assertEqual(result["data"]["lists"]["no_reply_3_days"], [])
 
     def test_personal_workload_uses_live_resolved_trends_over_incomplete_db(self):
         """Personal dashboard bars must reflect ALL closed issues from Redmine,

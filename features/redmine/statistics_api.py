@@ -253,6 +253,35 @@ async def get_workload_statistics(
         display_names=display_names,
         window_days=stats_cfg["window_days"],
     )
+    if refresh:
+        stale_items = list((data.get("lists") or {}).get("no_reply_3_days") or [])
+        refresh_one = getattr(service, "refresh_issue_metadata", None)
+        if callable(refresh_one) and stale_items:
+            refreshed = False
+            refresh_errors: list[str] = []
+            for item in stale_items[: min(list_limit, 30)]:
+                try:
+                    issue_id = int(item.get("issue_id") or 0)
+                except (TypeError, ValueError):
+                    issue_id = 0
+                if not issue_id:
+                    continue
+                try:
+                    await refresh_one(issue_id)
+                    refreshed = True
+                except Exception as exc:
+                    refresh_errors.append(f"#{issue_id}: {exc}")
+                    logger.debug("Personal workload metadata refresh failed for #%s", issue_id, exc_info=True)
+            if refreshed:
+                data = service.repository.get_workload_statistics(
+                    owner_names=all_names,
+                    stale_days=stale_days,
+                    list_limit=list_limit,
+                    display_names=display_names,
+                    window_days=stats_cfg["window_days"],
+                )
+            if refresh_errors:
+                data["refresh_warning"] = "部分工单未能从 Redmine 刷新：" + "；".join(refresh_errors[:3])
     if live_stats:
         # Live total/open/closed counters always win (the local DB snapshot is
         # incomplete for non-sync users). Resolved trends only override the

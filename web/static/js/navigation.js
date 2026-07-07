@@ -6158,6 +6158,7 @@ function flushLogQueue() {
         if (!bucket.length) continue;
         const logOutput = getLogContainer(src);
         if (!logOutput) continue;
+        const shouldFollow = isLogScrolledNearBottom(logOutput);
 
         // Use DocumentFragment for batch DOM insertion
         const fragment = document.createDocumentFragment();
@@ -6169,7 +6170,6 @@ function flushLogQueue() {
         });
 
         logOutput.appendChild(fragment);
-        logOutput.scrollTop = logOutput.scrollHeight;
 
         // Batch trim old log entries (keep max 500 per container)
         if (logOutput.children.length > maxLogs) {
@@ -6179,7 +6179,17 @@ function flushLogQueue() {
             range.setEndBefore(logOutput.children[removeCount]);
             range.deleteContents();
         }
+
+        if (shouldFollow) {
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
     }
+}
+
+function isLogScrolledNearBottom(logOutput) {
+    if (!logOutput) return true;
+    const distance = logOutput.scrollHeight - logOutput.clientHeight - logOutput.scrollTop;
+    return distance <= 24;
 }
 
 // Switch between the system-operations log tab and the module-test log tab.

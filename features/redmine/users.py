@@ -446,6 +446,30 @@ async def compute_user_overdue_stats(
                 display_names=owner_names,
                 window_days=window_days,
             )
+    if force_refresh and hasattr(client, "fetch_issue_metadata_snapshot"):
+        stale_items = list((workload.get("lists") or {}).get("no_reply_3_days") or [])
+        changed = False
+        for item in stale_items[: min(issue_limit, 100)]:
+            try:
+                issue_id = int(item.get("issue_id") or 0)
+            except (TypeError, ValueError):
+                issue_id = 0
+            if not issue_id:
+                continue
+            try:
+                snapshot = await client.fetch_issue_metadata_snapshot(issue_id)
+            except Exception:
+                continue
+            _merge_issue_snapshot(db, snapshot, resolved=bool(snapshot.get("is_resolved")))
+            changed = True
+        if changed:
+            workload = db.get_workload_statistics(
+                owner_names=owner_names,
+                stale_days=stale_days,
+                list_limit=min(issue_limit, 100),
+                display_names=owner_names,
+                window_days=window_days,
+            )
     # Resolve trends live from Redmine (per assignee) so the department view
     # reflects every member, independent of which issues were synced to the
     # local DB (the DB only holds issues assigned to the configured sync user).
