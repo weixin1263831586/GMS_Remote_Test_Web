@@ -54,9 +54,9 @@ class DeviceScreensApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(body["success"])
         self.assertEqual(
             body["vnc_sessions"][0]["url"],
-            "http://192.168.0.2:6080/vnc.html?autoconnect=true",
+            "http://192.168.0.2:6080/vnc.html?autoconnect=true&resize=scale",
         )
-        curl_check = "http://192.168.0.2:6080/vnc.html --connect-timeout 3"
+        curl_check = "http://192.168.0.2:6080/vnc.html?resize=scale --connect-timeout 3"
         self.assertTrue(any(curl_check in cmd for cmd in ssh_manager.commands))
 
 

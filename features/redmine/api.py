@@ -12,8 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from features.auth.service import require_authenticated_user
-from features.users.clients import get_client_id_from_request
+from features.users.clients import owner_id_from_request
 from features.redmine.agent import RedmineAgent
 from features.redmine.config import config_manager
 from features.redmine.dashboard import (
@@ -194,10 +193,7 @@ def get_redmine_config_for_request(request: Request):
 
 
 def _owner_id_from_request(request: Request) -> str:
-    try:
-        return require_authenticated_user(request).id
-    except Exception:
-        return get_client_id_from_request(request) or "legacy"
+    return owner_id_from_request(request)
 
 
 def _load_user_map_for_request(request: Request) -> list[dict[str, Any]]:

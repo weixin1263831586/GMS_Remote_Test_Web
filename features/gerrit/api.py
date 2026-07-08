@@ -12,8 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from features.auth.service import require_authenticated_user
-from features.users.clients import get_client_id_from_request
+from features.users.clients import owner_id_from_request
 from features.gerrit.config import (
     add_gerrit_department_profile,
     add_gerrit_personal_profile,
@@ -43,10 +42,7 @@ _STATS_CACHE: dict[str, Any] = {}
 
 
 def _request_user_id(request: Request) -> str:
-    try:
-        return require_authenticated_user(request).id
-    except Exception:
-        return get_client_id_from_request(request) or "legacy"
+    return owner_id_from_request(request)
 
 
 def _config_for_request(request: Request):
