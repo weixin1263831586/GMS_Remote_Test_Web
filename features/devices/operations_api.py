@@ -242,8 +242,13 @@ def _build_devices_management_payload(
     ubuntu_user = runtime.config_manager.get_ubuntu_user(config)
 
     # 设备 -> 所属分组 id 列表（按当前用户的 per-user 分组；局部 import 规避循环依赖）
-    from features.users.config_api import _load_groups, build_device_group_map
-    group_map = build_device_group_map(_load_groups(username))
+    from features.users.config_api import (
+        auto_assign_new_devices,
+        build_device_group_map,
+    )
+    # 持续自动补全：把新接入且匹配 auto 分组规则的设备补进对应组（只增不减，不互斥）
+    groups = auto_assign_new_devices(username, device_data)
+    group_map = build_device_group_map(groups)
 
     all_usbip_sources = _prune_inactive_usbip_sources(
         device_ids,

@@ -218,6 +218,78 @@ def build_device_group_map(groups: list[dict[str, Any]]) -> dict[str, list[str]]
     return mapping
 
 
+def soc_series(value: str) -> str:
+    """归并 SOC 型号到数字系列：去掉末尾的纯字母后缀。
+
+    RK3576S -> RK3576，RK3588S -> RK3588；RK3576/MSM8953 等无字母后缀的保持不变，
+    以便同系列设备归到同一个分组。生成(auto_group)与补全(auto_assign_new_devices)共用。
+    """
+    return re.sub(r"[A-Za-z]+$", "", value).strip() or value
+
+
+# 自动分组维度 -> 设备属性键（与 features/devices/api.py 的 _AUTO_GROUP_KEYS 保持一致）
+_AUTO_DIM_TO_PROP = {
+    "model": "model",
+    "android_version": "android_version",
+    "soc": "soc_model",
+}
+
+
+def auto_assign_new_devices(
+    username: str | None,
+    device_props: dict[str, dict[str, str]],
+) -> list[dict[str, Any]]:
+    """把匹配 auto 分组规则但尚未在组内的设备补进去（只增不减，不互斥）。
+
+    device_props: {device_id: {"soc_model": ..., "model": ..., "android_version": ...}}，
+    通常来自设备管理端点的批量 getprop 解析结果。
+
+    auto 分组的规则由组名 "{dim}: {value}" 反推（dim ∈ model/android_version/soc）；
+    soc 维度的设备值会先做系列归并（soc_series）再比较。仅往匹配的 auto 组追加
+    新设备，不触碰手建组，也不在 auto 组间做互斥（允许一台设备属于多个 auto 组）。
+    有变更时持久化并返回新列表，否则原样返回。
+    """
+    groups = _load_groups(username)
+    if not device_props:
+        return groups
+
+    # 预解析每个 auto 组的 (dim, value) 规则；格式不符的跳过
+    auto_rules: list[tuple[dict[str, Any], str, str]] = []
+    for g in groups:
+        if not str(g.get("id", "")).startswith("auto_"):
+            continue
+        dim, sep, value = str(g.get("name", "")).partition(": ")
+        if not sep or dim not in _AUTO_DIM_TO_PROP:
+            continue
+        auto_rules.append((g, dim, value))
+    if not auto_rules:
+        return groups
+
+    changed = False
+    for g, dim, target_value in auto_rules:
+        prop_key = _AUTO_DIM_TO_PROP[dim]
+        ids = g.get("device_ids") or []
+        existing = set(ids)
+        for device_id, props in device_props.items():
+            if device_id in existing:
+                continue
+            raw = str(props.get(prop_key) or "").strip()
+            if not raw:
+                continue
+            cur = soc_series(raw) if dim == "soc" else raw
+            if cur == target_value:
+                ids.append(device_id)
+                existing.add(device_id)
+                changed = True
+        if changed and ids is not g.get("device_ids"):
+            g["device_ids"] = ids
+
+    if changed:
+        _save_groups(username, groups)
+    return groups
+
+
+
 # ==================== Routes ====================
 
 @router.get("/api/config/read")

@@ -461,14 +461,14 @@ router.include_router(operations_router)
 _AUTO_GROUP_KEYS = {
     "model": "model",
     "android_version": "android_version",
-    "build_type": "build_type",
+    "soc": "soc_model",
 }
 
 
 @router.post("/api/device-groups/auto")
 @handle_api_errors
 async def auto_group_devices(request: Request, req: dict = Body(default={})):
-    """按设备属性（model / android_version / build_type）一键生成分组定义（per-user）。
+    """按设备属性（model / android_version / soc）一键生成分组定义（per-user）。
 
     结果写回当前用户的 device_groups（变成可再手动微调的持久分组），并返回新分组列表。
     每个分组名形如 "model: Pixel 7"，id 形如 "auto_<dim>_<sanitized>"。
@@ -478,13 +478,14 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
         _load_groups,
         _save_groups,
         normalize_device_groups,
+        soc_series,
     )
 
     dim = (req.get("by") or "").strip()
     info_key = _AUTO_GROUP_KEYS.get(dim)
     if not info_key:
         return _api_error(
-            "by 必须是 model/android_version/build_type", status_code=400
+            "by 必须是 model/android_version/soc", status_code=400
         )
 
     # 当前在线设备（用缓存即可，避免重复 SSH 扫描）
@@ -500,6 +501,10 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
                 device_manager.get_device_info, device_id, ssh
             )
             value = str(base_info.get(info_key) or "未知").strip() or "未知"
+            # SOC 维度做系列归并：RK3576S -> RK3576，RK3588S -> RK3588，
+            # 同数字系列的设备归到同一个分组；其他维度保持原值。
+            if dim == "soc":
+                value = soc_series(value)
             value_to_devices.setdefault(value, []).append(device_id)
 
     def _sanitize(value: str) -> str:
@@ -507,10 +512,10 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
 
     username = _current_username(request)
     existing_groups = _load_groups(username)
-    # 去掉旧的 auto_<dim>_ 分组，保留用户手建分组
+    # 去掉所有旧的自动分组（不限维度），保留用户手建分组
     kept = [
         g for g in existing_groups
-        if not g["id"].startswith(f"auto_{dim}_")
+        if not str(g.get("id", "")).startswith("auto_")
     ]
 
     new_groups = list(kept)
