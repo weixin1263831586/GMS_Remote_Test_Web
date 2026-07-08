@@ -176,6 +176,7 @@ class DeviceManager:
                 'ro.build.version.sdk': 'sdk_version',
                 'ro.build.version.security_patch': 'security_patch',
                 'ro.build.fingerprint': 'fingerprint',
+                'ro.soc.model': 'soc_model',
             }
 
             # 使用 getprop 不带参数输出所有属性（key=value 格式），按 key 解析更健壮

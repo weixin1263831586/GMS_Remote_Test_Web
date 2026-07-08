@@ -787,9 +787,9 @@
                     <button class="btn-xxs" onclick="openCreateGroupModal()" title="新建分组">➕ 新建分组</button>
                     <select class="btn-xxs" onchange="autoGroupDevices(this.value); this.value=''" title="按属性自动分组">
                         <option value="">⊞ 自动分组…</option>
-                        <option value="model">按机型 (model)</option>
-                        <option value="android_version">按 Android 版本</option>
-                        <option value="build_type">按构建类型 (build_type)</option>
+                        <option value="model">按设备型号</option>
+                        <option value="android_version">按Android版本</option>
+                        <option value="soc">按SOC系列</option>
                     </select>
                     <select class="btn-xxs" id="device-group-filter" onchange="onGroupFilterChange()" title="按组筛选" style="max-width:160px;">
                         <option value="">全部设备</option>
@@ -3019,7 +3019,7 @@
 
         async function loadDevicesManagement() {
             try {
-                const resp = await fetch('/api/devices/management');
+                const resp = await fetch('/api/devices/management', { cache: 'no-store' });
                 const data = await resp.json();
 
                 if (data.devices) {
@@ -3029,11 +3029,10 @@
                     allDevices = data.data;
                 }
 
-                // 首次进入设备管理页时拉取分组定义
-                if (!state.deviceGroupsLoaded) {
-                    await mgmtLoadGroups();
-                    state.deviceGroupsLoaded = true;
-                }
+                // 每次刷新都同步最新分组定义（后端持续自动补全会改动 auto 分组，
+                // 不同步会导致新接入设备虽在 allDevices 中却不进组/不显示）
+                await mgmtLoadGroups();
+                state.deviceGroupsLoaded = true;
                 displayDevicesManagement(filteredDevicesForView());
                 if (state.deviceGroups.length > 0) setupMgmtGroupDelegation();
 
@@ -3263,20 +3262,7 @@
         }
 
         // 分组视图渲染：每个分组一行标题（colspan）+ 组内设备行；未分组归"未分组"段
-        // 表头行 HTML（分组视图每组前重复一次，列宽由 table-layout:fixed 首行统一）
-        function deviceHeaderRowHtml() {
-            const th = (label, field, width) => {
-                const arrow = field ? ` <span>${currentSort.field === field ? (currentSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span>` : '';
-                const click = field ? ` onclick="sortDevices('${field}')"` : '';
-                const w = width ? ` width:${width}px;` : '';
-                const cursor = field ? ' cursor:pointer;' : '';
-                return `<th style="padding:5px 6px;text-align:center;font-size:13px;color:var(--text-secondary);${w}${cursor}">${label}${arrow}</th>`;
-            };
-            return `<tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                ${th('设备序列号','serial_no',140)}${th('来源主机','source_host',150)}${th('来源类型','source_type',110)}${th('设备型号','model',120)}${th('SOC','soc_model',100)}${th('Android版本','android_version',130)}${th('电池电量','battery_level',90)}${th('状态','status',90)}${th('占用用户','locked_by',130)}${th('操作','',300)}
-            </tr>`;
-        }
-
+        // 表头由表格 <thead> 统一提供（顶部唯一），分组内不再重复表头
         function renderDevicesManagementGrouped(devices, renderRow) {
             const entryBySerial = new Map(devices.map(d => [String(d.serial_no || d.device_id || ''), d]));
             const sections = [];
@@ -3292,19 +3278,27 @@
                 if (members.length === 0 && state.groupFilter) return;
                 sections.push(mgmtGroupTitleRow(group, members.length, false));
                 if (!state.collapsedGroups.has(group.id)) {
-                    sections.push(deviceHeaderRowHtml());
                     sections.push(members.map(renderRow).join(''));
                 }
             });
 
-            // 全部模式下，未分组设备单独一段
+            // 全部模式下，未分组设备单独一段。
+            // 注意：必须基于 state.deviceGroups 的 device_ids 实时判断"是否已归属某组"，
+            // 而非设备身上的 d.groups 字段——后者来自上一次 /api/devices/management 快照，
+            // 在分组刚增删后会过时，导致同一设备同时出现在组段和未分组段（未分组段残留数秒）。
             if (!state.groupFilter) {
-                const ungrouped = devices.filter(d => !Array.isArray(d.groups) || d.groups.length === 0);
+                const assignedIds = new Set();
+                (state.deviceGroups || []).forEach(g => {
+                    (g.device_ids || []).forEach(id => assignedIds.add(String(id)));
+                });
+                const ungrouped = devices.filter(d => {
+                    const id = String(d.serial_no || d.device_id || '');
+                    return id && !assignedIds.has(id);
+                });
                 if (ungrouped.length > 0) {
                     const ug = { id: '__ungrouped__', name: '未分组', color: '#888', followed: false, device_ids: ungrouped.map(d => d.serial_no || d.device_id) };
                     sections.push(mgmtGroupTitleRow(ug, ungrouped.length, true));
                     if (!state.collapsedGroups.has('__ungrouped__')) {
-                        sections.push(deviceHeaderRowHtml());
                         sections.push(ungrouped.map(renderRow).join(''));
                     }
                 }
@@ -3374,8 +3368,9 @@
                     if (!confirm(`确定删除分组「${g.name}」？组内设备将变为未分组。`)) return;
                     try {
                         await apiCall('/api/device-groups', 'POST', { action: 'delete', id: gid });
-                        await mgmtLoadGroups();
-                        displayDevicesManagement(filteredDevicesForView());
+                        // 同步刷新设备列表的 groups 字段，否则被删组里的设备会同时
+                        // 残留在未分组段直到下次轮询
+                        await loadDevicesManagement();
                         showToast('分组已删除', 'success');
                     } catch (err) { showToast(`删除失败: ${err.message}`, 'error'); }
                 }
@@ -3462,8 +3457,8 @@
                 await apiCall('/api/device-groups', 'POST', body);
                 showToast(id ? '分组已更新' : '分组已创建', 'success');
                 ModalManager.close('device-group-modal');
-                await mgmtLoadGroups();
-                displayDevicesManagement(filteredDevicesForView());
+                // 同步刷新设备列表的 groups 字段，避免设备在组段与未分组段重复显示
+                await loadDevicesManagement();
             } catch (e) {
                 showToast(`保存失败: ${e.message}`, 'error');
             }
@@ -3475,9 +3470,11 @@
             try {
                 showToast(`正在按 ${by} 分组，需读取设备属性，请稍候...`, 'info');
                 await apiCall('/api/device-groups/auto', 'POST', { by });
-                await mgmtLoadGroups();
+                // 刷新设备列表（含每台设备最新的 groups 字段）+ 分组定义 + 渲染，
+                // 避免旧 allDevices.groups 与新分组定义不一致导致设备同时出现在
+                // 组段和未分组段（未分组段残留数秒才消失）
+                await loadDevicesManagement();
                 setupMgmtGroupDelegation();
-                displayDevicesManagement(filteredDevicesForView());
                 showToast('自动分组完成', 'success');
             } catch (e) {
                 showToast(`自动分组失败: ${e.message}`, 'error');
