@@ -2491,7 +2491,10 @@
         const NOVNC_WEB_PORT = 6080;
 
         function buildVncUrl(host, password = '') {
-            const params = new URLSearchParams({ autoconnect: 'true' });
+            const params = new URLSearchParams({
+                autoconnect: 'true',
+                resize: 'scale'
+            });
             if (password) params.set('password', password);
 
             const canUseSameOriginProxy =

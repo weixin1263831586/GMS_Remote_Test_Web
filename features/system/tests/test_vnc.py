@@ -17,8 +17,9 @@ class VNCManagerTests(unittest.TestCase):
         self.assertFalse(command_reports_running("NOT_RUNNING\n"))
 
     def test_vnc_helpers_keep_default_ports_centralized(self):
-        self.assertEqual(novnc_url("192.168.0.2"), "http://192.168.0.2:6080/vnc.html?autoconnect=true")
-        self.assertEqual(novnc_url("192.168.0.2", autoconnect=False), "http://192.168.0.2:6080/vnc.html")
+        self.assertEqual(novnc_url("192.168.0.2"), "http://192.168.0.2:6080/vnc.html?autoconnect=true&resize=scale")
+        self.assertEqual(novnc_url("192.168.0.2", autoconnect=False), "http://192.168.0.2:6080/vnc.html?resize=scale")
+        self.assertEqual(novnc_url("192.168.0.2", resize='off'), "http://192.168.0.2:6080/vnc.html?autoconnect=true&resize=off")
         self.assertEqual(VNC_PORT, 5900)
         self.assertEqual(NOVNC_WEB_PORT, 6080)
         self.assertRegex(vnc_password_temp_path(), r"^/tmp/\.gms_vnc_passwd_[0-9a-f]{32}$")

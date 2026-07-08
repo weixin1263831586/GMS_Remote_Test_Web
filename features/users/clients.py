@@ -4,7 +4,7 @@ import ipaddress
 import logging
 from typing import Any
 
-from features.auth import get_authenticated_user
+from features.auth import get_authenticated_user, require_authenticated_user
 from foundation.networking import parse_host_address
 
 from . import runtime
@@ -17,13 +17,28 @@ def get_client_id_from_request(request) -> str:
     """Return a stable client id for runtime state.
 
     Platform login is optional for ordinary client usage. Authenticated users
-    keep their account id; anonymous clients fall back to username@ip resolved
-    from server-side client host config and request metadata.
+    are identified by their account ``username`` (stable across networks and
+    machines); anonymous clients fall back to username@ip resolved from
+    server-side client host config and request metadata.
     """
     user = get_authenticated_user(request)
     if user:
-        return user.id
+        return user.username
     return get_client_display_id_from_request(request)
+
+
+def owner_id_from_request(request, *, default: str = "legacy") -> str:
+    """Resolve a per-owner storage key for the current request.
+
+    Authenticated requests use the account ``username``; unauthenticated (or internal/no-request) callers fall
+    back to the anonymous client id, then ``default``. Centralizes the ``try/except`` resolution that redmine/gerrit previously triplicated.
+    """
+    if request is None:
+        return default
+    try:
+        return require_authenticated_user(request).username
+    except Exception:
+        return get_client_id_from_request(request) or default
 
 
 def get_client_ip(request, fallback_ip: str | None = None) -> str:

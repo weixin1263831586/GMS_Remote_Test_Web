@@ -81,7 +81,7 @@ class DeviceLockManager:
             return cleaned
         with contextlib.suppress(Exception):
             for user in auth_service.list_users():
-                if str(user.get("id") or "") == str(client_id):
+                if str(user.get("username") or "") == str(client_id):
                     return str(user.get("display_name") or user.get("username") or client_id)
         return cleaned or client_id
 

@@ -36,8 +36,7 @@ from .repository import (
     owner_user_map_path,
     refresh_assignee_issue_snapshots,
 )
-from features.auth.service import require_authenticated_user
-from features.users.clients import get_client_id_from_request
+from features.users.clients import owner_id_from_request
 
 
 logger = logging.getLogger(__name__)
@@ -46,14 +45,7 @@ router = APIRouter()
 
 
 def _request_user_id(request: Request | None) -> str:
-    if request is None:
-        return "legacy"
-    try:
-        return require_authenticated_user(request).id
-    except Exception:
-        # 未登录时回退到 state.current_user（内部直接调用场景），再退到 legacy。
-        user = getattr(getattr(request, "state", None), "current_user", None)
-        return getattr(user, "id", "") or get_client_id_from_request(request) or "legacy"
+    return owner_id_from_request(request)
 
 
 # 看板/统计数据仍按登录用户隔离；配置统一读写 configs/config_runtime.json 和

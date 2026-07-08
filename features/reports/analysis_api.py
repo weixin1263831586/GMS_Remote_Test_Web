@@ -1,5 +1,7 @@
 import sqlite3
 
+from features.auth import get_authenticated_user
+from features.users import get_client_id_from_request
 from foundation.config import settings
 
 from .api_helpers import (
@@ -25,7 +27,6 @@ from .api_helpers import (
     dependencies,
     error_response,
     extract_report_name_from_upload,
-    get_client_id_from_request,
     json,
     logger,
     os,
@@ -568,16 +569,18 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
 
 @router.delete("/api/reports/delete")
 async def delete_report(request: Request, timestamp: str = Query(...)):
-    """Delete test report (owner only)."""
+    """Delete test report (owner or admin only)."""
     try:
         client_id = get_client_id_from_request(request)
+        user = get_authenticated_user(request)
         report = test_report_db.get_report_by_timestamp(timestamp)
 
         if not report:
             return error_response("Report not found", 404)
 
         report_client_id = report.get("client_id")
-        if report_client_id != client_id:
+        is_admin = bool(user and getattr(user, "role", None) == "admin")
+        if report_client_id != client_id and not is_admin:
             logger.warning(f"[DELETE] Permission denied: {client_id} tried to delete {report_client_id}'s report")
             return error_response("No permission to delete this report", 403)
 

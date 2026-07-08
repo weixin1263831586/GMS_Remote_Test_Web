@@ -427,11 +427,16 @@ class RedmineClient(RedmineAttachmentMixin):
 
         # 近期段与历史段共用同一份「按 closed_on 拉取并分桶」逻辑，差异仅在
         # 过滤条件、缓存表与 TTL；抽取为 _fetch_trend_segment 避免两份近似副本。
+        # python-redmine 的 ``closed_on`` 在本部署只接受 ``><start|end`` 区间语法，
+        # 单边 ``>=``/``<`` 比较会抛 ValidationError 被分段逻辑静默吞掉，导致历史段
+        # 永远为空、趋势图只剩近 freshness_days 天（参考 fetch_resolved_issues_by_assignee
+        # 已用区间形式）。这里两段统一改成区间，keep_predicate 仍作二次防御。
+        cutoff_iso = cutoff_date.isoformat()
         recent_data = await self._fetch_trend_segment(
             cache_key,
             assignee_id=assignee_id,
             limit=limit,
-            filters={"closed_on": f">={cutoff_date.isoformat()}"},
+            filters={"closed_on": f"><{cutoff_iso}|9999-12-31"},
             keep_predicate=lambda closed_at: closed_at.date() >= cutoff_date,
             cache=_ASSIGNEE_TREND_CACHE,
             ttl=_CACHE_TTL_SECONDS,
@@ -444,7 +449,7 @@ class RedmineClient(RedmineAttachmentMixin):
             assignee_id=assignee_id,
             limit=limit,
             # 服务端就过滤掉近期段，避免历史段重复扫描近期窗口后客户端再丢弃。
-            filters={"closed_on": f"<{cutoff_date.isoformat()}"},
+            filters={"closed_on": f"><1900-01-01|{cutoff_iso}"},
             keep_predicate=lambda closed_at: closed_at.date() < cutoff_date,
             cache=_ASSIGNEE_TREND_HISTORICAL_CACHE,
             ttl=_HISTORICAL_TTL_SECONDS,
@@ -474,7 +479,8 @@ class RedmineClient(RedmineAttachmentMixin):
 
         未命中缓存时按 ``filters`` 服务端过滤拉取，再按 ``keep_predicate`` 二次
         过滤（防御服务端过滤不支持该语法的部署），分桶后写入 ``cache``。拉取
-        失败时返回空段（仍写缓存，TTL 由调用方决定：近期段短、历史段长）。
+        失败时返回空段但**不写缓存**——避免把瞬态失败（过滤语法/网络/5xx）冻结
+        成一份长期空数据；返回的空段仍能让合并逻辑走另一段兜底的可用性语义。
         """
         cached = cache.get(cache_key)
         if cached and time.time() - cached[0] < ttl:
@@ -499,9 +505,14 @@ class RedmineClient(RedmineAttachmentMixin):
                 self._bump_trend(buckets, closed_at, granularity_fields.keys())
             data = self._format_trend(buckets, granularity_fields, label_keys)
         except Exception as exc:
+            # 拉取失败时不写缓存：服务端过滤语法错误、网络抖动、Redmine 5xx 等
+            # 一旦把空段冻结进缓存（历史段 TTL 长达 7 天），后续请求会持续命中
+            # 这份空数据，等于把一次瞬态失败放大成长期空段（正是本次 bug 的形态）。
+            # 返回空段仍能让 _merge_trend_fields 走「另一段兜底」的可用性语义。
             logger.warning(
                 "Redmine %s trend fetch failed for assignee %s: %s", label, assignee_id, exc, exc_info=True
             )
+            return data
         cache[cache_key] = (time.time(), {key: list(value) for key, value in data.items()})
         return data
 
