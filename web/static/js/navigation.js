@@ -2201,6 +2201,27 @@ function renderSuiteBreadcrumb(path) {
             });
         });
         breadcrumb.appendChild(sibBtn);
+
+        // 「retry」：跳到测试页并预填该运行的时间戳/测试类型/套件路径，
+        // 与报告管理页 retry 按钮逻辑一致。与互跳按钮同处面包屑右侧。
+        const retryBtn = document.createElement('button');
+        retryBtn.className = 'btn-xs';
+        retryBtn.style.background = 'var(--primary-color)';
+        retryBtn.style.cssFloat = 'right';
+        retryBtn.textContent = 'retry报告';
+        retryBtn.title = '跳到测试页并预填该运行信息';
+        retryBtn.addEventListener('click', () => {
+            const ts = parts[1] || '';
+            // 从套件路径（如 android-gts-14-R1-...）解析测试类型，归一化到
+            // #test-type 下拉框的合法 value（CTS/GSI/GTS/...）。
+            // 直接用 test_type 字段常因 GTS-root 等变体不匹配而填不进下拉框。
+            const suitePath = state.suiteBrowser.selectedSuitePath || '';
+            const m = String(suitePath).toLowerCase().match(/android-([a-z]+)/);
+            const typeMap = { cts: 'CTS', gsi: 'GSI', gts: 'GTS', sts: 'STS', vts: 'VTS', apts: 'APTS' };
+            const testType = (m && typeMap[m[1]]) || '';
+            retryReportWithSuite(ts, testType, suitePath);
+        });
+        breadcrumb.appendChild(retryBtn);
     }
 
     if (parts.length === 0) return;
@@ -3390,7 +3411,7 @@ async function loadFirmwareShares() {
                     <td style="padding: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 12px;" title="${title}">${remote}</td>
                     <td style="padding: 8px; text-align: right;">${formatBytes(record.size || 0, true) || '-'}</td>
                     <td style="padding: 8px; text-align: center;">${record.downloads || 0}</td>
-                    <td style="padding: 8px; text-align: center; white-space: nowrap;">
+                    <td style="padding: 8px; text-align: center; white-space: nowrap;" class="firmware-share-actions">
                         <button class="btn-xxs" onclick="copyFirmwareShareLink('${id}')">分享</button>
                         <button class="btn-xxs" onclick="downloadFirmwareShare('${id}')">下载</button>
                         <button class="btn-xxs" onclick="deleteFirmwareShare('${id}')">删除</button>
@@ -3888,13 +3909,8 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
         });
 
         if (result.success) {
-            addLogEntry(`${operationName}完成`, 'success');
-            notifyOperationResult(`${operationName}完成`, `${operationName}已完成`, 'success', 'burn-operation', {
-                operation: operationName,
-                endpoint
-            });
-
             // 显示详细结果
+            addLogEntry(`${operationName}完成`, 'success');
             if (result.results && result.results.length > 0) {
                 result.results.forEach(item => {
                     if (item.success) {
