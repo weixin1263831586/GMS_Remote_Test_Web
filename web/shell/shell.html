@@ -528,7 +528,10 @@
             <div class="middle-row">
                 <!-- ADB设备区 -->
                 <div class="adb-frame">
-                    <div class="section-title">ADB设备</div>
+                    <div class="adb-title-row" style="display: flex; align-items: center; justify-content: space-between;">
+                        <div class="section-title" style="margin: 0;">ADB设备</div>
+                        <button class="btn-xxs" id="btn-follow-filter" onclick="toggleFollowFilter()" title="只显示我在设备管理页&quot;关注&quot;的分组设备">⭐ 只看关注</button>
+                    </div>
                     <div class="device-list-container">
                         <div class="device-canvas" id="device-canvas">
                             <div class="device-column" id="device-list-left">
@@ -541,7 +544,6 @@
                     <!-- ADB 控制按钮 -->
                     <div class="adb-button-frame">
                         <button class="btn-xxs" onclick="refreshDevices()">🔄 刷新设备</button>
-                        <button class="btn-xxs" id="btn-follow-filter" onclick="toggleFollowFilter()" title="只显示我在设备管理页"关注"的分组设备">⭐ 只看关注</button>
                         <button class="btn-xxs" onclick="selectAllDevices()">✅ 全选设备</button>
                         <button class="btn-xxs" onclick="rebootDevices()">⏻ 重启设备</button>
                         <button id="btn-remount-devices" class="btn-xxs" onclick="remountDevices()">⏻ Remount</button>
@@ -1827,7 +1829,7 @@
                     <button class="btn-xxs btn-primary" onclick="createFirmwareShare()">创建分享</button>
                     <button class="btn-xxs" onclick="loadFirmwareShares()">刷新列表</button>
                 </div>
-                <div style="margin-top: 12px; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; height: calc(92vh - 238px); min-height: 360px; overflow-y: auto;">
+                <div style="margin-top: 12px; border: 1px solid var(--border-color); border-radius: 8px; overflow: auto; max-height: calc(92vh - 238px);">
                     <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                         <thead style="position: sticky; top: 0; z-index: 1;">
                             <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
@@ -1835,7 +1837,7 @@
                                 <th style="padding: 8px; text-align: left; width: 40%;">远端路径</th>
                                 <th style="padding: 8px; text-align: right; width: 10%;">大小</th>
                                 <th style="padding: 8px; text-align: center; width: 10%;">下载</th>
-                                <th style="padding: 8px; text-align: center; width: 18%;">操作</th>
+                                <th style="padding: 8px; text-align: center; width: 13%;">操作</th>
                             </tr>
                         </thead>
                         <tbody id="firmware-share-list">

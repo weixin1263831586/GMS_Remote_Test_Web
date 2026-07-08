@@ -598,6 +598,25 @@ body {
     display: inline-block;
 }
 
+/* 主页 ADB 标题行右侧「⭐ 只看关注」：收窄到贴合标题文字高度，
+   不撑高标题行、不影响下方设备列表的像素级位置。
+   用 flex-start 对齐 + 固定行高，让按钮顶部与标题色条顶部对齐；
+   避免用 transform 偏移（刷新重排时会出现「过程中位移、完成后回弹」）。 */
+.adb-title-row {
+    align-items: flex-start !important;
+}
+.adb-title-row .section-title {
+    line-height: 18px;
+}
+.adb-title-row .btn-xxs {
+    min-width: 0;
+    min-height: 0;
+    padding: 1px 8px;
+    font-size: 11px;
+    line-height: 16px;
+    margin-top: -3px;
+}
+
 /* ==================== Input Container (参数设置区) ==================== */
 .input-container {
     background: var(--card-bg);
@@ -1085,12 +1104,12 @@ body {
 }
 
 .log-tab-btn {
-    padding: 4px 12px;
+    padding: 2px 8px;
     background: transparent;
     border: 1px solid var(--border-color);
     border-radius: 4px;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 10px;
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
@@ -1104,6 +1123,13 @@ body {
     background: var(--primary-color);
     color: #fff;
     border-color: var(--primary-color);
+}
+
+/* 测试页日志工具按钮（保存/清除/配置）：覆盖 .btn-xxs 的 min-width:80px，
+   收窄避免占用过多空间。作用域限定在测试按钮区。 */
+.test-btn-frame .btn-xxs {
+    min-width: 0;
+    padding: 4px 8px;
 }
 
 .log-tab-content {
@@ -1396,6 +1422,14 @@ select option {
     border-color: var(--primary-light);
     transform: translateY(-1px);
     box-shadow: var(--shadow-md);
+}
+
+/* 共享固件操作列：覆盖 .btn-xxs 的 min-width:80px，让分享/下载/删除 三按钮
+   收窄，避免撑破表格触发水平滚动条。作用域限定，不影响其它页面。 */
+.firmware-share-actions .btn-xxs {
+    min-width: 0;
+    padding: 4px 8px;
+    font-size: 11px;
 }
 
 .btn-xxs:active {
