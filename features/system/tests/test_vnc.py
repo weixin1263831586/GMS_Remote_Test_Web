@@ -1,7 +1,6 @@
 import unittest
 from unittest.mock import patch
 
-from foundation.processes import command_reports_running
 from features.system.vnc import (
     NOVNC_WEB_PORT,
     VNC_PORT,
@@ -9,6 +8,7 @@ from features.system.vnc import (
     novnc_url,
     vnc_password_temp_path,
 )
+from foundation.processes import command_reports_running
 
 
 class VNCManagerTests(unittest.TestCase):

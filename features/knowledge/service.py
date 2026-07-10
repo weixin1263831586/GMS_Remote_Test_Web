@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from features.assistant.universal_ai import get_universal_analyzer
+from features.assistant import get_universal_analyzer
 
 from .parsers import parse_file
 from .storage import KnowledgeStore

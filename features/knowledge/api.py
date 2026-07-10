@@ -15,8 +15,9 @@ from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 from foundation.uploads import save_upload_to_path
 
-from .storage import ATTACHMENT_DIR
 from .service import KnowledgeService
+from .storage import ATTACHMENT_DIR
+
 
 router = APIRouter(prefix="/api/knowledge")
 page_router = APIRouter()

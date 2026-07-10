@@ -54,20 +54,18 @@ def _query_mainline_exemptions(request: "ReportDiagnosisRequest") -> list[dict]:
     """
     if not _MAINLINE_DB_PATH.exists():
         return []
-    # Imported lazily to avoid pulling the whole `features.system` package
-    # (whose __init__ imports back into features.reports) at module load time.
-    from features.system.mainline_issues.repository import (  # noqa: I001
-        init_db as _init_mainline_db,
-        query_exemption_match as _query_mainline_exemption_match,
+    from features.system import (
+        init_mainline_issues_db,
+        query_mainline_exemption_match,
     )
 
     conn = sqlite3.connect(str(_MAINLINE_DB_PATH))
     conn.row_factory = sqlite3.Row
     try:
-        _init_mainline_db(conn)
+        init_mainline_issues_db(conn)
         # test_type is validated against MAINLINE_ISSUE_TYPES inside the matcher
         # (VTS/unknown → ''), so no separate mapping layer is needed here.
-        return _query_mainline_exemption_match(
+        return query_mainline_exemption_match(
             conn,
             test_module=request.module,
             test_case=request.test_name,

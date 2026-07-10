@@ -12,7 +12,6 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from features.users.clients import owner_id_from_request
 from features.gerrit.config import (
     add_gerrit_department_profile,
     add_gerrit_personal_profile,
@@ -33,7 +32,8 @@ from features.gerrit.service import (
     _select_profile,
 )
 from features.gerrit.settings import config_manager
-from features.redmine.users import load_redmine_user_map_for_owner
+from features.redmine import load_redmine_user_map_for_owner
+from features.users import owner_id_from_request
 
 
 router = APIRouter(prefix="/api/gerrit-dashboard")

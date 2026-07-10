@@ -4,14 +4,14 @@
 处理设备锁定、释放、状态查询等功能
 """
 
+import contextlib
 import sqlite3
 import threading
-import contextlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from features.auth.service import auth_service
+from features.auth import auth_service
 from foundation.config import settings
 
 

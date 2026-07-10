@@ -12,8 +12,8 @@ import time
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.test_execution.suites import get_default_suites_path
-from features.users.clients import get_client_username_from_request
+from features.test_execution import get_default_suites_path
+from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
 from foundation.uploads import merge_files_to_path, safe_upload_target_path, save_upload_to_path
 
@@ -693,7 +693,10 @@ async def burn_gsi(request: Request):
                             await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Burning device: {device}", "log_type": "info"})
 
                     _stdin, stdout, stderr = await asyncio.to_thread(
-                        lambda: ssh.exec_command(burn_cmd, get_pty=True, timeout=600)
+                        ssh.exec_command,
+                        burn_cmd,
+                        get_pty=True,
+                        timeout=600,
                     )
                     output_buffer = []
 

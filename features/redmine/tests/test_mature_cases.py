@@ -53,7 +53,7 @@ class MatureCaseBuilderTests(unittest.TestCase):
         self.assertEqual(set(case["source_issue_ids_json"]), {633454, 635211, 635212})
         # Links written.
         links = self.db.list_links_for_case(case["case_id"])
-        self.assertEqual({l["issue_id"] for l in links}, {633454, 635211, 635212})
+        self.assertEqual({link["issue_id"] for link in links}, {633454, 635211, 635212})
 
     def test_closed_solution_preferred(self):
         case = self.builder.build_from_issues([633454, 635211, 635212])

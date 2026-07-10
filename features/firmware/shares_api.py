@@ -3,19 +3,19 @@ from __future__ import annotations
 import json
 import os
 import re
-import socket
 import time
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterator
+from typing import Any
 from urllib.parse import quote
 
 import paramiko
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 
-from features.users.clients import get_client_username_from_request
+from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
 
 from . import runtime
@@ -185,7 +185,7 @@ def _stat_remote(host: str, user: str | None, path: str, config: dict[str, Any],
         raise ValueError(f"远端固件不存在: {path}") from exc
     except paramiko.AuthenticationException as exc:
         raise _AuthError(f"远端认证失败（用户名/密码/密钥不匹配）: {exc}") from exc
-    except (ConnectionRefusedError, socket.timeout, OSError) as exc:
+    except (TimeoutError, ConnectionRefusedError, OSError) as exc:
         raise ValueError(f"无法连接到主机（网络不通或端口未开放）: {exc}") from exc
     except paramiko.SSHException as exc:
         raise ValueError(f"SSH连接错误: {exc}") from exc
@@ -219,7 +219,7 @@ def _list_remote_dir(host: str, user: str | None, path: str, config: dict[str, A
         raise ValueError(f"远端目录不存在: {normalized_path}") from exc
     except paramiko.AuthenticationException as exc:
         raise _AuthError(f"远端认证失败（用户名/密码/密钥不匹配）: {exc}") from exc
-    except (ConnectionRefusedError, socket.timeout, OSError) as exc:
+    except (TimeoutError, ConnectionRefusedError, OSError) as exc:
         raise ValueError(f"无法连接到主机（网络不通或端口未开放）: {exc}") from exc
     except paramiko.SSHException as exc:
         raise ValueError(f"SSH连接错误: {exc}") from exc
@@ -285,16 +285,18 @@ def _remote_file_iterator(
     length: int,
     password: str | None = None,
 ) -> Iterator[bytes]:
-    with _sftp_client(host, user, config, password=password) as (sftp, _creds):
-        with sftp.open(path, "rb") as remote_file:
-            remote_file.seek(start)
-            remaining = length
-            while remaining > 0:
-                chunk = remote_file.read(min(_DOWNLOAD_CHUNK_SIZE, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                yield chunk
+    with (
+        _sftp_client(host, user, config, password=password) as (sftp, _creds),
+        sftp.open(path, "rb") as remote_file,
+    ):
+        remote_file.seek(start)
+        remaining = length
+        while remaining > 0:
+            chunk = remote_file.read(min(_DOWNLOAD_CHUNK_SIZE, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
 
 
 @router.get("/api/firmware-shares")

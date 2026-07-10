@@ -8,6 +8,8 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
+from features.users import owner_id_from_request
+
 from .api import (
     _DEPARTMENT_OVERDUE_CACHE,
     _PROJECT_STATS_CACHE,
@@ -36,7 +38,6 @@ from .repository import (
     owner_user_map_path,
     refresh_assignee_issue_snapshots,
 )
-from features.users.clients import owner_id_from_request
 
 
 logger = logging.getLogger(__name__)
@@ -158,7 +159,7 @@ async def _current_redmine_user_mapping(service) -> dict[str, Any] | None:
     if user is None:
         return None
     try:
-        user_id = int(getattr(user, "id"))
+        user_id = int(user.id)
     except (TypeError, ValueError):
         return None
     names = _redmine_user_names(user)

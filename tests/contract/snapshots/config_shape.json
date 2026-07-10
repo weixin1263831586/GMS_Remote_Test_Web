@@ -25,10 +25,17 @@
       }
     }
   },
+  "automation_worker": {
+    "build_poll_interval_seconds": "int",
+    "enabled": "bool",
+    "executor": "str",
+    "interval_seconds": "int",
+    "stale_build_seconds": "int",
+    "stale_run_seconds": "int",
+    "waiting_device_timeout_seconds": "int"
+  },
   "client_hosts": {
-    "127.0.0.1": "str",
-    "172.16.14.65": "str",
-    "172.16.14.66": "str"
+    "<dynamic-key>": "str"
   },
   "client_ssh_credentials": [
     {
@@ -36,6 +43,17 @@
       "host": "str",
       "password": "str",
       "username": "str"
+    }
+  ],
+  "device_groups": [
+    {
+      "color": "str",
+      "device_ids": [
+        "str"
+      ],
+      "followed": "bool",
+      "id": "str",
+      "name": "str"
     }
   ],
   "gerrit_dashboard": {
@@ -143,9 +161,10 @@
     },
     "email": {
       "from_addr": "str",
+      "password": "str",
       "smtp_host": "str",
       "smtp_port": "int",
-      "use_ssl": "bool",
+      "use_tls": "bool",
       "username": "str"
     },
     "project_profiles": []
@@ -153,6 +172,7 @@
   "redmine_stats": {
     "cache_ttl": "int",
     "chart_date_ranges": {},
+    "freshness_days": "int",
     "stale_days": "int",
     "window_days": "int"
   },

@@ -35,10 +35,15 @@ class AutomationService:
         store: AutomationStore,
         profiles_path: Path,
         gerrit_query: GerritQuery | None = None,
+        device_selector: Any = None,
+        device_manager: Any = None,
     ):
         self.store = store
         self.profiles_path = profiles_path
         self.gerrit_query = gerrit_query
+        self._build_passwords: dict[str, str] = {}
+        self._device_selector = device_selector
+        self._device_manager = device_manager
 
     @staticmethod
     def new_run_id() -> str:
@@ -46,11 +51,18 @@ class AutomationService:
 
     def orchestrator(self, executor_name: str = 'stub') -> AutomationOrchestrator:
         executor = (
-            HttpAutomationExecutor()
+            HttpAutomationExecutor(
+                build_password_provider=self.get_build_password,
+                device_selector=self._device_selector,
+                device_manager=self._device_manager,
+            )
             if executor_name == 'http'
             else StubAutomationExecutor()
         )
         return AutomationOrchestrator(self.store, executor)
+
+    def get_build_password(self, run_id: str) -> str:
+        return self._build_passwords.get(run_id, "")
 
     def list_profiles(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         return load_profiles(self.profiles_path, enabled_only=enabled_only)
@@ -107,10 +119,19 @@ class AutomationService:
         }
 
     def create_run(self, request: dict[str, Any]) -> dict[str, Any]:
-        create_request = AutomationRunCreateRequest(**(request or {}))
+        body = dict(request or {})
+        build_password = str(body.pop('build_server_password', '') or '')
+        test_plan = body.get('test_plan')
+        if isinstance(test_plan, dict):
+            build = test_plan.get('build')
+            if isinstance(build, dict):
+                build_password = build_password or str(build.pop('server_password', '') or '')
+        create_request = AutomationRunCreateRequest(**body)
         run = self.store.create_run(
             create_request.to_run_dict(self.new_run_id())
         )
+        if build_password:
+            self._build_passwords[run['id']] = build_password
         self.store.append_event(
             run['id'],
             run['status'],
@@ -239,6 +260,10 @@ class AutomationService:
             profile.get('jenkins'),
             dict,
         ) else {}
+        build = profile.get('build') if isinstance(
+            profile.get('build'),
+            dict,
+        ) else {}
         test_plan = profile.get('test_plan') if isinstance(
             profile.get('test_plan'),
             dict,
@@ -270,6 +295,13 @@ class AutomationService:
                 'flash': flash,
                 'device_selector': device_selector,
                 'reporting': reporting,
+                'build': {
+                    **build,
+                    'parameters': self._format_template_map(
+                        build.get('parameters') or {},
+                        event,
+                    ),
+                },
                 'jenkins': {
                     **jenkins,
                     'parameters': self._format_template_map(

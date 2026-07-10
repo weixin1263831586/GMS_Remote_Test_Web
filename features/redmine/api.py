@@ -12,7 +12,6 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from features.users.clients import owner_id_from_request
 from features.redmine.agent import RedmineAgent
 from features.redmine.config import config_manager
 from features.redmine.dashboard import (
@@ -48,6 +47,7 @@ from features.redmine.repository import (
 from features.redmine.scheduler import get_scheduler_config
 from features.redmine.service import RedmineService
 from features.redmine.utils import attachment_content_disposition, sanitize_attachment_filename
+from features.users import owner_id_from_request
 from foundation.config import settings
 
 
@@ -160,7 +160,7 @@ def _make_ai_analyzer_factory():
     time; the feature degrades to rule-based analysis if the module is missing.
     """
     try:
-        from features.assistant.universal_ai import UniversalAIAnalyzer
+        from features.assistant import UniversalAIAnalyzer
     except Exception:
         return None
     return lambda config: UniversalAIAnalyzer(config)
@@ -169,7 +169,7 @@ def _make_ai_analyzer_factory():
 def _make_report_analyzer_factory():
     """Return a factory(temp_dir)->ReportAnalyzer for PDF/XML/zip test reports."""
     try:
-        from features.reports.archive import ReportAnalyzer
+        from features.reports import ReportAnalyzer
     except Exception:
         return None
     return lambda temp_dir=None: ReportAnalyzer(temp_dir)
@@ -272,10 +272,10 @@ def _send_reminder_email(to_addr: str, subject: str, body: str, manager=None) ->
     """发送部门提醒邮件。
 
     SMTP 发送逻辑（含 163 企业邮兼容、SSL/TLS 判定、认证错误兜底）已统一到
-    :func:`features.email.service.send_email`，这里仅做透传，保持调用方与返回
+    :func:`features.email.send_email`，这里仅做透传，保持调用方与返回
     结构 ``{"sent", "mode", "error"}`` 不变。
     """
-    from features.email.service import send_email  # 延迟导入避免循环依赖
+    from features.email import send_email  # 延迟导入避免循环依赖
 
     selected_manager = manager or config_manager
     result = send_email(to_addr, subject, body, manager=selected_manager)

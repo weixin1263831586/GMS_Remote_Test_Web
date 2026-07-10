@@ -14,6 +14,7 @@ from .api_helpers import (
     test_report_db,
 )
 
+
 try:
     from features.users import get_client_display_id_from_request as _user_display_id_from_request
     from features.users import get_client_id_from_request as _user_id_from_request

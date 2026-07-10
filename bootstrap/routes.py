@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from features import knowledge
 from features.assistant import api as assistant
 from features.assistant.universal_ai import get_universal_analyzer
 from features.auth import router as auth_router
@@ -9,6 +10,10 @@ from features.automation import api as automation
 from features.automation.api import configure_automation_service
 from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
+from features.build import api as build
+from features.build.api import configure_build_service
+from features.build.repository import BuildStore
+from features.build.service import BuildService
 from features.devices import api as devices
 from features.devices import config_explorer_api as device_config_explorer
 from features.devices import config_override_api as device_config_override
@@ -42,7 +47,6 @@ from features.redmine.dashboard import (
 )
 from features.reports import api as reports
 from features.reports.dependencies import configure_report_dependencies
-from features import knowledge
 from features.system import api as system
 from features.system import assets, audit, desktop, integrations
 from features.system import notifications_api as notifications
@@ -106,6 +110,7 @@ ALL_ROUTERS = [
     auth_router,
     automation.router,
     automation.page_router,
+    build.router,
     desktop.router,
     devices.router,
     device_config_explorer.router,
@@ -149,6 +154,23 @@ def configure_config_sections() -> None:
         normalizer=normalize_gerrit_dashboard_config,
         denormalizer=denormalize_gerrit_dashboard_config,
     )
+
+
+def _build_device_components():
+    """Return ``(device_selector, device_manager)`` from device globals.
+
+    Both may be None if the device singletons are unavailable, in which case
+    the executor falls back to manual device selection and skips post-flash
+    property verification.
+    """
+    try:
+        from features.automation.device_selector import DeviceSelector
+        from features.devices import device_lock_manager
+        from features.devices.manager import device_manager
+
+        return DeviceSelector(device_manager, device_lock_manager), device_manager
+    except Exception:
+        return None, None
 
 
 def include_routes(app: FastAPI, templates, services=None) -> None:
@@ -257,6 +279,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             )
             return result.get('items') or result.get('changes') or []
 
+        device_selector, device_manager = _build_device_components()
         configure_automation_service(
             AutomationService(
                 store=AutomationStore(
@@ -265,6 +288,19 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
                 ),
                 profiles_path=profiles_path,
                 gerrit_query=query_gerrit,
+                device_selector=device_selector,
+                device_manager=device_manager,
+            )
+        )
+        build_config_path = services.settings.project_root / 'configs/build_servers.json'
+        if not build_config_path.exists():
+            build_config_path = services.settings.project_root / 'configs/build_servers.example.json'
+        configure_build_service(
+            BuildService(
+                store=BuildStore(
+                    services.settings.data_root / 'build/build.sqlite3'
+                ),
+                config_path=build_config_path,
             )
         )
     init_templates(templates)

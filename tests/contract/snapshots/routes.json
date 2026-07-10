@@ -163,6 +163,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/automation/dashboard"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/automation/gerrit/poll"
@@ -235,9 +241,87 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/automation/runs/{run_id}/trace"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/automation/worker/status"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/automation/worker/tick"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/build/discover/lunch-options"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/build/discover/workspaces"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/build/jobs"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/build/jobs"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/build/jobs/{job_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/build/jobs/{job_id}/cancel"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/build/jobs/{job_id}/log"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/build/jobs/{job_id}/password"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/build/jobs/{job_id}/poll"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/build/servers"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/build/templates"
   },
   {
     "methods": [
@@ -457,6 +541,24 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/device-groups"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/device-groups"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/device-groups/auto"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/devices/bootloader-lock"
@@ -537,6 +639,12 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/email/send"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/favicon/batch"
   },
   {
@@ -562,6 +670,54 @@
       "GET"
     ],
     "path": "/api/files/progress"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/firmware-shares"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/firmware-shares"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/firmware-shares/browse"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/firmware-shares/validate"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/firmware-shares/{share_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/firmware-shares/{share_id}/check"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/firmware-shares/{share_id}/credentials"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/firmware-shares/{share_id}/download"
   },
   {
     "methods": [
@@ -730,6 +886,96 @@
       "GET"
     ],
     "path": "/api/gms-update-monitor/sync/status"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/ask"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/docs"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/docs"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/docs/{doc_id}"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/knowledge/docs/{doc_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/docs/{doc_id}/attachments"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/folders"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/knowledge/nodes/{node_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/nodes/{node_id}/move"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/search"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/spaces"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/spaces"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/tags"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/tree"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/upload"
   },
   {
     "methods": [
@@ -1166,6 +1412,24 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/reports/weekly-report"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/reports/weekly-report/ai-summary"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/reports/weekly-report/department"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/security-audit/detail/{event_id}"
   },
   {
@@ -1377,6 +1641,12 @@
       "GET"
     ],
     "path": "/api/test/suites/download"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/suites/download-dir"
   },
   {
     "methods": [
@@ -1610,6 +1880,12 @@
       "GET"
     ],
     "path": "/node_modules/{path:path}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/notes"
   },
   {
     "methods": [

@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Query
 from fastapi.responses import JSONResponse
 
-from features.devices.support import ssh_connection_failed_response
+from features.devices import ssh_connection_failed_response
 from foundation.archives import (
     derive_suite_dir_name_from_archive,
     is_complete_archive_file,

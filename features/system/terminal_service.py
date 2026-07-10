@@ -18,7 +18,7 @@ import paramiko
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from features.devices.locks import device_lock_manager
+from features.devices import device_lock_manager
 from features.system.ssh import ssh_manager
 from features.system.state import global_state
 from foundation.common_utils import CommonUtils

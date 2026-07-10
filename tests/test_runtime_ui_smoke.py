@@ -2,6 +2,7 @@ import os
 import re
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import unittest
@@ -24,15 +25,19 @@ def free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-class RuntimeUiSmokeTests(unittest.TestCase):
+class RuntimeUiHarness(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if sync_playwright is None:
             raise unittest.SkipTest("Playwright is not installed")
         cls.port = free_port()
         cls.base_url = f"http://127.0.0.1:{cls.port}"
+        runtime_parent = "/dev/shm" if Path("/dev/shm").is_dir() else None
+        cls.runtime_dir = tempfile.TemporaryDirectory(dir=runtime_parent)
         env = os.environ.copy()
         env["GMS_PORT"] = str(cls.port)
+        env["GMS_DATA_ROOT"] = cls.runtime_dir.name
+        env["ATS_WORKER_ENABLED"] = "0"
         cls.server = subprocess.Popen(
             ["python", "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(cls.port)],
             cwd=Path(__file__).resolve().parents[1],
@@ -98,7 +103,9 @@ class RuntimeUiSmokeTests(unittest.TestCase):
             output_thread.join(timeout=2)
         if server and server.stdout:
             server.stdout.close()
-        Path("data/automation_runs.sqlite3").unlink(missing_ok=True)
+        runtime_dir = getattr(cls, "runtime_dir", None)
+        if runtime_dir:
+            runtime_dir.cleanup()
 
     def new_page(self):
         page = self.browser.new_page(viewport={"width": 1440, "height": 960})
@@ -194,6 +201,8 @@ class RuntimeUiSmokeTests(unittest.TestCase):
         self.press_escape_in_frame(frame)
         expect(frame.locator(modal_selector)).not_to_have_class(re.compile(r"show"))
 
+
+class RuntimeUiSmokeTests(RuntimeUiHarness):
     def test_sidebar_pages_switch_without_runtime_errors(self):
         page = self.new_page()
         page_errors = []
@@ -630,6 +639,7 @@ class RuntimeUiSmokeTests(unittest.TestCase):
         page = self.new_page()
         try:
             page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
+            page.evaluate("document.querySelector('button[data-workflow=\"create\"]').click()")
             page.wait_for_selector("#automation-create-run")
             page.fill("#automation-artifact", "/tmp/update.img")
             page.fill("#automation-devices", "TESTSERIAL001")
@@ -644,6 +654,15 @@ class RuntimeUiSmokeTests(unittest.TestCase):
 
     def test_redmine_dashboard_safe_controls_and_modals(self):
         page = self.new_page()
+        def fulfill_redmine(route):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"running":false,"last_result":{},"data":{},"items":[]}',
+            )
+
+        page.route("**/api/redmine/**", fulfill_redmine)
+        page.route("**/api/redmine-agent/**", fulfill_redmine)
         page_errors = []
         page.on("pageerror", lambda exc: page_errors.append(str(exc)))
         try:
@@ -723,6 +742,7 @@ class RuntimeUiSmokeTests(unittest.TestCase):
             page.evaluate("page(-1)")
 
             page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
+            page.evaluate("switchWorkflowPane('runs')")
             page.wait_for_selector("button[data-status]")
             for status in ["", "queued", "testing", "completed"]:
                 page.evaluate("status => setStatusFilter(status)", status)

@@ -4,4 +4,5 @@ from __future__ import annotations
 
 from .api import page_router, router
 
-__all__ = ["router", "page_router"]
+
+__all__ = ["page_router", "router"]

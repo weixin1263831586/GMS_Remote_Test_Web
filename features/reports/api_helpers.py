@@ -15,7 +15,7 @@ import aiohttp
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 
-from features.redmine.api import get_redmine_config_for_request
+from features.redmine import get_redmine_config_for_request
 from features.reports.analyzer import ReportAnalyzer
 from features.reports.repository import test_report_db
 from foundation.archives import ARCHIVE_EXTENSIONS
@@ -161,15 +161,15 @@ def _resolve_redmine_knowledge_service(request: Request | None = None):
          of silently reporting "no match".
       3. ``None`` when nothing is available — callers treat that as "no KB".
     """
-    from features.auth.service import get_authenticated_user
-    from features.redmine.api import get_redmine_service_for_owner
+    from features.auth import get_authenticated_user
+    from features.redmine import get_redmine_service_for_owner
 
     if request is not None:
         try:
             user = get_authenticated_user(request)
             if user is not None:
                 return get_redmine_service_for_owner(user.id).knowledge
-        except Exception as exc:  # noqa: BLE001 — diagnosis must never hard-fail
+        except Exception as exc:
             logger.debug("Knowledge service resolve from request failed: %s", exc)
 
     return _fallback_knowledge_service(get_redmine_service_for_owner)
@@ -193,7 +193,7 @@ def _fallback_knowledge_service(get_redmine_service_for_owner) -> Any:
     if _fallback_kb_scanned and _fallback_kb_owner:
         try:
             return get_redmine_service_for_owner(_fallback_kb_owner).knowledge
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("Cached fallback knowledge service stale: %s", exc)
             _fallback_kb_owner = None
 
@@ -220,9 +220,9 @@ def _fallback_knowledge_service(get_redmine_service_for_owner) -> Any:
                         _fallback_kb_owner = owner_id
                         _fallback_kb_scanned = True
                         return service
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.debug("Knowledge service fallback skip %s: %s", owner_id, exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("Knowledge service fallback scan failed: %s", exc)
 
     _fallback_kb_scanned = True

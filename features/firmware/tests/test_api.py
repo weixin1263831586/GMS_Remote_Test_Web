@@ -431,9 +431,8 @@ class FirmwareApiTests(unittest.TestCase):
             patch("features.firmware.shares_api._host_credentials", return_value={
                 "hostname": "10.10.10.206", "username": "hcq", "password": None,
                 "key_filename": None, "port": 22,
-            }),
+            }),shares_api._sftp_client("10.10.10.206", "hcq", {}, password="override")
         ):
-            with shares_api._sftp_client("10.10.10.206", "hcq", {}, password="override"):
-                pass
+            pass
 
         self.assertEqual(captured["password"], "override")

@@ -8,8 +8,7 @@ import re
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from features.devices.monitor import get_usb_monitor
-from features.devices.support import get_or_create_user_state
+from features.devices import get_or_create_user_state, get_usb_monitor
 from foundation.responses import error_response
 
 from . import runtime

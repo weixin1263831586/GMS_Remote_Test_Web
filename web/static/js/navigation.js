@@ -2024,11 +2024,32 @@ window.openTestResultsModal = function openTestResultsModal() {
         return;
     }
     ModalManager.open('test-results-modal');
+    const minimized = document.getElementById('test-results-minimized');
+    if (minimized) minimized.style.display = 'none';
     loadTestResults(true);
 };
 
 window.closeTestResultsModal = function closeTestResultsModal() {
     ModalManager.close('test-results-modal');
+    const minimized = document.getElementById('test-results-minimized');
+    if (minimized) minimized.style.display = 'none';
+};
+
+window.minimizeTestResultsModal = function minimizeTestResultsModal() {
+    ModalManager.close('test-results-modal');
+    const minimized = document.getElementById('test-results-minimized');
+    const title = document.getElementById('test-results-minimized-title');
+    if (title) {
+        const suite = document.getElementById('test-results-modal-suite');
+        title.textContent = suite ? suite.textContent.trim() : '';
+    }
+    if (minimized) minimized.style.display = 'flex';
+};
+
+window.restoreTestResultsModal = function restoreTestResultsModal() {
+    const minimized = document.getElementById('test-results-minimized');
+    if (minimized) minimized.style.display = 'none';
+    ModalManager.open('test-results-modal');
 };
 
 async function loadTestResults(force = false) {
@@ -4680,10 +4701,12 @@ async function checkSshd() {
     try {
         const result = await apiCall('/api/ssh/sshd', 'GET');
 
-        if (!result.installed && result.install_guide) {
+        if (result.success === true && result.installed === false && result.install_guide) {
             showSshdInstallGuide(result.install_guide);
         } else if (result.running) {
             addLogEntry(`SSHD 状态: 运行中`, 'success');
+        } else if (result.installed === null || result.installed === undefined) {
+            addLogEntry(`SSHD 状态: 无法连接设备主机，无法判断 SSHD 是否安装`, 'warning');
         } else if (!result.installed) {
             addLogEntry(`SSHD 状态: 无法确认是否已安装`, 'warning');
         } else {

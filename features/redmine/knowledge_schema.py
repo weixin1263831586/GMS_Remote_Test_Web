@@ -15,8 +15,6 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from .users import _now
-
 
 class KnowledgeSchemaMixin:
     """Creates the knowledge base tables (idempotent)."""

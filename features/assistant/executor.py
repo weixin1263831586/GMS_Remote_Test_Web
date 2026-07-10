@@ -15,9 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from features.assistant.tools import AgentTool, registry
-from features.devices.locks import device_lock_manager
-from features.devices.manager import device_manager
-from features.devices.support import get_or_create_user_state
+from features.devices import device_lock_manager, device_manager, get_or_create_user_state
 from features.redmine import (
     _name_keys,
     _norm_name,
@@ -100,7 +98,7 @@ def _get_model_by_tool() -> dict[str, type]:
     """Lazy-initialised mapping of tool names to Pydantic request models."""
     global _MODEL_BY_TOOL
     if _MODEL_BY_TOOL is None:
-        from features.devices.models import (
+        from features.devices import (
             ADBForwardStartRequest,
             DeviceActionRequest,
             DeviceLockRequest,
@@ -326,7 +324,7 @@ class ActionExecutor:
     async def _load_device_summaries(self) -> list[dict[str, Any]]:
         """Load device summaries, preferring management payload when available."""
         try:
-            from features.devices.api import (
+            from features.devices import (
                 _build_devices_management_payload,
                 _build_management_props_command,
                 _parse_management_device_props,
@@ -378,8 +376,7 @@ class ActionExecutor:
 
     async def _connect_wifi(self, session, request, params) -> ToolResult:
         """连接设备到 WiFi。未指定设备时默认选择一台空闲设备。"""
-        from features.devices.api import connect_wifi
-        from features.devices.models import WifiConnectRequest
+        from features.devices import WifiConnectRequest, connect_wifi
 
         devices = list(params.get("devices") or [])
         if not devices:
@@ -483,7 +480,7 @@ class ActionExecutor:
         )
 
     async def _query_suite_modules(self, session, request, params) -> ToolResult:
-        from features.test_execution.suite_modules import search_latest_suite_modules
+        from features.test_execution import search_latest_suite_modules
 
         query = str(params.get("query") or "").strip()
         suite_types_raw = params.get("suite_types") or "cts,vts,gts,sts"

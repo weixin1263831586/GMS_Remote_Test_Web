@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any, Protocol
 
 import requests
@@ -115,6 +116,12 @@ def _run_jenkins_plan(run: dict[str, Any]) -> dict[str, Any]:
     return jenkins
 
 
+def _run_build_plan(run: dict[str, Any]) -> dict[str, Any]:
+    plan = _run_test_plan(run)
+    build = plan.get("build") if isinstance(plan.get("build"), dict) else {}
+    return build
+
+
 def _jenkins_config_from_run(run: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
     jenkins = _run_jenkins_plan(run)
     config = dict(fallback or {})
@@ -131,11 +138,22 @@ class HttpAutomationExecutor:
     and launch real GMS tests.
     """
 
-    def __init__(self, base_url: str = "", session: Any = None, jenkins_config: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        base_url: str = "",
+        session: Any = None,
+        jenkins_config: dict[str, Any] | None = None,
+        build_password_provider: Any = None,
+        device_selector: Any = None,
+        device_manager: Any = None,
+    ):
         port = os.environ.get("GMS_PORT", "5001")
         self.base_url = (base_url or os.environ.get("GMS_AUTOMATION_BASE_URL") or f"http://127.0.0.1:{port}").rstrip("/")
         self.session = session or requests.Session()
         self.jenkins_config = jenkins_config or {}
+        self.build_password_provider = build_password_provider
+        self.device_selector = device_selector
+        self.device_manager = device_manager
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
@@ -148,6 +166,43 @@ class HttpAutomationExecutor:
         return {"success": True, "response": data, **(data.get("data") if isinstance(data.get("data"), dict) else {})}
 
     def trigger_build(self, run: dict[str, Any]) -> dict[str, Any]:
+        build_plan = _run_build_plan(run)
+        if build_plan.get("provider") == "ssh" or build_plan.get("server_id"):
+            try:
+                from features.build import get_build_service
+
+                parameters = dict(build_plan.get("parameters") or {})
+                for key in ("workspace", "lunch_target", "build_command"):
+                    if key in build_plan and key not in parameters:
+                        parameters[key] = build_plan[key]
+                job = get_build_service().create_job(
+                    {
+                        "server_id": build_plan.get("server_id", ""),
+                        "template_id": build_plan.get("template_id", "rk-android-build"),
+                        "server_password": (
+                            self.build_password_provider(run.get("id", ""))
+                            if self.build_password_provider
+                            else build_plan.get("server_password", "")
+                        ),
+                        "parameters": parameters,
+                        "source_type": run.get("source_type", "automation"),
+                        "source_key": f"automation-build:{run.get('id', '')}",
+                        "owner": run.get("owner", ""),
+                        "automation_run_id": run.get("id", ""),
+                    },
+                    start=True,
+                )
+                return {
+                    "success": True,
+                    "jenkins_queue_url": f"build://{job['id']}",
+                    "jenkins_build_number": job["id"],
+                    "jenkins_build_url": f"/api/build/jobs/{job['id']}",
+                    "build_job_id": job["id"],
+                    "build_status": job["status"],
+                }
+            except Exception as exc:
+                return {"success": False, "error": str(exc)}
+
         config = _jenkins_config_from_run(run, self.jenkins_config)
         if not config.get("base_url"):
             return {"success": False, "error": "Jenkins config missing"}
@@ -159,6 +214,38 @@ class HttpAutomationExecutor:
         }
 
     def poll_build(self, run: dict[str, Any]) -> dict[str, Any]:
+        build_plan = _run_build_plan(run)
+        if build_plan.get("provider") == "ssh" or build_plan.get("server_id"):
+            try:
+                from features.build import get_build_service
+
+                job_id = run.get("jenkins_build_number") or ""
+                if not job_id and str(run.get("jenkins_queue_url") or "").startswith("build://"):
+                    job_id = str(run["jenkins_queue_url"])[len("build://"):]
+                if not job_id:
+                    return {"success": False, "error": "Build job id missing"}
+                job = get_build_service().poll_job(job_id)
+                artifacts = job.get("artifacts") or []
+                result = {
+                    "success": True,
+                    "building": job.get("status") in {"queued", "running"},
+                    "result": "SUCCESS" if job.get("status") == "completed" else ("FAILURE" if job.get("status") == "failed" else ""),
+                    "jenkins_build_number": job_id,
+                    "jenkins_build_url": f"/api/build/jobs/{job_id}",
+                    "build_job_id": job_id,
+                    "build": job,
+                }
+                if artifacts:
+                    artifact = artifacts[0]
+                    result["artifact_path"] = artifact.get("path", "")
+                    result["artifact_url"] = artifact.get("path", "")
+                    result["artifact"] = artifact
+                if job.get("status") == "failed":
+                    return {"success": False, "error": job.get("error") or "Build failed", **result}
+                return result
+            except Exception as exc:
+                return {"success": False, "error": str(exc)}
+
         config = _jenkins_config_from_run(run, self.jenkins_config)
         if not config.get("base_url"):
             return {"success": False, "error": "Jenkins config missing"}
@@ -191,9 +278,12 @@ class HttpAutomationExecutor:
 
     def select_devices(self, run: dict[str, Any]) -> dict[str, Any]:
         devices = _run_devices(run)
-        if not devices:
-            return {"success": False, "error": "No devices selected"}
-        return {"success": True, "devices": [{"serial": serial} for serial in devices]}
+        if devices:
+            return {"success": True, "devices": [{"serial": serial} for serial in devices]}
+        # No manual devices — try automatic selection via device_selector.
+        if self.device_selector is not None:
+            return self.device_selector.select(run)
+        return {"success": False, "error": "No devices selected"}
 
     def flash(self, run: dict[str, Any]) -> dict[str, Any]:
         plan = _run_test_plan(run)
@@ -209,7 +299,42 @@ class HttpAutomationExecutor:
             data={"firmware_path": firmware_path},
             timeout=3600,
         )
-        return self._json_response(response)
+        result = self._json_response(response)
+        if not result.get("success"):
+            return result
+        verify = flash_plan.get("verify") if isinstance(flash_plan.get("verify"), dict) else {}
+        if verify and self.device_manager is not None:
+            check = self._verify_post_flash(devices, verify)
+            if not check["success"]:
+                return check
+        return result
+
+    def _verify_post_flash(self, devices: list[str], verify: dict[str, Any]) -> dict[str, Any]:
+        """Verify ro.product/fingerprint after flash; retry while the device reboots."""
+        expected_product = str(verify.get("product") or "").strip()
+        fingerprint_contains = str(verify.get("fingerprint_contains") or "").strip()
+        attempts = int(verify.get("retries") or 3)
+        delay = int(verify.get("retry_delay") or 10)
+        last_error = ""
+        for _ in range(max(1, attempts)):
+            for serial in devices:
+                try:
+                    info = self.device_manager.get_device_info(serial) or {}
+                except Exception as exc:
+                    last_error = f"get_device_info failed for {serial}: {exc}"
+                    info = {}
+                model = str(info.get("model") or "")
+                fingerprint = str(info.get("fingerprint") or "")
+                if expected_product and expected_product.lower() not in model.lower():
+                    last_error = f"product mismatch on {serial}: expected '{expected_product}', got '{model}'"
+                    break
+                if fingerprint_contains and fingerprint_contains.lower() not in fingerprint.lower():
+                    last_error = f"fingerprint mismatch on {serial}: '{fingerprint}' missing '{fingerprint_contains}'"
+                    break
+            else:
+                return {"success": True, "verified": True}
+            time.sleep(delay)
+        return {"success": False, "error": f"post-flash verification failed: {last_error}"}
 
     def start_test(self, run: dict[str, Any]) -> dict[str, Any]:
         plan = _run_test_plan(run)
@@ -248,11 +373,19 @@ class HttpAutomationExecutor:
         return self._json_response(response)
 
     def report_result(self, run: dict[str, Any]) -> dict[str, Any]:
-        # Gerrit feedback is implemented as a later transport-specific hook.
-        # This stage still returns a structured summary so the run timeline has
-        # a durable "reporting" checkpoint.
+        # Fire completion notifications (email/Gerrit/Redmine), each gated by the
+        # profile's reporting block. Never raises — a missing transport must not
+        # block the run from completing.
+        notifications = {"sent": [], "reason": "no reporting config"}
+        try:
+            from features.automation.notifier import notify_run_completion
+
+            notifications = notify_run_completion(run)
+        except Exception:
+            pass
         return {
             "success": True,
             "report_timestamp": run.get("report_timestamp", ""),
             "result": json.loads(run.get("result_json") or "{}"),
+            "notifications": notifications,
         }

@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import sys
 
+from features.redmine.case_extractor import RedmineCaseExtractor
+
 # Resolve the active per-user knowledge service (largest populated store).
 from features.reports.api_helpers import _resolve_redmine_knowledge_service
-from features.redmine.case_extractor import RedmineCaseExtractor
+
 
 # Verified root cause + solution for the multi-display IME timeout family.
 # Sourced from the closed/verified Redmine ticket #618660.

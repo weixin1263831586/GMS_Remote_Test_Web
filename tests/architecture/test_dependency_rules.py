@@ -39,14 +39,16 @@ class DependencyRuleTests(unittest.TestCase):
         offenders = []
         for path in (ROOT / 'features').rglob('*.py'):
             relative = str(path.relative_to(ROOT))
-            if relative in MIGRATION_FEATURE_IMPORT_EXEMPTIONS:
-                continue
             feature = path.relative_to(ROOT / 'features').parts[0]
             for name in imports(path):
                 if not name.startswith('features.'):
                     continue
                 parts = name.split('.')
-                if len(parts) >= 3 and parts[1] != feature:
+                if (
+                    len(parts) >= 3
+                    and parts[1] != feature
+                    and (relative, name) not in MIGRATION_FEATURE_IMPORT_EXEMPTIONS
+                ):
                     offenders.append((str(path.relative_to(ROOT)), name))
         self.assertEqual(offenders, [])
 

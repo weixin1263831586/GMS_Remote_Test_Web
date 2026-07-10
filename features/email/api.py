@@ -12,11 +12,12 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
-from features.auth.service import require_authenticated_user
-from foundation.responses import error_response, success_response
+from features.auth import require_authenticated_user
 from features.email.service import send_email
-from features.redmine.api import get_redmine_config_for_request
+from features.redmine import get_redmine_config_for_request
 from foundation.config import settings
+from foundation.responses import error_response, success_response
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
