@@ -15,6 +15,7 @@ def normalize_profile(raw: dict[str, Any]) -> dict[str, Any]:
         "name": name,
         "enabled": bool(raw.get("enabled", True)),
         "gerrit": raw.get("gerrit") if isinstance(raw.get("gerrit"), dict) else {},
+        "build": raw.get("build") if isinstance(raw.get("build"), dict) else {},
         "jenkins": raw.get("jenkins") if isinstance(raw.get("jenkins"), dict) else {},
         "device_selector": raw.get("device_selector") if isinstance(raw.get("device_selector"), dict) else {},
         "flash": raw.get("flash") if isinstance(raw.get("flash"), dict) else {},

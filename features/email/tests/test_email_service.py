@@ -81,7 +81,7 @@ class SendEmailTests(unittest.TestCase):
 
             self.assertTrue(result["sent"])
             # sendmail 的第一个参数是 from_addr，应被强制对齐为 username
-            from_addr, recipients, _ = smtp.sendmail.call_args.args
+            from_addr, _recipients, _ = smtp.sendmail.call_args.args
             self.assertEqual(from_addr, "me@rock-chips.com")
 
     @patch("features.email.service.smtplib.SMTP_SSL")

@@ -167,6 +167,13 @@ def create_lifespan(services: AppServices):
         except Exception:
             logger.exception('Failed to start USB monitor')
             usb_dispatch_task = None
+        automation_task = None
+        try:
+            from features.automation.worker import start_automation_worker
+
+            automation_task = start_automation_worker()
+        except Exception:
+            logger.exception('Failed to start automation worker')
         yield
         cleanup_task.cancel()
         with suppress(asyncio.CancelledError):
@@ -175,6 +182,11 @@ def create_lifespan(services: AppServices):
             usb_dispatch_task.cancel()
             with suppress(asyncio.CancelledError):
                 await usb_dispatch_task
+        if automation_task:
+            from features.automation.worker import stop_automation_worker
+
+            with suppress(asyncio.CancelledError):
+                await stop_automation_worker()
         if redmine_task:
             await stop_redmine_agent_scheduler()
         stop_usbip_reconnect_tasks()

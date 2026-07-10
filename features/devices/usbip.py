@@ -583,7 +583,7 @@ class USBIPManager:
         mode = (protocol_status or {}).get("mode") or "unknown"
         if mode in {"fastboot", "recovery", "unauthorized", "offline", "adb_non_device"}:
             return f'✅ USB/IP传输已连接，当前协议状态: {mode}'
-        return f'✅ USB/IP传输已连接，等待设备枚举完成'
+        return '✅ USB/IP传输已连接，等待设备枚举完成'
 
     def _scope_protocol_status(
         self,

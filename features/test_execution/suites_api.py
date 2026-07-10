@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from features.devices.support import ssh_connection_failed_response
+from features.devices import ssh_connection_failed_response
 from foundation.errors import handle_api_errors
 
 from . import runtime

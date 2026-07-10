@@ -1,11 +1,6 @@
-"""周报总结聚合 API。
+"""聚合 Redmine、Gerrit、Android17 和 GMS 测试进展并生成周报。
 
-聚合 Redmine 个人看板 (workload 统计)、Gerrit 个人看板 (personal 统计 +
-review-queue)、Android17 移植计划（腾讯文档）以及 GMS 本地认证测试进展，
-按用户给定的起止区间生成结构化周报数据，供前端渲染为 Markdown 报告。
-
-归属人取当前登录用户/默认 owner，与各个人看板页一致。任一数据源缺凭证或
-未配置时，该项降级为可用标记 false + error，不影响其他项与整体返回。
+数据源缺少凭证或配置时单项降级，不影响其他数据源。
 """
 
 from __future__ import annotations
@@ -13,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 import urllib.parse
 from datetime import date, datetime, timedelta
@@ -22,16 +16,18 @@ from typing import Any
 import aiohttp
 from fastapi import APIRouter, Query, Request
 
-from foundation.config import settings
+from features.test_execution import (
+    _get_available_test_suites,
+    execute_tradefed_command,
+    get_default_suites_path,
+    parse_tradefed_list_results,
+)
+from features.test_execution import (
+    runtime as te_runtime,
+)
 from foundation.responses import error_response, success_response
 from foundation.time import parse_datetime
 
-# gms_test 复用「📋 测试结果列表」数据源：tradefed list results（文本表格，几 KB），
-# 不再 etree.parse 整个 CTS XML（1.5GB）。这些函数/对象在调用时才取（避免启动期循环导入）。
-from features.test_execution import runtime as te_runtime
-from features.test_execution.suite_helpers import _get_available_test_suites
-from features.test_execution.suites import get_default_suites_path
-from features.test_execution.tradefed import execute_tradefed_command, parse_tradefed_list_results
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -107,13 +103,17 @@ async def _gather_weekly_sources(
     coros: list = []
     keys: list[str] = []
     if want_rm:
-        coros.append(_collect_redmine(request, start, end, name=redmine_name)); keys.append("redmine")
+        coros.append(_collect_redmine(request, start, end, name=redmine_name))
+        keys.append("redmine")
     if want_gr:
-        coros.append(_collect_gerrit(request, start, end, owner=gerrit_owner)); keys.append("gerrit")
+        coros.append(_collect_gerrit(request, start, end, owner=gerrit_owner))
+        keys.append("gerrit")
     if want_a17:
-        coros.append(_collect_android17(start, end, owner=android17_owner)); keys.append("android17")
+        coros.append(_collect_android17(start, end, owner=android17_owner))
+        keys.append("android17")
     if want_gms:
-        coros.append(_collect_gms_test(start, end)); keys.append("gms_test")
+        coros.append(_collect_gms_test(start, end))
+        keys.append("gms_test")
     gathered = await asyncio.gather(*coros) if coros else []
     # keys 与 gathered 一一对齐；未启用的来源填占位，保证下游解构永远拿到四个键。
     sources = dict(zip(keys, gathered))
@@ -183,7 +183,7 @@ def _parse_tencent_docs_ssr(html: str) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for row_cells in rows_raw:
         by_col: dict[str, list[str]] = {}
-        for x, y, idx, txt in row_cells:
+        for x, _y, _idx, txt in row_cells:
             matched = nearest_col(x)
             if not matched:
                 continue
@@ -251,9 +251,11 @@ def _task_completed_last_week(row: dict[str, Any], start: date, end: date) -> bo
 async def _collect_android17(start: date, end: date, owner: str = "黄超群") -> dict[str, Any]:
     """抓取腾讯文档 Android17 移植计划，返回指定负责人的上周已完成任务。"""
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
-            async with session.get(ANDROID17_SHEET_URL, headers={"User-Agent": "Mozilla/5.0"}) as resp:
-                html = await resp.text()
+        async with (
+            aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session,
+            session.get(ANDROID17_SHEET_URL, headers={"User-Agent": "Mozilla/5.0"}) as resp,
+        ):
+            html = await resp.text()
     except Exception as exc:
         return {"available": False, "error": f"无法访问腾讯文档: {exc}"}
 
@@ -497,7 +499,7 @@ async def _collect_gms_test(start: date, end: date) -> dict[str, Any]:
 async def _collect_redmine(request: Request, start: date, end: date, name: str = "") -> dict[str, Any]:
     # 复用 workload 端点：自带缓存、owner 解析、live counts。
     # name 非空时按指定人查询（部门周报）；为空时按当前登录用户。
-    from features.redmine.statistics_api import get_workload_statistics
+    from features.redmine import get_workload_statistics
 
     payload = await get_workload_statistics(request, stale_days=None, list_limit=50, name=name, refresh=False)
     if not payload.get("success"):
@@ -544,7 +546,7 @@ def _resolved_issues_summary(
     区间比较语义），这里只投影成摘要三列。
     """
     try:
-        from features.redmine.api import get_redmine_service_for_request
+        from features.redmine import get_redmine_service_for_request
 
         repo = get_redmine_service_for_request(request).repository
         end_next = (end + timedelta(days=1)).isoformat()
@@ -558,7 +560,7 @@ def _resolved_issues_summary(
 
 
 async def _collect_gerrit(request: Request, start: date, end: date, owner: str = "") -> dict[str, Any]:
-    from features.gerrit.api import (
+    from features.gerrit import (
         get_gerrit_personal_statistics,
         get_review_queue_count,
     )
@@ -777,7 +779,7 @@ def _resolve_department_members(request: Request, profile_id: str) -> list[dict[
     user_map → personal_profiles.name → 邮箱前缀）统一在 gerrit 侧维护，避免周报
     reach 进 gerrit 的内部配置与映射细节。
     """
-    from features.gerrit.api import list_department_members
+    from features.gerrit import list_department_members
 
     return list_department_members(request, profile_id)
 
@@ -897,7 +899,7 @@ def _collect_representative_issues(
     2. 超期未回复 / 待我回复 / 近期更新的开放工单。
     只取少量(limit)，避免把上千工单全喂给 AI。
     """
-    from features.redmine.api import get_redmine_service_for_request
+    from features.redmine import get_redmine_service_for_request
 
     lists = redmine.get("lists") or {}
     candidate_ids: list[int] = []
@@ -1090,8 +1092,8 @@ async def get_weekly_report_ai_summary(request: Request):
 
     # 调本地 AI
     try:
+        from features.assistant import get_universal_analyzer
         from features.reports.dependencies import dependencies
-        from features.assistant.universal_ai import get_universal_analyzer
     except Exception as e:  # pragma: no cover
         return error_response(f"AI 模块加载失败: {e}", status_code=500)
 

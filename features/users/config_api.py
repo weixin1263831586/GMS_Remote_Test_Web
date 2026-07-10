@@ -249,7 +249,7 @@ def auto_assign_new_devices(
     新设备，不触碰手建组，也不在 auto 组间做互斥（允许一台设备属于多个 auto 组）。
     有变更时持久化并返回新列表，否则原样返回。
     """
-    groups = _load_groups(username)
+    groups = load_device_groups(username)
     if not device_props:
         return groups
 
@@ -285,7 +285,7 @@ def auto_assign_new_devices(
             g["device_ids"] = ids
 
     if changed:
-        _save_groups(username, groups)
+        save_device_groups(username, groups)
     return groups
 
 
@@ -568,7 +568,7 @@ async def save_sidebar_order(req: dict = Body(default={})):
 # 未登录（匿名）时回退到全局 runtime config 的 device_groups，保持旧行为兼容。
 
 
-def _current_username(request: Request | None) -> str | None:
+def current_username_for_request(request: Request | None) -> str | None:
     """取当前登录用户名；未登录返回 None（走全局匿名回退）。"""
     if request is None:
         return None
@@ -594,7 +594,7 @@ def _anonymous_groups_key() -> str:
     return 'device_groups'
 
 
-def _load_groups(username: str | None) -> list[dict[str, Any]]:
+def load_device_groups(username: str | None) -> list[dict[str, Any]]:
     """读取并规整指定用户的 device_groups。username 为 None 时走全局（匿名回退）。"""
     if not username:
         if config_manager is None:
@@ -615,7 +615,7 @@ def _load_groups(username: str | None) -> list[dict[str, Any]]:
     return normalize_device_groups(data.get('groups', []) if isinstance(data, dict) else data)
 
 
-def _save_groups(username: str | None, groups: list[dict[str, Any]]) -> bool:
+def save_device_groups(username: str | None, groups: list[dict[str, Any]]) -> bool:
     if not username:
         if config_manager is None:
             return False
@@ -637,8 +637,8 @@ def _save_groups(username: str | None, groups: list[dict[str, Any]]) -> bool:
 @router.get("/api/device-groups")
 async def get_device_groups(request: Request):
     """获取当前用户的设备分组定义。"""
-    username = _current_username(request)
-    return success_response({'groups': _load_groups(username)})
+    username = current_username_for_request(request)
+    return success_response({'groups': load_device_groups(username)})
 
 
 @router.post("/api/device-groups")
@@ -656,8 +656,8 @@ async def mutate_device_groups(request: Request, req: dict = Body(default={})):
     if action not in {'create', 'update', 'delete', 'reorder', 'assign'}:
         return error_response("action 必须是 create/update/delete/reorder/assign", status_code=400)
 
-    username = _current_username(request)
-    groups = _load_groups(username)
+    username = current_username_for_request(request)
+    groups = load_device_groups(username)
 
     if action == 'create':
         name = str(req.get('name') or '').strip()
@@ -672,7 +672,7 @@ async def mutate_device_groups(request: Request, req: dict = Body(default={})):
             'device_ids': device_ids,
             'followed': bool(req.get('followed', False)),
         })
-        _enforce_exclusive(groups, group_id, device_ids)
+        enforce_exclusive_device_group(groups, group_id, device_ids)
 
     elif action == 'update':
         group = _find_group(groups, req.get('id'))
@@ -689,7 +689,7 @@ async def mutate_device_groups(request: Request, req: dict = Body(default={})):
                 group['color'] = color
         if 'device_ids' in req:
             group['device_ids'] = _coerce_device_ids(req.get('device_ids'))
-            _enforce_exclusive(groups, group['id'], group['device_ids'])
+            enforce_exclusive_device_group(groups, group['id'], group['device_ids'])
         if 'followed' in req:
             group['followed'] = bool(req.get('followed'))
 
@@ -713,18 +713,18 @@ async def mutate_device_groups(request: Request, req: dict = Body(default={})):
         incoming = set(_coerce_device_ids(req.get('device_ids')))
         if mode == 'set':
             group['device_ids'] = list(incoming)
-            _enforce_exclusive(groups, group['id'], group['device_ids'])
+            enforce_exclusive_device_group(groups, group['id'], group['device_ids'])
         elif mode == 'add':
             existing = set(group['device_ids']) | incoming
             group['device_ids'] = list(existing)
-            _enforce_exclusive(groups, group['id'], list(incoming))
+            enforce_exclusive_device_group(groups, group['id'], list(incoming))
         elif mode == 'remove':
             existing = set(group['device_ids']) - incoming
             group['device_ids'] = list(existing)
         else:
             return error_response("mode 必须是 set/add/remove", status_code=400)
 
-    if not _save_groups(username, groups):
+    if not save_device_groups(username, groups):
         return error_response("保存设备分组失败", status_code=500)
     return success_response({'groups': groups})
 
@@ -744,7 +744,7 @@ def _coerce_device_ids(raw: Any) -> list[str]:
     return result
 
 
-def _enforce_exclusive(groups: list[dict[str, Any]], owner_id: str, device_ids: list[str]) -> None:
+def enforce_exclusive_device_group(groups: list[dict[str, Any]], owner_id: str, device_ids: list[str]) -> None:
     """互斥语义：device_ids 这些设备只能属于 owner_id 这一组，从其他组移除。"""
     owned = set(device_ids)
     for g in groups:

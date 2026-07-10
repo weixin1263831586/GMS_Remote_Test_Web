@@ -7,7 +7,7 @@ import shlex
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from features.system.vnc import novnc_url
+from features.system import novnc_url
 from foundation.processes import command_reports_running
 from foundation.security import sanitize_device_ids
 

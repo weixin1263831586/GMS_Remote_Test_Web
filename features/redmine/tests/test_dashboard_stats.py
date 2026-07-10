@@ -392,7 +392,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         import asyncio
 
         import features.redmine.api as redmine_router
-        from features.auth.service import CurrentUser
+        from features.auth import CurrentUser
 
         class Client:
             async def count_issues_by_assignee(self, user_id):
@@ -459,7 +459,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         import asyncio
 
         import features.redmine.api as redmine_router
-        from features.auth.service import CurrentUser
+        from features.auth import CurrentUser
 
         class Client:
             async def count_issues_by_assignee(self, user_id):
@@ -539,7 +539,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         import asyncio
 
         import features.redmine.api as redmine_router
-        from features.auth.service import CurrentUser
+        from features.auth import CurrentUser
 
         live_trends = {
             "resolved_daily": [{"date": "2026-06-04", "count": 10}, {"date": "2026-05-18", "count": 9}],
@@ -605,7 +605,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         import asyncio
 
         import features.redmine.api as redmine_router
-        from features.auth.service import CurrentUser
+        from features.auth import CurrentUser
 
         class Client:
             async def count_issues_by_assignee(self, user_id):
@@ -655,7 +655,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
         import features.redmine.api as redmine_router
 
-        class Client:
+        class ResolvedIssuesClient:
             def __init__(self):
                 self.calls = []
 
@@ -672,8 +672,8 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             async def close(self):
                 pass
 
-        client = Client()
-        from features.auth.service import CurrentUser
+        client = ResolvedIssuesClient()
+        from features.auth import CurrentUser
 
         request = SimpleNamespace(
             state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),

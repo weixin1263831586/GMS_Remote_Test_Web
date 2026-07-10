@@ -33,6 +33,15 @@ from features.automation.models import (
 from features.automation.repository import AutomationStore
 
 
+def _run_has_build(run: dict[str, Any]) -> bool:
+    try:
+        plan = json.loads(run.get("test_plan_json") or "{}")
+    except json.JSONDecodeError:
+        return False
+    build = plan.get("build") if isinstance(plan.get("build"), dict) else {}
+    return bool(build.get("provider") or build.get("server_id") or build.get("template_id"))
+
+
 class AutomationOrchestrator:
     def __init__(self, store: AutomationStore, executor: AutomationExecutor):
         self.store = store
@@ -53,8 +62,8 @@ class AutomationOrchestrator:
 
         status = run["status"]
         if status == RUN_STATUS_QUEUED:
-            if run.get("jenkins_job"):
-                return self._transition(run, RUN_STATUS_JENKINS_QUEUED, "Run is queued for Jenkins build")
+            if run.get("jenkins_job") or _run_has_build(run):
+                return self._transition(run, RUN_STATUS_JENKINS_QUEUED, "Run is queued for firmware build")
             return self._transition(run, RUN_STATUS_WAITING_DEVICE, "Run is waiting for device selection")
         if status == RUN_STATUS_JENKINS_QUEUED:
             result = self.executor.trigger_build(run)
@@ -63,7 +72,7 @@ class AutomationOrchestrator:
             return self._transition(
                 run,
                 RUN_STATUS_JENKINS_BUILDING,
-                "Jenkins build triggered",
+                "Firmware build triggered",
                 result,
                 jenkins_queue_url=result.get("jenkins_queue_url", ""),
                 jenkins_build_number=result.get("jenkins_build_number", ""),
@@ -72,16 +81,16 @@ class AutomationOrchestrator:
         if status == RUN_STATUS_JENKINS_BUILDING:
             result = self.executor.poll_build(run)
             if not result.get("success"):
-                return self._fail(run, RUN_STATUS_JENKINS_FAILED, result.get("error", "Jenkins build failed"), result)
+                return self._fail(run, RUN_STATUS_JENKINS_FAILED, result.get("error", "Firmware build failed"), result)
             if result.get("building"):
-                self.store.append_event(run["id"], RUN_STATUS_JENKINS_BUILDING, "info", "Jenkins build is still running", result)
+                self.store.append_event(run["id"], RUN_STATUS_JENKINS_BUILDING, "info", "Firmware build is still running", result)
                 return run
             if result.get("result") and result.get("result") != "SUCCESS":
                 return self._fail(run, RUN_STATUS_JENKINS_FAILED, f"Jenkins build result: {result.get('result')}", result)
             return self._transition(
                 run,
                 RUN_STATUS_ARTIFACT_READY,
-                "Jenkins build completed",
+                "Firmware build completed",
                 result,
                 jenkins_queue_url=result.get("jenkins_queue_url", run.get("jenkins_queue_url", "")),
                 jenkins_build_number=result.get("jenkins_build_number", run.get("jenkins_build_number", "")),
@@ -104,8 +113,26 @@ class AutomationOrchestrator:
         if status == RUN_STATUS_WAITING_DEVICE:
             result = self.executor.select_devices(run)
             if not result.get("success"):
+                if result.get("retry"):
+                    # No idle devices yet — stay in waiting_device and let the
+                    # worker retry next tick. Worker enforces a timeout.
+                    self.store.append_event(
+                        run["id"],
+                        RUN_STATUS_WAITING_DEVICE,
+                        "info",
+                        f"Waiting for devices: {result.get('error', '')}",
+                        result,
+                    )
+                    return run
                 return self._fail(run, RUN_STATUS_FAILED, result.get("error", "device selection failed"), result)
-            return self._transition(run, RUN_STATUS_DEVICE_LOCKED, "Devices selected and locked", result)
+            devices = [{"serial": item.get("serial", "")} for item in result.get("devices") or []]
+            return self._transition(
+                run,
+                RUN_STATUS_DEVICE_LOCKED,
+                "Devices selected and locked",
+                result,
+                devices_json=json.dumps(devices, ensure_ascii=False, separators=(",", ":")),
+            )
         if status == RUN_STATUS_DEVICE_LOCKED:
             return self._transition(run, RUN_STATUS_FLASHING, "Starting firmware flash")
         if status == RUN_STATUS_FLASHING:
@@ -170,6 +197,7 @@ class AutomationOrchestrator:
             update_payload["started_at"] = utc_now_iso()
         updated = self.store.update_run(run["id"], **update_payload)
         self.store.append_event(run["id"], status, "success" if status == RUN_STATUS_COMPLETED else "info", message, payload or {})
+        self._audit(run, run.get("status", ""), status, message)
         return updated
 
     def _fail(self, run: dict[str, Any], status: str, error: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -181,4 +209,25 @@ class AutomationOrchestrator:
             finished_at=utc_now_iso(),
         )
         self.store.append_event(run["id"], status, "error", error, payload or {})
+        self._audit(run, run.get("status", ""), status, error)
         return updated
+
+    @staticmethod
+    def _audit(run: dict[str, Any], from_status: str, to_status: str, detail: str) -> None:
+        """Best-effort security audit of a state transition. Never raises."""
+        try:
+            from features.system import security_audit_logger
+
+            security_audit_logger.log_event({
+                "action_type": "automation_transition",
+                "source": "automation",
+                "operation": f"run {run.get('id', '')} {from_status} -> {to_status}",
+                "run_id": run.get("id", ""),
+                "profile_id": run.get("profile_id", ""),
+                "from_status": from_status,
+                "to_status": to_status,
+                "detail": detail,
+                "status_code": 200,
+            })
+        except Exception:
+            pass

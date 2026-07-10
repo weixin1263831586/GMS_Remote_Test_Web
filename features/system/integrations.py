@@ -10,7 +10,7 @@ import subprocess
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.devices.support import DeviceSSHConnection
+from features.devices import DeviceSSHConnection
 from features.system.models import VPNConnectRequest
 from features.system.network import (
     _extract_network,
@@ -136,9 +136,9 @@ async def check_ssh_sshd(request: Request, device_host: str | None = Query(None,
         logger.warning(f"[SSHD Check] Cannot connect to {device_host}: {traceback.format_exc()}")
         return JSONResponse(content={
             "success": False,
-            "installed": False,
-            "running": False,
-            "install_guide": SSHD_INSTALL_GUIDE,
+            "installed": None,
+            "running": None,
+            "install_guide": None,
             "error": f"无法通过 SSH 连接到 {device_host}，请检查网络连接和目标主机状态"
         })
 

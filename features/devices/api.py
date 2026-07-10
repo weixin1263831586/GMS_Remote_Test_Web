@@ -11,7 +11,7 @@ from datetime import datetime
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.test_execution.suites import get_default_suites_path
+from features.test_execution import get_default_suites_path
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 from foundation.security import sanitize_device_ids
@@ -28,16 +28,16 @@ from .operations_api import (
     _build_devices_management_payload as _build_devices_management_payload,
 )
 from .operations_api import (
-    _known_usbip_sources as _known_usbip_sources,
-)
-from .operations_api import (
-    _prune_inactive_usbip_sources as _prune_inactive_usbip_sources,
-)
-from .operations_api import (
     _build_management_props_command as _build_management_props_command,
 )
 from .operations_api import (
+    _known_usbip_sources as _known_usbip_sources,
+)
+from .operations_api import (
     _parse_management_device_props as _parse_management_device_props,
+)
+from .operations_api import (
+    _prune_inactive_usbip_sources as _prune_inactive_usbip_sources,
 )
 from .operations_api import (
     connect_wifi as connect_wifi,
@@ -159,12 +159,14 @@ async def get_connected_devices(
     devices_with_status = []
 
     # 设备 -> 所属分组 id 列表（按当前用户读取其 per-user 分组；局部 import 规避循环依赖）
-    from features.users.config_api import (
-        _current_username,
-        _load_groups,
+    from features.users import (
         build_device_group_map,
+        current_username_for_request,
+        load_device_groups,
     )
-    group_map = build_device_group_map(_load_groups(_current_username(request)))
+    group_map = build_device_group_map(
+        load_device_groups(current_username_for_request(request))
+    )
 
     usbip_sources = _prune_inactive_usbip_sources(
         devices,
@@ -473,11 +475,12 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
     结果写回当前用户的 device_groups（变成可再手动微调的持久分组），并返回新分组列表。
     每个分组名形如 "model: Pixel 7"，id 形如 "auto_<dim>_<sanitized>"。
     """
-    from features.users.config_api import (
-        _current_username,
-        _load_groups,
-        _save_groups,
+    from features.users import (
+        current_username_for_request,
+        enforce_exclusive_device_group,
+        load_device_groups,
         normalize_device_groups,
+        save_device_groups,
         soc_series,
     )
 
@@ -510,8 +513,8 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
     def _sanitize(value: str) -> str:
         return re.sub(r"[^a-zA-Z0-9_-]+", "_", value).strip("_") or "unknown"
 
-    username = _current_username(request)
-    existing_groups = _load_groups(username)
+    username = current_username_for_request(request)
+    existing_groups = load_device_groups(username)
     # 去掉所有旧的自动分组（不限维度），保留用户手建分组
     kept = [
         g for g in existing_groups
@@ -533,10 +536,9 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
     # 规整一次（补 color、去重 device_ids、followed 默认 False）
     new_groups = normalize_device_groups(new_groups)
     # 互斥语义：自动分出的组之间互斥（同一设备只进一个 auto 组），也从手建组抢回设备
-    from features.users.config_api import _enforce_exclusive
     for g in new_groups:
         if g["id"].startswith(f"auto_{dim}_"):
-            _enforce_exclusive(new_groups, g["id"], g["device_ids"])
-    _save_groups(username, new_groups)
+            enforce_exclusive_device_group(new_groups, g["id"], g["device_ids"])
+    save_device_groups(username, new_groups)
 
     return _api_success({"groups": new_groups}, f"已按 {dim} 生成 {len(value_to_devices)} 个分组")

@@ -16,6 +16,7 @@ from typing import Any
 
 from .cert_rules import detect_certification_errors, detect_certification_type
 
+
 # Placeholder texts the rule-based fallbacks emit when no real analysis is
 # available. They carry no knowledge and must never win over the signature KB.
 # Shared by the mature-case builder, reply drafter and knowledge service so the
@@ -216,7 +217,23 @@ class RedmineCaseExtractor:
 
         attachment_failures_text = cls._collect_attachment_failure_text(attachments)
         journal_text = cls._collect_journal_text(journals)
-        full_text = "\n".join(filter(None, [subject, description, summary, error_info, attachment_failures_text]))
+        full_text = "\n".join(
+            filter(
+                None,
+                [
+                    subject,
+                    description,
+                    summary,
+                    error_info,
+                    error_analysis,
+                    solution_text,
+                    patch_direction,
+                    doc_content,
+                    attachment_failures_text,
+                    journal_text,
+                ],
+            )
+        )
 
         chip_platform = cls._detect_chip_platform(subject, description, fixed_version)
         android_version = cls._detect_android_version(subject, description, fixed_version)

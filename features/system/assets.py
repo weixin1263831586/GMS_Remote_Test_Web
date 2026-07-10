@@ -1,7 +1,7 @@
 """Assets router - file listing, favicon, and user tools APIs."""
 
-import html
 import contextlib
+import html
 import json
 import logging
 import mimetypes
@@ -17,8 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from features.system.icon_fetcher import IconFetcher
 from features.system.ssh import ssh_manager
-from features.users import get_client_id_from_request
-from features.users.clients import get_client_display_id_from_request
+from features.users import get_client_display_id_from_request, get_client_id_from_request
 from foundation.config import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, TOOLS_DATA_FILE, config_manager
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response

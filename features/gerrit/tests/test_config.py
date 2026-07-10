@@ -1,5 +1,5 @@
-import unittest
 import json
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -147,8 +147,8 @@ class GerritConfigTests(unittest.TestCase):
     def test_gerrit_request_config_uses_shared_runtime_config(self):
         """Gerrit 看板配置统一写到 configs/config_runtime.json，不生成 per-user 配置目录。"""
         import features.gerrit.api as gerrit_api
-        import features.redmine.users as redmine_users
-        from features.auth.service import CurrentUser
+        from features.auth import CurrentUser
+        from features.gerrit.settings import GerritConfig
 
         def request_for(user_id):
             return SimpleNamespace(
@@ -160,11 +160,7 @@ class GerritConfigTests(unittest.TestCase):
             root = Path(tmp)
             (root / "configs").mkdir()
             (root / "foundation").mkdir()
-            fake_settings = type("S", (), {
-                "project_root": root,
-                "data_root": root,
-            })()
-            with patch.object(redmine_users, "settings", fake_settings):
+            with patch.object(gerrit_api, "config_manager", GerritConfig(root)):
                 alice_cfg = gerrit_api._config_for_request(request_for("alice-isolated"))
                 bob_cfg = gerrit_api._config_for_request(request_for("bob-isolated"))
                 self.assertEqual(
@@ -179,7 +175,7 @@ class GerritConfigTests(unittest.TestCase):
 
     def test_gerrit_department_config_is_derived_from_redmine_user_map_when_runtime_config_empty(self):
         import features.gerrit.api as gerrit_api
-        from features.auth.service import CurrentUser
+        from features.auth import CurrentUser
 
         class FakeManager:
             def get_gerrit_dashboard_config(self):

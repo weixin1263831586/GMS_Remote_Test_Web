@@ -5,8 +5,9 @@ import os
 import re
 from typing import Any
 
-from . import runtime
 from foundation.config import config_manager as default_config_manager
+
+from . import runtime
 
 
 logger = logging.getLogger(__name__)

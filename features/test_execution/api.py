@@ -49,13 +49,13 @@ from .suites_api import (
     list_suites as list_suites,
 )
 from .suites_api import (
-    search_suite_modules as search_suite_modules,
+    router as suites_router,
 )
 from .suites_api import (
     search_suite_files as search_suite_files,
 )
 from .suites_api import (
-    router as suites_router,
+    search_suite_modules as search_suite_modules,
 )
 from .transfers_api import (
     add_local_test_suite as add_local_test_suite,

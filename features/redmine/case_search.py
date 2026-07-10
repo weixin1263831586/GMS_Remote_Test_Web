@@ -22,6 +22,7 @@ from typing import Any
 from .case_extractor import RedmineCaseExtractor
 from .knowledge_repository import RedmineKnowledgeDB
 
+
 # Resolved-ish statuses that boost confidence in a candidate.
 _CONFIRMED_STATUSES = {"closed", "confirmed", "已关闭", "已解决", "resolved"}
 

@@ -42,7 +42,8 @@ class AuthApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["client_id"], setup_payload["user"]["id"])
+        self.assertEqual(payload["client_id"], "admin")
+        self.assertNotEqual(payload["client_id"], "attacker")
         self.assertEqual(payload["username"], "admin")
 
     def test_login_after_setup(self):

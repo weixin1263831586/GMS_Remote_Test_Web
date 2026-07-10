@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from features.auth import require_elevated_admin
-from features.users.clients import get_client_display_id_from_request
+from features.users import get_client_display_id_from_request
 from foundation.networking import split_host_port
 from foundation.responses import error_response
 

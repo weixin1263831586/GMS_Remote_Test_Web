@@ -16,12 +16,9 @@ import time
 import uuid
 from typing import Any
 
-from features.devices.utils import DeviceUtils
 from foundation.common_utils import CommonUtils
 from foundation.config import config_manager, get_ubuntu_user
 from foundation.processes import command_reports_running, start_detached_process
-from foundation.security import sanitize_device_ids
-from foundation.window_layout import calculate_window_positions
 
 from .ssh import ssh_manager
 

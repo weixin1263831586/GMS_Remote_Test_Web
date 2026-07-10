@@ -15,6 +15,12 @@ exclude = [
     "vendor",
     "web/static/vendor",
     "data",
+    "CI_AutoTest",
+    "data.pre_identity_migration_backup",
+    "remote-run-server",
+    "rk-skills",
+    "scripts_local",
+    "skills",
 ]
 
 [tool.ruff.lint]
@@ -66,3 +72,8 @@ lines-after-imports = 2
 quote-style = "single"
 indent-style = "space"
 line-ending = "lf"
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "features"]
+norecursedirs = ["rk-skills", "skills", "tools", "data", ".worktrees"]
+addopts = ["-p", "no:xonsh"]

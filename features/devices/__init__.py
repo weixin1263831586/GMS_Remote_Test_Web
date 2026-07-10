@@ -1,9 +1,3 @@
-from .api import (
-    _build_devices_management_payload,
-    _build_management_props_command,
-    _parse_management_device_props,
-    connect_wifi,
-)
 from .locks import device_lock_manager
 from .manager import device_manager
 from .models import (
@@ -25,6 +19,24 @@ from .support import (
     ssh_connection_failed_response,
     update_user_state_field,
 )
+
+
+_LAZY_API_EXPORTS = {
+    '_build_devices_management_payload',
+    '_build_management_props_command',
+    '_parse_management_device_props',
+    'connect_wifi',
+}
+
+
+def __getattr__(name: str):
+    if name not in _LAZY_API_EXPORTS:
+        raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+    from . import api
+
+    value = getattr(api, name)
+    globals()[name] = value
+    return value
 
 
 __all__ = [

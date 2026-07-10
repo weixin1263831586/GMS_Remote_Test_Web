@@ -50,7 +50,7 @@ async def automation_page():
         '{{AUTOMATION_JS}}',
         (ui_dir / 'page.js').read_text(encoding='utf-8'),
     )
-    return HTMLResponse(html)
+    return HTMLResponse(html, headers={'Cache-Control': 'no-store, no-cache, must-revalidate'})
 
 
 @router.get('/profiles')
@@ -132,6 +132,43 @@ async def get_automation_run(run_id: str):
     return {'success': True, 'data': run}
 
 
+@router.get('/dashboard')
+async def automation_dashboard():
+    """Aggregate run/build counts for the GMS ATS dashboard."""
+    from collections import Counter
+
+    from features.automation.models import TERMINAL_STATUSES
+    from features.build import get_build_service
+
+    runs = automation_service.list_runs(limit=500)
+    run_by_status = dict(Counter(run['status'] for run in runs))
+    completed_total = sum(
+        count for status, count in run_by_status.items() if status in TERMINAL_STATUSES
+    )
+    run_by_profile: dict[str, dict[str, int]] = {}
+    for run in runs:
+        bucket = run_by_profile.setdefault(run.get('profile_id') or 'manual', {})
+        bucket[run['status']] = bucket.get(run['status'], 0) + 1
+
+    try:
+        build_jobs = get_build_service().list_jobs(limit=500)
+    except Exception:
+        build_jobs = []
+    build_by_status = dict(Counter(job['status'] for job in build_jobs))
+
+    return {
+        'success': True,
+        'data': {
+            'run_total': len(runs),
+            'run_by_status': run_by_status,
+            'run_by_profile': run_by_profile,
+            'completed_total': completed_total,
+            'build_total': len(build_jobs),
+            'build_by_status': build_by_status,
+        },
+    }
+
+
 @router.get('/runs/{run_id}/events')
 async def get_automation_run_events(run_id: str):
     try:
@@ -139,6 +176,50 @@ async def get_automation_run_events(run_id: str):
     except AutomationNotFoundError as exc:
         return error_response(str(exc), 404)
     return {'success': True, 'data': {'items': events}}
+
+
+@router.get('/runs/{run_id}/trace')
+async def get_automation_run_trace(run_id: str):
+    """Correlate a run with its build job, commit, artifact and report."""
+    try:
+        run = automation_service.get_run(run_id)
+    except AutomationNotFoundError as exc:
+        return error_response(str(exc), 404)
+
+    import json
+
+    from features.build import get_build_service
+
+    build_job = None
+    build_job_id = run.get('jenkins_build_number') or ''
+    if build_job_id:
+        try:
+            build_job = get_build_service().get_job(build_job_id)
+        except Exception:
+            build_job = None
+    try:
+        result_summary = json.loads(run.get('result_json') or '{}')
+    except json.JSONDecodeError:
+        result_summary = {}
+    return {
+        'success': True,
+        'data': {
+            'run_id': run['id'],
+            'profile_id': run['profile_id'],
+            'status': run['status'],
+            'build_job_id': build_job_id,
+            'build_job': build_job,
+            'artifact_path': run.get('artifact_path') or '',
+            'commit': {
+                'gerrit_change_id': run.get('gerrit_change_id') or '',
+                'branch': run.get('branch') or '',
+                'gerrit_patchset': run.get('gerrit_patchset') or '',
+                'gerrit_subject': run.get('gerrit_subject') or '',
+            },
+            'report_timestamp': run.get('report_timestamp') or '',
+            'result_summary': result_summary,
+        },
+    }
 
 
 @router.post('/runs/{run_id}/cancel')
@@ -170,6 +251,13 @@ async def automation_worker_tick(executor: str = Query('stub')):
         'success': True,
         'data': data,
     }
+
+
+@router.get('/worker/status')
+async def automation_worker_status():
+    from features.automation.worker import get_worker_status
+
+    return {'success': True, 'data': get_worker_status()}
 
 
 @router.post('/gerrit/webhook')

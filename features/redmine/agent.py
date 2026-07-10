@@ -13,20 +13,20 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from features.redmine.analysis_ai import AiAnalysisMixin
-from features.redmine.analysis_attachments import IMAGE_ATTACHMENT_RE, PROCESS_ATTACHMENT_RE, AttachmentAnalysisMixin
+from features.redmine.analysis_attachments import AttachmentAnalysisMixin
 from features.redmine.analysis_issue import IssueAnalysisMixin
 from features.redmine.analysis_reporting import ReportingAnalysisMixin
 from features.redmine.analysis_resolution import ResolutionAnalysisMixin
 from features.redmine.analysis_similarity import SimilarityAnalysisMixin
 from features.redmine.client import RedmineClient
 from features.redmine.config import config_manager
-from features.redmine.utils import to_iso8601
 from features.redmine.repository import (
     RESOLVED_STATUS_NAMES as RESOLVED_STATUSES,
 )
 from features.redmine.repository import (
     RedmineAgentDB,
 )
+from features.redmine.utils import to_iso8601
 from foundation.config import settings
 
 

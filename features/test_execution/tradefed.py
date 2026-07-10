@@ -179,7 +179,6 @@ def execute_tradefed_command(ssh, suite_path: str, tradefed_bin: str, command: s
     PLATFORM_TOOLS_PATH = os.environ.get("GMS_PLATFORM_TOOLS_PATH", default_platform_tools)
     RECV_BUFFER_SIZE = 8192
     STABLE_OUTPUT_TIMEOUT = 2.0
-    POLL_INTERVAL = 0.05
 
     platform_tools_path = PLATFORM_TOOLS_PATH
 

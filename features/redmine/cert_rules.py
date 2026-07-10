@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+
 # BTS/EDLA error patterns. Each: (signature, [regex patterns]).
 CERT_ERROR_PATTERNS: list[tuple[str, list[re.Pattern[str]]]] = [
     (

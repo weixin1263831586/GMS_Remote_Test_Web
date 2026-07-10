@@ -139,8 +139,9 @@ parse_args() {
     if [[ -z "$SUITE_PATH" ]]; then
         die "缺少必需参数: --test-suite"
     fi
-    if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USER" ]]; then
-        die "缺少必需参数: --local-server"
+    # --local-server 仅在 --copy-remote 回传结果时需要，普通运行不再强制要求。
+    if [[ "$COPY_TO_REMOTE" == "true" ]] && { [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USER" ]]; }; then
+        die "启用 --copy-remote 时必须提供 --local-server（格式: user@host）"
     fi
 
     Test_Type="${args[0],,}"
@@ -361,7 +362,9 @@ main() {
     log "🧪 测试用例: $Test_Case"
     log "📱 测试设备: $DEVICE_ARGS"
     log "📁 测试套件: $SUITE_PATH"
-    log "🌐 本地主机: ${REMOTE_USER}@${REMOTE_HOST}"
+    if [[ -n "$REMOTE_HOST" ]]; then
+        log "🌐 本地主机: ${REMOTE_USER}@${REMOTE_HOST}"
+    fi
     log "📋 日志文件: $LOG_FILE"
     log "========================================"
 

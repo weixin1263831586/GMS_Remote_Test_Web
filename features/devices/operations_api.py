@@ -242,7 +242,7 @@ def _build_devices_management_payload(
     ubuntu_user = runtime.config_manager.get_ubuntu_user(config)
 
     # 设备 -> 所属分组 id 列表（按当前用户的 per-user 分组；局部 import 规避循环依赖）
-    from features.users.config_api import (
+    from features.users import (
         auto_assign_new_devices,
         build_device_group_map,
     )

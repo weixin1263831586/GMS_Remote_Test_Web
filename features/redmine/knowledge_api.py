@@ -12,9 +12,10 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.auth.service import require_authenticated_user
+from features.auth import require_authenticated_user
 
 from .api import get_redmine_service_for_request
+
 
 router = APIRouter()
 

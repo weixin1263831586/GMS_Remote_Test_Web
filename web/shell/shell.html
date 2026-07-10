@@ -153,8 +153,8 @@
             style.textContent =
                 // 隐藏所有页面内容
                 '.page-content { display: none !important; } ' +
-                // 显示目标页面
-                '#page-' + targetPage + ' { display: block !important; } ' +
+                // 显示目标页面（flex 列布局，使内嵌 iframe 的 flex:1 生效）
+                '#page-' + targetPage + ' { display: flex !important; flex-direction: column !important; } ' +
                 // 移除所有导航项的选中状态
                 '.sidebar-item { background: transparent !important; color: var(--text-secondary) !important; } ' +
                 // 设置目标导航项的选中状态
@@ -163,8 +163,6 @@
         })();
     </script>
     <style>
-        .page-content { display: none; }
-        .page-content.active { display: block; }
         .btn-xs { padding: 4px 10px; font-size: 11px; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 3px; color: var(--text-primary); cursor: pointer; transition: all 0.2s; font-weight: 500; }
         .btn-xs:hover { background: var(--border-color); transform: translateY(-1px); }
         .terminal-status.connected { background: rgba(76, 175, 80, 0.2); color: var(--success-color); }
@@ -1307,7 +1305,7 @@
         <div class="container page-content" id="page-gms-assistant">
             <div class="section-title">🎓 GMS助手</div>
             <iframe id="gms-assistant-frame" data-src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
-                    style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
+                    style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
         </div>
 
@@ -1315,7 +1313,7 @@
         <div class="container page-content" id="page-automation">
             <div class="section-title" style="text-transform:none">⚙️ GMS ATS</div>
             <iframe id="automation-frame" data-src="/automation"
-                    style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
+                    style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
         </div>
 
@@ -1323,7 +1321,7 @@
         <div class="container page-content" id="page-redmine-agent">
             <div class="section-title" style="text-transform:none">🧭 Redmine</div>
             <iframe id="redmine-agent-frame" data-src="/redmine-agent"
-                    style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
+                    style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
         </div>
 
@@ -1331,7 +1329,7 @@
         <div class="container page-content" id="page-gerrit-dashboard">
             <div class="section-title" style="text-transform:none">🔀 Gerrit看板</div>
             <iframe id="gerrit-dashboard-frame" data-src="/gerrit-dashboard"
-                    style="width: 100%; height: calc(100vh - 75px); border: none; border-radius: 8px; background: var(--light-bg);">
+                    style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
         </div>
 
@@ -1911,20 +1909,28 @@
     <!-- 测试结果列表弹框 (tradefed list results) -->
     <div id="test-results-modal" class="modal" style="z-index: 10090;">
         <div class="modal-content" style="max-width: min(1100px, 95vw); width: 95vw; height: 80vh; max-height: 80vh;">
-            <div class="modal-header">
+            <div class="modal-header" style="padding: 8px 20px;">
                 <span class="modal-title">测试结果列表 <span id="test-results-modal-suite" style="font-size: 12px; color: var(--text-secondary); font-weight: normal;"></span></span>
-                <span class="modal-close" onclick="closeTestResultsModal()">&times;</span>
+                <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+                    <button type="button" class="btn-xs" onclick="minimizeTestResultsModal()">缩小</button>
+                    <span class="modal-close" onclick="closeTestResultsModal()">&times;</span>
+                </div>
             </div>
-            <div class="modal-body" style="display: flex; flex-direction: column; height: 100%; overflow: hidden;">
-                <div class="modal-info-text" style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="modal-body" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; padding: 0 20px;">
+                <div class="modal-info-text" style="display: flex; justify-content: space-between; align-items: center; padding: 2px 0;">
                     <span id="test-results-modal-status">点击某一行测试结果可跳转到对应目录</span>
                     <button class="btn-xxs" onclick="loadTestResults(true)">🔄 刷新</button>
                 </div>
-                <div id="test-results-list" style="flex: 1; overflow: auto; margin-top: 10px; border: 1px solid var(--border-color); border-radius: 8px;">
+                <div id="test-results-list" style="flex: 1; overflow: auto; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 8px;">
                     <div style="padding: 20px; color: var(--text-secondary); text-align: center;">加载中...</div>
                 </div>
             </div>
         </div>
+    </div>
+    <div id="test-results-minimized" class="dcfg-minimized" style="display:none;">
+        <button type="button" class="btn-xs btn-primary" onclick="restoreTestResultsModal()">📋 测试结果列表</button>
+        <div id="test-results-minimized-title" class="dcfg-minimized-title"></div>
+        <button type="button" class="btn-xxs" onclick="closeTestResultsModal()">关闭</button>
     </div>
 
     <!-- 烧写固件弹框 -->
@@ -2738,8 +2744,8 @@
             const sshPasswordInput = document.getElementById('new-host-ssh-password');
             const vncPasswordInput = document.getElementById('new-host-vnc-password');
             const hostString = input.value.trim();
-            const sshPassword = sshPasswordInput.value.trim();
-            const vncPassword = vncPasswordInput.value.trim();
+            const sshPassword = sshPasswordInput.value;
+            const vncPassword = vncPasswordInput.value;
 
             if (!hostString) {
                 showToast('请输入主机连接信息', 'error');
@@ -2879,14 +2885,14 @@
                 });
                 const data = await resp.json();
                 if (resp.ok && data.success) {
-                    if (typeof showToast === 'function') showToast(`已移除用户 ${ip}`, 'success');
+                    showToast(`已移除用户 ${ip}`, 'success');
                     loadUsersList();
                 } else {
-                    alert(data.detail?.message || data.error || '移除失败');
+                    showToast(data.detail?.message || data.error || '移除失败', 'error');
                     if (btn) { btn.disabled = false; btn.textContent = '移除'; }
                 }
             } catch (e) {
-                alert('移除失败: ' + e.message);
+                showToast(`移除失败: ${e.message}`, 'error');
                 if (btn) { btn.disabled = false; btn.textContent = '移除'; }
             }
         }
@@ -3151,28 +3157,28 @@
 
                 // SOC 标签显示
                 const socDisplay = device.soc_model
-                    ? `<span style="background: rgba(33, 150, 243, 0.15); color: #42a5f5; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600; font-family: monospace;">${device.soc_model}</span>`
+                    ? `<span style="background: rgba(33, 150, 243, 0.15); color: #42a5f5; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600; font-family: monospace;">${escapeHtml(String(device.soc_model))}</span>`
                     : '-';
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
                         <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
-                            ${device.serial_no || '-'}
+                            ${escapeHtml(String(device.serial_no || '-'))}
                         </td>
                         <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
-                            ${device.source_host || '-'}
+                            ${escapeHtml(String(device.source_host || '-'))}
                         </td>
                         <td style="padding: 4px 6px; text-align: center;">
                             ${sourceTypeBadge}
                         </td>
                         <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
-                            ${device.model || '-'}
+                            ${escapeHtml(String(device.model || '-'))}
                         </td>
                         <td style="padding: 4px 6px; text-align: center;">
                             ${socDisplay}
                         </td>
                         <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
-                            ${device.android_version || '-'}
+                            ${escapeHtml(String(device.android_version || '-'))}
                         </td>
                         <td style="padding: 4px 6px; text-align: center;">
                             ${batteryDisplay}
@@ -3181,7 +3187,7 @@
                             ${statusBadge}
                         </td>
                         <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
-                            ${device.locked_by || '-'}
+                            ${escapeHtml(String(device.locked_by || '-'))}
                         </td>
                         <td style="padding: 4px 6px; text-align: center; white-space: nowrap;">
                             <div style="display: grid; grid-template-columns: repeat(3, 92px); gap: 6px; justify-content: center; align-items: center;">

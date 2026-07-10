@@ -17,14 +17,15 @@ import re
 from typing import Any
 
 from .case_extractor import (
-    RedmineCaseExtractor,
     _SIG_KNOWLEDGE,
-    meaningful_text,
+    RedmineCaseExtractor,
     decode_json_list,
     decode_json_obj,
+    meaningful_text,
 )
 from .case_search import RedmineCaseSearch
 from .knowledge_repository import RedmineKnowledgeDB
+
 
 # Historical owner (黄超群) reply block from generated Redmine docs. Compiled
 # once at import instead of on every _extract_owner_reply call.

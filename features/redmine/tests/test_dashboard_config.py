@@ -266,7 +266,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
 
                     self.assertEqual(result, {"sent": True, "mode": "smtp", "error": None})
                     # sendmail(from_addr, recipients, raw_mime)
-                    from_addr, recipients, raw = smtp.sendmail.call_args.args
+                    _from_addr, _recipients, raw = smtp.sendmail.call_args.args
                     from email import message_from_string
                     msg = message_from_string(raw)
                     self.assertEqual(msg["From"], "trac@rock-chips.com")

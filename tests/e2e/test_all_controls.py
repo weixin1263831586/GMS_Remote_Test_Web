@@ -101,7 +101,7 @@ SKIP_PATTERNS = [
 ]
 
 
-class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiSmokeTests):
+class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
     maxDiff = None
 
     def new_page(self):

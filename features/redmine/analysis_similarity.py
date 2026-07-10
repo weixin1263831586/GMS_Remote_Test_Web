@@ -10,7 +10,6 @@ import re
 from datetime import datetime
 from typing import Any
 
-from features.redmine.analysis_attachments import IMAGE_ATTACHMENT_RE, PROCESS_ATTACHMENT_RE
 from features.redmine.client import RedmineClient
 from features.redmine.config import config_manager
 from features.redmine.utils import to_iso8601

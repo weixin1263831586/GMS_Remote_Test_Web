@@ -64,11 +64,17 @@ def normalized_openapi(app) -> dict[str, Any]:
     return _remove_internal_openapi_fields(schema)
 
 
-def config_shape(value: Any) -> Any:
+def config_shape(value: Any, path: tuple[str, ...] = ()) -> Any:
     if isinstance(value, dict):
-        return {key: config_shape(item) for key, item in sorted(value.items())}
+        if path == ('client_hosts',):
+            sample = next(iter(value.values()), '')
+            return {'<dynamic-key>': config_shape(sample, (*path, '<dynamic-key>'))}
+        return {
+            key: config_shape(item, (*path, key))
+            for key, item in sorted(value.items())
+        }
     if isinstance(value, list):
-        return [config_shape(value[0])] if value else []
+        return [config_shape(value[0], (*path, '[]'))] if value else []
     return type(value).__name__
 
 

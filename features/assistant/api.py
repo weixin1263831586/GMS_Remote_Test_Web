@@ -31,9 +31,7 @@ from features.assistant.response import (
     page_quick_actions,
 )
 from features.assistant.tools import registry
-from features.devices.locks import device_lock_manager
-from features.devices.manager import device_manager
-from features.devices.support import get_or_create_user_state
+from features.devices import device_lock_manager, device_manager, get_or_create_user_state
 from features.reports import ReportDiagnosisRequest, test_report_db
 from features.test_execution import (
     SuiteApkAnalyzeRequest,
@@ -681,8 +679,7 @@ async def _run_pre_actions(session: dict[str, Any], plan: dict[str, Any]) -> dic
     for action in actions:
         if action.get("type") != "connect_wifi":
             continue
-        from features.devices.api import connect_wifi
-        from features.devices.models import WifiConnectRequest
+        from features.devices import WifiConnectRequest, connect_wifi
 
         wifi_req = WifiConnectRequest(
             devices=devices,

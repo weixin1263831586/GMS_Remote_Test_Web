@@ -9,7 +9,6 @@ from .config import (
     denormalize_gerrit_dashboard_config,
     normalize_gerrit_dashboard_config,
 )
-from features.redmine.users import owner_runtime_config_path
 
 
 class GerritConfig:
@@ -27,9 +26,9 @@ class GerritConfig:
     def runtime_config_path(self, value: Path | str) -> None:
         self.manager.runtime_config_path = str(value)
 
-    def for_owner(self, owner_id: str) -> "GerritConfig":
+    def for_owner(self, owner_id: str) -> GerritConfig:
         manager = GerritConfig(self.project_root)
-        runtime_path = owner_runtime_config_path(owner_id)
+        runtime_path = manager.project_root / "configs/config_runtime.json"
         runtime_path.parent.mkdir(parents=True, exist_ok=True)
         manager.runtime_config_path = runtime_path
         return manager

@@ -14,9 +14,9 @@ from typing import Any
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.devices.support import get_or_create_user_state, update_user_state_field
+from features.devices import get_or_create_user_state, update_user_state_field
 from features.reports import save_test_report_to_db, test_report_db
-from features.users.clients import get_client_display_id_from_request, get_client_username_from_request
+from features.users import get_client_display_id_from_request, get_client_username_from_request
 from foundation.responses import error_response, success_response
 
 from . import runtime
