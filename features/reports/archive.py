@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -14,7 +15,11 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from foundation.archives import ARCHIVE_EXTENSIONS, safe_extract_member_path
+from foundation.archives import (
+    ARCHIVE_EXTENSIONS,
+    copy_archive_member,
+    safe_extract_member_path,
+)
 from foundation.config import ConfigManager
 
 from .host_parser import HostLogParser
@@ -60,17 +65,23 @@ class ReportFileHandler:
             return False
 
     def _extract_zip(self, zip_path: str):
+        budget: dict[str, int] = {}
         with zipfile.ZipFile(zip_path, 'r') as zf:
             for member in zf.infolist():
+                if stat.S_ISLNK(member.external_attr >> 16):
+                    raise ValueError(
+                        f'压缩包包含不安全符号链接: {member.filename}'
+                    )
                 target = safe_extract_member_path(self.temp_dir, member.filename)
                 if member.is_dir():
                     os.makedirs(target, exist_ok=True)
                     continue
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 with zf.open(member) as src, open(target, 'wb') as dst:
-                    shutil.copyfileobj(src, dst)
+                    copy_archive_member(src, dst, budget)
 
     def _extract_tar(self, tar_path: str):
+        budget: dict[str, int] = {}
         with tarfile.open(tar_path, 'r:*') as tf:
             for member in tf.getmembers():
                 target = safe_extract_member_path(self.temp_dir, member.name)
@@ -83,7 +94,7 @@ class ReportFileHandler:
                 src = tf.extractfile(member)
                 if src:
                     with src, open(target, 'wb') as dst:
-                        shutil.copyfileobj(src, dst)
+                        copy_archive_member(src, dst, budget)
 
     def _extract_7z(self, archive_path: str):
         """使用系统 7z 解压 RAR/7z 等格式。"""

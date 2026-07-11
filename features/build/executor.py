@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
+import posixpath
 import re
 import shlex
 import subprocess
@@ -39,8 +40,8 @@ def validate_workspace(workspace: str, workspace_root: str) -> str:
         raise BuildExecutionError("workspace is required")
     if not workspace.startswith("/"):
         workspace = f"{workspace_root.rstrip('/')}/{workspace.lstrip('/')}"
-    normalized = str(PurePosixPath(workspace))
-    root = str(PurePosixPath(workspace_root)) if workspace_root else ""
+    normalized = posixpath.normpath(workspace)
+    root = posixpath.normpath(workspace_root) if workspace_root else ""
     if root and normalized != root and not normalized.startswith(root.rstrip("/") + "/"):
         raise BuildExecutionError("workspace escapes server workspace_root")
     return normalized

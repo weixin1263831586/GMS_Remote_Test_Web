@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from .runner import test_runner
 from .runtime import configure_runtime
 
 
@@ -47,5 +46,3 @@ def configure_test_execution_dependencies(
         selected_acquire_test_devices=acquire_test_devices,
         selected_release_test_devices=release_test_devices,
     )
-    test_runner.config_manager = config_manager
-    test_runner.ssh_manager = ssh_manager

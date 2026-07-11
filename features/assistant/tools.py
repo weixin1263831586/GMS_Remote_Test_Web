@@ -470,9 +470,9 @@ def _build_registry() -> ToolRegistry:
 
     registry = ToolRegistry()
     registry.register_from_api_docs(API_DOCS_LIST)
-
-    # 手动补充一些 API_DOCS_LIST 没有覆盖的重要工具
     _register_extra_tools(registry)
+    from features.assistant.android_ui_tools import register_android_ui_tools
+    register_android_ui_tools(registry)
     return registry
 
 

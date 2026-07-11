@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
+from features.users import get_client_id_from_request
 from foundation.config import APK_MAX_FILE_SIZE, APK_UPLOAD_DIR
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
@@ -36,7 +37,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _generate_help_or_continue: Callable[[bool, str, str], Any] | None = None
-_create_apk_task: Callable[[str, str, str], Any] | None = None
+_create_apk_task: Callable[[str, str, str, str], Any] | None = None
 _normalize_apk_filename: Callable[[str], str] | None = None
 _safe_join: Callable[[str, str], str] | None = None
 _cleanup_files: Callable[[list[str]], Any] | None = None
@@ -45,7 +46,7 @@ _cleanup_files: Callable[[list[str]], Any] | None = None
 def configure_config_explorer_dependencies(
     *,
     generate_help_or_continue: Callable[[bool, str, str], Any],
-    create_apk_task: Callable[[str, str, str], Any],
+    create_apk_task: Callable[[str, str, str, str], Any],
     normalize_apk_filename: Callable[[str], str],
     safe_join: Callable[[str, str], str],
     cleanup_files: Callable[[list[str]], Any],
@@ -226,7 +227,7 @@ class DecompileRequest(BaseModel):
 
 @router.post("/api/config-explorer/decompile")
 @handle_api_errors
-async def decompile_device_apk(req: DecompileRequest):
+async def decompile_device_apk(req: DecompileRequest, request: Request):
     """Pull an on-device APK/JAR and register it as an APK-analysis task.
 
     The file is pulled into the APK upload dir (so the existing APK-analysis
@@ -272,7 +273,16 @@ async def decompile_device_apk(req: DecompileRequest):
             f"文件过大，上限 {APK_MAX_FILE_SIZE // (1024 * 1024)}MB", status_code=400
         )
 
-    _create_apk_task(task_id, apk_path, filename)
+    try:
+        _create_apk_task(
+            task_id,
+            apk_path,
+            filename,
+            get_client_id_from_request(request),
+        )
+    except ValueError as exc:
+        _cleanup_files([apk_path])
+        return error_response(str(exc), status_code=429)
     return success_response(
         data={
             "task_id": task_id,

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from foundation.config_persistence import ConfigPersistenceMixin
 from foundation.networking import is_local_host
 
 
@@ -130,7 +131,7 @@ DEFAULT_REDMINE_BASE_URL = "https://redmine.rock-chips.com"
 PLACEHOLDER_PATTERN = re.compile(r'\$\{([^}]+)\}')
 
 
-class ConfigManager:
+class ConfigManager(ConfigPersistenceMixin):
     """Reads/writes static + runtime config with a short TTL cache to cut disk I/O."""
 
     def __init__(
@@ -157,6 +158,7 @@ class ConfigManager:
         self._cache_timestamp: float = 0
         self._cache_ttl: int = cache_ttl
         self._cache_lock: threading.Lock = threading.Lock()
+        self._runtime_write_lock = threading.RLock()
 
         # 文件修改时间追踪
         self._static_mtime: float = 0
@@ -190,7 +192,7 @@ class ConfigManager:
             static_mtime = os.path.getmtime(self.config_path)
             try:
                 runtime_mtime = os.path.getmtime(self.runtime_config_path)
-            except FileNotFoundError:
+            except OSError:
                 runtime_mtime = 0
 
             if (
@@ -211,7 +213,7 @@ class ConfigManager:
             self._static_mtime = os.path.getmtime(self.config_path)
             try:
                 self._runtime_mtime = os.path.getmtime(self.runtime_config_path)
-            except FileNotFoundError:
+            except OSError:
                 self._runtime_mtime = 0
         except Exception as e:
             logger.warning(f"Error updating file mtime: {e}")
@@ -450,10 +452,21 @@ class ConfigManager:
         只在 runtime 维护、静态配置不持有的区段），否则从合并后的 load_config 取。
         """
         try:
-            runtime = self._load_runtime_config() or {}
-            current = (runtime.get(key) if merge_from_runtime else None) or self.load_config().get(key) or {}
-            runtime[key] = self._denormalize_section(key, {**current, **(payload or {})})
-            return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
+            with self._runtime_write_lock:
+                runtime = self._load_runtime_config() or {}
+                current = (
+                    (runtime.get(key) if merge_from_runtime else None)
+                    or self.load_config().get(key)
+                    or {}
+                )
+                runtime[key] = self._denormalize_section(
+                    key,
+                    {**current, **(payload or {})},
+                )
+                return self._write_runtime_config_file(
+                    runtime,
+                    preserve_redmine_auth=False,
+                )
         except Exception as e:
             logger.error(f"Error saving {key} config: {e}")
             return False
@@ -491,55 +504,11 @@ class ConfigManager:
             if not isinstance(credentials, list):
                 raise ValueError("client_ssh_credentials must be a list")
 
-            runtime = self._load_runtime_config() or {}
-            runtime['client_ssh_credentials'] = credentials
-            return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
+            return self.update_runtime_config(
+                {'client_ssh_credentials': credentials},
+            )
         except Exception as e:
             logger.error(f"Error saving client SSH credentials: {e}")
-            return False
-
-    def save_config(self, config: dict[str, Any]) -> bool:
-        """Persist the static config; return whether the write succeeded."""
-        try:
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=4, ensure_ascii=False)
-            logger.info(f"Saved config to {self.config_path}")
-            self.invalidate_cache()
-            return True
-        except Exception as e:
-            logger.error(f"Error saving config: {e}")
-            return False
-
-    def save_runtime_config(self, runtime_config: dict[str, Any]) -> bool:
-        """Persist runtime_config (deploy identity + SSH creds) to config_runtime.json; return success."""
-        try:
-            runtime_config = dict(runtime_config or {})
-            return self._write_runtime_config_file(runtime_config)
-        except Exception as e:
-            logger.error(f"Error saving runtime config: {e}")
-            return False
-
-    def save_runtime(self, updates: dict[str, Any]) -> bool:
-        runtime = self._load_runtime_config() or {}
-        runtime.update(dict(updates or {}))
-        return self.save_runtime_config(runtime)
-
-    def _write_runtime_config_file(self, runtime_config: dict[str, Any], preserve_redmine_auth: bool = True) -> bool:
-        """Write the full runtime config to disk, re-keeping existing redmine_auth unless the caller already loaded it (preserve_redmine_auth=False)."""
-        try:
-            if preserve_redmine_auth and 'redmine_auth' not in runtime_config:
-                existing = self._load_runtime_config()
-                if existing and 'redmine_auth' in existing:
-                    runtime_config['redmine_auth'] = existing['redmine_auth']
-
-            os.makedirs(os.path.dirname(self.runtime_config_path), exist_ok=True)
-            with open(self.runtime_config_path, 'w', encoding='utf-8') as f:
-                json.dump(runtime_config, f, indent=4, ensure_ascii=False)
-            logger.info(f"Saved runtime config to {self.runtime_config_path}")
-            self.invalidate_cache()
-            return True
-        except Exception as e:
-            logger.error(f"Error writing runtime config: {e}")
             return False
 
     def prepare_client_config(self, updates: dict[str, Any]) -> dict[str, Any]:
@@ -649,35 +618,47 @@ class ConfigManager:
         if not username or not hostname or not password:
             return False
 
-        runtime = self._load_runtime_config() or {}
-        credentials = runtime.get('client_ssh_credentials') or []
-        if not isinstance(credentials, list):
-            credentials = []
+        with self._runtime_write_lock:
+            runtime = self._load_runtime_config() or {}
+            credentials = runtime.get('client_ssh_credentials') or []
+            if not isinstance(credentials, list):
+                credentials = []
 
-        updated = False
-        next_credentials = []
-        for cred in credentials:
-            if not isinstance(cred, dict):
-                continue
-            cred_device_host = str(cred.get('device_host') or '').strip()
-            cred_host = str(cred.get('host') or cred.get('hostname') or '').strip()
-            cred_username = str(cred.get('username') or '').strip()
-            is_same_host = cred_device_host == device_host or (cred_username == username and cred_host == hostname)
-            if is_same_host:
-                cred = {**cred, "device_host": device_host, "username": username, "host": hostname, "password": password}
-                updated = True
-            next_credentials.append(cred)
+            updated = False
+            next_credentials = []
+            for cred in credentials:
+                if not isinstance(cred, dict):
+                    continue
+                cred_device_host = str(cred.get('device_host') or '').strip()
+                cred_host = str(cred.get('host') or cred.get('hostname') or '').strip()
+                cred_username = str(cred.get('username') or '').strip()
+                is_same_host = cred_device_host == device_host or (
+                    cred_username == username and cred_host == hostname
+                )
+                if is_same_host:
+                    cred = {
+                        **cred,
+                        "device_host": device_host,
+                        "username": username,
+                        "host": hostname,
+                        "password": password,
+                    }
+                    updated = True
+                next_credentials.append(cred)
 
-        if not updated:
-            next_credentials.append({
-                "device_host": device_host,
-                "username": username,
-                "host": hostname,
-                "password": password,
-            })
+            if not updated:
+                next_credentials.append({
+                    "device_host": device_host,
+                    "username": username,
+                    "host": hostname,
+                    "password": password,
+                })
 
-        runtime['client_ssh_credentials'] = next_credentials
-        return self._write_runtime_config_file(runtime, preserve_redmine_auth=False)
+            runtime['client_ssh_credentials'] = next_credentials
+            return self._write_runtime_config_file(
+                runtime,
+                preserve_redmine_auth=False,
+            )
 
     def _get_redmine_cipher_suite(self):
         """获取 Redmine 凭证加密用的 Fernet 实例"""

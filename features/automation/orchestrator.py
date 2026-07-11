@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from features.automation.executors import AutomationExecutor
@@ -25,12 +26,16 @@ from features.automation.models import (
     RUN_STATUS_REPORTING,
     RUN_STATUS_REPORTING_FAILED,
     RUN_STATUS_TEST_FAILED,
+    RUN_STATUS_TEST_RUNNING,
     RUN_STATUS_TESTING,
     RUN_STATUS_WAITING_DEVICE,
     TERMINAL_STATUSES,
     utc_now_iso,
 )
 from features.automation.repository import AutomationStore
+
+
+logger = logging.getLogger(__name__)
 
 
 def _run_has_build(run: dict[str, Any]) -> bool:
@@ -48,9 +53,8 @@ class AutomationOrchestrator:
         self.executor = executor
 
     def advance_next(self) -> dict[str, Any] | None:
-        for run in self.store.list_runs(limit=100):
-            if run["status"] not in TERMINAL_STATUSES:
-                return self.advance_run(run["id"])
+        for run in self.store.list_active_runs(limit=100):
+            return self.advance_run(run["id"])
         return None
 
     def advance_run(self, run_id: str) -> dict[str, Any]:
@@ -146,7 +150,21 @@ class AutomationOrchestrator:
             result = self.executor.start_test(run)
             if not result.get("success"):
                 return self._fail(run, RUN_STATUS_TEST_FAILED, result.get("error", "test failed"), result)
-            return self._transition(run, RUN_STATUS_REPORT_COLLECTING, "Test completed, collecting report", result)
+            return self._transition(run, RUN_STATUS_TEST_RUNNING, "GMS test accepted and running", result)
+        if status == RUN_STATUS_TEST_RUNNING:
+            result = self.executor.poll_test(run)
+            if not result.get("success"):
+                return self._fail(run, RUN_STATUS_TEST_FAILED, result.get("error", "test failed"), result)
+            if result.get("running"):
+                self.store.append_event(run["id"], RUN_STATUS_TEST_RUNNING, "info", "GMS test is still running", result)
+                return run
+            return self._transition(
+                run,
+                RUN_STATUS_REPORT_COLLECTING,
+                "Test completed, collecting report",
+                result,
+                report_timestamp=result.get("report_timestamp", ""),
+            )
         if status == RUN_STATUS_REPORT_COLLECTING:
             result = self.executor.collect_report(run)
             if not result.get("success"):
@@ -183,15 +201,29 @@ class AutomationOrchestrator:
 
         return self._fail(run, RUN_STATUS_FAILED, f"unsupported status: {status}", {})
 
-    def cancel_run(self, run_id: str, reason: str = "cancelled by user") -> dict[str, Any]:
+    def cancel_run(
+        self,
+        run_id: str,
+        reason: str = "cancelled by user",
+        *,
+        cleanup: bool = True,
+    ) -> dict[str, Any]:
         run = self.store.get_run(run_id)
         if not run:
             raise ValueError(f"automation run not found: {run_id}")
         if run["status"] in TERMINAL_STATUSES:
             return run
+        if cleanup:
+            result = self.executor.cancel(run)
+            if not result.get("success"):
+                self.store.append_event(run["id"], run["status"], "error", result.get("error", "cancel failed"), result)
+                raise RuntimeError(result.get("error", "cancel failed"))
         return self._transition(run, RUN_STATUS_CANCELLED, reason, {}, finished_at=utc_now_iso())
 
     def _transition(self, run: dict[str, Any], status: str, message: str, payload: dict[str, Any] | None = None, **updates: Any) -> dict[str, Any]:
+        current = self.store.get_run(run["id"])
+        if current and current["status"] in TERMINAL_STATUSES:
+            return current
         update_payload = {"status": status, "current_stage": status, **updates}
         if run["started_at"] == "" and status != RUN_STATUS_QUEUED:
             update_payload["started_at"] = utc_now_iso()
@@ -201,6 +233,9 @@ class AutomationOrchestrator:
         return updated
 
     def _fail(self, run: dict[str, Any], status: str, error: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        current = self.store.get_run(run["id"])
+        if current and current["status"] in TERMINAL_STATUSES:
+            return current
         updated = self.store.update_run(
             run["id"],
             status=status,
@@ -230,4 +265,4 @@ class AutomationOrchestrator:
                 "status_code": 200,
             })
         except Exception:
-            pass
+            logger.debug("Failed to record automation transition audit", exc_info=True)

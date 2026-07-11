@@ -66,8 +66,16 @@ class AuthService:
     def initialize(self) -> None:
         with self._lock:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("PRAGMA journal_mode=WAL")
+            with sqlite3.connect(self.db_path, timeout=30) as conn:
+                conn.execute('PRAGMA busy_timeout=30000')
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                except sqlite3.OperationalError as exc:
+                    # journal_mode does not honor busy_timeout consistently.
+                    # A peer initializer is already enabling WAL; subsequent
+                    # schema statements will wait on the configured timeout.
+                    if 'locked' not in str(exc).lower():
+                        raise
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS platform_users (
@@ -115,7 +123,8 @@ class AuthService:
 
     def _connect(self) -> sqlite3.Connection:
         self._ensure_initialized()
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn.execute('PRAGMA busy_timeout=30000')
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -215,10 +224,34 @@ class AuthService:
         return CurrentUser(user_id, username, role, display_name.strip())
 
     def create_initial_admin(self, username: str, password: str, display_name: str = "") -> CurrentUser:
-        with self._lock:
-            if self.users_exist():
+        username = self._validate_username(username)
+        self._validate_password(password)
+        cleaned_display_name = display_name.strip()
+        now = _to_iso(_utcnow())
+        user_id = secrets.token_urlsafe(16)
+        with self._lock, self._connect() as conn:
+            # Serialize the emptiness check with the insert across processes.
+            conn.execute('BEGIN IMMEDIATE')
+            if conn.execute('SELECT 1 FROM platform_users LIMIT 1').fetchone():
                 raise ValueError("系统已经完成初始化")
-            return self.create_user(username, password, role="admin", display_name=display_name)
+            conn.execute(
+                """
+                INSERT INTO platform_users (
+                    id, username, password_hash, role, display_name,
+                    disabled, created_at, updated_at
+                ) VALUES (?, ?, ?, 'admin', ?, 0, ?, ?)
+                """,
+                (
+                    user_id,
+                    username,
+                    self._hash_password(password),
+                    cleaned_display_name,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        return CurrentUser(user_id, username, 'admin', cleaned_display_name)
 
     def authenticate(self, username: str, password: str) -> CurrentUser | None:
         with self._connect() as conn:
@@ -237,6 +270,17 @@ class AuthService:
         expires_at = now + timedelta(hours=SESSION_ABSOLUTE_HOURS)
         idle_expires_at = now + timedelta(hours=SESSION_IDLE_HOURS)
         with self._connect() as conn:
+            # Sessions are otherwise append-only. Opportunistic cleanup on
+            # login bounds the table without requiring a scheduler.
+            conn.execute(
+                """
+                DELETE FROM platform_sessions
+                WHERE revoked_at IS NOT NULL
+                   OR expires_at <= ?
+                   OR idle_expires_at <= ?
+                """,
+                (_to_iso(now), _to_iso(now)),
+            )
             conn.execute(
                 """
                 INSERT INTO platform_sessions (

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -34,6 +35,7 @@ _REMOTE_SPEC_RE = re.compile(r"^(?:(?P<user>[^@:/]+)@)?(?P<host>[^:]+):(?P<path>
 _RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 _DEFAULT_ALLOWED_PREFIXES = ("/home/", "/data/", "/mnt/")
 _DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+_records_lock = threading.RLock()
 
 
 def _store_path() -> Path:
@@ -55,9 +57,16 @@ def _load_records() -> list[dict[str, Any]]:
 def _save_records(records: list[dict[str, Any]]) -> None:
     path = _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    tmp = path.with_suffix(f'{path.suffix}.{uuid.uuid4().hex}.tmp')
+    try:
+        tmp.write_text(
+            json.dumps(records, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp.replace(path)
+    finally:
+        with suppress(OSError):
+            tmp.unlink()
 
 
 def _parse_remote_spec(value: str) -> tuple[str, str | None, str]:
@@ -109,11 +118,16 @@ def _host_credentials(host: str, user: str | None, config: dict[str, Any]) -> di
     default_user = default_user or config.get("ubuntu_user") or "hcq"
 
     key_filename = host_config.get("key_filename") or share_config.get("key_filename") or config.get("firmware_share_key")
-    password = host_config.get("password") or share_config.get("password") or config.get("firmware_share_password")
+    password = (
+        host_config.get("password")
+        or share_config.get("password")
+        or config.get("firmware_share_password")
+        or config.get("firmware_share_pswd")
+    )
+    # ubuntu_pswd is a host-specific legacy credential. Never send it to an
+    # arbitrary host supplied by an API caller.
     if not password and host == str(config.get("ubuntu_host") or ""):
         password = config.get("ubuntu_pswd")
-    if not password:
-        password = config.get("firmware_share_pswd") or config.get("ubuntu_pswd")
 
     return {
         "hostname": host,
@@ -332,10 +346,15 @@ async def create_firmware_share(request: Request):
             "downloads": 0,
             "last_downloaded_at": None,
         }
-        records = _load_records()
-        records = [item for item in records if item.get("host") != host or item.get("path") != path]
-        records.insert(0, record)
-        _save_records(records[:200])
+        with _records_lock:
+            records = _load_records()
+            records = [
+                item
+                for item in records
+                if item.get("host") != host or item.get("path") != path
+            ]
+            records.insert(0, record)
+            _save_records(records[:200])
         return success_response(data={"record": _public_record(record)}, message="固件分享已创建")
     except _AuthError as exc:
         return error_response(str(exc), 401)
@@ -381,11 +400,12 @@ async def browse_firmware_share_remote(request: Request):
 
 @router.delete("/api/firmware-shares/{share_id}")
 async def delete_firmware_share(share_id: str):
-    records = _load_records()
-    kept = [record for record in records if record.get("id") != share_id]
-    if len(kept) == len(records):
-        return error_response("固件分享不存在", 404)
-    _save_records(kept)
+    with _records_lock:
+        records = _load_records()
+        kept = [record for record in records if record.get("id") != share_id]
+        if len(kept) == len(records):
+            return error_response("固件分享不存在", 404)
+        _save_records(kept)
     return success_response(message="固件分享已删除")
 
 
@@ -401,11 +421,12 @@ async def update_firmware_share_credentials(share_id: str, request: Request):
             return error_response("SSH 密码不能为空", 400)
         config = runtime.config_manager.load_config()
         _stat_remote(record["host"], record.get("user"), record["path"], config, password=password)
-        for item in records:
-            if item.get("id") == share_id:
-                item["password"] = password
-                break
-        _save_records(records)
+        with _records_lock:
+            records, current = _find_record(share_id)
+            if not current:
+                return error_response("固件分享不存在", 404)
+            current["password"] = password
+            _save_records(records)
         return success_response(message="远端凭据已更新")
     except _AuthError as exc:
         return error_response(str(exc), 401)
@@ -455,14 +476,14 @@ async def download_firmware_share(share_id: str, request: Request):
         start, end, length = 0, size - 1, size
         status_code = 200
 
-    for item in records:
-        if item.get("id") == share_id:
-            item["downloads"] = int(item.get("downloads") or 0) + 1
-            item["last_downloaded_at"] = int(time.time())
-            item["size"] = size
-            item["mtime"] = info["mtime"]
-            break
-    _save_records(records)
+    with _records_lock:
+        records, current = _find_record(share_id)
+        if current:
+            current["downloads"] = int(current.get("downloads") or 0) + 1
+            current["last_downloaded_at"] = int(time.time())
+            current["size"] = size
+            current["mtime"] = info["mtime"]
+            _save_records(records)
 
     filename = _safe_filename(record.get("filename") or record["path"])
     headers = {

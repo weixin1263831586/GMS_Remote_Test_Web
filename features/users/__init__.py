@@ -11,7 +11,7 @@ from .clients import (
     probe_windows_usbipd,
     resolve_tailscale_device_host,
 )
-from .config_api import (
+from .device_groups import (
     auto_assign_new_devices,
     build_device_group_map,
     current_username_for_request,

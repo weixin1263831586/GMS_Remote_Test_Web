@@ -268,7 +268,6 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                 self.assertIsInstance(inventory['modals'], list)
         finally:
             page.close()
-
     def test_visible_safe_controls_click_without_browser_errors(self):
         page = self.new_page()
         requests = []

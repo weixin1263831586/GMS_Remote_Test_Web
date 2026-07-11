@@ -22,6 +22,78 @@ class AutomationExecutorTests(unittest.TestCase):
 
 
 class AutomationOrchestratorTests(unittest.TestCase):
+    def test_advance_next_schedules_least_recently_advanced_run(self):
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import AutomationRunCreateRequest
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / 'automation.sqlite3')
+            older = AutomationRunCreateRequest().to_run_dict('run_older')
+            older['created_at'] = older['updated_at'] = '2026-01-01T00:00:00Z'
+            newer = AutomationRunCreateRequest().to_run_dict('run_newer')
+            newer['created_at'] = newer['updated_at'] = '2026-01-02T00:00:00Z'
+            newer['status'] = newer['current_stage'] = 'waiting_device'
+            store.create_run(older)
+            store.create_run(newer)
+
+            result = AutomationOrchestrator(store, StubAutomationExecutor()).advance_next()
+
+            self.assertEqual(result['id'], 'run_older')
+            self.assertEqual(result['status'], 'waiting_device')
+            self.assertEqual(store.get_run('run_newer')['status'], 'waiting_device')
+
+    def test_stale_transition_cannot_revive_a_cancelled_run(self):
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import RUN_STATUS_CANCELLED, AutomationRunCreateRequest
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            store.create_run(AutomationRunCreateRequest(devices=["ABC123"]).to_run_dict("run_cancelled"))
+            stale = store.get_run("run_cancelled")
+            store.update_run("run_cancelled", status=RUN_STATUS_CANCELLED, current_stage=RUN_STATUS_CANCELLED)
+            orchestrator = AutomationOrchestrator(store, StubAutomationExecutor())
+
+            result = orchestrator._transition(stale, "testing", "stale worker result")
+
+            self.assertEqual(result["status"], RUN_STATUS_CANCELLED)
+
+    def test_real_style_test_start_waits_for_poll_before_collecting_report(self):
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import (
+            RUN_STATUS_REPORT_COLLECTING,
+            RUN_STATUS_TEST_RUNNING,
+            AutomationRunCreateRequest,
+        )
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
+
+        class PollingExecutor(StubAutomationExecutor):
+            def __init__(self):
+                super().__init__()
+                self.poll_count = 0
+
+            def poll_test(self, run):
+                self.poll_count += 1
+                return {"success": True, "running": self.poll_count == 1}
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            data = AutomationRunCreateRequest(
+                artifact_path="/tmp/update.img", devices=["ABC123"], test_plan={"test_type": "CTS"}
+            ).to_run_dict("run_poll")
+            data["status"] = "testing"
+            data["current_stage"] = "testing"
+            store.create_run(data)
+            orchestrator = AutomationOrchestrator(store, PollingExecutor())
+
+            self.assertEqual(orchestrator.advance_run("run_poll")["status"], RUN_STATUS_TEST_RUNNING)
+            self.assertEqual(orchestrator.advance_run("run_poll")["status"], RUN_STATUS_TEST_RUNNING)
+            self.assertEqual(orchestrator.advance_run("run_poll")["status"], RUN_STATUS_REPORT_COLLECTING)
+
     def test_orchestrator_advances_manual_run_to_completed(self):
         from features.automation.executors import StubAutomationExecutor
         from features.automation.models import RUN_STATUS_COMPLETED, AutomationRunCreateRequest
@@ -38,7 +110,7 @@ class AutomationOrchestratorTests(unittest.TestCase):
             ).to_run_dict("run_1"))
             orchestrator = AutomationOrchestrator(store, StubAutomationExecutor())
 
-            for _ in range(9):
+            for _ in range(10):
                 orchestrator.advance_run("run_1")
 
             run = store.get_run("run_1")

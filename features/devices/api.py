@@ -54,6 +54,7 @@ from .support import (
     get_device_properties_optimized,
     get_or_create_user_state,
 )
+from .ui_control_api import router as ui_control_router
 
 
 logger = logging.getLogger(__name__)
@@ -454,6 +455,7 @@ async def get_device_info(req: DeviceActionRequest):
 
 
 router.include_router(operations_router)
+router.include_router(ui_control_router)
 
 
 # ==================== 设备分组：按属性自动分组 ====================

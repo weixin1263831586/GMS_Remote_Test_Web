@@ -833,38 +833,3 @@ async def fetch_website_icon(url: str, timeout: int = 10) -> dict[str, Any]:
         return result.to_dict()
     finally:
         await fetcher.close()
-
-
-# Manual diagnostic entry point (python -m features.system.icon_fetcher).
-# Not imported by any production code; only invoked via the __main__ block below.
-async def test_icon_fetcher():
-    """测试图标获取功能"""
-    test_urls = [
-        'https://www.google.com',
-        'https://github.com',
-        'https://www.python.org',
-        'https://deepseek.com',
-        'https://www.rock-chips.com',  # Rockchip官网
-    ]
-
-    print("=== 图标获取测试 ===\n")
-
-    fetcher = IconFetcher()
-    try:
-        for url in test_urls:
-            print(f"测试: {url}")
-            result = await fetcher.fetch_icon_async(url)
-
-            if result.success:
-                print(f"✅ 成功: {result.icon_url}")
-                print(f"   类型: {result.icon_type}, 来源: {result.source}")
-            else:
-                print(f"❌ 失败: {result.error}")
-            print()
-    finally:
-        await fetcher.close()
-
-
-if __name__ == '__main__':
-    # 运行测试
-    asyncio.run(test_icon_fetcher())

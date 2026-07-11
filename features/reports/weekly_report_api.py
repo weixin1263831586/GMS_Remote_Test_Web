@@ -870,7 +870,8 @@ def _issue_body_for_ai(issue: dict[str, Any]) -> str:
         note = str(j.get("notes") or "").strip()
         if note:
             who = str(j.get("user") or j.get("author") or "").strip()
-            notes.append(f"[{who}] {note}" if who else note)
+            bounded_note = note[:800]
+            notes.append(f"[{who}] {bounded_note}" if who else bounded_note)
     parts = [f"#{issue_id} {subject}".strip()]
     if status:
         parts.append(f"状态：{status}")
@@ -1014,6 +1015,7 @@ async def get_weekly_report_ai_summary(request: Request):
         f"【{'本周已关闭' if it.get('_category') == 'closed_this_period' else '跟进中'}】\n{_issue_body_for_ai(it)}"
         for it in rep_issues
     )
+    issue_blocks = issue_blocks[:24000]
     merged_blocks = "\n".join(f"- {c.get('number','?')} {c.get('subject','')}".strip() for c in gr_merged[:10])
     new_blocks = "\n".join(f"- {c.get('number','?')} {c.get('subject','')}".strip() for c in gr_new[:6])
 
@@ -1035,7 +1037,7 @@ async def get_weekly_report_ai_summary(request: Request):
         untested = p.get("untested_modules") or []
         if untested:
             gms_lines.append(f"    · 未测试模块：{', '.join(untested)}")
-    gms_blocks = "\n".join(gms_lines)
+    gms_blocks = "\n".join(gms_lines)[:12000]
 
     user_prompt = (
         f"你是团队成员，请基于以下本周({start_date} ~ {end_date})的工作数据，"

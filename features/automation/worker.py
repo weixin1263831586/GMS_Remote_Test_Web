@@ -135,7 +135,7 @@ def stale_sweep_once(
         if age is not None and age > threshold_run:
             try:
                 auto_svc.orchestrator(cfg["executor"]).cancel_run(
-                    run["id"], reason="stale before worker start"
+                    run["id"], reason="stale before worker start", cleanup=False
                 )
                 runs_cancelled += 1
             except Exception:
@@ -237,6 +237,7 @@ def run_tick_sync(
     # None when no non-terminal run remains.
     advanced_runs = 0
     cap = 25
+    previous_signature: tuple[str, str] | None = None
     while advanced_runs < cap:
         try:
             advanced = auto_svc.worker_tick(cfg["executor"])
@@ -246,6 +247,13 @@ def run_tick_sync(
         if not advanced:
             break
         advanced_runs += 1
+        signature = (str(advanced.get("id") or ""), str(advanced.get("status") or ""))
+        # Polling stages deliberately return the same durable state while the
+        # external build/test is still running. Do not hammer the same API 25
+        # times in one worker tick; the next scheduled tick will poll again.
+        if signature == previous_signature:
+            break
+        previous_signature = signature
 
     return {
         "polled_builds": polled_builds,

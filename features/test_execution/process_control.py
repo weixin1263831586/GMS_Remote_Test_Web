@@ -39,12 +39,3 @@ def kill_pid_tree_commands(pid: str) -> list[str]:
         f"kill -9 {pid} 2>/dev/null",
         f"pkill -9 -P {pid} 2>/dev/null",
     ]
-
-
-def tradefed_kill_command(tradefed_bin: str) -> str:
-    """Build a scoped fallback kill command for a known tradefed launcher."""
-    safe_bin = str(tradefed_bin or "").strip()
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", safe_bin):
-        safe_bin = "tradefed"
-    pattern = f"[./]?{safe_bin}.*run commandAndExit"
-    return f"pkill -f -- {shlex.quote(pattern)}"

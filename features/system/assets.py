@@ -1,5 +1,6 @@
 """Assets router - file listing, favicon, and user tools APIs."""
 
+import asyncio
 import contextlib
 import html
 import json
@@ -7,12 +8,12 @@ import logging
 import mimetypes
 import os
 import re
+import shlex
 import urllib.parse
 from datetime import datetime
-from pathlib import Path
 
 import aiohttp
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from features.system.icon_fetcher import IconFetcher
@@ -22,10 +23,24 @@ from foundation.config import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, TOOLS_DAT
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
+from .utility_tools_api import (
+    browse_utility_tools as browse_utility_tools,
+)
+from .utility_tools_api import (
+    download_utility_tool as download_utility_tool,
+)
+from .utility_tools_api import (
+    list_utility_tools as list_utility_tools,
+)
+from .utility_tools_api import (
+    router as utility_tools_router,
+)
+
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+router.include_router(utility_tools_router)
 
 
 def ssh_connection_failed_response():
@@ -33,6 +48,11 @@ def ssh_connection_failed_response():
         content={'success': False, 'error': 'SSH connection failed'},
         status_code=500,
     )
+
+
+def _remote_list_command(path: str) -> str:
+    """Build a non-interactive listing command without exposing shell syntax."""
+    return f'ls -la -- {shlex.quote(str(path))} 2>/dev/null'
 
 
 @router.get("/api/files/progress")
@@ -58,45 +78,49 @@ async def list_files(req: dict):
         if not path:
             path = f"/home/{config_manager.get_ubuntu_user(config)}"
 
-        with ssh_manager.optional_connection(config) as ssh:
-            if not ssh:
-                return ssh_connection_failed_response()
+        def _list_remote_files():
+            with ssh_manager.optional_connection(config) as ssh:
+                if not ssh:
+                    return None
+                return ssh_manager.execute_command(ssh, _remote_list_command(path))
 
-            list_cmd = f"ls -la '{path}' 2>/dev/null || echo 'ERROR'"
-            output, _error, code = ssh_manager.execute_command(ssh, list_cmd)
+        command_result = await asyncio.to_thread(_list_remote_files)
+        if command_result is None:
+            return ssh_connection_failed_response()
+        output, _error, code = command_result
 
-            if 'ERROR' in output or code != 0:
-                return error_response('Failed to list directory', status_code=500)
+        if code != 0:
+            return error_response('Failed to list directory', status_code=500)
 
-            files = []
-            for line in output.split('\n'):
-                if line.startswith('total') or not line.strip():
+        files = []
+        for line in output.split('\n'):
+            if line.startswith('total') or not line.strip():
+                continue
+
+            parts = line.split()
+            if len(parts) >= 9:
+                permissions = parts[0]
+                name = ' '.join(parts[8:])
+                is_dir = permissions.startswith('d')
+                size = parts[4] if not is_dir else '0'
+
+                if name in ['.', '..']:
                     continue
 
-                parts = line.split()
-                if len(parts) >= 9:
-                    permissions = parts[0]
-                    name = ' '.join(parts[8:])
-                    is_dir = permissions.startswith('d')
-                    size = parts[4] if not is_dir else '0'
+                files.append({
+                    'name': name,
+                    'type': 'directory' if is_dir else 'file',
+                    'size': int(size),
+                    'permissions': permissions
+                })
 
-                    if name in ['.', '..']:
-                        continue
+        files.sort(key=lambda x: (x['type'] != 'directory', x['name'].lower()))
 
-                    files.append({
-                        'name': name,
-                        'type': 'directory' if is_dir else 'file',
-                        'size': int(size),
-                        'permissions': permissions
-                    })
-
-            files.sort(key=lambda x: (x['type'] != 'directory', x['name'].lower()))
-
-            return JSONResponse(content={
-                'success': True,
-                'path': path,
-                'files': files
-            })
+        return JSONResponse(content={
+            'success': True,
+            'path': path,
+            'files': files
+        })
     except Exception as e:
         logger.error(f"Error listing files: {e}")
         return JSONResponse(
@@ -505,112 +529,3 @@ async def sync_user_tools(request: Request):
     except Exception as e:
         logger.error(f"[ToolsData] Error in sync_user_tools: {e}")
         return error_response(str(e), status_code=500)
-
-
-# ==================== 常用工具 (Utility Tools) ====================
-
-UTILITY_TOOLS_DIR = Path(__file__).resolve().parent.parent / "tools"
-UTILITY_TOOL_MANIFEST = {
-    "gerrit_patch_export_and_apply_tool.sh",
-    "scrcpy-linux-x86_64-v3.3.4.tar.gz",
-    "upgrade_tool",
-    "misc.img",
-}
-
-
-def _resolve_allowed_utility_tool(file_path: str) -> Path:
-    normalized = str(Path(file_path or ""))
-    if normalized not in UTILITY_TOOL_MANIFEST:
-        raise HTTPException(status_code=403, detail="Tool is not available for download")
-
-    full_path = (UTILITY_TOOLS_DIR / normalized).resolve()
-    try:
-        full_path.relative_to(UTILITY_TOOLS_DIR.resolve())
-    except ValueError as err:
-        raise HTTPException(status_code=403, detail="Access denied") from err
-
-    if not full_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    return full_path
-
-
-@router.get("/api/tools/list")
-@handle_api_errors
-async def list_utility_tools():
-    """列出可下载的常用工具文件"""
-    try:
-        if not UTILITY_TOOLS_DIR.exists():
-            return JSONResponse(content={'success': True, 'files': []})
-
-        files = []
-        for rel_path in sorted(UTILITY_TOOL_MANIFEST):
-            try:
-                entry = _resolve_allowed_utility_tool(rel_path)
-                st = entry.stat()
-            except HTTPException:
-                continue
-            files.append({
-                'name': rel_path,
-                'size': st.st_size,
-                'modified': st.st_mtime,
-            })
-        return JSONResponse(content={'success': True, 'files': files})
-    except Exception as e:
-        logger.error(f"[UtilityTools] Error listing tools: {e}")
-        return error_response(str(e), status_code=500)
-
-
-@router.post("/api/tools/browse")
-@handle_api_errors
-async def browse_utility_tools(req: dict):
-    """浏览可下载工具清单，返回与 /api/files/list 相同格式以便复用文件浏览器弹框"""
-    try:
-        subpath = req.get('path', '').strip('/')
-        if '..' in Path(subpath).parts:
-            return error_response('非法路径', status_code=400)
-
-        files = []
-        directories = set()
-        for rel_path in sorted(UTILITY_TOOL_MANIFEST):
-            rel = Path(rel_path)
-            if subpath:
-                try:
-                    remaining = rel.relative_to(subpath)
-                except ValueError:
-                    continue
-            else:
-                remaining = rel
-
-            if len(remaining.parts) > 1:
-                directories.add(remaining.parts[0])
-                continue
-
-            try:
-                entry = _resolve_allowed_utility_tool(rel_path)
-                files.append({'name': remaining.name, 'type': 'file', 'size': entry.stat().st_size})
-            except HTTPException:
-                continue
-
-        files.extend({'name': name, 'type': 'directory', 'size': 0} for name in sorted(directories))
-        files.sort(key=lambda item: (item['type'] != 'directory', item['name'].lower()))
-
-        return JSONResponse(content={
-            'success': True,
-            'path': subpath,
-            'files': files,
-        })
-    except Exception as e:
-        logger.error(f"[UtilityTools] Error browsing tools: {e}")
-        return error_response(str(e), status_code=500)
-
-
-@router.get("/api/tools/download/{file_path:path}")
-@handle_api_errors
-async def download_utility_tool(file_path: str):
-    """下载 tools/ 目录下的指定文件"""
-    full_path = _resolve_allowed_utility_tool(file_path)
-    return FileResponse(
-        path=str(full_path),
-        filename=full_path.name,
-        media_type="application/octet-stream",
-    )

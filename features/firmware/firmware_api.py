@@ -1,10 +1,12 @@
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
 import re
 import shlex
+import shutil
 import tempfile
 import threading
 import time
@@ -12,6 +14,7 @@ import time
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from features.devices import parse_adb_device_states
 from features.test_execution import get_default_suites_path
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
@@ -19,6 +22,7 @@ from foundation.uploads import merge_files_to_path, safe_upload_target_path, sav
 
 from . import runtime
 from .models import SNBurnRequest
+from .upload_transport import upload_firmware_to_test_host as _upload_firmware_to_test_host
 
 
 logger = logging.getLogger(__name__)
@@ -31,6 +35,10 @@ _REMOTE_FILE_MISSING_MARKER = "__GMS_REMOTE_FILE_MISSING__"
 _FASTBOOT_OKAY_RE = re.compile(r"\s+OKAY\s+\[\s*[\d.]+s\]$")
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 _FIRMWARE_CHUNK_ROOT = os.path.join(tempfile.gettempdir(), "gms_firmware_uploads")
+MAX_FIRMWARE_UPLOAD_BYTES = 32 * 1024 * 1024 * 1024
+MAX_FIRMWARE_CHUNK_BYTES = 128 * 1024 * 1024
+MAX_FIRMWARE_CHUNKS = 10_000
+MERGE_LOCK_STALE_SECONDS = 60 * 60
 
 
 def strip_ansi_codes(text: str) -> str:
@@ -49,7 +57,12 @@ def _remote_file_exists(ssh, path: str) -> bool:
 
 
 def _safe_upload_token(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(value or "").strip())[:120] or "default"
+    raw = str(value or "").strip()
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]", "_", raw)[:96] or "default"
+    if cleaned != raw:
+        digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]
+        return f'{cleaned}_{digest}'
+    return cleaned
 
 
 def _remote_join(base_dir: str, path: str) -> str:
@@ -80,6 +93,22 @@ def _firmware_upload_session_dir(client_id: str, upload_id: str) -> str:
     )
 
 
+def _cleanup_expired_upload_sessions(client_id: str) -> None:
+    client_dir = os.path.join(_FIRMWARE_CHUNK_ROOT, _safe_upload_token(client_id))
+    if not os.path.isdir(client_dir):
+        return
+    cutoff = time.time() - UPLOAD_PROGRESS_EXPIRATION
+    with contextlib.suppress(OSError):
+        for entry in os.scandir(client_dir):
+            if not entry.is_dir(follow_symlinks=False):
+                continue
+            try:
+                if entry.stat(follow_symlinks=False).st_mtime < cutoff:
+                    shutil.rmtree(entry.path)
+            except OSError:
+                logger.debug('Failed to clean expired firmware upload %s', entry.path)
+
+
 def _read_uploaded_chunks(session_dir: str) -> set[int]:
     chunks_file = os.path.join(session_dir, "uploaded_chunks.json")
     if not os.path.exists(chunks_file):
@@ -92,8 +121,52 @@ def _read_uploaded_chunks(session_dir: str) -> set[int]:
 
 
 def _write_uploaded_chunks(session_dir: str, uploaded_chunks: set[int]) -> None:
-    with open(os.path.join(session_dir, "uploaded_chunks.json"), "w", encoding="utf-8") as handle:
+    target = os.path.join(session_dir, "uploaded_chunks.json")
+    temporary = f'{target}.{threading.get_ident()}.tmp'
+    with open(temporary, "w", encoding="utf-8") as handle:
         json.dump(sorted(uploaded_chunks), handle)
+    os.replace(temporary, target)
+
+
+def _validate_chunk_metadata(
+    session_dir: str,
+    *,
+    file_name: str,
+    total_chunks: int,
+    file_size: int,
+) -> str | None:
+    if total_chunks <= 0 or total_chunks > MAX_FIRMWARE_CHUNKS:
+        return f'total_chunks must be between 1 and {MAX_FIRMWARE_CHUNKS}'
+    if file_size <= 0 or file_size > MAX_FIRMWARE_UPLOAD_BYTES:
+        return f'file_size must be between 1 and {MAX_FIRMWARE_UPLOAD_BYTES}'
+    metadata = {
+        'file_name': os.path.basename(file_name),
+        'total_chunks': total_chunks,
+        'file_size': file_size,
+    }
+    path = os.path.join(session_dir, 'upload_metadata.json')
+    try:
+        if os.path.exists(path):
+            with open(path, encoding='utf-8') as handle:
+                existing = json.load(handle)
+            if existing != metadata:
+                return 'Chunk metadata does not match the existing upload session'
+        else:
+            temporary = f'{path}.{threading.get_ident()}.tmp'
+            with open(temporary, 'w', encoding='utf-8') as handle:
+                json.dump(metadata, handle)
+            try:
+                os.link(temporary, path)
+            except FileExistsError:
+                with open(path, encoding='utf-8') as handle:
+                    if json.load(handle) != metadata:
+                        return 'Chunk metadata does not match the existing upload session'
+            finally:
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(temporary)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return 'Upload session metadata is invalid'
+    return None
 
 
 def _firmware_chunk_paths(session_dir: str, total_chunks: int) -> list[str]:
@@ -106,6 +179,7 @@ async def _handle_firmware_chunk_upload(form, client_id: str):
     if not upload_id or not file_name:
         return error_response("upload_id and file_name are required for chunk upload", 400), None
 
+    await asyncio.to_thread(_cleanup_expired_upload_sessions, client_id)
     session_dir = _firmware_upload_session_dir(client_id, upload_id)
     os.makedirs(session_dir, exist_ok=True)
 
@@ -117,6 +191,10 @@ async def _handle_firmware_chunk_upload(form, client_id: str):
         except (TypeError, ValueError):
             total_chunks = 0
             file_size = 0
+        if total_chunks < 0 or total_chunks > MAX_FIRMWARE_CHUNKS:
+            return error_response('Invalid total_chunks', 400), None
+        if file_size < 0 or file_size > MAX_FIRMWARE_UPLOAD_BYTES:
+            return error_response('Invalid file_size', 400), None
         uploaded_size = 0
         if total_chunks > 0:
             for path in _firmware_chunk_paths(session_dir, total_chunks):
@@ -143,12 +221,28 @@ async def _handle_firmware_chunk_upload(form, client_id: str):
     if chunk_index < 0 or total_chunks <= 0 or chunk_index >= total_chunks:
         return error_response("Invalid chunk index", 400), None
 
+    metadata_error = _validate_chunk_metadata(
+        session_dir,
+        file_name=file_name,
+        total_chunks=total_chunks,
+        file_size=file_size,
+    )
+    if metadata_error:
+        return error_response(metadata_error, 400), None
+
     upload_file = form.get("file") or form.get("firmware_file")
     if upload_file is None:
         return error_response("No chunk file provided", 400), None
 
     chunk_path = os.path.join(session_dir, f"chunk_{chunk_index:05d}")
-    await save_upload_to_path(upload_file, chunk_path)
+    try:
+        await save_upload_to_path(
+            upload_file,
+            chunk_path,
+            min(MAX_FIRMWARE_CHUNK_BYTES, file_size),
+        )
+    except ValueError as exc:
+        return error_response(str(exc), 413), None
 
     uploaded_chunks = _read_uploaded_chunks(session_dir)
     uploaded_chunks.add(chunk_index)
@@ -182,6 +276,9 @@ async def _handle_firmware_chunk_upload(form, client_id: str):
         }), None
 
     merge_lock_path = os.path.join(session_dir, ".merge.lock")
+    with contextlib.suppress(OSError):
+        if time.time() - os.path.getmtime(merge_lock_path) > MERGE_LOCK_STALE_SECONDS:
+            os.remove(merge_lock_path)
     try:
         merge_lock_fd = os.open(merge_lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.close(merge_lock_fd)
@@ -196,12 +293,19 @@ async def _handle_firmware_chunk_upload(form, client_id: str):
             "upload_id": upload_id,
         }), None
 
-    merged_file = safe_upload_target_path(session_dir, file_name, allow_nested=False)
-    merge_files_to_path(chunk_paths, merged_file)
-    with contextlib.suppress(FileNotFoundError):
-        os.remove(merge_lock_path)
-    if file_size > 0 and os.path.getsize(merged_file) != file_size:
-        return error_response("Merged firmware size mismatch", 400), None
+    try:
+        merged_file = safe_upload_target_path(session_dir, file_name, allow_nested=False)
+        await asyncio.to_thread(merge_files_to_path, chunk_paths, merged_file)
+        if file_size > 0 and os.path.getsize(merged_file) != file_size:
+            return error_response("Merged firmware size mismatch", 400), None
+        for chunk_path in chunk_paths:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(chunk_path)
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(os.path.join(session_dir, 'uploaded_chunks.json'))
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(merge_lock_path)
 
     return None, {
         "path": merged_file,
@@ -219,6 +323,46 @@ async def _lock_devices(request: Request, client_id: str, devices: list, error_p
         devices=devices,
         error_prefix=error_prefix,
     )
+
+
+def _partition_devices_by_adb_state(ssh, devices: list[str]) -> tuple[list[str], list[str]]:
+    """把待烧写设备按 adb 在线状态分成 (online, offline) 两组。
+
+    烧写脚本的第一步是 ``adb -s <serial> reboot bootloader``，要求设备烧写前
+    处于 adb 可用状态（state == "device"）。若选中集合里混入离线/未授权设备，
+    脚本会因 ``set -euo pipefail`` 整体非 0 退出，最终报"部分设备失败"却看不出
+    是哪台。这里在锁设备前用一次 ``adb devices`` 预检，把离线设备提前剔除，
+    避免用户等整轮 fastboot 超时（最长 600s）才知道失败。
+
+    offline/unauthorized/recovery 等非 ``device`` 状态都视为不可烧写。
+    """
+    output, _error, _code = runtime.ssh_manager.execute_command(ssh, "adb devices", timeout=8)
+    states = parse_adb_device_states(output)
+    online, offline = [], []
+    for serial in devices:
+        if states.get(serial) == "device":
+            online.append(serial)
+        else:
+            offline.append(serial)
+    return online, offline
+
+
+async def _notify_skip(client_id: str, offline: list[str]) -> None:
+    """通过 websocket 告知用户哪些离线设备被跳过。"""
+    if not offline:
+        return
+    if client_id in runtime.global_state.websocket_connections:
+        with contextlib.suppress(Exception):
+            await runtime.safe_websocket_send(
+                client_id,
+                {
+                    "type": "log_update",
+                    "log": f"跳过离线设备（未在 adb 中或状态异常）: {', '.join(offline)}",
+                    "log_type": "warning",
+                },
+            )
+
+
 
 
 
@@ -247,119 +391,6 @@ async def get_firmware_upload_progress(request: Request):
             })
         else:
             return JSONResponse(content={"in_progress": False})
-
-
-
-async def _upload_firmware_to_test_host(ssh, client_id: str, source, remote_path: str, filename: str, file_size: int):
-    import scp
-
-    upload_progress_data = {"current_percentage": 0.0, "last_lock_update": 0.0}
-    upload_complete = threading.Event()
-    upload_error = [None]
-
-    def update_global_progress(percentage: float, sent: int):
-        if percentage - upload_progress_data["last_lock_update"] < 10:
-            return
-        try:
-            with runtime.global_state.firmware_upload_progress_lock:
-                runtime.global_state.firmware_upload_progress[client_id] = {
-                    "progress": percentage,
-                    "filename": filename,
-                    "uploaded_size": sent,
-                    "total_size": file_size,
-                    "timestamp": time.time(),
-                    "stage": "uploading_to_server",
-                }
-            upload_progress_data["last_lock_update"] = percentage
-        except Exception as e:
-            logger.error(f"[Firmware Burn] Failed to update upload progress: {e}")
-
-    def upload_progress(_filename, size, sent):
-        percentage = (sent / size) * 100 if size > 0 else 0.0
-        upload_progress_data["current_percentage"] = percentage
-        update_global_progress(percentage, sent)
-
-    def upload_file_worker():
-        scp_client = None
-        try:
-            scp_client = scp.SCPClient(ssh.get_transport(), progress=upload_progress)
-            if hasattr(source, "read"):
-                with contextlib.suppress(Exception):
-                    source.seek(0)
-                scp_client.putfo(source, remote_path, size=file_size)
-            else:
-                scp_client.put(source, remote_path)
-        except Exception as e:
-            logger.error(f"[Firmware Burn] Upload error: {e}")
-            upload_error[0] = str(e)
-        finally:
-            if scp_client:
-                with contextlib.suppress(Exception):
-                    scp_client.close()
-            upload_complete.set()
-
-    try:
-        with runtime.global_state.firmware_upload_progress_lock:
-            runtime.global_state.firmware_upload_progress[client_id] = {
-                "progress": 0.0,
-                "filename": filename,
-                "uploaded_size": 0,
-                "total_size": file_size,
-                "timestamp": time.time(),
-                "stage": "uploading_to_server",
-            }
-
-        await runtime.safe_websocket_send(client_id, {
-            "type": "file_upload_progress",
-            "filename": filename,
-            "percentage": 0,
-            "total_size": file_size,
-            "uploaded_size": 0,
-        })
-
-        upload_thread = threading.Thread(target=upload_file_worker, daemon=True)
-        upload_thread.start()
-
-        last_percentage = 0.0
-        last_update_time = time.time()
-        while not upload_complete.is_set():
-            await asyncio.sleep(1.0)
-            current_percentage = upload_progress_data.get("current_percentage", 0.0)
-            current_time = time.time()
-
-            if abs(current_percentage - last_percentage) > 1.0 and (current_time - last_update_time) > 2.0:
-                sent_size = int((current_percentage / 100) * file_size)
-                await runtime.safe_websocket_send(client_id, {
-                    "type": "file_upload_progress",
-                    "filename": filename,
-                    "percentage": round(current_percentage, 2),
-                    "total_size": file_size,
-                    "uploaded_size": sent_size,
-                })
-                last_percentage = current_percentage
-                last_update_time = current_time
-
-        upload_thread.join(timeout=300)
-        if upload_thread.is_alive():
-            raise RuntimeError("Upload timed out")
-        if upload_error[0]:
-            raise RuntimeError(f"Upload failed: {upload_error[0]}")
-
-        await runtime.safe_websocket_send(client_id, {
-            "type": "file_upload_progress",
-            "filename": filename,
-            "percentage": 100,
-            "total_size": file_size,
-            "uploaded_size": file_size,
-        })
-        await runtime.safe_websocket_send(client_id, {
-            "type": "log_update",
-            "log": "Firmware file upload complete",
-            "log_type": "success",
-        })
-    finally:
-        with runtime.global_state.firmware_upload_progress_lock:
-            runtime.global_state.firmware_upload_progress.pop(client_id, None)
 
 
 
@@ -405,7 +436,7 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
             return error_response("Please upload a firmware file or provide a firmware path")
 
         config = runtime.config_manager.load_config()
-        with runtime.ssh_manager.optional_connection(config) as ssh:
+        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
                 await runtime.release_firmware_devices(client_id, locked_devices)
                 return error_response("SSH connection failed")
@@ -613,15 +644,25 @@ async def burn_gsi(request: Request):
         if not system_img:
             return error_response("System image path is required")
 
-        locked_devices, lock_err = await _lock_devices(request, client_id, devices)
-        if lock_err:
-            return lock_err
-
         config = runtime.config_manager.load_config()
-        with runtime.ssh_manager.optional_connection(config) as ssh:
+        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
-                await runtime.release_firmware_devices(client_id, locked_devices)
                 return error_response("SSH connection failed")
+
+            # 烧写前预检：adb 一次查询，剔除离线/未授权设备，避免选中集合里
+            # 混入离线设备导致"部分设备失败"且要等 fastboot 超时才暴露。
+            online_devices, offline_devices = await asyncio.to_thread(
+                _partition_devices_by_adb_state, ssh, devices
+            )
+            if not online_devices:
+                return error_response(
+                    f"没有可烧写的在线设备，离线/状态异常: {', '.join(offline_devices)}"
+                )
+            await _notify_skip(client_id, offline_devices)
+
+            locked_devices, lock_err = await _lock_devices(request, client_id, online_devices)
+            if lock_err:
+                return lock_err
 
             try:
                 import scp
@@ -679,9 +720,9 @@ async def burn_gsi(request: Request):
 
                 if client_id in runtime.global_state.websocket_connections:
                     with contextlib.suppress(Exception):
-                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Starting GSI burn for {len(devices)} devices...", "log_type": "info"})
+                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Starting GSI burn for {len(online_devices)} devices...", "log_type": "info"})
 
-                for device in devices:
+                for device in online_devices:
                     img_args = f"--system {shlex.quote(resolved_system)}"
                     if remote_vendor:
                         img_args += f" --vendor {shlex.quote(remote_vendor)}"
@@ -761,25 +802,25 @@ async def burn_gsi(request: Request):
                 all_success = all(r["success"] for r in results)
                 if all_success:
                     try:
-                        runtime.store_notification(client_id, "GSI burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "results": results})
+                        runtime.store_notification(client_id, "GSI burn complete", f"Devices: {', '.join(online_devices)}", "success", "firmware", {"devices": online_devices, "results": results})
                     except Exception as notify_error:
                         logger.warning("[GSI Burn] Failed to store success notification: %s", notify_error)
                     # 设备锁已释放，通知前端刷新 ADB 设备状态
                     if client_id in runtime.global_state.websocket_connections:
                         with contextlib.suppress(Exception):
-                            await runtime.safe_websocket_send(client_id, {"type": "firmware_burn_complete", "devices": devices, "success": True})
+                            await runtime.safe_websocket_send(client_id, {"type": "firmware_burn_complete", "devices": online_devices, "success": True})
                     return JSONResponse(content={"success": True, "message": "GSI burn completed successfully", "results": results})
                 else:
                     failed = [r.get("device") for r in results if not r.get("success")]
                     try:
-                        runtime.store_notification(client_id, "GSI burn failed", f"Failed: {', '.join(failed)}", "error", "firmware", {"devices": devices, "results": results})
+                        runtime.store_notification(client_id, "GSI burn failed", f"Failed: {', '.join(failed)}", "error", "firmware", {"devices": online_devices, "results": results})
                     except Exception as notify_error:
                         logger.warning("[GSI Burn] Failed to store failure notification: %s", notify_error)
-                    return error_response("Some devices failed", results=results)
+                    return error_response(f"部分设备烧写失败: {', '.join(failed)}", results=results)
 
             except Exception as e:
                 try:
-                    runtime.store_notification(client_id, "GSI burn error", str(e)[:300], "error", "firmware", {"devices": devices})
+                    runtime.store_notification(client_id, "GSI burn error", str(e)[:300], "error", "firmware", {"devices": online_devices})
                 except Exception as notify_error:
                     logger.warning("[GSI Burn] Failed to store error notification: %s", notify_error)
                 try:
@@ -807,7 +848,7 @@ async def burn_sn(req: SNBurnRequest):
             return error_response("SN code is required", 400)
 
         config = runtime.config_manager.load_config()
-        with runtime.ssh_manager.optional_connection(config) as ssh:
+        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
                 return error_response("SSH connection failed", 500)
 

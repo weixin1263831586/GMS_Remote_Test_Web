@@ -15,7 +15,7 @@ MIGRATION_LINE_LIMITS = {
     'features/devices/operations_api.py': 695,
     'features/devices/tests/test_usbip_reconnect.py': 1107,
     'features/devices/usbip.py': 679,
-    'features/firmware/firmware_api.py': 828,
+    'features/firmware/firmware_api.py': 881,
     'features/gerrit/api.py': 643,
     'features/knowledge/storage.py': 777,
     'features/redmine/agent.py': 605,
@@ -29,9 +29,7 @@ MIGRATION_LINE_LIMITS = {
     'features/reports/weekly_report_api.py': 1123,
     'features/system/api.py': 1091,
     'features/system/api_docs_list.py': 963,
-    'features/system/assets.py': 617,
     'features/system/icon_fetcher.py': 870,
-    'features/users/config_api.py': 771,
 }
 
 

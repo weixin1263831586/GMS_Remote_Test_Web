@@ -178,6 +178,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
         configure_config_sections()
         configure_user_dependencies(
             config_manager=config_manager,
+            data_root=services.settings.data_root,
             global_state=global_state,
             ssh_async_manager=ssh_async_manager,
             get_or_create_user_state=get_or_create_user_state,

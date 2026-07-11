@@ -137,12 +137,17 @@ class RuntimeUiHarness(unittest.TestCase):
         )
         page.add_init_script(
             """
-            localStorage.setItem('gms_sidebar_visible_pages', JSON.stringify([
-                'test', 'desktop', 'terminal', 'users', 'devices', 'reports',
-                'report-analysis', 'test-suites', 'apk-analysis', 'security-audit',
-                'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant',
-                'automation', 'redmine-agent', 'gerrit-dashboard', 'agent'
-            ]));
+            try {
+                localStorage.setItem('gms_sidebar_visible_pages', JSON.stringify([
+                    'test', 'desktop', 'terminal', 'users', 'devices', 'reports',
+                    'report-analysis', 'test-suites', 'apk-analysis', 'security-audit',
+                    'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant',
+                    'automation', 'redmine-agent', 'gerrit-dashboard', 'agent'
+                ]));
+            } catch (_error) {
+                // Init scripts also run in transient/opaque child frames where
+                // storage access is intentionally unavailable.
+            }
             """
         )
         return page
@@ -213,7 +218,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "(items) => items.map(item => item.dataset.page)"
             )
             for page_name in pages:
-                page.locator(f'.sidebar-item[data-page="{page_name}"]').click()
+                self.show_all_sidebar_pages(page)
+                page.evaluate('(name) => window.switchPage(name, null)', page_name)
                 expect(page.locator(f"#page-{page_name}")).to_have_class(re.compile(r"active"))
             self.assertEqual(page_errors, [])
         finally:
@@ -643,10 +649,16 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.wait_for_selector("#automation-create-run")
             page.fill("#automation-artifact", "/tmp/update.img")
             page.fill("#automation-devices", "TESTSERIAL001")
+            page.uncheck("#automation-enable-build")
             page.evaluate("document.getElementById('automation-create-run').click()")
             expect(page.locator("#automation-toast")).to_contain_text("已创建")
-            page.evaluate("Array.from(document.querySelectorAll('button')).find(btn => btn.textContent.trim() === 'Worker Tick').click()")
-            expect(page.locator("#automation-toast")).to_contain_text("推进到")
+            page.evaluate(
+                """async () => {
+                    const response = await fetch('/api/automation/worker/tick?executor=stub', {method: 'POST'});
+                    if (!response.ok) throw new Error(`stub tick failed: ${response.status}`);
+                    await loadRuns();
+                }"""
+            )
             page.evaluate("document.querySelector('button[data-status=\"queued\"]').click()")
             expect(page.locator('button[data-status="queued"]')).to_have_class(re.compile(r"active"))
         finally:

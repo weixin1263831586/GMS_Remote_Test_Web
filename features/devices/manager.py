@@ -169,6 +169,9 @@ class DeviceManager:
             prop_map = {
                 'ro.serialno': 'serial_no',
                 'ro.product.model': 'model',
+                'ro.product.name': 'product',
+                'ro.product.device': 'device',
+                'ro.product.board': 'board',
                 'ro.build.version.release': 'android_version',
                 'ro.build.type': 'build_type',
                 'ro.build.tags': 'build_tags',

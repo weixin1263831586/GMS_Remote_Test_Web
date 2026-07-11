@@ -148,7 +148,8 @@ async def _current_redmine_user(service) -> Any | None:
     client = service.agent._make_client()
     try:
         return await client.get_current_user()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to load current Redmine user: %s", exc)
         return None
     finally:
         await client.close()
@@ -217,8 +218,8 @@ async def get_workload_statistics(
                     )
                 finally:
                     await client.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to refresh Redmine snapshots for user %s: %s", mapped.get("id"), exc)
     else:
         current_user = None if name else await _current_redmine_user_mapping(service)
         if current_user:
@@ -236,8 +237,8 @@ async def get_workload_statistics(
                 assigned_to = str(run.get("assigned_to") or "").strip()
                 if assigned_to:
                     extra_names.append(assigned_to)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to load recent Redmine runs for owner matching: %s", exc, exc_info=True)
     all_names = owner_names + [n for n in extra_names if n]
     data = service.repository.get_workload_statistics(
         owner_names=all_names,

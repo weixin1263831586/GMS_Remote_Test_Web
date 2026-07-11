@@ -1,7 +1,7 @@
 import asyncio
 import threading
 import unittest
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -38,6 +38,11 @@ class _SshManager:
     @contextmanager
     def optional_connection(self, config):
         yield object()
+
+    @asynccontextmanager
+    async def async_optional_connection(self, config):
+        with self.optional_connection(config) as ssh:
+            yield ssh
 
     def execute_command(self, ssh, command):
         self.commands.append(command)

@@ -342,7 +342,7 @@ async def list_suite_files(suite_path: str = Query(...), path: str = Query("")):
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)
 
-    with runtime.ssh_manager.optional_connection(config) as ssh:
+    async with runtime.ssh_manager.async_optional_connection(config) as ssh:
         if not ssh:
             return ssh_connection_failed_response()
 
@@ -370,7 +370,7 @@ async def search_suite_files(
         items = await asyncio.to_thread(_search_suite_files_local, suite_root, query.strip(), limit)
         return ApiResponse.success({"suite_path": suite_path, "suite_root": suite_root, "query": query, "items": items, "count": len(items)})
 
-    with runtime.ssh_manager.optional_connection(config) as ssh:
+    async with runtime.ssh_manager.async_optional_connection(config) as ssh:
         if not ssh:
             return ssh_connection_failed_response()
 
@@ -379,7 +379,9 @@ async def search_suite_files(
             f"python3 -c {shlex.quote(script)} {shlex.quote(suite_root)} {shlex.quote(suite_root)} "
             f"{shlex.quote(query.strip().lower())} {shlex.quote(str(limit))}"
         )
-        output, error, code = runtime.ssh_manager.execute_command(ssh, cmd, timeout=60)
+        output, error, code = await asyncio.to_thread(
+            runtime.ssh_manager.execute_command, ssh, cmd, timeout=60
+        )
         if code != 0:
             raise RuntimeError(error.strip() or output.strip() or "Remote search failed")
         payload = json.loads(output.strip() or "{}")

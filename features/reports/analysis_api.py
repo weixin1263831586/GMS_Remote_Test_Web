@@ -31,14 +31,13 @@ from .api_helpers import (
     logger,
     os,
     re,
-    safe_upload_target_path,
-    save_upload_to_path,
     shutil,
     success_response,
     tempfile,
     test_report_db,
     test_report_manager,
 )
+from .uploads import ReportUploadTooLargeError, stage_report_uploads
 
 
 router = APIRouter()
@@ -105,7 +104,6 @@ def _is_safe_report_delete_dir(result_dir: str) -> bool:
         return False
     if entries.intersection(marker_files):
         return True
-
     try:
         return any(name.startswith("host_log_") and name.endswith(".txt") for name in entries)
     except OSError:
@@ -183,11 +181,14 @@ async def analyze_reports(
                 if len(all_files) == 1:
                     uploaded_file = all_files[0]
                     try:
-                        temp_file_path = safe_upload_target_path(temp_dir, uploaded_file.filename, allow_nested=False)
+                        staged = await stage_report_uploads(
+                            [uploaded_file], temp_dir, allow_nested=False
+                        )
+                    except ReportUploadTooLargeError as e:
+                        return error_response(str(e), 413)
                     except ValueError as e:
                         return error_response(str(e), 400)
-
-                    bytes_written = await save_upload_to_path(uploaded_file, temp_file_path)
+                    temp_file_path, bytes_written = staged[0]
                     temp_file_path, detected_filename = _ensure_uploaded_report_extension(
                         temp_file_path,
                         uploaded_file.filename or "uploaded_report",
@@ -231,13 +232,14 @@ async def analyze_reports(
                     )
 
                 else:
-                    for uploaded_file in all_files:
-                        if uploaded_file.filename:
-                            try:
-                                file_path = safe_upload_target_path(temp_dir, uploaded_file.filename, allow_nested=True)
-                            except ValueError as e:
-                                return error_response(str(e), 400)
-                            await save_upload_to_path(uploaded_file, file_path)
+                    try:
+                        await stage_report_uploads(
+                            all_files, temp_dir, allow_nested=True
+                        )
+                    except ReportUploadTooLargeError as exc:
+                        return error_response(str(exc), 413)
+                    except ValueError as exc:
+                        return error_response(str(exc), 400)
 
                     analyzer = ReportAnalyzer(temp_dir=temp_dir)
                     xml_path = await asyncio.to_thread(analyzer.file_handler.find_xml_file)

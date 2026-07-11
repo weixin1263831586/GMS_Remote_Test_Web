@@ -112,7 +112,7 @@ async def upload_file(
         await save_upload_to_path(file, temp_path)
 
         try:
-            with ssh_manager.optional_connection(config) as ssh:
+            async with ssh_manager.async_optional_connection(config) as ssh:
                 if not ssh:
                     os.remove(temp_path)
                     return error_response("SSH connection failed", 500)
@@ -240,7 +240,7 @@ async def _upload_file_chunk(
             logger.info(f"[ChunkUpload] Merged {total_chunks} chunks in {merge_time:.2f}s")
 
             config = config_manager.load_config()
-            with ssh_manager.optional_connection(config) as ssh:
+            async with ssh_manager.async_optional_connection(config) as ssh:
 
                 if not ssh:
                     try:

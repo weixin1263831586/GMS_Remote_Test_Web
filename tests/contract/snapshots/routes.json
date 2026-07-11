@@ -625,6 +625,24 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/ui/layout"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/ui/screenshot"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/ui/tap"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/devices/user-locked"

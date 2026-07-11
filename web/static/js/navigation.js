@@ -975,6 +975,15 @@ async function loadDevices(forceRefresh = false) {
         const url = forceRefresh ? '/api/devices/list?force_refresh=1' : '/api/devices/list';
         const devices = await apiCall(url);
         state.devices = devices;
+        // 设备列表更新后，清理选中集合里已消失的设备。否则 USB 抖动导致设备断开时，
+        // 它仍残留在 state.selectedDevices 中，会被烧写/重启等批量操作一起送进后端，
+        // 触发"部分设备失败"（离线那台等 fastboot 超时才暴露）。
+        const currentIds = new Set(devices.map(d => typeof d === 'string' ? d : d.device_id).filter(Boolean));
+        for (const id of Array.from(state.selectedDevices)) {
+            if (!currentIds.has(id)) {
+                state.selectedDevices.delete(id);
+            }
+        }
         // 先用已有数据渲染设备，让 ADB 区立刻显示，不被分组加载阻塞
         renderDevices();
         // 首次加载时并行拉取分组定义（用于按"关注"筛选），到位后再重渲染一次
@@ -4432,7 +4441,7 @@ async function submitElevateForm() {
     const submitBtn = document.querySelector('#elevate-modal .btn-primary');
     if (msgEl) msgEl.textContent = '';
     if (!username || !password) {
-        if (msgEl) msgEl.textContent = '请输入管理员用户名和密码';
+        if (msgEl) msgEl.textContent = '请输入管理员账号和密码';
         return;
     }
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '验证中...'; }
@@ -6551,7 +6560,8 @@ const _modalCloseHandlers = {
     'firmware-share-password-modal': closeFirmwareSharePasswordModal,
     'file-browser-modal': closeFileBrowserModal,
     'gsi-modal': closeGsiModal,
-    'sn-modal': closeSnModal
+    'sn-modal': closeSnModal,
+    'ui-control-modal': closeUiControl
 };
 
 document.addEventListener('click', function(event) {

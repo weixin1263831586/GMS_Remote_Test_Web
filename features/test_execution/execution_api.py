@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.devices import get_or_create_user_state, update_user_state_field
+from features.devices import device_lock_manager, get_or_create_user_state, update_user_state_field
 from features.reports import save_test_report_to_db, test_report_db
 from features.users import get_client_display_id_from_request, get_client_username_from_request
 from foundation.responses import error_response, success_response
@@ -60,10 +60,6 @@ async def start_test(
 
     client_id = runtime.get_client_id_from_request(request)
 
-    user_state = get_or_create_user_state(client_id)
-    if user_state.get("running", False):
-        return error_response("You already have a test running", 400)
-
     devices = req.devices
     if not devices:
         return error_response("No devices selected", 400)
@@ -71,13 +67,29 @@ async def start_test(
     config = runtime.config_manager.load_config()
     username = get_client_username_from_request(request)
 
-    locked_devices, failed_devices = await runtime.acquire_test_devices(
-        client_id=client_id,
-        username=username,
-        devices=devices,
-    )
+    user_state = get_or_create_user_state(client_id)
+    with runtime.global_state.user_states_lock:
+        if user_state.get("running", False) or user_state.get("starting", False):
+            return error_response("You already have a test running", 400)
+        # Reserve this client's execution slot before awaiting device locks.
+        # Without this flag, concurrent requests can both observe running=False.
+        user_state["starting"] = True
+
+    try:
+        locked_devices, failed_devices = await runtime.acquire_test_devices(
+            client_id=client_id,
+            username=username,
+            devices=devices,
+        )
+    except Exception as exc:
+        with runtime.global_state.user_states_lock:
+            user_state["starting"] = False
+        logger.exception("Failed to acquire devices for %s", client_id)
+        return error_response(f"Failed to acquire devices: {exc}", 500)
 
     if failed_devices:
+        with runtime.global_state.user_states_lock:
+            user_state["starting"] = False
         error_msg = "The following devices are occupied by other users:\n"
         for fail in failed_devices:
             error_msg += f"- {fail['device_id']} ({fail['error']})\n"
@@ -94,7 +106,18 @@ async def start_test(
     logger.info(f"[TestStart] Client state created/loaded: {client_id}")
 
     logger.info(f"[TestStart] Setting running=True for {client_id}")
-    update_user_state_field(client_id, {"running": True, "devices": devices, "test_type": req.test_type, "logs": []})
+    update_user_state_field(
+        client_id,
+        {
+            "running": True,
+            "starting": False,
+            "devices": devices,
+            "test_type": req.test_type,
+            "logs": [],
+            "test_outcome": "running",
+            "report_timestamp": "",
+        },
+    )
 
     task = asyncio.create_task(_run_test_background(config, test_params, client_id, locked_devices))
     runtime.global_state.background_tasks.add(task)
@@ -112,6 +135,9 @@ async def _run_test_background(
     """Execute the GMS test over SSH, stream logs, and record the report on completion."""
 
     ssh = None
+    test_outcome = "failed"
+    report_timestamp = ""
+    last_lock_refresh = time.monotonic()
 
     async def log_callback(
         message: str,
@@ -165,7 +191,7 @@ async def _run_test_background(
 
         await log_callback(f"Process group ID: {process_group_id}", "info")
 
-        with runtime.ssh_manager.optional_connection(config) as ssh:
+        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
                 await log_callback("SSH connection failed", "error")
                 update_user_state_field(client_id, {"running": False})
@@ -353,6 +379,11 @@ async def _run_test_background(
             )
 
             while not stdout.channel.exit_status_ready():
+                if time.monotonic() - last_lock_refresh >= 300:
+                    renewed = await asyncio.to_thread(device_lock_manager.refresh_locks, client_id, locked_devices)
+                    if renewed != len(locked_devices):
+                        await log_callback("One or more device locks could not be renewed", "warning")
+                    last_lock_refresh = time.monotonic()
                 user_state = get_or_create_user_state(client_id)
                 if not user_state.get("running", False):
                     await log_callback("Test stopped by user", "warning")
@@ -413,8 +444,10 @@ async def _run_test_background(
                     logger.error(f"Error reading remaining stderr: {e}")
 
             if exit_code == 0:
+                test_outcome = "completed"
                 await log_callback(f"Test completed successfully (exit code: {exit_code})", "success")
             else:
+                test_outcome = "failed"
                 await log_callback(f"Test failed with exit code: {exit_code}", "error")
 
     except Exception as e:
@@ -425,7 +458,7 @@ async def _run_test_background(
         try:
             user_state = get_or_create_user_state(client_id)
             user_logs = user_state.get("logs", [])
-            report_timestamp = save_test_report_to_db(client_id, config, test_params, user_logs)
+            report_timestamp = save_test_report_to_db(client_id, config, test_params, user_logs) or ""
             if report_timestamp:
                 await log_callback(f"Test report recorded: {report_timestamp}", "success")
         except Exception as e:
@@ -434,7 +467,15 @@ async def _run_test_background(
         await runtime.release_test_devices(client_id, locked_devices)
         logger.info(f"[Device Lock] Test completed, device unlock broadcast: {locked_devices}")
 
-        update_user_state_field(client_id, {"running": False, "devices": []})
+        update_user_state_field(
+            client_id,
+            {
+                "running": False,
+                "devices": [],
+                "test_outcome": test_outcome,
+                "report_timestamp": report_timestamp,
+            },
+        )
 
         notification = runtime.store_notification(
             client_id,
@@ -485,7 +526,7 @@ async def stop_test(
     update_user_state_field(client_id, {"devices": []})
 
     config = runtime.config_manager.load_config()
-    with runtime.ssh_manager.optional_connection(config) as ssh:
+    async with runtime.ssh_manager.async_optional_connection(config) as ssh:
         if not ssh:
             return error_response("SSH connection failed", 500)
 

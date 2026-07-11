@@ -27,6 +27,7 @@ from features.system.terminal_service import (
     refresh_devices_websocket,
 )
 from features.system.vnc import NOVNC_WEB_PORT
+from features.users import get_client_ip
 from features.users import runtime as users_runtime
 from foundation.config import DEFAULT_SERVER_URL, PROJECT_ROOT, config_manager
 from foundation.errors import handle_api_errors
@@ -72,11 +73,7 @@ def init_templates(templates):
 
 def _get_websocket_client_ip(websocket: WebSocket) -> str:
     """Resolve browser client IP for WebSocket requests."""
-    for header in ("x-forwarded-for", "x-real-ip"):
-        value = (websocket.headers.get(header) or "").strip()
-        if value:
-            return value.split(",")[0].strip()
-    return websocket.client.host if websocket.client else "unknown"
+    return get_client_ip(websocket)
 
 
 def _get_websocket_client_identity(websocket: WebSocket, path_client_id: str) -> tuple[str, str, str]:

@@ -1,6 +1,6 @@
 import json
 import unittest
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from unittest.mock import patch
 
 from features.devices import screens_api
@@ -25,6 +25,11 @@ class FakeSshManager:
     @contextmanager
     def optional_connection(self, _config):
         yield object()
+
+    @asynccontextmanager
+    async def async_optional_connection(self, config):
+        with self.optional_connection(config) as ssh:
+            yield ssh
 
     def execute_command(self, _ssh, command, timeout=None):
         self.commands.append(command)

@@ -32,7 +32,7 @@ async def show_device_screens(req: DeviceActionRequest):
         ubuntu_host = runtime.config_manager.get_ubuntu_host(config)
 
         if not devices:
-            with runtime.ssh_manager.optional_connection(config) as ssh:
+            async with runtime.ssh_manager.async_optional_connection(config) as ssh:
                 if ssh:
                     try:
                         stdout, _stderr, code = runtime.ssh_manager.execute_command(
@@ -54,7 +54,7 @@ async def show_device_screens(req: DeviceActionRequest):
                 status_code=400,
             )
 
-        with runtime.ssh_manager.optional_connection(config) as ssh:
+        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
                 return ssh_connection_failed_response()
 

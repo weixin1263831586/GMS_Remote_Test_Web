@@ -598,7 +598,7 @@ async def connect_wifi(req: WifiConnectRequest):
         # shell argument (they were previously interpolated raw between quotes).
         ssid_q = shlex.quote(ssid)
         password_q = shlex.quote(password)
-        with runtime.ssh_manager.optional_connection(config) as ssh:
+        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
                 return error_response("SSH connection failed", status_code=500)
 
@@ -639,7 +639,7 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
     """Open device ADB Shell - prepare device connection for terminal page."""
     try:
         config = runtime.config_manager.load_config()
-        with runtime.ssh_manager.optional_connection(config) as ssh:
+        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
                 return JSONResponse(
                     content={"success": False, "message": "SSH connection failed"},

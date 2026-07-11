@@ -20,8 +20,7 @@
             <span id="worker-indicator" class="worker-dot down" title="Worker 状态">Worker</span>
             <button type="button" onclick="loadAll()">刷新</button>
             <button type="button" onclick="pollGerrit()">Gerrit Poll</button>
-            <button type="button" onclick="tickWorker('stub')">Worker Tick</button>
-            <button type="button" class="primary" onclick="tickWorker('http')">真实 API Tick</button>
+            <button type="button" class="primary" onclick="tickWorker('http')">立即推进</button>
         </div>
     </div>
     <div class="workflow-tabs" aria-label="GMS ATS workflow">
@@ -83,6 +82,7 @@
             <section class="panel">
                 <div class="panel-header">固件与构建</div>
                 <div class="panel-body compact-stack">
+                    <label class="checkbox-item"><input id="automation-enable-build" type="checkbox" checked> 执行编译（关闭后使用已有固件）</label>
                     <label>固件路径或 URL
                         <input id="automation-artifact" placeholder="/path/to/update.img 或 http://...">
                     </label>

@@ -96,9 +96,43 @@ async function loadProfiles() {
     atsProfiles = data.items || [];
     const select = qs('automation-profile');
     select.innerHTML = atsProfiles.map(p => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
+    select.onchange = applySelectedProfile;
     qs('automation-profiles').innerHTML = atsProfiles.length
         ? atsProfiles.map(p => `<div><span class="badge">${esc(p.enabled ? 'enabled' : 'disabled')}</span> <strong>${esc(p.name || p.id)}</strong><div class="muted">${esc(p.id)} / ${esc((p.jenkins || {}).job || 'manual')}</div></div>`).join('')
         : '<div class="muted">未配置 automation_profiles.json，当前使用 example 配置。</div>';
+    applySelectedProfile();
+}
+
+function selectedProfile() {
+    return atsProfiles.find(profile => profile.id === qs('automation-profile').value) || {};
+}
+
+function setSelectValue(id, value) {
+    const select = qs(id);
+    if (!select || value === undefined || value === null || value === '') return;
+    const text = String(value);
+    if (!Array.from(select.options).some(option => option.value === text)) {
+        select.insertAdjacentHTML('beforeend', `<option value="${esc(text)}">${esc(text)}</option>`);
+    }
+    select.value = text;
+}
+
+function applySelectedProfile() {
+    const profile = selectedProfile();
+    const build = profile.build || {};
+    const parameters = build.parameters || {};
+    qs('automation-enable-build').checked = Boolean(build.server_id || build.template_id || build.provider);
+    setSelectValue('build-server', build.server_id);
+    setSelectValue('build-template', build.template_id);
+    setSelectValue('build-workspace', parameters.workspace);
+    setSelectValue('build-lunch-target', parameters.lunch_target);
+    setSelectValue('build-command', parameters.build_command);
+
+    const testPlan = profile.test_plan || {};
+    setSelectValue('automation-test-type', testPlan.test_type);
+    renderSuiteOptions();
+    setSelectValue('automation-test-suite', testPlan.test_suite);
+    qs('automation-test-module').value = testPlan.test_module || (testPlan.modules || [])[0] || '';
 }
 
 async function loadBuildConfig() {
@@ -115,6 +149,7 @@ async function loadBuildConfig() {
 }
 
 function collectBuildPlan() {
+    if (!qs('automation-enable-build').checked) return null;
     const serverId = qs('build-server').value;
     const templateId = qs('build-template').value;
     const workspace = qs('build-workspace').value;
@@ -356,7 +391,13 @@ function collectTestPlan() {
     let extra = {};
     const raw = qs('automation-test-plan').value.trim();
     if (raw) extra = JSON.parse(raw);
+    const profile = selectedProfile();
+    const profilePlan = profile.test_plan || {};
     const plan = {
+        ...profilePlan,
+        flash: profile.flash || profilePlan.flash || {},
+        device_selector: profile.device_selector || profilePlan.device_selector || {},
+        reporting: profile.reporting || profilePlan.reporting || {},
         ...extra,
         test_type: qs('automation-test-type').value.trim(),
         test_suite: qs('automation-test-suite').value,

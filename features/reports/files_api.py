@@ -1,3 +1,4 @@
+import asyncio
 import shlex
 
 from .api_helpers import (
@@ -212,12 +213,13 @@ async def download_report(
             if not _is_registered_report_file_path(path):
                 return error_response("File path is not part of a registered report", 403)
             config = config_manager.load_config()
-            with dependencies.ssh_manager.optional_connection(config) as ssh:
+            async with dependencies.ssh_manager.async_optional_connection(config) as ssh:
                 if not ssh:
                     return error_response("SSH connection failed", 500)
 
                 cat_cmd = f"head -c {REPORT_FILE_VIEW_MAX_BYTES + 1} -- {shlex.quote(path)} 2>/dev/null"
-                output, _error, _code = dependencies.ssh_manager.execute_command(
+                output, _error, _code = await asyncio.to_thread(
+                    dependencies.ssh_manager.execute_command,
                     ssh,
                     cat_cmd,
                     timeout=30,

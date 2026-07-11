@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from pathlib import Path
@@ -25,6 +26,9 @@ from features.build.models import (
     utc_now_iso,
 )
 from features.build.repository import BuildStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class BuildNotFoundError(LookupError):
@@ -96,10 +100,10 @@ class BuildService:
             "started_at": "",
             "finished_at": "",
         })
-        if start:
-            job = self.start_job(job["id"], server_password=req.server_password)
         if req.server_password:
             self._runtime_passwords[job["id"]] = req.server_password
+        if start:
+            job = self.start_job(job["id"], server_password=req.server_password)
         return self._decorate_job(job)
 
     def _maybe_defer_for_capacity(self, server: dict[str, Any], start: bool) -> bool:
@@ -144,10 +148,11 @@ class BuildService:
                     continue
                 self.start_job(job["id"], server_password=self._runtime_passwords.get(job["id"], ""))
                 started += 1
-            except BuildExecutionError:
+            except BuildExecutionError as exc:
+                logger.info("Queued build %s remains deferred: %s", job.get("id"), exc)
                 continue
             except Exception:
-                pass
+                logger.exception("Failed to start queued build %s", job.get("id"))
         return started
 
     def start_job(self, job_id: str, server_password: str = "") -> dict[str, Any]:
@@ -165,6 +170,16 @@ class BuildService:
             json.loads(job.get("parameters_json") or "{}"),
         )
         backend = self._backend(server)
+        claimed = self.store.claim_queued_job(
+            job["id"],
+            server_id=server["id"],
+            max_concurrent=int(server.get("max_concurrent_jobs") or 1),
+        )
+        if claimed is None:
+            # A separate worker won the race. Return authoritative state and
+            # never invoke the remote backend twice for the same job.
+            return self.store.get_job(job["id"])
+        job = claimed
         try:
             started = backend.start(
                 server=server,
@@ -174,18 +189,18 @@ class BuildService:
                 timeout_sec=int(template.get("timeout_sec") or 21600),
             )
         except Exception as exc:
-            return self.store.update_job(
+            failed = self.store.update_job(
                 job["id"],
                 status=JOB_FAILED,
                 error=str(exc),
                 finished_at=utc_now_iso(),
             )
+            self._runtime_passwords.pop(job["id"], None)
+            return failed
         return self.store.update_job(
             job["id"],
-            status=JOB_RUNNING,
             remote_session=started["session"],
             remote_log_path=started["log_path"],
-            started_at=utc_now_iso(),
         )
 
     def poll_job(self, job_id: str) -> dict[str, Any]:
@@ -193,6 +208,7 @@ class BuildService:
         if not job:
             raise BuildNotFoundError("Build job not found")
         if job["status"] in TERMINAL_JOB_STATUSES:
+            self._runtime_passwords.pop(job_id, None)
             return self._decorate_job(job)
         if job["status"] == JOB_QUEUED:
             return self._decorate_job(self.start_job(job_id))
@@ -223,6 +239,7 @@ class BuildService:
             }
         if updates:
             job = self.store.update_job(job_id, **updates)
+            self._runtime_passwords.pop(job_id, None)
         return self._decorate_job(job)
 
     def tail_log(self, job_id: str, lines: int = 200) -> str:
@@ -239,17 +256,24 @@ class BuildService:
         if not job:
             raise BuildNotFoundError("Build job not found")
         if job["status"] in TERMINAL_JOB_STATUSES:
+            self._runtime_passwords.pop(job_id, None)
             return self._decorate_job(job)
         server = self._with_runtime_password(self._get_server(job["server_id"]), self._runtime_passwords.get(job_id, ""))
         if job.get("remote_session"):
             self._backend(server).cancel(server=server, session=job["remote_session"])
-        return self._decorate_job(self.store.update_job(job_id, status=JOB_CANCELLED, finished_at=utc_now_iso()))
+        cancelled = self.store.update_job(
+            job_id,
+            status=JOB_CANCELLED,
+            finished_at=utc_now_iso(),
+        )
+        self._runtime_passwords.pop(job_id, None)
+        return self._decorate_job(cancelled)
 
     def set_job_password(self, job_id: str, server_password: str) -> dict[str, Any]:
         job = self.store.get_job(job_id)
         if not job:
             raise BuildNotFoundError("Build job not found")
-        if server_password:
+        if server_password and job["status"] not in TERMINAL_JOB_STATUSES:
             self._runtime_passwords[job_id] = server_password
         return self._decorate_job(job)
 

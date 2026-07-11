@@ -293,7 +293,7 @@ async def ping_route_test(request: Request):
             # 不同网段，需要从测试主机执行ping来验证连通性
             try:
                 config = config_manager.load_config()
-                with ssh_manager.optional_connection(config) as ssh:
+                async with ssh_manager.async_optional_connection(config) as ssh:
                     if ssh:
                         # 从测试主机ping客户端IP
                         ping_cmd = f"ping -c 3 -W 2 {client_ip}"
@@ -389,7 +389,7 @@ async def get_vpn_status():
             "source": "local"
         })
 
-    with ssh_manager.optional_connection(config) as ssh:
+    async with ssh_manager.async_optional_connection(config) as ssh:
         if not ssh:
             return JSONResponse(
                 content={

@@ -19,6 +19,8 @@ from .support import (
     ssh_connection_failed_response,
     update_user_state_field,
 )
+from .ui_control_api import UiControlRequest, UiTapRequest
+from .usbip import parse_adb_device_states
 
 
 _LAZY_API_EXPORTS = {
@@ -48,6 +50,8 @@ __all__ = [
     "DeviceShellRequest",
     "USBIPDisconnectRequest",
     "USBIPStartRequest",
+    "UiControlRequest",
+    "UiTapRequest",
     "WifiConnectRequest",
     "_build_devices_management_payload",
     "_build_management_props_command",
@@ -58,6 +62,7 @@ __all__ = [
     "device_manager",
     "get_or_create_user_state",
     "get_usb_monitor",
+    "parse_adb_device_states",
     "release_device_locks",
     "ssh_connection_failed_response",
     "update_user_state_field",

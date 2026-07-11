@@ -30,6 +30,53 @@ def build_service(
 
 
 class AutomationApiTests(unittest.TestCase):
+    def test_create_does_not_mutate_nested_request_when_removing_secret(self):
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            request = {
+                'artifact_path': '/tmp/update.img',
+                'test_plan': {
+                    'test_type': 'CTS',
+                    'build': {'server_password': 'session-secret'},
+                },
+            }
+
+            run = service.create_run(request)
+
+            self.assertEqual(
+                request['test_plan']['build']['server_password'],
+                'session-secret',
+            )
+            self.assertNotIn('session-secret', run['test_plan_json'])
+
+    def test_create_rejects_run_without_build_or_firmware(self):
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            with patch.object(automation_api, 'automation_service', service):
+                response = asyncio.run(automation_api.create_automation_run({
+                    'devices': ['ABC123'],
+                    'test_plan': {'test_type': 'CTS'},
+                }))
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn('Firmware artifact', response.body.decode())
+
+    def test_retry_keeps_ephemeral_build_password_without_persisting_it(self):
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            original = service.create_run({
+                'profile_id': 'manual-smoke',
+                'artifact_path': '/tmp/update.img',
+                'devices': ['ABC123'],
+                'test_plan': {'test_type': 'CTS'},
+                'build_server_password': 'session-secret',
+            })
+
+            retried = service.retry_run(original['id'])
+
+            self.assertEqual(service.get_build_password(retried['id']), 'session-secret')
+            self.assertNotIn('session-secret', retried['test_plan_json'])
+
     def test_create_list_get_and_events(self):
         with TemporaryDirectory() as tmp:
             service = build_service(tmp)
@@ -75,7 +122,7 @@ class AutomationApiTests(unittest.TestCase):
                         }
                     )
                 )
-                ticked = asyncio.run(automation_api.automation_worker_tick())
+                ticked = asyncio.run(automation_api.automation_worker_tick('stub'))
 
             self.assertEqual(created['data']['status'], 'queued')
             self.assertEqual(ticked['data']['status'], 'waiting_device')

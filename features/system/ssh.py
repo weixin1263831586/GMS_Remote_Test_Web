@@ -1,10 +1,11 @@
 """
 SSH管理器 - 同步SSH操作
 """
+import asyncio
 import logging
 import os
 import queue
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
 import paramiko
@@ -143,6 +144,10 @@ class SSHManager:
                 )
 
             logger.info(f"[SSH] Connected to {host}")
+            # The pool is shared by all callers.  Keep the destination on the
+            # client so a healthy connection for host A is never handed to a
+            # request for host B.
+            ssh._gms_pool_identity = (str(host), str(username))
             return ssh
 
         except Exception as e:
@@ -159,11 +164,23 @@ class SSHManager:
         Returns:
             SSHClient 对象
         """
+        requested_identity = (
+            str(config.get('host') or config.get('hostname') or config.get('ubuntu_host') or ''),
+            str(config.get('username') or config.get('ubuntu_user') or get_ubuntu_user()),
+        )
+
         # 尝试从池中获取有效连接，最多尝试 pool_size 次防止无限循环
         max_attempts = self.pool.maxsize
         for attempt in range(max_attempts):
             try:
                 ssh = self.pool.get_nowait()
+                if getattr(ssh, '_gms_pool_identity', None) != requested_identity:
+                    logger.debug("[SSH] Discarding pooled connection for a different destination")
+                    try:
+                        ssh.close()
+                    except Exception:
+                        pass
+                    continue
                 # 测试连接是否仍然有效（轻量级检查）
                 try:
                     _stdin, stdout, _stderr = ssh.exec_command('true', timeout=2)
@@ -360,6 +377,16 @@ class SSHManager:
         finally:
             if ssh is not None:
                 self.return_connection(ssh)
+
+    @asynccontextmanager
+    async def async_optional_connection(self, config: dict):
+        """None-safe connection context without blocking the event loop."""
+        ssh = await asyncio.to_thread(self.get_connection, config)
+        try:
+            yield ssh
+        finally:
+            if ssh is not None:
+                await asyncio.to_thread(self.return_connection, ssh)
 
     def optimize_sftp_performance(self, sftp):
         """

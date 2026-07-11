@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import uuid
 from collections.abc import Awaitable, Callable
@@ -119,13 +120,25 @@ class AutomationService:
         }
 
     def create_run(self, request: dict[str, Any]) -> dict[str, Any]:
-        body = dict(request or {})
+        # Password removal below must never mutate the caller's nested request.
+        # API bodies are usually disposable, but programmatic callers reuse
+        # these dictionaries after validation errors and for audit logging.
+        body = copy.deepcopy(request or {})
         build_password = str(body.pop('build_server_password', '') or '')
         test_plan = body.get('test_plan')
         if isinstance(test_plan, dict):
             build = test_plan.get('build')
             if isinstance(build, dict):
                 build_password = build_password or str(build.pop('server_password', '') or '')
+        plan = test_plan if isinstance(test_plan, dict) else {}
+        build_plan = plan.get('build') if isinstance(plan.get('build'), dict) else {}
+        flash_plan = plan.get('flash') if isinstance(plan.get('flash'), dict) else {}
+        has_build = bool(build_plan.get('provider') or build_plan.get('server_id') or build_plan.get('template_id'))
+        has_artifact = bool(str(body.get('artifact_path') or body.get('artifact_url') or '').strip())
+        if flash_plan.get('mode') != 'skip' and not (has_build or has_artifact or body.get('jenkins_job')):
+            raise ValueError('Firmware artifact or build configuration is required')
+        if not str(plan.get('test_type') or '').strip():
+            raise ValueError('test_plan.test_type is required')
         create_request = AutomationRunCreateRequest(**body)
         run = self.store.create_run(
             create_request.to_run_dict(self.new_run_id())
@@ -154,9 +167,9 @@ class AutomationService:
         self.get_run(run_id)
         return self.store.list_events(run_id)
 
-    def cancel_run(self, run_id: str):
+    def cancel_run(self, run_id: str, executor_name: str = 'http'):
         try:
-            return self.orchestrator().cancel_run(run_id)
+            return self.orchestrator(executor_name).cancel_run(run_id)
         except ValueError as exc:
             raise AutomationNotFoundError('Automation run not found') from exc
 
@@ -180,6 +193,9 @@ class AutomationService:
         run_data['devices_json'] = old['devices_json']
         run_data['test_plan_json'] = old['test_plan_json']
         run = self.store.create_run(run_data)
+        retry_password = self._build_passwords.get(run_id, "")
+        if retry_password:
+            self._build_passwords[run["id"]] = retry_password
         self.store.append_event(
             run['id'],
             run['status'],

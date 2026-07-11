@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
+import shlex
 import time
 from typing import Any, Protocol
 
@@ -29,6 +31,12 @@ class AutomationExecutor(Protocol):
         raise NotImplementedError
 
     def start_test(self, run: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def poll_test(self, run: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def cancel(self, run: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
     def collect_report(self, run: dict[str, Any]) -> dict[str, Any]:
@@ -84,6 +92,12 @@ class StubAutomationExecutor:
 
     def start_test(self, run: dict[str, Any]) -> dict[str, Any]:
         return self._result("start_test", {"test_plan": json.loads(run.get("test_plan_json") or "{}")})
+
+    def poll_test(self, run: dict[str, Any]) -> dict[str, Any]:
+        return self._result("poll_test", {"running": False})
+
+    def cancel(self, run: dict[str, Any]) -> dict[str, Any]:
+        return self._result("cancel", {"cancelled": True})
 
     def collect_report(self, run: dict[str, Any]) -> dict[str, Any]:
         return self._result("collect_report", {"report_timestamp": f"stub_report_{run['id']}"})
@@ -291,9 +305,24 @@ class HttpAutomationExecutor:
         if flash_plan.get("mode") == "skip":
             return {"success": True, "skipped": True}
         devices = _run_devices(run)
-        firmware_path = run.get("artifact_path") or run.get("artifact_url")
+        build_plan = _run_build_plan(run)
+        is_ssh_build = bool(build_plan.get("provider") == "ssh" or build_plan.get("server_id"))
+        if is_ssh_build:
+            firmware_path = run.get("artifact_path") or run.get("artifact_url")
+        else:
+            firmware_path = run.get("artifact_url") or run.get("artifact_path")
         if not firmware_path:
             return {"success": False, "error": "No firmware artifact path/url"}
+        if is_ssh_build:
+            staged = self._stage_ssh_build_artifact(run, str(firmware_path))
+            if not staged.get("success"):
+                return staged
+            firmware_path = staged["firmware_path"]
+        elif str(firmware_path).startswith(("http://", "https://")):
+            staged = self._stage_http_artifact(run, str(firmware_path))
+            if not staged.get("success"):
+                return staged
+            firmware_path = staged["firmware_path"]
         response = self.session.post(
             self._url(f"/api/burn/firmware?devices={','.join(devices)}"),
             data={"firmware_path": firmware_path},
@@ -309,11 +338,114 @@ class HttpAutomationExecutor:
                 return check
         return result
 
+    def _stage_ssh_build_artifact(self, run: dict[str, Any], artifact_path: str) -> dict[str, Any]:
+        """Stream an SSH build artifact onto the test host before flashing.
+
+        Build and test hosts are commonly different machines. Passing the
+        build host's absolute path to ``/api/burn/firmware`` only works by
+        accident when both roles share a filesystem, so copy it explicitly
+        without buffering a multi-gigabyte image in the web process.
+        """
+        source_ssh = None
+        try:
+            import paramiko
+
+            from features.build import get_build_service
+            from features.system import ssh_manager
+            from features.test_execution import get_default_suites_path
+            from foundation.config import config_manager
+
+            build_service = get_build_service()
+            job_id = str(run.get("jenkins_build_number") or "")
+            job = build_service.get_job(job_id)
+            known_paths = {str(item.get("path") or "") for item in job.get("artifacts") or []}
+            if artifact_path not in known_paths:
+                return {"success": False, "error": "Selected artifact is not part of the completed build job"}
+
+            server = build_service._with_runtime_password(
+                build_service._get_server(job["server_id"]),
+                build_service._runtime_passwords.get(job_id, ""),
+            )
+            backend = build_service._backend(server)
+            connect_kwargs = backend._connect_kwargs(server)
+            source_ssh = paramiko.SSHClient()
+            source_ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            source_ssh.connect(**connect_kwargs)
+
+            target_config = config_manager.load_config()
+            target_dir = get_default_suites_path(target_config)
+            filename = posixpath.basename(artifact_path.rstrip("/"))
+            target_path = posixpath.join(target_dir, f"{run.get('id', 'ats')}_{filename}")
+            with ssh_manager.optional_connection(target_config) as target_ssh:
+                if not target_ssh:
+                    return {"success": False, "error": "Cannot connect to test host to stage firmware"}
+                ssh_manager.execute_command(target_ssh, f"mkdir -p {shlex.quote(target_dir)}", timeout=30)
+                source_sftp = source_ssh.open_sftp()
+                target_sftp = target_ssh.open_sftp()
+                try:
+                    with source_sftp.open(artifact_path, "rb") as source, target_sftp.open(target_path, "wb") as target:
+                        while chunk := source.read(4 * 1024 * 1024):
+                            target.write(chunk)
+                finally:
+                    source_sftp.close()
+                    target_sftp.close()
+            return {"success": True, "firmware_path": target_path}
+        except Exception as exc:
+            return {"success": False, "error": f"Failed to stage build artifact on test host: {exc}"}
+        finally:
+            if source_ssh is not None:
+                source_ssh.close()
+
+    def _stage_http_artifact(self, run: dict[str, Any], artifact_url: str) -> dict[str, Any]:
+        """Stream a Jenkins/HTTP artifact to the test host without local buffering."""
+        response = None
+        try:
+            from urllib.parse import urlparse
+
+            from features.system import ssh_manager
+            from features.test_execution import get_default_suites_path
+            from foundation.config import config_manager
+
+            jenkins = _jenkins_config_from_run(run, self.jenkins_config)
+            auth = None
+            if jenkins.get("username") and (jenkins.get("api_token") or jenkins.get("token")):
+                auth = (jenkins["username"], jenkins.get("api_token") or jenkins.get("token"))
+            response = requests.get(
+                artifact_url,
+                auth=auth,
+                verify=bool(jenkins.get("verify_ssl", True)),
+                stream=True,
+                timeout=(20, 3600),
+            )
+            response.raise_for_status()
+            filename = posixpath.basename(urlparse(artifact_url).path.rstrip("/")) or "update.img"
+            target_config = config_manager.load_config()
+            target_dir = get_default_suites_path(target_config)
+            target_path = posixpath.join(target_dir, f"{run.get('id', 'ats')}_{filename}")
+            with ssh_manager.optional_connection(target_config) as target_ssh:
+                if not target_ssh:
+                    return {"success": False, "error": "Cannot connect to test host to stage firmware"}
+                ssh_manager.execute_command(target_ssh, f"mkdir -p {shlex.quote(target_dir)}", timeout=30)
+                sftp = target_ssh.open_sftp()
+                try:
+                    with sftp.open(target_path, "wb") as target:
+                        for chunk in response.iter_content(chunk_size=4 * 1024 * 1024):
+                            if chunk:
+                                target.write(chunk)
+                finally:
+                    sftp.close()
+            return {"success": True, "firmware_path": target_path}
+        except Exception as exc:
+            return {"success": False, "error": f"Failed to stage HTTP artifact on test host: {exc}"}
+        finally:
+            if response is not None:
+                response.close()
+
     def _verify_post_flash(self, devices: list[str], verify: dict[str, Any]) -> dict[str, Any]:
         """Verify ro.product/fingerprint after flash; retry while the device reboots."""
         expected_product = str(verify.get("product") or "").strip()
         fingerprint_contains = str(verify.get("fingerprint_contains") or "").strip()
-        attempts = int(verify.get("retries") or 3)
+        attempts = int(verify.get("retries") or 30)
         delay = int(verify.get("retry_delay") or 10)
         last_error = ""
         for _ in range(max(1, attempts)):
@@ -323,10 +455,12 @@ class HttpAutomationExecutor:
                 except Exception as exc:
                     last_error = f"get_device_info failed for {serial}: {exc}"
                     info = {}
-                model = str(info.get("model") or "")
+                product_identity = " ".join(
+                    str(info.get(key) or "") for key in ("product", "device", "board", "model")
+                )
                 fingerprint = str(info.get("fingerprint") or "")
-                if expected_product and expected_product.lower() not in model.lower():
-                    last_error = f"product mismatch on {serial}: expected '{expected_product}', got '{model}'"
+                if expected_product and expected_product.lower() not in product_identity.lower():
+                    last_error = f"product mismatch on {serial}: expected '{expected_product}', got '{product_identity.strip()}'"
                     break
                 if fingerprint_contains and fingerprint_contains.lower() not in fingerprint.lower():
                     last_error = f"fingerprint mismatch on {serial}: '{fingerprint}' missing '{fingerprint_contains}'"
@@ -348,9 +482,72 @@ class HttpAutomationExecutor:
             "devices": _run_devices(run),
         }
         response = self.session.post(self._url("/api/test/start"), json=payload, timeout=30)
-        return self._json_response(response)
+        result = self._json_response(response)
+        if result.get("success"):
+            result["running"] = True
+        return result
+
+    def poll_test(self, run: dict[str, Any]) -> dict[str, Any]:
+        response = self.session.get(
+            self._url("/api/test/status"),
+            params={"logs": "true"},
+            timeout=30,
+        )
+        result = self._json_response(response)
+        if not result.get("success"):
+            return result
+        status = result.get("response", {})
+        running = bool(status.get("running"))
+        if running:
+            return {"success": True, "running": True, "log_count": status.get("log_count", 0)}
+        outcome = str(status.get("test_outcome") or "")
+        report_timestamp = str(status.get("report_timestamp") or "")
+        if outcome == "failed":
+            return {"success": False, "running": False, "error": "GMS test process failed"}
+        logs = status.get("logs") or []
+        failed = "" if outcome == "completed" else next(
+            (
+                str(entry.get("msg") or "test failed")
+                for entry in reversed(logs)
+                if isinstance(entry, dict) and entry.get("type") == "error"
+            ),
+            "",
+        )
+        if failed:
+            return {"success": False, "running": False, "error": failed}
+        if not report_timestamp:
+            return {"success": False, "running": False, "error": "Test completed without a persisted report"}
+        return {
+            "success": True,
+            "running": False,
+            "log_count": status.get("log_count", len(logs)),
+            "report_timestamp": report_timestamp,
+        }
+
+    def cancel(self, run: dict[str, Any]) -> dict[str, Any]:
+        status = str(run.get("status") or "")
+        if status == "flashing":
+            return {
+                "success": False,
+                "error": "Firmware flashing cannot be interrupted safely; wait for the flash command to finish",
+            }
+        if status in {"testing", "test_running"}:
+            response = self.session.post(self._url("/api/test/stop"), timeout=30)
+            return self._json_response(response)
+        if status in {"jenkins_queued", "jenkins_building"}:
+            build_job_id = str(run.get("jenkins_build_number") or "")
+            if build_job_id:
+                try:
+                    from features.build import get_build_service
+
+                    get_build_service().cancel_job(build_job_id)
+                except Exception as exc:
+                    return {"success": False, "error": f"failed to cancel build: {exc}"}
+        return {"success": True, "cancelled": True}
 
     def collect_report(self, run: dict[str, Any]) -> dict[str, Any]:
+        if run.get("report_timestamp"):
+            return {"success": True, "report_timestamp": run["report_timestamp"]}
         response = self.session.get(self._url("/api/reports/list"), timeout=30)
         data = self._json_response(response)
         if not data.get("success"):

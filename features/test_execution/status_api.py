@@ -95,7 +95,12 @@ async def get_status(
         since = request.query_params.get("since")
         include_logs = request.query_params.get("logs", "true").lower() == "true"
 
-        response = {"running": user_state.get("running", False), "devices": user_state.get("devices", [])}
+        response = {
+            "running": user_state.get("running", False),
+            "devices": user_state.get("devices", []),
+            "test_outcome": user_state.get("test_outcome", ""),
+            "report_timestamp": user_state.get("report_timestamp", ""),
+        }
 
         try:
             usb_monitor = get_usb_monitor()
