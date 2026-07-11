@@ -19,6 +19,14 @@ RUN_COLUMNS = [
     "created_at", "updated_at", "started_at", "finished_at",
 ]
 
+RUN_SUMMARY_COLUMNS = [
+    "id", "source_type", "source_key", "profile_id", "project", "branch",
+    "gerrit_change_id", "gerrit_patchset", "gerrit_subject", "owner",
+    "status", "current_stage", "jenkins_build_number", "artifact_url",
+    "artifact_path", "devices_json", "report_timestamp", "error",
+    "created_at", "updated_at", "started_at", "finished_at",
+]
+
 
 class AutomationStore:
     def __init__(self, db_path: str | Path):
@@ -124,6 +132,25 @@ class AutomationStore:
             else:
                 rows = conn.execute(
                     "SELECT * FROM automation_runs ORDER BY created_at DESC, id DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_run_summaries(self, status: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        """Return list fields without transferring potentially multi-megabyte result JSON."""
+        limit = max(1, min(int(limit or 50), 500))
+        columns = ", ".join(RUN_SUMMARY_COLUMNS)
+        with self._connect() as conn:
+            if status:
+                rows = conn.execute(
+                    f"SELECT {columns} FROM automation_runs WHERE status = ? "
+                    "ORDER BY created_at DESC, id DESC LIMIT ?",
+                    (status, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"SELECT {columns} FROM automation_runs "
+                    "ORDER BY created_at DESC, id DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
         return [dict(row) for row in rows]

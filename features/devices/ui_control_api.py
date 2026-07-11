@@ -27,6 +27,7 @@ import os
 import re
 import shlex
 import time
+import xml.etree.ElementTree as ET
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -44,7 +45,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # android CLI 报错前缀（exit code 恒为 0，靠文本判错）。
-_ERROR_MARKERS = ("Error:", "Multiple devices", "Unknown option", "Usage:")
+_ERROR_MARKERS = ("Error:", "ERROR:", "Failed to", "Multiple devices", "Unknown option", "Usage:")
 
 
 class UiControlRequest(BaseModel):
@@ -115,6 +116,65 @@ def _run_remote_with_connection(config: dict, command: str, timeout: int) -> tup
         if not ssh:
             raise ConnectionError("SSH connection failed")
         return _run_remote(ssh, command, timeout=timeout)
+
+
+def _layout_with_uiautomator2_sync(serial: str) -> list[dict]:
+    """用 uiautomator2 获取语义 UI 树。
+
+    uiautomator2 默认关闭 waitForIdleTimeout，能处理持续动画或系统界面始终不进入
+    idle 状态的设备；这正是 Android CLI layout 在 RK3576GMS1 上失败的场景。
+    """
+    import uiautomator2 as u2
+
+    device = u2.connect_usb(serial)
+    device.jsonrpc.setConfigurator({"waitForIdleTimeout": 0, "waitForSelectorTimeout": 0})
+    xml = device.dump_hierarchy(compressed=False, pretty=False, max_depth=50)
+    return _simplify_uiautomator_xml(xml)
+
+
+def _simplify_uiautomator_xml(xml: str) -> list[dict]:
+    """把 uiautomator2 XML 层级拍平成前端需要的元素列表。"""
+    root = ET.fromstring(xml)
+    items: list[dict] = []
+    interaction_attrs = (
+        ("clickable", "clickable"),
+        ("long-clickable", "long_clickable"),
+        ("scrollable", "scrollable"),
+        ("checkable", "checkable"),
+        ("focusable", "focusable"),
+        ("editable", "editable"),
+    )
+    for node in root.iter("node"):
+        attrs = node.attrib
+        bounds = attrs.get("bounds", "")
+        center = _center_from_bounds(bounds)
+        interactions = [name for attr, name in interaction_attrs if attrs.get(attr) == "true"]
+        text = attrs.get("text") or attrs.get("content-desc") or ""
+        resource_id = attrs.get("resource-id") or ""
+        if not (text or resource_id or center or interactions):
+            continue
+        items.append({
+            "text": text,
+            "content_desc": attrs.get("content-desc") or "",
+            "resource_id": resource_id,
+            "class_name": attrs.get("class") or "",
+            "package": attrs.get("package") or "",
+            "center": center,
+            "bounds": bounds,
+            "interactions": interactions,
+            "enabled": attrs.get("enabled", "true") == "true",
+        })
+    return items
+
+
+def _center_from_bounds(bounds: str):
+    nums = re.findall(r"-?\d+", bounds or "")
+    if len(nums) < 4:
+        return None
+    left, top, right, bottom = map(int, nums[:4])
+    if right <= left or bottom <= top:
+        return None
+    return [(left + right) // 2, (top + bottom) // 2]
 
 
 def _capture_screenshot_sync(config: dict, capture_cmd: str, remote_png: str) -> bytes:
@@ -201,7 +261,20 @@ async def ui_layout(req: UiControlRequest, request: Request):
 
     try:
         if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
-            out, err, _ = await asyncio.to_thread(runtime.run_local_shell_command, cmd, 30)
+            try:
+                elements = await asyncio.wait_for(
+                    asyncio.to_thread(_layout_with_uiautomator2_sync, serial),
+                    timeout=30,
+                )
+                return JSONResponse(content={
+                    "success": True,
+                    "serial": serial,
+                    "source": "uiautomator2",
+                    "elements": elements,
+                })
+            except Exception as u2_exc:
+                logger.warning("[UI Control] uiautomator2 layout failed for %s: %s; falling back", serial, u2_exc)
+                out, err, _ = await asyncio.to_thread(runtime.run_local_shell_command, cmd, 30)
         else:
             out, err, _ = await asyncio.to_thread(_run_remote_with_connection, config, cmd, 30)
 
@@ -215,6 +288,7 @@ async def ui_layout(req: UiControlRequest, request: Request):
         return JSONResponse(content={
             "success": True,
             "serial": serial,
+            "source": "android-cli",
             "elements": _simplify_layout(layout),
         })
     except Exception as exc:

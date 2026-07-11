@@ -8,9 +8,11 @@ from __future__ import annotations
 from features.devices.ui_control_api import (
     _android_cli_path,
     _extract_json_object,
+    _center_from_bounds,
     _looks_like_error,
     _parse_center,
     _simplify_layout,
+    _simplify_uiautomator_xml,
 )
 
 
@@ -24,6 +26,7 @@ def test_error_detection_flags_cli_failures():
     assert _looks_like_error("Error: Multiple devices are currently online") is not None
     assert _looks_like_error("Unknown option: '--device'") is not None
     assert _looks_like_error("Usage: android screen capture [-a] [-o=PARAM]") is not None
+    assert _looks_like_error("Failed to retrieve UI dump: ERROR: could not get idle state.") is not None
 
 
 def test_error_detection_passes_normal_json():
@@ -57,6 +60,29 @@ def test_parse_center_formats():
     assert _parse_center("") is None
     assert _parse_center(None) is None
     assert _parse_center("no digits") is None
+
+
+def test_center_from_bounds():
+    assert _center_from_bounds("[10,20][110,220]") == [60, 120]
+    assert _center_from_bounds("[10,20][10,220]") is None
+    assert _center_from_bounds("") is None
+
+
+def test_simplify_uiautomator_xml():
+    xml = '''<?xml version="1.0" encoding="UTF-8"?>
+    <hierarchy rotation="0"><node index="0" text="" resource-id="" class="android.widget.FrameLayout"
+    package="com.example" content-desc="" clickable="false" long-clickable="false" scrollable="false"
+    checkable="false" focusable="false" enabled="true" bounds="[0,0][1080,1920]">
+      <node index="0" text="登录" resource-id="com.example:id/login" class="android.widget.Button"
+      package="com.example" content-desc="登录按钮" clickable="true" long-clickable="false" scrollable="false"
+      checkable="false" focusable="true" enabled="true" bounds="[100,200][300,280]" />
+    </node></hierarchy>'''
+    items = _simplify_uiautomator_xml(xml)
+    button = next(item for item in items if item["resource_id"] == "com.example:id/login")
+    assert button["center"] == [200, 240]
+    assert button["text"] == "登录"
+    assert "clickable" in button["interactions"]
+    assert button["class_name"] == "android.widget.Button"
 
 
 def test_simplify_layout_filters_noise_and_keeps_clickable():

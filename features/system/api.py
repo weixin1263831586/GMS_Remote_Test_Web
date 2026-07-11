@@ -84,7 +84,10 @@ def _get_websocket_client_identity(websocket: WebSocket, path_client_id: str) ->
         display_id = f"{user.username}@{client_ip}" if client_ip and client_ip != "unknown" else user.username
         if path_client_id.startswith("terminal_"):
             return path_client_id, display_id, user.username
-        return user.id, display_id, user.username
+        # HTTP APIs key runtime state by authenticated username.  WebSocket
+        # connections must use the same key or real-time test logs are sent to
+        # a different entry and silently disappear from the browser.
+        return user.username, display_id, user.username
 
     username = "unknown"
     try:
@@ -116,8 +119,9 @@ async def root(request: Request):
         name="shell.html",
         context={"config": config, "initial_title": initial_title},
     )
-    # HTML页面不缓存（确保用户获取最新版本）
-    response.headers["Cache-Control"] = "no-cache"
+    # 允许浏览器短暂复用导航外壳；静态资源使用版本号独立更新。
+    # must-revalidate 确保短缓存过期后仍会向服务端确认新版本。
+    response.headers["Cache-Control"] = "private, max-age=10, must-revalidate"
     return response
 
 

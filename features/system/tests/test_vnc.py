@@ -33,9 +33,11 @@ class VNCManagerTests(unittest.TestCase):
 
     def test_remote_vnc_commands_quote_user_and_use_scoped_patterns(self):
         commands = []
+        connection_configs = []
 
         class FakeSshManager:
-            def get_connection(self, _config):
+            def get_connection(self, config):
+                connection_configs.append(config)
                 return object()
 
             def return_connection(self, _ssh):
@@ -47,6 +49,8 @@ class VNCManagerTests(unittest.TestCase):
                     return "ready\n", "", 0
                 if "pgrep" in command:
                     return "NOT_RUNNING\n", "", 1
+                if "ss -ltn" in command:
+                    return "VNC_READY\nNOVNC_READY\n", "", 0
                 return "exists\n", "", 0
 
         manager = VNCManager()
@@ -68,7 +72,20 @@ class VNCManagerTests(unittest.TestCase):
         self.assertIn("x11vnc -display :0 -forever -shared -rfbport 5900", joined)
         self.assertIn("./utils/websockify/run --web /opt/noVNC 6080 localhost:5900", joined)
         self.assertIn("cd /opt/noVNC", joined)
+        self.assertIn("mkdir -p ~/logs ~/.vnc", joined)
         self.assertIn("__returned__", commands)
+
+    def test_start_vnc_uses_selected_remote_host_credentials(self):
+        manager = VNCManager()
+        with patch.object(manager.config_manager, "load_config", return_value={"ubuntu_host": "10.0.0.1", "ubuntu_user": "default"}), \
+             patch.object(manager, "_start_remote_vnc", return_value={"success": True}) as start_remote:
+            result = manager.start_vnc("wlq@172.16.14.244", "secret", "")
+
+        self.assertTrue(result["success"])
+        remote_config = start_remote.call_args.args[3]
+        self.assertEqual(remote_config["hostname"], "172.16.14.244")
+        self.assertEqual(remote_config["username"], "wlq")
+        self.assertEqual(remote_config["password"], "secret")
 
 
 if __name__ == "__main__":

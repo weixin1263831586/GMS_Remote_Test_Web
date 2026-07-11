@@ -98,26 +98,36 @@ async def start_test(
             status_code=409,
         )
 
-    test_params = req.model_dump()
-    test_params["client_id"] = client_id
-    test_params["display_client_id"] = get_client_display_id_from_request(request)
+    try:
+        test_params = req.model_dump()
+        test_params["client_id"] = client_id
+        test_params["display_client_id"] = get_client_display_id_from_request(request)
 
-    user_state = get_or_create_user_state(client_id)
-    logger.info(f"[TestStart] Client state created/loaded: {client_id}")
+        user_state = get_or_create_user_state(client_id)
+        logger.info(f"[TestStart] Client state created/loaded: {client_id}")
 
-    logger.info(f"[TestStart] Setting running=True for {client_id}")
-    update_user_state_field(
-        client_id,
-        {
-            "running": True,
-            "starting": False,
-            "devices": devices,
-            "test_type": req.test_type,
-            "logs": [],
-            "test_outcome": "running",
-            "report_timestamp": "",
-        },
-    )
+        logger.info(f"[TestStart] Setting running=True for {client_id}")
+        update_user_state_field(
+            client_id,
+            {
+                "running": True,
+                "starting": False,
+                "devices": devices,
+                "test_type": req.test_type,
+                "logs": [],
+                "test_outcome": "running",
+                "report_timestamp": "",
+            },
+        )
+    except Exception:
+        # Any failure between acquiring devices and flipping running=True must
+        # release the reservation + device locks, otherwise the starting flag
+        # sticks True and the client can never start another test.
+        with runtime.global_state.user_states_lock:
+            user_state["starting"] = False
+        await runtime.release_test_devices(client_id, locked_devices)
+        logger.exception("Failed to prepare test start for %s", client_id)
+        return error_response("Failed to start test", 500)
 
     task = asyncio.create_task(_run_test_background(config, test_params, client_id, locked_devices))
     runtime.global_state.background_tasks.add(task)

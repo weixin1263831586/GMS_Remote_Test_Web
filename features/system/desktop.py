@@ -168,11 +168,18 @@ async def novnc_http_proxy(request: Request, path: str = "vnc.html"):
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session, session.get(upstream_url) as upstream:
             body = await upstream.read()
+            # noVNC 的 JS/CSS/字体/图片均为版本稳定的静态文件。之前全部 no-store，
+            # 每次刷新桌面都会重新代理数十个资源；仅入口 HTML/JSON 需要重验证。
+            cache_control = (
+                "no-cache"
+                if path.endswith(('.html', '.json')) or path in {'', 'vnc.html'}
+                else "public, max-age=86400"
+            )
             return Response(
                 content=body,
                 status_code=upstream.status,
                 media_type=upstream.headers.get("content-type", "application/octet-stream"),
-                headers={"Cache-Control": "no-store"}
+                headers={"Cache-Control": cache_control}
             )
     except aiohttp.ClientConnectorError:
         return error_response("noVNC 服务未运行，请先启动 VNC", status_code=503)

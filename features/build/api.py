@@ -128,3 +128,14 @@ async def cancel_build_job(job_id: str):
     except BuildNotFoundError as exc:
         return error_response(str(exc), 404)
     return {"success": True, "data": job}
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_build_job(job_id: str):
+    try:
+        build_service.delete_job(job_id)
+    except BuildNotFoundError as exc:
+        return error_response(str(exc), 404)
+    except BuildExecutionError as exc:
+        return error_response(str(exc), 409)
+    return {"success": True, "data": {"deleted": True, "id": job_id}}

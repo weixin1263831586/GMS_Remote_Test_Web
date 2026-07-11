@@ -275,7 +275,7 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
     font-size: 12px;
     font-weight: 700;
 }
-.build-log-pane { min-width: 0; display: grid; grid-template-rows: auto 1fr; }
+.build-log-pane { min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .build-log-toolbar {
     display: flex;
     align-items: center;
@@ -285,7 +285,8 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
     border-bottom: 1px solid var(--line);
 }
 .log-view {
-    height: 100%;
+    height: auto;
+    max-height: 100%;
     min-height: 0;
     overflow: auto;
     margin: 0;
@@ -299,6 +300,8 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px;
     line-height: 1.5;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
 }
 .build-job {
     border: 1px solid var(--line);
@@ -306,6 +309,12 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
     padding: 8px;
     cursor: pointer;
 }
+.build-job-head { display: flex; align-items: center; gap: 6px; }
+.build-job-head strong { flex: 1; min-width: 0; }
+.build-job-delete { padding: 2px 6px; color: var(--danger); border-color: transparent; background: transparent; }
+.build-job-delete:hover { border-color: var(--danger); }
+.auto-follow { display: flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--muted); }
+.auto-follow input { width: auto; margin: 0; }
 .build-job:hover { border-color: var(--primary); background: var(--panel-3); }
 .build-job.active { border-color: var(--primary); background: rgb(59 130 246 / 14%); }
 .password-backdrop {
@@ -427,7 +436,28 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
 .event-meta { color: var(--muted); margin-bottom: 3px; }
 .muted { color: var(--muted); }
 .nowrap { white-space: nowrap; }
-.toast { min-height: 18px; color: var(--muted); }
+.toast {
+    position: fixed;
+    z-index: 12000;
+    top: 16px;
+    right: 16px;
+    width: min(420px, calc(100vw - 32px));
+    max-height: 140px;
+    overflow: auto;
+    padding: 10px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--panel-3);
+    color: var(--text);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 42%);
+    white-space: pre-wrap;
+    word-break: break-word;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-8px);
+    transition: opacity .16s ease, transform .16s ease;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
 
 /* ==================== 概览 ==================== */
 .overview-layout {

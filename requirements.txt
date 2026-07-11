@@ -9,5 +9,6 @@ python-multipart>=0.0.9
 aiohttp>=3.9.0
 cryptography>=42.0.0
 requests>=2.31.0
+uiautomator2==3.7.0  # Android 语义 UI 树与可靠操控（禁用 idle wait，规避动态界面卡死）
 python-redmine>=2.5.0
 pyudev>=0.24.0

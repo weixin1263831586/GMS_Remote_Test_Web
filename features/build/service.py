@@ -64,6 +64,16 @@ class BuildService:
     def list_jobs(self, status: str = "", limit: int = 50) -> list[dict[str, Any]]:
         return [self._decorate_job(item) for item in self.store.list_jobs(status=status, limit=limit)]
 
+    def delete_job(self, job_id: str) -> None:
+        job = self.store.get_job(job_id)
+        if not job:
+            raise BuildNotFoundError("Build job not found")
+        if job["status"] not in TERMINAL_JOB_STATUSES:
+            raise BuildExecutionError("只能删除已完成、失败或已取消的历史构建任务")
+        if not self.store.delete_job(job_id):
+            raise BuildNotFoundError("Build job not found")
+        self._runtime_passwords.pop(job_id, None)
+
     def create_job(self, request: dict[str, Any], *, start: bool = True) -> dict[str, Any]:
         req = BuildJobCreateRequest(**(request or {}))
         server = self._with_runtime_password(self._get_server(req.server_id), req.server_password)
@@ -300,24 +310,33 @@ class BuildService:
         server = self._with_runtime_password(self._get_server(server_id), server_password)
         workspace = validate_workspace(workspace, str(server.get("workspace_root") or ""))
         backend = self._backend(server)
-        rkbuild_command = (
+        # 不调用交互式 rkbuild_lunch：无 stdin 时它可能选择默认项并把完整
+        # lunch banner/环境信息输出到错误提示。直接读取当前源码树由 envsetup
+        # 计算出的 COMMON_LUNCH_CHOICES，并用哨兵隔离 shell/profile 噪声。
+        discover_command = (
             f"cd {workspace!r} && "
-            "timeout 30s bash -lc '"
+            "timeout 60s bash --noprofile --norc -c '"
+            "unset TARGET_PRODUCT TARGET_RELEASE TARGET_BUILD_VARIANT TARGET_BUILD_APPS; "
             "if [ -f build/envsetup.sh ]; then source build/envsetup.sh >/dev/null 2>&1; "
-            "elif [ -f build/make/envsetup.sh ]; then source build/make/envsetup.sh >/dev/null 2>&1; fi; "
-            "if command -v rkbuild_lunch >/dev/null 2>&1; then rkbuild_lunch </dev/null 2>&1 || true; fi"
+            "elif [ -f build/make/envsetup.sh ]; then source build/make/envsetup.sh >/dev/null 2>&1; "
+            "else exit 3; fi; "
+            "printf \"__GMS_LUNCH_BEGIN__\\n\"; "
+            "if command -v get_build_var >/dev/null 2>&1; then "
+            "get_build_var COMMON_LUNCH_CHOICES 2>/dev/null | tr \" \" \"\\n\"; fi; "
+            "printf \"__GMS_LUNCH_END__\\n\""
             "'"
         )
-        code, out, err = backend._run(server, rkbuild_command, timeout=60)
+        code, out, err = backend._run(server, discover_command, timeout=75)
         if code != 0:
-            raise BuildExecutionError(err or out or "failed to discover lunch options")
-        options = self._parse_lunch_options(out)
+            detail = (err or "").strip().splitlines()[-1:] or [""]
+            raise BuildExecutionError(f"读取 {workspace} 的 lunch 选项失败{': ' + detail[0][:240] if detail[0] else ''}")
+        options = self._parse_scoped_lunch_options(out)
         if options:
             return options
 
         fallback_command = (
             f"cd {workspace!r} && "
-            "bash -lc '"
+            "bash --noprofile --norc -c '"
             "if [ -f build/envsetup.sh ]; then source build/envsetup.sh >/dev/null 2>&1; "
             "elif [ -f build/make/envsetup.sh ]; then source build/make/envsetup.sh >/dev/null 2>&1; fi; "
             "if command -v get_build_var >/dev/null 2>&1; then "
@@ -331,11 +350,18 @@ class BuildService:
             raise BuildExecutionError(fallback_err or fallback_out or "failed to discover lunch options")
         options = self._parse_lunch_options(fallback_out)
         if not options:
-            raise BuildExecutionError(
-                "未解析到 lunch 选项。rkbuild_lunch 原始输出：\n"
-                + (out or err or fallback_out or fallback_err or "").strip()[:4000]
-            )
+            logger.warning("No lunch options discovered for workspace %s", workspace)
+            raise BuildExecutionError(f"源码目录 {workspace} 未发现可用 lunch 选项，请检查 envsetup 和 AndroidProducts.mk")
         return options
+
+    @classmethod
+    def _parse_scoped_lunch_options(cls, output: str) -> list[str]:
+        match = re.search(
+            r"^__GMS_LUNCH_BEGIN__\s*$([\s\S]*?)^__GMS_LUNCH_END__\s*$",
+            output or "",
+            flags=re.MULTILINE,
+        )
+        return cls._parse_lunch_options(match.group(1)) if match else []
 
     @staticmethod
     def _parse_lunch_options(output: str) -> list[str]:
