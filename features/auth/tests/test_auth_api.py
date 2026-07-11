@@ -27,6 +27,23 @@ class AuthApiTests(unittest.TestCase):
         self.assertIsNone(payload["user"])
         self.assertTrue(payload["client_id"])
 
+    def test_anonymous_user_cannot_modify_or_list_sensitive_config(self):
+        self.assertEqual(
+            self.client.post('/api/config/update', json={'local_server': 'x@y'}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.get('/api/config/client-ssh-credentials').status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post(
+                '/api/config/client-ssh-credentials',
+                json={'device_host': 'user@192.0.2.1', 'password': 'secret'},
+            ).status_code,
+            401,
+        )
+
     def test_setup_creates_admin_session_and_header_cannot_spoof_identity(self):
         setup = self.client.post(
             "/api/auth/setup",

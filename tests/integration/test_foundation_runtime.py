@@ -1,8 +1,11 @@
 import asyncio
+import json
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from foundation.cache import TTLCache
 from foundation.config import ConfigManager, RuntimeSettings
@@ -10,6 +13,79 @@ from foundation.tasks import SingleFlightTask
 
 
 class FoundationConfigTests(unittest.TestCase):
+    def test_concurrent_incremental_updates_preserve_unrelated_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'configs').mkdir()
+            (root / 'foundation').mkdir()
+            manager = ConfigManager(project_root=root)
+            barrier = threading.Barrier(2)
+
+            def update(key, value):
+                barrier.wait()
+                self.assertTrue(manager.update_runtime_config({key: value}))
+
+            threads = [
+                threading.Thread(target=update, args=('sidebar_order', ['test'])),
+                threading.Thread(target=update, args=('redmine_stats', {'window_days': 30})),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(
+                manager.get_runtime_config(),
+                {
+                    'sidebar_order': ['test'],
+                    'redmine_stats': {'window_days': 30},
+                },
+            )
+
+    def test_failed_runtime_write_preserves_previous_valid_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            configs = root / 'configs'
+            configs.mkdir()
+            (root / 'foundation').mkdir()
+            runtime_path = configs / 'config_runtime.json'
+            runtime_path.write_text('{"existing": true}', encoding='utf-8')
+            manager = ConfigManager(project_root=root)
+
+            with patch(
+                'foundation.config.json.dump',
+                side_effect=OSError('disk full'),
+            ):
+                saved = manager.save_runtime_config({'replacement': True})
+
+            self.assertFalse(saved)
+            self.assertEqual(
+                json.loads(runtime_path.read_text(encoding='utf-8')),
+                {'existing': True},
+            )
+            self.assertEqual(list(configs.glob('*.tmp')), [])
+
+    def test_runtime_write_does_not_mutate_callers_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            configs = root / 'configs'
+            configs.mkdir()
+            (root / 'foundation').mkdir()
+            (configs / 'config_runtime.json').write_text(
+                '{"redmine_auth": {"encrypted_password": "secret"}}',
+                encoding='utf-8',
+            )
+            manager = ConfigManager(project_root=root)
+            payload = {'sidebar_order': ['test']}
+
+            self.assertTrue(manager.save_runtime_config(payload))
+
+            self.assertEqual(payload, {'sidebar_order': ['test']})
+            stored = json.loads(
+                (configs / 'config_runtime.json').read_text(encoding='utf-8')
+            )
+            self.assertIn('redmine_auth', stored)
+
     def test_runtime_settings_support_injected_data_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             settings = RuntimeSettings.from_environment(

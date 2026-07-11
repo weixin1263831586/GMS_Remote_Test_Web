@@ -1,5 +1,10 @@
+import asyncio
+import os
 import threading
+import time
 import unittest
+from contextlib import asynccontextmanager
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -26,6 +31,11 @@ class FakeSshManager:
 
     def optional_connection(self, _config):
         return self
+
+    @asynccontextmanager
+    async def async_optional_connection(self, config):
+        with self.optional_connection(config) as ssh:
+            yield ssh
 
     def __enter__(self):
         return self
@@ -73,6 +83,9 @@ class FirmwareApiTests(unittest.TestCase):
             release_firmware_devices=fake_release_firmware_devices,
             project_root=".",
             firmware_share_store=None,
+            apk_max_tasks=20,
+            apk_max_file_size=500 * 1024 * 1024,
+            apk_max_source_file_size=2 * 1024 * 1024,
         )
         app = FastAPI()
         app.include_router(api.router)
@@ -197,6 +210,115 @@ class FirmwareApiTests(unittest.TestCase):
             self.assertEqual(resume_payload["progress"], 50.0)
             self.assertEqual(resume_payload["uploaded_size"], 4)
             self.assertEqual(resume_payload["total_size"], 8)
+
+    def test_failed_chunk_merge_releases_merge_lock(self):
+        async def save_chunk(_upload, path, _max_size=None):
+            Path(path).write_bytes(b'1234')
+
+        with (
+            TemporaryDirectory() as tmp,
+            patch('features.firmware.firmware_api._FIRMWARE_CHUNK_ROOT', tmp),
+            patch(
+                'features.firmware.firmware_api.save_upload_to_path',
+                side_effect=save_chunk,
+            ),
+            patch(
+                'features.firmware.firmware_api.merge_files_to_path',
+                side_effect=OSError('disk full'),
+            ),
+        ):
+            with self.assertRaisesRegex(OSError, 'disk full'):
+                asyncio.run(
+                    firmware_api._handle_firmware_chunk_upload(
+                        {
+                            'upload_id': 'failed-merge',
+                            'file_name': 'update.img',
+                            'chunk_index': '0',
+                            'total_chunks': '1',
+                            'file_size': '4',
+                            'file': object(),
+                        },
+                        'client',
+                    )
+                )
+
+            lock_path = firmware_api._firmware_upload_session_dir(
+                'client', 'failed-merge'
+            )
+            self.assertFalse(os.path.exists(os.path.join(lock_path, '.merge.lock')))
+
+    def test_firmware_chunk_upload_rejects_changed_session_metadata(self):
+        with TemporaryDirectory() as tmp, patch(
+            'features.firmware.firmware_api._FIRMWARE_CHUNK_ROOT',
+            tmp,
+        ):
+            first = self.client.post(
+                '/api/burn/firmware?devices=D1',
+                data={
+                    'chunk_index': '0', 'total_chunks': '2',
+                    'upload_id': 'upload-1', 'file_name': 'update.img',
+                    'file_size': '8',
+                },
+                files={'file': ('update.img', b'1234')},
+            )
+            changed = self.client.post(
+                '/api/burn/firmware?devices=D1',
+                data={
+                    'chunk_index': '1', 'total_chunks': '3',
+                    'upload_id': 'upload-1', 'file_name': 'other.img',
+                    'file_size': '12',
+                },
+                files={'file': ('other.img', b'5678')},
+            )
+
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(changed.status_code, 400)
+            self.assertIn('metadata', changed.json()['error'])
+
+    def test_firmware_chunk_check_rejects_excessive_chunk_count(self):
+        with TemporaryDirectory() as tmp, patch(
+            'features.firmware.firmware_api._FIRMWARE_CHUNK_ROOT',
+            tmp,
+        ):
+            response = self.client.post(
+                '/api/burn/firmware?devices=D1',
+                data={
+                    'check_chunks': '1',
+                    'total_chunks': str(firmware_api.MAX_FIRMWARE_CHUNKS + 1),
+                    'upload_id': 'upload-1',
+                    'file_name': 'update.img',
+                    'file_size': '8',
+                },
+            )
+
+            self.assertEqual(response.status_code, 400)
+
+    def test_firmware_upload_tokens_do_not_collide_after_sanitizing(self):
+        self.assertNotEqual(
+            firmware_api._safe_upload_token('client/a'),
+            firmware_api._safe_upload_token('client_a'),
+        )
+        self.assertNotEqual(
+            firmware_api._safe_upload_token('x' * 121 + 'a'),
+            firmware_api._safe_upload_token('x' * 121 + 'b'),
+        )
+
+    def test_expired_firmware_upload_sessions_are_removed(self):
+        with TemporaryDirectory() as tmp, patch(
+            'features.firmware.firmware_api._FIRMWARE_CHUNK_ROOT',
+            tmp,
+        ):
+            expired = Path(
+                firmware_api._firmware_upload_session_dir('client', 'old')
+            )
+            expired.mkdir(parents=True)
+            (expired / 'update.img').write_bytes(b'firmware')
+            old = time.time() - firmware_api.UPLOAD_PROGRESS_EXPIRATION - 1
+            os.utime(expired, (old, old))
+
+            firmware_api._cleanup_expired_upload_sessions('client')
+
+            self.assertFalse(expired.exists())
 
     def test_firmware_share_rejects_path_outside_allowed_prefixes(self):
         config = {"firmware_shares": {"allowed_prefixes": ["/home/hcq/"]}}
@@ -339,10 +461,23 @@ class FirmwareApiTests(unittest.TestCase):
             self.assertEqual(stat_remote.call_args.kwargs["password"], "stored")
 
     def test_firmware_share_credentials_use_password_fallback(self):
-        creds = shares_api._host_credentials("10.10.10.206", "hcq", {"ubuntu_pswd": "rockchip"})
+        creds = shares_api._host_credentials(
+            "10.10.10.206",
+            "hcq",
+            {"ubuntu_host": "10.10.10.206", "ubuntu_pswd": "rockchip"},
+        )
 
         self.assertEqual(creds["username"], "hcq")
         self.assertEqual(creds["password"], "rockchip")
+
+    def test_firmware_share_does_not_send_ubuntu_password_to_other_host(self):
+        creds = shares_api._host_credentials(
+            'attacker.invalid',
+            'hcq',
+            {'ubuntu_host': '10.10.10.206', 'ubuntu_pswd': 'rockchip'},
+        )
+
+        self.assertIsNone(creds['password'])
 
     def test_firmware_share_browse_uses_remote_directory_listing(self):
         with (

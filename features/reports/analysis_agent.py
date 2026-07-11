@@ -15,7 +15,11 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from foundation.archives import ARCHIVE_EXTENSIONS, safe_extract_member_path
+from foundation.archives import (
+    ARCHIVE_EXTENSIONS,
+    copy_archive_member,
+    safe_extract_member_path,
+)
 
 from .analyzer import HostLogParser, TestReport, XMLReportParser
 
@@ -137,6 +141,7 @@ class ReportAnalysisAgent:
         return False
 
     def _extract_zip(self, archive_path: str, target_dir: str) -> None:
+        budget: dict[str, int] = {}
         with zipfile.ZipFile(archive_path, "r") as zf:
             for member in zf.infolist():
                 mode = member.external_attr >> 16
@@ -150,9 +155,10 @@ class ReportAnalysisAgent:
                     continue
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 with zf.open(member) as src, open(target, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                    copy_archive_member(src, dst, budget)
 
     def _extract_tar(self, archive_path: str, target_dir: str) -> None:
+        budget: dict[str, int] = {}
         with tarfile.open(archive_path, "r:*") as tf:
             for member in tf.getmembers():
                 target = safe_extract_member_path(target_dir, member.name)
@@ -165,7 +171,7 @@ class ReportAnalysisAgent:
                 src = tf.extractfile(member)
                 if src:
                     with src, open(target, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
+                        copy_archive_member(src, dst, budget)
 
     def _extract_with_7z(self, archive_path: str, target_dir: str) -> None:
         command = "rar" if archive_path.lower().endswith(".rar") and shutil.which("rar") else "7z"

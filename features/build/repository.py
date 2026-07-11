@@ -112,6 +112,49 @@ class BuildStore:
             )
         return self.get_job(job_id)
 
+    def claim_queued_job(
+        self,
+        job_id: str,
+        *,
+        server_id: str,
+        max_concurrent: int,
+    ) -> dict[str, Any] | None:
+        """Atomically claim a queued job for one worker.
+
+        The conditional update is the cross-process mutex. Returning ``None``
+        means another worker already claimed, cancelled, or completed it.
+        """
+        now = utc_now_iso()
+        with self._connect() as conn:
+            # Protect capacity calculation and state transition in one
+            # cross-process write transaction.
+            conn.execute("BEGIN IMMEDIATE")
+            if max_concurrent > 0:
+                running = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM build_jobs
+                    WHERE server_id = ? AND status = 'running'
+                    """,
+                    (server_id,),
+                ).fetchone()[0]
+                if running >= max_concurrent:
+                    return None
+            cursor = conn.execute(
+                """
+                UPDATE build_jobs
+                SET status = 'running', started_at = ?, updated_at = ?
+                WHERE id = ? AND status = 'queued'
+                """,
+                (now, now, job_id),
+            )
+            if cursor.rowcount != 1:
+                return None
+            row = conn.execute(
+                "SELECT * FROM build_jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+        return self._row_to_dict(row)
+
     @staticmethod
     def decode_artifacts(job: dict[str, Any]) -> list[dict[str, Any]]:
         try:

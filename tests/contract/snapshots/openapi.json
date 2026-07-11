@@ -1131,6 +1131,46 @@
         "title": "USBIPStartRequest",
         "type": "object"
       },
+      "UiControlRequest": {
+        "properties": {
+          "serial": {
+            "title": "Serial",
+            "type": "string"
+          }
+        },
+        "required": [
+          "serial"
+        ],
+        "title": "UiControlRequest",
+        "type": "object"
+      },
+      "UiTapRequest": {
+        "properties": {
+          "serial": {
+            "title": "Serial",
+            "type": "string"
+          },
+          "x": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "X",
+            "type": "integer"
+          },
+          "y": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "serial",
+          "x",
+          "y"
+        ],
+        "title": "UiTapRequest",
+        "type": "object"
+      },
       "UpsertEntryRequest": {
         "properties": {
           "device_id": {
@@ -2639,7 +2679,8 @@
             "name": "executor",
             "required": false,
             "schema": {
-              "default": "stub",
+              "default": "http",
+              "pattern": "^(http|stub)$",
               "title": "Executor",
               "type": "string"
             }
@@ -4950,6 +4991,114 @@
           }
         },
         "summary": "Open Device Shell"
+      }
+    },
+    "/api/devices/ui/layout": {
+      "post": {
+        "description": "返回指定设备当前 App 的 UI 布局树（含每个元素的坐标/文本/可交互性）。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UiControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Layout"
+      }
+    },
+    "/api/devices/ui/screenshot": {
+      "post": {
+        "description": "截取指定设备当前屏幕，返回 base64 PNG。\n\n走 ``adb -s <serial> exec-out screencap -p``，输出重定向到测试主机临时文件，\n再 SCP 拉回 web 服务器读字节并 base64 内联返回前端。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UiControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Screenshot"
+      }
+    },
+    "/api/devices/ui/tap": {
+      "post": {
+        "description": "点按指定坐标。坐标通常取自 /ui/layout 返回的 element.center。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UiTapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Tap"
       }
     },
     "/api/devices/user-locked": {

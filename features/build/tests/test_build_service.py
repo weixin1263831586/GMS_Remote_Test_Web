@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -47,6 +48,19 @@ def test_build_command_rejects_workspace_escape():
             {"workspace_root": "/home/hcq"},
             {},
         )
+
+
+def test_build_command_rejects_parent_segment_workspace_escape():
+    for workspace in ('/srv/build/../secrets', '../secrets'):
+        with pytest.raises(BuildExecutionError, match='workspace escapes'):
+            build_command_from_template(
+                {
+                    'workspace': workspace,
+                    'command': 'true',
+                },
+                {'workspace_root': '/srv/build'},
+                {},
+            )
 
 
 def test_parse_lunch_options_from_rkbuild_output():
@@ -114,3 +128,166 @@ def test_local_build_job_completes_and_discovers_artifact(tmp_path: Path):
     assert job["status"] == "completed"
     assert job["artifacts"][0]["path"].endswith("out/update.img")
     assert "done" in service.tail_log(job["id"], lines=20)
+
+
+def test_separate_workers_start_a_queued_job_only_once(tmp_path: Path):
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    config_path = tmp_path / 'build_servers.json'
+    config_path.write_text(
+        json.dumps({
+            'servers': [{
+                'id': 'local',
+                'backend': 'local',
+                'workspace_root': str(tmp_path),
+            }],
+            'templates': [{
+                'id': 'demo',
+                'server_id': 'local',
+                'workspace': str(workspace),
+                'command': 'true',
+                'parameters_schema': {},
+                'enabled': True,
+            }],
+        }),
+        encoding='utf-8',
+    )
+    db_path = tmp_path / 'build.sqlite3'
+    creator = BuildService(store=BuildStore(db_path), config_path=config_path)
+    job = creator.create_job(
+        {'server_id': 'local', 'template_id': 'demo'},
+        start=False,
+    )
+
+    class CountingBackend:
+        def __init__(self):
+            self.calls = 0
+            self.lock = threading.Lock()
+
+        def start(self, **_kwargs):
+            with self.lock:
+                self.calls += 1
+            return {'session': 'session', 'log_path': '/tmp/build.log'}
+
+    backend = CountingBackend()
+    services = [
+        BuildService(store=BuildStore(db_path), config_path=config_path)
+        for _ in range(2)
+    ]
+    for service in services:
+        service.backends['local'] = backend
+    barrier = threading.Barrier(2)
+
+    def start(service):
+        barrier.wait()
+        service.start_job(job['id'])
+
+    threads = [threading.Thread(target=start, args=(service,)) for service in services]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert backend.calls == 1
+    assert creator.get_job(job['id'])['status'] == 'running'
+
+
+def test_concurrent_workers_respect_server_capacity(tmp_path: Path):
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    config_path = tmp_path / 'build_servers.json'
+    config_path.write_text(
+        json.dumps({
+            'servers': [{
+                'id': 'local', 'backend': 'local',
+                'workspace_root': str(tmp_path), 'max_concurrent_jobs': 1,
+            }],
+            'templates': [{
+                'id': 'demo', 'server_id': 'local',
+                'workspace': str(workspace), 'command': 'true',
+                'parameters_schema': {}, 'enabled': True,
+            }],
+        }),
+        encoding='utf-8',
+    )
+    db_path = tmp_path / 'build.sqlite3'
+    creator = BuildService(store=BuildStore(db_path), config_path=config_path)
+    jobs = [
+        creator.create_job({'server_id': 'local', 'template_id': 'demo'}, start=False)
+        for _ in range(2)
+    ]
+
+    class CountingBackend:
+        def __init__(self):
+            self.calls = 0
+            self.lock = threading.Lock()
+
+        def start(self, **kwargs):
+            with self.lock:
+                self.calls += 1
+            return {
+                'session': kwargs['job_id'],
+                'log_path': f"/tmp/{kwargs['job_id']}.log",
+            }
+
+    backend = CountingBackend()
+    services = [
+        BuildService(store=BuildStore(db_path), config_path=config_path)
+        for _ in range(2)
+    ]
+    for service in services:
+        service.backends['local'] = backend
+    barrier = threading.Barrier(2)
+
+    def start(index):
+        barrier.wait()
+        services[index].start_job(jobs[index]['id'])
+
+    threads = [threading.Thread(target=start, args=(index,)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    statuses = [creator.get_job(job['id'])['status'] for job in jobs]
+    assert backend.calls == 1
+    assert sorted(statuses) == ['queued', 'running']
+
+
+def test_runtime_password_is_removed_when_start_fails(tmp_path: Path):
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    config_path = tmp_path / 'build_servers.json'
+    config_path.write_text(
+        json.dumps({
+            'servers': [{
+                'id': 'local', 'backend': 'local',
+                'workspace_root': str(tmp_path),
+            }],
+            'templates': [{
+                'id': 'demo', 'server_id': 'local',
+                'workspace': str(workspace), 'command': 'true',
+                'parameters_schema': {}, 'enabled': True,
+            }],
+        }),
+        encoding='utf-8',
+    )
+    service = BuildService(
+        store=BuildStore(tmp_path / 'build.sqlite3'),
+        config_path=config_path,
+    )
+
+    class FailingBackend:
+        @staticmethod
+        def start(**_kwargs):
+            raise RuntimeError('cannot connect')
+
+    service.backends['local'] = FailingBackend()
+    job = service.create_job({
+        'server_id': 'local',
+        'template_id': 'demo',
+        'server_password': 'secret',
+    })
+
+    assert job['status'] == 'failed'
+    assert job['id'] not in service._runtime_passwords

@@ -57,15 +57,6 @@ class ClientManager:
         finally:
             ssh.close()
 
-    def get_client_ip(self, headers: dict[str, str], remote_addr: str) -> str:
-        """获取客户端IP地址"""
-        client_ip = (
-            headers.get('X-Forwarded-For', '').split(',')[0].strip() or
-            headers.get('X-Real-IP') or
-            remote_addr
-        )
-        return client_ip
-
     def detect_username(
         self,
         client_ip: str,

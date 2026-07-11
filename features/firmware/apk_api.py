@@ -2,13 +2,14 @@
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import re
 import shutil
 import xml.etree.ElementTree as ET
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from features.firmware.apk import (
@@ -36,11 +37,22 @@ from .responses import ApiResponse
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+MAX_APK_UPLOAD_CHUNKS = 1_000
+
+
+def _owner_id(request: Request) -> str:
+    return str(runtime.get_client_id_from_request(request) or 'anonymous')
+
+
+def _task_id_in_use(task_id: str) -> bool:
+    with runtime.global_state.apk_analysis_tasks_lock:
+        return task_id in runtime.global_state.apk_analysis_tasks
 
 
 @router.post("/api/apk/upload")
 @handle_api_errors
 async def upload_apk(
+    request: Request,
     file: UploadFile | None = File(None),
     chunk_index: int | None = Form(None),
     total_chunks: int | None = Form(None),
@@ -59,25 +71,70 @@ async def upload_apk(
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)
 
+    if _task_id_in_use(task_id):
+        return ApiResponse.error('Task ID already exists', status_code=409)
+
     os.makedirs(task_dir, exist_ok=True)
 
     if (chunk_index is None) != (total_chunks is None):
         return ApiResponse.error("Incomplete chunk parameters", status_code=400)
 
     if chunk_index is not None and total_chunks is not None:
-        if total_chunks <= 0 or chunk_index < 0 or chunk_index >= total_chunks:
+        if (
+            total_chunks <= 0
+            or total_chunks > MAX_APK_UPLOAD_CHUNKS
+            or chunk_index < 0
+            or chunk_index >= total_chunks
+        ):
             return ApiResponse.error("Invalid chunk parameters", status_code=400)
 
         chunk_path = _safe_join(task_dir, f"{filename}.part{chunk_index}")
-        try:
-            await save_upload_to_path(file, chunk_path, runtime.apk_max_file_size)
-        except ValueError as e:
-            _cleanup_files([chunk_path])
-            return ApiResponse.error(str(e), status_code=400)
-
-        chunk_paths = [_safe_join(task_dir, f"{filename}.part{i}") for i in range(total_chunks)]
         upload_lock = _get_apk_upload_lock(task_id)
         async with upload_lock:
+            if _task_id_in_use(task_id):
+                return ApiResponse.error('Task ID already exists', status_code=409)
+            metadata_path = _safe_join(task_dir, 'upload_metadata.json')
+            metadata = {'filename': filename, 'total_chunks': total_chunks}
+            if os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, encoding='utf-8') as handle:
+                        if json.load(handle) != metadata:
+                            return ApiResponse.error(
+                                'Chunk metadata does not match upload session',
+                                status_code=400,
+                            )
+                except (OSError, json.JSONDecodeError):
+                    return ApiResponse.error(
+                        'Upload session metadata is invalid',
+                        status_code=400,
+                    )
+            else:
+                with open(metadata_path, 'w', encoding='utf-8') as handle:
+                    json.dump(metadata, handle)
+
+            try:
+                await save_upload_to_path(
+                    file,
+                    chunk_path,
+                    runtime.apk_max_file_size,
+                )
+            except ValueError as e:
+                _cleanup_files([chunk_path])
+                return ApiResponse.error(str(e), status_code=413)
+
+            chunk_paths = [
+                _safe_join(task_dir, f"{filename}.part{i}")
+                for i in range(total_chunks)
+            ]
+            present = [path for path in chunk_paths if os.path.exists(path)]
+            total_size = sum(os.path.getsize(path) for path in present)
+            if total_size > runtime.apk_max_file_size:
+                _cleanup_files([*chunk_paths, apk_path, metadata_path])
+                return ApiResponse.error(
+                    f"File too large, max {runtime.apk_max_file_size // (1024 * 1024)}MB",
+                    status_code=413,
+                )
+
             if os.path.exists(apk_path):
                 file_size = os.path.getsize(apk_path)
                 return ApiResponse.success({"task_id": task_id, "filename": filename, "size": file_size, "uploaded": True})
@@ -89,37 +146,47 @@ async def upload_apk(
                     "chunk_received": chunk_index + 1, "total_chunks": total_chunks, "uploaded": False,
                 })
 
-            total_size = sum(os.path.getsize(path) for path in chunk_paths)
-            if total_size > runtime.apk_max_file_size:
-                _cleanup_files([*chunk_paths, apk_path])
-                return ApiResponse.error(f"File too large, max {runtime.apk_max_file_size // (1024*1024)}MB", status_code=400)
-
             await asyncio.to_thread(merge_files_to_path, chunk_paths, apk_path)
-            _cleanup_files(chunk_paths)
+            _cleanup_files([*chunk_paths, metadata_path])
 
             file_size = os.path.getsize(apk_path)
             if file_size > runtime.apk_max_file_size:
                 _cleanup_files([apk_path])
                 return ApiResponse.error(f"File too large, max {runtime.apk_max_file_size // (1024*1024)}MB", status_code=400)
 
-            _create_apk_task(task_id, apk_path, filename)
+            try:
+                _create_apk_task(task_id, apk_path, filename, _owner_id(request))
+            except ValueError as exc:
+                _cleanup_files([apk_path])
+                return ApiResponse.error(str(exc), status_code=429)
             return ApiResponse.success({"task_id": task_id, "filename": filename, "size": file_size, "uploaded": True})
     else:
-        try:
-            file_size = await save_upload_to_path(file, apk_path, runtime.apk_max_file_size)
-        except ValueError as e:
-            _cleanup_files([apk_path])
-            return ApiResponse.error(str(e), status_code=400)
-
-        _create_apk_task(task_id, apk_path, filename)
+        upload_lock = _get_apk_upload_lock(task_id)
+        async with upload_lock:
+            if _task_id_in_use(task_id):
+                return ApiResponse.error('Task ID already exists', status_code=409)
+            try:
+                file_size = await save_upload_to_path(
+                    file, apk_path, runtime.apk_max_file_size
+                )
+            except ValueError as e:
+                _cleanup_files([apk_path])
+                return ApiResponse.error(str(e), status_code=413)
+            try:
+                _create_apk_task(task_id, apk_path, filename, _owner_id(request))
+            except ValueError as exc:
+                _cleanup_files([apk_path])
+                return ApiResponse.error(str(exc), status_code=429)
         return ApiResponse.success({"task_id": task_id, "filename": filename, "size": file_size})
 
 
 @router.post("/api/apk/analyze/{task_id}")
 @handle_api_errors
-async def analyze_apk(task_id: str):
+async def analyze_apk(task_id: str, request: Request):
     """Start jadx decompilation analysis."""
-    task, err = _get_apk_task(task_id, require_completed=False)
+    task, err = _get_apk_task(
+        task_id, require_completed=False, owner_id=_owner_id(request)
+    )
     if err:
         return err
 
@@ -150,9 +217,11 @@ async def analyze_apk(task_id: str):
 
 @router.get("/api/apk/status/{task_id}")
 @handle_api_errors
-async def get_apk_status(task_id: str):
+async def get_apk_status(task_id: str, request: Request):
     """Get APK analysis status."""
-    task, err = _get_apk_task(task_id, require_completed=False)
+    task, err = _get_apk_task(
+        task_id, require_completed=False, owner_id=_owner_id(request)
+    )
     if err:
         return err
 
@@ -167,9 +236,9 @@ async def get_apk_status(task_id: str):
 
 @router.get("/api/apk/manifest/{task_id}")
 @handle_api_errors
-async def get_apk_manifest(task_id: str):
+async def get_apk_manifest(task_id: str, request: Request):
     """Get parsed AndroidManifest.xml."""
-    task, err = _get_apk_task(task_id)
+    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -205,9 +274,9 @@ async def get_apk_manifest(task_id: str):
 
 @router.get("/api/apk/permissions/{task_id}")
 @handle_api_errors
-async def get_apk_permissions(task_id: str):
+async def get_apk_permissions(task_id: str, request: Request):
     """Get APK permission list."""
-    task, err = _get_apk_task(task_id)
+    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -231,9 +300,14 @@ async def get_apk_permissions(task_id: str):
 
 @router.get("/api/apk/source/{task_id}")
 @handle_api_errors
-async def get_apk_source(task_id: str, path: str = "", view: bool = False):
+async def get_apk_source(
+    task_id: str,
+    request: Request,
+    path: str = "",
+    view: bool = False,
+):
     """Browse decompiled source tree or view file content."""
-    task, err = _get_apk_task(task_id)
+    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -283,9 +357,14 @@ async def get_apk_source(task_id: str, path: str = "", view: bool = False):
 
 @router.get("/api/apk/search/{task_id}")
 @handle_api_errors
-async def search_apk_source_files(task_id: str, q: str, limit: int = 20):
+async def search_apk_source_files(
+    task_id: str,
+    request: Request,
+    q: str,
+    limit: int = 20,
+):
     """Search decompiled source files by filename without loading the full tree in the browser."""
-    task, err = _get_apk_task(task_id)
+    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -315,9 +394,15 @@ async def search_apk_source_files(task_id: str, q: str, limit: int = 20):
 
 @router.get("/api/apk/definition/{task_id}")
 @handle_api_errors
-async def find_apk_symbol_definition(task_id: str, symbol: str, path: str = "", line: int = 0):
+async def find_apk_symbol_definition(
+    task_id: str,
+    request: Request,
+    symbol: str,
+    path: str = "",
+    line: int = 0,
+):
     """Find a best-effort Java symbol definition in decompiled APK sources."""
-    task, err = _get_apk_task(task_id)
+    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -340,9 +425,9 @@ async def find_apk_symbol_definition(task_id: str, symbol: str, path: str = "", 
 
 @router.get("/api/apk/download/{task_id}")
 @handle_api_errors
-async def download_apk_source(task_id: str):
+async def download_apk_source(task_id: str, request: Request):
     """Download decompiled source ZIP."""
-    task, err = _get_apk_task(task_id)
+    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -372,7 +457,7 @@ async def download_apk_source(task_id: str):
 
 @router.get("/api/apk/tasks")
 @handle_api_errors
-async def list_apk_tasks():
+async def list_apk_tasks(request: Request):
     """List all APK analysis tasks."""
     with runtime.global_state.apk_analysis_tasks_lock:
         tasks = [
@@ -385,6 +470,7 @@ async def list_apk_tasks():
                 "error": task.get("error"),
             }
             for tid, task in runtime.global_state.apk_analysis_tasks.items()
+            if task.get('owner_id') == _owner_id(request)
         ]
 
     tasks.sort(key=lambda t: t["timestamp"], reverse=True)
@@ -393,7 +479,7 @@ async def list_apk_tasks():
 
 @router.delete("/api/apk/task/{task_id}")
 @handle_api_errors
-async def delete_apk_task(task_id: str):
+async def delete_apk_task(task_id: str, request: Request):
     """Delete APK analysis task and its files."""
     try:
         safe_task_id = _normalize_apk_task_id(task_id)
@@ -401,8 +487,14 @@ async def delete_apk_task(task_id: str):
         return ApiResponse.error(str(e), status_code=400)
 
     with runtime.global_state.apk_analysis_tasks_lock:
-        if safe_task_id not in runtime.global_state.apk_analysis_tasks:
+        task = runtime.global_state.apk_analysis_tasks.get(safe_task_id)
+        if not task or task.get('owner_id') != _owner_id(request):
             return ApiResponse.error("Task not found", status_code=404)
+        if task.get('status') == 'analyzing':
+            return ApiResponse.error(
+                'Cannot delete a task while analysis is running',
+                status_code=409,
+            )
         runtime.global_state.apk_analysis_tasks.pop(safe_task_id)
 
     task_dir = _safe_join(runtime.apk_upload_dir, safe_task_id)

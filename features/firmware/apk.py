@@ -32,19 +32,27 @@ JAVA_CONTROL_WORDS = {'if', 'for', 'while', 'switch', 'catch', 'return', 'throw'
 APK_SYMBOL_INDEX_MAX_FILE_SIZE = 2 * 1024 * 1024
 
 
-def _create_apk_task(task_id, apk_path, filename):
+def _create_apk_task(task_id, apk_path, filename, owner_id: str):
     """创建APK分析任务并限制总数"""
     os.makedirs(runtime.apk_upload_dir, exist_ok=True)
     with runtime.global_state.apk_analysis_tasks_lock:
         if len(runtime.global_state.apk_analysis_tasks) >= runtime.apk_max_tasks:
-            oldest = min(runtime.global_state.apk_analysis_tasks.items(), key=lambda t: t[1].get('timestamp', 0))
+            removable = [
+                item
+                for item in runtime.global_state.apk_analysis_tasks.items()
+                if item[1].get('status') != 'analyzing'
+            ]
+            if not removable:
+                raise ValueError('APK analysis capacity is full; retry later')
+            oldest = min(removable, key=lambda t: t[1].get('timestamp', 0))
             old_dir = _safe_join(runtime.apk_upload_dir, oldest[0])
             shutil.rmtree(old_dir, ignore_errors=True)
             del runtime.global_state.apk_analysis_tasks[oldest[0]]
         runtime.global_state.apk_analysis_tasks[task_id] = {
             'status': 'uploaded', 'progress': 0,
             'apk_path': apk_path, 'output_dir': None,
-            'filename': filename, 'timestamp': time.time(), 'error': None
+            'filename': filename, 'timestamp': time.time(), 'error': None,
+            'owner_id': owner_id,
         }
 
 
@@ -92,7 +100,11 @@ def _cleanup_files(paths: list[str]):
             logger.warning(f"Failed to remove temporary APK file {path}: {e}")
 
 
-def _get_apk_task(task_id: str, require_completed: bool = True):
+def _get_apk_task(
+    task_id: str,
+    require_completed: bool = True,
+    owner_id: str | None = None,
+):
     """获取APK分析任务，返回 (task, error_response)"""
     try:
         task_id = _normalize_apk_task_id(task_id)
@@ -102,6 +114,8 @@ def _get_apk_task(task_id: str, require_completed: bool = True):
     with runtime.global_state.apk_analysis_tasks_lock:
         task = runtime.global_state.apk_analysis_tasks.get(task_id)
     if not task:
+        return None, ApiResponse.error("任务不存在", status_code=404)
+    if owner_id is not None and task.get('owner_id') != owner_id:
         return None, ApiResponse.error("任务不存在", status_code=404)
     if require_completed and task['status'] != 'completed':
         return None, ApiResponse.error("分析尚未完成", status_code=400)

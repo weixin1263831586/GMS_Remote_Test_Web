@@ -104,7 +104,11 @@ async def dry_run_automation_profile(
 
 @router.post('/runs')
 async def create_automation_run(req: dict[str, Any]):
-    return {'success': True, 'data': automation_service.create_run(req)}
+    try:
+        run = automation_service.create_run(req)
+    except ValueError as exc:
+        return error_response(str(exc), 400)
+    return {'success': True, 'data': run}
 
 
 @router.get('/runs')
@@ -228,6 +232,8 @@ async def cancel_automation_run(run_id: str):
         run = automation_service.cancel_run(run_id)
     except AutomationNotFoundError as exc:
         return error_response(str(exc), 404)
+    except RuntimeError as exc:
+        return error_response(str(exc), 409)
     return {'success': True, 'data': run}
 
 
@@ -241,7 +247,7 @@ async def retry_automation_run(run_id: str):
 
 
 @router.post('/worker/tick')
-async def automation_worker_tick(executor: str = Query('stub')):
+async def automation_worker_tick(executor: str = Query('http', pattern='^(http|stub)$')):
     # worker_tick drives the whole automation state machine synchronously —
     # Jenkins trigger/poll, firmware flash (HTTP timeout up to 3600s), test
     # start, report analysis. Run it off the event loop or a single tick can

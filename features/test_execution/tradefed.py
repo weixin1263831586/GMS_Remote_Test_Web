@@ -43,6 +43,12 @@ def sanitize_tradefed_console_command(command: str) -> str:
 _RESULT_DIR_RE = re.compile(r"\b\d{4}\.\d{2}\.\d{2}(?:[_\d.]+)?\b")
 
 
+# 表头行可能粘连 tradefed 提示符（如 "cts-console > Session  Pass..."）——SSH
+# 分块时序偶发会把提示符与表头挤进同一行。剥离前导 "xxx > " 才能得到干净列名，
+# 否则首列被污染成 "cts-console > Session"，前端 renderer 按 key 匹配不到而整列空白。
+_PROMPT_PREFIX_RE = re.compile(r"^[A-Za-z0-9_\-./() ]*>[ \t]*", re.IGNORECASE)
+
+
 def _split_result_header(header_line: str) -> list[str]:
     """把 tradefed 原始表头行拆成列名列表，保留原始列名。
 
@@ -50,9 +56,14 @@ def _split_result_header(header_line: str) -> list[str]:
         "Session  Pass  Fail  Warning  Modules Complete  Result Directory  ..."
     按两个以上空格切分即可得到各列；"Modules Complete"、"Result Directory"、
     "Device serial(s)"、"Build ID"、"Test Plan" 各自是单列（含内部空格）。
+
+    若提示符（如 ``cts-console >``）与表头粘连在同一行，先用一次 sub 剥离
+    前导提示符段（行首到 ``>`` 及其后空白），避免首列名被污染成
+    ``cts-console > Session``。无提示符时 sub 匹配为空，行原样返回。
     """
-    # 去掉回车与首尾空白后，按 2+ 空格分段。
-    return [seg.strip() for seg in re.split(r"\s{2,}", header_line.replace("\r", "").strip()) if seg.strip()]
+    line = _PROMPT_PREFIX_RE.sub("", header_line.replace("\r", "").strip(), count=1)
+    # 按 2+ 空格分段。
+    return [seg.strip() for seg in re.split(r"\s{2,}", line) if seg.strip()]
 
 
 def parse_tradefed_list_results(output: str) -> dict[str, Any]:

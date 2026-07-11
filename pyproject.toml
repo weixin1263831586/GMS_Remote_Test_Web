@@ -75,5 +75,6 @@ line-ending = "lf"
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "features"]
+pythonpath = ["."]
 norecursedirs = ["rk-skills", "skills", "tools", "data", ".worktrees"]
 addopts = ["-p", "no:xonsh"]

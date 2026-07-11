@@ -109,15 +109,29 @@ class DeviceLockManager:
                         return True, f"设备 {device_id} 已锁定 (当前用户)"
                     return False, f"设备 {device_id} 已被 {row['username']} 锁定"
 
-                conn.execute(
+                cursor = conn.execute(
                     """
-                    INSERT INTO device_locks (device_id, client_id, username, timestamp)
+                    INSERT OR IGNORE INTO device_locks
+                        (device_id, client_id, username, timestamp)
                     VALUES (?, ?, ?, ?)
                     """,
                     (device_id, client_id, username, datetime.now().isoformat()),
                 )
                 conn.commit()
-                return True, f"设备 {device_id} 锁定成功"
+                if cursor.rowcount == 1:
+                    return True, f"设备 {device_id} 锁定成功"
+
+                # Another process may have acquired the lock after our SELECT.
+                # Resolve that normal race as a conflict instead of leaking an
+                # IntegrityError from SQLite to the API caller.
+                row = conn.execute(
+                    "SELECT client_id, username FROM device_locks WHERE device_id = ?",
+                    (device_id,),
+                ).fetchone()
+                if row and row['client_id'] == client_id:
+                    return True, f"设备 {device_id} 已锁定 (当前用户)"
+                owner = row['username'] if row else '其他用户'
+                return False, f"设备 {device_id} 已被 {owner} 锁定"
             finally:
                 self._close_if_needed(conn)
 
@@ -202,6 +216,28 @@ class DeviceLockManager:
                     }
                     for row in rows
                 }
+            finally:
+                self._close_if_needed(conn)
+
+    def refresh_locks(self, client_id: str, device_ids: list[str]) -> int:
+        """Renew locks still owned by ``client_id`` and return the renewed count."""
+        cleaned = [str(device_id).strip() for device_id in device_ids if str(device_id).strip()]
+        if not cleaned:
+            return 0
+        with self.lock:
+            conn = self._connect()
+            try:
+                self._cleanup_expired(conn)
+                timestamp = datetime.now().isoformat()
+                renewed = 0
+                for device_id in cleaned:
+                    cursor = conn.execute(
+                        "UPDATE device_locks SET timestamp = ? WHERE device_id = ? AND client_id = ?",
+                        (timestamp, device_id, client_id),
+                    )
+                    renewed += cursor.rowcount
+                conn.commit()
+                return renewed
             finally:
                 self._close_if_needed(conn)
 

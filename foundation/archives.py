@@ -5,6 +5,7 @@ import re
 import tarfile
 import urllib.parse
 import zipfile
+from typing import BinaryIO
 
 
 ARCHIVE_EXTENSIONS = (
@@ -18,6 +19,8 @@ ARCHIVE_EXTENSIONS = (
 )
 _SANITIZE_FILENAME_RE = re.compile(r'[^\w\-_.\[\]]')
 _SANITIZE_DIRNAME_RE = re.compile(r'[^A-Za-z0-9._-]+')
+MAX_ARCHIVE_FILES = 10_000
+MAX_ARCHIVE_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def sanitize_suite_filename_from_url(url: str) -> str:
@@ -57,6 +60,26 @@ def safe_extract_member_path(base_dir: str, member_name: str) -> str:
     if target != base and not target.startswith(base + os.sep):
         raise ValueError(f'压缩包包含不安全路径: {member_name}')
     return target
+
+
+def copy_archive_member(
+    source: BinaryIO,
+    destination: BinaryIO,
+    budget: dict[str, int],
+    *,
+    max_files: int = MAX_ARCHIVE_FILES,
+    max_bytes: int = MAX_ARCHIVE_EXPANDED_BYTES,
+    chunk_size: int = 1024 * 1024,
+) -> None:
+    """Copy one archive member while enforcing a shared expansion budget."""
+    budget['files'] = budget.get('files', 0) + 1
+    if budget['files'] > max_files:
+        raise ValueError(f'压缩包文件数量超过限制: {max_files}')
+    while chunk := source.read(chunk_size):
+        budget['bytes'] = budget.get('bytes', 0) + len(chunk)
+        if budget['bytes'] > max_bytes:
+            raise ValueError(f'压缩包展开大小超过限制: {max_bytes} bytes')
+        destination.write(chunk)
 
 
 def strip_common_archive_root(

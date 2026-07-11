@@ -109,6 +109,48 @@ class GerritTriggerTests(unittest.TestCase):
 
 
 class HttpAutomationExecutorTests(unittest.TestCase):
+    def test_post_flash_verification_accepts_product_device_or_board_identity(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        class DeviceManager:
+            @staticmethod
+            def get_device_info(serial):
+                return {"board": "rk3576", "model": "Android", "fingerprint": "vendor/release-keys"}
+
+        executor = HttpAutomationExecutor(device_manager=DeviceManager())
+
+        result = executor._verify_post_flash(
+            ["ABC123"],
+            {"product": "rk3576", "fingerprint_contains": "release-keys", "retries": 1},
+        )
+
+        self.assertEqual(result, {"success": True, "verified": True})
+
+    def test_jenkins_flash_stages_artifact_url_instead_of_using_relative_path(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        class StagingExecutor(HttpAutomationExecutor):
+            def _stage_http_artifact(self, run, artifact_url):
+                self.staged_url = artifact_url
+                return {"success": True, "firmware_path": "/test-host/ats_update.img"}
+
+        session = FakeSession()
+        session.queue(FakeResponse(json_data={"success": True, "message": "burn ok"}))
+        executor = StagingExecutor(base_url="http://127.0.0.1:5001", session=session)
+        run = {
+            "id": "run_jenkins",
+            "artifact_path": "out/update.img",
+            "artifact_url": "http://jenkins/job/gms/1/artifact/out/update.img",
+            "devices_json": '[{"serial":"ABC123"}]',
+            "test_plan_json": '{"jenkins":{"base_url":"http://jenkins"}}',
+        }
+
+        result = executor.flash(run)
+
+        self.assertEqual(result["success"], True)
+        self.assertEqual(executor.staged_url, run["artifact_url"])
+        self.assertEqual(session.calls[0][2]["data"]["firmware_path"], "/test-host/ats_update.img")
+
     def test_http_executor_uses_embedded_jenkins_config_and_selects_artifact(self):
         from features.automation.executors import HttpAutomationExecutor
 
@@ -173,6 +215,7 @@ class HttpAutomationExecutorTests(unittest.TestCase):
         session = FakeSession()
         session.queue(FakeResponse(json_data={"success": True, "message": "burn ok"}))
         session.queue(FakeResponse(json_data={"success": True, "message": "test started"}))
+        session.queue(FakeResponse(json_data={"running": True, "logs": [], "log_count": 0}))
         executor = HttpAutomationExecutor(base_url="http://127.0.0.1:5001", session=session)
         run = {
             "id": "run_1",
@@ -183,11 +226,32 @@ class HttpAutomationExecutorTests(unittest.TestCase):
 
         flash = executor.flash(run)
         start = executor.start_test(run)
+        poll = executor.poll_test(run)
 
         self.assertEqual(flash["success"], True)
         self.assertEqual(start["success"], True)
+        self.assertEqual(start["running"], True)
+        self.assertEqual(poll["running"], True)
         self.assertEqual(session.calls[0][0], "POST")
         self.assertIn("/api/burn/firmware", session.calls[0][1])
         self.assertEqual(session.calls[0][2]["data"]["firmware_path"], "/tmp/update.img")
         self.assertIn("/api/test/start", session.calls[1][1])
         self.assertEqual(session.calls[1][2]["json"]["devices"], ["ABC123"])
+        self.assertIn("/api/test/status", session.calls[2][1])
+
+    def test_poll_test_returns_the_exact_report_created_by_the_run(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        session = FakeSession()
+        session.queue(FakeResponse(json_data={
+            "running": False,
+            "test_outcome": "completed",
+            "report_timestamp": "2026.07.10_20.30.00",
+            "logs": [{"type": "success", "msg": "done"}],
+        }))
+        executor = HttpAutomationExecutor(base_url="http://127.0.0.1:5001", session=session)
+
+        result = executor.poll_test({"id": "run_1"})
+
+        self.assertEqual(result["success"], True)
+        self.assertEqual(result["report_timestamp"], "2026.07.10_20.30.00")

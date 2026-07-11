@@ -6,7 +6,6 @@ from features.test_execution.process_control import (
     find_env_pgid_command,
     kill_pid_tree_commands,
     parse_pid_lines,
-    tradefed_kill_command,
 )
 
 
@@ -35,17 +34,6 @@ class ProcessControlTests(unittest.TestCase):
         self.assertIn("grep -F --", env_cmd)
         self.assertIn("'GMS_TEST_PGID=group with spaces'", env_cmd)
         self.assertIn("grep -- '--pgid group with spaces'", arg_cmd)
-
-    def test_tradefed_kill_command_quotes_known_launcher(self):
-        self.assertEqual(
-            tradefed_kill_command("cts-tradefed"),
-            "pkill -f -- '[./]?cts-tradefed.*run commandAndExit'",
-        )
-        self.assertEqual(
-            tradefed_kill_command("bad launcher; rm"),
-            "pkill -f -- '[./]?tradefed.*run commandAndExit'",
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

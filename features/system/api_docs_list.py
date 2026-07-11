@@ -214,7 +214,6 @@ API_DOCS_LIST = [
         "category": "device",
         "skill": "gms-rt-devices-scrcpy"
     },
-
     # ==================== 测试管理 ====================
     {
         "method": "POST",

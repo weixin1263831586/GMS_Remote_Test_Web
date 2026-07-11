@@ -49,7 +49,10 @@ def store_notification(
     传递原始 ID 和已读状态，此方法会自动识别并去重。
     """
     normalized_level = level if level in VALID_NOTIFICATION_LEVELS else 'info'
-    data = data or {}
+    # Work on a copy: synchronization metadata is transport-only, but popping
+    # it from the caller's dictionary caused surprising state corruption when
+    # the same payload was also persisted or broadcast elsewhere.
+    data = dict(data or {})
     synced_id = data.pop('_synced_id', None)
     synced_read = data.pop('_synced_read', None)
 

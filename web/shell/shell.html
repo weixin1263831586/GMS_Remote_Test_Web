@@ -1771,7 +1771,7 @@
                         <input type="text" id="elevate-action-label" readonly value="需要管理员权限" />
                     </div>
                     <div class="modal-form-row">
-                        <label>管理员用户名:</label>
+                        <label>管理员账号:</label>
                         <input type="text" id="elevate-username" placeholder="管理员账号" autocomplete="username" />
                     </div>
                     <div class="modal-form-row">
@@ -1996,6 +1996,36 @@
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeGsiModal()">取消</button>
                     <button class="btn-xxs btn-primary" onclick="submitGsiBurn()">开始烧写</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 智能 UI 操控弹框：截图 + 布局元素 + 点按 -->
+    <div id="ui-control-modal" class="modal">
+        <div class="modal-content" style="max-width: min(1100px, 95vw); width: 95vw;">
+            <div class="modal-header">
+                <span class="modal-title">🎯 智能 UI 操控 <span id="ui-control-serial" style="font-size: 12px; color: var(--text-secondary); font-weight: normal;"></span></span>
+                <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+                    <button class="btn-xxs" onclick="refreshUiControl()">🔄 刷新</button>
+                    <span class="modal-close" onclick="closeUiControl()">&times;</span>
+                </div>
+            </div>
+            <div class="modal-body" style="display: flex; flex-direction: column; gap: 8px;">
+                <div id="ui-control-status" class="modal-info-text">加载中...</div>
+                <div style="display: flex; gap: 12px; align-items: flex-start; min-height: 400px;">
+                    <!-- 左：设备截图 -->
+                    <div style="flex: 0 0 auto; max-width: 45%;">
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">设备屏幕</div>
+                        <img id="ui-control-screenshot" alt="device screen" style="max-width: 100%; max-height: 60vh; border: 1px solid var(--border-color); border-radius: 8px; display: block;" />
+                    </div>
+                    <!-- 右：可点按元素列表 -->
+                    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">可交互元素（点击行即点按对应坐标，随后自动刷新）</div>
+                        <div id="ui-control-elements" style="flex: 1; overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; max-height: 60vh;">
+                            <div style="padding: 20px; color: var(--text-secondary); text-align: center;">暂无元素</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -3190,9 +3220,10 @@
                             ${escapeHtml(String(device.locked_by || '-'))}
                         </td>
                         <td style="padding: 4px 6px; text-align: center; white-space: nowrap;">
-                            <div style="display: grid; grid-template-columns: repeat(3, 92px); gap: 6px; justify-content: center; align-items: center;">
+                            <div style="display: grid; grid-template-columns: repeat(4, 92px); gap: 6px; justify-content: center; align-items: center;">
                                 <button class="btn-xxs" data-serial="${serialAttr}" onclick="openDeviceShell(this.dataset.serial)" style="background: var(--primary-color); ${actionButtonStyle}">🐧 adb shell</button>
                                 <button class="btn-xxs" data-serial="${serialAttr}" onclick="openDeviceConfigExplorer(this.dataset.serial)" title="查看设备信息：configs 配置资源 / packages 已装包 / features 特性" style="background: var(--success-color); color: white; ${actionButtonStyle}">ℹ️ device info</button>
+                                <button class="btn-xxs" data-serial="${serialAttr}" onclick="openUiControl(this.dataset.serial)" title="智能 UI 操控：截图 + 布局元素 + 点按" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}">🎯 UI 操控</button>
                                 ${releaseButton}
                             </div>
                         </td>
@@ -3541,6 +3572,105 @@
             } catch (error) {
                 console.error('打开 Shell 失败:', error);
                 showToast(`打开 Shell 失败: ${error.message}`, 'error');
+            }
+        }
+
+        // ==================== 智能 UI 操控（截图 + 布局元素 + 点按）====================
+        let uiControlSerial = null;
+
+        async function openUiControl(serialNo) {
+            if (!serialNo || serialNo === '-') {
+                showToast('设备序列号无效', 'error');
+                return;
+            }
+            uiControlSerial = serialNo;
+            const serialEl = document.getElementById('ui-control-serial');
+            if (serialEl) serialEl.textContent = `· ${serialNo}`;
+            ModalManager.open('ui-control-modal');
+            await refreshUiControl();
+        }
+
+        function closeUiControl() {
+            ModalManager.close('ui-control-modal');
+            uiControlSerial = null;
+        }
+
+        async function refreshUiControl() {
+            if (!uiControlSerial) return;
+            const statusEl = document.getElementById('ui-control-status');
+            const imgEl = document.getElementById('ui-control-screenshot');
+            const listEl = document.getElementById('ui-control-elements');
+            if (statusEl) statusEl.textContent = '正在截图并解析布局...';
+            if (listEl) listEl.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">加载中...</div>';
+            try {
+                // 并行：截图 + 布局（两个端点互相独立）。
+                const [shotRes, layoutRes] = await Promise.all([
+                    apiCall('/api/devices/ui/screenshot', 'POST', { serial: uiControlSerial }),
+                    apiCall('/api/devices/ui/layout', 'POST', { serial: uiControlSerial }),
+                ]);
+                if (shotRes && shotRes.success && imgEl) {
+                    imgEl.src = shotRes.image;
+                } else if (statusEl) {
+                    statusEl.textContent = `截图失败: ${(shotRes && (shotRes.error || shotRes.detail)) || '未知'}`;
+                }
+                const elements = (layoutRes && layoutRes.success) ? (layoutRes.elements || []) : [];
+                if (statusEl) {
+                    statusEl.textContent = layoutRes && layoutRes.success
+                        ? `共 ${elements.length} 个元素（其中可点击 ${
+                            elements.filter(e => (e.interactions || []).includes('clickable')).length
+                          }）`
+                        : `布局解析失败: ${(layoutRes && (layoutRes.error || layoutRes.detail)) || '未知'}`;
+                }
+                renderUiControlElements(elements);
+            } catch (err) {
+                if (statusEl) statusEl.textContent = `加载失败: ${err.message || err}`;
+            }
+        }
+
+        function renderUiControlElements(elements) {
+            const listEl = document.getElementById('ui-control-elements');
+            if (!listEl) return;
+            if (!elements.length) {
+                listEl.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">暂无可交互元素</div>';
+                return;
+            }
+            // 可点击的排前面，便于操作。
+            const sorted = [...elements].sort((a, b) => {
+                const ac = (a.interactions || []).includes('clickable') ? 0 : 1;
+                const bc = (b.interactions || []).includes('clickable') ? 0 : 1;
+                return ac - bc;
+            });
+            listEl.innerHTML = sorted.map((el, idx) => {
+                const label = el.text || el.resource_id || '(无文本)';
+                const c = el.center ? `${el.center[0]},${el.center[1]}` : '-';
+                const clickable = (el.interactions || []).includes('clickable');
+                const tag = clickable ? '👆' : '•';
+                return `<div class="ui-ctrl-el" data-x="${el.center ? el.center[0] : ''}" data-y="${el.center ? el.center[1] : ''}" style="padding:6px 10px;border-bottom:1px solid var(--border-color);cursor:${clickable ? 'pointer' : 'default'};font-size:12px;" onmouseenter="this.style.background='var(--hover-bg,rgba(0,0,0,0.04))'" onmouseleave="this.style.background=''">
+                    ${tag} ${escapeHtml(String(label)).slice(0, 40)} <span style="color:var(--text-secondary);">[${escapeHtml(c)}]</span>
+                </div>`;
+            }).join('');
+            // 绑定点按：仅有点击有坐标的行。
+            listEl.querySelectorAll('.ui-ctrl-el').forEach(row => {
+                const x = row.dataset.x, y = row.dataset.y;
+                if (x === '' || y === '') return;
+                row.addEventListener('click', () => uiControlTap(Number(x), Number(y)));
+            });
+        }
+
+        async function uiControlTap(x, y) {
+            if (!uiControlSerial) return;
+            const statusEl = document.getElementById('ui-control-status');
+            if (statusEl) statusEl.textContent = `点按 (${x}, ${y}) 中...`;
+            try {
+                const res = await apiCall('/api/devices/ui/tap', 'POST', { serial: uiControlSerial, x, y });
+                if (res && res.success) {
+                    // 点按后等界面刷新，再重新截图+解析。
+                    setTimeout(refreshUiControl, 600);
+                } else {
+                    if (statusEl) statusEl.textContent = `点按失败: ${(res && (res.error || res.detail)) || '未知'}`;
+                }
+            } catch (err) {
+                if (statusEl) statusEl.textContent = `点按失败: ${err.message || err}`;
             }
         }
 

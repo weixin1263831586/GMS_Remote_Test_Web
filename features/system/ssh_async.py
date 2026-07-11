@@ -28,8 +28,9 @@ class SSHAsyncManager:
 
     def __init__(self):
         """初始化 SSH 异步管理器"""
-        # SSH 连接池 {host: paramiko.SSHClient}
-        self.connections: dict[str, paramiko.SSHClient] = {}
+        # SSH connections are identity-scoped; a host-only key could reuse an
+        # authenticated session for the wrong user.
+        self.connections: dict[tuple[str, int, str], paramiko.SSHClient] = {}
         self._lock = asyncio.Lock()
 
     async def connect(
@@ -53,15 +54,16 @@ class SSHAsyncManager:
         Returns:
             SSHClient 对象
         """
+        connection_key = (host, port, username)
         async with self._lock:
             # 检查是否已有连接
-            if host in self.connections:
+            if connection_key in self.connections:
                 try:
                     # 测试连接是否仍然有效
-                    transport = self.connections[host].get_transport()
+                    transport = self.connections[connection_key].get_transport()
                     if transport and transport.is_active():
                         logger.debug(f"[SSH] Reusing existing connection to {host}")
-                        return self.connections[host]
+                        return self.connections[connection_key]
                 except Exception:
                     pass
 
@@ -85,7 +87,7 @@ class SSHAsyncManager:
             try:
                 # 在线程池中执行同步的 SSH 连接
                 ssh = await asyncio.to_thread(_connect)
-                self.connections[host] = ssh
+                self.connections[connection_key] = ssh
                 logger.info(f"[SSH] Connected to {host}")
                 return ssh
             except Exception as e:
@@ -115,10 +117,11 @@ class SSHAsyncManager:
 
         try:
             # 执行命令
-            _stdin, stdout, stderr = ssh.exec_command(
+            _stdin, stdout, stderr = await asyncio.to_thread(
+                ssh.exec_command,
                 command,
                 get_pty=True,
-                timeout=timeout
+                timeout=timeout,
             )
 
             # 异步读取标准输出
@@ -221,17 +224,19 @@ class SSHAsyncManager:
         Args:
             host: 主机地址
         """
-        if host in self.connections:
+        keys = [key for key in self.connections if key[0] == host]
+        for key in keys:
             try:
-                self.connections[host].close()
-                del self.connections[host]
-                logger.info(f"[SSH] Closed connection to {host}")
+                self.connections[key].close()
+                del self.connections[key]
             except Exception as e:
                 logger.error(f"[SSH] Error closing connection to {host}: {e}")
+        if keys:
+            logger.info(f"[SSH] Closed {len(keys)} connection(s) to {host}")
 
     def close_all(self):
         """关闭所有连接"""
-        for host in list(self.connections):
+        for host in {key[0] for key in self.connections}:
             self.close(host)
 
 

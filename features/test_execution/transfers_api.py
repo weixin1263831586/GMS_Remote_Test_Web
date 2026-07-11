@@ -5,19 +5,21 @@ import contextlib
 import logging
 import os
 import shlex
-import shutil
+import stat
 import subprocess
 import tarfile
 import time
 import uuid
 import zipfile
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Body, Query
 from fastapi.responses import JSONResponse
 
 from features.devices import ssh_connection_failed_response
 from foundation.archives import (
+    copy_archive_member,
     derive_suite_dir_name_from_archive,
     is_complete_archive_file,
     safe_extract_member_path,
@@ -46,6 +48,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _validate_suite_download_url(url: str) -> str:
+    parsed = urlparse(str(url or '').strip())
+    if parsed.scheme.lower() not in {'http', 'https'} or not parsed.hostname:
+        raise ValueError('Only HTTP(S) download URLs are allowed')
+    return parsed.geturl()
+
+
+def _path_within_suite_root(path: str, suite_root: str, label: str) -> str:
+    root = os.path.realpath(str(suite_root or ''))
+    target = os.path.realpath(str(path or ''))
+    if not root or not target or os.path.commonpath([root, target]) != root:
+        raise ValueError(f'{label} must stay inside suites_path')
+    return target
+
+
 # ==================== Suite Download Tasks ====================
 
 def _update_suite_task(tasks_dict: dict, lock, task_id: str, **updates):
@@ -65,6 +82,7 @@ def _update_suite_extract_task(task_id: str, **updates):
 
 
 _SUITE_TASK_TTL = 3600
+MAX_SUITE_ARCHIVE_BYTES = 50 * 1024 * 1024 * 1024
 _last_suite_cleanup = 0.0
 
 
@@ -99,7 +117,7 @@ def _parse_curl_size(s: str) -> float:
 async def _run_suite_download_task(task_id: str, url: str, archive_path: str):
     part_path = archive_path + ".part"
     filename = os.path.basename(archive_path)
-    cmd = ["curl", "-L", "-C", "-", "--connect-timeout", "30", "--max-time", "7200", "--retry", "3", "--retry-delay", "5", "-o", part_path, url]
+    cmd = ["curl", "-L", "-C", "-", "--max-filesize", str(MAX_SUITE_ARCHIVE_BYTES), "--connect-timeout", "30", "--max-time", "7200", "--retry", "3", "--retry-delay", "5", "-o", part_path, url]
     _update_suite_download_task(task_id, status="downloading", progress=0, message=f"Downloading: {filename}")
 
     process = None
@@ -130,10 +148,19 @@ async def _run_suite_download_task(task_id: str, url: str, archive_path: str):
 
         await process.wait()
         if process.returncode != 0:
-            if os.path.exists(part_path):
+            # curl exit 63 means --max-filesize was exceeded; discard that
+            # oversized partial. Network failures retain .part so the next
+            # task can actually resume via -C -.
+            if process.returncode == 63 and os.path.exists(part_path):
                 with contextlib.suppress(OSError):
                     os.remove(part_path)
-            _update_suite_download_task(task_id, status="error", progress=0, error=f"Download failed (exit code {process.returncode})")
+            _update_suite_download_task(
+                task_id,
+                status="error",
+                progress=0,
+                error=f"Download failed (exit code {process.returncode})",
+                resumable=os.path.exists(part_path),
+            )
             return
 
         os.replace(part_path, archive_path)
@@ -151,6 +178,7 @@ def _extract_archive_local_with_progress(archive_path: str, extract_dir: str, ta
         os.makedirs(target_extract_dir, exist_ok=True)
 
     files_count = 0
+    extraction_budget: dict[str, int] = {}
     _last_pct = -1
 
     def progress(done: int, total: int):
@@ -180,22 +208,28 @@ def _extract_archive_local_with_progress(archive_path: str, extract_dir: str, ta
                     if source_name.endswith("/"):
                         os.makedirs(target_path, exist_ok=True)
                         continue
+                    member = zip_ref.getinfo(source_name)
+                    if stat.S_ISLNK(member.external_attr >> 16):
+                        raise ValueError(f'压缩包包含不安全符号链接: {source_name}')
                     os.makedirs(os.path.dirname(target_path), exist_ok=True)
                     with zip_ref.open(source_name) as src, open(target_path, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
+                        copy_archive_member(src, dst, extraction_budget)
                     _chmod_tradefed(target_path, os.path.basename(target_path))
                     files_count += 1
                     progress(files_count, total)
             else:
                 total = len(names)
                 for member_name in names:
+                    member = zip_ref.getinfo(member_name)
+                    if stat.S_ISLNK(member.external_attr >> 16):
+                        raise ValueError(f'压缩包包含不安全符号链接: {member_name}')
                     target_path = safe_extract_member_path(extract_dir, member_name)
                     if member_name.endswith("/"):
                         os.makedirs(target_path, exist_ok=True)
                         continue
                     os.makedirs(os.path.dirname(target_path), exist_ok=True)
                     with zip_ref.open(member_name) as src, open(target_path, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
+                        copy_archive_member(src, dst, extraction_budget)
                     _chmod_tradefed(target_path, os.path.basename(target_path))
                     files_count += 0 if member_name.endswith("/") else 1
                     progress(files_count, total)
@@ -220,7 +254,7 @@ def _extract_archive_local_with_progress(archive_path: str, extract_dir: str, ta
                         src = tar_ref.extractfile(member)
                         if src:
                             with src, open(target_path, "wb") as dst:
-                                shutil.copyfileobj(src, dst)
+                                copy_archive_member(src, dst, extraction_budget)
                             _chmod_tradefed(target_path, os.path.basename(target_path))
                             files_count += 1
                             progress(files_count, total)
@@ -236,7 +270,7 @@ def _extract_archive_local_with_progress(archive_path: str, extract_dir: str, ta
                         src = tar_ref.extractfile(member)
                         if src:
                             with src, open(target_path, "wb") as dst:
-                                shutil.copyfileobj(src, dst)
+                                copy_archive_member(src, dst, extraction_budget)
                         _chmod_tradefed(target_path, os.path.basename(target_path))
                         files_count += 1
                         progress(files_count, total)
@@ -274,11 +308,14 @@ async def add_local_test_suite(req: TestSuiteAddLocalRequest):
         if not os.path.isdir(req.path):
             return error_response(f"Not a directory: {req.path}", 400)
     else:
-        with runtime.ssh_manager.optional_connection(config) as ssh:
+        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
                 return ssh_connection_failed_response()
-            check_cmd = f"[ -d '{req.path}' ] && echo 'exists' || echo 'not_exists'"
-            output, _, _ = runtime.ssh_manager.execute_command(ssh, check_cmd, timeout=10)
+            check_cmd = (
+                f"[ -d {shlex.quote(req.path)} ] "
+                "&& echo exists || echo not_exists"
+            )
+            output, _, _ = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, check_cmd, timeout=10)
             if output.strip() != "exists":
                 return error_response(f"Path not found: {req.path}", 404)
 
@@ -354,10 +391,23 @@ async def download_test_suite_from_url(req: TestSuiteDownloadRequest):
     if not req.url:
         return error_response("Download URL cannot be empty", 400)
 
-    save_dir = req.save_dir or get_default_suites_path(config)
+    try:
+        download_url = _validate_suite_download_url(req.url)
+    except ValueError as exc:
+        return error_response(str(exc), 400)
+
+    suites_root = get_default_suites_path(config)
+    try:
+        save_dir = _path_within_suite_root(
+            req.save_dir or suites_root,
+            suites_root,
+            'save_dir',
+        )
+    except ValueError as exc:
+        return error_response(str(exc), 400)
     os.makedirs(save_dir, exist_ok=True)
 
-    filename = sanitize_suite_filename_from_url(req.url)
+    filename = sanitize_suite_filename_from_url(download_url)
     archive_path = os.path.join(save_dir, filename)
 
     if is_config_host_local(config):
@@ -376,19 +426,23 @@ async def download_test_suite_from_url(req: TestSuiteDownloadRequest):
         with runtime.global_state.suite_download_tasks_lock:
             runtime.global_state.suite_download_tasks[task_id] = {
                 "task_id": task_id, "status": "queued", "progress": 0,
-                "url": req.url, "filename": filename, "archive_path": archive_path,
+                "url": download_url, "filename": filename, "archive_path": archive_path,
                 "downloaded_size": 0, "total_size": 0, "message": f"Preparing download: {filename}",
                 "created_at": time.time(), "updated_at": time.time(),
             }
-        task = asyncio.create_task(_run_suite_download_task(task_id, req.url, archive_path))
+        task = asyncio.create_task(_run_suite_download_task(task_id, download_url, archive_path))
         runtime.global_state.background_tasks.add(task)
         task.add_done_callback(runtime.global_state.background_tasks.discard)
         return JSONResponse(content={"success": True, "message": f"Download started: {filename}", "task_id": task_id, "archive_path": archive_path, "file_size": 0, "download_method": "local_async"})
     else:
-        with runtime.ssh_manager.optional_connection(config) as ssh:
+        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
                 return ssh_connection_failed_response()
-            cmd = f"curl -L -o '{archive_path}' '{req.url}' 2>&1"
+            cmd = (
+                f"curl -L --max-filesize {MAX_SUITE_ARCHIVE_BYTES} "
+                f"-o {shlex.quote(archive_path)} "
+                f"{shlex.quote(download_url)} 2>&1"
+            )
             output, exit_code, _ = runtime.ssh_manager.execute_command(ssh, cmd, timeout=600)
             if exit_code != 0:
                 return error_response(f"Download failed: {output}", 500)
@@ -424,11 +478,11 @@ async def list_test_suite_archives():
                     archives.append({"name": name, "path": path, "size": stat.st_size, "mtime": stat.st_mtime, "default_dir_name": derive_suite_dir_name_from_archive(path)})
         return JSONResponse(content={"success": True, "archives": archives, "base_path": base_path})
 
-    with runtime.ssh_manager.optional_connection(config) as ssh:
+    async with runtime.ssh_manager.async_optional_connection(config) as ssh:
         if not ssh:
             return ssh_connection_failed_response()
         find_cmd = f"find {shlex.quote(base_path)} -maxdepth 1 -type f \\( -name '*.zip' -o -name '*.tar.gz' -o -name '*.tgz' -o -name '*.tar.bz2' -o -name '*.tar' \\) -printf '%T@\\t%s\\t%f\\t%p\\n' 2>/dev/null | sort -nr"
-        output, _, _ = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=20)
+        output, _, _ = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, find_cmd, timeout=20)
         archives = []
         for line in output.splitlines():
             parts = line.split("\t", 3)
@@ -451,9 +505,20 @@ async def start_test_suite_extract(req: TestSuiteExtractRequest):
     if not is_config_host_local(config):
         return error_response("Background extraction only supports local host mode", 400)
 
-    if not os.path.exists(req.archive_path):
+    suites_root = get_default_suites_path(config)
+    try:
+        archive_path = _path_within_suite_root(
+            req.archive_path, suites_root, 'archive_path'
+        )
+        extract_dir = _path_within_suite_root(
+            extract_dir, suites_root, 'extract_dir'
+        )
+    except ValueError as exc:
+        return error_response(str(exc), 400)
+
+    if not os.path.exists(archive_path):
         return error_response(f"Archive not found: {req.archive_path}", 404)
-    if not is_complete_archive_file(req.archive_path):
+    if not is_complete_archive_file(archive_path):
         return error_response(f"Incomplete or unsupported archive: {req.archive_path}", 400)
 
     os.makedirs(extract_dir, exist_ok=True)
@@ -461,13 +526,13 @@ async def start_test_suite_extract(req: TestSuiteExtractRequest):
     with runtime.global_state.suite_extract_tasks_lock:
         runtime.global_state.suite_extract_tasks[task_id] = {
             "task_id": task_id, "status": "queued", "progress": 0,
-            "archive_path": req.archive_path, "extract_dir": extract_dir,
+            "archive_path": archive_path, "extract_dir": extract_dir,
             "target_dir_name": target_dir_name, "extracted_count": 0, "total_count": 0,
             "message": f"Preparing extraction: {os.path.basename(req.archive_path)}",
             "created_at": time.time(), "updated_at": time.time(),
         }
 
-    task = asyncio.create_task(_run_suite_extract_task(task_id, req.archive_path, extract_dir, target_dir_name))
+    task = asyncio.create_task(_run_suite_extract_task(task_id, archive_path, extract_dir, target_dir_name))
     runtime.global_state.background_tasks.add(task)
     task.add_done_callback(runtime.global_state.background_tasks.discard)
     return JSONResponse(content={"success": True, "task_id": task_id, "message": "Extraction started", "archive_path": req.archive_path, "target_dir_name": target_dir_name})
@@ -494,26 +559,36 @@ async def extract_test_suite_archive(req: TestSuiteExtractRequest):
     extract_dir = req.extract_dir or get_default_suites_path(config)
     target_dir_name = sanitize_suite_dir_name(req.target_dir_name, derive_suite_dir_name_from_archive(req.archive_path)) if req.target_dir_name else ""
 
-    if is_config_host_local(config) and not os.path.exists(req.archive_path):
-        return error_response(f"Archive not found: {req.archive_path}", 404)
+    suites_root = get_default_suites_path(config)
+    try:
+        archive_path = _path_within_suite_root(
+            req.archive_path, suites_root, 'archive_path'
+        )
+        extract_dir = _path_within_suite_root(
+            extract_dir, suites_root, 'extract_dir'
+        )
+    except ValueError as exc:
+        return error_response(str(exc), 400)
 
-    os.makedirs(extract_dir, exist_ok=True)
+    if is_config_host_local(config) and not os.path.exists(archive_path):
+        return error_response(f"Archive not found: {req.archive_path}", 404)
 
     if is_config_host_local(config):
         try:
-            result = await asyncio.to_thread(_extract_archive_local_with_progress, req.archive_path, extract_dir, target_dir_name)
+            os.makedirs(extract_dir, exist_ok=True)
+            result = await asyncio.to_thread(_extract_archive_local_with_progress, archive_path, extract_dir, target_dir_name)
             return JSONResponse(content={"success": True, **result})
         except Exception as e:
             return error_response(f"Extraction failed: {e!s}", 500)
     else:
-        with runtime.ssh_manager.optional_connection(config) as ssh:
+        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
                 return ssh_connection_failed_response()
             remote_extract_dir = os.path.join(extract_dir, target_dir_name) if target_dir_name else extract_dir
             mkdir_cmd = f"mkdir -p {shlex.quote(remote_extract_dir)}"
-            runtime.ssh_manager.execute_command(ssh, mkdir_cmd, timeout=20)
-            cmd = f"tar -xf {shlex.quote(req.archive_path)} -C {shlex.quote(remote_extract_dir)} 2>&1"
-            output, exit_code, _ = runtime.ssh_manager.execute_command(ssh, cmd, timeout=300)
+            await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, mkdir_cmd, timeout=20)
+            cmd = f"tar -xf {shlex.quote(archive_path)} -C {shlex.quote(remote_extract_dir)} 2>&1"
+            output, _error, exit_code = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, cmd, timeout=300)
 
             if exit_code != 0:
                 return error_response(f"Extraction failed: {output}", 500)
