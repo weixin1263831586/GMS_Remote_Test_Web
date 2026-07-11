@@ -157,6 +157,9 @@ class AutomationService:
     def list_runs(self, *, status: str = '', limit: int = 50):
         return self.store.list_runs(status=status, limit=limit)
 
+    def list_run_summaries(self, *, status: str = '', limit: int = 50):
+        return self.store.list_run_summaries(status=status, limit=limit)
+
     def get_run(self, run_id: str):
         run = self.store.get_run(run_id)
         if run is None:

@@ -112,6 +112,11 @@ class BuildStore:
             )
         return self.get_job(job_id)
 
+    def delete_job(self, job_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM build_jobs WHERE id = ?", (job_id,))
+        return cursor.rowcount == 1
+
     def claim_queued_job(
         self,
         job_id: str,

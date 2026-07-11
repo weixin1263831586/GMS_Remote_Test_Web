@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from features.build.executor import BuildExecutionError, build_command_from_template
-from features.build.repository import BuildStore
+from features.build.repository import JOB_COLUMNS, BuildStore
 from features.build.service import BuildService
 
 
@@ -81,6 +81,37 @@ rk3326-evb-lp3-v11-avb
         "rk3588-userdebug",
         "rk3576_s-user",
     ]
+
+
+def test_parse_scoped_lunch_options_ignores_shell_noise():
+    output = """profile noise rk3326-userdebug
+__GMS_LUNCH_BEGIN__
+pk30_u-bp2a-user
+pk30_u-bp2a-userdebug
+__GMS_LUNCH_END__
+post noise rk3588-userdebug
+"""
+    assert BuildService._parse_scoped_lunch_options(output) == [
+        "pk30_u-bp2a-user",
+        "pk30_u-bp2a-userdebug",
+    ]
+
+
+def test_delete_build_history_only_allows_terminal_jobs(tmp_path: Path):
+    store = BuildStore(tmp_path / "build.sqlite3")
+    config_path = tmp_path / "build_servers.json"
+    config_path.write_text('{"servers": [], "templates": []}', encoding="utf-8")
+    service = BuildService(store=store, config_path=config_path)
+    base = {column: "" for column in JOB_COLUMNS}
+    base.update({"id": "done", "server_id": "s", "template_id": "t", "status": "completed"})
+    store.create_job(base)
+    running = dict(base, id="running", status="running")
+    store.create_job(running)
+
+    service.delete_job("done")
+    assert store.get_job("done") is None
+    with pytest.raises(BuildExecutionError, match="只能删除"):
+        service.delete_job("running")
 
 
 def test_local_build_job_completes_and_discovers_artifact(tmp_path: Path):

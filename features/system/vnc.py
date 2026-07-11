@@ -116,7 +116,18 @@ class VNCManager:
             if is_local:
                 return self._start_local_vnc(force_restart=force_restart)
 
-            return self._start_remote_vnc(host, password, vnc_password, config)
+            remote_user, remote_ip = CommonUtils.parse_host_address(host)
+            remote_config = dict(config)
+            remote_config.update({
+                'host': remote_ip,
+                'hostname': remote_ip,
+                'ubuntu_host': remote_ip,
+                'username': remote_user or get_ubuntu_user(),
+                'ubuntu_user': remote_user or get_ubuntu_user(),
+                'password': password or '',
+                'ubuntu_pswd': password or '',
+            })
+            return self._start_remote_vnc(host, password, vnc_password, remote_config)
 
         except Exception as e:
             logger.error(f"Error starting VNC: {e}")
@@ -363,8 +374,16 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                     'warning': '需要在主机桌面环境中运行'
                 }
 
+            # x11vnc/websockify 都会写日志；目录不存在时后台启动命令会直接
+            # 退出，但旧实现忽略了这个错误并继续返回连接 URL。
+            self.ssh_manager.execute_command(ssh, "mkdir -p ~/logs ~/.vnc", timeout=5)
+
             # 检查并启动x11vnc
-            check_x11_cmd = f"pgrep -f -- {shlex.quote(X11VNC_DISPLAY_PATTERN)} && echo 'RUNNING' || echo 'NOT_RUNNING'"
+            check_x11_cmd = (
+                f"pgrep -f -- {shlex.quote(X11VNC_DISPLAY_PATTERN)} >/dev/null "
+                f"&& ss -ltn | grep -q ':{VNC_PORT} ' "
+                "&& echo 'RUNNING' || echo 'NOT_RUNNING'"
+            )
             stdout, _, _ = self.ssh_manager.execute_command(ssh, check_x11_cmd)
             x11vnc_running = command_reports_running(stdout)
 
@@ -393,11 +412,18 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                     f"x11vnc -display {VNC_DISPLAY} -forever -shared "
                     f"-rfbport {VNC_PORT} {auth_param} -bg -o ~/logs/x11vnc.log"
                 )
-                self.ssh_manager.execute_command(ssh, x11vnc_cmd, timeout=15)
-                time.sleep(1)
+                _, x11_stderr, x11_code = self.ssh_manager.execute_command(
+                    ssh, x11vnc_cmd, timeout=15
+                )
+                if x11_code != 0:
+                    logger.warning("[VNC] Remote x11vnc start failed: %s", x11_stderr)
 
             # 检查并启动websockify
-            check_ws_cmd = f"pgrep -f -- {shlex.quote(WEBSOCKIFY_PATTERN)} && echo 'RUNNING' || echo 'NOT_RUNNING'"
+            check_ws_cmd = (
+                f"pgrep -f -- {shlex.quote(WEBSOCKIFY_PATTERN)} >/dev/null "
+                f"&& ss -ltn | grep -q ':{NOVNC_WEB_PORT} ' "
+                "&& echo 'RUNNING' || echo 'NOT_RUNNING'"
+            )
             stdout, _, _ = self.ssh_manager.execute_command(ssh, check_ws_cmd)
             websockify_running = command_reports_running(stdout)
 
@@ -408,8 +434,55 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                     f"{NOVNC_WEB_PORT} localhost:{VNC_PORT} "
                     "> ~/logs/novnc.log 2>&1 &"
                 )
-                self.ssh_manager.execute_command(ssh, novnc_cmd, timeout=10)
-                time.sleep(1)
+                _, novnc_stderr, novnc_code = self.ssh_manager.execute_command(
+                    ssh, novnc_cmd, timeout=10
+                )
+                if novnc_code != 0:
+                    logger.warning("[VNC] Remote websockify start failed: %s", novnc_stderr)
+
+            # 启动命令在后台执行，命令本身返回 0 不代表监听已经成功。只有
+            # x11vnc 与 websockify 两个端口都就绪时才向前端返回成功。
+            verify_cmd = (
+                f"ss -ltn | grep -q ':{VNC_PORT} ' && echo VNC_READY || echo VNC_FAILED; "
+                f"ss -ltn | grep -q ':{NOVNC_WEB_PORT} ' && echo NOVNC_READY || echo NOVNC_FAILED"
+            )
+            stdout = ''
+            stderr = ''
+            vnc_ready = False
+            novnc_ready = False
+            # 后台进程在较慢主机上可能需要数秒才开始监听。
+            for _ in range(10):
+                stdout, stderr, _ = self.ssh_manager.execute_command(ssh, verify_cmd, timeout=5)
+                vnc_ready = 'VNC_READY' in stdout
+                novnc_ready = 'NOVNC_READY' in stdout
+                if vnc_ready and novnc_ready:
+                    break
+                time.sleep(0.3)
+            if not vnc_ready or not novnc_ready:
+                log_cmd = "tail -n 12 ~/logs/x11vnc.log ~/logs/novnc.log 2>/dev/null"
+                logs, _, _ = self.ssh_manager.execute_command(ssh, log_cmd, timeout=5)
+                self.ssh_manager.return_connection(ssh)
+                failed = []
+                if not vnc_ready:
+                    failed.append(str(VNC_PORT))
+                if not novnc_ready:
+                    failed.append(str(NOVNC_WEB_PORT))
+                command_errors = '\n'.join(
+                    value.strip()
+                    for value in (
+                        locals().get('x11_stderr', ''),
+                        locals().get('novnc_stderr', ''),
+                        logs,
+                        stderr,
+                    )
+                    if value and value.strip()
+                )
+                detail = command_errors[-1200:]
+                return {
+                    'success': False,
+                    'error': f"远程端口 {', '.join(failed)} 未监听，VNC 服务启动失败",
+                    'detail': detail,
+                }
 
             target_ip = CommonUtils.extract_ip_from_host(host)
 

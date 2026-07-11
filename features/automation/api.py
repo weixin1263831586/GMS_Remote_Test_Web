@@ -119,7 +119,7 @@ async def list_automation_runs(
     return {
         'success': True,
         'data': {
-            'items': automation_service.list_runs(
+            'items': automation_service.list_run_summaries(
                 status=status,
                 limit=limit,
             )
@@ -144,7 +144,7 @@ async def automation_dashboard():
     from features.automation.models import TERMINAL_STATUSES
     from features.build import get_build_service
 
-    runs = automation_service.list_runs(limit=500)
+    runs = automation_service.list_run_summaries(limit=500)
     run_by_status = dict(Counter(run['status'] for run in runs))
     completed_total = sum(
         count for status, count in run_by_status.items() if status in TERMINAL_STATUSES

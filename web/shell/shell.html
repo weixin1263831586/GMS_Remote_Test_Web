@@ -8,21 +8,21 @@
     <link rel="stylesheet" href="/static/css/common.css?v=20260624-dcfg-ui">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
-    <script src="/static/js/chunk-upload.js?v=20260601-01"></script>
+    <script src="/static/js/chunk-upload.js?v=20260601-01" defer></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
-    <script src="/static/js/api-constants.js?v=20260411"></script>
+    <script src="/static/js/api-constants.js?v=20260411" defer></script>
     <!-- 加载共享工具函数 - 必须在app.js之前加载 -->
-    <script src="/static/js/utils.js?v=20260601-01"></script>
+    <script src="/static/js/utils.js?v=20260601-01" defer></script>
     <!-- 加载全局状态 - 必须在通知中心和app.js之前加载 -->
-    <script src="/static/js/state.js?v=20260601-01"></script>
+    <script src="/static/js/state.js?v=20260601-01" defer></script>
     <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
-    <script src="/static/js/modal.js?v=20260601-01"></script>
+    <script src="/static/js/modal.js?v=20260601-01" defer></script>
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
-    <script src="/static/js/api.js?v=20260601-01"></script>
+    <script src="/static/js/api.js?v=20260601-01" defer></script>
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
-    <script src="/static/js/notifications.js?v=20260601-01"></script>
+    <script src="/static/js/notifications.js?v=20260601-01" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260701-burn-refresh-devices" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260711-page-load-performance" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -636,6 +636,7 @@
                     </select>
                     <button class="btn-xs" onclick="refreshVNC()" style="padding: 2px 6px; font-size: 10px;">🔄 刷新桌面</button>
                     <button class="btn-xs" onclick="showAddHostModal()" style="padding: 2px 6px; font-size: 10px;">添加主机</button>
+                    <button id="delete-host-btn" class="btn-xs" onclick="deleteCurrentHost()" style="padding: 2px 6px; font-size: 10px; color: var(--danger-color);">删除主机</button>
                 </div>
             </div>
 
@@ -2021,7 +2022,11 @@
                     </div>
                     <!-- 右：可点按元素列表 -->
                     <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">可交互元素（点击行即点按对应坐标，随后自动刷新）</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">UI 元素（点击行即点按对应坐标，随后自动刷新）</div>
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                            <input id="ui-control-search" type="search" placeholder="搜索文本、资源 ID 或控件类型" oninput="renderUiControlElements()" style="flex:1;min-width:0;" />
+                            <label style="font-size:12px;white-space:nowrap;"><input id="ui-control-actionable-only" type="checkbox" checked onchange="renderUiControlElements()" /> 仅可操作</label>
+                        </div>
                         <div id="ui-control-elements" style="flex: 1; overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; max-height: 60vh;">
                             <div style="padding: 20px; color: var(--text-secondary); text-align: center;">暂无元素</div>
                         </div>
@@ -2637,6 +2642,12 @@
             select.innerHTML = desktopHosts.map(host =>
                 `<option value="${host.id}" ${currentHost && currentHost.id === host.id ? 'selected' : ''}>${host.name}</option>`
             ).join('');
+            const deleteButton = document.getElementById('delete-host-btn');
+            if (deleteButton) {
+                const canDelete = Boolean(currentHost && currentHost.id !== 'default');
+                deleteButton.disabled = !canDelete;
+                deleteButton.title = canDelete ? `删除 ${currentHost.name}` : '默认主机不能删除';
+            }
         }
 
         // 保存主机列表到 localStorage
@@ -2661,6 +2672,24 @@
 
             // 刷新 VNC 连接
             await loadVNCConnection();
+        }
+
+        function deleteCurrentHost() {
+            if (!currentHost || currentHost.id === 'default') {
+                showToast('默认主机不能删除', 'warning');
+                return;
+            }
+            const deletingHost = currentHost;
+            if (!confirm(`确定删除主机 ${deletingHost.name} 吗？`)) return;
+
+            desktopHosts = desktopHosts.filter(host => host.id !== deletingHost.id);
+            currentHost = desktopHosts[0] || null;
+            saveHostsToStorage();
+            updateHostSelector();
+            showToast(`已删除主机 ${deletingHost.name}`, 'success');
+            loadVNCConnection().catch(error => {
+                console.error('[Desktop] Failed to load default host after deletion:', error);
+            });
         }
 
         // 加载 VNC 连接
@@ -2721,7 +2750,8 @@
                 const result = await response.json();
 
                 if (!result.success) {
-                    showToast(`连接失败: ${result.error}`, 'error');
+                    const detail = result.detail ? `；${result.detail}` : '';
+                    showToast(`连接失败: ${result.error}${detail}`, 'error');
                     return;
                 }
 
@@ -3577,6 +3607,8 @@
 
         // ==================== 智能 UI 操控（截图 + 布局元素 + 点按）====================
         let uiControlSerial = null;
+        let uiControlElements = [];
+        let uiControlRefreshId = 0;
 
         async function openUiControl(serialNo) {
             if (!serialNo || serialNo === '-') {
@@ -3584,6 +3616,7 @@
                 return;
             }
             uiControlSerial = serialNo;
+            uiControlElements = [];
             const serialEl = document.getElementById('ui-control-serial');
             if (serialEl) serialEl.textContent = `· ${serialNo}`;
             ModalManager.open('ui-control-modal');
@@ -3593,45 +3626,68 @@
         function closeUiControl() {
             ModalManager.close('ui-control-modal');
             uiControlSerial = null;
+            uiControlElements = [];
+            uiControlRefreshId += 1;
         }
 
         async function refreshUiControl() {
             if (!uiControlSerial) return;
+            const refreshId = ++uiControlRefreshId;
+            const serial = uiControlSerial;
             const statusEl = document.getElementById('ui-control-status');
             const imgEl = document.getElementById('ui-control-screenshot');
             const listEl = document.getElementById('ui-control-elements');
             if (statusEl) statusEl.textContent = '正在截图并解析布局...';
             if (listEl) listEl.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">加载中...</div>';
-            try {
-                // 并行：截图 + 布局（两个端点互相独立）。
-                const [shotRes, layoutRes] = await Promise.all([
-                    apiCall('/api/devices/ui/screenshot', 'POST', { serial: uiControlSerial }),
-                    apiCall('/api/devices/ui/layout', 'POST', { serial: uiControlSerial }),
-                ]);
-                if (shotRes && shotRes.success && imgEl) {
-                    imgEl.src = shotRes.image;
-                } else if (statusEl) {
-                    statusEl.textContent = `截图失败: ${(shotRes && (shotRes.error || shotRes.detail)) || '未知'}`;
-                }
-                const elements = (layoutRes && layoutRes.success) ? (layoutRes.elements || []) : [];
-                if (statusEl) {
-                    statusEl.textContent = layoutRes && layoutRes.success
-                        ? `共 ${elements.length} 个元素（其中可点击 ${
-                            elements.filter(e => (e.interactions || []).includes('clickable')).length
-                          }）`
-                        : `布局解析失败: ${(layoutRes && (layoutRes.error || layoutRes.detail)) || '未知'}`;
-                }
-                renderUiControlElements(elements);
-            } catch (err) {
-                if (statusEl) statusEl.textContent = `加载失败: ${err.message || err}`;
+            // 截图和布局独立结算：其中一项失败时，另一项仍正常展示。
+            const [shotResult, layoutResult] = await Promise.allSettled([
+                apiCall('/api/devices/ui/screenshot', 'POST', { serial }),
+                apiCall('/api/devices/ui/layout', 'POST', { serial }),
+            ]);
+            if (refreshId !== uiControlRefreshId || serial !== uiControlSerial) return;
+
+            const errors = [];
+            if (shotResult.status === 'fulfilled' && shotResult.value?.success && imgEl) {
+                imgEl.src = shotResult.value.image;
+            } else {
+                errors.push(`截图失败：${shotResult.reason?.message || shotResult.value?.error || '未知错误'}`);
             }
+
+            if (layoutResult.status === 'fulfilled' && layoutResult.value?.success) {
+                const layoutRes = layoutResult.value;
+                uiControlElements = layoutRes.elements || [];
+                const actionableCount = uiControlElements.filter(isUiControlActionable).length;
+                const source = layoutRes.source === 'uiautomator2' ? 'UIAutomator2' : 'Android CLI';
+                if (statusEl) statusEl.textContent = `已加载 ${uiControlElements.length} 个元素，${actionableCount} 个可操作 · ${source}`;
+                renderUiControlElements();
+            } else {
+                uiControlElements = [];
+                errors.push(`布局失败：${layoutResult.reason?.message || layoutResult.value?.error || '未知错误'}`);
+                renderUiControlElements();
+            }
+            if (errors.length && statusEl) statusEl.textContent = errors.join('；');
         }
 
-        function renderUiControlElements(elements) {
+        function isUiControlActionable(el) {
+            const interactions = el.interactions || [];
+            return Boolean(el.center && el.enabled !== false && interactions.some(value =>
+                ['clickable', 'long_clickable', 'checkable', 'focusable', 'editable'].includes(value)
+            ));
+        }
+
+        function renderUiControlElements(elements = uiControlElements) {
             const listEl = document.getElementById('ui-control-elements');
             if (!listEl) return;
+            const query = (document.getElementById('ui-control-search')?.value || '').trim().toLowerCase();
+            const actionableOnly = document.getElementById('ui-control-actionable-only')?.checked ?? true;
+            elements = elements.filter(el => {
+                if (actionableOnly && !isUiControlActionable(el)) return false;
+                if (!query) return true;
+                return [el.text, el.content_desc, el.resource_id, el.class_name]
+                    .some(value => String(value || '').toLowerCase().includes(query));
+            });
             if (!elements.length) {
-                listEl.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">暂无可交互元素</div>';
+                listEl.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">没有符合条件的 UI 元素，可取消“仅可操作”或修改搜索词</div>';
                 return;
             }
             // 可点击的排前面，便于操作。
@@ -3643,10 +3699,12 @@
             listEl.innerHTML = sorted.map((el, idx) => {
                 const label = el.text || el.resource_id || '(无文本)';
                 const c = el.center ? `${el.center[0]},${el.center[1]}` : '-';
-                const clickable = (el.interactions || []).includes('clickable');
-                const tag = clickable ? '👆' : '•';
-                return `<div class="ui-ctrl-el" data-x="${el.center ? el.center[0] : ''}" data-y="${el.center ? el.center[1] : ''}" style="padding:6px 10px;border-bottom:1px solid var(--border-color);cursor:${clickable ? 'pointer' : 'default'};font-size:12px;" onmouseenter="this.style.background='var(--hover-bg,rgba(0,0,0,0.04))'" onmouseleave="this.style.background=''">
-                    ${tag} ${escapeHtml(String(label)).slice(0, 40)} <span style="color:var(--text-secondary);">[${escapeHtml(c)}]</span>
+                const actionable = isUiControlActionable(el);
+                const tag = actionable ? '👆' : '•';
+                const type = String(el.class_name || '').split('.').pop();
+                return `<div class="ui-ctrl-el" data-x="${el.center ? el.center[0] : ''}" data-y="${el.center ? el.center[1] : ''}" style="padding:8px 10px;border-bottom:1px solid var(--border-color);cursor:${el.center ? 'pointer' : 'default'};font-size:12px;" onmouseenter="this.style.background='var(--hover-bg,rgba(0,0,0,0.04))'" onmouseleave="this.style.background=''">
+                    <div>${tag} ${escapeHtml(String(label)).slice(0, 80)} <span style="color:var(--text-secondary);">[${escapeHtml(c)}]</span></div>
+                    <div style="color:var(--text-secondary);font-size:11px;margin-top:2px;">${escapeHtml(type)}${el.resource_id ? ` · ${escapeHtml(el.resource_id)}` : ''}</div>
                 </div>`;
             }).join('');
             // 绑定点按：仅有点击有坐标的行。

@@ -10,6 +10,7 @@ let testSuites = [];
 let connectedDevices = [];
 let selectedBuildJobId = '';
 let activeWorkflowPane = 'overview';
+let toastTimer = null;
 
 // 13 段流水线阶段（顺序即推进顺序）
 const PIPELINE_STAGES = [
@@ -41,7 +42,14 @@ function qs(id) { return document.getElementById(id); }
 function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
-function toast(message) { qs('automation-toast').textContent = message; }
+function toast(message) {
+    const el = qs('automation-toast');
+    if (!el) return;
+    el.textContent = String(message || '').slice(0, 600);
+    el.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 4200);
+}
 function compactTime(value) {
     if (!value) return '-';
     const text = String(value);
@@ -146,6 +154,7 @@ async function loadBuildConfig() {
         renderBuildWorkspaces([]);
         renderLunchOptions([]);
     };
+    qs('build-workspace').onchange = () => renderLunchOptions([]);
 }
 
 function collectBuildPlan() {
@@ -251,14 +260,15 @@ async function refreshLunchOptions() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({server_id: serverId, workspace, server_password: password}),
         });
-        renderLunchOptions(data.items || []);
-        toast(`发现 ${(data.items || []).length} 个 lunch 选项`);
+        const items = data.items || [];
+        renderLunchOptions(items);
+        toast(`已从 ${workspace} 读取 ${items.length} 个 lunch 选项`);
     } catch (err) { toast(err.message); }
 }
 
-async function loadDevices() {
+async function loadDevices(forceRefresh = false) {
     try {
-        const resp = await fetch('/api/devices/list?force_refresh=1', {cache: 'no-store'});
+        const resp = await fetch(`/api/devices/list?force_refresh=${forceRefresh ? '1' : '0'}`, {cache: 'no-store'});
         connectedDevices = await resp.json();
         const items = Array.isArray(connectedDevices) ? connectedDevices : [];
         qs('automation-device-list').innerHTML = items.length
@@ -412,8 +422,28 @@ async function loadBuildJobs() {
     const data = await api('/api/build/jobs?limit=20');
     buildJobs = data.items || [];
     qs('build-jobs').innerHTML = buildJobs.length
-        ? buildJobs.map(job => `<div class="build-job ${job.id === selectedBuildJobId ? 'active' : ''}" onclick="loadBuildLog('${esc(job.id)}')"><span class="badge ${esc(job.status)}">${esc(job.status)}</span> <strong>${esc(job.template_id)}</strong><div class="muted">${esc(job.id)} / ${esc(job.remote_workspace || '')}</div><div>${esc((job.artifacts || [])[0]?.path || job.error || '')}</div></div>`).join('')
+        ? buildJobs.map(job => {
+            const terminal = TERMINAL_STATUSES.has(job.status);
+            return `<div class="build-job ${job.id === selectedBuildJobId ? 'active' : ''}" onclick="loadBuildLog('${esc(job.id)}')">
+                <div class="build-job-head"><span class="badge ${esc(job.status)}">${esc(job.status)}</span><strong>${esc(job.template_id)}</strong>
+                ${terminal ? `<button type="button" class="build-job-delete" title="删除历史任务" onclick="event.stopPropagation(); deleteBuildJob('${esc(job.id)}')">删除</button>` : ''}</div>
+                <div class="muted">${esc(job.id)} / ${esc(job.remote_workspace || '')}</div><div>${esc((job.artifacts || [])[0]?.path || job.error || '')}</div></div>`;
+        }).join('')
         : '<div class="muted">暂无构建任务。</div>';
+}
+
+async function deleteBuildJob(jobId) {
+    if (!window.confirm(`确定删除历史构建任务 ${jobId}？\n此操作只删除平台记录，不删除远端源码和构建产物。`)) return;
+    try {
+        await api(`/api/build/jobs/${encodeURIComponent(jobId)}`, {method: 'DELETE'});
+        if (selectedBuildJobId === jobId) {
+            selectedBuildJobId = '';
+            qs('build-log-title').textContent = '未选择任务';
+            qs('build-log').textContent = '选择构建任务查看日志。';
+        }
+        toast(`已删除历史构建任务 ${jobId}`);
+        await loadBuildJobs();
+    } catch (err) { toast(err.message); }
 }
 
 async function createBuildJob() {
@@ -438,7 +468,7 @@ async function createBuildJob() {
     } catch (err) { toast(err.message); }
 }
 
-async function loadBuildLog(jobId) {
+async function loadBuildLog(jobId, {silent = false} = {}) {
     try {
         selectedBuildJobId = jobId;
         let job = await api(`/api/build/jobs/${encodeURIComponent(jobId)}`);
@@ -454,9 +484,19 @@ async function loadBuildLog(jobId) {
         }
         job = await api(`/api/build/jobs/${encodeURIComponent(jobId)}?poll=true`);
         const log = await api(`/api/build/jobs/${encodeURIComponent(jobId)}/log?lines=5000`);
-        qs('build-log').textContent = log.text || '暂无日志。';
+        const logEl = qs('build-log');
+        const autoFollow = qs('build-log-auto-follow')?.checked !== false;
+        const wasNearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 48;
+        const previousTop = logEl.scrollTop;
+        logEl.textContent = log.text || '暂无日志。';
+        if (autoFollow && (wasNearBottom || !logEl.dataset.loaded)) {
+            requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
+        } else {
+            logEl.scrollTop = previousTop;
+        }
+        logEl.dataset.loaded = '1';
         qs('build-log-title').textContent = `${job.id} / ${job.status}`;
-        toast(`构建任务 ${job.id}: ${job.status}`);
+        if (!silent) toast(`构建任务 ${job.id}: ${job.status}`);
         await loadBuildJobs();
     } catch (err) { toast(err.message); }
 }
@@ -690,13 +730,9 @@ async function loadAll(silent = false) {
         await loadDashboard();
     } catch (_) { /* 概览失败不阻断主流程 */ }
     try {
-        await loadBuildConfig();
-        await loadDevices();
-        await loadTestSuitesForAutomation();
-        await loadProfiles();
-        await loadRuns();
-        await loadBuildJobs();
-        await loadWorkerStatus();
+        await Promise.all([loadBuildConfig(), loadTestSuitesForAutomation()]);
+        await Promise.all([loadDevices(false), loadProfiles()]);
+        await Promise.all([loadRuns(), loadBuildJobs(), loadWorkerStatus()]);
         if (!silent) toast('已刷新');
     } catch (err) { toast(err.message); }
 }
@@ -717,7 +753,7 @@ setInterval(async () => {
         if (activeWorkflowPane === 'runs' || activeWorkflowPane === 'reports') await loadRuns();
         if (activeWorkflowPane === 'build') {
             await loadBuildJobs();
-            if (selectedBuildJobId) await loadBuildLog(selectedBuildJobId);
+            if (selectedBuildJobId) await loadBuildLog(selectedBuildJobId, {silent: true});
         }
         if (activeWorkflowPane === 'events' && selectedRunId) await refreshSelectedEvents();
     } catch (_) { /* 后台刷新静默失败 */ }

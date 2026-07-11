@@ -127,7 +127,7 @@
                         <div class="device-picker">
                             <input id="automation-devices" placeholder="TESTSERIAL001，多个用逗号分隔">
                             <div id="automation-device-list" class="checkbox-list"></div>
-                            <button type="button" onclick="loadDevices()">刷新</button>
+                            <button type="button" onclick="loadDevices(true)">刷新</button>
                         </div>
                     </label>
                     <div class="form-row">
@@ -192,7 +192,10 @@
                 <div class="build-log-pane">
                     <div class="build-log-toolbar">
                         <span id="build-log-title" class="muted">未选择任务</span>
-                        <button type="button" onclick="refreshSelectedBuildLog()">刷新日志</button>
+                        <div class="log-actions">
+                            <label class="auto-follow"><input id="build-log-auto-follow" type="checkbox" checked> 跟随最新</label>
+                            <button type="button" onclick="refreshSelectedBuildLog()">刷新日志</button>
+                        </div>
                     </div>
                     <pre id="build-log" class="log-view">选择构建任务查看日志。</pre>
                 </div>

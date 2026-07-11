@@ -291,19 +291,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🔌 现在初始化WebSocket（需要clientId）
     initWebSocket();
 
+    // 刷新非测试页面时不要启动 ADB、套件和用户列表等全局扫描。各页面会由
+    // runPageInitializers() 按需加载自己的数据，避免多个慢请求争抢后端资源。
+    const initialPage = window.__targetPage || 'test';
+    const needsTestWorkspace = initialPage === 'test';
+
     // 📱 设备列表是测试页的关键数据，立即触发，避免 F5 后空等（之前被埋在
     // 1s 延迟里，叠加后端扫描耗时，导致 ADB 设备区显示很慢）。
-    loadDevices();
+    if (needsTestWorkspace) {
+        loadDevices();
+    }
 
     // ⚙️ 延迟加载非关键数据（避免阻塞关键请求）
     setTimeout(() => {
         loadConfig().catch(error => {
             console.warn('[Init] Config load failed, using defaults:', error);
         });
-        loadTestSuites();
-        checkInitialTestStatus().catch(error => {
-            console.warn('[Init] Test status check failed:', error);
-        });
+        if (needsTestWorkspace) {
+            loadTestSuites();
+            checkInitialTestStatus().catch(error => {
+                console.warn('[Init] Test status check failed:', error);
+            });
+        }
     }, 1000);
 
     startStatusPolling();
@@ -321,7 +330,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // 延迟执行耗时操作，不阻塞页面加载
-    setTimeout(async () => {
+    if (needsTestWorkspace) setTimeout(async () => {
 
         // 加载用户列表
         try {
@@ -493,6 +502,8 @@ function initWebSocket() {
                         debugLog('[WebSocket] log_update:', data.log);
                         addNormalizedLogEntry(data);
                         state.lastLogCount = (state.lastLogCount || 0) + 1;
+                        // WebSocket 正常投递日志，清除停滞计数。
+                        wsLogStallTicks = 0;
                         break;
 
                     case 'test_complete':
@@ -6306,6 +6317,10 @@ function startStatusPolling() {
     let pollInterval = 2000;  // 初始轮询间隔：2秒
     const maxPollInterval = 30000;  // 最大轮询间隔：30秒
     let pollTimer = null;
+    // WebSocket 是实时日志主通道，但 client_id 不一致或推送丢失时它会静默丢日志。
+    // 下面两个计数器用于检测"服务端日志在涨、本地却没收到"的停滞后回退到增量拉取。
+    let wsLogStallTicks = 0;       // WebSocket 连接正常但日志停滞的连续轮询次数
+    let lastSeenServerLogCount = 0; // 最近一次观测到的服务端日志总数
 
     const pollStatus = async () => {
         try {
@@ -6314,12 +6329,26 @@ function startStatusPolling() {
 
             // WebSocket 是实时主通道：连接正常时绝不拉增量日志，否则会与 WebSocket
             // 推送的同一批日志重复显示（两者共用 state.lastLogCount，竞态必现重复）。
-            // 仅当 WebSocket 不可用时才走 since 增量兜底。
-            const shouldFetchLogs = !hasRealtimeConnection;
+            // 但若服务端日志总数持续增长而本地 lastLogCount 不动（WebSocket 推送丢失或
+            // client_id 不一致），则回退到 since 增量兜底，避免"测试在跑却看不到日志"。
+            let shouldFetchLogs = !hasRealtimeConnection;
+            if (hasRealtimeConnection && state.testing && wsLogStallTicks >= 2) {
+                shouldFetchLogs = true;
+            }
             const statusUrl = shouldFetchLogs
                 ? `/api/test/status?since=${encodeURIComponent(String(state.lastLogCount || 0))}`
                 : '/api/test/status?logs=false';
             const status = await apiCall(statusUrl);
+
+            // 检测 WebSocket 日志停滞：服务端 log_count 在涨、本地却没有跟进时累计计数。
+            if (typeof status.log_count === 'number' && hasRealtimeConnection && state.testing) {
+                if (status.log_count > (state.lastLogCount || 0)) {
+                    wsLogStallTicks += 1;
+                } else {
+                    wsLogStallTicks = 0;
+                }
+                lastSeenServerLogCount = status.log_count;
+            }
 
             // 检查 USB 监控器状态并提示（仅显示一次）
             if (!shownPyudevWarning && status.usb_monitor) {
@@ -6357,6 +6386,8 @@ function startStatusPolling() {
             if (status.logs && status.logs.length > 0) {
                 status.logs.forEach(addNormalizedLogEntry);
                 state.lastLogCount = status.log_count || (state.lastLogCount + status.logs.length);
+                // 增量拉取成功补回了日志，说明 WebSocket 推送确实在丢，重置停滞计数避免反复回退。
+                wsLogStallTicks = 0;
             } else if (typeof status.log_count === 'number') {
                 state.lastLogCount = Math.max(state.lastLogCount || 0, status.log_count);
             }
