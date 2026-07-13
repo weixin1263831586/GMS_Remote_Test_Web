@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class TestStartRequest(BaseModel):
+    worker_id: str = "worker-local"
     test_type: str = ""
     test_module: str = ""
     test_case: str = ""

@@ -25,6 +25,7 @@ def configure_test_execution_dependencies(
     cleanup_files: Any,
     acquire_test_devices: Any,
     release_test_devices: Any,
+    start_cluster_test: Any = None,
 ) -> None:
     configure_runtime(
         selected_config_manager=config_manager,
@@ -45,4 +46,5 @@ def configure_test_execution_dependencies(
         selected_cleanup_files=cleanup_files,
         selected_acquire_test_devices=acquire_test_devices,
         selected_release_test_devices=release_test_devices,
+        selected_start_cluster_test=start_cluster_test,
     )

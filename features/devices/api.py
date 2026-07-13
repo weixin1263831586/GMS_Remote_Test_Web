@@ -466,13 +466,14 @@ _AUTO_GROUP_KEYS = {
     "model": "model",
     "android_version": "android_version",
     "soc": "soc_model",
+    "worker": "worker_id",
 }
 
 
 @router.post("/api/device-groups/auto")
 @handle_api_errors
 async def auto_group_devices(request: Request, req: dict = Body(default={})):
-    """按设备属性（model / android_version / soc）一键生成分组定义（per-user）。
+    """按设备属性（model / android_version / soc / worker）一键生成分组定义（per-user）。
 
     结果写回当前用户的 device_groups（变成可再手动微调的持久分组），并返回新分组列表。
     每个分组名形如 "model: Pixel 7"，id 形如 "auto_<dim>_<sanitized>"。
@@ -488,29 +489,68 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
 
     dim = (req.get("by") or "").strip()
     info_key = _AUTO_GROUP_KEYS.get(dim)
-    if not info_key:
+    if dim != "worker" and not info_key:
         return _api_error(
-            "by 必须是 model/android_version/soc", status_code=400
+            "by 必须是 model/android_version/soc/worker", status_code=400
         )
 
-    # 当前在线设备（用缓存即可，避免重复 SSH 扫描）
-    raw_devices = await asyncio.to_thread(device_manager.get_connected_devices)
-    if not raw_devices:
-        return _api_success({"groups": []}, "当前无在线设备")
+    # worker 维度：用集群设备池确定每台设备归属的主机，不需要 SSH 读属性
+    if dim == "worker":
+        value_to_devices: dict[str, list[str]] = {}
+        local_worker_id = "worker-local"
+        cluster = None
+        try:
+            from features.cluster import get_cluster_service
+            cluster = get_cluster_service()
+            local_worker_id = cluster.config.local_worker_id
+        except Exception:
+            pass
+        # 本地设备：用裸 serial（与 /api/devices/management 返回的 device_id 一致）
+        local_devices = await asyncio.to_thread(device_manager.get_connected_devices)
+        for device_id in local_devices:
+            value_to_devices.setdefault(local_worker_id, []).append(device_id)
+        # 远端 Worker 设备：用集群命名空间 ID（worker-id:serial）
+        if cluster is not None and cluster.effective_enabled:
+            for device in cluster.repository.list_devices():
+                if device.get("state") in {"offline", "unknown"}:
+                    continue
+                wid = device.get("worker_id", "unknown")
+                if wid == local_worker_id:
+                    continue  # 本地设备已用裸 serial 加入
+                value_to_devices.setdefault(wid, []).append(device["id"])
+        # 将 worker_id 映射为友好名称
+        worker_names: dict[str, str] = {}
+        try:
+            for worker in get_cluster_service().list_workers():
+                worker_names[worker["id"]] = worker.get("name") or worker["id"]
+        except Exception:
+            pass
+        # 重写 value_to_devices 的 key 为友好名
+        _named = {}
+        for wid, devs in value_to_devices.items():
+            _named[worker_names.get(wid, wid)] = devs
+        value_to_devices = _named
+        if not value_to_devices:
+            return _api_success({"groups": []}, "当前无在线设备")
+    else:
+        # 当前在线设备（用缓存即可，避免重复 SSH 扫描）
+        raw_devices = await asyncio.to_thread(device_manager.get_connected_devices)
+        if not raw_devices:
+            return _api_success({"groups": []}, "当前无在线设备")
 
-    # 收集每台设备的属性值
-    value_to_devices: dict[str, list[str]] = {}
-    with SSHConnection() as ssh:
-        for device_id in raw_devices:
-            base_info = await asyncio.to_thread(
-                device_manager.get_device_info, device_id, ssh
-            )
-            value = str(base_info.get(info_key) or "未知").strip() or "未知"
-            # SOC 维度做系列归并：RK3576S -> RK3576，RK3588S -> RK3588，
-            # 同数字系列的设备归到同一个分组；其他维度保持原值。
-            if dim == "soc":
-                value = soc_series(value)
-            value_to_devices.setdefault(value, []).append(device_id)
+        # 收集每台设备的属性值
+        value_to_devices = {}
+        with SSHConnection() as ssh:
+            for device_id in raw_devices:
+                base_info = await asyncio.to_thread(
+                    device_manager.get_device_info, device_id, ssh
+                )
+                value = str(base_info.get(info_key) or "未知").strip() or "未知"
+                # SOC 维度做系列归并：RK3576S -> RK3576，RK3588S -> RK3588，
+                # 同数字系列的设备归到同一个分组；其他维度保持原值。
+                if dim == "soc":
+                    value = soc_series(value)
+                value_to_devices.setdefault(value, []).append(device_id)
 
     def _sanitize(value: str) -> str:
         return re.sub(r"[^a-zA-Z0-9_-]+", "_", value).strip("_") or "unknown"

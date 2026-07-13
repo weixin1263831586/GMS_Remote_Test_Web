@@ -23,6 +23,7 @@ from features.devices.reconnect import (
     schedule_usbip_reconnect_for_removed_devices,
     stop_usbip_reconnect_tasks,
 )
+from features.cluster import stop_local_bridge
 from features.redmine.scheduler import (
     start_redmine_agent_scheduler,
     stop_redmine_agent_scheduler,
@@ -43,12 +44,14 @@ def initialize_runtime_data(services: AppServices) -> None:
     (data_root / 'redmine/attachments').mkdir(parents=True, exist_ok=True)
 
     from features.automation.repository import AutomationStore
+    from features.cluster.repository import ClusterRepository
     from features.reports.repository import TestReportDB
     from features.system.mainline_issues.repository import init_db as init_mainline_db
     from features.system.update_monitor.repository import init_db as init_update_monitor_db
 
     AutomationStore(data_root / 'automation/automation.sqlite3')
-    TestReportDB(str(data_root / 'reports/test_reports.json'))
+    ClusterRepository(data_root / 'cluster/cluster.sqlite3')
+    TestReportDB(str(data_root / 'test_reports.json'))
 
     update_monitor_db = data_root / 'gms_update_monitor.sqlite3'
     update_monitor_db.parent.mkdir(parents=True, exist_ok=True)
@@ -189,6 +192,10 @@ def create_lifespan(services: AppServices):
                 await stop_automation_worker()
         if redmine_task:
             await stop_redmine_agent_scheduler()
+        try:
+            stop_local_bridge()
+        except Exception:
+            pass
         stop_usbip_reconnect_tasks()
         stop_usb_monitor()
 

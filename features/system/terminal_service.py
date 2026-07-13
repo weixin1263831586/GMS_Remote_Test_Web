@@ -277,11 +277,39 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
         password = data.get('password', config.get('ubuntu_pswd', ''))
         mode = data.get('mode', 'ssh')
         serial_no = data.get('serial_no', '')
+        worker_id = str(data.get('worker_id') or '').strip()
+
+        if worker_id:
+            from features.cluster import get_cluster_service
+            cluster = get_cluster_service()
+            worker = cluster.repository.get_worker(worker_id)
+            if worker_id == cluster.config.local_worker_id and not worker:
+                worker_id = ""
+            if not worker_id:
+                worker = None
+            elif not worker or worker.get('status') not in {'online', 'busy'}:
+                await websocket.send_json({'type': 'terminal_error', 'error': '所选 Worker 不在线'})
+                return
+            host = (worker or {}).get('address') or (worker or {}).get('hostname') or host
+            user = str(((worker or {}).get('capabilities') or {}).get('ssh_user') or user)
+            if not host or not user:
+                await websocket.send_json({'type': 'terminal_error', 'error': 'Worker 缺少 SSH 连接元数据'})
+                return
+            password = config_manager.find_device_host_password(f'{user}@{host}', config) or password
+            if mode == 'adb':
+                device_ids = {item['id'] for item in get_cluster_service().repository.list_devices(worker_id)}
+                composite_id = serial_no if serial_no.startswith(f'{worker_id}:') else f'{worker_id}:{serial_no}'
+                if composite_id not in device_ids:
+                    await websocket.send_json({'type': 'terminal_error', 'error': '设备不属于所选 Worker'})
+                    return
+                serial_no = composite_id.split(':', 1)[1]
 
         session_id = client_id
 
         if mode == 'adb':
-            await handle_adb_shell_connect(client_id, websocket, serial_no, config)
+            adb_config = dict(config)
+            adb_config.update({'ubuntu_host': host, 'ubuntu_user': user})
+            await handle_adb_shell_connect(client_id, websocket, serial_no, adb_config)
             return
 
         logger.info(f"[TERMINAL] SSH Connection request from {session_id} to {user}@{host}")
@@ -348,7 +376,10 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
             'username': user,
             'password': password,
             'timeout': 5,
-            'use_key_auth': config.get('use_key_auth', False),
+            # A host-scoped saved password takes precedence over the global
+            # key setting. Otherwise an encrypted default key prevents
+            # Paramiko from ever attempting the valid Worker password.
+            'use_key_auth': bool(config.get('use_key_auth', False) and not password),
             'private_key_path': config.get('private_key_path', '~/.ssh/id_rsa')
         }
 

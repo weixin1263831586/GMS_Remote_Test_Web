@@ -104,7 +104,7 @@ def _report_matches_aliases(report: dict, aliases: set[str]) -> bool:
 # ==================== List Reports ====================
 
 @router.get("/api/reports/list")
-async def list_reports(request: Request, user_only: bool = False):
+async def list_reports(request: Request, user_only: bool = False, worker_id: str = ""):
     """Get test report list from database."""
     import time
     start_time = time.time()
@@ -131,12 +131,15 @@ async def list_reports(request: Request, user_only: bool = False):
                 _decorate_report_for_client(report, display_id, aliases)
                 for report in test_report_db.get_reports(limit=30, user_only=client_id_filter)
             ]
+        if worker_id:
+            all_reports = [report for report in all_reports if
+                           (report.get("worker_id") or "worker-local") == worker_id]
         db_time = (time.time() - db_start) * 1000
 
         total_time = (time.time() - start_time) * 1000
         logger.info(f"[API] /api/reports/list completed: {len(all_reports)} reports, DB: {db_time:.2f}ms, Total: {total_time:.2f}ms")
 
-        return JSONResponse(content={"reports": all_reports})
+        return JSONResponse(content={"reports": all_reports, "worker_id": worker_id})
     except Exception as e:
         logger.error(f"Failed to get report list: {e}")
         return JSONResponse(content={"reports": []})

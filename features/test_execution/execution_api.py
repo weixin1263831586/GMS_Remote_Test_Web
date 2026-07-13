@@ -64,6 +64,9 @@ async def start_test(
     if not devices:
         return error_response("No devices selected", 400)
 
+    if req.worker_id and req.worker_id != "worker-local":
+        return runtime.start_cluster_test(req, runtime.get_client_id_from_request(request))
+
     config = runtime.config_manager.load_config()
     username = get_client_username_from_request(request)
 

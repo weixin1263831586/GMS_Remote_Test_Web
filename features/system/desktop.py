@@ -44,6 +44,22 @@ NOVNC_UPSTREAM_HTTP = os.getenv("GMS_NOVNC_UPSTREAM", default_novnc_upstream_htt
 NOVNC_UPSTREAM_WS = NOVNC_UPSTREAM_HTTP.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
 
 
+def _cluster_novnc_upstream(worker_id: str) -> str:
+    from features.cluster import get_cluster_service
+
+    cluster = get_cluster_service()
+    worker = cluster.repository.get_worker(worker_id)
+    if not cluster.effective_enabled or not worker:
+        raise ValueError("Worker 不存在或集群模式未启用")
+    if worker.get("status") not in {"online", "busy"}:
+        raise ValueError("Worker 不在线")
+    address = str(worker.get("address") or worker.get("hostname") or "").strip()
+    if not address:
+        raise ValueError("Worker 缺少桌面地址")
+    port = int((worker.get("capabilities") or {}).get("novnc_port") or NOVNC_WEB_PORT)
+    return f"http://{address}:{port}"
+
+
 def build_novnc_upstream_url(path: str, query_string: bytes = b"") -> str:
     upstream_path = path.lstrip("/") or "vnc.html"
     url = f"{NOVNC_UPSTREAM_HTTP}/{upstream_path}"
@@ -157,6 +173,52 @@ async def novnc_websockify_proxy(websocket: WebSocket):
             pass
 
 
+@router.websocket("/cluster/novnc/{worker_id}/websockify")
+async def cluster_novnc_websockify_proxy(websocket: WebSocket, worker_id: str):
+    """Proxy a Worker's noVNC socket through the Controller HTTPS origin."""
+    requested_protocols = {
+        item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")
+        if item.strip()
+    }
+    subprotocol = "binary" if "binary" in requested_protocols else None
+    await websocket.accept(subprotocol=subprotocol)
+    try:
+        upstream_http = _cluster_novnc_upstream(worker_id)
+        upstream_url = upstream_http.replace("http://", "ws://", 1) + "/websockify"
+        protocols = (subprotocol,) if subprotocol else ()
+        async with aiohttp.ClientSession() as session, session.ws_connect(
+            upstream_url, protocols=protocols
+        ) as upstream:
+            async def client_to_upstream():
+                while True:
+                    message = await websocket.receive()
+                    if message.get("type") == "websocket.disconnect":
+                        await upstream.close()
+                        return
+                    if message.get("bytes") is not None:
+                        await upstream.send_bytes(message["bytes"])
+                    elif message.get("text") is not None:
+                        await upstream.send_str(message["text"])
+
+            async def upstream_to_client():
+                async for message in upstream:
+                    if message.type == aiohttp.WSMsgType.BINARY:
+                        await websocket.send_bytes(message.data)
+                    elif message.type == aiohttp.WSMsgType.TEXT:
+                        await websocket.send_text(message.data)
+
+            tasks = [asyncio.create_task(client_to_upstream()), asyncio.create_task(upstream_to_client())]
+            _done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+    except Exception as exc:
+        logger.error("[noVNC] Worker %s WebSocket proxy error: %s", worker_id, exc)
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
+
+
 # ==================== noVNC HTTP Proxy ====================
 
 @router.get("/novnc")
@@ -186,6 +248,30 @@ async def novnc_http_proxy(request: Request, path: str = "vnc.html"):
     except Exception as e:
         logger.error(f"[noVNC] HTTP proxy error: {e}")
         return error_response(f"noVNC 代理失败：{e!s}", status_code=502)
+
+
+@router.get("/cluster/novnc/{worker_id}")
+@router.get("/cluster/novnc/{worker_id}/{path:path}")
+async def cluster_novnc_http_proxy(request: Request, worker_id: str, path: str = "vnc.html"):
+    """Serve Worker noVNC assets without mixed-content or browser routing issues."""
+    try:
+        upstream = _cluster_novnc_upstream(worker_id)
+        upstream_path = path.lstrip("/") or "vnc.html"
+        url = f"{upstream}/{upstream_path}"
+        if request.scope.get("query_string"):
+            url += "?" + request.scope["query_string"].decode("utf-8", errors="ignore")
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(url) as response:
+            body = await response.read()
+            cache = "no-cache" if upstream_path.endswith((".html", ".json")) else "public, max-age=86400"
+            return Response(content=body, status_code=response.status,
+                            media_type=response.headers.get("content-type", "application/octet-stream"),
+                            headers={"Cache-Control": cache})
+    except ValueError as exc:
+        return error_response(str(exc), status_code=409)
+    except Exception as exc:
+        logger.error("[noVNC] Worker %s HTTP proxy error: %s", worker_id, exc)
+        return error_response(f"Worker noVNC 代理失败：{exc}", status_code=502)
 
 
 # ==================== Host Validation ====================

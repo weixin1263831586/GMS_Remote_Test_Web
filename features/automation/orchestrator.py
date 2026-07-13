@@ -150,7 +150,10 @@ class AutomationOrchestrator:
             result = self.executor.start_test(run)
             if not result.get("success"):
                 return self._fail(run, RUN_STATUS_TEST_FAILED, result.get("error", "test failed"), result)
-            return self._transition(run, RUN_STATUS_TEST_RUNNING, "GMS test accepted and running", result)
+            return self._transition(
+                run, RUN_STATUS_TEST_RUNNING, "GMS test accepted and running", result,
+                result_json=json.dumps(result, ensure_ascii=False, separators=(",", ":")),
+            )
         if status == RUN_STATUS_TEST_RUNNING:
             result = self.executor.poll_test(run)
             if not result.get("success"):

@@ -71,6 +71,9 @@ async def upload_file(
     file_size: int | None = Form(None),
     resume: str | None = Form(None),
     check_chunks: str | None = Form(None),
+    worker_id: str = Form(""),
+    host: str = Form(""),
+    user: str = Form(""),
 ):
     """File upload - supports chunked upload and resume."""
     # HEAD request: check uploaded chunks for resume
@@ -99,6 +102,11 @@ async def upload_file(
             return error_response("No file selected", 400)
 
         config = config_manager.load_config()
+        if worker_id and worker_id != "worker-local" and host and user:
+            password = config_manager.find_device_host_password(f"{user}@{host}", config) or ""
+            config = {**config, "ubuntu_host": host, "ubuntu_user": user,
+                      "ubuntu_pswd": password, "host": host, "username": user,
+                      "password": password}
 
         upload_dir = upload_temp_root()
         os.makedirs(upload_dir, exist_ok=True)

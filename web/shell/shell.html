@@ -64,7 +64,7 @@
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
-            const sidebarAllPages = ['test', 'desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'apk-analysis', 'test-suites', 'api-docs', 'architecture', 'websites', 'tools', 'security-audit', 'gms-assistant', 'automation', 'redmine-agent', 'gerrit-dashboard', 'agent', 'notes'];
+            const sidebarAllPages = ['test', 'desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'apk-analysis', 'test-suites', 'api-docs', 'architecture', 'websites', 'tools', 'security-audit', 'gms-assistant', 'automation', 'cluster', 'redmine-agent', 'gerrit-dashboard', 'agent', 'notes'];
             const pageTitles = {
                 'test': '测试界面 - GMS远程测试',
                 'desktop': '主机桌面 - GMS远程测试',
@@ -82,6 +82,7 @@
                 'security-audit': '安全审计 - GMS 远程测试',
                 'gms-assistant': 'GMS助手 - GMS 远程测试',
                 'automation': 'GMS ATS - GMS 远程测试',
+                'cluster': '主机集群 - GMS 远程测试',
                 'redmine-agent': 'Redmine - GMS 远程测试',
                 'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
                 'notes': '个人知识库 - GMS 远程测试',
@@ -104,8 +105,10 @@
                 savedVisiblePages = JSON.parse(localStorage.getItem('gms_sidebar_visible_pages') || 'null');
                 if (!Array.isArray(savedVisiblePages) || savedVisiblePages.length === 0) {
                     savedVisiblePages = null;
-                } else if (!savedVisiblePages.includes('notes')) {
-                    savedVisiblePages.push('notes');
+                } else {
+                    for (const requiredPage of ['notes', 'cluster']) {
+                        if (!savedVisiblePages.includes(requiredPage)) savedVisiblePages.push(requiredPage);
+                    }
                     localStorage.setItem('gms_sidebar_visible_pages', JSON.stringify(savedVisiblePages));
                 }
             } catch (e) {
@@ -158,7 +161,10 @@
                 // 移除所有导航项的选中状态
                 '.sidebar-item { background: transparent !important; color: var(--text-secondary) !important; } ' +
                 // 设置目标导航项的选中状态
-                '[data-page="' + targetPage + '"] { background: var(--active-bg) !important; color: var(--primary-color) !important; }';
+                '[data-page="' + targetPage + '"] { background: var(--active-bg) !important; color: var(--primary-color) !important; }' +
+                (Array.isArray(savedOrder) ? savedOrder.map(function(page, index) {
+                    return '.sidebar-item[data-page="' + page + '"] { order: ' + index + '; }';
+                }).join('') : '');
             document.head.appendChild(style);
         })();
     </script>
@@ -169,7 +175,16 @@
         .terminal-status.disconnected { background: rgba(244, 67, 54, 0.2); color: var(--danger-color); }
         .sidebar-brand { cursor: pointer; user-select: none; }
         .sidebar-brand:focus { outline: 2px solid var(--primary-color); outline-offset: 3px; border-radius: 4px; }
-        .sidebar-visibility-list { display: grid; gap: 8px; max-height: min(60vh, 520px); overflow-y: auto; padding-right: 4px; }
+        .cluster-mode-toggle { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 8px; padding: 6px 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+        .cluster-mode-toggle:hover { border-color: var(--primary-color); }
+        .cluster-mode-toggle .mode-label { font-size: 11px; color: var(--text-secondary); }
+        .cluster-mode-toggle .mode-switch { position: relative; width: 36px; height: 18px; background: var(--border-color); border-radius: 9px; transition: background 0.2s; flex-shrink: 0; }
+        .cluster-mode-toggle .mode-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background: white; border-radius: 50%; transition: transform 0.2s; }
+        .cluster-mode-toggle.active .mode-switch { background: var(--primary-color); }
+        .cluster-mode-toggle.active .mode-switch::after { transform: translateX(18px); }
+        .cluster-mode-toggle .mode-text { font-size: 11px; font-weight: 600; }
+        #sidebar-visibility-modal .modal-body { overflow: hidden; display: flex; flex-direction: column; }
+        .sidebar-visibility-list { display: grid; gap: 8px; min-height: 0; overflow-y: auto; padding-right: 4px; }
         .sidebar-visibility-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); cursor: pointer; }
         .sidebar-visibility-option input { margin: 0; }
         .sidebar-visibility-option .sidebar-icon { width: 22px; display: inline-flex; justify-content: center; }
@@ -386,6 +401,11 @@
                     <span class="sidebar-icon">⚙️</span>
                     <span class="sidebar-text">GMS ATS</span>
                 </a>
+                <a href="#" class="sidebar-item" data-page="cluster" data-page-order="16" onclick="switchPage('cluster', event)">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">🖧</span>
+                    <span class="sidebar-text">主机集群</span>
+                </a>
                 <a href="#" class="sidebar-item" data-page="redmine-agent" data-page-order="16" onclick="switchPage('redmine-agent', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🧭</span>
@@ -430,6 +450,10 @@
                     <span class="modal-close" onclick="closeSidebarVisibilityModal()">&times;</span>
                 </div>
                 <div class="modal-body">
+                    <div id="cluster-mode-toggle-row" class="cluster-mode-toggle" style="margin: 0 0 12px;" onclick="toggleClusterMode()">
+                        <span id="cluster-mode-label" class="mode-label">单机模式</span>
+                        <span id="cluster-mode-btn" class="mode-switch"></span>
+                    </div>
                     <div id="sidebar-visibility-list" class="sidebar-visibility-list"></div>
                     <div class="modal-info-text" style="margin-top: 12px;">至少保留一个页面可见。</div>
                     <div class="modal-buttons">
@@ -508,6 +532,12 @@
                                     <input type="text" id="ubuntu-host" class="entry-field readonly"
                                            value="{{ config.ubuntu_user }}@{{ config.ubuntu_host }}" readonly />
                                 </div>
+                                <div class="form-row" id="cluster-worker-row">
+                                    <label>集群 Worker:</label>
+                                    <select id="cluster-worker" class="combo-box" onchange="switchTestWorker()">
+                                        <option value="worker-local">本机 worker-local</option>
+                                    </select>
+                                </div>
                                 <div class="form-row">
                                     <label>设备主机:</label>
                                     <input type="text" id="device-host" class="entry-field" value="" placeholder="自动检测中..." />
@@ -553,8 +583,8 @@
                     </div>
                     <!-- VNC 控制按钮 -->
                     <div class="vnc-button-frame">
-                        <button class="btn-xxs" onclick="burnFirmware()">🔥 烧写固件</button>
-                        <button class="btn-xxs" onclick="burnGsiImage()">🔥 烧写GSI</button>
+                        <button id="btn-burn-firmware" class="btn-xxs" onclick="burnFirmware()">🔥 烧写固件</button>
+                        <button id="btn-burn-gsi" class="btn-xxs" onclick="burnGsiImage()">🔥 烧写GSI</button>
                         <button class="btn-xxs" onclick="burnSerialNumber()" disabled>🔥 烧写SN</button>
                         <button class="btn-xxs" onclick="initAndStartVnc()">🚀 启动VNC</button>
                         <button class="btn-xxs" onclick="showDeviceScreen()">📺 设备投屏</button>
@@ -626,44 +656,53 @@
         </div>
         <!-- End of page-test -->
 
-        <!-- 桌面页面 -->
+        <!-- 多主机桌面 -->
         <div class="container page-content" id="page-desktop">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-                <div class="section-title" style="margin: 0;">🖥️ 主机桌面</div>
-                <div style="display: flex; align-items: center; gap: 6px;">
-                    <select id="host-select" onchange="switchHost()" style="padding: 3px 6px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 11px;">
-                        <option value="">加载中...</option>
-                    </select>
-                    <button class="btn-xs" onclick="refreshVNC()" style="padding: 2px 6px; font-size: 10px;">🔄 刷新桌面</button>
+            <div style="position:relative;margin-bottom:6px;">
+                <div class="section-title" style="margin:0;">🖥️ 主机桌面</div>
+                <div class="host-workspace-layouts page-title-actions" role="group" aria-label="桌面布局">
+                    <button class="btn-xs" data-workspace-layout="single" onclick="setHostWorkspaceLayout('single')">单屏</button>
+                    <button class="btn-xs" data-workspace-layout="horizontal" onclick="setHostWorkspaceLayout('horizontal')">左右</button>
+                    <button class="btn-xs" data-workspace-layout="vertical" onclick="setHostWorkspaceLayout('vertical')">上下</button>
+                    <button class="btn-xs" data-workspace-layout="quad" onclick="setHostWorkspaceLayout('quad')">四屏</button>
                     <button class="btn-xs" onclick="showAddHostModal()" style="padding: 2px 6px; font-size: 10px;">添加主机</button>
-                    <button id="delete-host-btn" class="btn-xs" onclick="deleteCurrentHost()" style="padding: 2px 6px; font-size: 10px; color: var(--danger-color);">删除主机</button>
                 </div>
             </div>
-
-            <!-- VNC 画布 -->
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 80px); overflow: hidden;">
-                <iframe id="vnc-frame" style="width: 100%; height: 100%; border: none;"
-                        src="about:blank"
-                        frameborder="0"
-                        allowfullscreen>
-                </iframe>
+            <div id="host-workspace-grid" class="host-workspace-grid layout-single"></div>
+            <!-- 兼容旧的桌面控制函数与 UI 合约；实际显示由工作区窗格负责。 -->
+            <div style="display:none" aria-hidden="true">
+                <select id="host-select" onchange="switchHost()"><option value="">加载中</option></select>
+                <button id="delete-host-btn" onclick="deleteCurrentHost()"></button>
+                <iframe id="vnc-frame" src="about:blank"></iframe>
             </div>
         </div>
 
         <!-- 终端页面 -->
         <div class="container page-content" id="page-terminal">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+            <div style="position:relative;margin-bottom:6px;">
                 <div class="section-title" style="margin: 0;">🐧 主机终端</div>
-                <div style="display: flex; align-items: center; gap: 6px;">
-                    <div style="font-size: 11px; color: var(--text-secondary);">连接: <span style="color: var(--text-primary); font-weight: 500;">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</span></div>
+                <div class="host-workspace-layouts page-title-actions" role="group" aria-label="终端布局">
+                    <button class="btn-xs" data-terminal-layout="single" onclick="setTerminalWorkspaceLayout('single')">单屏</button>
+                    <button class="btn-xs" data-terminal-layout="horizontal" onclick="setTerminalWorkspaceLayout('horizontal')">左右</button>
+                    <button class="btn-xs" data-terminal-layout="vertical" onclick="setTerminalWorkspaceLayout('vertical')">上下</button>
+                    <button class="btn-xs" data-terminal-layout="quad" onclick="setTerminalWorkspaceLayout('quad')">四屏</button>
+                    <label class="host-workspace-broadcast"><input id="terminal-workspace-broadcast" type="checkbox" onchange="setTerminalWorkspaceBroadcast(this.checked)">输入广播</label>
+                    <span style="display:none">
+                    <span id="terminal-worker-control" style="display:contents">
+                        <label for="terminal-host-select" style="font-size:11px;color:var(--text-secondary);">主机</label>
+                        <select id="terminal-host-select" onchange="switchTerminalHost()" style="padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;">
+                            <option value="worker-local">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</option>
+                        </select>
+                    </span>
+                    <div style="font-size: 11px; color: var(--text-secondary);">连接: <span id="terminal-connection-label" style="color: var(--text-primary); font-weight: 500;">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</span></div>
                     <div class="terminal-status" id="terminal-status" style="font-size: 10px; padding: 3px 6px; border-radius: 3px; background: var(--darker-bg); color: var(--text-secondary);">未连接</div>
                     <button class="btn-xs" onclick="clearTerminal()" style="padding: 2px 6px; font-size: 10px;">🧹</button>
                     <button class="btn-xs" onclick="reconnectTerminal()" style="padding: 2px 6px; font-size: 10px;">🔄</button>
+                    </span>
                 </div>
             </div>
-
-            <!-- 终端区域 -->
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 80px); overflow: hidden;">
+            <div id="terminal-workspace-grid" class="host-workspace-grid layout-single"></div>
+            <div style="display:none" aria-hidden="true">
                 <div id="terminal" style="width: 100%; height: 100%;"></div>
             </div>
         </div>
@@ -786,6 +825,7 @@
                     <button class="btn-xxs" onclick="openCreateGroupModal()" title="新建分组">➕ 新建分组</button>
                     <select class="btn-xxs" onchange="autoGroupDevices(this.value); this.value=''" title="按属性自动分组">
                         <option value="">⊞ 自动分组…</option>
+                        <option value="worker">按主机分组</option>
                         <option value="model">按设备型号</option>
                         <option value="android_version">按Android版本</option>
                         <option value="soc">按SOC系列</option>
@@ -863,10 +903,15 @@
         <div class="container page-content" id="page-reports">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
                 <div class="section-title" style="margin: 0;">📊 报告管理</div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-primary);">主机
+                    <select id="reports-worker-filter" onchange="loadTestReports(currentUserFilter)" style="padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;"><option value="">全部 Worker</option></select>
+                </label>
                 <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-primary); cursor: pointer;">
                     <input type="checkbox" id="filter-user-checkbox" onchange="toggleUserReports()" style="cursor: pointer;">
                     查看本用户报告
                 </label>
+                </div>
             </div>
 
             <!-- 报告列表 -->
@@ -958,7 +1003,12 @@
 
         <!-- 测试套件页面 -->
         <div class="container page-content" id="page-test-suites">
-            <div class="section-title">📚 测试套件</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div class="section-title">📚 测试套件</div>
+                <label style="font-size:12px;color:var(--text-secondary);">主机
+                    <select id="suite-worker-select" onchange="switchSuiteWorker()" style="padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;"><option value="worker-local">本机 worker-local</option></select>
+                </label>
+            </div>
 
             <!-- 下载和解压区域 -->
             <div class="suite-download-section" style="margin-bottom: 10px; padding: 8px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border-color);">
@@ -1314,6 +1364,14 @@
         <div class="container page-content" id="page-automation">
             <div class="section-title" style="text-transform:none">⚙️ GMS ATS</div>
             <iframe id="automation-frame" data-src="/automation"
+                    style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
+            </iframe>
+        </div>
+
+        <!-- 主机集群页面 -->
+        <div class="container page-content" id="page-cluster">
+            <div class="section-title" style="text-transform:none">🖧 主机集群</div>
+            <iframe id="cluster-frame" data-src="/cluster"
                     style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
             </iframe>
         </div>
@@ -2533,12 +2591,17 @@
         const DEFAULT_VNC_PASSWORD = {{ config.vnc_password | default("", true) | tojson }};
         const NOVNC_WEB_PORT = 6080;
 
-        function buildVncUrl(host, password = '') {
+        function buildVncUrl(host, password = '', workerId = '') {
             const params = new URLSearchParams({
                 autoconnect: 'true',
                 resize: 'scale'
             });
             if (password) params.set('password', password);
+
+            if (workerId && workerId !== 'worker-local') {
+                params.set('path', `cluster/novnc/${workerId}/websockify`);
+                return `/cluster/novnc/${encodeURIComponent(workerId)}/vnc.html?${params.toString()}`;
+            }
 
             const canUseSameOriginProxy =
                 host === DEFAULT_VNC_HOST ||
@@ -2552,10 +2615,10 @@
             return `http://${host}:${NOVNC_WEB_PORT}/vnc.html?${params.toString()}`;
         }
 
-        function normalizeVncUrl(url, password = '') {
+        function normalizeVncUrl(url, password = '', workerId = '') {
             try {
                 const parsed = new URL(url, window.location.origin);
-                return buildVncUrl(parsed.hostname, password || parsed.searchParams.get('password') || '');
+                return buildVncUrl(parsed.hostname, password || parsed.searchParams.get('password') || '', workerId);
             } catch (e) {
                 return url;
             }
@@ -2616,7 +2679,40 @@
 
             updateHostSelector();
             saveHostsToStorage();
-            setTimeout(() => loadVNCConnection(), 0);
+            mergeClusterDesktopHosts();
+        }
+
+        async function mergeClusterDesktopHosts() {
+            try {
+                const response = await fetch('/api/cluster/hosts', {cache: 'no-store'});
+                const payload = await response.json();
+                if (!response.ok || !payload.success || !Array.isArray(payload.hosts)) return;
+                const selectedId = currentHost && currentHost.id;
+                const clusterHosts = payload.hosts
+                    .filter(host => host.address && host.ssh_user)
+                    .map(host => ({
+                        id: `cluster:${host.worker_id}`,
+                        worker_id: host.worker_id,
+                        name: `${host.name || host.worker_id}${host.status === 'offline' ? '（离线）' : ''}`,
+                        connection: `${host.ssh_user}@${host.address}`,
+                        password: '',
+                        vnc_password: '',
+                        cluster_managed: true,
+                        offline: host.status === 'offline'
+                    }));
+                // Controller's configured default remains the compatibility entry.
+                const defaultConnection = {{ (config.ubuntu_user ~ '@' ~ config.ubuntu_host) | tojson }};
+                const localAlias = clusterHosts.find(host => host.connection === defaultConnection);
+                const retained = desktopHosts.filter(host => !host.cluster_managed);
+                desktopHosts = retained.concat(clusterHosts.filter(host => !localAlias || host.id !== localAlias.id));
+                currentHost = desktopHosts.find(host => host.id === selectedId) || currentHost || desktopHosts[0];
+                updateHostSelector();
+                saveHostsToStorage();
+                if (window.hostWorkspaceInitialized) renderHostWorkspace();
+                if (window.terminalWorkspaceInitialized) renderTerminalWorkspace();
+            } catch (error) {
+                console.debug('Cluster desktop hosts unavailable; preserving local host list', error);
+            }
         }
 
         // 首次初始化或确保 VNC 已加载（桌面页面切换时调用）
@@ -2625,13 +2721,8 @@
                 initDesktopHosts();
                 window.desktopHostsInitialized = true;
                 debugLog('[Desktop] Hosts initialized');
-            } else {
-                const vncFrame = document.getElementById('vnc-frame');
-                if (vncFrame && (!vncFrame.src || vncFrame.src === 'about:blank' || vncFrame.src.includes('about:blank'))) {
-                    debugLog('[Desktop] VNC frame not loaded, loading now');
-                    setTimeout(() => loadVNCConnection(), 100);
-                }
             }
+            ensureHostWorkspaceInitialized();
         }
 
         // 更新主机选择器
@@ -2640,7 +2731,7 @@
             if (!select) return;
 
             select.innerHTML = desktopHosts.map(host =>
-                `<option value="${host.id}" ${currentHost && currentHost.id === host.id ? 'selected' : ''}>${host.name}</option>`
+                `<option value="${host.id}" ${currentHost && currentHost.id === host.id ? 'selected' : ''} ${host.offline ? 'disabled' : ''}>${host.name}</option>`
             ).join('');
             const deleteButton = document.getElementById('delete-host-btn');
             if (deleteButton) {
@@ -2669,6 +2760,9 @@
 
             currentHost = host;
             saveHostsToStorage();
+
+            // 刷新删除按钮等 UI 状态
+            updateHostSelector();
 
             // 刷新 VNC 连接
             await loadVNCConnection();
@@ -2756,7 +2850,7 @@
                 }
 
                 // 使用后端返回的URL（可能包含密码）
-                vncFrame.src = normalizeVncUrl(result.url, currentHost.vnc_password || '');
+                vncFrame.src = normalizeVncUrl(result.url, currentHost.vnc_password || '', currentHost.worker_id || '');
 
                 debugLog('[Desktop] Switched to host:', currentHost.name);
             } catch (e) {
@@ -2780,6 +2874,346 @@
 
             debugLog('[Desktop] VNC refreshed');
         }
+
+        // ==================== 多主机工作区 ====================
+        const HOST_WORKSPACE_COUNTS = {single: 1, horizontal: 2, vertical: 2, quad: 4};
+        const hostWorkspace = {layout: 'single', panes: [], instances: new Map(), maximized: null};
+
+        function loadHostWorkspaceState() {
+            try {
+                const saved = JSON.parse(localStorage.getItem('gms_host_workspace') || '{}');
+                if (HOST_WORKSPACE_COUNTS[saved.layout]) hostWorkspace.layout = saved.layout;
+                if (Array.isArray(saved.panes)) hostWorkspace.panes = saved.panes.slice(0, 4);
+            } catch (error) {
+                console.warn('[Workspace] Invalid saved layout:', error);
+            }
+            normalizeHostWorkspacePanes();
+        }
+
+        function normalizeHostWorkspacePanes() {
+            const count = HOST_WORKSPACE_COUNTS[hostWorkspace.layout] || 1;
+            const fallbackHost = currentHost?.id || desktopHosts[0]?.id || 'default';
+            while (hostWorkspace.panes.length < count) {
+                const used = new Set(hostWorkspace.panes.filter(p => p.type !== 'empty').map(p => p.hostId));
+                const nextHost = desktopHosts.find(host => !host.offline && !used.has(host.id));
+                hostWorkspace.panes.push(nextHost ? {type: 'desktop', hostId: nextHost.id} : {type: 'empty', hostId: ''});
+            }
+            const assigned = new Set();
+            hostWorkspace.panes = hostWorkspace.panes.slice(0, count).map(pane => {
+                let hostId = pane?.type === 'empty' ? '' : pane?.hostId;
+                if (!desktopHosts.some(host => host.id === hostId) || assigned.has(hostId)) {
+                    hostId = desktopHosts.find(host => !host.offline && !assigned.has(host.id))?.id || '';
+                }
+                if (hostId) assigned.add(hostId);
+                return {type: hostId ? 'desktop' : 'empty', hostId};
+            });
+        }
+
+        function saveHostWorkspaceState() {
+            localStorage.setItem('gms_host_workspace', JSON.stringify({
+                layout: hostWorkspace.layout,
+                panes: hostWorkspace.panes
+            }));
+        }
+
+        function ensureHostWorkspaceInitialized() {
+            if (!window.hostWorkspaceInitialized) {
+                loadHostWorkspaceState();
+                window.hostWorkspaceInitialized = true;
+            }
+            renderHostWorkspace();
+        }
+
+        function disposeHostWorkspaceInstance(index) {
+            const instance = hostWorkspace.instances.get(index);
+            if (!instance) return;
+            instance.disposed = true;
+            if (instance.resizeObserver) instance.resizeObserver.disconnect();
+            if (instance.socket) {
+                instance.socket.onclose = null;
+                instance.socket.close();
+            }
+            if (instance.terminal) instance.terminal.dispose();
+            hostWorkspace.instances.delete(index);
+        }
+
+        function disposeAllHostWorkspaceInstances() {
+            Array.from(hostWorkspace.instances.keys()).forEach(disposeHostWorkspaceInstance);
+        }
+
+        function hostWorkspaceHostOptions(selectedId) {
+            const emptyOption = selectedId ? '' : '<option value="" selected>请选择主机</option>';
+            return emptyOption + desktopHosts.map(host => {
+                const disabled = host.offline ? ' disabled' : '';
+                const selected = host.id === selectedId ? ' selected' : '';
+                return `<option value="${escapeHtml(host.id)}"${selected}${disabled}>${escapeHtml(host.name)}</option>`;
+            }).join('');
+        }
+
+        function renderHostWorkspace() {
+            const grid = document.getElementById('host-workspace-grid');
+            if (!grid) return;
+            normalizeHostWorkspacePanes();
+            saveHostWorkspaceState();
+            disposeAllHostWorkspaceInstances();
+            grid.className = `host-workspace-grid layout-${hostWorkspace.layout}`;
+            document.querySelectorAll('[data-workspace-layout]').forEach(button => {
+                button.classList.toggle('active', button.dataset.workspaceLayout === hostWorkspace.layout);
+            });
+            grid.classList.toggle('pane-maximized', hostWorkspace.maximized !== null);
+            grid.innerHTML = hostWorkspace.panes.map((pane, index) => `
+                <section class="host-workspace-pane${hostWorkspace.maximized === index ? ' maximized' : ''}" data-workspace-pane="${index}">
+                    <div class="host-workspace-pane-header">
+                        <span style="font-size:11px;">🖥️ 桌面</span>
+                        <select aria-label="主机" onchange="changeHostWorkspacePaneHost(${index}, this.value)"${pane.type === 'empty' ? ' disabled' : ''}>
+                            ${hostWorkspaceHostOptions(pane.hostId)}
+                        </select>
+                        <span class="host-workspace-pane-status" id="host-workspace-status-${index}">准备中</span>
+                        <button class="btn-xs" onclick="refreshHostWorkspacePane(${index})" title="重新连接">🔄</button>
+                        <button class="btn-xs" onclick="maximizeHostWorkspacePane(${index})" title="${hostWorkspace.maximized === index ? '恢复布局' : '单屏显示'}">${hostWorkspace.maximized === index ? '▦' : '⛶'}</button>
+                        <button class="btn-xs" onclick="closeHostWorkspacePane(${index})" title="关闭">×</button>
+                    </div>
+                    <div class="host-workspace-pane-body" id="host-workspace-body-${index}"></div>
+                </section>`).join('');
+            hostWorkspace.panes.forEach((pane, index) => mountHostWorkspacePane(index, pane));
+        }
+
+        function setHostWorkspaceStatus(index, text, connected = false) {
+            const status = document.getElementById(`host-workspace-status-${index}`);
+            if (!status) return;
+            status.textContent = text;
+            status.style.color = connected ? 'var(--success-color)' : 'var(--text-secondary)';
+        }
+
+        async function mountHostWorkspacePane(index, pane) {
+            const body = document.getElementById(`host-workspace-body-${index}`);
+            if (!body) return;
+            const host = desktopHosts.find(item => item.id === pane.hostId);
+            if (pane.type === 'empty') {
+                body.innerHTML = `<div class="host-workspace-empty"><button class="btn-xs" onclick="reopenHostWorkspacePane(${index})">重新打开桌面</button></div>`;
+                setHostWorkspaceStatus(index, '未打开');
+                return;
+            }
+            if (!host || host.offline) {
+                body.innerHTML = '<div class="host-workspace-empty">主机不可用或已离线</div>';
+                setHostWorkspaceStatus(index, '离线');
+                return;
+            }
+            await mountHostWorkspaceDesktop(index, host, body);
+        }
+
+        async function resolveWorkspaceVncUrl(host) {
+            if (host.worker_id && host.worker_id !== 'worker-local') {
+                const address = String(host.connection || '').split('@').pop();
+                return buildVncUrl(address, host.vnc_password || '', host.worker_id);
+            }
+            if (host.id === 'default' || host.worker_id === 'worker-local') {
+                try {
+                    const status = await apiCall('/api/desktop/vnc/status');
+                    if (status.running) return normalizeVncUrl(status.url || buildVncUrl(DEFAULT_VNC_HOST), host.vnc_password || '');
+                } catch (_) {}
+            }
+            const response = await fetch('/api/desktop/vnc/start', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({host: host.connection, password: host.password || '', vnc_password: host.vnc_password || ''})
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) throw new Error(result.error || result.detail || 'VNC 启动失败');
+            return normalizeVncUrl(result.url, host.vnc_password || '', host.worker_id || '');
+        }
+
+        async function mountHostWorkspaceDesktop(index, host, body) {
+            setHostWorkspaceStatus(index, '正在连接桌面…');
+            try {
+                const url = await resolveWorkspaceVncUrl(host);
+                if (!document.getElementById(`host-workspace-body-${index}`)) return;
+                const frame = document.createElement('iframe');
+                frame.allowFullscreen = true;
+                frame.src = url;
+                frame.onload = () => setHostWorkspaceStatus(index, '桌面已连接', true);
+                body.replaceChildren(frame);
+                hostWorkspace.instances.set(index, {type: 'desktop', frame, disposed: false});
+            } catch (error) {
+                body.innerHTML = `<div class="host-workspace-empty">${escapeHtml(error.message)}</div>`;
+                setHostWorkspaceStatus(index, '连接失败');
+            }
+        }
+
+        async function mountHostWorkspaceTerminal(index, host, body) {
+            setHostWorkspaceStatus(index, '正在加载终端…');
+            try {
+                await loadXtermScripts();
+            } catch (error) {
+                body.innerHTML = '<div class="host-workspace-empty">xterm.js 加载失败</div>';
+                setHostWorkspaceStatus(index, '加载失败');
+                return;
+            }
+            const terminalElement = document.createElement('div');
+            terminalElement.className = 'host-workspace-terminal';
+            body.replaceChildren(terminalElement);
+            const term = new Terminal({cursorBlink: true, fontSize: 13, fontFamily: 'Consolas, "Courier New", monospace',
+                theme: {background: '#000000', foreground: '#ffffff'}, scrollback: 2000, termName: 'xterm-256color'});
+            const fit = new FitAddon.FitAddon();
+            term.loadAddon(fit);
+            term.open(terminalElement);
+            fit.fit();
+            const instance = {type: 'terminal', terminal: term, fit, socket: null, resizeObserver: null, disposed: false};
+            hostWorkspace.instances.set(index, instance);
+            const [user = '', address = ''] = String(host.connection || '').split('@');
+            const workerId = host.worker_id || (host.id === 'default' ? 'worker-local' : '');
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const clientId = `workspace_${index}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+            const socket = new WebSocket(`${protocol}//${location.host}/api/system/websocket/${clientId}`);
+            instance.socket = socket;
+            term.writeln(`\x1b[33m⏳ 正在连接 ${user}@${address}...\x1b[0m`);
+            term.onData(input => {
+                if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type: 'terminal_input', input}));
+                if (hostWorkspace.broadcast) {
+                    hostWorkspace.instances.forEach((target, targetIndex) => {
+                        if (targetIndex !== index && target.type === 'terminal' &&
+                                target.socket?.readyState === WebSocket.OPEN) {
+                            target.socket.send(JSON.stringify({type: 'terminal_input', input}));
+                        }
+                    });
+                }
+            });
+            socket.onopen = () => socket.send(JSON.stringify({type: 'terminal_connect', mode: 'ssh', host: address, user, worker_id: workerId}));
+            socket.onmessage = event => {
+                if (instance.disposed) return;
+                try {
+                    const message = JSON.parse(event.data);
+                    if (message.type === 'terminal_data') term.write(message.data || '');
+                    else if (message.type === 'terminal_connected') {
+                        setHostWorkspaceStatus(index, `${user}@${address}`, true);
+                        setTimeout(() => resizeHostWorkspaceTerminal(instance), 0);
+                    } else if (message.type === 'terminal_error' || message.type === 'error') {
+                        term.writeln(`\r\n\x1b[31m${message.error || message.message || '终端连接失败'}\x1b[0m`);
+                        setHostWorkspaceStatus(index, '连接失败');
+                    }
+                } catch (error) { console.error('[Workspace terminal] Invalid message:', error); }
+            };
+            socket.onclose = () => {
+                if (!instance.disposed) {
+                    term.writeln('\r\n\x1b[31m⚠️ 连接已断开\x1b[0m');
+                    setHostWorkspaceStatus(index, '已断开');
+                }
+            };
+            socket.onerror = () => setHostWorkspaceStatus(index, '连接错误');
+            instance.resizeObserver = new ResizeObserver(() => resizeHostWorkspaceTerminal(instance));
+            instance.resizeObserver.observe(body);
+        }
+
+        function resizeHostWorkspaceTerminal(instance) {
+            if (!instance || instance.disposed) return;
+            try {
+                instance.fit.fit();
+                if (instance.socket?.readyState === WebSocket.OPEN) {
+                    instance.socket.send(JSON.stringify({type: 'terminal_resize', cols: instance.terminal.cols, rows: instance.terminal.rows}));
+                }
+            } catch (_) {}
+        }
+
+        function setHostWorkspaceLayout(layout) {
+            if (!HOST_WORKSPACE_COUNTS[layout]) return;
+            hostWorkspace.layout = layout;
+            renderHostWorkspace();
+        }
+        function changeHostWorkspacePaneHost(index, hostId) { hostWorkspace.panes[index].hostId = hostId; renderHostWorkspace(); }
+        function refreshHostWorkspacePane(index) {
+            disposeHostWorkspaceInstance(index);
+            mountHostWorkspacePane(index, hostWorkspace.panes[index]);
+        }
+        function closeHostWorkspacePane(index) { hostWorkspace.panes[index].type = 'empty'; renderHostWorkspace(); }
+        function reopenHostWorkspacePane(index) { hostWorkspace.panes[index].type = 'desktop'; renderHostWorkspace(); }
+        function maximizeHostWorkspacePane(index) { hostWorkspace.maximized = hostWorkspace.maximized === index ? null : index; renderHostWorkspace(); }
+
+        window.setHostWorkspaceLayout = setHostWorkspaceLayout;
+        window.changeHostWorkspacePaneHost = changeHostWorkspacePaneHost;
+        window.refreshHostWorkspacePane = refreshHostWorkspacePane;
+        window.closeHostWorkspacePane = closeHostWorkspacePane;
+        window.reopenHostWorkspacePane = reopenHostWorkspacePane;
+        window.maximizeHostWorkspacePane = maximizeHostWorkspacePane;
+
+        // ==================== 多主机终端工作区 ====================
+        const terminalWorkspace = {layout:'single', panes:[], instances:new Map(), broadcast:false, maximized:null};
+        function normalizeTerminalWorkspace() {
+            const count = HOST_WORKSPACE_COUNTS[terminalWorkspace.layout] || 1;
+            const fallback = desktopHosts[0]?.id || 'default';
+            while (terminalWorkspace.panes.length < count) terminalWorkspace.panes.push({hostId:''});
+            const assigned = new Set();
+            terminalWorkspace.panes = terminalWorkspace.panes.slice(0, count).map(p => {
+                let hostId = p?.hostId;
+                if (!desktopHosts.some(h => h.id === hostId) || assigned.has(hostId)) {
+                    hostId = desktopHosts.find(h => !h.offline && !assigned.has(h.id))?.id || '';
+                }
+                if (hostId) assigned.add(hostId);
+                return {hostId};
+            });
+        }
+        function saveTerminalWorkspace() { localStorage.setItem('gms_terminal_workspace', JSON.stringify({layout:terminalWorkspace.layout, panes:terminalWorkspace.panes, broadcast:terminalWorkspace.broadcast})); }
+        function ensureTerminalWorkspaceInitialized() {
+            if (!window.terminalWorkspaceInitialized) {
+                try { const s=JSON.parse(localStorage.getItem('gms_terminal_workspace')||'{}'); if(HOST_WORKSPACE_COUNTS[s.layout]) terminalWorkspace.layout=s.layout; if(Array.isArray(s.panes)) terminalWorkspace.panes=s.panes; terminalWorkspace.broadcast=false; } catch(_) {}
+                window.terminalWorkspaceInitialized=true;
+            }
+            if (!window.desktopHostsInitialized) { initDesktopHosts(); window.desktopHostsInitialized=true; }
+            renderTerminalWorkspace();
+        }
+        function disposeTerminalWorkspace() {
+            terminalWorkspace.instances.forEach(i => { i.disposed=true; i.resizeObserver?.disconnect(); if(i.socket){i.socket.onclose=null;i.socket.close();} i.terminal?.dispose(); });
+            terminalWorkspace.instances.clear();
+        }
+        function renderTerminalWorkspace() {
+            const grid=document.getElementById('terminal-workspace-grid'); if(!grid)return;
+            normalizeTerminalWorkspace(); saveTerminalWorkspace(); disposeTerminalWorkspace();
+            grid.className=`host-workspace-grid layout-${terminalWorkspace.layout}${terminalWorkspace.maximized!==null?' pane-maximized':''}`;
+            document.querySelectorAll('[data-terminal-layout]').forEach(b=>b.classList.toggle('active',b.dataset.terminalLayout===terminalWorkspace.layout));
+            const broadcast=document.getElementById('terminal-workspace-broadcast'); if(broadcast)broadcast.checked=terminalWorkspace.broadcast;
+            grid.innerHTML=terminalWorkspace.panes.map((p,i)=>`<section class="host-workspace-pane${terminalWorkspace.maximized===i?' maximized':''}" data-terminal-pane="${i}">
+                <div class="host-workspace-pane-header"><span style="font-size:11px;">🐧 终端</span>
+                <select aria-label="主机" onchange="changeTerminalWorkspaceHost(${i},this.value)">${hostWorkspaceHostOptions(p.hostId)}</select>
+                <span class="host-workspace-pane-status" id="terminal-workspace-status-${i}">准备中</span>
+                <button class="btn-xs" onclick="refreshTerminalWorkspacePane(${i})">🔄</button>
+                <button class="btn-xs" onclick="maximizeTerminalWorkspacePane(${i})">${terminalWorkspace.maximized===i?'▦':'⛶'}</button></div>
+                <div class="host-workspace-pane-body" id="terminal-workspace-body-${i}"></div></section>`).join('');
+            terminalWorkspace.panes.forEach((p,i)=>mountTerminalWorkspacePane(i,p));
+        }
+        function terminalWorkspaceStatus(i,text,ok=false){const e=document.getElementById(`terminal-workspace-status-${i}`);if(e){e.textContent=text;e.style.color=ok?'var(--success-color)':'var(--text-secondary)';}}
+        async function mountTerminalWorkspacePane(index,pane) {
+            const body=document.getElementById(`terminal-workspace-body-${index}`),host=desktopHosts.find(h=>h.id===pane.hostId); if(!body)return;
+            if(!host){body.innerHTML='<div class="host-workspace-empty">暂无更多可用主机</div>';terminalWorkspaceStatus(index,'空闲');return;}
+            if(host.offline){body.innerHTML='<div class="host-workspace-empty">主机已离线</div>';terminalWorkspaceStatus(index,'离线');return;}
+            try{await loadXTermScripts();}catch(error){console.error('[Terminal workspace] xterm.js load failed:',error);body.innerHTML='<div class="host-workspace-empty">xterm.js 加载失败</div>';return;}
+            const el=document.createElement('div');el.className='host-workspace-terminal';body.replaceChildren(el);
+            const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'Consolas, "Courier New", monospace',theme:{background:'#000',foreground:'#fff'},scrollback:2000,termName:'xterm-256color'});
+            const fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(el);fit.fit();
+            const instance={type:'terminal',terminal:term,fit,socket:null,resizeObserver:null,disposed:false};terminalWorkspace.instances.set(index,instance);
+            const parts=String(host.connection||'').split('@'),user=parts.shift()||'',address=parts.join('@'),workerId=host.worker_id||(host.id==='default'?'worker-local':'');
+            body.addEventListener('dragover',event=>{event.preventDefault();body.style.outline='2px dashed var(--primary-color)';});
+            body.addEventListener('dragleave',()=>{body.style.outline='';});
+            body.addEventListener('drop',async event=>{event.preventDefault();body.style.outline='';const file=event.dataTransfer?.files?.[0];if(!file)return;term.writeln(`\r\n\x1b[33m📤 正在上传 ${file.name}...\x1b[0m`);const form=new FormData();form.append('file',file);form.append('worker_id',workerId);form.append('host',address);form.append('user',user);try{const response=await fetch('/api/terminal/push',{method:'POST',body:form});const result=await response.json();if(!response.ok||!result.success)throw new Error(result.error||result.message||`HTTP ${response.status}`);term.writeln(`\r\n\x1b[32m✅ 已上传到 ${result.remote_path}\x1b[0m`);}catch(error){term.writeln(`\r\n\x1b[31m❌ 上传失败: ${error.message}\x1b[0m`);}finally{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input:'\r'}));term.focus();}});
+            const protocol=location.protocol==='https:'?'wss:':'ws:',socket=new WebSocket(`${protocol}//${location.host}/api/system/websocket/terminal_workspace_${index}_${Date.now()}_${Math.random().toString(36).slice(2)}`);instance.socket=socket;
+            term.writeln(`\x1b[33m⏳ 正在连接 ${user}@${address}...\x1b[0m`);
+            term.onData(input=>{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input}));const broadcastable=terminalWorkspace.broadcast&&!/[\x00-\x1f\x7f]/.test(input);if(broadcastable)terminalWorkspace.instances.forEach((t,j)=>{if(j!==index&&t.socket?.readyState===WebSocket.OPEN)t.socket.send(JSON.stringify({type:'terminal_input',input}));});});
+            let suppressPasteUntil=0;
+            const sendInput=input=>{if(socket.readyState!==WebSocket.OPEN)return false;socket.send(JSON.stringify({type:'terminal_input',input}));return true;};
+            const pasteText=text=>sendInput(String(text||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n'));
+            const pasteClipboard=async()=>{try{if(navigator.clipboard?.readText)pasteText(await navigator.clipboard.readText());}catch(error){console.debug('[Terminal workspace] clipboard read failed',error);}finally{term.focus();}};
+            term.attachCustomKeyEventHandler(event=>{if(event.type!=='keydown')return true;const key=event.key.length===1?event.key.toLowerCase():event.key,isCtrl=event.ctrlKey&&!event.altKey&&!event.metaKey;if(isCtrl&&key==='c'){if(term.hasSelection()){const text=term.getSelection();navigator.clipboard?.writeText(text);term.clearSelection();term.focus();}else sendInput('\x03');return false;}if(isCtrl&&key==='v'){suppressPasteUntil=Date.now()+500;pasteClipboard();return false;}if(isCtrl&&/^[a-z]$/.test(key)){sendInput(String.fromCharCode(key.charCodeAt(0)-96));return false;}return true;});
+            el.addEventListener('click',()=>term.focus());
+            el.addEventListener('paste',event=>{if(Date.now()<suppressPasteUntil){event.preventDefault();event.stopPropagation();return;}const text=event.clipboardData?.getData('text/plain');if(text){event.preventDefault();event.stopPropagation();pasteText(text);term.focus();}},true);
+            el.addEventListener('contextmenu',event=>{if(navigator.clipboard?.readText){event.preventDefault();event.stopPropagation();pasteClipboard();}});
+            socket.onopen=()=>socket.send(JSON.stringify({type:'terminal_connect',mode:'ssh',host:address,user,worker_id:workerId}));
+            socket.onmessage=e=>{if(instance.disposed)return;try{const m=JSON.parse(e.data);if(m.type==='terminal_data')term.write(m.data||'');else if(m.type==='terminal_connected'){terminalWorkspaceStatus(index,`${user}@${address}`,true);setTimeout(()=>resizeHostWorkspaceTerminal(instance),0);}else if(m.type==='terminal_error'||m.type==='error'){term.writeln(`\r\n\x1b[31m${m.error||m.message||'连接失败'}\x1b[0m`);terminalWorkspaceStatus(index,'连接失败');}}catch(_){}};
+            socket.onclose=()=>{if(!instance.disposed){term.writeln('\r\n\x1b[31m⚠️ 连接已断开\x1b[0m');terminalWorkspaceStatus(index,'已断开');}};
+            socket.onerror=()=>terminalWorkspaceStatus(index,'连接错误');instance.resizeObserver=new ResizeObserver(()=>resizeHostWorkspaceTerminal(instance));instance.resizeObserver.observe(body);
+        }
+        function setTerminalWorkspaceLayout(v){if(HOST_WORKSPACE_COUNTS[v]){terminalWorkspace.layout=v;terminalWorkspace.maximized=null;renderTerminalWorkspace();}}
+        function setTerminalWorkspaceBroadcast(v){terminalWorkspace.broadcast=Boolean(v);saveTerminalWorkspace();showToast(v?'终端输入广播已开启':'终端输入广播已关闭',v?'warning':'success');}
+        function changeTerminalWorkspaceHost(i,v){terminalWorkspace.panes[i].hostId=v;renderTerminalWorkspace();}
+        function refreshTerminalWorkspacePane(i){renderTerminalWorkspace();}
+        function maximizeTerminalWorkspacePane(i){terminalWorkspace.maximized=terminalWorkspace.maximized===i?null:i;renderTerminalWorkspace();}
+        Object.assign(window,{setTerminalWorkspaceLayout,setTerminalWorkspaceBroadcast,changeTerminalWorkspaceHost,refreshTerminalWorkspacePane,maximizeTerminalWorkspacePane});
 
         // 显示添加主机弹框
         function showAddHostModal() {
@@ -3085,7 +3519,10 @@
 
         async function loadDevicesManagement() {
             try {
-                const resp = await fetch('/api/devices/management', { cache: 'no-store' });
+                const [resp, clusterResp] = await Promise.all([
+                    fetch('/api/devices/management', { cache: 'no-store' }),
+                    fetch('/api/cluster/devices', { cache: 'no-store' }).catch(() => null)
+                ]);
                 const data = await resp.json();
 
                 if (data.devices) {
@@ -3093,6 +3530,30 @@
                 } else if (data.data) {
                     // 兼容旧格式
                     allDevices = data.data;
+                }
+                // 为本地设备补全 worker_id，使按主机分组时本地和远端设备都能正确归类
+                allDevices.forEach(d => {
+                    if (!d.worker_id) d.worker_id = 'worker-local';
+                });
+                if (clusterResp && clusterResp.ok) {
+                    const clusterData = await clusterResp.json();
+                    const remoteDevices = (clusterData.devices || [])
+                        .filter(device => device.worker_id !== 'worker-local')
+                        .map(device => ({
+                            device_id: device.id,
+                            serial_no: device.serial,
+                            worker_id: device.worker_id,
+                            source_host: device.worker_id,
+                            source_type: 'cluster',
+                            status: ['available', 'allocated'].includes(device.state) ? 'online' : 'offline',
+                            model: device.properties && (device.properties.model || device.properties.product),
+                            android_version: device.properties && device.properties.android_version,
+                            battery_level: device.properties && device.properties.battery_level,
+                            soc_model: device.properties && device.properties.soc_model,
+                            locked_by: device.state === 'allocated' ? 'cluster lease' : '',
+                            cluster_readonly: true
+                        }));
+                    allDevices = allDevices.concat(remoteDevices);
                 }
 
                 // 每次刷新都同步最新分组定义（后端持续自动补全会改动 auto 分组，
@@ -3187,10 +3648,14 @@
                 const serialNo = device.serial_no || device.device_id || '';
                 const serialAttr = escapeIconAttr(serialNo);
                 const actionButtonStyle = 'width: 92px; min-width: 92px; font-size: 12px; padding: 4px 8px;';
-                const releaseButton = device.locked_by
+                const releaseButton = device.cluster_readonly
+                    ? `<span style="color:var(--text-secondary);font-size:11px;">由 ${escapeHtml(device.worker_id)} 管理</span>`
+                    : device.locked_by
                     ? `<button class="btn-xxs" data-serial="${serialAttr}" onclick="forceReleaseDeviceLock(this.dataset.serial)" title="强制释放该设备的平台占用锁" style="background: var(--danger-color); color: white; ${actionButtonStyle}">释放设备</button>`
                     : `<span style="visibility: hidden; width: 92px; min-width: 92px;"></span>`;
-                const sourceTypeBadge = device.source_type === 'local'
+                const sourceTypeBadge = device.source_type === 'cluster'
+                    ? `<span style="background:rgba(33,150,243,.15);color:#42a5f5;padding:2px 6px;border-radius:3px;font-size:12px;font-weight:600;">${escapeHtml(device.worker_id)}</span>`
+                    : device.source_type === 'local'
                     ? '<span style="background: rgba(76, 175, 80, 0.2); color: var(--success-color); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: 600;">测试主机</span>'
                     : '<span style="background: rgba(255, 152, 0, 0.2); color: var(--warning-color); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: 600;">USB/IP</span>';
 
@@ -3322,16 +3787,24 @@
         function filteredDevicesForView() {
             let list = sortedAllDevices();
             if (state.groupFilter) {
-                // 筛选模式：只显示属于选中组的设备（一台设备可属多组，OR 命中）
-                list = list.filter(d => Array.isArray(d.groups) && d.groups.includes(state.groupFilter));
+                // 直接使用最新分组定义，远端设备没有 management API 的 groups 字段。
+                const group = (state.deviceGroups || []).find(g => g.id === state.groupFilter);
+                const memberIds = new Set((group?.device_ids || []).map(String));
+                list = list.filter(d => memberIds.has(mgmtDeviceKey(d)));
             }
             return list;
+        }
+
+        // 本地设备以 serial 为主键；集群设备必须使用 worker:serial 命名空间，
+        // 否则不同 Worker 的同名设备会冲突，且无法匹配后端自动分组结果。
+        function mgmtDeviceKey(device) {
+            return String(device?.device_id || device?.serial_no || '');
         }
 
         // 分组视图渲染：每个分组一行标题（colspan）+ 组内设备行；未分组归"未分组"段
         // 表头由表格 <thead> 统一提供（顶部唯一），分组内不再重复表头
         function renderDevicesManagementGrouped(devices, renderRow) {
-            const entryBySerial = new Map(devices.map(d => [String(d.serial_no || d.device_id || ''), d]));
+            const entryBySerial = new Map(devices.map(d => [mgmtDeviceKey(d), d]));
             const sections = [];
 
             const groupsToShow = (state.deviceGroups || []).filter(g =>
@@ -3359,11 +3832,11 @@
                     (g.device_ids || []).forEach(id => assignedIds.add(String(id)));
                 });
                 const ungrouped = devices.filter(d => {
-                    const id = String(d.serial_no || d.device_id || '');
+                    const id = mgmtDeviceKey(d);
                     return id && !assignedIds.has(id);
                 });
                 if (ungrouped.length > 0) {
-                    const ug = { id: '__ungrouped__', name: '未分组', color: '#888', followed: false, device_ids: ungrouped.map(d => d.serial_no || d.device_id) };
+                    const ug = { id: '__ungrouped__', name: '未分组', color: '#888', followed: false, device_ids: ungrouped.map(mgmtDeviceKey) };
                     sections.push(mgmtGroupTitleRow(ug, ungrouped.length, true));
                     if (!state.collapsedGroups.has('__ungrouped__')) {
                         sections.push(ungrouped.map(renderRow).join(''));
@@ -3470,10 +3943,8 @@
             document.getElementById('device-group-edit-id').value = '';
             document.getElementById('device-group-name').value = '';
             // 预填：筛选模式下预选当前筛选组的成员；否则预选当前可见设备
-            const preset = state.groupFilter
-                ? (allDevices.filter(d => Array.isArray(d.groups) && d.groups.includes(state.groupFilter))
-                            .map(d => d.serial_no || d.device_id))
-                : [];
+            const selectedGroup = (state.deviceGroups || []).find(g => g.id === state.groupFilter);
+            const preset = selectedGroup ? selectedGroup.device_ids || [] : [];
             renderGroupDevicePicker(preset);
             ModalManager.open('device-group-modal');
             setTimeout(() => document.getElementById('device-group-name').focus(), 50);
@@ -3497,7 +3968,7 @@
             const container = document.getElementById('device-group-picklist');
             if (!container) return;
             const checked = new Set((checkedIds || []).map(String));
-            const onlineIds = allDevices.map(d => String(d.serial_no || d.device_id || ''));
+            const onlineIds = allDevices.map(mgmtDeviceKey);
             const known = new Set([...onlineIds, ...checked]);
             const onlineSet = new Set(onlineIds);
             const html = [...known].map(id => {
@@ -3535,7 +4006,7 @@
         async function autoGroupDevices(by) {
             if (!by) return;
             try {
-                showToast(`正在按 ${by} 分组，需读取设备属性，请稍候...`, 'info');
+                showToast(by === 'worker' ? '正在按主机分组...' : `正在按 ${by} 分组，需读取设备属性，请稍候...`, 'info');
                 await apiCall('/api/device-groups/auto', 'POST', { by });
                 // 刷新设备列表（含每台设备最新的 groups 字段）+ 分组定义 + 渲染，
                 // 避免旧 allDevices.groups 与新分组定义不一致导致设备同时出现在
@@ -3593,9 +4064,16 @@
 
                 showToast(`正在打开设备 ${serialNo} 的 Shell...`, 'info');
 
-                // 保存设备序列号,供终端初始化时使用。sessionStorage 用于页面切换重建时兜底。
-                pendingAdbDevice = serialNo;
-                sessionStorage.setItem('pending_adb_device', serialNo);
+                const device = allDevices.find(item =>
+                    item.device_id === serialNo || item.serial_no === serialNo);
+                const workerId = device?.worker_id || (serialNo.includes(':') ? serialNo.split(':', 1)[0] : 'worker-local');
+                const rawSerial = serialNo.startsWith(`${workerId}:`) ? serialNo.slice(workerId.length + 1) : serialNo;
+                // 保存设备和 Worker，终端 WebSocket 将由服务端再次校验归属关系。
+                pendingAdbDevice = rawSerial;
+                sessionStorage.setItem('pending_adb_device', rawSerial);
+                sessionStorage.setItem('pending_adb_worker', workerId);
+                await loadTerminalClusterHosts();
+                applyTerminalHost(workerId, false);
 
                 // 直接切换页面，避免等待设备预检查导致按钮看起来无响应。
                 switchPage('terminal');
@@ -3634,6 +4112,9 @@
             if (!uiControlSerial) return;
             const refreshId = ++uiControlRefreshId;
             const serial = uiControlSerial;
+            const managedDevice = allDevices.find(item => item.device_id === serial || item.serial_no === serial);
+            const workerId = managedDevice?.worker_id || (serial.includes(':') ? serial.split(':', 1)[0] : '');
+            const isRemote = Boolean(workerId && workerId !== 'worker-local');
             const statusEl = document.getElementById('ui-control-status');
             const imgEl = document.getElementById('ui-control-screenshot');
             const listEl = document.getElementById('ui-control-elements');
@@ -3641,8 +4122,12 @@
             if (listEl) listEl.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">加载中...</div>';
             // 截图和布局独立结算：其中一项失败时，另一项仍正常展示。
             const [shotResult, layoutResult] = await Promise.allSettled([
-                apiCall('/api/devices/ui/screenshot', 'POST', { serial }),
-                apiCall('/api/devices/ui/layout', 'POST', { serial }),
+                isRemote
+                    ? apiCall('/api/cluster/devices/actions', 'POST', {worker_id: workerId, devices: [serial], action: 'screenshot'})
+                    : apiCall('/api/devices/ui/screenshot', 'POST', { serial }),
+                isRemote
+                    ? apiCall('/api/cluster/devices/actions', 'POST', {worker_id: workerId, devices: [serial], action: 'layout'})
+                    : apiCall('/api/devices/ui/layout', 'POST', { serial }),
             ]);
             if (refreshId !== uiControlRefreshId || serial !== uiControlSerial) return;
 
@@ -3720,7 +4205,11 @@
             const statusEl = document.getElementById('ui-control-status');
             if (statusEl) statusEl.textContent = `点按 (${x}, ${y}) 中...`;
             try {
-                const res = await apiCall('/api/devices/ui/tap', 'POST', { serial: uiControlSerial, x, y });
+                const managedDevice = allDevices.find(item => item.device_id === uiControlSerial || item.serial_no === uiControlSerial);
+                const workerId = managedDevice?.worker_id || (uiControlSerial.includes(':') ? uiControlSerial.split(':', 1)[0] : '');
+                const res = workerId && workerId !== 'worker-local'
+                    ? await apiCall('/api/cluster/devices/actions', 'POST', {worker_id: workerId, devices: [uiControlSerial], action: 'tap', x, y})
+                    : await apiCall('/api/devices/ui/tap', 'POST', { serial: uiControlSerial, x, y });
                 if (res && res.success) {
                     // 点按后等界面刷新，再重新截图+解析。
                     setTimeout(refreshUiControl, 600);
@@ -4456,6 +4945,7 @@
             'security-audit': '安全审计 - GMS 远程测试',
             'gms-assistant': 'GMS助手 - GMS 远程测试',
             'automation': 'GMS ATS - GMS 远程测试',
+            'cluster': '主机集群 - GMS 远程测试',
             'redmine-agent': 'Redmine - GMS 远程测试',
             'gerrit-dashboard': 'Gerrit看板 - GMS 远程测试',
             'notes': '个人知识库 - GMS 远程测试',
@@ -4490,8 +4980,8 @@
                     seen.add(page);
                 }
             });
-            if (allPages.includes('notes') && !seen.has('notes')) {
-                valid.push('notes');
+            for (const requiredPage of ['notes', 'cluster']) {
+                if (allPages.includes(requiredPage) && !seen.has(requiredPage)) valid.push(requiredPage);
             }
             return valid.length > 0 ? valid : allPages;
         }
@@ -4686,6 +5176,7 @@
             const frameMap = {
                 'gms-assistant': 'gms-assistant-frame',
                 'automation': 'automation-frame',
+                'cluster': 'cluster-frame',
                 'redmine-agent': 'redmine-agent-frame',
                 'gerrit-dashboard': 'gerrit-dashboard-frame',
                 'architecture': 'architecture-iframe'
@@ -4720,11 +5211,14 @@
         function runPageInitializers(pageName) {
             // Keep switchPage() and F5 restoration on the same page-specific path.
             if (pageName === 'terminal') {
+                if (!window.terminalClusterHosts) loadTerminalClusterHosts();
                 const pendingCommand = sessionStorage.getItem('pending_terminal_command');
                 const commandSource = sessionStorage.getItem('command_source');
                 pendingAdbDevice = pendingAdbDevice || sessionStorage.getItem('pending_adb_device');
 
-                if (!terminalInitialized || pendingAdbDevice || pendingCommand) {
+                if (!pendingAdbDevice && !pendingCommand) {
+                    ensureTerminalWorkspaceInitialized();
+                } else if (!terminalInitialized || pendingAdbDevice || pendingCommand) {
                     if ((pendingAdbDevice || pendingCommand) && terminalInitialized) {
                         debugLog('Forcing terminal re-initialization');
                         isReconnecting = true;
@@ -4782,7 +5276,7 @@
                     }
                 }, 50);
             }
-            if (pageName === 'terminal' && terminalInitialized && terminal) {
+            if (pageName === 'terminal' && terminalInitialized && terminal && (pendingAdbDevice || sessionStorage.getItem('pending_terminal_command'))) {
                 setTimeout(() => {
                     terminal.focus();
                 }, 100);
@@ -4809,6 +5303,12 @@
                 event.preventDefault();
             }
             pageName = resolveVisiblePage(pageName);
+            if (currentPage === 'desktop' && pageName !== 'desktop' && typeof disposeAllHostWorkspaceInstances === 'function') {
+                disposeAllHostWorkspaceInstances();
+            }
+            if (currentPage === 'terminal' && pageName !== 'terminal' && typeof disposeTerminalWorkspace === 'function') {
+                disposeTerminalWorkspace();
+            }
             const pageEl = document.getElementById(`page-${pageName}`);
             if (!pageEl) return;
             const initStyle = document.getElementById('page-init-style');
@@ -8098,9 +8598,59 @@
 
         // ==================== 终端功能 ====================
         const terminalConfig = {
+            worker_id: 'worker-local',
             ssh_host: '{{ config.ubuntu_host }}',
             ssh_user: '{{ config.ubuntu_user }}'
         };
+
+        async function loadTerminalClusterHosts() {
+            const select = document.getElementById('terminal-host-select');
+            if (!select) return;
+            const fallback = {
+                worker_id: 'worker-local', name: 'Controller / Local Worker',
+                address: terminalConfig.ssh_host, ssh_user: terminalConfig.ssh_user,
+                status: 'online'
+            };
+            let hosts = [fallback];
+            try {
+                const response = await fetch('/api/cluster/hosts', {cache: 'no-store'});
+                const payload = await response.json();
+                if (response.ok && payload.success && Array.isArray(payload.hosts) && payload.hosts.length) {
+                    hosts = payload.hosts;
+                    if (!hosts.some(host => host.worker_id === 'worker-local')) hosts.unshift(fallback);
+                }
+            } catch (error) {
+                console.debug('Cluster host directory unavailable; using local host', error);
+            }
+            window.terminalClusterHosts = hosts;
+            const previous = sessionStorage.getItem('pending_adb_worker') ||
+                localStorage.getItem('gms_terminal_worker') || terminalConfig.worker_id;
+            select.innerHTML = hosts.map(host => {
+                const disabled = host.status === 'offline' ? ' disabled' : '';
+                const suffix = host.status === 'offline' ? '（离线）' : '';
+                return `<option value="${escapeHtml(host.worker_id)}"${disabled}>${escapeHtml(host.name || host.worker_id)} ${suffix}</option>`;
+            }).join('');
+            if (hosts.some(host => host.worker_id === previous && host.status !== 'offline')) select.value = previous;
+            applyTerminalHost(select.value, terminalInitialized);
+        }
+
+        function applyTerminalHost(workerId, reconnect = true) {
+            const hosts = window.terminalClusterHosts || [];
+            const host = hosts.find(item => item.worker_id === workerId);
+            if (!host || !host.address || !host.ssh_user) return;
+            terminalConfig.worker_id = host.worker_id;
+            terminalConfig.ssh_host = host.address;
+            terminalConfig.ssh_user = host.ssh_user;
+            localStorage.setItem('gms_terminal_worker', host.worker_id);
+            const label = document.getElementById('terminal-connection-label');
+            if (label) label.textContent = `${host.ssh_user}@${host.address}`;
+            if (reconnect && terminalInitialized) reconnectTerminal();
+        }
+
+        function switchTerminalHost() {
+            const select = document.getElementById('terminal-host-select');
+            if (select) applyTerminalHost(select.value, true);
+        }
 
         // 终端静默模式处理（统一管理ADB和路由命令）
         let silentMode = {
@@ -8155,7 +8705,8 @@
                         type: 'terminal_connect',
                         mode: 'ssh',
                         host: terminalConfig.ssh_host,
-                        user: terminalConfig.ssh_user
+                        user: terminalConfig.ssh_user,
+                        worker_id: terminalConfig.worker_id
                     }));
                     return;
                 }
@@ -8170,17 +8721,20 @@
                         mode: 'adb',
                         serial_no: adbDevice,
                         host: terminalConfig.ssh_host,
-                        user: terminalConfig.ssh_user
+                        user: terminalConfig.ssh_user,
+                        worker_id: sessionStorage.getItem('pending_adb_worker') || terminalConfig.worker_id
                     }));
                     pendingAdbDevice = null;
                     sessionStorage.removeItem('pending_adb_device');
+                    sessionStorage.removeItem('pending_adb_worker');
                 } else {
                     // 请求SSH连接
                     socket.send(JSON.stringify({
                         type: 'terminal_connect',
                         mode: 'ssh',
                         host: terminalConfig.ssh_host,
-                        user: terminalConfig.ssh_user
+                        user: terminalConfig.ssh_user,
+                        worker_id: terminalConfig.worker_id
                     }));
                 }
             };
@@ -9382,7 +9936,8 @@
             'redmine-agent-notification',
             'gms-dashboard-notification',
             'gms-update-monitor-notification',
-            'automation-notification'
+            'automation-notification',
+            'cluster-notification'
         ]);
         if (e.data && allowedTypes.has(e.data.type)) {
             if (typeof notifyOperationResult === 'function') {

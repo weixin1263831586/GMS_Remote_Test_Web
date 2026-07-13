@@ -218,6 +218,66 @@
         "title": "Body_analyze_suite_log_dir_api_reports_analyze_log_dir_post",
         "type": "object"
       },
+      "Body_stage_worker_firmware_api_cluster_firmware_stage_post": {
+        "properties": {
+          "devices": {
+            "title": "Devices",
+            "type": "string"
+          },
+          "firmware_file": {
+            "format": "binary",
+            "title": "Firmware File",
+            "type": "string"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "devices",
+          "firmware_file"
+        ],
+        "title": "Body_stage_worker_firmware_api_cluster_firmware_stage_post",
+        "type": "object"
+      },
+      "Body_stage_worker_gsi_api_cluster_gsi_stage_post": {
+        "properties": {
+          "devices": {
+            "title": "Devices",
+            "type": "string"
+          },
+          "system_file": {
+            "format": "binary",
+            "title": "System File",
+            "type": "string"
+          },
+          "vendor_file": {
+            "anyOf": [
+              {
+                "format": "binary",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor File"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "devices",
+          "system_file"
+        ],
+        "title": "Body_stage_worker_gsi_api_cluster_gsi_stage_post",
+        "type": "object"
+      },
       "Body_upload_apk_api_apk_upload_post": {
         "properties": {
           "chunk_index": {
@@ -389,6 +449,11 @@
             ],
             "title": "File Size"
           },
+          "host": {
+            "default": "",
+            "title": "Host",
+            "type": "string"
+          },
           "path": {
             "default": "",
             "title": "Path",
@@ -426,6 +491,16 @@
               }
             ],
             "title": "Upload Id"
+          },
+          "user": {
+            "default": "",
+            "title": "User",
+            "type": "string"
+          },
+          "worker_id": {
+            "default": "",
+            "title": "Worker Id",
+            "type": "string"
           }
         },
         "title": "Body_upload_file_api_terminal_push_head",
@@ -489,6 +564,11 @@
             ],
             "title": "File Size"
           },
+          "host": {
+            "default": "",
+            "title": "Host",
+            "type": "string"
+          },
           "path": {
             "default": "",
             "title": "Path",
@@ -526,6 +606,16 @@
               }
             ],
             "title": "Upload Id"
+          },
+          "user": {
+            "default": "",
+            "title": "User",
+            "type": "string"
+          },
+          "worker_id": {
+            "default": "",
+            "title": "Worker Id",
+            "type": "string"
           }
         },
         "title": "Body_upload_file_api_terminal_push_post",
@@ -568,6 +658,273 @@
           }
         },
         "title": "ClientInfoRequest",
+        "type": "object"
+      },
+      "ClusterDeviceAction": {
+        "properties": {
+          "action": {
+            "enum": [
+              "reboot",
+              "reboot_bootloader",
+              "remount",
+              "get_properties",
+              "bootloader_status",
+              "bootloader_lock",
+              "bootloader_unlock",
+              "wifi",
+              "screenshot",
+              "layout",
+              "tap",
+              "scrcpy_start"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "devices": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Devices",
+            "type": "array"
+          },
+          "password": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Password",
+            "type": "string"
+          },
+          "ssid": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Ssid",
+            "type": "string"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y"
+          }
+        },
+        "required": [
+          "worker_id",
+          "devices",
+          "action"
+        ],
+        "title": "ClusterDeviceAction",
+        "type": "object"
+      },
+      "ClusterJobCreate": {
+        "properties": {
+          "argv": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Argv",
+            "type": "array"
+          },
+          "device_count": {
+            "default": 1,
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Device Count",
+            "type": "integer"
+          },
+          "devices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Devices",
+            "type": "array"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Env",
+            "type": "object"
+          },
+          "owner_id": {
+            "default": "",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "priority": {
+            "default": 100,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "source_type": {
+            "default": "manual",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "suite_key": {
+            "default": "",
+            "title": "Suite Key",
+            "type": "string"
+          },
+          "suite_path": {
+            "default": "",
+            "title": "Suite Path",
+            "type": "string"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id"
+        ],
+        "title": "ClusterJobCreate",
+        "type": "object"
+      },
+      "ClusterSuiteDownload": {
+        "properties": {
+          "filename": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Filename",
+            "type": "string"
+          },
+          "size_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "url": {
+            "maxLength": 4096,
+            "minLength": 8,
+            "title": "Url",
+            "type": "string"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "url"
+        ],
+        "title": "ClusterSuiteDownload",
+        "type": "object"
+      },
+      "ClusterSuiteExtract": {
+        "properties": {
+          "archive_path": {
+            "title": "Archive Path",
+            "type": "string"
+          },
+          "target_dir_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._+-]+$",
+            "title": "Target Dir Name",
+            "type": "string"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "archive_path",
+          "target_dir_name"
+        ],
+        "title": "ClusterSuiteExtract",
+        "type": "object"
+      },
+      "CommandAck": {
+        "properties": {
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "CommandAck",
+        "type": "object"
+      },
+      "CommandCreate": {
+        "properties": {
+          "attempt_id": {
+            "default": "",
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "command_type": {
+            "title": "Command Type",
+            "type": "string"
+          },
+          "job_id": {
+            "default": "",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "command_type"
+        ],
+        "title": "CommandCreate",
         "type": "object"
       },
       "DecompileRequest": {
@@ -666,6 +1023,66 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "JobEvent": {
+        "properties": {
+          "event_type": {
+            "default": "log",
+            "title": "Event Type",
+            "type": "string"
+          },
+          "level": {
+            "default": "info",
+            "title": "Level",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "sequence": {
+            "minimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "source": {
+            "default": "worker",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence"
+        ],
+        "title": "JobEvent",
+        "type": "object"
+      },
+      "JobEventBatch": {
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/JobEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "events"
+        ],
+        "title": "JobEventBatch",
         "type": "object"
       },
       "NotificationCreateRequest": {
@@ -795,6 +1212,52 @@
           "test_name"
         ],
         "title": "ReportDiagnosisRequest",
+        "type": "object"
+      },
+      "RunningWorkerJob": {
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "devices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Devices",
+            "type": "array"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "pid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pid"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "worker_job_id": {
+            "title": "Worker Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_job_id",
+          "job_id",
+          "attempt_id",
+          "status"
+        ],
+        "title": "RunningWorkerJob",
         "type": "object"
       },
       "SNBurnRequest": {
@@ -971,6 +1434,11 @@
             "default": "",
             "title": "Test Type",
             "type": "string"
+          },
+          "worker_id": {
+            "default": "worker-local",
+            "title": "Worker Id",
+            "type": "string"
           }
         },
         "title": "TestStartRequest",
@@ -1076,6 +1544,38 @@
           "suite_path"
         ],
         "title": "TradefedListResultsRequest",
+        "type": "object"
+      },
+      "TransferComplete": {
+        "properties": {
+          "chunk_count": {
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Chunk Count",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename",
+          "size_bytes",
+          "sha256",
+          "chunk_count"
+        ],
+        "title": "TransferComplete",
         "type": "object"
       },
       "USBIPDisconnectRequest": {
@@ -1330,6 +1830,185 @@
           "devices"
         ],
         "title": "WifiConnectRequest",
+        "type": "object"
+      },
+      "WorkerDevice": {
+        "properties": {
+          "properties": {
+            "additionalProperties": true,
+            "title": "Properties",
+            "type": "object"
+          },
+          "serial": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Serial",
+            "type": "string"
+          },
+          "state": {
+            "default": "available",
+            "title": "State",
+            "type": "string"
+          },
+          "transport": {
+            "default": "local_usb",
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "serial"
+        ],
+        "title": "WorkerDevice",
+        "type": "object"
+      },
+      "WorkerHeartbeat": {
+        "properties": {
+          "agent_version": {
+            "default": "",
+            "title": "Agent Version",
+            "type": "string"
+          },
+          "cpu_percent": {
+            "default": 0,
+            "title": "Cpu Percent",
+            "type": "number"
+          },
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerDevice"
+            },
+            "title": "Devices",
+            "type": "array"
+          },
+          "disk_free_gb": {
+            "default": 0,
+            "title": "Disk Free Gb",
+            "type": "number"
+          },
+          "memory_percent": {
+            "default": 0,
+            "title": "Memory Percent",
+            "type": "number"
+          },
+          "running_jobs": {
+            "items": {
+              "$ref": "#/components/schemas/RunningWorkerJob"
+            },
+            "title": "Running Jobs",
+            "type": "array"
+          },
+          "suites": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WorkerSuite"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suites"
+          },
+          "timestamp": {
+            "default": "",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "title": "WorkerHeartbeat",
+        "type": "object"
+      },
+      "WorkerRegistration": {
+        "properties": {
+          "address": {
+            "default": "",
+            "title": "Address",
+            "type": "string"
+          },
+          "agent_version": {
+            "default": "",
+            "title": "Agent Version",
+            "type": "string"
+          },
+          "capabilities": {
+            "additionalProperties": true,
+            "title": "Capabilities",
+            "type": "object"
+          },
+          "hostname": {
+            "default": "",
+            "title": "Hostname",
+            "type": "string"
+          },
+          "max_jobs": {
+            "default": 1,
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Max Jobs",
+            "type": "integer"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "worker_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id"
+        ],
+        "title": "WorkerRegistration",
+        "type": "object"
+      },
+      "WorkerSuite": {
+        "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "checksum": {
+            "default": "",
+            "title": "Checksum",
+            "type": "string"
+          },
+          "size_bytes": {
+            "default": 0,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "suite_key": {
+            "default": "",
+            "title": "Suite Key",
+            "type": "string"
+          },
+          "suite_type": {
+            "title": "Suite Type",
+            "type": "string"
+          },
+          "suite_version": {
+            "default": "",
+            "title": "Suite Version",
+            "type": "string"
+          },
+          "tools_path": {
+            "title": "Tools Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "suite_type",
+          "tools_path"
+        ],
+        "title": "WorkerSuite",
         "type": "object"
       }
     }
@@ -3301,6 +3980,2035 @@
         "summary": "Get Firmware Upload Progress"
       }
     },
+    "/api/cluster/commands": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Command",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/commands/{command_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "command_id",
+            "required": true,
+            "schema": {
+              "title": "Command Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Command",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/devices": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Devices",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/devices/actions": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterDeviceAction"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Device Action",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/firmware/stage": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_stage_worker_firmware_api_cluster_firmware_stage_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stage Worker Firmware",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/gsi/stage": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_stage_worker_gsi_api_cluster_gsi_stage_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stage Worker Gsi",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/hosts": {
+      "get": {
+        "description": "Return the stable host directory used by host-scoped UI pages.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Hosts",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/jobs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Jobs",
+        "tags": [
+          "cluster"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterJobCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Job",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/jobs/{job_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Job",
+        "tags": [
+          "cluster"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/jobs/{job_id}/artifacts": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Artifacts",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/jobs/{job_id}/artifacts/{artifact_id}/download": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Artifact",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/jobs/{job_id}/artifacts/{filename}": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "artifact_type",
+            "required": false,
+            "schema": {
+              "default": "file",
+              "title": "Artifact Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-ID",
+            "required": true,
+            "schema": {
+              "title": "X-Gms-Worker-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Artifact",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/jobs/{job_id}/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Job",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/jobs/{job_id}/events": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": -1,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 2000,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Job Events",
+        "tags": [
+          "cluster"
+        ]
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-ID",
+            "required": true,
+            "schema": {
+              "title": "X-Gms-Worker-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobEventBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Job Events",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/mode": {
+      "post": {
+        "description": "Toggle between single-host and cluster mode at runtime.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Cluster Mode",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cluster Status",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suite-library": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Controller Suite Library",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suite-library-download/{safe_filename}": {
+      "get": {
+        "description": "Serve an original archive through an old-Worker-compatible URL name.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "safe_filename",
+            "required": true,
+            "schema": {
+              "title": "Safe Filename",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Controller Suite Archive Compat",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suite-library-download/{safe_filename}/{filename}": {
+      "get": {
+        "description": "Keep the original name as the URL's final segment for older Workers.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "safe_filename",
+            "required": true,
+            "schema": {
+              "title": "Safe Filename",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Controller Suite Archive Named",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suite-library/{filename}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Controller Suite Archive",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suites": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Suites",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suites/archives": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cluster Suite Archives",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suites/download": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suite_path",
+            "required": true,
+            "schema": {
+              "title": "Suite Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "inline",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Inline",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cluster Suite Download File",
+        "tags": [
+          "cluster"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterSuiteDownload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cluster Suite Download",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suites/export": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suite_path",
+            "required": true,
+            "schema": {
+              "title": "Suite Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "directory",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Directory",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Suite Export",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suites/extract": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterSuiteExtract"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cluster Suite Extract",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suites/files": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suite_path",
+            "required": true,
+            "schema": {
+              "title": "Suite Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cluster Suite Files",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suites/search": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suite_path",
+            "required": true,
+            "schema": {
+              "title": "Suite Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cluster Suite Search",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/transfers/{transfer_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "transfer_id",
+            "required": true,
+            "schema": {
+              "title": "Transfer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Transfer",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/transfers/{transfer_id}/chunks/{index}": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "transfer_id",
+            "required": true,
+            "schema": {
+              "title": "Transfer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "title": "Index",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-ID",
+            "required": true,
+            "schema": {
+              "title": "X-Gms-Worker-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Transfer Chunk",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/transfers/{transfer_id}/complete": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "transfer_id",
+            "required": true,
+            "schema": {
+              "title": "Transfer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-ID",
+            "required": true,
+            "schema": {
+              "title": "X-Gms-Worker-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferComplete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Transfer",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/transfers/{transfer_id}/download": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "transfer_id",
+            "required": true,
+            "schema": {
+              "title": "Transfer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Transfer",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Workers",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/deploy": {
+      "post": {
+        "description": "Upload and install a Worker using explicitly supplied SSH credentials.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deploy Worker",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/register": {
+      "post": {
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerRegistration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Worker",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/{worker_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Worker",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/{worker_id}/commands/poll": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Poll Commands",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/{worker_id}/commands/{command_id}/ack": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "command_id",
+            "required": true,
+            "schema": {
+              "title": "Command Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandAck"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ack Command",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/{worker_id}/firmware/{stage_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stage_id",
+            "required": true,
+            "schema": {
+              "title": "Stage Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Staged Firmware",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/{worker_id}/heartbeat": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerHeartbeat"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Heartbeat",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/config-explorer": {
       "get": {
         "description": "List config resources of a package with default (+optional effective) values.",
@@ -4581,7 +7289,7 @@
     },
     "/api/device-groups/auto": {
       "post": {
-        "description": "按设备属性（model / android_version / soc）一键生成分组定义（per-user）。\n\n结果写回当前用户的 device_groups（变成可再手动微调的持久分组），并返回新分组列表。\n每个分组名形如 \"model: Pixel 7\"，id 形如 \"auto_<dim>_<sanitized>\"。",
+        "description": "按设备属性（model / android_version / soc / worker）一键生成分组定义（per-user）。\n\n结果写回当前用户的 device_groups（变成可再手动微调的持久分组），并返回新分组列表。\n每个分组名形如 \"model: Pixel 7\"，id 形如 \"auto_<dim>_<sanitized>\"。",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9983,6 +12691,16 @@
               "title": "User Only",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Worker Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -12459,6 +15177,116 @@
           }
         },
         "summary": "Automation Page"
+      }
+    },
+    "/cluster": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cluster Page"
+      }
+    },
+    "/cluster/novnc/{worker_id}": {
+      "get": {
+        "description": "Serve Worker noVNC assets without mixed-content or browser routing issues.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "vnc.html",
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cluster Novnc Http Proxy"
+      }
+    },
+    "/cluster/novnc/{worker_id}/{path}": {
+      "get": {
+        "description": "Serve Worker noVNC assets without mixed-content or browser routing issues.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cluster Novnc Http Proxy"
       }
     },
     "/gerrit-dashboard": {
