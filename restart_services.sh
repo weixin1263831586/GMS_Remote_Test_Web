@@ -24,6 +24,21 @@ CERT_CRT="${CERT_DIR}/gms-local.crt"
 PORT="${GMS_PORT:-5001}"
 SERVER_HOSTNAME="${GMS_SERVER_HOSTNAME:-172.16.14.233}"
 
+ENV_FILE="${PROJECT_DIR}/.env.production"
+SYSTEMD_SERVICE="gms-web-app.service"
+WORKER_SERVICE="gms-worker-agent"
+SYSTEMD_UNIT_FILE="/etc/systemd/system/${SYSTEMD_SERVICE}"
+WORKER_UNIT_FILE="${HOME}/.config/systemd/user/${WORKER_SERVICE}.service"
+
+# 加载生产环境变量（含 worker token 等配置），保证手动启动与 systemd 行为一致
+if [[ -f "${ENV_FILE}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${ENV_FILE}"
+    set +a
+fi
+
+
 ensure_https_cert() {
     mkdir -p "${CERT_DIR}"
 
@@ -96,13 +111,26 @@ echo ""
 
 # 3. 停止旧服务
 echo -e "${YELLOW}[3/4] 停止旧服务...${NC}"
+
+# 确认环境变量已加载（含 worker token，防 503）
+if [[ -f "${ENV_FILE}" ]]; then
+    echo -e "${GREEN}  ✓ 已加载 ${ENV_FILE}${NC}"
+else
+    echo -e "${YELLOW}  ⚠ 未找到 ${ENV_FILE}，worker token 可能缺失${NC}"
+fi
+if [[ -f "${SYSTEMD_UNIT_FILE}" ]]; then
+    sudo systemctl stop "${SYSTEMD_SERVICE}" 2>/dev/null || systemctl stop "${SYSTEMD_SERVICE}" 2>/dev/null || true
+    echo -e "${GREEN}  ✓ systemd ${SYSTEMD_SERVICE} 已停止${NC}"
+else
+    echo -e "${BLUE}  ℹ systemd ${SYSTEMD_SERVICE} 未安装${NC}"
+fi
+
+# 确保端口释放（清理 nohup 残留进程）
 for port in "${PORT}"; do
     if lsof -i :"$port" >/dev/null 2>&1; then
         fuser -k "$port/tcp" 2>/dev/null || true
         sleep 1
-        echo -e "${GREEN}  ✓ ${port} 已停止${NC}"
-    else
-        echo -e "${BLUE}  ℹ ${port} 未运行${NC}"
+        echo -e "${GREEN}  ✓ 端口 ${port} 残留进程已清理${NC}"
     fi
 done
 echo ""
@@ -112,25 +140,74 @@ echo -e "${YELLOW}[4/4] 启动新服务...${NC}"
 
 ensure_https_cert
 
-echo -e "  启动 FastAPI (${PORT})..."
-nohup setsid "${PYTHON_BIN}" -m uvicorn app:app \
-    --host 0.0.0.0 --port "${PORT}" --log-level info --access-log \
-    --ssl-keyfile "${CERT_KEY}" --ssl-certfile "${CERT_CRT}" \
-    >> fastapi.log 2>&1 < /dev/null &
-echo $! > fastapi.pid
-sleep 2
+# 优先通过 systemd 启动（自带 .env.production 和自动重启）
+# 直接检测 unit 文件是否存在，避免非交互式 shell 中 systemctl 连不上 D-Bus
+USE_SYSTEMD=false
+if [[ -f "${SYSTEMD_UNIT_FILE}" ]]; then
+    USE_SYSTEMD=true
+fi
 
-# 健康检查（增加超时和重试）
-echo -e "${BLUE}  进行健康检查...${NC}"
-sleep 3  # 等待服务完全启动
-
-for port in "${PORT}"; do
-    if timeout 5 curl -sk -f "https://localhost:${port}/" >/dev/null 2>&1; then
-        echo -e "${GREEN}  ✓ ${port} 启动成功${NC}"
-    else
-        echo -e "${YELLOW}  ⚠ ${port} 健康检查失败（可能仍在启动中）${NC}"
+if [[ "${USE_SYSTEMD}" == "true" ]]; then
+    echo -e "  通过 systemd 启动 ${SYSTEMD_SERVICE}..."
+    sudo systemctl restart "${SYSTEMD_SERVICE}" 2>/dev/null || systemctl restart "${SYSTEMD_SERVICE}" 2>/dev/null || true
+    # systemd 启动时如果端口仍被占用，清理残留后重试一次
+    if lsof -i :"${PORT}" >/dev/null 2>&1 && ! systemctl is-active --quiet "${SYSTEMD_SERVICE}" 2>/dev/null; then
+        echo -e "${YELLOW}  端口 ${PORT} 仍被占用，清理残留进程后重试...${NC}"
+        fuser -k "${PORT}/tcp" 2>/dev/null || true
+        sleep 2
+        sudo systemctl restart "${SYSTEMD_SERVICE}" 2>/dev/null || systemctl restart "${SYSTEMD_SERVICE}" 2>/dev/null || true
     fi
+else
+    echo -e "${YELLOW}  systemd 服务未安装，使用 nohup 方式启动...${NC}"
+
+    # 手动启动时必须加载环境变量（否则 worker token 缺失导致 503）
+    if [[ -z "${GMS_CLUSTER_WORKER_TOKENS:-}" ]]; then
+        echo -e "${RED}  ✗ GMS_CLUSTER_WORKER_TOKENS 未设置！${NC}"
+        echo -e "${RED}    请确保 ${ENV_FILE} 存在且包含 worker token 配置。${NC}"
+        exit 1
+    fi
+
+    echo -e "  启动 FastAPI (${PORT})..."
+    nohup setsid env \
+        GMS_CLUSTER_WORKER_TOKENS="${GMS_CLUSTER_WORKER_TOKENS}" \
+        "${PYTHON_BIN}" -m uvicorn app:app \
+        --host 0.0.0.0 --port "${PORT}" --log-level info --access-log \
+        --ssl-keyfile "${CERT_KEY}" --ssl-certfile "${CERT_CRT}" \
+        >> fastapi.log 2>&1 < /dev/null &
+    echo $! > fastapi.pid
+fi
+
+# 健康检查（带重试，最多等待 15 秒）
+echo -e "${BLUE}  进行健康检查...${NC}"
+HEALTH_OK=false
+for attempt in $(seq 1 5); do
+    sleep 3
+    if timeout 5 curl -sk -f "https://localhost:${PORT}/" >/dev/null 2>&1; then
+        HEALTH_OK=true
+        break
+    fi
+    echo -e "${BLUE}  等待服务就绪... (${attempt}/5)${NC}"
 done
+
+if [[ "${HEALTH_OK}" == "true" ]]; then
+    echo -e "${GREEN}  ✓ ${PORT} 启动成功${NC}"
+else
+    echo -e "${RED}  ✗ ${PORT} 健康检查失败${NC}"
+    if [[ "${USE_SYSTEMD}" == "true" ]]; then
+        echo -e "${YELLOW}  查看: journalctl -u ${SYSTEMD_SERVICE} -n 30${NC}"
+    else
+        echo -e "${YELLOW}  查看: tail -30 fastapi.log${NC}"
+    fi
+    exit 1
+fi
+
+# 5. 重启本地 Worker Agent
+if [[ -f "${WORKER_UNIT_FILE}" ]]; then
+    echo ""
+    echo -e "${YELLOW}  重启 Worker Agent (${WORKER_SERVICE})...${NC}"
+    systemctl --user restart "${WORKER_SERVICE}" 2>/dev/null || true
+    echo -e "${GREEN}  ✓ Worker Agent 已重启${NC}"
+fi
 echo ""
 
 echo -e "${BLUE}========================================${NC}"
@@ -138,11 +215,14 @@ echo -e "${GREEN}  ✓ 服务管理完成！${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "📋 服务状态："
-echo -e "  FastAPI: ${GREEN}https://localhost:${PORT}${NC} (主服务)"
+if [[ "${USE_SYSTEMD}" == "true" ]]; then
+    echo -e "  FastAPI: ${GREEN}https://localhost:${PORT}${NC} (systemd: ${SYSTEMD_SERVICE})"
+    echo -e "  日志: journalctl -u ${SYSTEMD_SERVICE} -f"
+else
+    echo -e "  FastAPI: ${GREEN}https://localhost:${PORT}${NC} (nohup, PID: $(cat fastapi.pid 2>/dev/null || echo '?'))"
+    echo -e "  日志: tail -f fastapi.log"
+fi
 echo -e "  局域网: ${GREEN}https://${SERVER_HOSTNAME}:${PORT}${NC}"
-echo ""
-echo -e "📊 查看日志："
-echo -e "  FastAPI: tail -f fastapi.log"
 echo ""
 echo -e "🔍 检查端口："
 echo -e "  lsof -i :${PORT}"

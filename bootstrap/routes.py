@@ -14,6 +14,7 @@ from features.build import api as build
 from features.build.api import configure_build_service
 from features.build.repository import BuildStore
 from features.build.service import BuildService
+from features.cluster import api as cluster
 from features.devices import api as devices
 from features.devices import config_explorer_api as device_config_explorer
 from features.devices import config_override_api as device_config_override
@@ -101,6 +102,7 @@ from workflows.firmware_device import (
     lock_firmware_devices,
     release_firmware_devices,
 )
+from workflows.cluster_test_execution import start_cluster_test
 
 
 ALL_ROUTERS = [
@@ -111,6 +113,8 @@ ALL_ROUTERS = [
     automation.router,
     automation.page_router,
     build.router,
+    cluster.router,
+    cluster.page_router,
     desktop.router,
     devices.router,
     device_config_explorer.router,
@@ -175,6 +179,7 @@ def _build_device_components():
 
 def include_routes(app: FastAPI, templates, services=None) -> None:
     if services is not None:
+        cluster.configure_cluster(services.settings.data_root)
         configure_config_sections()
         configure_user_dependencies(
             config_manager=config_manager,
@@ -253,6 +258,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             cleanup_files=_cleanup_files,
             acquire_test_devices=acquire_test_devices,
             release_test_devices=release_test_devices,
+            start_cluster_test=start_cluster_test,
         )
         configure_redmine_service(services.redmine)
         configure_redmine_users_provider(

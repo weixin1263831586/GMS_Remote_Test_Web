@@ -21,6 +21,7 @@ safe_join: Any = None
 cleanup_files: Any = None
 acquire_test_devices: Any = None
 release_test_devices: Any = None
+start_cluster_test: Any = None
 
 
 def configure_runtime(
@@ -43,13 +44,14 @@ def configure_runtime(
     selected_cleanup_files: Any = None,
     selected_acquire_test_devices: Any = None,
     selected_release_test_devices: Any = None,
+    selected_start_cluster_test: Any = None,
 ) -> None:
     global config_manager, ssh_manager, global_state, project_root
     global safe_websocket_send, generate_help_or_continue
     global get_client_id_from_request, parse_client_id, store_notification
     global apk_max_file_size, apk_upload_dir, max_log_entries
     global create_apk_task, normalize_apk_filename, safe_join, cleanup_files
-    global acquire_test_devices, release_test_devices
+    global acquire_test_devices, release_test_devices, start_cluster_test
     config_manager = selected_config_manager
     ssh_manager = selected_ssh_manager
     global_state = selected_global_state
@@ -68,3 +70,4 @@ def configure_runtime(
     cleanup_files = selected_cleanup_files
     acquire_test_devices = selected_acquire_test_devices
     release_test_devices = selected_release_test_devices
+    start_cluster_test = selected_start_cluster_test

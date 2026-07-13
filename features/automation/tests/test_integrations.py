@@ -255,3 +255,30 @@ class HttpAutomationExecutorTests(unittest.TestCase):
 
         self.assertEqual(result["success"], True)
         self.assertEqual(result["report_timestamp"], "2026.07.10_20.30.00")
+
+    def test_cluster_test_routes_start_poll_and_cancel_by_cluster_job_id(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        session = FakeSession()
+        session.queue(FakeResponse(json_data={"success": True, "data": {
+            "cluster_job_id": "job-1", "worker_id": "worker-246"}}))
+        session.queue(FakeResponse(json_data={"success": True, "job": {
+            "id": "job-1", "status": "running", "assigned_worker_id": "worker-246"}}))
+        session.queue(FakeResponse(json_data={"success": True, "job": {
+            "id": "job-1", "status": "stopping"}}))
+        executor = HttpAutomationExecutor(base_url="http://controller", session=session)
+        run = {"id": "run-cluster", "status": "testing",
+               "devices_json": '[{"serial":"worker-246:ABC"}]',
+               "test_plan_json": '{"worker_id":"worker-246","test_type":"CTS","test_suite":"/suite/tools"}',
+               "result_json": '{"cluster_job_id":"job-1"}'}
+
+        started = executor.start_test(run)
+        polled = executor.poll_test(run)
+        cancelled = executor.cancel(run)
+
+        self.assertEqual(started["cluster_job_id"], "job-1")
+        self.assertTrue(polled["running"])
+        self.assertTrue(cancelled["success"])
+        self.assertEqual(session.calls[0][2]["json"]["worker_id"], "worker-246")
+        self.assertIn("/api/cluster/jobs/job-1", session.calls[1][1])
+        self.assertIn("/api/cluster/jobs/job-1/cancel", session.calls[2][1])

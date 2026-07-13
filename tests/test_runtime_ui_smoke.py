@@ -142,7 +142,7 @@ class RuntimeUiHarness(unittest.TestCase):
                     'test', 'desktop', 'terminal', 'users', 'devices', 'reports',
                     'report-analysis', 'test-suites', 'apk-analysis', 'security-audit',
                     'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant',
-                    'automation', 'redmine-agent', 'gerrit-dashboard', 'agent'
+                    'automation', 'cluster', 'redmine-agent', 'gerrit-dashboard', 'agent'
                 ]));
             } catch (_error) {
                 // Init scripts also run in transient/opaque child frames where
@@ -168,7 +168,7 @@ class RuntimeUiHarness(unittest.TestCase):
                     'test', 'desktop', 'terminal', 'users', 'devices', 'reports',
                     'report-analysis', 'test-suites', 'apk-analysis', 'security-audit',
                     'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant',
-                    'automation', 'redmine-agent', 'gerrit-dashboard', 'agent'
+                    'automation', 'cluster', 'redmine-agent', 'gerrit-dashboard', 'agent'
                 ]);
             }
             """

@@ -33,6 +33,7 @@ const state = {
     collapsedGroups: new Set(JSON.parse(localStorage.getItem('gms_collapsed_groups') || '[]')),
     domCache: {},
     lastLogCount: 0,
+    wsLogStallTicks: 0,
     currentLogTab: 'system',
     pendingDeviceRefresh: null,
     deviceRefreshPromise: null,

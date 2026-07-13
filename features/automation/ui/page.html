@@ -123,6 +123,11 @@
             <section class="panel">
                 <div class="panel-header">设备与测试</div>
                 <div class="panel-body compact-stack">
+                    <label>测试主机
+                        <select id="automation-worker" onchange="loadDevices(true); loadTestSuitesForAutomation()">
+                            <option value="worker-local">Controller / Local Worker</option>
+                        </select>
+                    </label>
                     <label>设备序列号
                         <div class="device-picker">
                             <input id="automation-devices" placeholder="TESTSERIAL001，多个用逗号分隔">

@@ -119,8 +119,7 @@ async def root(request: Request):
         name="shell.html",
         context={"config": config, "initial_title": initial_title},
     )
-    # 允许浏览器短暂复用导航外壳；静态资源使用版本号独立更新。
-    # must-revalidate 确保短缓存过期后仍会向服务端确认新版本。
+    # 短暂复用导航外壳；must-revalidate 保证过期后确认新版本。
     response.headers["Cache-Control"] = "private, max-age=10, must-revalidate"
     return response
 

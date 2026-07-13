@@ -181,6 +181,9 @@
   "sidebar_order": [
     "str"
   ],
+  "sidebar_visible_pages": [
+    "str"
+  ],
   "suites_path": "str",
   "ubuntu_host": "str",
   "ubuntu_pswd": "str",

@@ -33,10 +33,10 @@ class TestReportDB:
         初始化数据库
 
         Args:
-            db_path: 数据库文件路径，默认为 reports/test_reports.json
+            db_path: 数据库文件路径，默认为 test_reports.json
         """
         if db_path is None:
-            db_path = str(settings.data_root / 'reports/test_reports.json')
+            db_path = str(settings.data_root / 'test_reports.json')
 
         self.db_path = db_path
         self.lock = threading.Lock()

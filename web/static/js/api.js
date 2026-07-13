@@ -47,8 +47,12 @@ async function _apiCallOnce(url, method, data, opts) {
         };
 
         if (data && !['GET', 'HEAD'].includes(method.toUpperCase())) {
-            options.headers['Content-Type'] = 'application/json';
-            options.body = JSON.stringify(data);
+            if (data instanceof FormData) {
+                options.body = data;
+            } else {
+                options.headers['Content-Type'] = 'application/json';
+                options.body = JSON.stringify(data);
+            }
         }
 
         options.credentials = 'same-origin';

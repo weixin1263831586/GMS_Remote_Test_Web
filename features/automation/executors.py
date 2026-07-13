@@ -7,6 +7,7 @@ import os
 import posixpath
 import shlex
 import time
+from pathlib import Path
 from typing import Any, Protocol
 
 import requests
@@ -122,6 +123,14 @@ def _run_devices(run: dict[str, Any]) -> list[str]:
 
 def _run_test_plan(run: dict[str, Any]) -> dict[str, Any]:
     return json.loads(run.get("test_plan_json") or "{}")
+
+
+def _run_result(run: dict[str, Any]) -> dict[str, Any]:
+    try:
+        value = json.loads(run.get("result_json") or "{}")
+        return value if isinstance(value, dict) else {}
+    except (TypeError, json.JSONDecodeError):
+        return {}
 
 
 def _run_jenkins_plan(run: dict[str, Any]) -> dict[str, Any]:
@@ -313,6 +322,7 @@ class HttpAutomationExecutor:
             firmware_path = run.get("artifact_url") or run.get("artifact_path")
         if not firmware_path:
             return {"success": False, "error": "No firmware artifact path/url"}
+        worker_id = str(plan.get("worker_id") or "worker-local")
         if is_ssh_build:
             staged = self._stage_ssh_build_artifact(run, str(firmware_path))
             if not staged.get("success"):
@@ -323,6 +333,30 @@ class HttpAutomationExecutor:
             if not staged.get("success"):
                 return staged
             firmware_path = staged["firmware_path"]
+        if worker_id != "worker-local":
+            path = Path(str(firmware_path)).expanduser()
+            if not path.is_file():
+                return {"success": False, "error": "Cluster firmware must be staged on the Controller first"}
+            devices_payload = ",".join(devices)
+            with path.open("rb") as source:
+                response = self.session.post(self._url("/api/cluster/firmware/stage"),
+                    data={"worker_id": worker_id, "devices": devices_payload},
+                    files={"firmware_file": (path.name, source, "application/octet-stream")}, timeout=3600)
+            result = self._json_response(response)
+            command_id = str(result.get("response", {}).get("command_id") or result.get("command_id") or "")
+            if result.get("success") and command_id:
+                for _ in range(900):
+                    polled = self._json_response(self.session.get(
+                        self._url(f"/api/cluster/commands/{command_id}"), timeout=30))
+                    command = polled.get("response", {}).get("command") or {}
+                    if command.get("status") == "completed":
+                        return {"success": True, "command_id": command_id,
+                                "flash_result": command.get("result") or {}}
+                    if command.get("status") in {"failed", "cancelled"}:
+                        return {"success": False, "error": command.get("error") or "cluster flash failed"}
+                    time.sleep(2)
+                return {"success": False, "error": "cluster flash timed out"}
+            return result
         response = self.session.post(
             self._url(f"/api/burn/firmware?devices={','.join(devices)}"),
             data={"firmware_path": firmware_path},
@@ -473,6 +507,7 @@ class HttpAutomationExecutor:
     def start_test(self, run: dict[str, Any]) -> dict[str, Any]:
         plan = _run_test_plan(run)
         payload = {
+            "worker_id": plan.get("worker_id") or "worker-local",
             "test_type": plan.get("test_type", ""),
             "test_module": plan.get("test_module") or (plan.get("modules") or [""])[0],
             "test_case": plan.get("test_case", ""),
@@ -488,6 +523,27 @@ class HttpAutomationExecutor:
         return result
 
     def poll_test(self, run: dict[str, Any]) -> dict[str, Any]:
+        cluster_job_id = str(_run_result(run).get("cluster_job_id") or "")
+        if cluster_job_id:
+            response = self.session.get(self._url(f"/api/cluster/jobs/{cluster_job_id}"), timeout=30)
+            result = self._json_response(response)
+            if not result.get("success"):
+                return result
+            job = result.get("response", {}).get("job") or result.get("job") or {}
+            status = str(job.get("status") or "")
+            if status in {"created", "queued", "leasing", "assigned", "dispatching", "running",
+                          "stopping", "collecting", "worker_lost"}:
+                return {"success": True, "running": True, "cluster_job_id": cluster_job_id}
+            if status != "completed":
+                return {"success": False, "running": False,
+                        "error": job.get("error") or f"cluster test {status}"}
+            reports = self.session.get(self._url("/api/reports/list"),
+                params={"worker_id": job.get("assigned_worker_id", "")}, timeout=30)
+            report_data = self._json_response(reports).get("response", {})
+            matched = next((item for item in report_data.get("reports", [])
+                            if item.get("cluster_job_id") == cluster_job_id), None)
+            return {"success": True, "running": False, "cluster_job_id": cluster_job_id,
+                    "report_timestamp": (matched or {}).get("timestamp", "")}
         response = self.session.get(
             self._url("/api/test/status"),
             params={"logs": "true"},
@@ -532,7 +588,9 @@ class HttpAutomationExecutor:
                 "error": "Firmware flashing cannot be interrupted safely; wait for the flash command to finish",
             }
         if status in {"testing", "test_running"}:
-            response = self.session.post(self._url("/api/test/stop"), timeout=30)
+            cluster_job_id = str(_run_result(run).get("cluster_job_id") or "")
+            endpoint = f"/api/cluster/jobs/{cluster_job_id}/cancel" if cluster_job_id else "/api/test/stop"
+            response = self.session.post(self._url(endpoint), timeout=30)
             return self._json_response(response)
         if status in {"jenkins_queued", "jenkins_building"}:
             build_job_id = str(run.get("jenkins_build_number") or "")

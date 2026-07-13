@@ -228,6 +228,22 @@ const DeviceOperation = {
 async function callDeviceApi(endpoint, additionalData = {}) {
     if (!validateDeviceSelection()) return;
     try {
+        const workerId = selectedClusterWorker();
+        const clusterActions = {
+            '/api/devices/reboot': 'reboot',
+            '/api/devices/remount': 'remount',
+            '/api/devices/info': 'get_properties'
+        };
+        if (workerId && clusterActions[endpoint]) {
+            return await apiCall('/api/cluster/devices/actions', 'POST', {
+                worker_id: workerId,
+                devices: Array.from(state.selectedDevices),
+                action: clusterActions[endpoint]
+            });
+        }
+        if (workerId) {
+            throw new Error(`远端 Worker 暂不支持此结构化设备操作: ${endpoint}`);
+        }
         await apiCall(endpoint, 'POST', {
             devices: Array.from(state.selectedDevices),
             ...additionalData
@@ -235,6 +251,17 @@ async function callDeviceApi(endpoint, additionalData = {}) {
     } catch (error) {
         addLogEntry(`操作失败: ${error.message}`, 'error');
     }
+}
+
+function selectedClusterWorker() {
+    const selected = Array.from(state.selectedDevices);
+    if (!selected.length) return '';
+    const workers = new Set(selected.map(deviceId => {
+        const device = state.devices.find(item => typeof item !== 'string' &&
+            (item.device_id === deviceId || item.serial === deviceId));
+        return device && device.cluster_worker_id;
+    }).filter(Boolean));
+    return workers.size === 1 ? Array.from(workers)[0] : '';
 }
 
 // ==================== Initialization ====================
@@ -290,6 +317,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 🔌 现在初始化WebSocket（需要clientId）
     initWebSocket();
+
+    initializeClusterMode().then(enabled => {
+        if (enabled) loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
+    });
 
     // 刷新非测试页面时不要启动 ADB、套件和用户列表等全局扫描。各页面会由
     // runPageInitializers() 按需加载自己的数据，避免多个慢请求争抢后端资源。
@@ -457,13 +488,19 @@ function initWebSocket() {
             addLogEntry(`WebSocket已连接 (${displayId})`, 'success');
             // WebSocket 成为实时主通道后，把增量游标对齐到服务端当前日志总数，
             // 避免断连期间的轮询已显示的日志在重连后被再次补发。
-            if (state.testing) {
-                apiCall('/api/test/status?logs=false').then(s => {
-                    if (typeof s.log_count === 'number') {
-                        state.lastLogCount = Math.max(state.lastLogCount || 0, s.log_count);
-                    }
-                }).catch(() => {});
-            }
+            // F5 刷新时 state.testing 可能尚未置位（checkInitialTestStatus 有延迟），
+            // 因此不依赖 state.testing，只要服务端有日志就对齐游标。
+            apiCall('/api/test/status?logs=false').then(s => {
+                if (typeof s.log_count === 'number') {
+                    state.lastLogCount = Math.max(state.lastLogCount || 0, s.log_count);
+                }
+                if (typeof s.running === 'boolean') {
+                    state.testing = s.running;
+                    updateTestToggleButton(s.running);
+                }
+                // 重连后重置停滞计数，避免上一连接的残留计数误触发增量兜底。
+                state.wsLogStallTicks = 0;
+            }).catch(() => {});
         };
 
         websocket.onclose = () => {
@@ -503,7 +540,7 @@ function initWebSocket() {
                         addNormalizedLogEntry(data);
                         state.lastLogCount = (state.lastLogCount || 0) + 1;
                         // WebSocket 正常投递日志，清除停滞计数。
-                        wsLogStallTicks = 0;
+                        state.wsLogStallTicks = 0;
                         break;
 
                     case 'test_complete':
@@ -972,6 +1009,154 @@ function initDragDrop() {
 }
 
 // ==================== Device Management ====================
+async function loadClusterWorkers() {
+    const select = document.getElementById('cluster-worker');
+    if (!select) return;
+    const response = await fetch('/api/cluster/workers');
+    if (!response.ok) return;
+    const data = await response.json();
+    const workers = (data.workers || []).filter(worker => worker.status !== 'offline');
+    const current = select.value || 'worker-local';
+    select.innerHTML = workers.map(worker =>
+        `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)} (${escapeHtml(worker.hostname || worker.id)})</option>`
+    ).join('');
+    if (!workers.some(worker => worker.id === 'worker-local')) {
+        select.insertAdjacentHTML('afterbegin', '<option value="worker-local">本机 worker-local</option>');
+    }
+    if (Array.from(select.options).some(option => option.value === current)) select.value = current;
+}
+
+function updateClusterToggleUI(enabled) {
+    const row = document.getElementById('cluster-mode-toggle-row');
+    const label = document.getElementById('cluster-mode-label');
+    if (!row || !label) return;
+    if (enabled) {
+        label.textContent = '集群模式 · 点击切换单机';
+        row.title = '当前为集群模式，点击切换到单机模式';
+        row.classList.add('active');
+    } else {
+        label.textContent = '单机模式 · 点击切换集群';
+        row.title = '当前为单机模式，点击切换到集群模式';
+        row.classList.remove('active');
+    }
+}
+
+function applyClusterMode(enabled) {
+    document.querySelectorAll('.sidebar-item[data-page="cluster"]').forEach(item => {
+        // 集群管理页也是启用集群模式和接入 Worker 的入口，单机模式下也必须可见。
+        item.style.display = '';
+    });
+    const row = document.getElementById('cluster-worker-row');
+    if (row) row.style.display = enabled ? '' : 'none';
+    for (const id of ['suite-worker-select', 'reports-worker-filter']) {
+        const select = document.getElementById(id);
+        if (select?.closest('label')) select.closest('label').style.display = enabled ? '' : 'none';
+    }
+    const terminalControl = document.getElementById('terminal-worker-control');
+    if (terminalControl) terminalControl.style.display = enabled ? 'contents' : 'none';
+    if (!enabled) {
+        const workerSelect = document.getElementById('cluster-worker');
+        if (workerSelect) workerSelect.value = 'worker-local';
+    }
+    updateClusterToggleUI(enabled);
+}
+
+async function toggleClusterMode() {
+    const row = document.getElementById('cluster-mode-toggle-row');
+    if (row) { row.style.pointerEvents = 'none'; row.style.opacity = '0.6'; }
+    try {
+        const wasEnabled = Boolean(state.clusterStatus && state.clusterStatus.enabled);
+        const resp = await apiCall('/api/cluster/mode', 'POST', {enabled: !wasEnabled});
+        state.clusterStatus = resp;
+        applyClusterMode(resp.enabled);
+        if (resp.enabled) {
+            await loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
+            showToast('已切换到集群模式', 'success');
+        } else {
+            const clusterPageActive = document.querySelector('.sidebar-item[data-page="cluster"].active')
+                || document.getElementById('page-cluster')?.style.display === 'flex';
+            if (clusterPageActive) switchPage('test');
+            showToast('已切换到单机模式', 'success');
+        }
+        // 重新加载设备列表以反映模式变化
+        await Promise.all([loadDevices(true), loadTestSuites(true)]);
+    } catch (error) {
+        showToast(`切换模式失败: ${error.message}`, 'error');
+    } finally {
+        if (row) { row.style.pointerEvents = ''; row.style.opacity = ''; }
+    }
+}
+
+window.toggleClusterMode = toggleClusterMode;
+
+async function initializeClusterMode() {
+    try {
+        const response = await fetch('/api/cluster/status', {cache: 'no-store'});
+        const status = await response.json();
+        state.clusterStatus = status;
+        const enabled = Boolean(response.ok && status.enabled);
+        applyClusterMode(enabled);
+        return enabled;
+    } catch (error) {
+        debugLog('[Cluster] Status unavailable, preserving single-host UI:', error);
+        return false;
+    }
+}
+
+async function switchTestWorker() {
+    const workerId = document.getElementById('cluster-worker')?.value || 'worker-local';
+    state.selectedDevices.clear();
+    const remoteSelected = workerId !== 'worker-local';
+    for (const id of ['adb-forward-btn', 'usbip-btn']) {
+        const control = document.getElementById(id);
+        if (!control) continue;
+        control.disabled = remoteSelected || id === 'adb-forward-btn';
+        control.title = remoteSelected
+            ? 'USB/IP 与 ADB forward 属于浏览器到 Controller 的设备接入，不作用于远端 Worker'
+            : '';
+    }
+    if (workerId === 'worker-local') {
+        await Promise.all([loadDevices(true), loadTestSuites(true)]);
+        showToast('已切换到本机测试主机', 'success');
+        return;
+    }
+    try {
+        const [deviceResponse, suiteResponse] = await Promise.all([
+            fetch(`/api/cluster/devices?worker_id=${encodeURIComponent(workerId)}`),
+            fetch(`/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`)
+        ]);
+        if (!deviceResponse.ok || !suiteResponse.ok) throw new Error('集群资源加载失败');
+        const devicesData = await deviceResponse.json();
+        const suitesData = await suiteResponse.json();
+        state.devices = (devicesData.devices || [])
+            .filter(device => device.state !== 'offline' && device.state !== 'unknown')
+            .map(device => ({
+                ...device.properties,
+                device_id: device.id,
+                serial: device.serial,
+                cluster_worker_id: workerId,
+                state: device.state,
+                status: device.state
+            }));
+        testSuitesCache = (suitesData.suites || [])
+            .filter(suite => suite.available)
+            .map(suite => ({
+                tools_path: suite.tools_path,
+                test_type: String(suite.suite_type || '').toLowerCase(),
+                version: suite.suite_version,
+                name: `${suite.suite_type} ${suite.suite_version}`,
+                worker_id: workerId
+            }));
+        renderDevices();
+        renderTestSuitesDropdown();
+        showToast(`已切换到 ${workerId}，发现 ${state.devices.length} 台设备`, 'success');
+    } catch (error) {
+        showToast(`切换 Worker 失败: ${error.message}`, 'error');
+    }
+}
+
+window.switchTestWorker = switchTestWorker;
+
 async function loadDevices(forceRefresh = false) {
     if (state.isRefreshingDevices) {
         state.pendingDeviceRefresh = Boolean(state.pendingDeviceRefresh || forceRefresh);
@@ -1246,7 +1431,8 @@ async function initTestSuiteBrowserPage() {
         listEl.innerHTML = '<div class="suite-empty">正在加载...</div>';
     }
 
-    await loadTestSuites();
+    await loadSuiteWorkerSelector();
+    await loadSuitesForBrowserWorker(false);
     renderTestSuiteBrowserList();
 
     const routeParams = getSuiteBrowserRouteParams();
@@ -1272,8 +1458,61 @@ async function initTestSuiteBrowserPage() {
     resumeSuiteDownloadIfNeeded();
 }
 
+async function loadSuiteWorkerSelector() {
+    const select = $('suite-worker-select');
+    if (!select || select.dataset.loaded === '1') return;
+    try {
+        const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
+        const payload = await response.json();
+        const saved = localStorage.getItem('gms_suite_worker') || 'worker-local';
+        const workers = (payload.workers || []).filter(worker => worker.status !== 'offline');
+        select.innerHTML = workers.map(worker =>
+            `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)}</option>`
+        ).join('');
+        if (!workers.some(worker => worker.id === 'worker-local')) {
+            select.insertAdjacentHTML('afterbegin', '<option value="worker-local">本机 worker-local</option>');
+        }
+        if (Array.from(select.options).some(option => option.value === saved)) select.value = saved;
+        select.dataset.loaded = '1';
+    } catch (error) {
+        debugLog('[Suites] Worker selector unavailable:', error);
+    }
+}
+
+async function loadSuitesForBrowserWorker(force = false) {
+    const workerId = $('suite-worker-select')?.value || 'worker-local';
+    if (workerId === 'worker-local') return loadTestSuites(force);
+    const response = await fetch(`/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`, {cache: 'no-store'});
+    if (!response.ok) throw new Error('加载 Worker 套件失败');
+    const payload = await response.json();
+    testSuitesCache = (payload.suites || []).filter(item => item.available).map(item => ({
+        tools_path: item.tools_path,
+        test_type: String(item.suite_type || '').toLowerCase(),
+        version: item.suite_version,
+        name: `${item.suite_type} ${item.suite_version}`,
+        worker_id: workerId
+    }));
+    return testSuitesCache;
+}
+
+async function switchSuiteWorker() {
+    const workerId = $('suite-worker-select')?.value || 'worker-local';
+    localStorage.setItem('gms_suite_worker', workerId);
+    clearSuiteBrowserSelection('正在加载 Worker 套件...');
+    try {
+        testSuitesCache = [];
+        await loadSuitesForBrowserWorker(true);
+        renderTestSuiteBrowserList();
+        clearSuiteBrowserSelection(testSuitesCache.length ? '请选择左侧测试套件' : '此 Worker 暂无套件');
+    } catch (error) {
+        clearSuiteBrowserSelection(`加载失败: ${error.message}`);
+    }
+}
+
+window.switchSuiteWorker = switchSuiteWorker;
+
 async function refreshTestSuiteBrowser(preferredSuiteRoot = '') {
-    await loadTestSuites(true);
+    await loadSuitesForBrowserWorker(true);
     renderTestSuiteBrowserList();
     const normalizedPreferredRoot = (preferredSuiteRoot || '').replace(/\/+$/, '');
     if (normalizedPreferredRoot) {
@@ -1356,6 +1595,33 @@ window.downloadTestSuite = async function downloadTestSuite() {
     debugLog('[downloadTestSuite] 开始下载：', url);
 
     try {
+        const suiteWorkerId = $('suite-worker-select')?.value || 'worker-local';
+        if (suiteWorkerId !== 'worker-local') {
+            const accepted = await apiCall('/api/cluster/suites/download', 'POST', {
+                worker_id: suiteWorkerId, url
+            });
+            if (progressStatus) progressStatus.textContent = `正在由 ${suiteWorkerId} 下载...`;
+            if (progressBar) progressBar.style.width = '10%';
+            if (progressPercent) progressPercent.textContent = '10%';
+            let command;
+            while (true) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                const status = await apiCall(`/api/cluster/commands/${encodeURIComponent(accepted.command_id)}`);
+                command = status.command;
+                if (['completed', 'failed', 'cancelled'].includes(command.status)) break;
+            }
+            if (command.status !== 'completed') throw new Error(command.error || 'Worker 下载失败');
+            const downloaded = command.result || {};
+            urlInput.dataset.lastArchivePath = downloaded.archive_path || '';
+            if (progressBar) progressBar.style.width = '100%';
+            if (progressPercent) progressPercent.textContent = '100%';
+            if (progressStatus) progressStatus.textContent = '✅ 下载完成';
+            log(`✅ ${suiteWorkerId} 下载完成：${downloaded.archive_path}`);
+            log(`📦 文件大小：${((downloaded.file_size || 0) / 1024 / 1024).toFixed(2)} MB`);
+            notifyOperationResult('测试套件下载完成', downloaded.message || '下载完成',
+                'success', 'suite-download', {worker_id: suiteWorkerId, archive_path: downloaded.archive_path});
+            return;
+        }
         const result = await apiCall('/api/test/suites/download-url', 'POST', {
             url: url,
             save_dir: `/home/${getDefaultUbuntuUser()}/GMS-Suite`
@@ -1605,7 +1871,10 @@ window.showExtractSuiteModal = async function showExtractSuiteModal() {
     select.innerHTML = '<option value="">正在加载压缩包...</option>';
 
     try {
-        const response = await fetch('/api/test/suites/archives');
+        const suiteWorkerId = $('suite-worker-select')?.value || 'worker-local';
+        const response = await fetch(suiteWorkerId === 'worker-local'
+            ? '/api/test/suites/archives'
+            : `/api/cluster/suites/archives?worker_id=${encodeURIComponent(suiteWorkerId)}`);
         const result = await response.json();
         const archives = result.success ? (result.archives || []) : [];
         select.innerHTML = '<option value="">手动输入压缩包路径</option>' + archives.map(archive => {
@@ -1700,26 +1969,40 @@ window.submitExtractSuite = async function submitExtractSuite() {
             logDiv.innerHTML += `[${time}] 开始解压：${archivePath}\n`;
         }
 
-        const response2 = await fetch('/api/test/suites/extract-start', {
+        const suiteWorkerId = $('suite-worker-select')?.value || 'worker-local';
+        const response2 = await fetch(suiteWorkerId === 'worker-local'
+            ? '/api/test/suites/extract-start' : '/api/cluster/suites/extract', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+            body: JSON.stringify(suiteWorkerId === 'worker-local' ? {
                 archive_path: archivePath,
                 extract_dir: `/home/${getDefaultUbuntuUser()}/GMS-Suite`,
                 target_dir_name: folderName
-            })
+            } : {worker_id: suiteWorkerId, archive_path: archivePath, target_dir_name: folderName})
         });
 
         const result2 = await response2.json();
 
-        if (result2.success && result2.task_id) {
-            const statusUrl = `/api/test/suites/extract-status/${encodeURIComponent(result2.task_id)}`;
-            const completedTask = await pollTaskProgress({
-                statusUrl,
-                progressBar, progressPercent, progressStatus,
-                completedLabel: '✅ 解压完成',
-                activeLabel: '正在解压...'
-            });
+        if (result2.success && (result2.task_id || result2.command_id)) {
+            let completedTask;
+            if (result2.command_id) {
+                while (true) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    const state = await apiCall(`/api/cluster/commands/${encodeURIComponent(result2.command_id)}`);
+                    if (['completed', 'failed', 'cancelled'].includes(state.command.status)) {
+                        if (state.command.status !== 'completed') throw new Error(state.command.error || 'Worker 解压失败');
+                        completedTask = state.command.result || {};
+                        break;
+                    }
+                }
+                if (progressBar) progressBar.style.width = '100%';
+                if (progressPercent) progressPercent.textContent = '100%';
+                if (progressStatus) progressStatus.textContent = '✅ 解压完成';
+            } else {
+                const statusUrl = `/api/test/suites/extract-status/${encodeURIComponent(result2.task_id)}`;
+                completedTask = await pollTaskProgress({statusUrl, progressBar, progressPercent, progressStatus,
+                    completedLabel: '✅ 解压完成', activeLabel: '正在解压...'});
+            }
             if (logDiv) {
                 const time = new Date().toLocaleTimeString();
                 logDiv.innerHTML += `[${time}] ✅ 解压完成：${completedTask.extracted_path}\n`;
@@ -1729,7 +2012,7 @@ window.submitExtractSuite = async function submitExtractSuite() {
                 completedTask.message || '解压完成',
                 'success',
                 'suite-extract',
-                { task_id: result2.task_id, extracted_path: completedTask.extracted_path }
+                { task_id: result2.task_id || result2.command_id, extracted_path: completedTask.extracted_path }
             );
 
             debugLog('[submitExtractSuite] refreshing suite browser, extracted_path:', completedTask.extracted_path);
@@ -1954,7 +2237,10 @@ async function searchSuiteFilesInSuite(suite, query, limit = 30) {
         query,
         limit: String(limit)
     });
-    const result = await apiCall(`/api/test/suites/search?${params.toString()}`);
+    if (suite.worker_id && suite.worker_id !== 'worker-local') params.set('worker_id', suite.worker_id);
+    const endpoint = suite.worker_id && suite.worker_id !== 'worker-local'
+        ? '/api/cluster/suites/search' : '/api/test/suites/search';
+    const result = await apiCall(`${endpoint}?${params.toString()}`);
     const payload = result.data || {};
     const suiteLabel = `${String(suite.test_type || '').toUpperCase()} ${getSuiteDisplayName(suite)}`.trim();
     return (payload.items || []).map(item => ({
@@ -2025,7 +2311,11 @@ async function loadSuiteBrowserDirectory(path = '') {
             suite_path: state.suiteBrowser.selectedSuitePath,
             path: path || ''
         });
-        const result = await apiCall(`/api/test/suites/files?${params.toString()}`);
+        const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+        if (suite?.worker_id && suite.worker_id !== 'worker-local') params.set('worker_id', suite.worker_id);
+        const endpoint = suite?.worker_id && suite.worker_id !== 'worker-local'
+            ? '/api/cluster/suites/files' : '/api/test/suites/files';
+        const result = await apiCall(`${endpoint}?${params.toString()}`);
         const data = result.data || {};
         state.suiteBrowser.currentPath = data.path || '';
         // 保留解析后的套件根绝对路径，供"报告分析"等需要绝对路径的操作使用。
@@ -2581,11 +2871,44 @@ function openSuiteFileInline(path) {
         path,
         inline: 'true'
     });
-    window.open(`/api/test/suites/download?${params.toString()}`, '_blank');
+    const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+    if (suite?.worker_id && suite.worker_id !== 'worker-local') params.set('worker_id', suite.worker_id);
+    const endpoint = suite?.worker_id && suite.worker_id !== 'worker-local'
+        ? '/api/cluster/suites/download' : '/api/test/suites/download';
+    window.open(`${endpoint}?${params.toString()}`, '_blank');
 }
 
-function downloadSuiteFile(path, filename = '') {
+async function startRemoteSuiteExport(path, directory = false) {
+    const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+    if (!suite?.worker_id || suite.worker_id === 'worker-local') return false;
+    showToast(`正在从 ${suite.worker_id} 准备下载...`, 'info');
+    const params = new URLSearchParams({worker_id: suite.worker_id,
+        suite_path: state.suiteBrowser.selectedSuitePath, path, directory: String(directory)});
+    const created = await apiCall(`/api/cluster/suites/export?${params.toString()}`, 'POST');
+    const transferId = created.transfer.id;
+    while (true) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const status = await apiCall(`/api/cluster/transfers/${encodeURIComponent(transferId)}`);
+        if (status.transfer.status === 'completed') break;
+        if (status.transfer.status === 'failed') throw new Error(status.transfer.error || '远端导出失败');
+    }
+    const frame = document.getElementById('suite-download-frame') || Object.assign(document.createElement('iframe'), {
+        id: 'suite-download-frame', name: 'suite-download-frame'
+    });
+    frame.style.display = 'none';
+    if (!frame.parentNode) document.body.appendChild(frame);
+    window.open(`/api/cluster/transfers/${encodeURIComponent(transferId)}/download`, frame.name);
+    return true;
+}
+
+async function downloadSuiteFile(path, filename = '') {
     if (!state.suiteBrowser.selectedSuitePath || !path) return;
+    try {
+        if (await startRemoteSuiteExport(path, false)) return;
+    } catch (error) {
+        showToast(`远端文件下载失败: ${error.message}`, 'error');
+        return;
+    }
     const params = new URLSearchParams({
         suite_path: state.suiteBrowser.selectedSuitePath,
         path
@@ -2600,7 +2923,11 @@ function downloadSuiteFile(path, filename = '') {
     }
 
     const link = document.createElement('a');
-    link.href = `/api/test/suites/download?${params.toString()}`;
+    const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+    if (suite?.worker_id && suite.worker_id !== 'worker-local') params.set('worker_id', suite.worker_id);
+    const endpoint = suite?.worker_id && suite.worker_id !== 'worker-local'
+        ? '/api/cluster/suites/download' : '/api/test/suites/download';
+    link.href = `${endpoint}?${params.toString()}`;
     link.download = filename || path.split('/').pop() || 'download';
     link.target = frame.name;
     link.style.display = 'none';
@@ -2609,10 +2936,16 @@ function downloadSuiteFile(path, filename = '') {
     link.remove();
 }
 
-function downloadSuiteDir(path, name = '') {
+async function downloadSuiteDir(path, name = '') {
     // 后端把整个文件夹打包成 zip 流式回传（保持目录树）。复用 downloadSuiteFile
     // 的隐藏 iframe 模式，避免浏览器把流响应当作页面跳转。
     if (!state.suiteBrowser.selectedSuitePath || !path) return;
+    try {
+        if (await startRemoteSuiteExport(path, true)) return;
+    } catch (error) {
+        showToast(`远端目录下载失败: ${error.message}`, 'error');
+        return;
+    }
     const params = new URLSearchParams({
         suite_path: state.suiteBrowser.selectedSuitePath,
         path
@@ -3009,9 +3342,10 @@ async function rebootDevices() {
     if (!confirmed) return;
 
     try {
-        await apiCall('/api/devices/reboot', 'POST', {
-            devices: Array.from(state.selectedDevices)
-        });
+        const workerId = selectedClusterWorker();
+        await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/reboot', 'POST',
+            workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'reboot'}
+                     : {devices: Array.from(state.selectedDevices)});
         addLogEntry(`正在重启 ${state.selectedDevices.size} 台设备...`, 'info');
         showToast('设备正在重启', 'success');
         if (state.usbipConnected) {
@@ -3034,7 +3368,14 @@ async function remountDevices() {
 
     try {
         addLogEntry('正在执行 remount...', 'info');
-        await callDeviceApi('/api/devices/remount');
+        const workerId = selectedClusterWorker();
+        if (workerId) {
+            await apiCall('/api/cluster/devices/actions', 'POST', {
+                worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'remount'
+            });
+        } else {
+            await callDeviceApi('/api/devices/remount');
+        }
     } catch (error) {
         addLogEntry('Remount失败: ' + error.message, 'error');
     } finally {
@@ -3078,11 +3419,11 @@ async function submitWifiConfig() {
         addLogEntry(`正在连接 Wi-Fi (${ssid})...`, 'info');
         showToast('正在连接 Wi-Fi...', 'info');
 
-        await apiCall('/api/devices/wifi', 'POST', {
-            devices: Array.from(state.selectedDevices),
-            ssid: ssid,
-            password: password
-        });
+        const workerId = selectedClusterWorker();
+        await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/wifi', 'POST',
+            workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices),
+                        action: 'wifi', ssid, password}
+                     : {devices: Array.from(state.selectedDevices), ssid, password});
 
         addLogEntry(`Wi-Fi 连接命令已发送 (${ssid})`, 'success');
     } catch (error) {
@@ -3106,7 +3447,15 @@ async function lockSelectedDevices(action) {
 
     try {
         addLogEntry(`正在${actionText}设备...`, 'info');
-        await callDeviceApi(`/api/devices/bootloader-${action}`, {});
+        const workerId = selectedClusterWorker();
+        if (workerId) {
+            await apiCall('/api/cluster/devices/actions', 'POST', {
+                worker_id: workerId, devices: Array.from(state.selectedDevices),
+                action: action === 'lock' ? 'bootloader_lock' : 'bootloader_unlock'
+            });
+        } else {
+            await callDeviceApi(`/api/devices/bootloader-${action}`, {});
+        }
         addLogEntry(`设备${actionText}完成`, 'info');
     } catch (error) {
         addLogEntry(`设备${actionText}失败: ${error.message}`, 'error');
@@ -3133,9 +3482,10 @@ async function checkDeviceLockStatus() {
     }
 
     try {
-        const result = await apiCall('/api/devices/bootloader-status', 'POST', {
-            devices: Array.from(state.selectedDevices)
-        });
+        const workerId = selectedClusterWorker();
+        const result = await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/bootloader-status', 'POST',
+            workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'bootloader_status'}
+                     : {devices: Array.from(state.selectedDevices)});
         addLogEntry('设备锁定状态: ' + JSON.stringify(result, null, 2), 'info');
     } catch (error) {
         addLogEntry('获取锁定状态失败: ' + error.message, 'error');
@@ -3162,9 +3512,10 @@ async function collectDeviceInfo() {
     }
 
     try {
-        const result = await apiCall('/api/devices/info', 'POST', {
-            devices: Array.from(state.selectedDevices)
-        });
+        const workerId = selectedClusterWorker();
+        const result = await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/info', 'POST',
+            workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'get_properties'}
+                     : {devices: Array.from(state.selectedDevices)});
         addLogEntry('设备信息: ' + JSON.stringify(result, null, 2), 'info');
     } catch (error) {
         addLogEntry('获取设备信息失败: ' + error.message, 'error');
@@ -3604,6 +3955,37 @@ async function submitFirmwareBurn() {
             }
         };
 
+        const workerId = selectedClusterWorker();
+        if (workerId) {
+            if (!selectedFirmwareFile) {
+                throw new Error('远端 Worker 烧写必须选择本机固件文件，以便安全分发并校验 SHA-256');
+            }
+            if (devices.length !== 1) {
+                throw new Error('集群固件烧写一次只允许选择一台设备');
+            }
+            const form = new FormData();
+            form.append('worker_id', workerId);
+            form.append('devices', devices.join(','));
+            form.append('firmware_file', selectedFirmwareFile, selectedFirmwareFile.name);
+            const staged = await apiCall('/api/cluster/firmware/stage', 'POST', form);
+            addLogEntry(`固件已暂存，Worker 命令: ${staged.command_id}`, 'success');
+            while (true) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                const status = await apiCall(`/api/cluster/commands/${encodeURIComponent(staged.command_id)}`);
+                const command = status.command;
+                if (command.status === 'completed') {
+                    addLogEntry(`远端固件烧写完成: ${command.result?.device || devices[0]}`, 'success');
+                    showToast('远端固件烧写完成', 'success');
+                    break;
+                }
+                if (['failed', 'cancelled'].includes(command.status)) {
+                    throw new Error(command.error || '远端固件烧写失败');
+                }
+            }
+            await switchTestWorker();
+            return;
+        }
+
         if (selectedFirmwareFile) {
             const uploadId = getReusableFirmwareUploadId(selectedFirmwareFile);
             // 设置上传状态标记，防止刷新导致进度丢失
@@ -3761,6 +4143,16 @@ async function browseLocalFileForGsiScript() {
 
 // Browse remote file for GSI system image
 async function browseLocalFileForGsiSystem() {
+    if (selectedClusterWorker()) {
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = '.img';
+        input.onchange = () => {
+            state.gsiSystemFile = input.files?.[0] || null;
+            if (state.gsiSystemFile) document.getElementById('gsi-system').value = state.gsiSystemFile.name;
+        };
+        input.click();
+        return;
+    }
     const title = '选择System镜像';
 
     // Set file browser state
@@ -3878,6 +4270,29 @@ async function submitGsiBurn() {
     }
 
     try {
+        const workerId = selectedClusterWorker();
+        if (workerId) {
+            if (!state.gsiSystemFile) throw new Error('远端 GSI 烧写必须选择本机 System 镜像');
+            if (state.selectedDevices.size !== 1) throw new Error('集群 GSI 烧写一次只允许一台设备');
+            const form = new FormData();
+            form.append('worker_id', workerId);
+            form.append('devices', Array.from(state.selectedDevices).join(','));
+            form.append('system_file', state.gsiSystemFile, state.gsiSystemFile.name);
+            if (state.gsiVendorFile) form.append('vendor_file', state.gsiVendorFile, state.gsiVendorFile.name);
+            closeGsiModal();
+            const staged = await apiCall('/api/cluster/gsi/stage', 'POST', form);
+            addLogEntry(`GSI 已暂存，Worker 命令: ${staged.command_id}`, 'success');
+            while (true) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                const status = await apiCall(`/api/cluster/commands/${encodeURIComponent(staged.command_id)}`);
+                if (status.command.status === 'completed') break;
+                if (['failed', 'cancelled'].includes(status.command.status)) throw new Error(status.command.error || 'GSI 烧写失败');
+            }
+            state.gsiSystemFile = null; state.gsiVendorFile = null;
+            showToast('远端 GSI 烧写完成', 'success');
+            await switchTestWorker();
+            return;
+        }
         if (state.gsiVendorFile) {
             vendorImg = await uploadGsiVendorBootToTestHost(state.gsiVendorFile);
             const vendorInput = document.getElementById('gsi-vendor');
@@ -4032,6 +4447,23 @@ async function showDeviceScreen() {
     }
 
     try {
+        const workerId = selectedClusterWorker();
+        if (workerId) {
+            addLogEntry(`正在 ${workerId} 启动设备投屏...`, 'info');
+            const result = await apiCall('/api/cluster/devices/actions', 'POST', {
+                worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'scrcpy_start'
+            });
+            addLogEntry(`已在 ${workerId} 启动 ${result.summary?.success || state.selectedDevices.size} 个投屏窗口`, 'success');
+            const host = (window.desktopHosts || desktopHosts || []).find(item => item.worker_id === workerId);
+            if (host) {
+                currentHost = host;
+                saveHostsToStorage();
+                updateHostSelector();
+            }
+            switchPage('desktop');
+            await loadVNCConnection();
+            return;
+        }
         addLogEntry('正在检查 VNC 服务...', 'info');
         await initAndStartVnc();
 
@@ -5744,8 +6176,10 @@ async function startTest() {
         if (systemOut) systemOut.innerHTML = '';
         if (moduleOut) moduleOut.innerHTML = '';
         state.lastLogCount = 0;
+        state.wsLogStallTicks = 0;
 
-        await apiCall('/api/test/start', 'POST', {
+        const startResult = await apiCall('/api/test/start', 'POST', {
+            worker_id: document.getElementById('cluster-worker')?.value || 'worker-local',
             devices: Array.from(state.selectedDevices),
             test_type: testType,
             test_module: testModule,
@@ -5754,6 +6188,13 @@ async function startTest() {
             test_suite: suitePath,
             local_server: state.config?.local_server || state.clientDisplayId || state.clientId || ''
         });
+        const clusterJobId = startResult?.data?.cluster_job_id || startResult?.cluster_job_id || '';
+        if (clusterJobId) {
+            state.clusterJobId = clusterJobId;
+            state.clusterEventSequence = -1;
+            sessionStorage.setItem('active_cluster_job', clusterJobId);
+            addLogEntry(`分布式任务 ${clusterJobId} 已排队`, 'info');
+        }
 
         debugLog('[startTest] API call successful, setting testing = true');
         state.testing = true;
@@ -5777,11 +6218,18 @@ async function stopTest() {
     try {
         addLogEntry('⏹ 用户请求停止测试...', 'info');
 
-        // 使用新的 stop 接口（支持多用户隔离）
-        await apiCall('/api/test/stop', 'POST');
+        if (state.clusterJobId) {
+            await apiCall(`/api/cluster/jobs/${encodeURIComponent(state.clusterJobId)}/cancel`, 'POST');
+        } else {
+            // 使用新的 stop 接口（支持多用户隔离）
+            await apiCall('/api/test/stop', 'POST');
+        }
 
         // Update test state
         state.testing = false;
+        state.clusterJobId = '';
+        state.clusterEventSequence = -1;
+        sessionStorage.removeItem('active_cluster_job');
         updateTestToggleButton(false);
 
         addLogEntry('测试已停止', 'warning');
@@ -6318,12 +6766,41 @@ function startStatusPolling() {
     const maxPollInterval = 30000;  // 最大轮询间隔：30秒
     let pollTimer = null;
     // WebSocket 是实时日志主通道，但 client_id 不一致或推送丢失时它会静默丢日志。
-    // 下面两个计数器用于检测"服务端日志在涨、本地却没收到"的停滞后回退到增量拉取。
-    let wsLogStallTicks = 0;       // WebSocket 连接正常但日志停滞的连续轮询次数
+    // wsLogStallTicks 检测"服务端日志在涨、本地却没收到"的停滞后回退到增量拉取。
+    // 必须使用全局 state.wsLogStallTicks，WebSocket onmessage 才能正确重置计数。
     let lastSeenServerLogCount = 0; // 最近一次观测到的服务端日志总数
 
     const pollStatus = async () => {
         try {
+            if (state.clusterJobId) {
+                const jobId = encodeURIComponent(state.clusterJobId);
+                const [jobResponse, eventResponse] = await Promise.all([
+                    apiCall(`/api/cluster/jobs/${jobId}`),
+                    apiCall(`/api/cluster/jobs/${jobId}/events?after=${encodeURIComponent(String(state.clusterEventSequence ?? -1))}&limit=1000`)
+                ]);
+                const job = jobResponse.job;
+                const events = eventResponse.events || [];
+                events.forEach(event => addNormalizedLogEntry({message: event.message,
+                    type: event.level === 'error' ? 'error' : 'info',
+                    source: event.source === 'stderr' ? 'system' : undefined}));
+                if (events.length) state.clusterEventSequence = Math.max(...events.map(event => Number(event.sequence)));
+                const active = ['created', 'queued', 'leasing', 'assigned', 'dispatching', 'running', 'stopping', 'collecting', 'worker_lost'].includes(job.status);
+                state.testing = active;
+                updateTestToggleButton(active);
+                if (!active) {
+                    const level = job.status === 'completed' ? 'success' : 'error';
+                    addLogEntry(`分布式测试 ${job.status}${job.error ? `: ${job.error}` : ''}`, level);
+                    showToast(`分布式测试${job.status === 'completed' ? '完成' : '结束'}: ${job.status}`, level);
+                    state.clusterJobId = '';
+                    state.clusterEventSequence = -1;
+                    sessionStorage.removeItem('active_cluster_job');
+                    loadDevices(true).catch(() => {});
+                }
+                pollInterval = active ? 1000 : 3000;
+                if (pollTimer) clearTimeout(pollTimer);
+                pollTimer = setTimeout(pollStatus, pollInterval);
+                return;
+            }
             // 检查是否有 WebSocket 连接
             const hasRealtimeConnection = state.websocket && state.websocket.readyState === WebSocket.OPEN;
 
@@ -6332,7 +6809,7 @@ function startStatusPolling() {
             // 但若服务端日志总数持续增长而本地 lastLogCount 不动（WebSocket 推送丢失或
             // client_id 不一致），则回退到 since 增量兜底，避免"测试在跑却看不到日志"。
             let shouldFetchLogs = !hasRealtimeConnection;
-            if (hasRealtimeConnection && state.testing && wsLogStallTicks >= 2) {
+            if (hasRealtimeConnection && state.testing && state.wsLogStallTicks >= 2) {
                 shouldFetchLogs = true;
             }
             const statusUrl = shouldFetchLogs
@@ -6343,9 +6820,9 @@ function startStatusPolling() {
             // 检测 WebSocket 日志停滞：服务端 log_count 在涨、本地却没有跟进时累计计数。
             if (typeof status.log_count === 'number' && hasRealtimeConnection && state.testing) {
                 if (status.log_count > (state.lastLogCount || 0)) {
-                    wsLogStallTicks += 1;
+                    state.wsLogStallTicks += 1;
                 } else {
-                    wsLogStallTicks = 0;
+                    state.wsLogStallTicks = 0;
                 }
                 lastSeenServerLogCount = status.log_count;
             }
@@ -6387,7 +6864,7 @@ function startStatusPolling() {
                 status.logs.forEach(addNormalizedLogEntry);
                 state.lastLogCount = status.log_count || (state.lastLogCount + status.logs.length);
                 // 增量拉取成功补回了日志，说明 WebSocket 推送确实在丢，重置停滞计数避免反复回退。
-                wsLogStallTicks = 0;
+                state.wsLogStallTicks = 0;
             } else if (typeof status.log_count === 'number') {
                 state.lastLogCount = Math.max(state.lastLogCount || 0, status.log_count);
             }
@@ -6422,9 +6899,23 @@ function startStatusPolling() {
 
 async function checkInitialTestStatus() {
     try {
+        const savedClusterJob = sessionStorage.getItem('active_cluster_job') || '';
+        if (savedClusterJob) {
+            state.clusterJobId = savedClusterJob;
+            state.clusterEventSequence = -1;
+            const response = await apiCall(`/api/cluster/jobs/${encodeURIComponent(savedClusterJob)}`);
+            const active = ['created', 'queued', 'leasing', 'assigned', 'dispatching', 'running', 'stopping', 'collecting', 'worker_lost'].includes(response.job.status);
+            state.testing = active;
+            updateTestToggleButton(active);
+            if (active) return;
+            sessionStorage.removeItem('active_cluster_job');
+            state.clusterJobId = '';
+        }
         const status = await apiCall('/api/test/status');
         state.testing = status.running;
         updateTestToggleButton(status.running);
+        // 重置停滞计数：页面刚加载，WebSocket 可能尚未就绪或尚未投递日志。
+        state.wsLogStallTicks = 0;
 
         // 页面刷新时加载历史日志（限制最近100条，避免卡顿）
         if (status.logs && status.logs.length > 0) {
@@ -6442,7 +6933,7 @@ async function checkInitialTestStatus() {
 
             state.lastLogCount = status.log_count || status.logs.length;
         } else {
-            state.lastLogCount = 0;
+            state.lastLogCount = typeof status.log_count === 'number' ? status.log_count : 0;
         }
     } catch (error) {
         console.error('Failed to check initial test status:', error);
@@ -6605,6 +7096,34 @@ document.addEventListener('click', function(event) {
 // ==================== Test Reports ====================
 let reportsRefreshInterval = null;
 let currentUserFilter = false;  // 当前是否只显示本用户报告
+let reportsWorkersLoaded = false;
+
+async function loadReportWorkers() {
+    if (reportsWorkersLoaded) return;
+    const select = document.getElementById('reports-worker-filter');
+    if (!select) return;
+    try {
+        const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
+        const payload = await response.json();
+        const previous = select.value;
+        select.innerHTML = '<option value="">全部 Worker</option>' + (payload.workers || []).map(worker =>
+            `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)}</option>`
+        ).join('');
+        select.value = previous;
+        reportsWorkersLoaded = true;
+    } catch (error) {
+        debugLog('[Reports] Worker filter unavailable:', error);
+    }
+}
+
+function reportsListUrl(userOnly) {
+    const params = new URLSearchParams();
+    if (userOnly) params.set('user_only', 'true');
+    const workerId = document.getElementById('reports-worker-filter')?.value || '';
+    if (workerId) params.set('worker_id', workerId);
+    const query = params.toString();
+    return `/api/reports/list${query ? `?${query}` : ''}`;
+}
 
 // Cleanup reports interval when leaving page (memory leak prevention)
 function cleanupReportsPolling() {
@@ -6616,7 +7135,8 @@ function cleanupReportsPolling() {
 
 async function loadTestReports(userOnly = false) {
     try {
-        const url = userOnly ? '/api/reports/list?user_only=true' : '/api/reports/list';
+        await loadReportWorkers();
+        const url = reportsListUrl(userOnly);
         const resp = await fetch(url);
         const data = await resp.json();
 
@@ -6631,7 +7151,7 @@ async function loadTestReports(userOnly = false) {
             reportsRefreshInterval = setInterval(async () => {
                 if (currentPage === 'reports') {
                     try {
-                        const url = currentUserFilter ? '/api/reports/list?user_only=true' : '/api/reports/list';
+                        const url = reportsListUrl(currentUserFilter);
                         const response = await fetch(url);
                         const data = await response.json();
 
@@ -6720,7 +7240,7 @@ function displayTestReports(reports) {
         const failCount = report.fail !== undefined ? report.fail : '-';
         const totalCount = report.total !== undefined ? report.total : '-';
         const passRate = report.total > 0 ? ((report.pass / report.total) * 100).toFixed(1) + '%' : '-';
-        const suiteVersion = getReportSuiteVersion(report);
+        const suiteVersion = `${getReportSuiteVersion(report)}${report.worker_id ? ` · ${report.worker_id}` : ''}`;
 
         const passRateStyle = report.total > 0 ? (report.pass / report.total >= 0.9 ? 'color: var(--success-color);' : 'color: var(--warning-color);') : '';
 

@@ -12,6 +12,33 @@ let selectedBuildJobId = '';
 let activeWorkflowPane = 'overview';
 let toastTimer = null;
 
+function selectedWorkerId() {
+    return qs('automation-worker')?.value || 'worker-local';
+}
+
+async function loadClusterWorkers() {
+    const select = qs('automation-worker');
+    if (!select) return;
+    const previous = select.value || 'worker-local';
+    try {
+        const statusResponse = await fetch('/api/cluster/status', {cache: 'no-store'});
+        const status = await statusResponse.json();
+        if (!statusResponse.ok || !status.enabled) {
+            select.innerHTML = '<option value="worker-local">Controller / Local Worker</option>';
+            if (select.closest('label')) select.closest('label').style.display = 'none';
+            return;
+        }
+        if (select.closest('label')) select.closest('label').style.display = '';
+        const response = await fetch('/api/cluster/hosts', {cache: 'no-store'});
+        const payload = await response.json();
+        const hosts = payload.hosts || [];
+        select.innerHTML = hosts.map(host => `<option value="${esc(host.worker_id)}"${host.status === 'offline' ? ' disabled' : ''}>${esc(host.name || host.worker_id)}${host.status === 'offline' ? '（离线）' : ''}</option>`).join('');
+        if (hosts.some(host => host.worker_id === previous && host.status !== 'offline')) select.value = previous;
+    } catch (_) {
+        select.innerHTML = '<option value="worker-local">Controller / Local Worker</option>';
+    }
+}
+
 // 13 段流水线阶段（顺序即推进顺序）
 const PIPELINE_STAGES = [
     'queued', 'jenkins_queued', 'jenkins_building', 'artifact_ready',
@@ -268,12 +295,17 @@ async function refreshLunchOptions() {
 
 async function loadDevices(forceRefresh = false) {
     try {
-        const resp = await fetch(`/api/devices/list?force_refresh=${forceRefresh ? '1' : '0'}`, {cache: 'no-store'});
-        connectedDevices = await resp.json();
+        const workerId = selectedWorkerId();
+        const endpoint = workerId === 'worker-local'
+            ? `/api/devices/list?force_refresh=${forceRefresh ? '1' : '0'}`
+            : `/api/cluster/devices?worker_id=${encodeURIComponent(workerId)}`;
+        const resp = await fetch(endpoint, {cache: 'no-store'});
+        const payload = await resp.json();
+        connectedDevices = workerId === 'worker-local' ? payload : (payload.devices || []);
         const items = Array.isArray(connectedDevices) ? connectedDevices : [];
         qs('automation-device-list').innerHTML = items.length
             ? items.map(d => {
-                const id = d.device_id || d.serial || d.serial_no || '';
+                const id = d.id || d.device_id || d.serial || d.serial_no || '';
                 const label = `${id}${d.locked ? ' (locked)' : ''}`;
                 return `<label class="checkbox-item"><input type="checkbox" value="${esc(id)}"> <span>${esc(label)}</span></label>`;
             }).join('')
@@ -283,9 +315,15 @@ async function loadDevices(forceRefresh = false) {
 
 async function loadTestSuitesForAutomation() {
     try {
-        const resp = await fetch('/api/test/suites', {cache: 'no-store'});
+        const workerId = selectedWorkerId();
+        const endpoint = workerId === 'worker-local' ? '/api/test/suites'
+            : `/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`;
+        const resp = await fetch(endpoint, {cache: 'no-store'});
         const data = await resp.json();
         testSuites = data.suites || data.data?.suites || [];
+        testSuites = testSuites.map(suite => ({...suite,
+            test_type: suite.test_type || suite.suite_type,
+            full_path: suite.full_path || suite.tools_path}));
         const types = [...new Set(testSuites.map(s => String(s.test_type || '').toUpperCase()).filter(Boolean))].sort();
         qs('automation-test-type').innerHTML = types.length
             ? types.map(type => `<option value="${esc(type)}">${esc(type)}</option>`).join('')
@@ -298,7 +336,7 @@ function renderSuiteOptions() {
     const type = String(qs('automation-test-type').value || '').toLowerCase();
     const suites = testSuites.filter(s => String(s.test_type || '').toLowerCase() === type);
     qs('automation-test-suite').innerHTML = suites.length
-        ? suites.map(s => `<option value="${esc(s.tools_path || '')}">${esc(s.version || s.tools_path || '')}</option>`).join('')
+        ? suites.map(s => `<option value="${esc(s.tools_path || '')}">${esc(s.version || s.suite_version || s.tools_path || '')}</option>`).join('')
         : '<option value="">自动匹配最新套件</option>';
 }
 
@@ -412,6 +450,7 @@ function collectTestPlan() {
         test_type: qs('automation-test-type').value.trim(),
         test_suite: qs('automation-test-suite').value,
         test_module: qs('automation-test-module').value.trim(),
+        worker_id: selectedWorkerId(),
     };
     const build = collectBuildPlan();
     if (build) plan.build = build;
@@ -730,7 +769,8 @@ async function loadAll(silent = false) {
         await loadDashboard();
     } catch (_) { /* 概览失败不阻断主流程 */ }
     try {
-        await Promise.all([loadBuildConfig(), loadTestSuitesForAutomation()]);
+        await Promise.all([loadBuildConfig(), loadClusterWorkers()]);
+        await loadTestSuitesForAutomation();
         await Promise.all([loadDevices(false), loadProfiles()]);
         await Promise.all([loadRuns(), loadBuildJobs(), loadWorkerStatus()]);
         if (!silent) toast('已刷新');
