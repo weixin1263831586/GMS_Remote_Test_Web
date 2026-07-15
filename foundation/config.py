@@ -123,10 +123,6 @@ TOOLS_DATA_FILE = os.path.join(PROJECT_ROOT, 'data', 'user_tools_data.json')
 DEFAULT_WIFI_SSID = ""
 DEFAULT_WIFI_PASSWORD = ""
 
-# Redmine 默认 base URL。各处不要再直接写字面量，
-# 统一经 config_manager.get_redmine_base_url() 读取（config.redmine.base_url 覆盖此默认）。
-DEFAULT_REDMINE_BASE_URL = "https://redmine.rock-chips.com"
-
 # Precompile regex pattern for placeholder replacement (efficiency)
 PLACEHOLDER_PATTERN = re.compile(r'\$\{([^}]+)\}')
 
@@ -273,7 +269,7 @@ class ConfigManager(ConfigPersistenceMixin):
             redmine_config = (config if config is not None else self.load_config()).get("redmine") or {}
         except Exception:
             redmine_config = {}
-        return str(redmine_config.get("base_url") or "").strip().rstrip("/") or DEFAULT_REDMINE_BASE_URL
+        return str(redmine_config.get("base_url") or "").strip().rstrip("/")
 
     def get_ai_provider_config(self, provider_name: str) -> dict[str, Any] | None:
         """Return the named provider's config (e.g. 'qwen', 'zhipu'), or None if absent."""

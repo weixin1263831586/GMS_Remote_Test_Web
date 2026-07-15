@@ -15,6 +15,7 @@ from features.build.api import configure_build_service
 from features.build.repository import BuildStore
 from features.build.service import BuildService
 from features.cluster import api as cluster
+from features.cluster import get_cluster_service
 from features.devices import api as devices
 from features.devices import config_explorer_api as device_config_explorer
 from features.devices import config_override_api as device_config_override
@@ -94,6 +95,7 @@ from foundation.config import (
     config_manager,
 )
 from foundation.files import FileUtils
+from workflows.cluster_test_execution import start_cluster_test
 from workflows.device_test_execution import (
     acquire_test_devices,
     release_test_devices,
@@ -102,7 +104,6 @@ from workflows.firmware_device import (
     lock_firmware_devices,
     release_firmware_devices,
 )
-from workflows.cluster_test_execution import start_cluster_test
 
 
 ALL_ROUTERS = [
@@ -297,6 +298,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
                 gerrit_query=query_gerrit,
                 device_selector=device_selector,
                 device_manager=device_manager,
+                cluster_provider=get_cluster_service,
             )
         )
         build_config_path = services.settings.project_root / 'configs/build_servers.json'

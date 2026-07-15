@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 _task: asyncio.Task | None = None
 _stale_swept: bool = False
+_last_build_poll_at: float = 0.0
 _last_tick_at: float = 0.0
 _last_tick_result: dict[str, Any] = {}
 
@@ -38,16 +40,25 @@ def _load_worker_config() -> dict[str, Any]:
     return {
         "enabled": os.getenv("ATS_WORKER_ENABLED", str(cfg.get("enabled", True))).lower()
         not in ("0", "false", "no", "off"),
-        "interval_seconds": int(os.getenv("ATS_WORKER_INTERVAL", cfg.get("interval_seconds", 15))),
-        "build_poll_interval_seconds": int(
+        "interval_seconds": max(1, int(os.getenv("ATS_WORKER_INTERVAL", cfg.get("interval_seconds", 15)))),
+        "build_poll_interval_seconds": max(1, int(
             os.getenv("ATS_WORKER_BUILD_POLL_INTERVAL", cfg.get("build_poll_interval_seconds", 10))
-        ),
+        )),
         "executor": os.getenv("ATS_WORKER_EXECUTOR", cfg.get("executor", "http")),
-        "stale_build_seconds": int(os.getenv("ATS_STALE_BUILD_SECONDS", cfg.get("stale_build_seconds", 7200))),
-        "stale_run_seconds": int(os.getenv("ATS_STALE_RUN_SECONDS", cfg.get("stale_run_seconds", 86400))),
-        "waiting_device_timeout_seconds": int(
+        "stale_build_seconds": max(1, int(os.getenv("ATS_STALE_BUILD_SECONDS", cfg.get("stale_build_seconds", 7200)))),
+        "stale_run_seconds": max(1, int(os.getenv("ATS_STALE_RUN_SECONDS", cfg.get("stale_run_seconds", 86400)))),
+        "waiting_device_timeout_seconds": max(1, int(
             os.getenv("ATS_WAITING_DEVICE_TIMEOUT", cfg.get("waiting_device_timeout_seconds", 1800))
-        ),
+        )),
+        "test_timeout_seconds": max(1, int(
+            os.getenv("ATS_TEST_TIMEOUT", cfg.get("test_timeout_seconds", 86400))
+        )),
+        "report_collection_timeout_seconds": max(1, int(
+            os.getenv(
+                "ATS_REPORT_COLLECTION_TIMEOUT",
+                cfg.get("report_collection_timeout_seconds", 1800),
+            )
+        )),
     }
 
 
@@ -135,7 +146,7 @@ def stale_sweep_once(
         if age is not None and age > threshold_run:
             try:
                 auto_svc.orchestrator(cfg["executor"]).cancel_run(
-                    run["id"], reason="stale before worker start", cleanup=False
+                    run["id"], reason="stale before worker start", cleanup=True
                 )
                 runs_cancelled += 1
             except Exception:
@@ -186,7 +197,21 @@ def sweep_waiting_device_timeouts(
     timeout = cfg["waiting_device_timeout_seconds"]
     cancelled = 0
     for run in auto_svc.list_runs(status="waiting_device", limit=100):
-        age = _age_seconds(run.get("updated_at") or "")
+        # Poll retries touch updated_at for fair scheduling, so timeout from
+        # the first waiting_device event (the status-entry transition).
+        entered_at = ""
+        try:
+            entered_at = next(
+                (
+                    event.get("created_at") or ""
+                    for event in auto_svc.list_events(run["id"])
+                    if event.get("stage") == "waiting_device"
+                ),
+                "",
+            )
+        except Exception:
+            logger.debug("failed to resolve waiting_device entry time", exc_info=True)
+        age = _age_seconds(entered_at or run.get("updated_at") or "")
         if age is not None and age > timeout:
             try:
                 auto_svc.orchestrator(cfg["executor"]).cancel_run(
@@ -196,6 +221,63 @@ def sweep_waiting_device_timeouts(
             except Exception:
                 logger.exception("failed to cancel waiting_device run %s", run.get("id"))
     return cancelled
+
+
+def _stage_entry_age_seconds(
+    automation_service: Any, run: dict[str, Any], stage: str
+) -> float | None:
+    """Return time in the current stage without being reset by poll events."""
+    entered_at = ""
+    try:
+        entered_at = next(
+            (
+                event.get("created_at") or ""
+                for event in automation_service.list_events(run["id"])
+                if event.get("stage") == stage
+            ),
+            "",
+        )
+    except Exception:
+        logger.debug("failed to resolve %s entry time", stage, exc_info=True)
+    return _age_seconds(entered_at or run.get("updated_at") or "")
+
+
+def sweep_active_stage_timeouts(
+    cfg: dict[str, Any],
+    *,
+    automation_service: Any | None = None,
+) -> dict[str, int]:
+    """Cancel safely interruptible ATS stages that exceed their wall timeout."""
+    auto_svc = automation_service or _resolve_services()[0]
+    counts = {"test_running": 0, "report_collecting": 0}
+    if auto_svc is None:
+        return counts
+
+    stages = (
+        (
+            "test_running",
+            int(cfg.get("test_timeout_seconds", cfg.get("stale_run_seconds", 86400))),
+            "GMS test timed out",
+        ),
+        (
+            "report_collecting",
+            int(cfg.get("report_collection_timeout_seconds", 1800)),
+            "report collection timed out",
+        ),
+    )
+    for stage, timeout, reason in stages:
+        for run in auto_svc.list_runs(status=stage, limit=500):
+            age = _stage_entry_age_seconds(auto_svc, run, stage)
+            if age is None or age <= timeout:
+                continue
+            try:
+                auto_svc.orchestrator(cfg["executor"]).cancel_run(
+                    run["id"], reason=f"{reason} after {timeout}s", cleanup=True
+                )
+                counts[stage] += 1
+            except Exception:
+                logger.exception("failed to cancel timed-out %s run %s", stage, run.get("id"))
+    return counts
 
 
 def run_tick_sync(
@@ -210,7 +292,13 @@ def run_tick_sync(
     if auto_svc is None or build_svc is None:
         auto_svc, build_svc = _resolve_services()
     if auto_svc is None or build_svc is None:
-        return {"polled_builds": 0, "advanced_runs": 0, "device_timeouts": 0, "skipped": True}
+        return {
+            "polled_builds": 0,
+            "advanced_runs": 0,
+            "device_timeouts": 0,
+            "stage_timeouts": {"test_running": 0, "report_collecting": 0},
+            "skipped": True,
+        }
 
     global _stale_swept
     if not _stale_swept:
@@ -220,17 +308,28 @@ def run_tick_sync(
             logger.exception("[AutomationWorker] stale sweep failed")
         _stale_swept = True
 
+    global _last_build_poll_at
     polled_builds = 0
-    try:
-        polled_builds = poll_running_builds_sync(build_svc)
-    except Exception:
-        logger.exception("[AutomationWorker] build poll loop failed")
+    build_poll_interval = max(1, int(cfg.get("build_poll_interval_seconds", 10)))
+    now = time.monotonic()
+    if not _last_build_poll_at or now - _last_build_poll_at >= build_poll_interval:
+        _last_build_poll_at = now
+        try:
+            polled_builds = poll_running_builds_sync(build_svc)
+        except Exception:
+            logger.exception("[AutomationWorker] build poll loop failed")
 
     device_timeouts = 0
     try:
         device_timeouts = sweep_waiting_device_timeouts(cfg, automation_service=auto_svc)
     except Exception:
         logger.exception("[AutomationWorker] waiting_device sweep failed")
+
+    stage_timeouts = {"test_running": 0, "report_collecting": 0}
+    try:
+        stage_timeouts = sweep_active_stage_timeouts(cfg, automation_service=auto_svc)
+    except Exception:
+        logger.exception("[AutomationWorker] active-stage timeout sweep failed")
 
     # Advance runs. Cap iterations per tick so a single tick (which may block
     # inside a 3600s flash) does not loop indefinitely. worker_tick returns
@@ -259,6 +358,7 @@ def run_tick_sync(
         "polled_builds": polled_builds,
         "advanced_runs": advanced_runs,
         "device_timeouts": device_timeouts,
+        "stage_timeouts": stage_timeouts,
     }
 
 
@@ -292,7 +392,7 @@ async def _loop() -> None:
 
 
 def start_automation_worker() -> asyncio.Task | None:
-    global _task
+    global _last_build_poll_at, _stale_swept, _task
     if _task and not _task.done():
         return _task
     cfg = _load_worker_config()
@@ -300,6 +400,7 @@ def start_automation_worker() -> asyncio.Task | None:
         logger.info("[AutomationWorker] disabled by config; not starting")
         return None
     _stale_swept = False
+    _last_build_poll_at = 0.0
     _task = asyncio.create_task(_loop())
     return _task
 
@@ -319,8 +420,7 @@ async def stop_automation_worker() -> None:
 
 def get_worker_status() -> dict[str, Any]:
     cfg = _load_worker_config()
-    loop = asyncio.get_event_loop()
-    last_ago = (loop.time() - _last_tick_at) if _last_tick_at else None
+    last_ago = (time.monotonic() - _last_tick_at) if _last_tick_at else None
     return {
         "running": _task is not None and not _task.done(),
         "enabled": cfg["enabled"],

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import time
+from pathlib import Path
 
 import aiohttp
 import paramiko
@@ -29,6 +30,14 @@ router = APIRouter()
 # survives a user action.
 _VNC_STATUS_TTL = 10.0
 _vnc_status_cache: dict[str, float] = {"ts": 0.0, "value": None}
+_NOVNC_ZH_CN_LOCALE = Path(__file__).with_name("novnc_zh_cn.json")
+
+
+def novnc_locale_override(path: str) -> bytes | None:
+    """Return the platform's Simplified Chinese noVNC locale when requested."""
+    if path.lstrip("/") != "app/locale/zh.json":
+        return None
+    return _NOVNC_ZH_CN_LOCALE.read_bytes()
 
 
 def _invalidate_vnc_status_cache() -> None:
@@ -51,7 +60,7 @@ def _cluster_novnc_upstream(worker_id: str) -> str:
     worker = cluster.repository.get_worker(worker_id)
     if not cluster.effective_enabled or not worker:
         raise ValueError("Worker 不存在或集群模式未启用")
-    if worker.get("status") not in {"online", "busy"}:
+    if worker.get("status") not in {"online", "busy", "draining"}:
         raise ValueError("Worker 不在线")
     address = str(worker.get("address") or worker.get("hostname") or "").strip()
     if not address:
@@ -163,8 +172,8 @@ async def novnc_websockify_proxy(websocket: WebSocket):
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
                 task.cancel()
-            for task in done:
-                task.result()
+            await asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.gather(*done)
     except Exception as e:
         logger.error(f"[noVNC] WebSocket proxy error: {e}")
         try:
@@ -208,9 +217,11 @@ async def cluster_novnc_websockify_proxy(websocket: WebSocket, worker_id: str):
                         await websocket.send_text(message.data)
 
             tasks = [asyncio.create_task(client_to_upstream()), asyncio.create_task(upstream_to_client())]
-            _done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
                 task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.gather(*done)
     except Exception as exc:
         logger.error("[noVNC] Worker %s WebSocket proxy error: %s", worker_id, exc)
         try:
@@ -225,6 +236,9 @@ async def cluster_novnc_websockify_proxy(websocket: WebSocket, worker_id: str):
 @router.get("/novnc/{path:path}")
 async def novnc_http_proxy(request: Request, path: str = "vnc.html"):
     """Proxy noVNC static files through the 5001 origin."""
+    locale = novnc_locale_override(path)
+    if locale is not None:
+        return Response(content=locale, media_type="application/json", headers={"Cache-Control": "no-cache"})
     upstream_url = build_novnc_upstream_url(path, request.scope.get("query_string", b""))
     try:
         timeout = aiohttp.ClientTimeout(total=30)
@@ -254,6 +268,9 @@ async def novnc_http_proxy(request: Request, path: str = "vnc.html"):
 @router.get("/cluster/novnc/{worker_id}/{path:path}")
 async def cluster_novnc_http_proxy(request: Request, worker_id: str, path: str = "vnc.html"):
     """Serve Worker noVNC assets without mixed-content or browser routing issues."""
+    locale = novnc_locale_override(path)
+    if locale is not None:
+        return Response(content=locale, media_type="application/json", headers={"Cache-Control": "no-cache"})
     try:
         upstream = _cluster_novnc_upstream(worker_id)
         upstream_path = path.lstrip("/") or "vnc.html"

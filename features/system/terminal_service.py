@@ -287,7 +287,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                 worker_id = ""
             if not worker_id:
                 worker = None
-            elif not worker or worker.get('status') not in {'online', 'busy'}:
+            elif not worker or worker.get('status') not in {'online', 'busy', 'draining'}:
                 await websocket.send_json({'type': 'terminal_error', 'error': '所选 Worker 不在线'})
                 return
             host = (worker or {}).get('address') or (worker or {}).get('hostname') or host
@@ -308,7 +308,14 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
 
         if mode == 'adb':
             adb_config = dict(config)
-            adb_config.update({'ubuntu_host': host, 'ubuntu_user': user})
+            adb_config.update({
+                'ubuntu_host': host,
+                'ubuntu_user': user,
+                'ubuntu_pswd': password,
+                'host': host,
+                'username': user,
+                'password': password,
+            })
             await handle_adb_shell_connect(client_id, websocket, serial_no, adb_config)
             return
 

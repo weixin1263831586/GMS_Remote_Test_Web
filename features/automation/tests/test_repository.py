@@ -1,5 +1,6 @@
 import json
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -78,6 +79,37 @@ class AutomationStoreTests(unittest.TestCase):
             found = store.get_run_by_source_key("gerrit:project:123:7:p1")
 
             self.assertEqual(found["id"], "run_1")
+
+    def test_only_one_worker_can_claim_the_same_run(self):
+        from features.automation.models import AutomationRunCreateRequest
+        from features.automation.repository import AutomationStore
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            store.create_run(AutomationRunCreateRequest().to_run_dict("run_1"))
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                claimed = list(pool.map(
+                    lambda owner: store.claim_run("run_1", owner),
+                    ("worker-a", "worker-b"),
+                ))
+
+            self.assertEqual(sum(claimed), 1)
+
+    def test_run_lists_filter_by_creator(self):
+        from features.automation.models import AutomationRunCreateRequest
+        from features.automation.repository import AutomationStore
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            for run_id, owner in (("run_1", "alice"), ("run_2", "bob")):
+                data = AutomationRunCreateRequest().to_run_dict(run_id)
+                data["created_by"] = owner
+                store.create_run(data)
+
+            self.assertEqual(
+                [item["id"] for item in store.list_run_summaries(created_by="alice")],
+                ["run_1"],
+            )
 
 
 class AutomationProfileTests(unittest.TestCase):

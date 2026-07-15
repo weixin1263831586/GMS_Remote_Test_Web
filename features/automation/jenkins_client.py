@@ -85,6 +85,34 @@ class JenkinsClient:
             "raw": data,
         }
 
+    def cancel_queue_item(self, queue_url: str) -> dict[str, Any]:
+        match = re.search(r"/queue/item/(\d+)(?:/|$)", str(queue_url or ""))
+        if not match:
+            return {"success": False, "error": "Invalid Jenkins queue URL"}
+        response = self.session.post(
+            urljoin(self.base_url, "queue/cancelItem"),
+            data={"id": match.group(1)},
+            headers=self._crumb_headers(),
+            timeout=20,
+        )
+        response.raise_for_status()
+        return {"success": True, "cancelled": True, "queue_id": match.group(1)}
+
+    def cancel_build(
+        self, job_name: str, build_number: str | int
+    ) -> dict[str, Any]:
+        response = self.session.post(
+            self._job_url(job_name, f"{build_number}/stop"),
+            headers=self._crumb_headers(),
+            timeout=20,
+        )
+        response.raise_for_status()
+        return {
+            "success": True,
+            "cancelled": True,
+            "build_number": str(build_number),
+        }
+
     @staticmethod
     def select_artifact(build: dict[str, Any], artifact_pattern: str) -> dict[str, Any]:
         pattern = re.compile(artifact_pattern or r".*")

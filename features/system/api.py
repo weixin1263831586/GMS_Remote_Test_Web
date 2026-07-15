@@ -1,6 +1,7 @@
 """System router - WebSocket, health check, docs, help, skills download, root page."""
 
 import asyncio
+import html
 import json
 import logging
 import os
@@ -37,7 +38,6 @@ from foundation.responses import error_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-GMS_ASSISTANT_UPSTREAM = os.getenv("GMS_ASSISTANT_URL", "http://172.16.14.248:5173").rstrip("/")
 
 # Template factory (initialized from app.py)
 _templates = None
@@ -59,9 +59,11 @@ SHELL_PAGE_TITLES = {
     "security-audit": "安全审计 - GMS 远程测试",
     "gms-assistant": "GMS助手 - GMS 远程测试",
     "automation": "GMS ATS - GMS 远程测试",
+    "cluster": "主机集群 - GMS 远程测试",
     "redmine-agent": "Redmine - GMS 远程测试",
     "gerrit-dashboard": "Gerrit看板 - GMS 远程测试",
     "agent": "对话Agent - GMS 远程测试",
+    "notes": "个人知识库 - GMS 远程测试",
 }
 
 
@@ -69,6 +71,16 @@ def init_templates(templates):
     """Initialize Jinja2 templates reference from the main app."""
     global _templates
     _templates = templates
+
+
+def _gms_assistant_upstream() -> str:
+    """Resolve the optional upstream from environment or product config."""
+    env_url = str(os.getenv("GMS_ASSISTANT_URL") or "").strip()
+    if env_url:
+        return env_url.rstrip("/")
+    config = config_manager.load_config()
+    external = config.get("external_services") or {}
+    return str(external.get("gms_assistant_url") or "").strip().rstrip("/")
 
 
 def _get_websocket_client_ip(websocket: WebSocket) -> str:
@@ -124,14 +136,22 @@ async def root(request: Request):
     return response
 
 
-def _rewrite_gms_assistant_content(text: str, request: Request, proxy_base: str = "") -> str:
+def _rewrite_gms_assistant_content(
+    text: str,
+    request: Request,
+    proxy_base: str = "",
+    upstream: str = "",
+) -> str:
     """Rewrite upstream absolute URLs to this HTTPS origin."""
-    upstream_https = re.sub(r"^http://", "https://", GMS_ASSISTANT_UPSTREAM)
+    upstream = upstream or _gms_assistant_upstream()
+    if not upstream:
+        return text
+    upstream_https = re.sub(r"^http://", "https://", upstream)
     base = proxy_base.rstrip("/")
     replacements = {
-        GMS_ASSISTANT_UPSTREAM: base,
+        upstream: base,
         upstream_https: base,
-        GMS_ASSISTANT_UPSTREAM.replace("/", "\\/"): base.replace("/", "\\/"),
+        upstream.replace("/", "\\/"): base.replace("/", "\\/"),
         upstream_https.replace("/", "\\/"): base.replace("/", "\\/"),
     }
     for old, new in replacements.items():
@@ -147,7 +167,13 @@ def _rewrite_gms_assistant_content(text: str, request: Request, proxy_base: str 
 
 async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str = ""):
     """Same-origin HTTPS proxy for the external HTTP GMS assistant."""
-    upstream_url = f"{GMS_ASSISTANT_UPSTREAM}/{path}"
+    upstream = _gms_assistant_upstream()
+    if not upstream:
+        return JSONResponse(
+            content={"success": False, "error": "GMS助手未配置，请设置 external_services.gms_assistant_url"},
+            status_code=503,
+        )
+    upstream_url = f"{upstream}/{path}"
     if request.url.query:
         upstream_url = f"{upstream_url}?{request.url.query}"
 
@@ -175,7 +201,7 @@ async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str
         for key, value in request.headers.items()
         if key.lower() not in excluded_headers
     }
-    request_headers["Host"] = urlparse(GMS_ASSISTANT_UPSTREAM).netloc
+    request_headers["Host"] = urlparse(upstream).netloc
 
     try:
         timeout = aiohttp.ClientTimeout(total=60)
@@ -197,12 +223,14 @@ async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str
             if upstream_response.status in {301, 302, 303, 307, 308}:
                 location = response_headers.get("Location") or response_headers.get("location")
                 if location:
-                    response_headers["Location"] = location.replace(GMS_ASSISTANT_UPSTREAM, "/gms-assistant")
+                    response_headers["Location"] = location.replace(upstream, "/gms-assistant")
 
             if any(marker in content_type for marker in ("text/", "javascript", "json")):
                 try:
                     text = body.decode(upstream_response.charset or "utf-8", errors="replace")
-                    body = _rewrite_gms_assistant_content(text, request, proxy_base=proxy_base).encode("utf-8")
+                    body = _rewrite_gms_assistant_content(
+                        text, request, proxy_base=proxy_base, upstream=upstream
+                    ).encode("utf-8")
                     response_headers.pop("Content-Length", None)
                     response_headers.pop("content-length", None)
                 except Exception:
@@ -522,6 +550,10 @@ async def get_architecture():
     if os.path.exists(architecture_file):
         with open(architecture_file, encoding='utf-8') as f:
             content = f.read()
+        config = config_manager.load_config()
+        ui_defaults = config.get("ui_defaults") or {}
+        build_server = str(ui_defaults.get("architecture_build_server") or "未配置")
+        content = content.replace("{{BUILD_SERVER_LABEL}}", html.escape(build_server))
         return HTMLResponse(content=content)
     return JSONResponse(status_code=404, content={"error": "Architecture diagram not found"})
 

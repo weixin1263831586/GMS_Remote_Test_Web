@@ -7,6 +7,7 @@ import time
 import uuid
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
@@ -65,8 +66,11 @@ WEBAPP_PAGES = {
     "tools": ("常用工具", "下载和维护常用工具"),
     "security-audit": ("安全审计", "查看访问和接口审计"),
     "gms-assistant": ("GMS助手", "外部 GMS 助手"),
+    "automation": ("GMS ATS", "查看和管理自动化测试流水线"),
+    "cluster": ("主机集群", "查看 Worker、设备和持久化集群任务"),
     "redmine-agent": ("Redmine看板", "个人/部门 Redmine 统计、未回复问题和 RedmineAgent 扫描"),
     "gerrit-dashboard": ("Gerrit看板", "查询 Gerrit 变更和配置 Gerrit dashboard profiles"),
+    "notes": ("个人知识库", "管理 Wiki 文档、附件和知识问答"),
     "agent": ("对话Agent", "自然语言操作 Web_app"),
 }
 
@@ -83,20 +87,78 @@ class AgentChatRequest(BaseModel):
     execute: bool = False
     action: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
+    workspace_context: dict[str, Any] = Field(default_factory=dict)
+
+
+_AGENT_WORKSPACE_FIELDS = {
+    "scope_mode", "worker_id", "device_ids", "suite_key", "suite_path",
+    "cluster_job_id", "attempt_id", "automation_run_id", "report_id",
+    "report_timestamp", "artifact_id", "gerrit_change_id", "gerrit_patchset",
+    "redmine_issue_id", "origin_page",
+}
+
+
+def _local_worker_id() -> str:
+    try:
+        from features.cluster import get_cluster_service
+
+        return str(get_cluster_service().config.local_worker_id or "worker-local")
+    except (AttributeError, RuntimeError):
+        return "worker-local"
+
+
+def _is_local_worker_id(worker_id: str | None) -> bool:
+    return not worker_id or worker_id in {"worker-local", _local_worker_id()}
+
+
+def _normalize_workspace_context(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Keep only bounded navigation state supplied by the authenticated browser."""
+    if not raw:
+        return {"scope_mode": "single", "worker_id": _local_worker_id(), "device_ids": []}
+    context: dict[str, Any] = {}
+    for key, value in (raw or {}).items():
+        if key not in _AGENT_WORKSPACE_FIELDS:
+            continue
+        if key == "device_ids":
+            context[key] = [str(item)[:384] for item in (value or [])[:32] if str(item).strip()]
+        elif value is not None:
+            context[key] = str(value)[:4096]
+    if "scope_mode" in raw:
+        context["scope_mode"] = "cluster" if context.get("scope_mode") == "cluster" else "single"
+    elif context.get("worker_id") and not _is_local_worker_id(context["worker_id"]):
+        context["scope_mode"] = "cluster"
+    if context.get("scope_mode") == "single":
+        context["worker_id"] = _local_worker_id()
+    elif context.get("scope_mode") == "cluster":
+        context["worker_id"] = context.get("worker_id") or _local_worker_id()
+        if context["worker_id"] == "worker-local":
+            context["worker_id"] = _local_worker_id()
+    return context
 
 
 class AgentRequestShim:
     """Minimal request object for reusing existing route handlers."""
 
-    def __init__(self, request: Request, query_params: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        request: Request,
+        query_params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+    ):
         self.headers = request.headers
         self.client = request.client
+        self.cookies = getattr(request, "cookies", {})
+        self.state = getattr(request, "state", SimpleNamespace())
         self.method = getattr(request, "method", "POST")
         self.url = getattr(request, "url", None)
         self.query_params = query_params if query_params is not None else getattr(request, "query_params", {})
+        self._json_body = dict(json_body or {})
 
     async def form(self):
         return {}
+
+    async def json(self):
+        return dict(self._json_body)
 
 
 def _now_iso() -> str:
@@ -161,6 +223,7 @@ async def _get_or_create_session(session_id: str | None, client_id: str) -> dict
                 "steps": [],
                 "pending_plan": None,
                 "active_run": None,
+                "workspace_context": {},
                 "created_at": _now_iso(),
                 "updated_at": _now_iso(),
             }
@@ -243,7 +306,39 @@ def _parse_user_intent(message: str) -> dict[str, Any]:
     }
 
 
-def _select_devices(intent: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
+def _select_devices(
+    intent: dict[str, Any], workspace_context: dict[str, Any] | None = None
+) -> tuple[list[str], list[dict[str, Any]]]:
+    workspace = workspace_context or {}
+    worker_id = workspace.get("worker_id") or _local_worker_id()
+    is_remote = workspace.get("scope_mode") == "cluster" and not _is_local_worker_id(worker_id)
+    workspace_devices = [str(item) for item in workspace.get("device_ids") or []]
+    if is_remote:
+        from features.cluster import get_cluster_service
+
+        rows = get_cluster_service().repository.list_devices(worker_id)
+        details = [{
+            "device_id": item.get("id") or f"{worker_id}:{item.get('serial', '')}",
+            "serial": item.get("serial", ""),
+            "worker_id": worker_id,
+            "state": item.get("state", "unknown"),
+            "locked": item.get("state") != "available",
+            "locked_by": item.get("lease_owner", ""),
+        } for item in rows]
+        available = {item["device_id"]: item for item in details if not item["locked"]}
+
+        def remote_id(value: str) -> str:
+            return value if value.startswith(f"{worker_id}:") else f"{worker_id}:{value}"
+
+        explicit = [remote_id(item) for item in intent.get("devices") or []]
+        preferred = [remote_id(item) for item in workspace_devices]
+        requested = explicit or preferred
+        if requested:
+            return [item for item in requested if item in available], details
+        unlocked = list(available)
+        count = int(intent.get("device_count") or 1)
+        return unlocked if count <= 0 else unlocked[:count], details
+
     device_ids = device_manager.get_connected_devices(force_refresh=True)
     details = []
     for device_id in device_ids:
@@ -254,7 +349,11 @@ def _select_devices(intent: dict[str, Any]) -> tuple[list[str], list[dict[str, A
             "locked_by": lock_status.get("locked_by", "") if lock_status else "",
         })
 
-    requested = intent.get("devices") or []
+    requested = intent.get("devices") or [
+        item.split(":", 1)[1]
+        if item.startswith(("worker-local:", f"{_local_worker_id()}:")) else item
+        for item in workspace_devices
+    ]
     if requested:
         available = {item["device_id"]: item for item in details}
         return [dev for dev in requested if dev in available and not available[dev]["locked"]], details
@@ -266,7 +365,9 @@ def _select_devices(intent: dict[str, Any]) -> tuple[list[str], list[dict[str, A
 
 def _score_suite(suite: dict[str, Any], test_type: str, module: str) -> int:
     score = 0
-    haystack = " ".join(str(suite.get(key, "")) for key in ("test_type", "version", "tools_path", "binary")).lower()
+    haystack = " ".join(str(suite.get(key, "")) for key in (
+        "test_type", "suite_type", "version", "suite_version", "tools_path", "binary"
+    )).lower()
     if test_type and test_type.lower() in haystack:
         score += 20
     if module:
@@ -278,7 +379,16 @@ def _score_suite(suite: dict[str, Any], test_type: str, module: str) -> int:
     return score
 
 
-def _list_suites() -> list[dict[str, Any]]:
+def _list_suites(workspace_context: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    workspace = workspace_context or {}
+    worker_id = workspace.get("worker_id") or _local_worker_id()
+    if workspace.get("scope_mode") == "cluster" and not _is_local_worker_id(worker_id):
+        from features.cluster import get_cluster_service
+
+        return [
+            item for item in get_cluster_service().repository.list_suites(worker_id)
+            if item.get("available")
+        ]
     from features.test_execution import _get_available_test_suites
 
     config = config_manager.load_config()
@@ -286,18 +396,37 @@ def _list_suites() -> list[dict[str, Any]]:
     return _get_available_test_suites(config, base_path)
 
 
-def _select_suite(intent: dict[str, Any]) -> dict[str, Any] | None:
-    suites = _list_suites()
+def _select_suite(
+    intent: dict[str, Any], workspace_context: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    workspace = workspace_context or {}
+    suites = _list_suites(workspace)
     test_type = intent.get("test_type") or ""
     module = intent.get("test_module") or ""
     if not suites:
         return None
+    selected_path = workspace.get("suite_path") or ""
+    selected_key = workspace.get("suite_key") or ""
+    exact = next((suite for suite in suites if selected_path and
+                  (suite.get("tools_path") or suite.get("full_path")) == selected_path), None)
+    if not exact:
+        exact = next((suite for suite in suites if selected_key and
+                      suite.get("suite_key") == selected_key), None)
+    if exact:
+        return exact
     return max(suites, key=lambda suite: _score_suite(suite, test_type, module))
 
 
-def _build_plan(intent: dict[str, Any], selected_devices: list[str], device_details: list[dict[str, Any]], suite: dict[str, Any] | None) -> dict[str, Any]:
-    test_suite = suite.get("tools_path", "") if suite else ""
-    test_type = intent.get("test_type") or (suite.get("test_type", "") if suite else "")
+def _build_plan(
+    intent: dict[str, Any], selected_devices: list[str],
+    device_details: list[dict[str, Any]], suite: dict[str, Any] | None,
+    workspace_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    workspace = workspace_context or {}
+    test_suite = (suite.get("tools_path") or suite.get("full_path") or "") if suite else ""
+    test_type = intent.get("test_type") or (
+        suite.get("test_type") or suite.get("suite_type") or "" if suite else ""
+    )
     if not test_type and test_suite:
         test_type = detect_test_type_from_suite_path(test_suite).upper()
 
@@ -327,6 +456,7 @@ def _build_plan(intent: dict[str, Any], selected_devices: list[str], device_deta
         "intent": intent,
         "steps": steps,
         "request": {
+            "worker_id": workspace.get("worker_id") or _local_worker_id(),
             "test_type": test_type,
             "test_module": intent.get("test_module", ""),
             "test_case": intent.get("test_case", ""),
@@ -343,6 +473,7 @@ def _build_plan(intent: dict[str, Any], selected_devices: list[str], device_deta
         },
         "device_details": device_details,
         "suite": suite or {},
+        "workspace_context": workspace,
     }
 
 
@@ -351,6 +482,7 @@ def _summarize_plan(plan: dict[str, Any]) -> str:
     policy = plan.get("policy", {})
     lines = [
         "我已经生成执行计划，确认后开始：",
+        f"- Worker: {req.get('worker_id') or _local_worker_id()}",
         f"- 设备: {', '.join(req.get('devices') or []) or '未选择'}",
         f"- 测试前连接 WiFi: {'是' if plan.get('pre_actions') else '否'}",
         f"- 测试类型: {req.get('test_type') or '自动识别'}",
@@ -368,10 +500,56 @@ def _summarize_plan(plan: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _apply_workspace_tool_params(
+    tool_name: str, params: dict[str, Any], workspace: dict[str, Any]
+) -> dict[str, Any]:
+    """Fill omitted tool parameters from the visible browser workspace."""
+    result = dict(params or {})
+    worker_id = workspace.get("worker_id") or _local_worker_id()
+    if tool_name == "reports_list" and worker_id:
+        result.setdefault("worker_id", worker_id)
+    if tool_name == "test_start":
+        result.setdefault("worker_id", worker_id)
+        result.setdefault("devices", workspace.get("device_ids") or [])
+        result.setdefault("test_suite", workspace.get("suite_path") or "")
+    if tool_name in {"reports_analyze", "reports_download", "reports_delete"}:
+        timestamp = workspace.get("report_timestamp") or workspace.get("report_id") or ""
+        if timestamp:
+            result.setdefault("report_timestamp", timestamp)
+            result.setdefault("timestamp", timestamp)
+    return result
+
+
+def _missing_required_params(tool: Any, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return required tool parameters that still have no usable value."""
+    if not tool:
+        return []
+    missing: list[dict[str, Any]] = []
+    for definition in tool.params:
+        if not definition.get("required"):
+            continue
+        name = str(definition.get("name") or "").strip()
+        if not name:
+            continue
+        value = params.get(name)
+        if value is None or (isinstance(value, str) and not value.strip()) or value == []:
+            missing.append(definition)
+    return missing
+
+
+def _request_missing_params(session: dict[str, Any], missing: list[dict[str, Any]]) -> None:
+    labels = [str(item.get("desc") or item.get("name") or "参数") for item in missing]
+    _append_message(
+        session,
+        "assistant",
+        "还缺少必要参数：" + "、".join(labels) + "。请补充后再执行。",
+    )
+    session["status"] = "idle"
+    session["pending_plan"] = None
+
+
 def _latest_report_for_client(client_id: str, exclude_timestamp: str | None = None) -> dict[str, Any] | None:
     reports = test_report_db.get_reports(limit=20, user_only=client_id)
-    if not reports:
-        reports = test_report_db.get_reports(limit=20)
     if exclude_timestamp:
         for report in reports:
             if report.get("timestamp") == exclude_timestamp:
@@ -389,6 +567,18 @@ def _report_failed(report: dict[str, Any] | None) -> bool:
         return int(fail_count) > 0
     except Exception:
         return False
+
+
+def _report_for_cluster_job(job_id: str, attempt_id: str = "") -> dict[str, Any] | None:
+    """Resolve only the report produced by one durable Worker attempt."""
+    if not job_id:
+        return None
+    report = test_report_db.get_report_by_timestamp(f"cluster-{job_id}")
+    if not report or report.get("cluster_job_id") != job_id:
+        return None
+    if attempt_id and report.get("attempt_id") != attempt_id:
+        return None
+    return report
 
 
 def _normalize_failure(raw_failure: dict[str, Any], index: int = 0) -> dict[str, Any]:
@@ -489,13 +679,15 @@ def _extract_symbols_for_apk_lookup(diagnosis: dict[str, Any], failure: dict[str
     return symbols[:5]
 
 
-async def _wait_for_apk_analysis(task_id: str, timeout_seconds: int = 180) -> dict[str, Any] | None:
+async def _wait_for_apk_analysis(
+    task_id: str, request: AgentRequestShim, timeout_seconds: int = 180
+) -> dict[str, Any] | None:
     from features.firmware import get_apk_status
 
     deadline = time.time() + timeout_seconds
     last_status = None
     while time.time() < deadline:
-        payload = _json_body(await get_apk_status(task_id))
+        payload = _json_body(await get_apk_status(task_id, request))
         data = payload.get("data") or {}
         last_status = data
         if data.get("status") == "completed":
@@ -506,14 +698,19 @@ async def _wait_for_apk_analysis(task_id: str, timeout_seconds: int = 180) -> di
     return last_status
 
 
-async def _read_apk_source_snippet(task_id: str, diagnosis: dict[str, Any], failure: dict[str, Any]) -> dict[str, Any] | None:
+async def _read_apk_source_snippet(
+    task_id: str, diagnosis: dict[str, Any], failure: dict[str, Any],
+    request: AgentRequestShim,
+) -> dict[str, Any] | None:
     """Find a likely decompiled source file and read a short snippet."""
     from features.firmware import find_apk_symbol_definition, get_apk_source
 
     symbols = _extract_symbols_for_apk_lookup(diagnosis, failure)
     definition = None
     for symbol in symbols:
-        payload = _json_body(await find_apk_symbol_definition(task_id, symbol=symbol))
+        payload = _json_body(await find_apk_symbol_definition(
+            task_id, request, symbol=symbol
+        ))
         if payload.get("success"):
             definition = (payload.get("data") or {}).get("definition")
             if definition:
@@ -526,7 +723,9 @@ async def _read_apk_source_snippet(task_id: str, diagnosis: dict[str, Any], fail
     if not path:
         return None
 
-    payload = _json_body(await get_apk_source(task_id, path=path, view=True))
+    payload = _json_body(await get_apk_source(
+        task_id, request, path=path, view=True
+    ))
     if not payload.get("success"):
         return {"definition": definition, "path": path, "error": payload.get("error") or "源码读取失败"}
 
@@ -540,7 +739,10 @@ async def _read_apk_source_snippet(task_id: str, diagnosis: dict[str, Any], fail
     return {"definition": definition, "path": path, "line": line, "snippet": snippet}
 
 
-async def _run_apk_source_analysis(session: dict[str, Any], plan: dict[str, Any], diagnosis: dict[str, Any], failure: dict[str, Any]) -> dict[str, Any] | None:
+async def _run_apk_source_analysis(
+    session: dict[str, Any], plan: dict[str, Any], diagnosis: dict[str, Any],
+    failure: dict[str, Any], request: AgentRequestShim,
+) -> dict[str, Any] | None:
     """Import a suite APK/JAR, decompile it, and read a likely source snippet."""
     from features.firmware import analyze_apk
     from features.test_execution import create_suite_apk_analysis_task
@@ -557,7 +759,7 @@ async def _run_apk_source_analysis(session: dict[str, Any], plan: dict[str, Any]
     _append_step(session, "APK/源码分析", "running", f"导入构件 {artifact_path}")
     try:
         req = SuiteApkAnalyzeRequest(suite_path=suite_path, path=artifact_path)
-        create_payload = _json_body(await create_suite_apk_analysis_task(req))
+        create_payload = _json_body(await create_suite_apk_analysis_task(req, request))
         if not create_payload.get("success"):
             _append_step(session, "APK/源码分析失败", "warning", create_payload.get("error") or "构件导入失败", create_payload)
             return None
@@ -568,17 +770,17 @@ async def _run_apk_source_analysis(session: dict[str, Any], plan: dict[str, Any]
             _append_step(session, "APK/源码分析失败", "warning", "反编译任务 ID 为空", create_payload)
             return None
 
-        start_payload = _json_body(await analyze_apk(task_id))
+        start_payload = _json_body(await analyze_apk(task_id, request))
         if not start_payload.get("success"):
             _append_step(session, "APK/源码分析失败", "warning", start_payload.get("error") or "反编译启动失败", start_payload)
             return None
 
-        status = await _wait_for_apk_analysis(task_id)
+        status = await _wait_for_apk_analysis(task_id, request)
         if not status or status.get("status") != "completed":
             _append_step(session, "APK/源码分析", "warning", f"反编译未完成: {(status or {}).get('status', 'timeout')}", {"task_id": task_id, "status": status})
             return {"task_id": task_id, "status": status}
 
-        snippet = await _read_apk_source_snippet(task_id, diagnosis, failure)
+        snippet = await _read_apk_source_snippet(task_id, diagnosis, failure, request)
         detail = f"反编译完成: {task.get('filename') or artifact_path}"
         if snippet and snippet.get("path"):
             detail += f"，命中源码 {snippet['path']}:{snippet.get('line', '')}"
@@ -591,7 +793,10 @@ async def _run_apk_source_analysis(session: dict[str, Any], plan: dict[str, Any]
         return None
 
 
-async def _run_failure_analysis_pipeline(session: dict[str, Any], plan: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+async def _run_failure_analysis_pipeline(
+    session: dict[str, Any], plan: dict[str, Any], report: dict[str, Any],
+    request: AgentRequestShim,
+) -> dict[str, Any]:
     """Analyze report failures, diagnose the first failure, and optionally inspect APK source."""
     report_timestamp = report.get("timestamp", "")
     analysis = await _analyze_saved_report(session, report_timestamp)
@@ -614,7 +819,9 @@ async def _run_failure_analysis_pipeline(session: dict[str, Any], plan: dict[str
 
     apk_result = None
     if diagnosis and (plan.get("policy") or {}).get("apk_source_analysis"):
-        apk_result = await _run_apk_source_analysis(session, plan, diagnosis, primary_failure)
+        apk_result = await _run_apk_source_analysis(
+            session, plan, diagnosis, primary_failure, request
+        )
         result["apk_source_analysis"] = apk_result
 
     root_cause = ((diagnosis or {}).get("ai_result") or {}).get("root_cause") or (diagnosis or {}).get("summary") or "未生成根因"
@@ -657,13 +864,31 @@ async def _start_test_with_plan(session: dict[str, Any], request_shim: AgentRequ
     response = await start_test(request_shim, help=False, req=req)
     payload = _json_body(response)
     if payload.get("success"):
+        correlation = payload.get("data") or {}
         _append_step(
             session,
             "启动测试" if not retry_timestamp else "启动 retry",
             "running",
             retry_timestamp or req.test_module or req.test_suite,
-            {"request": req.model_dump()},
+            {"request": req.model_dump(), "correlation": correlation},
         )
+        if correlation.get("cluster_job_id"):
+            active_run = session.setdefault("active_run", {})
+            active_run.update({
+                "cluster_job_id": correlation["cluster_job_id"],
+                "attempt_id": correlation.get("attempt_id", ""),
+                "worker_id": correlation.get("worker_id") or req.worker_id,
+            })
+            workspace = session.setdefault("workspace_context", {})
+            workspace.update({
+                "scope_mode": "cluster",
+                "worker_id": correlation.get("worker_id") or req.worker_id,
+                "device_ids": list(req.devices),
+                "suite_path": req.test_suite,
+                "cluster_job_id": correlation["cluster_job_id"],
+                "attempt_id": correlation.get("attempt_id", ""),
+                "origin_page": "agent",
+            })
     else:
         _append_step(session, "启动测试失败", "error", payload.get("error") or payload.get("message", ""), payload)
     return payload
@@ -676,20 +901,41 @@ async def _run_pre_actions(session: dict[str, Any], plan: dict[str, Any]) -> dic
 
     req = plan.get("request") or {}
     devices = req.get("devices") or []
+    worker_id = req.get("worker_id") or _local_worker_id()
     for action in actions:
         if action.get("type") != "connect_wifi":
             continue
-        from features.devices import WifiConnectRequest, connect_wifi
+        if not _is_local_worker_id(worker_id):
+            from features.cluster import ClusterDeviceAction, device_action
 
-        wifi_req = WifiConnectRequest(
-            devices=devices,
-            ssid=action.get("ssid"),
-            password=action.get("password"),
-        )
-        response = await connect_wifi(wifi_req)
-        payload = _json_body(response)
+            response = await device_action(ClusterDeviceAction(
+                worker_id=worker_id,
+                devices=devices,
+                action="wifi",
+                ssid=action.get("ssid") or "",
+                password=action.get("password") or "",
+            ))
+            payload = _jsonable(response)
+            wifi_ssid = action.get("ssid") or ""
+        else:
+            from features.devices import WifiConnectRequest, connect_wifi
+
+            wifi_req = WifiConnectRequest(
+                devices=devices,
+                ssid=action.get("ssid"),
+                password=action.get("password"),
+            )
+            response = await connect_wifi(wifi_req)
+            payload = _json_body(response)
+            wifi_ssid = wifi_req.ssid
         summary = payload.get("summary") or {}
-        detail = f"{wifi_req.ssid}: 成功 {summary.get('success', 0)}/{summary.get('total', len(devices))}"
+        results = payload.get("results") or []
+        if not summary and results:
+            summary = {
+                "success": sum(1 for item in results if item.get("success")),
+                "total": len(results),
+            }
+        detail = f"{wifi_ssid}: 成功 {summary.get('success', 0)}/{summary.get('total', len(devices))}"
         if payload.get("success"):
             _append_step(session, "连接 WiFi", "done", detail, payload)
         else:
@@ -717,6 +963,99 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
 
     try:
         while True:
+            active_run = session.get("active_run") or {}
+            cluster_job_id = active_run.get("cluster_job_id") or ""
+            if cluster_job_id:
+                from features.cluster import get_cluster_service
+
+                repository = get_cluster_service().repository
+                job = repository.get_job(cluster_job_id)
+                while job and job.get("status") in {
+                    "assigned", "dispatching", "running", "stopping"
+                }:
+                    await asyncio.sleep(3)
+                    job = repository.get_job(cluster_job_id)
+                if not job:
+                    session["status"] = "error"
+                    _append_step(session, "读取集群任务", "error", f"任务不存在: {cluster_job_id}")
+                    return
+
+                attempt_id = active_run.get("attempt_id") or job.get("current_attempt_id", "")
+                report = None
+                for _ in range(20):
+                    report = _report_for_cluster_job(cluster_job_id, attempt_id)
+                    if report and report.get("status") != "collecting":
+                        break
+                    if job.get("status") != "completed" and not report:
+                        break
+                    await asyncio.sleep(1)
+                latest_report_timestamp = report.get("timestamp") if report else None
+                job_failed = job.get("status") != "completed"
+                failed = job_failed or _report_failed(report)
+                _append_step(
+                    session,
+                    "读取集群测试结果",
+                    "done" if not job_failed else "error",
+                    f"{cluster_job_id} / {job.get('status')}"
+                    + (f" / 报告 {latest_report_timestamp}" if latest_report_timestamp else " / 未生成报告"),
+                    {"job": job, "report": report or {}},
+                )
+
+                workspace = session.setdefault("workspace_context", {})
+                workspace.update({
+                    "scope_mode": "cluster",
+                    "worker_id": job.get("assigned_worker_id", ""),
+                    "cluster_job_id": cluster_job_id,
+                    "attempt_id": attempt_id,
+                    "report_timestamp": latest_report_timestamp or "",
+                    "report_id": (report or {}).get("report_id", ""),
+                    "artifact_id": (report or {}).get("artifact_id", ""),
+                    "origin_page": "agent",
+                })
+
+                if failed and retries_left > 0 and latest_report_timestamp:
+                    attempt += 1
+                    retries_left -= 1
+                    _append_message(
+                        session, "assistant",
+                        f"检测到失败，开始第 {attempt} 次 retry：{latest_report_timestamp}",
+                    )
+                    payload = await _start_test_with_plan(
+                        session, request_shim, plan, latest_report_timestamp
+                    )
+                    if not payload.get("success"):
+                        session["status"] = "error"
+                        _append_message(
+                            session, "assistant",
+                            f"retry 启动失败：{payload.get('error') or payload.get('message')}",
+                        )
+                        return
+                    continue
+
+                if failed and policy.get("analyze_on_failure") and report:
+                    session["status"] = "analyzing"
+                    await _run_failure_analysis_pipeline(
+                        session, plan, report, request_shim
+                    )
+                elif failed:
+                    _append_message(
+                        session, "assistant",
+                        f"集群测试失败。任务：{cluster_job_id}，报告：{latest_report_timestamp or '未生成'}",
+                    )
+                else:
+                    _append_message(
+                        session, "assistant",
+                        f"集群测试完成。任务：{cluster_job_id}，报告：{latest_report_timestamp or '未生成'}",
+                        data={
+                            "cluster_job_id": cluster_job_id,
+                            "attempt_id": attempt_id,
+                            "report_timestamp": latest_report_timestamp or "",
+                        },
+                    )
+                session["status"] = "done"
+                session["active_run"] = None
+                return
+
             user_state = get_or_create_user_state(client_id)
             while user_state.get("running", False):
                 await asyncio.sleep(3)
@@ -752,7 +1091,9 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
 
             if failed and policy.get("analyze_on_failure") and latest_report_timestamp and report:
                 session["status"] = "analyzing"
-                await _run_failure_analysis_pipeline(session, plan, report)
+                await _run_failure_analysis_pipeline(
+                    session, plan, report, request_shim
+                )
             elif failed:
                 _append_message(session, "assistant", f"测试完成但有失败。最近报告：{latest_report_timestamp or '未找到'}")
             else:
@@ -788,6 +1129,7 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
         "plan": plan,
         "started_at": _now_iso(),
         "baseline_report_timestamp": latest_existing_report.get("timestamp") if latest_existing_report else None,
+        "worker_id": req.get("worker_id") or _local_worker_id(),
     }
     request_shim = AgentRequestShim(request)
 
@@ -824,6 +1166,13 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
 
     client_id = get_client_id_from_request(request)
     session = await _get_or_create_session(req.session_id, client_id)
+    if req.workspace_context:
+        supplied_workspace = _normalize_workspace_context(req.workspace_context)
+        session["workspace_context"] = {
+            **(session.get("workspace_context") or {}),
+            **supplied_workspace,
+        }
+    workspace = session.get("workspace_context") or _normalize_workspace_context({})
     _append_message(session, "user", message)
 
     record_user_message(session, message)
@@ -838,13 +1187,21 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
 
             if isinstance(intent_data, dict):
                 tool_name = intent_data.get("tool_name", "")
-                params = intent_data.get("params", {})
+                params = _apply_workspace_tool_params(
+                    tool_name, intent_data.get("params", {}), workspace
+                )
                 category = intent_data.get("category", "")
             else:
                 tool_name = getattr(intent_data, "tool_name", "")
-                params = getattr(intent_data, "params", {})
+                params = _apply_workspace_tool_params(
+                    tool_name, getattr(intent_data, "params", {}), workspace
+                )
                 category = ""
             tool = registry.get(tool_name)
+            missing = _missing_required_params(tool, params)
+            if missing:
+                _request_missing_params(session, missing)
+                return success_response({"session": _session_payload(session)}, "Agent updated")
             tool_result = await executor.execute(session, request, tool_name, params)
 
             update_context(
@@ -875,7 +1232,13 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             session["status"] = "idle"
             return success_response({"session": _session_payload(session)}, "Agent updated")
 
-        params = _jsonable(req.params or {})
+        params = _apply_workspace_tool_params(
+            tool.name, _jsonable(req.params or {}), workspace
+        )
+        missing = _missing_required_params(tool, params)
+        if missing:
+            _request_missing_params(session, missing)
+            return success_response({"session": _session_payload(session)}, "Agent updated")
         if tool.requires_confirm and not req.execute:
             session["pending_plan"] = {
                 "intent": {"tool_name": tool.name, "params": params, "category": tool.category},
@@ -968,13 +1331,23 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     # --- 2d. Run test: generate plan (existing behavior) ---
     if intent.is_run_test:
         legacy_intent = _parse_user_intent(message)
-        selected_devices, device_details = _select_devices(legacy_intent)
-        suite = _select_suite(legacy_intent)
-        plan = _build_plan(legacy_intent, selected_devices, device_details, suite)
+        selected_devices, device_details = _select_devices(legacy_intent, workspace)
+        suite = _select_suite(legacy_intent, workspace)
+        plan = _build_plan(
+            legacy_intent, selected_devices, device_details, suite, workspace
+        )
         session["pending_plan"] = plan
         session["status"] = "planning"
         _append_step(session, "生成测试计划", "done", "已根据自然语言匹配设备和测试套件", {"plan": plan})
         _append_message(session, "assistant", _summarize_plan(plan), kind="plan", data={"plan": plan})
+        return success_response({"session": _session_payload(session)}, "Agent updated")
+
+    tool_params = _apply_workspace_tool_params(
+        intent.tool_name, intent.params, workspace
+    )
+    missing = _missing_required_params(intent.tool, tool_params)
+    if missing:
+        _request_missing_params(session, missing)
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
     # --- 2e. Dangerous/confirm-required: show confirmation plan ---
@@ -983,24 +1356,24 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
         tool_display = tool.display_name if tool else intent.tool_name
         plan_text = (
             "⚠️ 此操作需要确认：**" + tool_display + "**\n\n"
-            "参数：" + _format_params(intent.params) + "\n\n"
+            "参数：" + _format_params(tool_params) + "\n\n"
             "输入\"确认执行\"或点击执行按钮后启动。"
         )
         session["pending_plan"] = {
             "intent": {
                 "tool_name": intent.tool_name,
-                "params": _jsonable(intent.params),
+                "params": _jsonable(tool_params),
                 "category": tool.category if tool else "",
             },
             "type": "generic_action",
         }
         session["status"] = "planning"
         _append_message(session, "assistant", plan_text, kind="plan",
-                        data={"plan": {"tool_name": intent.tool_name, "params": intent.params, "type": "generic_action"}})
+                        data={"plan": {"tool_name": intent.tool_name, "params": tool_params, "type": "generic_action"}})
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
     # --- 3. Execute tool ---
-    tool_result = await executor.execute(session, request, intent.tool_name, intent.params)
+    tool_result = await executor.execute(session, request, intent.tool_name, tool_params)
 
     # --- 4. Update context ---
     update_context(
@@ -1080,6 +1453,11 @@ async def get_agent_capabilities():
             "list_devices", "list_test_suites", "start_test", "monitor_test",
             "retry_test", "find_latest_report", "analyze_report", "diagnose_failure",
             "analyze_suite_apk", "read_decompiled_source",
+            "automation_dashboard", "automation_runs", "automation_run_cancel",
+            "automation_run_retry", "cluster_status", "cluster_workers",
+            "cluster_devices", "cluster_jobs", "cluster_job_cancel",
+            "cluster_set_mode", "build_jobs", "knowledge_search",
+            "knowledge_ask", "knowledge_create",
         ],
         "tool_catalog": tools_by_category,
         "total_tools": len(registry),

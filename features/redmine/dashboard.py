@@ -23,9 +23,6 @@ DEFAULT_DEPARTMENT_DASHBOARD = {
     "issue_limit": 500,
 }
 
-DEFAULT_REDMINE_BASE_URL = "https://redmine.rock-chips.com"
-
-
 def _bounded_int(value, default: int, minimum: int, maximum: int) -> int:
     try:
         parsed = int(value)
@@ -323,7 +320,9 @@ def issue_id_list(issues: Iterable[dict[str, Any]]) -> list[str]:
 
 def issue_url_list(issues: Iterable[dict[str, Any]], base_url: str) -> list[str]:
     """Return stable Redmine issue URLs for copy/email actions."""
-    root = str(base_url or "").strip().rstrip("/") or DEFAULT_REDMINE_BASE_URL
+    root = str(base_url or "").strip().rstrip("/")
+    if not root:
+        return []
     return [f"{root}/issues/{issue_id}" for issue_id in issue_id_list(issues)]
 
 

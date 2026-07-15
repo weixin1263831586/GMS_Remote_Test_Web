@@ -115,7 +115,7 @@ async function _apiCallOnce(url, method, data, opts) {
                 }
             }
             const error = new Error(
-                (detail && (detail.message || detail.detail)) ||
+                (typeof detail === 'string' ? detail : detail && (detail.message || detail.detail)) ||
                 result.error || result.message || 'Request failed'
             );
             if (needsElevation) error.suppressToast = true;

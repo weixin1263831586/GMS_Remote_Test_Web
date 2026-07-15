@@ -163,6 +163,7 @@ async def get_connected_devices(
     from features.users import (
         build_device_group_map,
         current_username_for_request,
+        cluster_device_properties,
         load_device_groups,
     )
     group_map = build_device_group_map(
@@ -479,6 +480,7 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
     每个分组名形如 "model: Pixel 7"，id 形如 "auto_<dim>_<sanitized>"。
     """
     from features.users import (
+        cluster_device_properties,
         current_username_for_request,
         enforce_exclusive_device_group,
         load_device_groups,
@@ -498,7 +500,6 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
     if dim == "worker":
         value_to_devices: dict[str, list[str]] = {}
         local_worker_id = "worker-local"
-        cluster = None
         try:
             from features.cluster import get_cluster_service
             cluster = get_cluster_service()
@@ -509,15 +510,10 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
         local_devices = await asyncio.to_thread(device_manager.get_connected_devices)
         for device_id in local_devices:
             value_to_devices.setdefault(local_worker_id, []).append(device_id)
-        # 远端 Worker 设备：用集群命名空间 ID（worker-id:serial）
-        if cluster is not None and cluster.effective_enabled:
-            for device in cluster.repository.list_devices():
-                if device.get("state") in {"offline", "unknown"}:
-                    continue
-                wid = device.get("worker_id", "unknown")
-                if wid == local_worker_id:
-                    continue  # 本地设备已用裸 serial 加入
-                value_to_devices.setdefault(wid, []).append(device["id"])
+        # 远端 Worker 设备：用集群命名空间 ID（worker-id:serial）及友好主机名
+        for device_id, properties in cluster_device_properties().items():
+            source_host = properties.get("source_host") or "unknown"
+            value_to_devices.setdefault(source_host, []).append(device_id)
         # 将 worker_id 映射为友好名称
         worker_names: dict[str, str] = {}
         try:
@@ -525,7 +521,16 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
                 worker_names[worker["id"]] = worker.get("name") or worker["id"]
         except Exception:
             pass
-        # 重写 value_to_devices 的 key 为友好名
+        # 本地 worker 的友好名称使用 "user@host" 格式，与设备管理页的
+        # source_host 一致，这样 auto_assign_new_devices 才能正确补全新设备。
+        try:
+            config = runtime.config_manager.load_config()
+            ubuntu_user = runtime.config_manager.get_ubuntu_user(config)
+            ubuntu_host = runtime.config_manager.get_ubuntu_host(config)
+            worker_names[local_worker_id] = f"{ubuntu_user}@{ubuntu_host}"
+        except Exception:
+            worker_names.setdefault(local_worker_id, local_worker_id)
+        # 重写本地 Worker 的 key 为友好名；远端项已经使用友好名。
         _named = {}
         for wid, devs in value_to_devices.items():
             _named[worker_names.get(wid, wid)] = devs
@@ -535,22 +540,27 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
     else:
         # 当前在线设备（用缓存即可，避免重复 SSH 扫描）
         raw_devices = await asyncio.to_thread(device_manager.get_connected_devices)
-        if not raw_devices:
-            return _api_success({"groups": []}, "当前无在线设备")
-
         # 收集每台设备的属性值
         value_to_devices = {}
-        with SSHConnection() as ssh:
-            for device_id in raw_devices:
-                base_info = await asyncio.to_thread(
-                    device_manager.get_device_info, device_id, ssh
-                )
-                value = str(base_info.get(info_key) or "未知").strip() or "未知"
-                # SOC 维度做系列归并：RK3576S -> RK3576，RK3588S -> RK3588，
-                # 同数字系列的设备归到同一个分组；其他维度保持原值。
-                if dim == "soc":
-                    value = soc_series(value)
-                value_to_devices.setdefault(value, []).append(device_id)
+        if raw_devices:
+            with SSHConnection() as ssh:
+                for device_id in raw_devices:
+                    base_info = await asyncio.to_thread(
+                        device_manager.get_device_info, device_id, ssh
+                    )
+                    value = str(base_info.get(info_key) or "未知").strip() or "未知"
+                    if dim == "soc":
+                        value = soc_series(value)
+                    value_to_devices.setdefault(value, []).append(device_id)
+
+        # 集群设备属性由 Worker 心跳上报，无需从 Controller SSH 到远端主机。
+        for device_id, properties in cluster_device_properties().items():
+            value = str(properties.get(info_key) or "未知").strip() or "未知"
+            if dim == "soc":
+                value = soc_series(value)
+            value_to_devices.setdefault(value, []).append(device_id)
+        if not value_to_devices:
+            return _api_success({"groups": []}, "当前无在线设备")
 
     def _sanitize(value: str) -> str:
         return re.sub(r"[^a-zA-Z0-9_-]+", "_", value).strip("_") or "unknown"

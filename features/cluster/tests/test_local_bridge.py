@@ -6,10 +6,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-from features.cluster.repository import ClusterRepository
 from features.cluster.config import ClusterConfig
+from features.cluster.repository import ClusterRepository
 
 
 class LocalBridgeTests(unittest.TestCase):

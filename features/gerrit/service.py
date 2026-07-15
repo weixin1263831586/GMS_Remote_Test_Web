@@ -6,11 +6,143 @@ import asyncio
 import json
 import os
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import aiohttp
 
 from features.gerrit.config import MAX_QUERY_PAGE_SIZE
+
+
+async def post_gerrit_review(
+    cfg: dict[str, Any],
+    *,
+    change_id: str,
+    patchset: str = "",
+    message: str = "",
+    verified: int | None = None,
+) -> dict[str, Any]:
+    """Publish one ATS review using configured REST, then SSH fallback."""
+    if not str(change_id or "").strip():
+        return {"sent": False, "error": "Gerrit change id is missing"}
+    rest_error = ""
+    if cfg.get("base_url") and cfg.get("rest_username") and cfg.get("rest_password"):
+        result = await _post_gerrit_review_rest(
+            cfg,
+            change_id=str(change_id),
+            revision=str(patchset or "current"),
+            message=message,
+            verified=verified,
+        )
+        if result.get("sent"):
+            return result
+        rest_error = str(result.get("error") or "")
+    if cfg.get("ssh_host"):
+        result = await _post_gerrit_review_ssh(
+            cfg,
+            change_id=str(change_id),
+            patchset=str(patchset or ""),
+            message=message,
+            verified=verified,
+        )
+        if rest_error:
+            result["rest_error"] = rest_error
+        return result
+    return {
+        "sent": False,
+        "error": rest_error or "Gerrit review transport is not configured",
+    }
+
+
+async def _post_gerrit_review_rest(
+    cfg: dict[str, Any],
+    *,
+    change_id: str,
+    revision: str,
+    message: str,
+    verified: int | None,
+) -> dict[str, Any]:
+    base_url = str(cfg.get("base_url") or "").rstrip("/")
+    url = (
+        f"{base_url}/a/changes/{quote(change_id, safe='')}/revisions/"
+        f"{quote(revision, safe='')}/review"
+    )
+    payload: dict[str, Any] = {"message": message}
+    if verified is not None:
+        payload["labels"] = {"Verified": int(verified)}
+    timeout = aiohttp.ClientTimeout(total=30)
+    connector = aiohttp.TCPConnector(ssl=bool(cfg.get("rest_verify_ssl", False)))
+    auth = aiohttp.BasicAuth(
+        str(cfg.get("rest_username") or ""),
+        str(cfg.get("rest_password") or ""),
+    )
+    try:
+        async with aiohttp.ClientSession(
+            timeout=timeout, connector=connector, auth=auth
+        ) as session, session.post(url, json=payload) as response:
+            text = await response.text()
+            if response.status >= 400:
+                return {
+                    "sent": False,
+                    "source": "rest",
+                    "error": f"REST {response.status}: {text[:300]}",
+                }
+        return {"sent": True, "source": "rest", "change_id": change_id}
+    except Exception as exc:
+        return {"sent": False, "source": "rest", "error": str(exc)}
+
+
+async def _post_gerrit_review_ssh(
+    cfg: dict[str, Any],
+    *,
+    change_id: str,
+    patchset: str,
+    message: str,
+    verified: int | None,
+) -> dict[str, Any]:
+    target = str(cfg.get("ssh_host") or "")
+    if cfg.get("ssh_user"):
+        target = f"{cfg['ssh_user']}@{target}"
+    command = [
+        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+        "-p", str(cfg.get("ssh_port") or 29418),
+    ]
+    identity_file = str(cfg.get("ssh_identity_file") or "").strip()
+    if identity_file:
+        command.extend([
+            "-o", "IdentitiesOnly=yes", "-i", os.path.expanduser(identity_file)
+        ])
+    command.extend([target, "gerrit", "review"])
+    if message:
+        command.extend(["--message", message])
+    if verified is not None:
+        command.extend(["--label", f"Verified={int(verified):+d}"])
+    revision = f"{change_id},{patchset}" if patchset else change_id
+    command.append(revision)
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.communicate()
+        return {"sent": False, "source": "ssh", "error": "Gerrit review timed out"}
+    except Exception as exc:
+        return {"sent": False, "source": "ssh", "error": str(exc)}
+    if process.returncode != 0:
+        return {
+            "sent": False,
+            "source": "ssh",
+            "error": stderr.decode("utf-8", errors="replace").strip(),
+        }
+    return {
+        "sent": True,
+        "source": "ssh",
+        "change_id": change_id,
+        "output": stdout.decode("utf-8", errors="replace").strip(),
+    }
 
 
 def _select_profile(cfg: dict[str, Any], profile_id: str) -> dict[str, Any]:
@@ -233,4 +365,3 @@ def _extract_query_limit(query: str) -> int | None:
             except (TypeError, ValueError):
                 return None
     return None
-

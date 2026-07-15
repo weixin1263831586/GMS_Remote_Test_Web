@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import uuid
@@ -8,12 +9,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .repository_commands import ClusterCommandRepositoryMixin
+from .repository_inventory import ClusterInventoryRepositoryMixin
+from .repository_reservations import ClusterReservationRepositoryMixin
+from .repository_transfers import ClusterTransferRepositoryMixin
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-class ClusterRepository:
+class ClusterRepository(
+    ClusterCommandRepositoryMixin,
+    ClusterInventoryRepositoryMixin,
+    ClusterReservationRepositoryMixin,
+    ClusterTransferRepositoryMixin,
+):
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -36,9 +47,14 @@ class ClusterRepository:
                     status TEXT NOT NULL, capabilities_json TEXT NOT NULL,
                     cpu_percent REAL NOT NULL DEFAULT 0,
                     memory_percent REAL NOT NULL DEFAULT 0,
+                    memory_total_gb REAL NOT NULL DEFAULT 0,
+                    memory_available_gb REAL NOT NULL DEFAULT 0,
+                    load_1m REAL NOT NULL DEFAULT 0,
                     disk_free_gb REAL NOT NULL DEFAULT 0,
                     max_jobs INTEGER NOT NULL DEFAULT 1,
                     running_jobs INTEGER NOT NULL DEFAULT 0,
+                    external_jobs INTEGER NOT NULL DEFAULT 0,
+                    unknown_external_jobs INTEGER NOT NULL DEFAULT 0,
                     registered_at TEXT NOT NULL, last_heartbeat_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -59,6 +75,13 @@ class ClusterRepository:
                     checksum TEXT NOT NULL, size_bytes INTEGER NOT NULL DEFAULT 0,
                     available INTEGER NOT NULL DEFAULT 1, last_scanned_at TEXT NOT NULL,
                     UNIQUE(worker_id, tools_path),
+                    FOREIGN KEY(worker_id) REFERENCES cluster_workers(id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS cluster_worker_tests (
+                    worker_id TEXT NOT NULL, worker_job_id TEXT NOT NULL,
+                    source TEXT NOT NULL, status TEXT NOT NULL, suite_type TEXT NOT NULL,
+                    pid INTEGER, devices_json TEXT NOT NULL, payload_json TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL, PRIMARY KEY(worker_id, worker_job_id),
                     FOREIGN KEY(worker_id) REFERENCES cluster_workers(id) ON DELETE CASCADE
                 );
                 CREATE TABLE IF NOT EXISTS cluster_commands (
@@ -111,6 +134,16 @@ class ClusterRepository:
                     released_at TEXT NOT NULL,
                     FOREIGN KEY(job_id) REFERENCES cluster_jobs(id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS cluster_device_reservations (
+                    id TEXT PRIMARY KEY, reservation_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL, worker_id TEXT NOT NULL,
+                    serial TEXT NOT NULL, owner_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL, status TEXT NOT NULL,
+                    acquired_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL, released_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_cluster_reservations_source
+                    ON cluster_device_reservations(source_id,status);
                 CREATE TABLE IF NOT EXISTS cluster_job_artifacts (
                     id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
                     worker_id TEXT NOT NULL, filename TEXT NOT NULL,
@@ -118,16 +151,40 @@ class ClusterRepository:
                     size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL,
                     created_at TEXT NOT NULL, UNIQUE(attempt_id, filename)
                 );
+                CREATE TABLE IF NOT EXISTS cluster_artifact_uploads (
+                    id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+                    worker_id TEXT NOT NULL, filename TEXT NOT NULL,
+                    artifact_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+                    sha256 TEXT NOT NULL, chunk_size INTEGER NOT NULL,
+                    chunk_count INTEGER NOT NULL, status TEXT NOT NULL,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    completed_at TEXT NOT NULL,
+                    UNIQUE(attempt_id, filename)
+                );
                 CREATE TABLE IF NOT EXISTS cluster_transfers (
                     id TEXT PRIMARY KEY, worker_id TEXT NOT NULL, transfer_type TEXT NOT NULL,
+                    owner_id TEXT NOT NULL DEFAULT '', metadata_json TEXT NOT NULL DEFAULT '{}',
                     status TEXT NOT NULL, filename TEXT NOT NULL, relative_path TEXT NOT NULL,
                     size_bytes INTEGER NOT NULL DEFAULT 0, sha256 TEXT NOT NULL,
                     error TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
                     completed_at TEXT NOT NULL
                 );
             """)
+            self._migrate_worker_metrics(conn)
+            self._migrate_transfers(conn)
             self._migrate_device_lease_unique_constraint(conn)
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_active_device_lease ON device_leases(device_id) WHERE status='active'")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_active_device_reservation ON cluster_device_reservations(device_id) WHERE status='active'")
+
+    @staticmethod
+    def _migrate_transfers(conn: sqlite3.Connection) -> None:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(cluster_transfers)")}
+        if "owner_id" not in columns:
+            conn.execute("ALTER TABLE cluster_transfers ADD COLUMN owner_id TEXT NOT NULL DEFAULT ''")
+        if "metadata_json" not in columns:
+            conn.execute(
+                "ALTER TABLE cluster_transfers ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'"
+            )
 
     @staticmethod
     def _migrate_device_lease_unique_constraint(conn: sqlite3.Connection) -> None:
@@ -155,7 +212,10 @@ class ClusterRepository:
         if row is None:
             return None
         result = dict(row)
-        for column in ("capabilities_json", "properties_json", "payload_json", "result_json"):
+        for column in (
+            "capabilities_json", "properties_json", "payload_json", "result_json",
+            "metadata_json",
+        ):
             if column in result:
                 key = column.removesuffix("_json")
                 try:
@@ -210,6 +270,7 @@ class ClusterRepository:
             conn.execute("DELETE FROM cluster_commands WHERE worker_id=?", (worker_id,))
             conn.execute("DELETE FROM cluster_worker_devices WHERE worker_id=?", (worker_id,))
             conn.execute("DELETE FROM cluster_worker_suites WHERE worker_id=?", (worker_id,))
+            conn.execute("DELETE FROM cluster_worker_tests WHERE worker_id=?", (worker_id,))
             conn.execute("DELETE FROM cluster_transfers WHERE worker_id=?", (worker_id,))
             conn.execute("DELETE FROM cluster_workers WHERE id=?", (worker_id,))
             return conn.total_changes > 0
@@ -220,56 +281,64 @@ class ClusterRepository:
                 "SELECT * FROM cluster_commands WHERE id=?", (command_id,)
             ).fetchone())
 
+    def find_correlated_command(
+        self, worker_id: str, command_type: str, key: str, value: str
+    ) -> dict[str, Any] | None:
+        if not value or key not in {"automation_run_id", "transfer_id"}:
+            return None
+        with self.connect() as conn:
+            row = conn.execute(
+                """SELECT * FROM cluster_commands
+                   WHERE worker_id=? AND command_type=?
+                     AND json_extract(payload_json, ?) = ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (worker_id, command_type, f"$.{key}", value),
+            ).fetchone()
+        return self._decode(row)
+
     def compact_command_result(self, command_id: str, result: dict[str, Any]) -> None:
         """Replace transient/binary-heavy command output with durable metadata."""
         with self.connect() as conn:
             conn.execute("UPDATE cluster_commands SET result_json=?,updated_at=? WHERE id=?",
                          (json.dumps(result, separators=(",", ":")), utc_now(), command_id))
 
-    def create_transfer(self, worker_id: str, transfer_type: str = "suite_export") -> dict[str, Any]:
-        transfer_id = f"transfer-{uuid.uuid4().hex}"
-        now = utc_now()
-        with self.connect() as conn:
-            conn.execute("""INSERT INTO cluster_transfers
-                (id,worker_id,transfer_type,status,filename,relative_path,size_bytes,sha256,
-                 error,created_at,updated_at,completed_at) VALUES(?,?,?,'created','','',0,'','',?,?, '')""",
-                         (transfer_id, worker_id, transfer_type, now, now))
-        return self.get_transfer(transfer_id) or {}
-
-    def get_transfer(self, transfer_id: str) -> dict[str, Any] | None:
-        with self.connect() as conn:
-            row = conn.execute("SELECT * FROM cluster_transfers WHERE id=?", (transfer_id,)).fetchone()
-        return dict(row) if row else None
-
-    def update_transfer(self, transfer_id: str, **values: Any) -> dict[str, Any] | None:
-        allowed = {"status", "filename", "relative_path", "size_bytes", "sha256", "error", "completed_at"}
-        fields = [(key, value) for key, value in values.items() if key in allowed]
-        if fields:
-            assignments = ",".join(f"{key}=?" for key, _ in fields)
-            with self.connect() as conn:
-                conn.execute(f"UPDATE cluster_transfers SET {assignments},updated_at=? WHERE id=?",
-                             ([value for _, value in fields] + [utc_now(), transfer_id]))
-        return self.get_transfer(transfer_id)
-
     def heartbeat(self, worker_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         now = utc_now()
+        running_jobs = data.get("running_jobs", [])
+        external_jobs = [item for item in running_jobs if item.get("source") == "external"]
+        unknown_external_jobs = [item for item in external_jobs if not item.get("devices")]
+        external_serials = {
+            (str(device)[len(worker_id) + 1:]
+             if str(device).startswith(f"{worker_id}:") else str(device))
+            for item in external_jobs
+            for device in item.get("devices", [])
+        }
+        status = ("draining" if unknown_external_jobs else
+                  "busy" if running_jobs else "online")
         with self._lock, self.connect() as conn:
             cursor = conn.execute("""
                 UPDATE cluster_workers SET status=?,agent_version=?,cpu_percent=?,
-                    memory_percent=?,disk_free_gb=?,running_jobs=?,
+                    memory_percent=?,memory_total_gb=?,memory_available_gb=?,load_1m=?,
+                    disk_free_gb=?,running_jobs=?,external_jobs=?,unknown_external_jobs=?,
                     last_heartbeat_at=?,updated_at=? WHERE id=?
             """, (
-                "busy" if data.get("running_jobs") else "online",
+                status,
                 data.get("agent_version", ""), data.get("cpu_percent", 0),
-                data.get("memory_percent", 0), data.get("disk_free_gb", 0),
-                len(data.get("running_jobs", [])), now, now, worker_id,
+                data.get("memory_percent", 0), data.get("memory_total_gb", 0),
+                data.get("memory_available_gb", 0), data.get("load_1m", 0),
+                data.get("disk_free_gb", 0), len(running_jobs), len(external_jobs),
+                len(unknown_external_jobs), now, now, worker_id,
             ))
             if cursor.rowcount == 0:
                 return None
-            self._replace_devices(conn, worker_id, data.get("devices", []), now)
+            self._replace_devices(conn, worker_id, data.get("devices", []), now,
+                                  external_serials)
+            self._replace_worker_tests(conn, worker_id, running_jobs, now)
             if data.get("suites") is not None:
                 self._replace_suites(conn, worker_id, data["suites"], now)
-            for running in data.get("running_jobs", []):
+            for running in running_jobs:
+                if running.get("source") == "external":
+                    continue
                 attempt_id = running.get("attempt_id", "")
                 worker_job_id = running.get("worker_job_id", "")
                 conn.execute("""UPDATE cluster_job_attempts SET status='running',
@@ -296,81 +365,12 @@ class ClusterRepository:
                         WHERE attempt_id=? AND status='active'""", (now, attempt_id))
         return self.get_worker(worker_id)
 
-    def _replace_devices(self, conn, worker_id: str, devices: list[dict], now: str) -> None:
-        seen = []
-        for device in devices:
-            serial = device["serial"]
-            transport = device.get("transport", "local_usb")
-            device_id = f"{worker_id}:{serial}"
-            seen.append(device_id)
-            conn.execute("""
-                INSERT INTO cluster_worker_devices
-                    (id,worker_id,serial,transport,state,properties_json,
-                     first_seen_at,last_seen_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(worker_id,serial,transport) DO UPDATE SET
-                    state=CASE WHEN EXISTS(
-                        SELECT 1 FROM device_leases
-                        WHERE device_id=excluded.id AND status='active'
-                    ) THEN 'allocated' ELSE excluded.state END,
-                    properties_json=excluded.properties_json,
-                    last_seen_at=excluded.last_seen_at,updated_at=excluded.updated_at
-            """, (device_id, worker_id, serial, transport,
-                    device.get("state", "available"),
-                    json.dumps(device.get("properties", {}), separators=(",", ":")),
-                    now, now, now))
-        if seen:
-            placeholders = ",".join("?" for _ in seen)
-            conn.execute(
-                f"UPDATE cluster_worker_devices SET state='offline',updated_at=? "
-                f"WHERE worker_id=? AND id NOT IN ({placeholders})", [now, worker_id, *seen]
-            )
-        else:
-            conn.execute("UPDATE cluster_worker_devices SET state='offline',updated_at=? WHERE worker_id=?", (now, worker_id))
-
-    def _replace_suites(self, conn, worker_id: str, suites: list[dict], now: str) -> None:
-        conn.execute("UPDATE cluster_worker_suites SET available=0 WHERE worker_id=?", (worker_id,))
-        for suite in suites:
-            conn.execute("""
-                INSERT INTO cluster_worker_suites
-                    (worker_id,suite_type,suite_version,suite_key,tools_path,checksum,
-                     size_bytes,available,last_scanned_at)
-                VALUES (?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(worker_id,tools_path) DO UPDATE SET
-                    suite_type=excluded.suite_type,suite_version=excluded.suite_version,
-                    suite_key=excluded.suite_key,checksum=excluded.checksum,
-                    size_bytes=excluded.size_bytes,available=excluded.available,
-                    last_scanned_at=excluded.last_scanned_at
-            """, (worker_id, suite.get("suite_type", ""), suite.get("suite_version", ""),
-                    suite.get("suite_key", ""), suite["tools_path"], suite.get("checksum", ""),
-                    suite.get("size_bytes", 0), int(suite.get("available", True)), now))
-
-    def list_devices(self, worker_id: str = "") -> list[dict[str, Any]]:
-        sql = "SELECT * FROM cluster_worker_devices"
-        params: tuple = ()
-        if worker_id:
-            sql += " WHERE worker_id=?"
-            params = (worker_id,)
-        sql += " ORDER BY worker_id,serial"
-        with self.connect() as conn:
-            return [self._decode(row) or {} for row in conn.execute(sql, params).fetchall()]
-
-    def list_suites(self, worker_id: str = "") -> list[dict[str, Any]]:
-        sql = "SELECT * FROM cluster_worker_suites"
-        params: tuple = ()
-        if worker_id:
-            sql += " WHERE worker_id=?"
-            params = (worker_id,)
-        sql += " ORDER BY worker_id,suite_type,suite_version"
-        with self.connect() as conn:
-            return [dict(row) for row in conn.execute(sql, params).fetchall()]
-
     def delete_job(self, job_id: str) -> bool:
         with self._lock, self.connect() as conn:
             row = conn.execute("SELECT status FROM cluster_jobs WHERE id=?", (job_id,)).fetchone()
             if not row or row["status"] not in {"completed", "failed", "cancelled"}:
                 return False
-            for table in ("cluster_job_events", "cluster_job_artifacts", "device_leases",
+            for table in ("cluster_job_events", "cluster_job_artifacts", "cluster_artifact_uploads", "device_leases",
                           "cluster_commands", "cluster_job_attempts"):
                 conn.execute(f"DELETE FROM {table} WHERE job_id=?", (job_id,))
             conn.execute("DELETE FROM cluster_jobs WHERE id=?", (job_id,))
@@ -392,14 +392,20 @@ class ClusterRepository:
                     json.dumps(data.get("payload", {}), separators=(",", ":")), now, now))
         return self.get_command(command_id) or {}
 
-    def get_command(self, command_id: str) -> dict[str, Any] | None:
-        with self.connect() as conn:
-            return self._decode(conn.execute("SELECT * FROM cluster_commands WHERE id=?", (command_id,)).fetchone())
-
-    def poll_commands(self, worker_id: str, limit: int = 5) -> list[dict[str, Any]]:
+    def poll_commands(self, worker_id: str, limit: int = 5,
+                      redelivery_seconds: int = 120) -> list[dict[str, Any]]:
         now = utc_now()
         with self._lock, self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            # Delivery is at-least-once.  If a Worker disappears after polling
+            # but before ACKing, make the command visible again after a bounded
+            # lease.  Worker-side command persistence makes this idempotent.
+            conn.execute(
+                """UPDATE cluster_commands SET status='queued',updated_at=?
+                   WHERE worker_id=? AND status='delivered'
+                     AND datetime(delivered_at) <= datetime('now', ?)""",
+                (now, worker_id, f'-{max(1, redelivery_seconds)} seconds'),
+            )
             rows = conn.execute("""
                 SELECT * FROM cluster_commands WHERE worker_id=? AND status='queued'
                 ORDER BY created_at LIMIT ?
@@ -414,14 +420,24 @@ class ClusterRepository:
 
     def ack_command(self, worker_id: str, command_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         now = utc_now()
-        with self.connect() as conn:
-            cursor = conn.execute("""
+        with self._lock, self.connect() as conn:
+            current = conn.execute(
+                "SELECT * FROM cluster_commands WHERE id=? AND worker_id=?",
+                (command_id, worker_id),
+            ).fetchone()
+            if current is None:
+                return None
+            current_status = current["status"]
+            incoming_status = data["status"]
+            terminal = {"completed", "failed", "cancelled"}
+            progress_rank = {"queued": 0, "delivered": 1, "accepted": 2, "running": 3}
+            if current_status in terminal or progress_rank.get(incoming_status, 4) < progress_rank.get(current_status, 0):
+                return self._decode(current)
+            conn.execute("""
                 UPDATE cluster_commands SET status=?,result_json=?,error=?,
                     acknowledged_at=?,updated_at=? WHERE id=? AND worker_id=?
-            """, (data["status"], json.dumps(data.get("result", {}), separators=(",", ":")),
+            """, (incoming_status, json.dumps(data.get("result", {}), separators=(",", ":")),
                     data.get("error", ""), now, now, command_id, worker_id))
-            if cursor.rowcount == 0:
-                return None
         return self.get_command(command_id)
 
     def create_job_with_leases(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -431,8 +447,10 @@ class ClusterRepository:
         lease_ids = []
         worker_id = data["worker_id"]
         requested_devices = data.get("devices", [])
+        reservation_id = str(data.get("device_reservation_id") or "")
         with self._lock, self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            self._expire_device_reservations(conn, now)
             worker = conn.execute("SELECT * FROM cluster_workers WHERE id=?", (worker_id,)).fetchone()
             if worker is None:
                 raise ValueError("worker not found")
@@ -440,11 +458,54 @@ class ClusterRepository:
                 raise ValueError("worker is not online")
             if int(worker["running_jobs"]) >= int(worker["max_jobs"]):
                 raise ValueError("worker capacity is exhausted")
-            active_jobs = conn.execute("""SELECT COUNT(*) FROM cluster_jobs
+            minimum_disk = float(os.getenv("GMS_CLUSTER_MIN_DISK_FREE_GB", "50"))
+            if float(worker["disk_free_gb"] or 0) > 0 and float(worker["disk_free_gb"]) < minimum_disk:
+                raise ValueError(
+                    f"worker has less than {minimum_disk:.1f} GB free disk"
+                )
+            required_memory_gb = float(data.get("required_memory_gb", 0) or 0)
+            available_memory_gb = float(worker["memory_available_gb"] or 0)
+            if required_memory_gb and available_memory_gb and available_memory_gb < required_memory_gb:
+                raise ValueError(
+                    f"worker has {available_memory_gb:.1f} GB available memory; "
+                    f"{required_memory_gb:.1f} GB is required"
+                )
+            active_rows = conn.execute("""SELECT request_json FROM cluster_jobs
                 WHERE assigned_worker_id=? AND status IN ('assigned','dispatching','running','stopping')""",
-                (worker_id,)).fetchone()[0]
-            if active_jobs >= int(worker["max_jobs"]):
+                (worker_id,)).fetchall()
+            if len(active_rows) >= int(worker["max_jobs"]):
                 raise ValueError("worker already has the maximum number of active jobs")
+            existing_exclusive = any(
+                bool(json.loads(row["request_json"] or "{}").get("exclusive_host"))
+                for row in active_rows
+            )
+            if existing_exclusive or (data.get("exclusive_host") and
+                                      (active_rows or int(worker["running_jobs"]) > 0)):
+                raise ValueError("a full-suite test requires exclusive use of the worker")
+            reserved_ids: set[str] = set()
+            if reservation_id:
+                reservation_rows = conn.execute(
+                    """SELECT * FROM cluster_device_reservations
+                       WHERE reservation_id=? AND status='active'""",
+                    (reservation_id,),
+                ).fetchall()
+                if not reservation_rows:
+                    raise ValueError("device reservation is missing or expired")
+                if any(row["worker_id"] != worker_id for row in reservation_rows):
+                    raise ValueError("device reservation belongs to another Worker")
+                source_id = str(data.get("automation_run_id") or "")
+                if source_id and any(row["source_id"] != source_id for row in reservation_rows):
+                    raise ValueError("device reservation belongs to another automation run")
+                owner_id = str(data.get("owner_id") or "")
+                if owner_id and any(row["owner_id"] != owner_id for row in reservation_rows):
+                    raise ValueError("device reservation belongs to another owner")
+                reserved_ids = {row["device_id"] for row in reservation_rows}
+                normalized_requested = {
+                    str(value) if str(value).startswith(f"{worker_id}:") else f"{worker_id}:{value}"
+                    for value in requested_devices
+                }
+                if normalized_requested != reserved_ids:
+                    raise ValueError("test devices do not match the active reservation")
             conn.execute("""INSERT INTO cluster_jobs
                 (id,owner_id,source_type,requested_worker_id,assigned_worker_id,
                  suite_key,suite_path,request_json,status,priority,current_attempt_id,
@@ -468,7 +529,7 @@ class ClusterRepository:
                 ).fetchone()
                 if device is None:
                     raise ValueError(f"device not found on worker: {raw_id}")
-                if device["state"] != "available":
+                if device["state"] != "available" and device_id not in reserved_ids:
                     raise ValueError(f"device is not available: {raw_id}")
                 if conn.execute("SELECT 1 FROM device_leases WHERE device_id=? AND status='active'", (device_id,)).fetchone():
                     raise ValueError(f"device is already leased: {raw_id}")
@@ -482,6 +543,12 @@ class ClusterRepository:
                     (lease_id, device_id, worker_id, device["serial"], job_id, attempt_id,
                      data.get("owner_id", ""), now, now))
                 conn.execute("UPDATE cluster_worker_devices SET state='allocated',updated_at=? WHERE id=?", (now, device_id))
+            if reservation_id:
+                conn.execute(
+                    """UPDATE cluster_device_reservations SET status='converted',released_at=?
+                       WHERE reservation_id=? AND status='active'""",
+                    (now, reservation_id),
+                )
         job = self.get_job(job_id) or {}
         job["lease_ids"] = lease_ids
         return job
@@ -500,9 +567,29 @@ class ClusterRepository:
             result["leases"] = [dict(item) for item in conn.execute("SELECT * FROM device_leases WHERE job_id=?", (job_id,)).fetchall()]
             return result
 
-    def list_jobs(self, limit: int = 100) -> list[dict[str, Any]]:
+    def get_job_by_automation_run(self, automation_run_id: str) -> dict[str, Any] | None:
+        if not automation_run_id:
+            return None
         with self.connect() as conn:
-            rows = conn.execute("SELECT id FROM cluster_jobs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            row = conn.execute(
+                """SELECT id FROM cluster_jobs
+                   WHERE json_extract(request_json, '$.automation_run_id')=?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (automation_run_id,),
+            ).fetchone()
+        return self.get_job(row["id"]) if row else None
+
+    def list_jobs(self, limit: int = 100, owner_id: str = "") -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            if owner_id:
+                rows = conn.execute(
+                    "SELECT id FROM cluster_jobs WHERE owner_id=? ORDER BY created_at DESC LIMIT ?",
+                    (owner_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id FROM cluster_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+                ).fetchall()
         return [job for row in rows if (job := self.get_job(row["id"]))]
 
     def attach_command_to_job(self, job_id: str, command: dict[str, Any]) -> None:

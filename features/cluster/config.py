@@ -15,9 +15,10 @@ class ClusterConfig:
     local_worker_id: str = "worker-local"
     worker_offline_seconds: int = 45
     lease_ttl_seconds: int = 90
+    worker_registration_timeout_seconds: int = 45
 
     @classmethod
-    def load(cls) -> "ClusterConfig":
+    def load(cls) -> ClusterConfig:
         default_path = Path(__file__).resolve().parents[2] / "configs/cluster.json"
         path = Path(os.getenv("GMS_CLUSTER_CONFIG", default_path))
         raw = {}
@@ -34,4 +35,7 @@ class ClusterConfig:
             local_worker_id=str(raw.get("local_worker_id") or "worker-local"),
             worker_offline_seconds=max(15, int(raw.get("worker_offline_seconds", 45))),
             lease_ttl_seconds=max(30, int(raw.get("lease_ttl_seconds", 90))),
+            worker_registration_timeout_seconds=max(
+                15, int(raw.get("worker_registration_timeout_seconds", 45))
+            ),
         )

@@ -104,7 +104,15 @@ def _report_matches_aliases(report: dict, aliases: set[str]) -> bool:
 # ==================== List Reports ====================
 
 @router.get("/api/reports/list")
-async def list_reports(request: Request, user_only: bool = False, worker_id: str = ""):
+async def list_reports(
+    request: Request,
+    user_only: bool = False,
+    worker_id: str = "",
+    cluster_job_id: str = "",
+    attempt_id: str = "",
+    automation_run_id: str = "",
+    report_timestamp: str = "",
+):
     """Get test report list from database."""
     import time
     start_time = time.time()
@@ -117,8 +125,26 @@ async def list_reports(request: Request, user_only: bool = False, worker_id: str
             client_id_filter = None
 
         db_start = time.time()
+        exact_filter = any((cluster_job_id, attempt_id, automation_run_id, report_timestamp))
+        if report_timestamp:
+            exact = test_report_db.get_report_by_timestamp(report_timestamp)
+            candidate_reports = [exact] if exact else []
+        elif exact_filter:
+            candidate_reports = test_report_db.get_reports(limit=500)
+        else:
+            candidate_reports = []
         if user_only and not aliases:
             all_reports = []
+        elif exact_filter:
+            all_reports = [
+                _decorate_report_for_client(report, display_id, aliases)
+                for report in candidate_reports
+                if report
+                and (not cluster_job_id or report.get("cluster_job_id") == cluster_job_id)
+                and (not attempt_id or report.get("attempt_id") == attempt_id)
+                and (not automation_run_id or report.get("automation_run_id") == automation_run_id)
+                and (not user_only or _report_matches_aliases(report, aliases))
+            ]
         elif user_only:
             candidate_reports = test_report_db.get_reports(limit=200)
             all_reports = [
@@ -132,8 +158,24 @@ async def list_reports(request: Request, user_only: bool = False, worker_id: str
                 for report in test_report_db.get_reports(limit=30, user_only=client_id_filter)
             ]
         if worker_id:
-            all_reports = [report for report in all_reports if
-                           (report.get("worker_id") or "worker-local") == worker_id]
+            local_worker_id = "worker-local"
+            try:
+                from features.cluster import get_cluster_service
+
+                local_worker_id = get_cluster_service().config.local_worker_id
+            except (AttributeError, RuntimeError):
+                pass
+            local_aliases = {"", "worker-local", local_worker_id}
+            all_reports = [
+                report for report in all_reports
+                if (
+                    str(report.get("worker_id") or "") == worker_id
+                    or (
+                        worker_id in local_aliases
+                        and str(report.get("worker_id") or "") in local_aliases
+                    )
+                )
+            ]
         db_time = (time.time() - db_start) * 1000
 
         total_time = (time.time() - start_time) * 1000

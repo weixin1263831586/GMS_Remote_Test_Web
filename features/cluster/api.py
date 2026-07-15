@@ -1,26 +1,35 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
+import base64
 import ipaddress
-import os
 import re
-import shlex
-import tarfile
-import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
-import base64
 
-from .models import (ClusterDeviceAction, ClusterJobCreate, ClusterSuiteDownload, ClusterSuiteExtract, CommandAck, CommandCreate, JobEventBatch, TransferComplete,
-                     WorkerHeartbeat, WorkerRegistration)
-from .repository import ClusterRepository, utc_now
-from .service import ClusterService
 from .config import ClusterConfig
-from foundation.config import config_manager
+from .models import (
+    ClusterDeviceAction,
+    ClusterSuiteDownload,
+    ClusterSuiteExtract,
+    CommandAck,
+    CommandCreate,
+    WorkerHeartbeat,
+    WorkerRegistration,
+)
+from .repository import ClusterRepository
+from .service import ClusterService
+from .worker_auth import (
+    authenticate_worker as _authenticate,
+)
+from .worker_auth import (
+    worker_tokens as _worker_tokens,
+)
+from .worker_auth import (
+    write_worker_tokens as _write_worker_tokens,
+)
 
 
 router = APIRouter(prefix="/api/cluster", tags=["cluster"])
@@ -51,46 +60,6 @@ def cluster_page():
     html = html.replace("{{CLUSTER_CSS}}", (ui_dir / "page.css").read_text(encoding="utf-8"))
     html = html.replace("{{CLUSTER_JS}}", (ui_dir / "page.js").read_text(encoding="utf-8"))
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
-
-
-def _worker_tokens() -> dict[str, str]:
-    # worker-246:token,worker-local:token
-    result = {}
-    for item in os.getenv("GMS_CLUSTER_WORKER_TOKENS", "").split(","):
-        worker_id, separator, token = item.partition(":")
-        if separator and worker_id.strip() and token.strip():
-            result[worker_id.strip()] = token.strip()
-    return result
-
-
-def _write_worker_tokens(tokens: dict[str, str]) -> None:
-    value = ",".join(f"{key}:{item}" for key, item in sorted(tokens.items()))
-    os.environ["GMS_CLUSTER_WORKER_TOKENS"] = value
-    env_path = Path(__file__).resolve().parents[2] / ".env.production"
-    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-    replacement = f"GMS_CLUSTER_WORKER_TOKENS={value}"
-    lines = [replacement if line.startswith("GMS_CLUSTER_WORKER_TOKENS=") else line for line in lines]
-    if not any(line.startswith("GMS_CLUSTER_WORKER_TOKENS=") for line in lines):
-        lines.append(replacement)
-    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _persist_worker_token(worker_id: str, token: str) -> None:
-    tokens = _worker_tokens()
-    tokens[worker_id] = token
-    _write_worker_tokens(tokens)
-
-
-def _authenticate(worker_id: str, authorization: str | None) -> None:
-    expected = _worker_tokens().get(worker_id)
-    if not expected:
-        raise HTTPException(503, f"worker token is not configured for {worker_id}")
-    supplied = (authorization or "").removeprefix("Bearer ").strip()
-    if not hmac.compare_digest(
-        hashlib.sha256(supplied.encode()).digest(),
-        hashlib.sha256(expected.encode()).digest(),
-    ):
-        raise HTTPException(401, "invalid worker token")
 
 
 @router.post("/workers/register")
@@ -128,13 +97,33 @@ def list_workers():
     return {"success": True, "workers": service().list_workers()}
 
 
+@router.get("/worker-tests")
+def list_worker_tests(worker_id: str = Query(default="")):
+    if (worker_id and not service().effective_enabled
+            and worker_id != service().config.local_worker_id):
+        raise HTTPException(409, "cluster mode is disabled")
+    tests = service().repository.list_worker_tests(worker_id)
+    if not service().effective_enabled:
+        tests = [item for item in tests
+                 if item["worker_id"] == service().config.local_worker_id]
+    return {"success": True, "tests": tests,
+            "retention": {"automatic_cleanup": False,
+                          "policy": "artifacts and test history are retained until explicitly deleted"}}
+
+
 @router.delete("/workers/{worker_id}")
 def delete_worker(worker_id: str):
     svc = service()
     if worker_id == svc.config.local_worker_id:
         raise HTTPException(409, "local Worker cannot be deleted")
-    if svc.repository.get_worker(worker_id) is None:
+    worker = svc.repository.get_worker(worker_id)
+    if worker is None:
         raise HTTPException(404, "worker not found")
+    if int(worker.get("running_jobs") or 0) > 0:
+        raise HTTPException(
+            409,
+            "Worker has a running platform or external test and cannot be deleted",
+        )
     if not svc.repository.delete_worker(worker_id):
         raise HTTPException(409, "Worker has an active job and cannot be deleted")
     tokens = _worker_tokens()
@@ -189,84 +178,6 @@ def set_cluster_mode(body: dict):
             "worker_count": len(workers)}
 
 
-@router.post("/workers/deploy")
-async def deploy_worker(body: dict):
-    """Upload and install a Worker using explicitly supplied SSH credentials."""
-    worker_id = str(body.get("worker_id") or "").strip()
-    connection = str(body.get("ssh_host") or "").strip()
-    password = str(body.get("password") or "")
-    token = str(body.get("token") or "").strip()
-    controller_url = str(body.get("controller_url") or "").strip().rstrip("/")
-    suite_root = str(body.get("suite_root") or "~/GMS-Suite").strip()
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", worker_id):
-        raise HTTPException(400, "invalid worker ID")
-    if "@" not in connection or not token or not controller_url.startswith(("http://", "https://")):
-        raise HTTPException(400, "SSH host, Worker Token and Controller URL are required")
-    username, hostname = connection.split("@", 1)
-    _persist_worker_token(worker_id, token)
-
-    def _deploy() -> dict:
-        from features.system.ssh import SSHManager
-        manager = SSHManager(pool_size=1)
-        ssh = manager.create_connection({"host": hostname, "username": username,
-                                         "password": password})
-        if ssh is None:
-            raise RuntimeError("SSH connection failed")
-        # The same credential is required by the host-terminal workspace.
-        # Persist it only after SSH authentication has actually succeeded.
-        if password and not config_manager.upsert_device_host_password(connection, password):
-            raise RuntimeError("SSH connected, but saving the host credential failed")
-        project_root = Path(__file__).resolve().parents[2]
-        archive_path = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as temporary:
-                archive_path = Path(temporary.name)
-            with tarfile.open(archive_path, "w:gz") as bundle:
-                bundle.add(project_root / "worker_agent", arcname="worker_agent")
-                bundle.add(project_root / "scripts/install_cluster_worker.sh",
-                           arcname="scripts/install_cluster_worker.sh")
-            sftp = ssh.open_sftp()
-            try:
-                sftp.put(str(archive_path), "/tmp/gms-worker-setup.tar.gz")
-            finally:
-                sftp.close()
-            install = ("rm -rf ~/gms-worker-setup && mkdir -p ~/gms-worker-setup && "
-                       "tar -xzf /tmp/gms-worker-setup.tar.gz -C ~/gms-worker-setup && "
-                       "cd ~/gms-worker-setup && "
-                       f"bash scripts/install_cluster_worker.sh {shlex.quote(worker_id)} "
-                       f"{shlex.quote(controller_url)} {shlex.quote(token)} - {shlex.quote(suite_root)} "
-                       f"{shlex.quote(hostname)}")
-            _stdin, stdout, stderr = ssh.exec_command(install, timeout=900, get_pty=True)
-            exit_code = stdout.channel.recv_exit_status()
-            output = (stdout.read() + stderr.read()).decode("utf-8", errors="replace")[-12000:]
-            if exit_code != 0:
-                raise RuntimeError(output or f"installer exited with {exit_code}")
-            return {"success": True, "worker_id": worker_id, "output": output}
-        finally:
-            ssh.close()
-            if archive_path:
-                archive_path.unlink(missing_ok=True)
-
-    try:
-        result = await asyncio.to_thread(_deploy)
-        # An installer exiting successfully only proves that files and units
-        # were created. Do not report deployment success until the Agent has
-        # authenticated and registered with this Controller.
-        for _ in range(20):
-            if service().repository.get_worker(worker_id) is not None:
-                return {**result, "registered": True}
-            await asyncio.sleep(1)
-        raise HTTPException(
-            502,
-            "安装脚本已完成，但 Worker 在 20 秒内未注册。请在目标主机执行 "
-            "systemctl --user status gms-worker-agent 和 "
-            "journalctl --user -u gms-worker-agent -n 50 --no-pager",
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(502, f"automatic deployment failed: {exc}") from exc
-
 def _require_cluster_enabled(remote: bool = False) -> None:
     svc = service()
     config = svc.config
@@ -319,33 +230,46 @@ async def device_action(body: ClusterDeviceAction):
     is_local = body.worker_id == service().config.local_worker_id
     _require_cluster_enabled(remote=not is_local)
     worker = service().repository.get_worker(body.worker_id)
-    if not worker or worker.get("status") not in {"online", "busy"}:
+    if not worker or worker.get("status") not in {"online", "busy", "draining"}:
         raise HTTPException(409, "worker is not online")
     known = {item["id"]: item for item in service().repository.list_devices(body.worker_id)}
+    # Read-only inspection actions are safe even on external_busy devices.
+    read_only_actions = {
+        "screenshot", "layout", "get_properties", "packages_with_path",
+        "packages_all", "features", "props", "config_explore", "override_status",
+    }
+    is_read_only = body.action in read_only_actions
     requested = []
     for value in body.devices:
         device_id = value if value.startswith(f"{body.worker_id}:") else f"{body.worker_id}:{value}"
         device = known.get(device_id)
-        if not device or device.get("state") in {"offline", "unknown"}:
+        if not device:
             raise HTTPException(409, f"device is not available on worker: {value}")
+        device_state = device.get("state")
+        if device_state in {"offline", "unknown"}:
+            raise HTTPException(409, f"device is offline: {value}")
+        if device_state == "external_busy" and not is_read_only:
+            raise HTTPException(409, f"device is busy with a manual Tradefed test: {value}")
         requested.append(device_id)
     # When targeting the local Controller host, execute device actions
     # directly instead of queuing a command that nobody polls.
     if is_local:
-        from .local_bridge import _probe_devices
         from worker_agent.inventory import execute_device_action as _exec_action
-        result = _exec_action(body.action, requested,
-                              {"x": body.x, "y": body.y, "ssid": body.ssid, "password": body.password})
+        result = _exec_action(body.action, requested, body.model_dump())
         return {"success": True, **result}
     command = service().repository.create_command({
         "worker_id": body.worker_id,
         "command_type": "device_action",
-        "payload": {"action": body.action, "devices": requested, "x": body.x, "y": body.y,
-                    "ssid": body.ssid, "password": body.password},
+        "payload": {**body.model_dump(exclude={"worker_id", "devices"}), "devices": requested},
     })
     # Device actions are short. Waiting here preserves the existing device API's
     # completed-result semantics while still using the outbound Worker channel.
-    wait_steps = 350 if body.action in {"screenshot", "layout"} else 100
+    wait_steps = 1800 if body.action in {
+        "config_explore", "override_apply", "override_revert",
+    } else 350 if body.action in {
+        "screenshot", "layout", "packages_with_path", "packages_all",
+        "features", "props", "override_status",
+    } else 100
     for _ in range(wait_steps):
         await asyncio.sleep(0.1)
         current = service().repository.get_command(command["id"])
@@ -377,8 +301,9 @@ def list_suites(worker_id: str = Query(default="")):
 
 def _local_execute(command_type: str, payload: dict) -> dict:
     """Execute a command directly on the Controller host (worker-local)."""
-    from worker_agent.inventory import execute_suite_action as _exec_suite
     from worker_agent.config import WorkerConfig
+    from worker_agent.inventory import execute_suite_action as _exec_suite
+
     from .local_bridge import _suite_roots
 
     if command_type == "suite_action":
@@ -427,6 +352,25 @@ async def cluster_suite_search(worker_id: str = Query(...), suite_path: str = Qu
         "action": "search", "suite_path": suite_path, "query": query, "limit": limit,
     }, timeout=30)
     return {"success": True, "data": result}
+
+
+@router.post("/suites/results")
+async def cluster_suite_results(worker_id: str = Query(...), suite_path: str = Query(...)):
+    from features.test_execution import parse_tradefed_list_results
+
+    _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
+    result = await _run_worker_command(worker_id, "suite_action", {
+        "action": "list_results", "suite_path": suite_path,
+    }, timeout=100)
+    parsed = parse_tradefed_list_results(result.get("raw_output") or "")
+    return {
+        "success": True,
+        "columns": parsed.get("columns", []),
+        "results": parsed.get("results", []),
+        "count": len(parsed.get("results", [])),
+        "worker_id": worker_id,
+        "launcher": result.get("launcher", ""),
+    }
 
 
 @router.post("/suites/download")
@@ -539,191 +483,32 @@ async def cluster_suite_download_file(worker_id: str = Query(...), suite_path: s
                     headers={"Content-Disposition": f'{disposition}; filename="{filename}"'})
 
 
-def _transfer_root() -> Path:
-    return service().repository.db_path.parent / "transfers"
-
-
-def _firmware_root() -> Path:
-    return service().repository.db_path.parent / "firmware"
-
-
-@router.post("/firmware/stage")
-async def stage_worker_firmware(worker_id: str = Form(...), devices: str = Form(...),
-                                firmware_file: UploadFile = File(...)):
-    _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
-    worker = service().repository.get_worker(worker_id)
-    if not worker or worker.get("status") not in {"online", "busy"}:
-        raise HTTPException(409, "worker is not online")
-    requested = [item.strip() for item in devices.split(",") if item.strip()]
-    if len(requested) != 1:
-        raise HTTPException(400, "cluster firmware flashing requires exactly one device")
-    device_id = requested[0] if requested[0].startswith(f"{worker_id}:") else f"{worker_id}:{requested[0]}"
-    if device_id not in {item["id"] for item in service().repository.list_devices(worker_id)}:
-        raise HTTPException(409, "device does not belong to worker")
-    filename = re.sub(r"[^A-Za-z0-9._+-]", "_", Path(firmware_file.filename or "firmware.img").name)
-    stage_id = "fw-" + os.urandom(16).hex()
-    directory = _firmware_root() / stage_id
-    directory.mkdir(parents=True, exist_ok=False)
-    target = directory / filename
-    digest, total = hashlib.sha256(), 0
-    limit = int(os.getenv("GMS_CLUSTER_FIRMWARE_MAX_BYTES", str(20 * 1024 ** 3)))
-    with target.open("wb") as output:
-        while chunk := await firmware_file.read(4 * 1024 * 1024):
-            total += len(chunk)
-            if total > limit:
-                target.unlink(missing_ok=True)
-                raise HTTPException(413, "firmware image is too large")
-            digest.update(chunk)
-            output.write(chunk)
-    if not total:
-        target.unlink(missing_ok=True)
-        raise HTTPException(400, "firmware image is empty")
-    command = service().repository.create_command({"worker_id": worker_id,
-        "command_type": "flash_firmware", "payload": {"stage_id": stage_id,
-        "filename": filename, "sha256": digest.hexdigest(), "size_bytes": total,
-        "devices": [device_id]}})
-    return {"success": True, "stage_id": stage_id, "command_id": command["id"], "size_bytes": total}
-
-
-@router.get("/workers/{worker_id}/firmware/{stage_id}")
-def download_staged_firmware(worker_id: str, stage_id: str, filename: str = Query(...),
-                             authorization: str | None = Header(default=None)):
-    _authenticate(worker_id, authorization)
-    if not re.fullmatch(r"fw-[a-f0-9]{32}", stage_id):
-        raise HTTPException(400, "invalid firmware stage")
-    safe_name = re.sub(r"[^A-Za-z0-9._+-]", "_", Path(filename).name)
-    path = (_firmware_root() / stage_id / safe_name).resolve()
-    if not path.is_relative_to(_firmware_root().resolve()) or not path.is_file():
-        raise HTTPException(404, "staged firmware not found")
-    return FileResponse(path, filename=safe_name)
-
-
-@router.post("/gsi/stage")
-async def stage_worker_gsi(worker_id: str = Form(...), devices: str = Form(...),
-                           system_file: UploadFile = File(...),
-                           vendor_file: UploadFile | None = File(default=None)):
-    _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
-    requested = [item.strip() for item in devices.split(",") if item.strip()]
-    if len(requested) != 1:
-        raise HTTPException(400, "cluster GSI flashing requires exactly one device")
-    device_id = requested[0] if requested[0].startswith(f"{worker_id}:") else f"{worker_id}:{requested[0]}"
-    if device_id not in {item["id"] for item in service().repository.list_devices(worker_id)}:
-        raise HTTPException(409, "device does not belong to worker")
-    stage_id = "fw-" + os.urandom(16).hex()
-    directory = _firmware_root() / stage_id
-    directory.mkdir(parents=True)
-    files = []
-    for kind, upload in (("system", system_file), ("vendor", vendor_file)):
-        if upload is None:
-            continue
-        name = f"{kind}.img"
-        target, digest, total = directory / name, hashlib.sha256(), 0
-        with target.open("wb") as output:
-            while chunk := await upload.read(4 * 1024 * 1024):
-                total += len(chunk); digest.update(chunk); output.write(chunk)
-        if not total:
-            raise HTTPException(400, f"{kind} image is empty")
-        files.append({"kind": kind, "filename": name, "size_bytes": total, "sha256": digest.hexdigest()})
-    command = service().repository.create_command({"worker_id": worker_id,
-        "command_type": "flash_gsi", "payload": {"stage_id": stage_id,
-        "files": files, "devices": [device_id]}})
-    return {"success": True, "stage_id": stage_id, "command_id": command["id"]}
-
-
-@router.post("/suites/export")
-def create_suite_export(worker_id: str = Query(...), suite_path: str = Query(...),
-                        path: str = Query(...), directory: bool = Query(default=False)):
-    _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
-    worker = service().repository.get_worker(worker_id)
-    if not worker or worker.get("status") not in {"online", "busy"}:
-        raise HTTPException(409, "worker is not online")
-    transfer = service().repository.create_transfer(worker_id)
-    command = service().repository.create_command({
-        "worker_id": worker_id, "command_type": "suite_export",
-        "payload": {"transfer_id": transfer["id"], "suite_path": suite_path,
-                    "path": path, "directory": directory},
-    })
-    return {"success": True, "transfer": transfer, "command_id": command["id"]}
-
-
-@router.put("/transfers/{transfer_id}/chunks/{index}")
-async def upload_transfer_chunk(transfer_id: str, index: int, request: Request,
-                                worker_id: str = Header(alias="X-GMS-Worker-ID"),
-                                authorization: str | None = Header(default=None)):
-    _authenticate(worker_id, authorization)
-    transfer = service().repository.get_transfer(transfer_id)
-    if not transfer or transfer["worker_id"] != worker_id:
-        raise HTTPException(404, "transfer not found for worker")
-    if index < 0 or index > 100000:
-        raise HTTPException(400, "invalid chunk index")
-    body = await request.body()
-    max_chunk = int(os.getenv("GMS_CLUSTER_TRANSFER_CHUNK_BYTES", str(8 * 1024 * 1024)))
-    if not body or len(body) > max_chunk:
-        raise HTTPException(413, "invalid transfer chunk size")
-    chunk_dir = _transfer_root() / transfer_id / "chunks"
-    chunk_dir.mkdir(parents=True, exist_ok=True)
-    (chunk_dir / f"{index:08d}.part").write_bytes(body)
-    service().repository.update_transfer(transfer_id, status="uploading")
-    return {"success": True, "index": index, "size_bytes": len(body)}
-
-
-@router.post("/transfers/{transfer_id}/complete")
-def complete_transfer(transfer_id: str, body: TransferComplete,
-                      worker_id: str = Header(alias="X-GMS-Worker-ID"),
-                      authorization: str | None = Header(default=None)):
-    _authenticate(worker_id, authorization)
-    transfer = service().repository.get_transfer(transfer_id)
-    if not transfer or transfer["worker_id"] != worker_id:
-        raise HTTPException(404, "transfer not found for worker")
-    safe_name = re.sub(r"[^A-Za-z0-9._+-]", "_", Path(body.filename).name)
-    root = _transfer_root() / transfer_id
-    chunks = [root / "chunks" / f"{index:08d}.part" for index in range(body.chunk_count)]
-    if not all(path.is_file() for path in chunks):
-        raise HTTPException(409, "transfer chunks are incomplete")
-    destination = root / safe_name
-    digest = hashlib.sha256()
-    total = 0
-    with destination.open("wb") as output:
-        for chunk in chunks:
-            data = chunk.read_bytes()
-            total += len(data)
-            digest.update(data)
-            output.write(data)
-    if total != body.size_bytes or digest.hexdigest() != body.sha256:
-        destination.unlink(missing_ok=True)
-        raise HTTPException(409, "transfer checksum or size mismatch")
-    for chunk in chunks:
-        chunk.unlink(missing_ok=True)
-    transfer = service().repository.update_transfer(transfer_id, status="completed",
-        filename=safe_name, relative_path=str(destination.relative_to(_transfer_root())),
-        size_bytes=total, sha256=body.sha256, completed_at=utc_now())
-    return {"success": True, "transfer": transfer}
-
-
-@router.get("/transfers/{transfer_id}")
-def get_transfer(transfer_id: str):
-    transfer = service().repository.get_transfer(transfer_id)
-    if not transfer:
-        raise HTTPException(404, "transfer not found")
-    return {"success": True, "transfer": transfer}
-
-
-@router.get("/transfers/{transfer_id}/download")
-def download_transfer(transfer_id: str):
-    transfer = service().repository.get_transfer(transfer_id)
-    if not transfer or transfer["status"] != "completed":
-        raise HTTPException(409, "transfer is not complete")
-    path = (_transfer_root() / transfer["relative_path"]).resolve()
-    if not path.is_relative_to(_transfer_root().resolve()) or not path.is_file():
-        raise HTTPException(404, "transfer file not found")
-    return FileResponse(path, filename=transfer["filename"])
-
-
 @router.post("/commands")
 def create_command(body: CommandCreate):
     if service().repository.get_worker(body.worker_id) is None:
         raise HTTPException(404, "worker not found")
     return {"success": True, "command": service().repository.create_command(body.model_dump())}
+
+
+@router.post("/workers/{worker_id}/restart-vnc")
+async def restart_worker_vnc(worker_id: str):
+    """Restart x11vnc/websockify on a worker to recover from zombie VNC processes."""
+    worker = service().repository.get_worker(worker_id)
+    if worker is None:
+        raise HTTPException(404, "worker not found")
+    if worker.get("status") not in {"online", "busy"}:
+        raise HTTPException(409, "worker is not online")
+    if worker_id == service().config.local_worker_id:
+        from worker_agent.app import restart_local_vnc
+        result = await asyncio.to_thread(restart_local_vnc)
+        return {"success": result.get("rfb_ok", False), "result": result}
+    try:
+        result = await _run_worker_command(worker_id, "restart_vnc", {}, timeout=20)
+        return {"success": result.get("rfb_ok", False), "result": result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"restart_vnc failed: {exc}") from exc
 
 
 @router.post("/workers/{worker_id}/commands/poll")
@@ -748,7 +533,18 @@ def ack_command(worker_id: str, command_id: str, body: CommandAck,
     if command is None:
         raise HTTPException(404, "command not found")
     service().repository.sync_job_from_command(command)
-    if command.get("command_type") == "suite_export" and command.get("status") in {"failed", "cancelled"}:
+    if command.get("job_id") and command.get("command_type") == "start_test" \
+            and command.get("status") in {"completed", "failed", "cancelled"}:
+        from .jobs_api import update_cluster_report_status
+
+        update_cluster_report_status(
+            command["job_id"], command["status"], command.get("error", "")
+        )
+    from .transfers_api import cleanup_staged_firmware
+
+    cleanup_staged_firmware(command)
+    if command.get("command_type") in {"suite_export", "device_export"} \
+            and command.get("status") in {"failed", "cancelled"}:
         transfer_id = (command.get("payload") or {}).get("transfer_id", "")
         if transfer_id:
             service().repository.update_transfer(transfer_id, status="failed",
@@ -756,192 +552,15 @@ def ack_command(worker_id: str, command_id: str, body: CommandAck,
     return {"success": True, "command": command}
 
 
-@router.post("/jobs")
-def create_job(body: ClusterJobCreate):
-    _require_cluster_enabled(remote=body.worker_id not in {"auto", service().config.local_worker_id})
-    data = body.model_dump()
-    if data["worker_id"] == "auto":
-        try:
-            data["worker_id"], selected_devices = service().select_worker(
-                data["suite_key"], data["device_count"]
-            )
-            if not data["devices"]:
-                data["devices"] = selected_devices
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
-    if not data["argv"]:
-        suite_path = data["suite_path"]
-        suite_type = ""
-        if not suite_path:
-            suites = [item for item in service().repository.list_suites(data["worker_id"])
-                      if item["suite_key"] == data["suite_key"] and item["available"]]
-            if not suites:
-                raise HTTPException(409, "suite is not available on worker")
-            suite_path = suites[0]["tools_path"]
-            suite_type = suites[0]["suite_type"].lower()
-        # A harmless console listing is the safe default; real runs supply the
-        # existing Tradefed arguments selected by the test page.
-        executable = str(Path(suite_path) / f"{suite_type}-tradefed") if suite_type else ""
-        if not executable and data["worker_id"] == "worker-local":
-            executable = next((str(Path(suite_path) / name) for name in
-                               ("cts-tradefed", "gts-tradefed", "vts-tradefed", "sts-tradefed")
-                               if (Path(suite_path) / name).exists()), "")
-        if not executable:
-            raise HTTPException(409, "suite executable not found")
-        data["argv"] = [executable, "list", "devices"]
-    try:
-        job = service().repository.create_job_with_leases(data)
-        attempt = job["attempt"]
-        command = service().repository.create_command({
-            "worker_id": data["worker_id"], "command_type": "start_test",
-            "job_id": job["id"], "attempt_id": job["current_attempt_id"],
-            "payload": {"worker_job_id": f"wj-{job['id']}", "argv": data["argv"],
-                        "env": data["env"], "devices": data["devices"]},
-        })
-        service().repository.attach_command_to_job(job["id"], command)
-        return {"success": True, "job": service().repository.get_job(job["id"]),
-                "command": command}
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
+def _mount_subrouters() -> None:
+    """Mount split routers after this module's shared dependencies exist."""
+    from .deployment_api import router as deployment_router
+    from .jobs_api import router as jobs_router
+    from .transfers_api import router as transfers_router
+
+    router.include_router(deployment_router)
+    router.include_router(transfers_router)
+    router.include_router(jobs_router)
 
 
-@router.get("/jobs")
-def list_jobs(limit: int = Query(default=100, ge=1, le=500)):
-    return {"success": True, "jobs": service().repository.list_jobs(limit)}
-
-
-@router.get("/jobs/{job_id}")
-def get_job(job_id: str):
-    job = service().repository.get_job(job_id)
-    if not job:
-        raise HTTPException(404, "job not found")
-    return {"success": True, "job": job}
-
-
-@router.post("/jobs/{job_id}/cancel")
-def cancel_job(job_id: str):
-    job = service().repository.get_job(job_id)
-    if not job:
-        raise HTTPException(404, "job not found")
-    if job["status"] in {"completed", "failed", "cancelled"}:
-        return {"success": True, "job": job, "already_terminal": True}
-    # Worker job ids are deterministic, allowing cancellation to be queued
-    # immediately after Start even before the first running ACK arrives.
-    worker_job_id = (job.get("attempt") or {}).get("worker_job_id", "") or f"wj-{job_id}"
-    command = service().repository.create_command({
-        "worker_id": job["assigned_worker_id"], "command_type": "stop_test",
-        "job_id": job_id, "attempt_id": job["current_attempt_id"],
-        "payload": {"worker_job_id": worker_job_id},
-    })
-    with service().repository.connect() as conn:
-        conn.execute("UPDATE cluster_jobs SET status='stopping',updated_at=? WHERE id=?",
-                     (utc_now(), job_id))
-    return {"success": True, "job": service().repository.get_job(job_id), "command": command}
-
-
-@router.delete("/jobs/{job_id}")
-def delete_job(job_id: str):
-    job = service().repository.get_job(job_id)
-    if not job:
-        raise HTTPException(404, "job not found")
-    if job["status"] not in {"completed", "failed", "cancelled"}:
-        raise HTTPException(409, "only completed history can be deleted")
-    if not service().repository.delete_job(job_id):
-        raise HTTPException(409, "job could not be deleted")
-    return {"success": True, "deleted": job_id}
-
-
-@router.post("/jobs/{job_id}/events")
-def add_job_events(job_id: str, body: JobEventBatch, worker_id: str = Header(alias="X-GMS-Worker-ID"),
-                   authorization: str | None = Header(default=None)):
-    _authenticate(worker_id, authorization)
-    job = service().repository.get_job(job_id)
-    if not job or job["assigned_worker_id"] != worker_id or job["current_attempt_id"] != body.attempt_id:
-        raise HTTPException(404, "job attempt not found for worker")
-    inserted = service().repository.add_events(job_id, body.attempt_id,
-                                               [item.model_dump() for item in body.events])
-    return {"success": True, "inserted": inserted}
-
-
-@router.get("/jobs/{job_id}/events")
-def list_job_events(job_id: str, after: int = Query(default=-1), limit: int = Query(default=500, le=2000)):
-    return {"success": True, "events": service().repository.list_events(job_id, after, limit)}
-
-
-def _artifact_root() -> Path:
-    return service().repository.db_path.parent / "artifacts"
-
-
-@router.put("/jobs/{job_id}/artifacts/{filename}")
-async def upload_artifact(job_id: str, filename: str, request: Request,
-                          attempt_id: str = Query(...),
-                          artifact_type: str = Query(default="file"),
-                          worker_id: str = Header(alias="X-GMS-Worker-ID"),
-                          authorization: str | None = Header(default=None)):
-    _authenticate(worker_id, authorization)
-    job = service().repository.get_job(job_id)
-    if not job or job["assigned_worker_id"] != worker_id or job["current_attempt_id"] != attempt_id:
-        raise HTTPException(404, "job attempt not found for worker")
-    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(filename).name)
-    if not safe_name:
-        raise HTTPException(400, "invalid filename")
-    body = await request.body()
-    max_bytes = int(os.getenv("GMS_CLUSTER_ARTIFACT_MAX_BYTES", str(512 * 1024 * 1024)))
-    if len(body) > max_bytes:
-        raise HTTPException(413, "artifact is too large")
-    destination_dir = _artifact_root() / job_id / attempt_id
-    destination_dir.mkdir(parents=True, exist_ok=True)
-    destination = destination_dir / safe_name
-    destination.write_bytes(body)
-    artifact = service().repository.record_artifact({
-        "job_id": job_id, "attempt_id": attempt_id, "worker_id": worker_id,
-        "filename": safe_name, "relative_path": str(destination.relative_to(_artifact_root())),
-        "artifact_type": artifact_type, "size_bytes": len(body),
-        "sha256": hashlib.sha256(body).hexdigest(),
-    })
-    if artifact_type.startswith("report"):
-        _index_cluster_report(job, destination_dir, artifact)
-    return {"success": True, "artifact": artifact}
-
-
-def _index_cluster_report(job: dict, result_dir: Path, artifact: dict) -> None:
-    """Expose completed Worker results through the existing Reports page."""
-    from features.reports import test_report_db
-
-    request_data = job.get("request") or {}
-    suite_key = job.get("suite_key") or "XTS"
-    test_type = suite_key.split(":", 1)[0].upper()
-    report_info = {
-        "timestamp": f"cluster-{job['id']}",
-        "test_type": test_type,
-        "test_module": request_data.get("test_module", ""),
-        "test_case": request_data.get("test_case", ""),
-        "client_id": job.get("owner_id", "cluster"),
-        "display_client_id": job.get("owner_id", "cluster"),
-        "devices": [item["device_id"] for item in job.get("leases", [])],
-        "result_dir": str(result_dir),
-        "suite_path": job.get("suite_path", ""),
-        "status": "completed",
-        "worker_id": job.get("assigned_worker_id", ""),
-        "cluster_job_id": job["id"],
-        "artifact_id": artifact["id"],
-    }
-    test_report_db.add_report(report_info)
-
-
-@router.get("/jobs/{job_id}/artifacts")
-def list_artifacts(job_id: str):
-    return {"success": True, "artifacts": service().repository.list_artifacts(job_id)}
-
-
-@router.get("/jobs/{job_id}/artifacts/{artifact_id}/download")
-def download_artifact(job_id: str, artifact_id: str):
-    artifacts = [item for item in service().repository.list_artifacts(job_id)
-                 if item["id"] == artifact_id]
-    if not artifacts:
-        raise HTTPException(404, "artifact not found")
-    artifact = artifacts[0]
-    path = (_artifact_root() / artifact["relative_path"]).resolve()
-    if not path.is_relative_to(_artifact_root().resolve()) or not path.is_file():
-        raise HTTPException(404, "artifact file not found")
-    return FileResponse(path, filename=artifact["filename"])
+_mount_subrouters()

@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
 from bootstrap.dependencies import AppServices
+from features.cluster import stop_local_bridge
 from features.devices.manager import device_manager
 from features.devices.monitor import (
     init_usb_monitor,
@@ -23,7 +24,6 @@ from features.devices.reconnect import (
     schedule_usbip_reconnect_for_removed_devices,
     stop_usbip_reconnect_tasks,
 )
-from features.cluster import stop_local_bridge
 from features.redmine.scheduler import (
     start_redmine_agent_scheduler,
     stop_redmine_agent_scheduler,

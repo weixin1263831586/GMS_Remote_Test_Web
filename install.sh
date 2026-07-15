@@ -185,30 +185,53 @@ ensure_sudo() {
 package_web_app() {
     local archive root_name
     root_name="${PACKAGE_NAME}"
-    archive="${DIST_DIR}/${PACKAGE_NAME}-${PACKAGE_VERSION}.tar.gz"
+    [[ "${root_name}" =~ ^[A-Za-z0-9._-]+$ ]] || fail "安装包名称只能包含字母、数字、点、下划线和连字符"
+    command -v rsync >/dev/null 2>&1 || fail "打包需要 rsync"
+    command -v python3 >/dev/null 2>&1 || fail "打包需要 python3"
     mkdir -p "${DIST_DIR}"
+    archive="$(cd "${DIST_DIR}" && pwd)/${PACKAGE_NAME}-${PACKAGE_VERSION}.tar.gz"
 
-    cd "${PROJECT_DIR}"
-    tar -czf "${archive}" \
-        --transform "s#^#${root_name}/#" \
-        --exclude='.git' \
-        --exclude='.agents' \
-        --exclude='.codex' \
-        --exclude='dist' \
-        --exclude='__pycache__' \
-        --exclude='*/__pycache__' \
-        --exclude='*.pyc' \
-        --exclude='*.pyo' \
-        --exclude='.pytest_cache' \
-        --exclude='logs' \
-        --exclude='*.log' \
-        --exclude='*.log.backup.*' \
-        --exclude='local.diff' \
-        --exclude='configs/config_runtime.json' \
-        --exclude='configs/client_ssh_credentials.local.json' \
-        --exclude='configs/redmine_auth.json' \
-        --exclude='data/*.json' \
-        .
+    (
+        local stage package_root
+        stage="$(mktemp -d)"
+        trap 'rm -rf "${stage}"' EXIT
+        package_root="${stage}/${root_name}"
+        mkdir -p "${package_root}"
+        rsync -a \
+            --exclude '.git/' \
+            --exclude '.agents/' \
+            --exclude '.codex/' \
+            --exclude '.certs/' \
+            --exclude '.env.production' \
+            --exclude '.venv/' \
+            --exclude '.pytest_cache/' \
+            --exclude '.ruff_cache/' \
+            --exclude 'AGENTS.md' \
+            --exclude '__pycache__/' \
+            --exclude '*/__pycache__/' \
+            --exclude '*.pyc' \
+            --exclude '*.pyo' \
+            --exclude 'data/' \
+            --exclude 'dist/' \
+            --exclude 'logs/' \
+            --exclude '*.log' \
+            --exclude '*.log.backup.*' \
+            --exclude '*.pid' \
+            --exclude 'local.diff' \
+            --exclude 'scripts_local/' \
+            --exclude 'tests/' \
+            --exclude '*/tests/' \
+            --exclude 'docs/superpowers/' \
+            --exclude 'configs/config_runtime.json' \
+            --exclude 'configs/client_ssh_credentials.local.json' \
+            --exclude 'configs/redmine_auth.json' \
+            "${PROJECT_DIR}/" "${package_root}/"
+        mkdir -p "${package_root}/data"
+        python3 "${PROJECT_DIR}/scripts/sanitize_release_config.py" \
+            "${package_root}/configs/config.json" \
+            "${package_root}/skills/rk_codesearch/config/config.json"
+        tar -czf "${archive}" -C "${stage}" "${root_name}"
+    )
 
     cat <<EOF
 安装包已生成:
@@ -249,16 +272,26 @@ copy_project() {
             --exclude '.git/' \
             --exclude '.agents/' \
             --exclude '.codex/' \
+            --exclude '.certs/' \
+            --exclude '.env.production' \
             --exclude '.venv/' \
             --exclude '__pycache__/' \
             --exclude '*.pyc' \
             --exclude '*.pyo' \
             --exclude '.pytest_cache/' \
+            --exclude '.ruff_cache/' \
+            --exclude 'AGENTS.md' \
+            --exclude 'data/' \
             --exclude 'logs/' \
             --exclude '*.log' \
             --exclude '*.log.backup.*' \
             --exclude 'local.diff' \
             --exclude 'dist/' \
+            --exclude 'scripts_local/' \
+            --exclude 'tests/' \
+            --exclude '*/tests/' \
+            --exclude 'docs/superpowers/' \
+            --exclude 'skills/rk_codesearch/config/config.json' \
             --exclude 'configs/config_runtime.json' \
             --exclude 'configs/client_ssh_credentials.local.json' \
             --exclude 'configs/redmine_auth.json' \
@@ -357,12 +390,12 @@ setup_local_ssh_key() {
 }
 
 write_runtime_config() {
-    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}/configs/config_runtime.json" "${INSTALL_DIR}/configs/config.json" "${RUN_USER}" "${HOST_IP}" "${RUN_HOME}" "${SSH_KEY_PATH}" "${PORT}" <<'PY'
+    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}/configs/config_runtime.json" "${INSTALL_DIR}/configs/config.json" "${INSTALL_DIR}/configs/cluster.json" "${RUN_USER}" "${HOST_IP}" "${RUN_HOME}" "${SSH_KEY_PATH}" "${PORT}" <<'PY'
 import json
 import os
 import sys
 
-runtime_path, static_path, user, host_ip, home, key_path, port = sys.argv[1:8]
+runtime_path, static_path, cluster_path, user, host_ip, home, key_path, port = sys.argv[1:9]
 os.makedirs(os.path.dirname(runtime_path), exist_ok=True)
 
 try:
@@ -410,6 +443,16 @@ static_config.update(deployment_config)
 
 with open(static_path, 'w', encoding='utf-8') as f:
     json.dump(static_config, f, ensure_ascii=False, indent=4)
+    f.write('\n')
+
+try:
+    with open(cluster_path, 'r', encoding='utf-8') as f:
+        cluster_config = json.load(f)
+except Exception:
+    cluster_config = {}
+cluster_config['controller_url'] = f'https://{host_ip}:{port}'
+with open(cluster_path, 'w', encoding='utf-8') as f:
+    json.dump(cluster_config, f, ensure_ascii=False, indent=4)
     f.write('\n')
 PY
 }
@@ -482,10 +525,14 @@ User=${RUN_USER}
 Group=${RUN_GROUP}
 WorkingDirectory=${INSTALL_DIR}
 Environment=PYTHONUNBUFFERED=1
+Environment=GMS_ENV=production
+Environment=GMS_DATA_ROOT=${INSTALL_DIR}/data
+Environment=PYTHONPYCACHEPREFIX=${INSTALL_DIR}/data/pycache
 Environment=UBUNTU_USER=${RUN_USER}
 Environment=UBUNTU_HOST=${HOST_IP}
 Environment=GMS_LOCAL_SERVER=${RUN_USER}@${HOST_IP}
 Environment=GMS_PRIVATE_KEY_PATH=${SSH_KEY_PATH}
+EnvironmentFile=-${INSTALL_DIR}/.env.production
 ExecStart=${INSTALL_DIR}/.venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port ${PORT} --log-level info --access-log --ssl-keyfile ${CERT_KEY} --ssl-certfile ${CERT_CRT}
 Restart=on-failure
 RestartSec=3

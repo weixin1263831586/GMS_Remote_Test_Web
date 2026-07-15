@@ -4,6 +4,7 @@ import threading
 import unittest
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 class UsersListApiTests(unittest.TestCase):
@@ -40,7 +41,11 @@ class UsersListApiTests(unittest.TestCase):
         users_api.runtime.config_manager = FakeConfigManager()
         users_api.runtime.global_state = fake_state
         try:
-            resp = asyncio.run(users_api.list_users())
+            with patch(
+                "features.cluster.get_cluster_service",
+                side_effect=RuntimeError("cluster not configured in unit test"),
+            ):
+                resp = asyncio.run(users_api.list_users())
         finally:
             users_api.runtime.config_manager = old_config_manager
             users_api.runtime.global_state = old_global_state

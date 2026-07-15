@@ -13,7 +13,7 @@ import urllib.parse
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from features.devices import ssh_connection_failed_response
@@ -520,7 +520,7 @@ async def download_suite_directory(suite_path: str = Query(...), path: str = Que
 
 @router.post("/api/test/suites/apk/analyze")
 @handle_api_errors
-async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest):
+async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest, request: Request):
     """Copy an APK from test suite for APK analysis."""
     config = runtime.config_manager.load_config()
     try:
@@ -555,7 +555,12 @@ async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest):
             runtime.cleanup_files([apk_path])
             return ApiResponse.error(f"File too large, max {runtime.apk_max_file_size // (1024*1024)}MB", status_code=400)
 
-        runtime.create_apk_task(task_id, apk_path, filename)
+        runtime.create_apk_task(
+            task_id,
+            apk_path,
+            filename,
+            runtime.get_client_id_from_request(request),
+        )
         return ApiResponse.success({"task_id": task_id, "filename": filename, "size": os.path.getsize(apk_path), "source_path": req.path})
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)

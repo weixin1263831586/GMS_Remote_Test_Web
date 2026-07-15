@@ -1,4 +1,5 @@
 import os
+import json
 import re
 import socket
 import subprocess
@@ -142,7 +143,7 @@ class RuntimeUiHarness(unittest.TestCase):
                     'test', 'desktop', 'terminal', 'users', 'devices', 'reports',
                     'report-analysis', 'test-suites', 'apk-analysis', 'security-audit',
                     'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant',
-                    'automation', 'cluster', 'redmine-agent', 'gerrit-dashboard', 'agent'
+                    'automation', 'cluster', 'redmine-agent', 'gerrit-dashboard', 'agent', 'notes'
                 ]));
             } catch (_error) {
                 // Init scripts also run in transient/opaque child frames where
@@ -168,7 +169,7 @@ class RuntimeUiHarness(unittest.TestCase):
                     'test', 'desktop', 'terminal', 'users', 'devices', 'reports',
                     'report-analysis', 'test-suites', 'apk-analysis', 'security-audit',
                     'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant',
-                    'automation', 'cluster', 'redmine-agent', 'gerrit-dashboard', 'agent'
+                    'automation', 'cluster', 'redmine-agent', 'gerrit-dashboard', 'agent', 'notes'
                 ]);
             }
             """
@@ -643,13 +644,58 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
 
     def test_automation_workbench_buttons_create_and_advance_stub_run(self):
         page = self.new_page()
+        runs = []
+
+        def fulfill_automation(route):
+            path = route.request.url.split("?", 1)[0]
+            method = route.request.method
+            data = {}
+            if path.endswith("/api/automation/dashboard"):
+                data = {"run_total": len(runs), "run_by_status": {}, "run_by_profile": {}}
+            elif path.endswith("/api/automation/profiles"):
+                data = {"items": []}
+            elif path.endswith("/api/automation/runs/preflight"):
+                data = {
+                    "ready": True,
+                    "worker_id": "worker-local",
+                    "test_type": "CTS",
+                    "test_suite": "",
+                    "devices": ["TESTSERIAL001"],
+                }
+            elif path.endswith("/api/automation/runs") and method == "POST":
+                run = {
+                    "id": "ats_ui_smoke",
+                    "profile_id": "manual",
+                    "status": "queued",
+                    "current_stage": "queued",
+                    "artifact_path": "/tmp/update.img",
+                    "devices_json": '["TESTSERIAL001"]',
+                }
+                runs[:] = [run]
+                data = run
+            elif path.endswith("/api/automation/runs"):
+                data = {"items": runs}
+            elif path.endswith("/api/automation/worker/tick"):
+                data = runs[0] if runs else None
+            elif path.endswith("/events"):
+                data = {"items": []}
+            elif path.endswith("/api/automation/worker/status"):
+                data = {"running": False, "interval_seconds": 5, "last_tick_seconds_ago": None}
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": data}),
+            )
+
+        page.route("**/api/automation/**", fulfill_automation)
         try:
             page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
+            page.wait_for_function("document.body.dataset.automationReady === 'true'")
             page.evaluate("document.querySelector('button[data-workflow=\"create\"]').click()")
             page.wait_for_selector("#automation-create-run")
             page.fill("#automation-artifact", "/tmp/update.img")
             page.fill("#automation-devices", "TESTSERIAL001")
-            page.uncheck("#automation-enable-build")
+            page.uncheck("#automation-enable-build", force=True)
             page.evaluate("document.getElementById('automation-create-run').click()")
             expect(page.locator("#automation-toast")).to_contain_text("已创建")
             page.evaluate(

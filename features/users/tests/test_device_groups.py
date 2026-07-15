@@ -2,6 +2,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from features.users import device_groups
 
@@ -91,6 +92,58 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
             {group['name'] for group in device_groups.load_device_groups('alice')},
             {'A', 'B'},
         )
+
+    def test_cluster_properties_use_namespaced_ids_and_worker_names(self):
+        repository = SimpleNamespace(
+            list_devices=lambda: [
+                {
+                    'id': 'worker-a:ABC',
+                    'worker_id': 'worker-a',
+                    'state': 'available',
+                    'properties': {'product': 'rk', 'android_version': '14'},
+                },
+                {
+                    'id': 'worker-a:OFF',
+                    'worker_id': 'worker-a',
+                    'state': 'offline',
+                    'properties': {'model': 'Offline'},
+                },
+                {
+                    'id': 'worker-local:LOCAL',
+                    'worker_id': 'worker-local',
+                    'state': 'available',
+                    'properties': {'model': 'Local'},
+                },
+            ]
+        )
+        service = SimpleNamespace(
+            effective_enabled=True,
+            config=SimpleNamespace(local_worker_id='worker-local'),
+            repository=repository,
+            list_workers=lambda: [{'id': 'worker-a', 'name': 'Lab A'}],
+        )
+
+        properties = device_groups.cluster_device_properties(service)
+
+        self.assertEqual(set(properties), {'worker-a:ABC'})
+        self.assertEqual(properties['worker-a:ABC']['model'], 'rk')
+        self.assertEqual(properties['worker-a:ABC']['source_host'], 'Lab A')
+
+    def test_remote_devices_are_continuously_added_to_automatic_groups(self):
+        groups = [{
+            'id': 'auto_model_rk',
+            'name': 'model: rk',
+            'color': '#000000',
+            'device_ids': [],
+            'followed': False,
+        }]
+        self.assertTrue(device_groups.save_device_groups('alice', groups))
+
+        updated = device_groups.auto_assign_new_devices(
+            'alice', {'worker-a:ABC': {'model': 'rk'}}
+        )
+
+        self.assertEqual(updated[0]['device_ids'], ['worker-a:ABC'])
 
 
 if __name__ == '__main__':

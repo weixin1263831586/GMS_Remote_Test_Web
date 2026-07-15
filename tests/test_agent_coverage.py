@@ -7,6 +7,26 @@ from features.system import API_DOCS_LIST
 
 
 class AgentCoverageTests(unittest.TestCase):
+    def test_agent_covers_product_level_automation_cluster_and_wiki_controls(self):
+        expected = {
+            "automation_dashboard",
+            "automation_runs",
+            "automation_run_cancel",
+            "automation_run_retry",
+            "cluster_status",
+            "cluster_workers",
+            "cluster_devices",
+            "cluster_jobs",
+            "cluster_job_cancel",
+            "cluster_set_mode",
+            "build_jobs",
+            "knowledge_search",
+            "knowledge_ask",
+            "knowledge_create",
+        }
+
+        self.assertEqual(expected - {tool.name for tool in registry.get_all_tools()}, set())
+
     def test_agent_registry_covers_documented_api_paths(self):
         documented_paths = {
             item["path"]

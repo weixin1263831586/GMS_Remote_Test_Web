@@ -19,8 +19,10 @@ EXPECTED_SIDEBAR_PAGES = {
     "security-audit": "安全审计",
     "gms-assistant": "GMS助手",
     "automation": "GMS ATS",
+    "cluster": "主机集群",
     "redmine-agent": "Redmine看板",
     "gerrit-dashboard": "Gerrit看板",
+    "notes": "个人知识库",
     "agent": "对话Agent",
 }
 
@@ -34,6 +36,27 @@ class AgentIntentTests(unittest.TestCase):
         self.assertEqual(intent.tool_name, "navigate")
         self.assertEqual(intent.params["page"], "automation")
         self.assertGreaterEqual(intent.confidence, 0.9)
+
+    def test_agent_resolves_cluster_ats_and_wiki_queries(self):
+        from features.assistant.intent import resolve
+
+        cases = {
+            "集群状态": ("cluster_status", {}),
+            "ATS运行记录": ("automation_runs", {}),
+            "知识库搜索 GTS 前置条件": (
+                "knowledge_search",
+                {"q": "GTS 前置条件"},
+            ),
+            "知识库问答：CTS 网络怎么配置": (
+                "knowledge_ask",
+                {"question": "CTS 网络怎么配置"},
+            ),
+        }
+        for message, (tool_name, params) in cases.items():
+            with self.subTest(message=message):
+                intent = resolve(message, {})
+                self.assertEqual(intent.tool_name, tool_name)
+                self.assertEqual(intent.params, params)
 
     def test_agent_navigation_aliases_cover_all_sidebar_pages(self):
         from features.assistant.intent import _NAV_ALIASES, resolve

@@ -1,4 +1,5 @@
 from .agent import RESOLVED_STATUSES
+from .client import RedmineClient
 from .api import (
     _resolve_owner_names,
     get_redmine_config_for_request,
@@ -26,6 +27,7 @@ async def get_workload_statistics(*args, **kwargs):
 
 __all__ = [
     "RESOLVED_STATUSES",
+    "RedmineClient",
     "RedmineService",
     "_name_keys",
     "_norm_name",

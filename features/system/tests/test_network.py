@@ -1,6 +1,6 @@
 import unittest
 
-from features.system.network import has_active_vpn_connection
+from features.system.network import _generate_route_commands, has_active_vpn_connection
 
 
 class NetworkTests(unittest.TestCase):
@@ -13,6 +13,11 @@ class NetworkTests(unittest.TestCase):
         output = "corp-vpn:vpn:activated\nWired connection 1:ethernet:activated\n"
 
         self.assertTrue(has_active_vpn_connection(output))
+
+    def test_route_gateway_uses_last_octet_one(self):
+        commands = _generate_route_commands("192.168.14.0", "192.168.20.0", "192.168.14.9")
+
+        self.assertIn("via 192.168.14.1", commands["linux"][2])
 
 
 if __name__ == "__main__":

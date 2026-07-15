@@ -33,6 +33,7 @@ _AUTO_DIM_TO_PROP = {
     'model': 'model',
     'android_version': 'android_version',
     'soc': 'soc_model',
+    'worker': 'source_host',
 }
 
 
@@ -123,6 +124,47 @@ def auto_assign_new_devices(
     if changed:
         save_device_groups(username, groups)
     return groups
+
+
+def cluster_device_properties(service: Any = None) -> dict[str, dict[str, str]]:
+    """Return online remote Worker devices in the management/grouping shape."""
+    try:
+        if service is None:
+            from features.cluster import get_cluster_service
+
+            service = get_cluster_service()
+        if not service.effective_enabled:
+            return {}
+        local_worker_id = service.config.local_worker_id
+        worker_names = {
+            worker['id']: worker.get('name') or worker['id']
+            for worker in service.list_workers()
+        }
+        devices: dict[str, dict[str, str]] = {}
+        for device in service.repository.list_devices():
+            worker_id = str(device.get('worker_id') or '')
+            if (
+                not worker_id
+                or worker_id == local_worker_id
+                or device.get('state') in {'offline', 'unknown'}
+            ):
+                continue
+            raw = device.get('properties') or {}
+            properties = {
+                str(key): str(value)
+                for key, value in raw.items()
+                if value is not None
+            }
+            properties['model'] = (
+                properties.get('model') or properties.get('product') or ''
+            )
+            properties['source_host'] = worker_names.get(worker_id, worker_id)
+            devices[str(device['id'])] = properties
+        return devices
+    except Exception:
+        # Device groups remain usable in single-host mode and during cluster
+        # bootstrap/offline periods.
+        return {}
 
 
 def current_username_for_request(request: Request | None) -> str | None:
@@ -221,7 +263,8 @@ def save_device_groups(
 async def get_device_groups(request: Request):
     """获取当前用户的设备分组定义。"""
     username = current_username_for_request(request)
-    return success_response({'groups': load_device_groups(username)})
+    groups = auto_assign_new_devices(username, cluster_device_properties())
+    return success_response({'groups': groups})
 
 
 @router.post('/api/device-groups')

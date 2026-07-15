@@ -14,6 +14,16 @@ class BootstrapTests(unittest.TestCase):
         paths = {route.path for route in app.routes}
         self.assertIn('/api/system/health', paths)
 
+    def test_create_app_keeps_automation_cluster_preflight_enabled(self):
+        from features.automation import api as automation
+        from features.cluster import get_cluster_service
+
+        create_app()
+        self.assertIs(
+            automation.automation_service._cluster_provider,
+            get_cluster_service,
+        )
+
     def test_create_app_preserves_frozen_routes(self):
         from tests.contract.snapshot_tools import normalized_routes, read_json
 

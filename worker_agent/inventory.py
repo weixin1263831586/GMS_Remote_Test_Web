@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-import os
 import base64
+import mimetypes
+import os
 import re
 import shutil
 import subprocess
-import xml.etree.ElementTree as ET
+import tarfile
+import time
 import urllib.parse
 import urllib.request
-import tarfile
+import xml.etree.ElementTree as ET
 import zipfile
-import mimetypes
-import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .config import WorkerConfig
 
@@ -26,18 +27,53 @@ def _run(argv: list[str], timeout: int = 10) -> str:
         return ""
 
 
-def probe_devices() -> list[dict[str, Any]]:
+def _probe_device_details(serial: str) -> dict[str, str]:
+    """Read management attributes in one ADB round trip."""
+    output = _run([
+        "adb", "-s", serial, "shell",
+        "echo __MODEL__; getprop ro.product.model; "
+        "echo __ANDROID__; getprop ro.build.version.release; "
+        "echo __BATTERY__; dumpsys battery | grep '^  level:' | head -n 1; "
+        "echo __SOC__; getprop ro.soc.model",
+    ], timeout=3)
+    markers = {
+        "__MODEL__": "model",
+        "__ANDROID__": "android_version",
+        "__BATTERY__": "battery_level",
+        "__SOC__": "soc_model",
+    }
+    details: dict[str, str] = {}
+    current = ""
+    for line in output.splitlines():
+        value = line.strip()
+        if value in markers:
+            current = markers[value]
+            continue
+        if not current or not value or current in details:
+            continue
+        if current == "battery_level":
+            value = value.partition(":")[2].strip() if ":" in value else value
+        details[current] = value
+    return details
+
+
+def probe_devices(include_details: bool = False) -> list[dict[str, Any]]:
     devices = []
     for line in _run(["adb", "devices", "-l"]).splitlines()[1:]:
         parts = line.split()
         if len(parts) < 2 or parts[1] not in {"device", "offline", "unauthorized"}:
             continue
         serial, adb_state = parts[0], parts[1]
+        # Skip stale USB/IP TCP sessions that ADB keeps reporting as offline.
+        if serial.startswith("localhost:") and adb_state != "device":
+            continue
         properties = {}
         for item in parts[2:]:
             key, separator, value = item.partition(":")
             if separator:
                 properties[key] = value
+        if include_details and adb_state == "device":
+            properties.update(_probe_device_details(serial))
         devices.append({
             "serial": serial, "transport": "local_usb",
             "state": "available" if adb_state == "device" else adb_state,
@@ -63,6 +99,18 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
             raise ValueError(f"device is not attached to this worker: {serial}")
         serials.append(serial)
     options = options or {}
+    inspection_actions = {
+        "packages_with_path", "packages_all", "features", "props",
+        "config_explore", "override_status", "override_apply",
+        "override_revert", "override_disable_verity", "override_enable_verity",
+        "override_reboot",
+    }
+    if action in inspection_actions:
+        if len(serials) != 1:
+            raise ValueError(f"{action} requires exactly one device")
+        from .android_inspection import execute_inspection_action
+
+        return execute_inspection_action(action, serials[0], options)
     if action == "scrcpy_start":
         bundled_scrcpy = Path(__file__).resolve().parent.parent / "tools" / "scrcpy-linux-x86_64-v3.3.4" / "scrcpy"
         executable = os.getenv("GMS_WORKER_SCRCPY_PATH") or shutil.which("scrcpy")
@@ -321,6 +369,39 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
     if not any(root.exists() and suite_root.is_relative_to(root.resolve())
                for root in config.suite_roots):
         raise ValueError("suite path is outside configured roots")
+    if action == "list_results":
+        tools_dir = suite_path if suite_path.name == "tools" else suite_root / "tools"
+        launchers = sorted(
+            path for path in tools_dir.glob("*-tradefed")
+            if path.is_file() and os.access(path, os.X_OK)
+        )
+        if not launchers:
+            raise ValueError("no executable tradefed launcher found in suite tools")
+        try:
+            completed = subprocess.run(
+                [str(launchers[0])],
+                input="list results\nexit\n",
+                capture_output=True,
+                text=True,
+                cwd=tools_dir,
+                timeout=90,
+                check=False,
+                env={**os.environ, "TERM": "dumb"},
+            )
+        except subprocess.TimeoutExpired as exc:
+            parts = [exc.stdout or "", exc.stderr or ""]
+            output = "\n".join(
+                value.decode(errors="replace") if isinstance(value, bytes) else value
+                for value in parts if value
+            )
+            if "Session" not in output:
+                raise RuntimeError("tradefed list results timed out") from exc
+            return {"raw_output": output, "exit_code": 0, "launcher": launchers[0].name}
+        output = "\n".join(filter(None, [completed.stdout, completed.stderr]))
+        if completed.returncode != 0 and "Session" not in output:
+            raise RuntimeError(output[-4000:] or "tradefed list results failed")
+        return {"raw_output": output, "exit_code": completed.returncode,
+                "launcher": launchers[0].name}
     if action == "read_file":
         relative = Path(str(payload.get("path") or ""))
         target = (suite_root / relative).resolve()
@@ -496,12 +577,16 @@ def scan_suites(config: WorkerConfig) -> list[dict[str, Any]]:
 def host_metrics(config: WorkerConfig) -> dict[str, float]:
     usage = shutil.disk_usage(config.data_root.parent if config.data_root.parent.exists() else Path.home())
     memory_percent = 0.0
+    memory_total_gb = 0.0
+    memory_available_gb = 0.0
     try:
         values = {}
         for line in Path("/proc/meminfo").read_text().splitlines():
             key, value = line.split(":", 1)
             values[key] = int(value.strip().split()[0])
         memory_percent = 100 * (1 - values["MemAvailable"] / values["MemTotal"])
+        memory_total_gb = values["MemTotal"] / 1024 ** 2
+        memory_available_gb = values["MemAvailable"] / 1024 ** 2
     except Exception:
         pass
     try:
@@ -511,4 +596,7 @@ def host_metrics(config: WorkerConfig) -> dict[str, float]:
         cpu_percent = 0.0
     return {"cpu_percent": round(cpu_percent, 2),
             "memory_percent": round(memory_percent, 2),
+            "memory_total_gb": round(memory_total_gb, 2),
+            "memory_available_gb": round(memory_available_gb, 2),
+            "load_1m": round(load if 'load' in locals() else 0.0, 2),
             "disk_free_gb": round(usage.free / 1024 ** 3, 2)}

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from features.users import get_client_id_from_request
 from foundation.errors import handle_api_errors
@@ -16,7 +16,7 @@ from foundation.responses import error_response, success_response
 from foundation.uploads import save_upload_to_path
 
 from .service import KnowledgeService
-from .storage import ATTACHMENT_DIR
+from .storage import ATTACHMENT_DIR, DEFAULT_SPACES
 
 
 router = APIRouter(prefix="/api/knowledge")
@@ -48,9 +48,14 @@ def _user(request: Request) -> str:
 
 def _space_id(user_id: str, requested: str = "") -> str:
     requested = str(requested or "").strip()
-    if requested and requested != "gms":
+    if requested in {item[0] for item in DEFAULT_SPACES}:
+        return _service.store.default_space_id(user_id, requested)
+    owned = {
+        item["space_id"] for item in _service.store.list_spaces(user_id)
+    }
+    if requested and requested in owned:
         return requested
-    return _service.store.default_space_id(user_id, requested or "gms")
+    return _service.store.default_space_id(user_id, "gms")
 
 
 def _preview(doc: dict[str, Any]) -> dict[str, Any]:
@@ -193,6 +198,25 @@ async def update_doc(request: Request, doc_id: str):
     return success_response(data=doc, message="已保存")
 
 
+@router.get("/docs/{doc_id}/versions")
+@handle_api_errors
+async def list_doc_versions(request: Request, doc_id: str, limit: int = Query(100, ge=1, le=500)):
+    user_id = _user(request)
+    if not _service.store.get_doc(user_id, doc_id):
+        return error_response("文档不存在", 404)
+    versions = _service.store.list_versions(user_id, doc_id, limit)
+    return success_response(data={"versions": versions, "count": len(versions)})
+
+
+@router.post("/docs/{doc_id}/versions/{version_id}/restore")
+@handle_api_errors
+async def restore_doc_version(request: Request, doc_id: str, version_id: str):
+    doc = _service.store.restore_version(_user(request), doc_id, version_id)
+    if not doc:
+        return error_response("文档或历史版本不存在", 404)
+    return success_response(data=doc, message="历史版本已恢复")
+
+
 @router.delete("/nodes/{node_id}")
 @handle_api_errors
 async def delete_node(request: Request, node_id: str):
@@ -250,6 +274,32 @@ async def upload_attachment(request: Request, doc_id: str, file: UploadFile | No
             mime=file.content_type or "",
         )
     return success_response(data=attachment)
+
+
+@router.get("/docs/{doc_id}/attachments/{attachment_id}/download")
+@handle_api_errors
+async def download_attachment(request: Request, doc_id: str, attachment_id: str):
+    user_id = _user(request)
+    doc = _service.store.get_doc(user_id, doc_id)
+    attachment = next(
+        (
+            item
+            for item in (doc or {}).get("attachments") or []
+            if item.get("attachment_id") == attachment_id
+        ),
+        None,
+    )
+    if not attachment:
+        return error_response("附件不存在", 404)
+    path = Path(str(attachment.get("path") or "")).resolve()
+    root = (Path(ATTACHMENT_DIR) / user_id / doc_id).resolve()
+    if not path.is_file() or not path.is_relative_to(root):
+        return error_response("附件文件不存在", 404)
+    return FileResponse(
+        path,
+        filename=str(attachment.get("original_name") or path.name),
+        media_type=str(attachment.get("mime") or "application/octet-stream"),
+    )
 
 
 @router.post("/upload")

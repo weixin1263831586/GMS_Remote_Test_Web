@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import http.cookiejar
+import os
 import shutil
 import sqlite3
 import sys
@@ -15,7 +16,10 @@ from urllib.parse import urlparse
 import requests
 
 
-DEFAULT_URL = 'https://docs.partner.android.com/mainline/release/release-notes'
+DEFAULT_URL = os.getenv(
+    'GMS_PARTNER_ANDROID_URL',
+    'https://docs.partner.android.com/mainline/release/release-notes',
+)
 COOKIE_HOST_SUFFIXES = (
     '.android.com',
     '.google.com',

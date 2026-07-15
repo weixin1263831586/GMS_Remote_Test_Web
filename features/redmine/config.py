@@ -18,9 +18,6 @@ from .dashboard import (
 from .users import owner_runtime_config_path
 
 
-DEFAULT_REDMINE_BASE_URL = "https://redmine.rock-chips.com"
-
-
 class RedmineConfig:
     """Feature-owned configuration facade backed by runtime config files."""
 
@@ -71,15 +68,14 @@ class RedmineConfig:
     ) -> str:
         config = config or self.load_config()
         redmine = config.get("redmine") or {}
-        return str(
-            redmine.get("base_url")
-            or DEFAULT_REDMINE_BASE_URL
-        ).rstrip("/")
+        return str(redmine.get("base_url") or "").strip().rstrip("/")
 
     def get_redmine_config(self) -> dict[str, Any]:
         config = self.load_config()
         redmine = dict(config.get("redmine") or {})
         redmine["base_url"] = self.get_redmine_base_url(config)
+        if not redmine["base_url"]:
+            raise ValueError("Redmine 未配置，请设置 configs/config.json 的 redmine.base_url")
         redmine.setdefault("domain", urlparse(redmine["base_url"]).netloc)
         return redmine
 

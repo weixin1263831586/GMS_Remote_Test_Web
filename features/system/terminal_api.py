@@ -102,7 +102,19 @@ async def upload_file(
             return error_response("No file selected", 400)
 
         config = config_manager.load_config()
-        if worker_id and worker_id != "worker-local" and host and user:
+        local_worker_id = "worker-local"
+        try:
+            from features.cluster import get_cluster_service
+
+            local_worker_id = get_cluster_service().config.local_worker_id
+        except (AttributeError, RuntimeError):
+            pass
+        if (
+            worker_id
+            and worker_id not in {"worker-local", local_worker_id}
+            and host
+            and user
+        ):
             password = config_manager.find_device_host_password(f"{user}@{host}", config) or ""
             config = {**config, "ubuntu_host": host, "ubuntu_user": user,
                       "ubuntu_pswd": password, "host": host, "username": user,

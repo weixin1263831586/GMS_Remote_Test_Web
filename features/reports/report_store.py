@@ -240,6 +240,18 @@ def save_test_report_to_db(
             'suite_path': test_params.get('test_suite', ''),
             'status': 'completed'
         }
+        for field in (
+            'worker_id', 'cluster_job_id', 'attempt_id', 'automation_run_id',
+            'build_id', 'build_artifact_id', 'gerrit_change_id',
+            'gerrit_patchset', 'redmine_issue_id', 'source_type',
+        ):
+            if test_params.get(field) not in (None, '', []):
+                report_info[field] = test_params[field]
+        report_info['report_id'] = (
+            f"cluster:{report_info['cluster_job_id']}:{report_info.get('attempt_id', '')}"
+            if report_info.get('cluster_job_id')
+            else timestamp
+        )
 
         # 提取用户名
         if '@' in client_id:

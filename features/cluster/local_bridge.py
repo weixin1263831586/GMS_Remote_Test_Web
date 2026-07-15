@@ -24,11 +24,16 @@ import shutil
 import socket
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from worker_agent.inventory import probe_devices
+from worker_agent.process_inventory import discover_tradefed_processes
+
 from .config import ClusterConfig
 from .repository import ClusterRepository
+
 
 logger = logging.getLogger(__name__)
 AGENT_VERSION = "controller-0.1.0"
@@ -36,39 +41,7 @@ AGENT_VERSION = "controller-0.1.0"
 
 def _probe_devices() -> list[dict[str, Any]]:
     """Return locally attached ADB / Fastboot devices in Worker format."""
-    import subprocess
-
-    def run(argv: list[str], timeout: int = 8) -> str:
-        try:
-            return subprocess.run(argv, capture_output=True, text=True,
-                                  timeout=timeout, check=False).stdout
-        except (OSError, subprocess.TimeoutExpired):
-            return ""
-
-    devices: list[dict[str, Any]] = []
-    for line in run(["adb", "devices", "-l"]).splitlines()[1:]:
-        parts = line.split()
-        if len(parts) < 2 or parts[1] not in {"device", "offline", "unauthorized"}:
-            continue
-        serial, adb_state = parts[0], parts[1]
-        properties: dict[str, Any] = {}
-        for item in parts[2:]:
-            key, sep, value = item.partition(":")
-            if sep:
-                properties[key] = value
-        devices.append({
-            "serial": serial,
-            "transport": "local_usb",
-            "state": "available" if adb_state == "device" else adb_state,
-            "properties": properties,
-        })
-    known = {item["serial"] for item in devices}
-    for line in run(["fastboot", "devices"]).splitlines():
-        serial = line.split()[0] if line.split() else ""
-        if serial and serial not in known:
-            devices.append({"serial": serial, "transport": "local_usb",
-                            "state": "fastboot", "properties": {}})
-    return devices
+    return probe_devices(include_details=True)
 
 
 def _suite_details(path: Path) -> tuple[str, str]:
@@ -117,12 +90,16 @@ def _scan_suites(roots: list[Path]) -> list[dict[str, Any]]:
 def _host_metrics() -> dict[str, float]:
     usage = shutil.disk_usage(Path.home())
     memory_percent = 0.0
+    memory_total_gb = 0.0
+    memory_available_gb = 0.0
     try:
         values: dict[str, int] = {}
         for line in Path("/proc/meminfo").read_text().splitlines():
             key, value = line.split(":", 1)
             values[key] = int(value.strip().split()[0])
         memory_percent = 100 * (1 - values["MemAvailable"] / values["MemTotal"])
+        memory_total_gb = values["MemTotal"] / 1024 ** 2
+        memory_available_gb = values["MemAvailable"] / 1024 ** 2
     except Exception:
         pass
     try:
@@ -133,6 +110,9 @@ def _host_metrics() -> dict[str, float]:
     return {
         "cpu_percent": round(cpu_percent, 2),
         "memory_percent": round(memory_percent, 2),
+        "memory_total_gb": round(memory_total_gb, 2),
+        "memory_available_gb": round(memory_available_gb, 2),
+        "load_1m": round(load if 'load' in locals() else 0.0, 2),
         "disk_free_gb": round(usage.free / 1024 ** 3, 2),
     }
 
@@ -178,7 +158,7 @@ class LocalWorkerBridge:
             "hostname": socket.gethostname(),
             "address": ubuntu_host,
             "agent_version": AGENT_VERSION,
-            "max_jobs": int(os.getenv("GMS_LOCAL_WORKER_MAX_JOBS", "2")),
+            "max_jobs": int(os.getenv("GMS_LOCAL_WORKER_MAX_JOBS", "1")),
             "capabilities": {
                 "adb": True, "fastboot": True, "tradefed": True,
                 "cts": True, "gts": True, "vts": True, "sts": True,
@@ -188,12 +168,28 @@ class LocalWorkerBridge:
         }
 
     def _register(self) -> None:
+        if self._real_agent_active():
+            return
         data = self._registration()
         self.repository.register_worker(data)
         self._registered = True
         logger.info("Local worker bridge registered as %s", self.worker_id)
 
+    def _real_agent_active(self) -> bool:
+        worker = self.repository.get_worker(self.worker_id)
+        if not worker or str(worker.get("agent_version", "")).startswith("controller-"):
+            return False
+        try:
+            heartbeat = datetime.fromisoformat(
+                str(worker["last_heartbeat_at"]).replace("Z", "+00:00")
+            )
+        except (KeyError, TypeError, ValueError):
+            return False
+        return (datetime.now(timezone.utc) - heartbeat).total_seconds() <= 45
+
     def _heartbeat(self) -> None:
+        if self._real_agent_active():
+            return
         now_mono = time.monotonic()
         include_suites = (not self._suites
                           or now_mono - self._last_suite_scan >= self._suite_scan_interval)
@@ -203,7 +199,7 @@ class LocalWorkerBridge:
         payload: dict[str, Any] = {
             "agent_version": AGENT_VERSION,
             **_host_metrics(),
-            "running_jobs": [],
+            "running_jobs": discover_tradefed_processes(),
             "devices": _probe_devices(),
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
@@ -216,6 +212,9 @@ class LocalWorkerBridge:
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
+                if self._real_agent_active():
+                    self._stop.wait(self._heartbeat_interval)
+                    continue
                 if not self._registered:
                     self._register()
                 self._heartbeat()

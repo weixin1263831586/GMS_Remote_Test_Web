@@ -1,6 +1,6 @@
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from features.automation.notifier import notify_run_completion
 
@@ -40,6 +40,77 @@ class AutomationNotifierTests(unittest.TestCase):
             result['sent'],
             [{'transport': 'pager', 'sent': False, 'reason': 'unknown transport'}],
         )
+
+    def test_gerrit_transport_posts_comment_and_verified_vote(self):
+        run = {
+            'created_by': 'alice',
+            'status': 'completed',
+            'gerrit_change_id': '123',
+            'gerrit_patchset': '7',
+            'test_plan_json': json.dumps({'reporting': {
+                'transports': ['gerrit'],
+                'gerrit_comment': True,
+                'gerrit_verified_label': True,
+            }}),
+        }
+        manager = MagicMock()
+        manager.for_owner.return_value.get_gerrit_dashboard_config.return_value = {
+            'base_url': 'https://gerrit.example.com'
+        }
+        sender = AsyncMock(return_value={'sent': True, 'source': 'rest'})
+        with patch('features.gerrit.gerrit_config_manager', manager), patch(
+            'features.gerrit.post_gerrit_review', sender
+        ):
+            result = notify_run_completion(run)
+
+        self.assertTrue(result['sent'][0]['sent'])
+        self.assertEqual(sender.await_args.kwargs['change_id'], '123')
+        self.assertEqual(sender.await_args.kwargs['patchset'], '7')
+        self.assertEqual(sender.await_args.kwargs['verified'], 1)
+
+    def test_redmine_transport_writes_note_with_owner_credentials(self):
+        run = {
+            'id': 'ats-1',
+            'created_by': 'alice',
+            'status': 'completed',
+            'test_plan_json': json.dumps({
+                'redmine_issue_id': '456',
+                'reporting': {'transports': ['redmine']},
+            }),
+        }
+        owner_manager = MagicMock()
+        owner_manager.get_redmine_config.return_value = {
+            'base_url': 'https://redmine.example.com'
+        }
+        owner_manager.load_redmine_credentials.return_value = {
+            'username': 'alice', 'password': 'secret'
+        }
+        manager = MagicMock()
+        manager.for_owner.return_value = owner_manager
+        client = MagicMock()
+        client.update_issue = AsyncMock()
+        client.close = AsyncMock()
+        with patch('features.redmine.config_manager', manager), patch(
+            'features.redmine.RedmineClient', return_value=client
+        ):
+            result = notify_run_completion(run)
+
+        self.assertTrue(result['sent'][0]['sent'])
+        client.update_issue.assert_awaited_once()
+        self.assertEqual(client.update_issue.await_args.args[0], '456')
+        self.assertIn('GMS ATS', client.update_issue.await_args.kwargs['notes'])
+
+    def test_required_transport_failure_is_explicit(self):
+        run = {
+            'test_plan_json': json.dumps({'reporting': {
+                'transports': ['pager'], 'required': True,
+            }}),
+        }
+
+        result = notify_run_completion(run)
+
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['failed_required'], ['pager'])
 
 
 if __name__ == '__main__':

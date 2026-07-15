@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-ANDROID17_SHEET_URL = "https://docs.qq.com/sheet/DQnVLa3NVeHdISXpy?tab=BB08J2"
+from .weekly_config import android17_sheet_url
 
 
 def _last_week_range(today: date | None = None) -> tuple[date, date]:
@@ -253,7 +253,7 @@ async def _collect_android17(start: date, end: date, owner: str = "黄超群") -
     try:
         async with (
             aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session,
-            session.get(ANDROID17_SHEET_URL, headers={"User-Agent": "Mozilla/5.0"}) as resp,
+            session.get(android17_sheet_url(), headers={"User-Agent": "Mozilla/5.0"}) as resp,
         ):
             html = await resp.text()
     except Exception as exc:
