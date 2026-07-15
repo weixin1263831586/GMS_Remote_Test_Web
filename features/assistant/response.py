@@ -29,8 +29,10 @@ PAGE_DISPLAY_NAMES: dict[str, str] = {
     "security-audit": "安全审计",
     "gms-assistant": "GMS助手",
     "automation": "GMS ATS",
+    "cluster": "主机集群",
     "redmine-agent": "Redmine看板",
     "gerrit-dashboard": "Gerrit看板",
+    "notes": "个人知识库",
     "agent": "对话Agent",
 }
 
@@ -113,10 +115,10 @@ def generate_capability_overview() -> str:
     return (
         "我是 GMS 远程测试平台的对话 Agent，负责把自然语言转换成 Web_app 查询、导航和执行计划。\n\n"
         "我能做这些事：\n"
-        "- 查询状态：设备/型号、空闲占用、测试状态、测试套件、报告、APK任务、在线用户、系统健康、VPN、USB/IP、配置摘要。\n"
-        "- 执行操作：启动/停止测试、失败 retry、连接 WiFi、重启/remount/投屏设备、VPN/USB-IP 操作、报告下载/删除等；有风险或会改状态的操作会先让你确认。\n"
+        "- 查询状态：设备/型号、空闲占用、测试状态、测试套件、报告、ATS 流水线、Cluster Worker/任务、构建任务、知识库、在线用户、系统健康、VPN、USB/IP、配置摘要。\n"
+        "- 执行操作：启动/停止测试、失败 retry、取消/重试 ATS 或集群任务、连接 WiFi、重启/remount/投屏设备、VPN/USB-IP 操作、知识文档创建、报告下载/删除等；有风险或会改状态的操作会先让你确认。\n"
         "- 分析问题：报告分析、失败用例诊断、APK/JAR 反编译、套件 APK 源码分析、OpenGrok 代码搜索。\n"
-        "- 页面导航：打开测试界面、设备管理、报告管理、报告分析、APK分析、测试套件、GMS ATS、Redmine看板、Gerrit看板、终端、桌面、常用网址、常用工具、安全审计。\n\n"
+        "- 页面导航：打开测试界面、设备管理、报告管理、报告分析、APK分析、测试套件、GMS ATS、主机集群、Redmine看板、Gerrit看板、个人知识库、终端、桌面、常用网址、常用工具、安全审计。\n\n"
         "你可以直接这样说：\n"
         "- 「rk3572设备」或「空闲设备」\n"
         "- 「最近报告」或「分析最新失败报告」\n"
@@ -145,8 +147,10 @@ def generate_page_overview() -> str:
         "- 安全审计：查看页面访问、API 调用、请求摘要、响应摘要和耗时，辅助追踪操作记录。\n"
         "- GMS助手：打开外部/内置 GMS 知识助手入口。\n"
         "- GMS ATS：把 Gerrit 触发、构建产物、设备选择、烧写、测试执行和结果回写串成自动化测试站流程。\n"
+        "- 主机集群：查看 Controller/Worker、设备、套件、运行任务和部署状态，管理持久化 Cluster Job。\n"
         "- Redmine看板：查看个人/部门/项目 Redmine 统计、待回复、超阈值未回复、解决趋势和问题明细。\n"
         "- Gerrit看板：查看个人/部门 Gerrit 提交统计、查询变更、趋势明细和成员配置。\n"
+        "- 个人知识库：按知识空间和目录维护 Wiki，上传附件、全文检索、关联报告/Redmine/Gerrit 并进行知识问答。\n"
         "- 对话Agent：用自然语言查询设备/报告/套件，生成测试计划，打开项目页面，执行确认类操作并跟踪分析流程。"
     )
 

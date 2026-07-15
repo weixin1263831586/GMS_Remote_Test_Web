@@ -13,20 +13,15 @@ from pathlib import Path
 from typing import Any
 
 from foundation.config import settings
-
-
+from .versions import KnowledgeVersionMixin
 logger = logging.getLogger(__name__)
-
 DB_PATH: Path = settings.data_root / "knowledge/knowledge.sqlite3"
 ATTACHMENT_DIR: Path = settings.data_root / "knowledge/attachments"
-
 DEFAULT_SPACES = [
     ("gms", "GMS测试", "book-open"),
     ("devices", "设备接入", "plug"),
     ("issues", "问题沉淀", "ticket"),
 ]
-
-
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -97,7 +92,7 @@ def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-class KnowledgeStore:
+class KnowledgeStore(KnowledgeVersionMixin):
     def __init__(self, db_path: Path = DB_PATH, attachment_dir: Path = ATTACHMENT_DIR) -> None:
         self.db_path = Path(db_path)
         self.attachment_dir = Path(attachment_dir)
@@ -106,6 +101,7 @@ class KnowledgeStore:
         # 已确保播种默认空间的用户集合（避免每次读操作都跑 COUNT 探测）。
         self._ensured_users: set[str] = set()
         self.init_db()
+        self.init_version_db()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -207,19 +203,19 @@ class KnowledgeStore:
             return
         now = _now()
         with self._connect() as conn:
-            count = conn.execute(
-                "SELECT COUNT(*) AS c FROM knowledge_spaces WHERE user_id = ?",
-                (user_id,),
-            ).fetchone()["c"]
-            if count:
-                self._ensured_users.add(user_id)
-                return
             for idx, (sid, name, icon) in enumerate(DEFAULT_SPACES):
+                hashed_id = _user_default_space_id(user_id, sid)
+                owned = conn.execute(
+                    "SELECT 1 FROM knowledge_spaces WHERE user_id=? AND space_id IN (?, ?)",
+                    (user_id, sid, hashed_id),
+                ).fetchone()
+                if owned:
+                    continue
                 exists = conn.execute(
                     "SELECT user_id FROM knowledge_spaces WHERE space_id = ?",
                     (sid,),
                 ).fetchone()
-                space_id = sid if not exists else _user_default_space_id(user_id, sid)
+                space_id = sid if not exists else hashed_id
                 conn.execute(
                     """INSERT OR IGNORE INTO knowledge_spaces
                        (space_id, user_id, name, icon, sort_order, created_at, updated_at)
@@ -231,10 +227,13 @@ class KnowledgeStore:
 
     def default_space_id(self, user_id: str, base_id: str = "gms") -> str:
         self.ensure_default_spaces(user_id)
+        hashed_id = _user_default_space_id(user_id, base_id)
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT space_id FROM knowledge_spaces WHERE user_id = ? AND space_id = ?",
-                (user_id, base_id),
+                """SELECT space_id FROM knowledge_spaces
+                   WHERE user_id = ? AND space_id IN (?, ?)
+                   ORDER BY CASE WHEN space_id = ? THEN 0 ELSE 1 END LIMIT 1""",
+                (user_id, base_id, hashed_id, base_id),
             ).fetchone()
             if row:
                 return row["space_id"]
@@ -344,6 +343,7 @@ class KnowledgeStore:
             self._replace_tags(conn, user_id, record["doc_id"], tag_names)
             self._replace_links(conn, user_id, record["doc_id"], links or [])
             self._replace_fts(conn, record["doc_id"])
+            self._save_version(conn, user_id, record["doc_id"], title=title)
             conn.commit()
         return self.get_doc(user_id, record["doc_id"]) or {}
 
@@ -428,8 +428,10 @@ class KnowledgeStore:
                 self._replace_links(conn, user_id, doc_id, list(updates.get("links") or []))
             conn.execute("UPDATE knowledge_nodes SET updated_at=? WHERE node_id=? AND user_id=?", (now, current["node_id"], user_id))
             self._replace_fts(conn, doc_id)
+            self._save_version(conn, user_id, doc_id)
             conn.commit()
         return self.get_doc(user_id, doc_id)
+
 
     def move_node(self, user_id: str, node_id: str, parent_id: str = "", sort_order: int | None = None) -> bool:
         with self._connect() as conn:
@@ -445,11 +447,21 @@ class KnowledgeStore:
     def delete_node(self, user_id: str, node_id: str) -> bool:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT node_id, type FROM knowledge_nodes WHERE user_id=? AND (node_id=? OR parent_id=?)",
-                (user_id, node_id, node_id),
+                """WITH RECURSIVE descendants(node_id, type) AS (
+                       SELECT node_id, type FROM knowledge_nodes
+                       WHERE user_id=? AND node_id=?
+                       UNION ALL
+                       SELECT child.node_id, child.type
+                       FROM knowledge_nodes child
+                       JOIN descendants parent ON child.parent_id=parent.node_id
+                       WHERE child.user_id=?
+                   )
+                   SELECT node_id, type FROM descendants""",
+                (user_id, node_id, user_id),
             ).fetchall()
-            ids = {node_id}
-            ids.update(r["node_id"] for r in rows)
+            ids = {r["node_id"] for r in rows}
+            if not ids:
+                return False
             doc_ids = [
                 r["doc_id"]
                 for r in conn.execute(

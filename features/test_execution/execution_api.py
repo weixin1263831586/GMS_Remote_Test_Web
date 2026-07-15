@@ -64,8 +64,51 @@ async def start_test(
     if not devices:
         return error_response("No devices selected", 400)
 
-    if req.worker_id and req.worker_id != "worker-local":
+    cluster = None
+    local_worker_id = "worker-local"
+    try:
+        from features.cluster import get_cluster_service
+
+        cluster = get_cluster_service()
+        local_worker_id = cluster.config.local_worker_id
+    except (AttributeError, RuntimeError):
+        pass
+
+    requested_worker_id = req.worker_id or local_worker_id
+    if requested_worker_id == "worker-local":
+        # Preserve compatibility for old clients after local_worker_id changes.
+        requested_worker_id = local_worker_id
+    if requested_worker_id != local_worker_id:
         return runtime.start_cluster_test(req, runtime.get_client_id_from_request(request))
+
+    req = req.model_copy(update={"worker_id": local_worker_id})
+    if cluster is not None:
+        local_admission_error = ""
+        try:
+            worker = cluster.repository.get_worker(cluster.config.local_worker_id)
+            selected_serials = {
+                (item[len(cluster.config.local_worker_id) + 1:]
+                 if item.startswith(f"{cluster.config.local_worker_id}:") else item)
+                for item in req.devices
+            }
+            device_states = {
+                item["serial"]: item["state"]
+                for item in cluster.repository.list_devices(cluster.config.local_worker_id)
+            }
+            if worker and worker.get("status") == "draining":
+                local_admission_error = "A manual Tradefed test is running on this host with an unknown device"
+            elif any(device_states.get(serial) == "external_busy" for serial in selected_serials):
+                local_admission_error = "The selected device is already used by a manual Tradefed test"
+            durable_local = (
+                cluster.effective_enabled
+                and cluster.has_command_agent(cluster.config.local_worker_id)
+            )
+        except (RuntimeError, AttributeError):
+            durable_local = False
+        if local_admission_error:
+            return error_response(local_admission_error, 409)
+        if durable_local:
+            return runtime.start_cluster_test(req, runtime.get_client_id_from_request(request))
 
     config = runtime.config_manager.load_config()
     username = get_client_username_from_request(request)

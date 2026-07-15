@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
-from features.cluster.repository import ClusterRepository
-from features.cluster.service import ClusterService
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from features.cluster import api as cluster_api
+from features.cluster.repository import ClusterRepository
+from features.cluster.service import ClusterService
 
 
 class ClusterRepositoryTests(unittest.TestCase):
@@ -58,6 +59,40 @@ class ClusterRepositoryTests(unittest.TestCase):
         })
         self.assertEqual(ack["status"], "completed")
         self.assertEqual(ack["result"]["count"], 3)
+
+    def test_unacknowledged_command_is_redelivered_after_delivery_lease(self):
+        self.register()
+        command = self.repo.create_command({
+            "worker_id": "worker-246", "command_type": "refresh_devices",
+            "payload": {},
+        })
+        self.assertEqual(len(self.repo.poll_commands("worker-246")), 1)
+
+        with self.repo.connect() as conn:
+            conn.execute(
+                "UPDATE cluster_commands SET delivered_at='2000-01-01T00:00:00Z' WHERE id=?",
+                (command["id"],),
+            )
+
+        redelivered = self.repo.poll_commands("worker-246")
+        self.assertEqual([item["id"] for item in redelivered], [command["id"]])
+
+    def test_late_ack_cannot_regress_terminal_command(self):
+        self.register()
+        command = self.repo.create_command({
+            "worker_id": "worker-246", "command_type": "refresh_devices",
+            "payload": {},
+        })
+        completed = self.repo.ack_command("worker-246", command["id"], {
+            "status": "completed", "result": {"count": 1}, "error": "",
+        })
+        late = self.repo.ack_command("worker-246", command["id"], {
+            "status": "running", "result": {}, "error": "",
+        })
+
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(late["status"], "completed")
+        self.assertEqual(late["result"], {"count": 1})
 
     def test_transfer_state_is_persisted(self):
         self.register()
@@ -177,6 +212,38 @@ class ClusterRepositoryTests(unittest.TestCase):
         self.assertEqual(worker_id, "worker-246")
         self.assertEqual(devices, ["worker-246:ABC"])
 
+    def test_scheduler_can_exclude_controller_local_worker(self):
+        for worker_id in ("worker-local", "worker-246"):
+            self.repo.register_worker({
+                "worker_id": worker_id,
+                "name": worker_id,
+                "hostname": worker_id,
+                "address": "127.0.0.1",
+                "agent_version": "1",
+                "max_jobs": 1,
+                "capabilities": {},
+            })
+            self.repo.heartbeat(worker_id, {
+                "agent_version": "1",
+                "running_jobs": [],
+                "devices": [{"serial": worker_id, "state": "available"}],
+                "suites": [{
+                    "suite_type": "CTS",
+                    "suite_version": "17_r1",
+                    "suite_key": "CTS:17_r1",
+                    "tools_path": f"/{worker_id}/cts/tools",
+                    "available": True,
+                }],
+            })
+
+        worker_id, devices = ClusterService(self.repo).select_worker(
+            "CTS:17_r1",
+            include_local=False,
+        )
+
+        self.assertEqual(worker_id, "worker-246")
+        self.assertEqual(devices, ["worker-246:worker-246"])
+
     def test_job_leases_device_and_releases_after_command_completion(self):
         self.register()
         self.repo.heartbeat("worker-246", {
@@ -209,6 +276,54 @@ class ClusterRepositoryTests(unittest.TestCase):
             "devices": ["worker-246:ABC"], "suite_key": "CTS:17_r1",
         })
         self.assertEqual(second["leases"][0]["status"], "active")
+
+    def test_automation_reservation_survives_heartbeat_and_converts_to_job_lease(self):
+        self.register()
+        heartbeat = {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+        }
+        self.repo.heartbeat("worker-246", heartbeat)
+        reservation = self.repo.reserve_devices(
+            "worker-246", ["worker-246:ABC"],
+            owner_id="alice", source_id="ats-run-1",
+        )
+        self.assertEqual(self.repo.list_devices("worker-246")[0]["state"], "reserved")
+
+        self.repo.heartbeat("worker-246", heartbeat)
+        self.assertEqual(self.repo.list_devices("worker-246")[0]["state"], "reserved")
+        with self.assertRaisesRegex(ValueError, "not available"):
+            self.repo.reserve_devices(
+                "worker-246", ["worker-246:ABC"],
+                owner_id="bob", source_id="ats-run-2",
+            )
+
+        job = self.repo.create_job_with_leases({
+            "worker_id": "worker-246", "owner_id": "alice",
+            "devices": ["worker-246:ABC"], "suite_key": "CTS:17_r1",
+            "automation_run_id": "ats-run-1",
+            "device_reservation_id": reservation["id"],
+        })
+        self.assertEqual(job["leases"][0]["status"], "active")
+        self.assertEqual(self.repo.get_reservation(reservation["id"])["status"], "converted")
+        self.assertEqual(self.repo.list_devices("worker-246")[0]["state"], "allocated")
+
+    def test_job_rejects_reservation_from_another_owner(self):
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+        })
+        reservation = self.repo.reserve_devices(
+            "worker-246", ["ABC"], owner_id="alice", source_id="ats-run-1"
+        )
+        with self.assertRaisesRegex(ValueError, "another owner"):
+            self.repo.create_job_with_leases({
+                "worker_id": "worker-246", "owner_id": "bob",
+                "devices": ["ABC"], "suite_key": "CTS:17_r1",
+                "automation_run_id": "ats-run-1",
+                "device_reservation_id": reservation["id"],
+            })
 
     def test_early_cancel_queues_deterministic_worker_job_id(self):
         self.register()

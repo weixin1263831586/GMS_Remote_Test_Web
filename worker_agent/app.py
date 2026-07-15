@@ -1,25 +1,112 @@
 from __future__ import annotations
 
-import logging
 import getpass
-import socket
-import threading
-import time
+import logging
+import os
 import re
 import shutil
-from pathlib import Path
+import socket
+import subprocess
+import threading
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 
+from .android_inspection import _aapt2_path, prepare_device_export
 from .client import ControllerClient
 from .config import WorkerConfig
-from .inventory import (execute_device_action, execute_suite_action, flash_firmware, flash_gsi, host_metrics,
-                        prepare_suite_export, probe_devices, scan_suites)
+from .inventory import (
+    execute_device_action,
+    execute_suite_action,
+    flash_firmware,
+    flash_gsi,
+    host_metrics,
+    prepare_suite_export,
+    probe_devices,
+    scan_suites,
+)
+from .process_inventory import discover_tradefed_processes
 from .runtime import WorkerRuntime
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("gms-worker")
-AGENT_VERSION = "0.1.0"
+AGENT_VERSION = "0.3.1"
+
+
+VNC_PORT = 5900
+NOVNC_PORT = 6080
+
+
+def _rfb_handshake_ok(port: int = VNC_PORT, timeout: float = 1.0) -> bool:
+    """Return True only when a real RFB greeting is received, not just an open port."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout) as s:
+            s.settimeout(timeout)
+            return s.recv(12).startswith(b"RFB ")
+    except OSError:
+        return False
+
+
+def restart_local_vnc() -> dict:
+    """Kill stale x11vnc/websockify and restart them. Runs on the worker host itself."""
+    units = (
+        "gms-worker-xvfb.service",
+        "gms-worker-x11vnc.service",
+        "gms-worker-novnc.service",
+    )
+    unit_root = Path.home() / ".config/systemd/user"
+    if all((unit_root / unit).is_file() for unit in units):
+        completed = subprocess.run(
+            ["systemctl", "--user", "restart", *units],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        time.sleep(1)
+        rfb_ok = _rfb_handshake_ok()
+        return {
+            "x11vnc_running": rfb_ok,
+            "websockify_listening": _port_listening(NOVNC_PORT),
+            "rfb_ok": rfb_ok,
+            "systemd_exit_code": completed.returncode,
+            "error": completed.stderr.strip(),
+        }
+
+    for pattern in ("x11vnc.*-rfbport", "websockify.*6080"):
+        subprocess.run(["pkill", "-9", "-f", pattern], capture_output=True)
+    time.sleep(1)
+    display = os.environ.get("DISPLAY", ":0")
+    xauth = f"/home/{getpass.getuser()}/.Xauthority"
+    subprocess.run(
+        ["x11vnc", "-display", display, "-forever", "-shared",
+         "-rfbport", str(VNC_PORT), "-nopw", "-bg", "-o", f"/home/{getpass.getuser()}/logs/x11vnc.log"],
+        capture_output=True, env={**os.environ, "DISPLAY": display, "XAUTHORITY": xauth},
+        timeout=10,
+    )
+    time.sleep(1)
+    novnc_dir = next((d for d in ("/opt/noVNC", "/usr/share/novnc")
+                      if os.path.isfile(os.path.join(d, "vnc.html"))), None)
+    if novnc_dir:
+        websockify_bin = shutil.which("websockify")
+        cmd = [websockify_bin or "python3"]
+        if not websockify_bin:
+            cmd += ["-m", "websockify"]
+        cmd += [f"--web={novnc_dir}", str(NOVNC_PORT), f"localhost:{VNC_PORT}"]
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        time.sleep(1)
+    rfb_ok = _rfb_handshake_ok()
+    return {
+        "x11vnc_running": rfb_ok,
+        "websockify_listening": _port_listening(NOVNC_PORT),
+        "rfb_ok": rfb_ok,
+    }
+
+
+def _port_listening(port: int) -> bool:
+    result = subprocess.run(["ss", "-ltn"], capture_output=True, text=True)
+    return f":{port} " in result.stdout
 
 
 class WorkerAgent:
@@ -31,14 +118,28 @@ class WorkerAgent:
         self.last_suite_scan = 0.0
 
     def registration(self):
+        try:
+            _aapt2_path()
+            has_aapt2 = True
+        except RuntimeError:
+            has_aapt2 = False
+        capabilities = {"adb": shutil.which("adb") is not None,
+                        "fastboot": shutil.which("fastboot") is not None,
+                        "tradefed": True,
+                        "cts": True, "gts": True, "vts": True, "sts": True,
+                        "device_inspection": True,
+                        "aapt2": has_aapt2,
+                        "ssh_user": self.config.ssh_user or getpass.getuser()}
+        # noVNC capability requires both ports open AND a valid RFB handshake.
+        # A zombie x11vnc keeps listening on 5900 but never sends the RFB
+        # greeting, so a pure port check reports a false positive.
+        if _port_listening(NOVNC_PORT) and _rfb_handshake_ok():
+            capabilities["novnc_port"] = NOVNC_PORT
         return {"worker_id": self.config.worker_id, "name": self.config.name,
                 "hostname": socket.gethostname(),
                 "address": self.config.address or socket.gethostname(),
                 "agent_version": AGENT_VERSION, "max_jobs": self.config.max_jobs,
-                "capabilities": {"adb": True, "fastboot": True, "tradefed": True,
-                                 "cts": True, "gts": True, "vts": True, "sts": True,
-                                 "ssh_user": self.config.ssh_user or getpass.getuser(),
-                                 "novnc_port": 6080}}
+                "capabilities": capabilities}
 
     def heartbeat(self):
         now = time.monotonic()
@@ -46,8 +147,10 @@ class WorkerAgent:
         if include_suites:
             self.suites = scan_suites(self.config)
             self.last_suite_scan = now
+        managed_jobs = self.runtime.running_jobs()
+        running_jobs = managed_jobs + discover_tradefed_processes(managed_jobs)
         payload = {"agent_version": AGENT_VERSION, **host_metrics(self.config),
-                   "running_jobs": self.runtime.running_jobs(), "devices": probe_devices(),
+                   "running_jobs": running_jobs, "devices": probe_devices(include_details=True),
                    "timestamp": datetime.now(timezone.utc).isoformat()}
         if include_suites:
             payload["suites"] = self.suites
@@ -55,13 +158,16 @@ class WorkerAgent:
 
     def handle(self, command):
         previous = self.runtime.previous_command(command["id"])
-        if previous and previous["status"] in {"completed", "failed", "cancelled"}:
+        if previous:
+            # Controller delivery is at-least-once.  A running command may be
+            # re-delivered after a network interruption, and executing it a
+            # second time could launch a duplicate test or flash operation.
             self.client.ack(command["id"], previous["status"], previous["result"], previous["error"])
             return
         try:
             kind = command["command_type"]
             if kind == "refresh_devices":
-                result = {"devices": probe_devices()}
+                result = {"devices": probe_devices(include_details=True)}
             elif kind == "refresh_suites":
                 self.suites = scan_suites(self.config)
                 self.last_suite_scan = time.monotonic()
@@ -83,6 +189,12 @@ class WorkerAgent:
                 threading.Thread(target=self.run_suite_export,
                                  args=(command,), name=f"SuiteExport-{command['id']}", daemon=True).start()
                 return
+            elif kind == "device_export":
+                self.runtime.save_command(command["id"], "running", {})
+                self.client.ack(command["id"], "running", {})
+                threading.Thread(target=self.run_device_export,
+                                 args=(command,), name=f"DeviceExport-{command['id']}", daemon=True).start()
+                return
             elif kind in {"flash_firmware", "flash_gsi"}:
                 self.runtime.save_command(command["id"], "running", {})
                 self.client.ack(command["id"], "running", {})
@@ -101,6 +213,8 @@ class WorkerAgent:
                 return
             elif kind == "stop_test":
                 result = self.runtime.stop_process(command.get("payload", {}).get("worker_job_id", ""))
+            elif kind == "restart_vnc":
+                result = restart_local_vnc()
             else:
                 raise ValueError(f"unsupported command type: {kind}")
             self.runtime.save_command(command["id"], "completed", result)
@@ -139,8 +253,8 @@ class WorkerAgent:
                 for log_name in ("stdout.log", "stderr.log"):
                     log_path = work_dir / log_name
                     if log_path.exists():
-                        self._retry(lambda: self.client.upload_artifact(
-                            row["job_id"], row["attempt_id"], log_path, "log"))
+                        self._retry(lambda path=log_path: self.client.upload_artifact(
+                            row["job_id"], row["attempt_id"], path, "log"))
                 self._upload_tradefed_results(row, work_dir)
             self.runtime.save_command(command_id, status, result, error)
             self._retry(lambda: self.client.ack(command_id, status, result, error))
@@ -168,8 +282,9 @@ class WorkerAgent:
             self.last_suite_scan = time.monotonic()
         except Exception as exc:
             logger.exception("suite action %s failed", command.get("id"))
-            self.runtime.save_command(command["id"], "failed", error=str(exc))
-            self._retry(lambda: self.client.ack(command["id"], "failed", error=str(exc)))
+            error = str(exc)
+            self.runtime.save_command(command["id"], "failed", error=error)
+            self._retry(lambda: self.client.ack(command["id"], "failed", error=error))
 
     def run_suite_export(self, command: dict):
         path = None
@@ -177,7 +292,7 @@ class WorkerAgent:
         try:
             payload = command.get("payload", {})
             path, temporary = prepare_suite_export(self.config, payload)
-            result = self.client.upload_transfer(payload["transfer_id"], path)
+            self.client.upload_transfer(payload["transfer_id"], path)
             summary = {"transfer_id": payload["transfer_id"], "filename": path.name,
                        "size_bytes": path.stat().st_size}
             self.runtime.save_command(command["id"], "completed", summary)
@@ -193,13 +308,41 @@ class WorkerAgent:
             if temporary and path is not None:
                 path.unlink(missing_ok=True)
 
+    def run_device_export(self, command: dict):
+        path = None
+        try:
+            payload = command.get("payload", {})
+            path = prepare_device_export(payload)
+            self.client.upload_transfer(
+                payload["transfer_id"], path, filename=Path(payload["path"]).name
+            )
+            summary = {
+                "transfer_id": payload["transfer_id"],
+                "filename": Path(payload["path"]).name,
+                "size_bytes": path.stat().st_size,
+                "device": payload["devices"][0],
+            }
+            self.runtime.save_command(command["id"], "completed", summary)
+            self._retry(lambda: self.client.ack(command["id"], "completed", summary))
+        except Exception as exc:
+            logger.exception("device export %s failed", command.get("id"))
+            self.runtime.save_command(command["id"], "failed", error=str(exc))
+            try:
+                self.client.ack(command["id"], "failed", error=str(exc))
+            except Exception:
+                logger.exception("failed to acknowledge device export failure")
+        finally:
+            if path is not None:
+                path.unlink(missing_ok=True)
+
     def run_firmware_flash(self, command: dict):
+        directory = None
         try:
             payload = command.get("payload", {})
             directory = self.config.data_root / "firmware" / payload["stage_id"]
             directory.mkdir(parents=True, exist_ok=False)
-            from urllib.parse import quote, urlencode
             import hashlib
+            from urllib.parse import quote, urlencode
             specs = payload.get("files") or [{"filename": payload["filename"],
                 "size_bytes": payload["size_bytes"], "sha256": payload["sha256"], "kind": "firmware"}]
             downloaded = {}
@@ -210,7 +353,8 @@ class WorkerAgent:
                 self.client.download(endpoint, target)
                 digest = hashlib.sha256()
                 with target.open("rb") as source:
-                    while block := source.read(4 * 1024 * 1024): digest.update(block)
+                    while block := source.read(4 * 1024 * 1024):
+                        digest.update(block)
                 if target.stat().st_size != int(spec["size_bytes"]) or digest.hexdigest() != spec["sha256"]:
                     raise ValueError("staged image checksum mismatch")
                 downloaded[spec["kind"]] = target
@@ -223,8 +367,12 @@ class WorkerAgent:
             self._retry(lambda: self.client.ack(command["id"], status, result, error))
         except Exception as exc:
             logger.exception("firmware command %s failed", command.get("id"))
-            self.runtime.save_command(command["id"], "failed", error=str(exc))
-            self._retry(lambda: self.client.ack(command["id"], "failed", error=str(exc)))
+            error = str(exc)
+            self.runtime.save_command(command["id"], "failed", error=error)
+            self._retry(lambda: self.client.ack(command["id"], "failed", error=error))
+        finally:
+            if directory is not None:
+                shutil.rmtree(directory, ignore_errors=True)
 
     def _flush_log_events(self, row, offsets: dict[str, int], sequence: int) -> int:
         events = []
@@ -235,7 +383,9 @@ class WorkerAgent:
                 continue
             with path.open("r", encoding="utf-8", errors="replace") as handle:
                 handle.seek(offsets[log_name])
-                text = handle.read()
+                # Keep heartbeat/log-forwarding memory bounded even when a
+                # full CTS run produces output for several days.
+                text = handle.read(int(os.getenv("GMS_WORKER_LOG_BATCH_CHARS", str(256 * 1024))))
                 new_offsets[log_name] = handle.tell()
             for line in text.splitlines():
                 events.append({"sequence": sequence, "event_type": "log",
@@ -260,7 +410,12 @@ class WorkerAgent:
         raise last_error or RuntimeError("operation failed")
 
     def _upload_tradefed_results(self, row, work_dir: Path) -> None:
-        stdout = (work_dir / "stdout.log").read_text(encoding="utf-8", errors="replace")
+        stdout_path = work_dir / "stdout.log"
+        with stdout_path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - 4 * 1024 * 1024))
+            stdout = handle.read().decode("utf-8", errors="replace")
         matches = re.findall(r"RESULT DIRECTORY\s*:\s*(\S+)", stdout)
         if not matches:
             return
@@ -292,7 +447,12 @@ class WorkerAgent:
                     registered = True
                     logger.info("registered as %s", self.config.worker_id)
                 if not recovered:
-                    for job in self.runtime.recoverable_jobs():
+                    recoverable_jobs = self.runtime.recoverable_jobs()
+                    for command in self.runtime.fail_interrupted_commands():
+                        self._retry(lambda item=command: self.client.ack(
+                            item["id"], item["status"], item["result"], item["error"]
+                        ))
+                    for job in recoverable_jobs:
                         threading.Thread(target=self.monitor_recovered_job, args=(job,),
                                          name=f"Recovered-{job['worker_job_id']}", daemon=True).start()
                     recovered = True

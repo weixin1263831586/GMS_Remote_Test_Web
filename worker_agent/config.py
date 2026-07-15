@@ -23,7 +23,7 @@ class WorkerConfig:
     suite_roots: list[Path] = field(default_factory=list)
 
     @classmethod
-    def load(cls) -> "WorkerConfig":
+    def load(cls) -> WorkerConfig:
         config_path = Path(os.getenv("GMS_WORKER_CONFIG", Path.home() / ".config/gms-worker/config.json"))
         raw = {}
         if config_path.exists():

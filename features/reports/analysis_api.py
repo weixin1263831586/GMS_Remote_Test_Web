@@ -38,6 +38,7 @@ from .api_helpers import (
     test_report_manager,
 )
 from .uploads import ReportUploadTooLargeError, stage_report_uploads
+from .knowledge_ranking import android_version_from_request, rank_kb_hits
 
 
 router = APIRouter()
@@ -113,6 +114,7 @@ def _is_safe_report_delete_dir(result_dir: str) -> bool:
 
 @router.post("/api/reports/analyze")
 async def analyze_reports(
+    request: Request,
     mode: AnalysisMode = Form(default=AnalysisMode.UPLOAD),
     report_timestamp: str | None = Form(default=None),
     test_name: str | None = Form(default=None),
@@ -133,6 +135,9 @@ async def analyze_reports(
             report = test_report_db.get_report_by_timestamp(report_timestamp)
             if not report:
                 return error_response("Report not found", 404)
+            user = get_authenticated_user(request)
+            if user and user.role != "admin" and report.get("client_id") != user.username:
+                return error_response("Report not found", 404)
 
             result_dir = report.get("result_dir")
             if not result_dir:
@@ -141,6 +146,21 @@ async def analyze_reports(
             result = await asyncio.to_thread(test_report_manager.analyze_report, report_timestamp)
             if not result:
                 return error_response("Report analysis failed", 500)
+
+            provenance_fields = (
+                "report_id", "timestamp", "source_timestamp", "worker_id", "cluster_job_id",
+                "attempt_id", "automation_run_id", "artifact_id", "artifact_ids",
+                "build_id", "build_artifact_id", "gerrit_change_id", "gerrit_patchset",
+                "redmine_issue_id", "source_type", "suite_path",
+            )
+            result["provenance"] = {
+                field: report.get(field)
+                for field in provenance_fields
+                if report.get(field) not in (None, "", [])
+            }
+            result["report_id"] = report.get("report_id") or report_timestamp
+            result["report_timestamp"] = report_timestamp
+            result.setdefault("report_name", report_timestamp)
 
             return JSONResponse(content={"success": True, "data": result, "mode": "saved"})
 
@@ -441,7 +461,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
                 probe = {
                     "test_name": request.test_name or "",
                     "module": request.module or "",
-                    "android_version": _android_version_from_request(request),
+                    "android_version": android_version_from_request(request),
                 }
 
                 def _gather() -> list[dict]:
@@ -492,7 +512,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
                             _adapt(s, "case_facts")
                     except Exception as exc:
                         logger.debug(f"Case-facts KB recall skipped: {exc}")
-                    return _rank_kb_hits(merged, probe)
+                    return rank_kb_hits(merged, probe)
 
                 return await asyncio.to_thread(_gather)
             except Exception as kb_error:
@@ -638,128 +658,3 @@ async def knowledgebase_stats(request: Request):
         logger.error(f"Knowledge base stats failed: {e}", exc_info=True)
         return error_response(str(e), status_code=500)
 
-
-# ==================== Knowledge-base relevance ranking ====================
-
-
-def _android_version_from_request(request: ReportDiagnosisRequest) -> str:
-    """Best-effort Android major version from suite_version (e.g. '16_r5' -> '16')."""
-    raw = (getattr(request, "suite_version", "") or "").strip()
-    m = re.match(r"(\d+)", raw)
-    return m.group(1) if m else ""
-
-
-def _test_method_and_class(test_name: str) -> tuple[str, str]:
-    """Return (method_name, simple_class) from 'a.b.C#method' or 'a.b.C'."""
-    test_name = (test_name or "").strip()
-    method = ""
-    cls = test_name
-    if "#" in test_name:
-        cls, method = test_name.split("#", 1)
-    simple_cls = cls.rsplit(".", 1)[-1]
-    return method.strip(), simple_cls.strip()
-
-
-def _rank_kb_hits(hits: list[dict], probe: dict) -> list[dict]:
-    """Filter and re-rank KB hits by relevance to the diagnosed failure.
-
-    The raw FTS recall is broad — it surfaces any ticket sharing the module
-    (e.g. CtsInputMethodTestCases), including cross-platform / cross-case
-    noise. We score each hit against the failure under diagnosis and keep only
-    the genuinely relevant ones, so the operator sees a few precise matches
-    instead of eight loosely-related tickets.
-
-    Scoring (higher = more relevant):
-      exact test method in subject ........ +100  (top tier)
-      exact test class in subject ......... +40
-      same module ........................ +15
-      same Android major version ......... +20
-      verified (Closed/Confirmed) ........ +10
-      curated case_fact ................... +15
-
-    Hard filter: drop hits that match only the module on a different platform
-    *and* lack any case/method overlap — pure cross-platform noise.
-    """
-    method, simple_cls = _test_method_and_class(probe.get("test_name") or "")
-    module = (probe.get("module") or "").strip()
-    probe_android = (probe.get("android_version") or "").strip()
-
-    # Anchor platform from exact-method hits — when the failure has identical
-    # tickets on one platform, a different-platform same-module ticket is noise.
-    anchor_platform = ""
-    if method:
-        for h in hits:
-            if method.lower() in (h.get("subject") or "").lower():
-                anchor_platform = (h.get("chip_platform") or "").upper()
-                if anchor_platform:
-                    break
-
-    def _score(h: dict) -> tuple[float, bool]:
-        subject = (h.get("subject") or "").lower()
-        root = (h.get("root_cause") or "").lower()
-        hay = f"{subject} {root}"
-        s = 0.0
-        case_hit = method and method.lower() in hay
-        cls_hit = simple_cls and simple_cls.lower() in hay
-        if case_hit:
-            s += 100
-        if cls_hit:
-            s += 40
-        if module and module.lower() in hay:
-            s += 15
-        if probe_android:
-            theirs = (h.get("android_version") or "").strip()
-            if theirs and probe_android in theirs:
-                s += 20
-        status = (h.get("status_name") or "").lower()
-        if status in ("closed", "confirmed", "已关闭", "已解决", "resolved"):
-            s += 10
-        if h.get("source") == "case_facts":
-            s += 15
-        # A hit carrying a real, distilled solution/root cause is far more
-        # valuable as a reference than a bare same-module ticket — reward it so
-        # verified historical fixes surface above generic same-module noise.
-        sol = (h.get("solution_summary") or h.get("root_cause") or "")
-        if len(sol.strip()) >= 40:
-            s += 8
-        # Cross-platform noise penalty: same-module only, different platform
-        # from the anchored exact matches, and no case/class overlap.
-        plat = (h.get("chip_platform") or "").upper()
-        keep = True
-        if anchor_platform and plat and plat != anchor_platform and not (case_hit or cls_hit):
-            keep = False
-        return s, keep
-
-    scored = []
-    for h in hits:
-        s, keep = _score(h)
-        if not keep:
-            continue
-        h_out = dict(h)
-        h_out["score"] = round(s, 1)
-        h_out["similarity_level"] = (
-            "exact" if s >= 100 else "high" if s >= 50 else "medium" if s >= 30 else "low"
-        )
-        scored.append((s, h_out))
-
-    # If filtering removed everything (e.g. no anchor could be established and
-    # nothing matched), fall back to the raw recall rather than showing "未命中".
-    # Raw hits carry no score (those are added in _score below), so stamp a
-    # neutral default on each.
-    if not scored:
-        return [{**h, "score": 0.0, "similarity_level": "low"} for h in hits[:5]]
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    ordered = [h for _, h in scored]
-
-    # When we have a precise (exact) match, keep the results tight: the exact
-    # hit plus high-relevance references, with at most two same-module-only
-    # tickets as supporting context. Operators want a few precise matches, not a
-    # wall of loosely-related same-module tickets.
-    has_exact = any(h["similarity_level"] == "exact" for h in ordered)
-    if has_exact:
-        precise = [h for h in ordered if h["similarity_level"] in ("exact", "high")]
-        same_module = [h for h in ordered if h["similarity_level"] not in ("exact", "high")]
-        return (precise + same_module)[:5]
-
-    return ordered[:5]

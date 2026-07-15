@@ -8,7 +8,7 @@
 {{AUTOMATION_CSS}}
     </style>
 </head>
-<body>
+<body data-automation-ready="false">
     <main class="ats-shell">
 <section class="ats-toolbar">
     <div class="ats-toolbar-main">
@@ -124,7 +124,7 @@
                 <div class="panel-header">设备与测试</div>
                 <div class="panel-body compact-stack">
                     <label>测试主机
-                        <select id="automation-worker" onchange="loadDevices(true); loadTestSuitesForAutomation()">
+                        <select id="automation-worker" onchange="syncAutomationWorkspaceSelection(); loadDevices(true); loadTestSuitesForAutomation()">
                             <option value="worker-local">Controller / Local Worker</option>
                         </select>
                     </label>
@@ -137,10 +137,17 @@
                     </label>
                     <div class="form-row">
                         <label>测试类型
-                            <select id="automation-test-type" onchange="renderSuiteOptions()"></select>
+                            <select id="automation-test-type" onchange="renderSuiteOptions(); syncAutomationWorkspaceSelection()">
+                                <option value="CTS">CTS</option>
+                                <option value="GTS">GTS</option>
+                                <option value="VTS">VTS</option>
+                                <option value="STS">STS</option>
+                            </select>
                         </label>
                         <label>测试套件
-                            <select id="automation-test-suite"></select>
+                            <select id="automation-test-suite" onchange="syncAutomationWorkspaceSelection()">
+                                <option value="">自动匹配最新套件</option>
+                            </select>
                         </label>
                     </div>
                     <label>测试模块
@@ -265,7 +272,11 @@
             </section>
             <section class="trace-section">
                 <div class="trace-section-title">固件产物</div>
-                <div id="trace-artifact" class="muted">-</div>
+                <div id="trace-artifact" class="trace-grid muted">-</div>
+            </section>
+            <section class="trace-section">
+                <div class="trace-section-title">集群测试</div>
+                <div id="trace-test" class="trace-grid muted">-</div>
             </section>
             <section class="trace-section">
                 <div class="trace-section-title">报告</div>
@@ -274,6 +285,7 @@
         </div>
     </aside>
 
+    <script src="/static/js/embedded-workspace.js?v=20260713-01"></script>
     <script>
 {{AUTOMATION_JS}}
     </script>

@@ -11,20 +11,19 @@ Usage:
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
+
 
 # Ensure project root is on the path
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from fastapi import FastAPI  # noqa: E402
 
-from features.cluster import api as cluster_api
-from features.cluster.config import ClusterConfig
-from features.cluster.repository import ClusterRepository
-from features.cluster.service import ClusterService
+from features.cluster import api as cluster_api  # noqa: E402
+from features.cluster.config import ClusterConfig  # noqa: E402
+from features.cluster.repository import ClusterRepository  # noqa: E402
+from features.cluster.service import ClusterService  # noqa: E402
 
 
 def main() -> int:
@@ -93,8 +92,6 @@ def main() -> int:
     app = FastAPI()
     app.include_router(cluster_api.router)
     app.include_router(cluster_api.page_router)
-
-    errors = []
 
     # Test 1: Status endpoint
     status = svc.config

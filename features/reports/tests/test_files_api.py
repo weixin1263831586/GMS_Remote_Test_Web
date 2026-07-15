@@ -69,6 +69,42 @@ class ReportFilesApiTests(unittest.TestCase):
         report = _decorate_report_for_client({"client_id": "NqWo58sh1jr5c6ZiyxxPtQ"}, display, aliases)
         self.assertEqual(report["display_client_id"], "hcq@172.16.14.66")
 
+    def test_list_reports_filters_exact_automation_job_attempt(self):
+        request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+        reports = [
+            {
+                "timestamp": "cluster-job-1", "cluster_job_id": "job-1",
+                "attempt_id": "attempt-1", "automation_run_id": "ats-1",
+            },
+            {
+                "timestamp": "cluster-job-2", "cluster_job_id": "job-2",
+                "attempt_id": "attempt-2", "automation_run_id": "ats-2",
+            },
+        ]
+        fake_db = type(
+            "FakeDb",
+            (),
+            {
+                "get_reports": lambda self, limit=500, user_only=None: reports[:limit],
+                "get_report_by_timestamp": lambda self, timestamp: next(
+                    (item for item in reports if item["timestamp"] == timestamp), None
+                ),
+            },
+        )()
+
+        with patch("features.reports.files_api.test_report_db", fake_db):
+            response = asyncio.run(list_reports(
+                request,
+                cluster_job_id="job-1",
+                attempt_id="attempt-1",
+                automation_run_id="ats-1",
+            ))
+
+        payload = json.loads(response.body.decode("utf-8"))
+        self.assertEqual(
+            [item["timestamp"] for item in payload["reports"]], ["cluster-job-1"]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -44,6 +44,34 @@ class AutomationOrchestratorTests(unittest.TestCase):
             self.assertEqual(result['status'], 'waiting_device')
             self.assertEqual(store.get_run('run_newer')['status'], 'waiting_device')
 
+    def test_waiting_run_yields_to_other_active_runs_after_retry(self):
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import AutomationRunCreateRequest
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
+
+        class WaitingExecutor(StubAutomationExecutor):
+            def select_devices(self, run):
+                return {"success": False, "retry": True, "error": "busy"}
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            for run_id, timestamp in (
+                ("run_first", "2026-01-01T00:00:00Z"),
+                ("run_second", "2026-01-02T00:00:00Z"),
+            ):
+                data = AutomationRunCreateRequest().to_run_dict(run_id)
+                data["status"] = data["current_stage"] = "waiting_device"
+                data["created_at"] = data["updated_at"] = timestamp
+                store.create_run(data)
+            orchestrator = AutomationOrchestrator(store, WaitingExecutor())
+
+            first = orchestrator.advance_next()
+            second = orchestrator.advance_next()
+
+            self.assertEqual(first["id"], "run_first")
+            self.assertEqual(second["id"], "run_second")
+
     def test_stale_transition_cannot_revive_a_cancelled_run(self):
         from features.automation.executors import StubAutomationExecutor
         from features.automation.models import RUN_STATUS_CANCELLED, AutomationRunCreateRequest
@@ -144,6 +172,60 @@ class AutomationOrchestratorTests(unittest.TestCase):
 
             self.assertEqual(run["status"], RUN_STATUS_FLASH_FAILED)
             self.assertIn("flash failed by stub", run["error"])
+
+    def test_orchestrator_records_analysis_failure_stage(self):
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import (
+            RUN_STATUS_ANALYSIS_FAILED,
+            AutomationRunCreateRequest,
+        )
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            data = AutomationRunCreateRequest().to_run_dict("run_analysis")
+            data["status"] = data["current_stage"] = "analyzing"
+            data["report_timestamp"] = "report-1"
+            store.create_run(data)
+
+            run = AutomationOrchestrator(
+                store, StubAutomationExecutor(fail_stage="analyze_report")
+            ).advance_run("run_analysis")
+
+            self.assertEqual(run["status"], RUN_STATUS_ANALYSIS_FAILED)
+
+    def test_reporting_failure_does_not_send_notifications_twice(self):
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import (
+            RUN_STATUS_REPORTING_FAILED,
+            AutomationRunCreateRequest,
+        )
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
+
+        class FailingReporter(StubAutomationExecutor):
+            calls = 0
+
+            def report_result(self, run):
+                self.calls += 1
+                return {
+                    "success": False,
+                    "error": "required notification failed",
+                    "notifications": {"ok": False},
+                }
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            data = AutomationRunCreateRequest().to_run_dict("run_reporting")
+            data["status"] = data["current_stage"] = "reporting"
+            store.create_run(data)
+            executor = FailingReporter()
+
+            run = AutomationOrchestrator(store, executor).advance_run("run_reporting")
+
+            self.assertEqual(run["status"], RUN_STATUS_REPORTING_FAILED)
+            self.assertEqual(executor.calls, 1)
 
     def test_orchestrator_runs_jenkins_stages_before_device_stages(self):
         from features.automation.executors import StubAutomationExecutor

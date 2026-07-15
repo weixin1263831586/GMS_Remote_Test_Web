@@ -217,6 +217,12 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/runs/preflight"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/automation/runs/{run_id}"
@@ -381,6 +387,12 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/cluster/devices/export"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/cluster/firmware/stage"
   },
   {
@@ -424,6 +436,30 @@
       "GET"
     ],
     "path": "/api/cluster/jobs/{job_id}/artifacts"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/jobs/{job_id}/artifacts/uploads"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/cluster/jobs/{job_id}/artifacts/uploads/{upload_id}"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/cluster/jobs/{job_id}/artifacts/uploads/{upload_id}/chunks/{index}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/jobs/{job_id}/artifacts/uploads/{upload_id}/complete"
   },
   {
     "methods": [
@@ -535,6 +571,12 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/suites/results"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/cluster/suites/search"
@@ -544,6 +586,12 @@
       "GET"
     ],
     "path": "/api/cluster/transfers/{transfer_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/transfers/{transfer_id}/apk-analysis"
   },
   {
     "methods": [
@@ -562,6 +610,18 @@
       "GET"
     ],
     "path": "/api/cluster/transfers/{transfer_id}/download"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/transfers/{transfer_id}/report-analysis"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/cluster/worker-tests"
   },
   {
     "methods": [
@@ -610,6 +670,12 @@
       "POST"
     ],
     "path": "/api/cluster/workers/{worker_id}/heartbeat"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/workers/{worker_id}/restart-vnc"
   },
   {
     "methods": [
@@ -1204,6 +1270,24 @@
       "POST"
     ],
     "path": "/api/knowledge/docs/{doc_id}/attachments"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/docs/{doc_id}/attachments/{attachment_id}/download"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/docs/{doc_id}/versions"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/docs/{doc_id}/versions/{version_id}/restore"
   },
   {
     "methods": [
@@ -2055,6 +2139,24 @@
       "POST"
     ],
     "path": "/api/users/set-username"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/users/workspace-context"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/users/workspace-context"
+  },
+  {
+    "methods": [
+      "PATCH"
+    ],
+    "path": "/api/users/workspace-context"
   },
   {
     "methods": [

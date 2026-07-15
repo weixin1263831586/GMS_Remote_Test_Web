@@ -30,8 +30,10 @@
     "enabled": "bool",
     "executor": "str",
     "interval_seconds": "int",
+    "report_collection_timeout_seconds": "int",
     "stale_build_seconds": "int",
     "stale_run_seconds": "int",
+    "test_timeout_seconds": "int",
     "waiting_device_timeout_seconds": "int"
   },
   "client_hosts": {
@@ -56,6 +58,12 @@
       "name": "str"
     }
   ],
+  "external_services": {
+    "crm_icon_url": "str",
+    "gms_assistant_url": "str",
+    "grafana_url": "str",
+    "router_icon_url": "str"
+  },
   "gerrit_dashboard": {
     "base_url": "str",
     "cache_ttl": "int",
@@ -188,6 +196,9 @@
   "ubuntu_host": "str",
   "ubuntu_pswd": "str",
   "ubuntu_user": "str",
+  "ui_defaults": {
+    "architecture_build_server": "str"
+  },
   "usbip_devices_source": {},
   "usbip_vid_pid": "str",
   "use_key_auth": "bool",
@@ -198,6 +209,9 @@
   "vpn_target": [
     "str"
   ],
+  "weekly_report": {
+    "android17_sheet_url": "str"
+  },
   "wifi": {
     "password": "str",
     "ssid": "str"

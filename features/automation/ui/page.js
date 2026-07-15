@@ -11,44 +11,140 @@ let connectedDevices = [];
 let selectedBuildJobId = '';
 let activeWorkflowPane = 'overview';
 let toastTimer = null;
+let atsWorkspaceContext = {};
+let applyingWorkspaceContext = false;
+let atsLocalWorkerId = 'worker-local';
+
+function isLocalAutomationWorker(workerId) {
+    return !workerId || workerId === 'worker-local' || workerId === atsLocalWorkerId;
+}
+
+function workspaceDeviceSerial(value) {
+    const text = String(value || '');
+    const worker = selectedWorkerId();
+    return !isLocalAutomationWorker(worker) && text.startsWith(`${worker}:`)
+        ? text.slice(worker.length + 1) : text;
+}
+
+function syncAutomationWorkspaceSelection(extra = {}) {
+    if (applyingWorkspaceContext) return;
+    const workerId = selectedWorkerId();
+    const checked = Array.from(document.querySelectorAll(
+        '#automation-device-list input[type="checkbox"]:checked'
+    )).map(input => input.value);
+    const typed = String(qs('automation-devices')?.value || '')
+        .split(/[,\s]+/).map(value => value.trim()).filter(Boolean);
+    const suitePath = qs('automation-test-suite')?.value || '';
+    const suite = testSuites.find(item => (item.tools_path || item.full_path) === suitePath);
+    window.GmsEmbeddedWorkspace?.update({
+        scope_mode: isLocalAutomationWorker(workerId) ? 'single' : 'cluster',
+        worker_id: workerId,
+        device_ids: [...new Set([...typed, ...checked])].map(value =>
+            isLocalAutomationWorker(workerId) || value.startsWith(`${workerId}:`)
+                ? value : `${workerId}:${value}`),
+        suite_key: suite?.suite_key || suitePath,
+        suite_path: suitePath,
+        origin_page: 'automation',
+        ...extra,
+    });
+}
+
+async function applyAutomationWorkspaceContext(next, navigate = false) {
+    atsWorkspaceContext = {...atsWorkspaceContext, ...(next || {})};
+    applyingWorkspaceContext = true;
+    try {
+        const worker = atsWorkspaceContext.scope_mode === 'cluster'
+            ? (atsWorkspaceContext.worker_id || atsLocalWorkerId) : atsLocalWorkerId;
+        const workerSelect = qs('automation-worker');
+        if (workerSelect && Array.from(workerSelect.options).some(option => option.value === worker)) {
+            const changed = workerSelect.value !== worker;
+            workerSelect.value = worker;
+            if (changed) {
+                await loadTestSuitesForAutomation();
+                await loadDevices(false);
+            }
+        }
+        if (atsWorkspaceContext.suite_path) {
+            setSelectValue('automation-test-suite', atsWorkspaceContext.suite_path);
+        }
+        const selected = new Set((atsWorkspaceContext.device_ids || []).map(workspaceDeviceSerial));
+        document.querySelectorAll('#automation-device-list input[type="checkbox"]').forEach(input => {
+            input.checked = !input.disabled && selected.has(workspaceDeviceSerial(input.value));
+        });
+        if (qs('automation-devices') && selected.size) {
+            qs('automation-devices').value = [...selected].join(', ');
+        }
+        if (atsWorkspaceContext.gerrit_change_id) {
+            if (qs('dryrun-change-id')) qs('dryrun-change-id').value = atsWorkspaceContext.gerrit_change_id;
+            if (qs('dryrun-patchset')) qs('dryrun-patchset').value = atsWorkspaceContext.gerrit_patchset || '';
+        }
+        if (navigate && atsWorkspaceContext.automation_run_id) {
+            await loadRuns();
+            if (atsRuns.some(run => run.id === atsWorkspaceContext.automation_run_id)) {
+                await loadEvents(atsWorkspaceContext.automation_run_id);
+            }
+        }
+    } finally {
+        applyingWorkspaceContext = false;
+    }
+}
+
+window.addEventListener('gms:embedded-workspace', event => {
+    applyAutomationWorkspaceContext(
+        event.detail?.context || {},
+        event.detail?.type === 'workspace-context-navigate'
+    ).catch(error => toast(error.message));
+});
 
 function selectedWorkerId() {
-    return qs('automation-worker')?.value || 'worker-local';
+    return qs('automation-worker')?.value || atsLocalWorkerId;
 }
 
 async function loadClusterWorkers() {
     const select = qs('automation-worker');
     if (!select) return;
-    const previous = select.value || 'worker-local';
     try {
         const statusResponse = await fetch('/api/cluster/status', {cache: 'no-store'});
         const status = await statusResponse.json();
+        atsLocalWorkerId = String(status.local_worker_id || atsLocalWorkerId);
+        const contextWorker = atsWorkspaceContext.scope_mode === 'cluster'
+            ? atsWorkspaceContext.worker_id : atsLocalWorkerId;
+        const previous = contextWorker || select.value || atsLocalWorkerId;
         if (!statusResponse.ok || !status.enabled) {
-            select.innerHTML = '<option value="worker-local">Controller / Local Worker</option>';
-            if (select.closest('label')) select.closest('label').style.display = 'none';
+            select.innerHTML = `<option value="${esc(atsLocalWorkerId)}">Controller / Local Worker（需启用集群 Agent）</option>`;
+            select.disabled = true;
+            select.title = 'GMS ATS 使用持久化任务队列，请先启用集群能力和 Worker Agent';
             return;
         }
-        if (select.closest('label')) select.closest('label').style.display = '';
-        const response = await fetch('/api/cluster/hosts', {cache: 'no-store'});
+        const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
         const payload = await response.json();
-        const hosts = payload.hosts || [];
-        select.innerHTML = hosts.map(host => `<option value="${esc(host.worker_id)}"${host.status === 'offline' ? ' disabled' : ''}>${esc(host.name || host.worker_id)}${host.status === 'offline' ? '（离线）' : ''}</option>`).join('');
-        if (hosts.some(host => host.worker_id === previous && host.status !== 'offline')) select.value = previous;
+        const workers = (payload.workers || []).filter(worker => {
+            if (['offline', 'draining'].includes(worker.status)) return false;
+            if (isLocalAutomationWorker(worker.id)) {
+                return !String(worker.agent_version || '').startsWith('controller-');
+            }
+            return Boolean(status.remote_dispatch_enabled);
+        });
+        select.innerHTML = workers.map(worker => `<option value="${esc(worker.id)}">${esc(worker.name || worker.id)}</option>`).join('');
+        select.disabled = !workers.length;
+        select.title = workers.length ? '' : '没有安装持久化 Agent 的在线 Worker';
+        if (workers.some(worker => worker.id === previous)) select.value = previous;
     } catch (_) {
-        select.innerHTML = '<option value="worker-local">Controller / Local Worker</option>';
+        select.innerHTML = `<option value="${esc(atsLocalWorkerId)}">Controller / Local Worker</option>`;
+        select.disabled = true;
     }
 }
 
-// 13 段流水线阶段（顺序即推进顺序）
+// 14 段流水线阶段（顺序即推进顺序）
 const PIPELINE_STAGES = [
     'queued', 'jenkins_queued', 'jenkins_building', 'artifact_ready',
     'waiting_device', 'device_locked', 'flashing', 'flash_verified',
-    'testing', 'report_collecting', 'analyzing', 'reporting', 'completed',
+    'testing', 'test_running', 'report_collecting', 'analyzing', 'reporting', 'completed',
 ];
 const STAGE_LABELS_ZH = {
     queued: '排队', jenkins_queued: '构建排队', jenkins_building: '编译中',
     artifact_ready: '固件就绪', waiting_device: '等待设备', device_locked: '设备已锁',
-    flashing: '刷机中', flash_verified: '刷机校验', testing: '测试中',
+    flashing: '刷机中', flash_verified: '刷机校验', testing: '启动测试', test_running: '测试中',
     report_collecting: '收集报告', analyzing: '分析中', reporting: '上报中', completed: '完成',
 };
 const TERMINAL_STATUSES = new Set([
@@ -62,7 +158,7 @@ const FAILURE_STATUSES = new Set([
 // 失败状态 → 对应失败阶段的索引（用于进度条标红定位）
 const FAILURE_STAGE_INDEX = {
     jenkins_failed: 2, artifact_missing: 3, flash_failed: 6,
-    test_failed: 8, analysis_failed: 10, reporting_failed: 11,
+    test_failed: 9, analysis_failed: 11, reporting_failed: 12,
 };
 
 function qs(id) { return document.getElementById(id); }
@@ -102,6 +198,21 @@ function runMeta(run) {
     if (run.gerrit_change_id) parts.push(run.gerrit_patchset ? `${run.gerrit_change_id} / PS${run.gerrit_patchset}` : run.gerrit_change_id);
     if (run.owner) parts.push(run.owner);
     return parts.join(' · ');
+}
+function openRunReport(event, runId) {
+    event.stopPropagation();
+    const run = atsRuns.find(item => item.id === runId);
+    if (!run?.report_timestamp) return;
+    window.GmsEmbeddedWorkspace?.navigate('reports', {
+        scope_mode: isLocalAutomationWorker(run.worker_id) ? 'single' : 'cluster',
+        worker_id: run.worker_id || atsLocalWorkerId,
+        cluster_job_id: run.cluster_job_id || '',
+        attempt_id: run.attempt_id || '',
+        automation_run_id: run.id,
+        report_id: run.report_id || '',
+        report_timestamp: run.report_timestamp,
+        origin_page: 'automation',
+    });
 }
 function renderStageBar(status, currentStage) {
     // 单索引模型：cursor 是“当前/失败”段的下标；它之前的段全部 done。
@@ -296,27 +407,37 @@ async function refreshLunchOptions() {
 async function loadDevices(forceRefresh = false) {
     try {
         const workerId = selectedWorkerId();
-        const endpoint = workerId === 'worker-local'
+        const endpoint = isLocalAutomationWorker(workerId)
             ? `/api/devices/list?force_refresh=${forceRefresh ? '1' : '0'}`
             : `/api/cluster/devices?worker_id=${encodeURIComponent(workerId)}`;
         const resp = await fetch(endpoint, {cache: 'no-store'});
         const payload = await resp.json();
-        connectedDevices = workerId === 'worker-local' ? payload : (payload.devices || []);
+        if (!resp.ok || payload.success === false) {
+            throw new Error(payload.error || `测试主机 ${workerId} 的设备加载失败`);
+        }
+        connectedDevices = isLocalAutomationWorker(workerId) ? payload : (payload.devices || []);
         const items = Array.isArray(connectedDevices) ? connectedDevices : [];
         qs('automation-device-list').innerHTML = items.length
             ? items.map(d => {
                 const id = d.id || d.device_id || d.serial || d.serial_no || '';
-                const label = `${id}${d.locked ? ' (locked)' : ''}`;
-                return `<label class="checkbox-item"><input type="checkbox" value="${esc(id)}"> <span>${esc(label)}</span></label>`;
+                const deviceState = isLocalAutomationWorker(workerId)
+                    ? (d.locked ? 'allocated' : (d.status || 'available'))
+                    : (d.state || 'unknown');
+                const unavailable = isLocalAutomationWorker(workerId)
+                    ? Boolean(d.locked || ['offline', 'unauthorized', 'unknown'].includes(deviceState))
+                    : deviceState !== 'available';
+                const label = `${id}${unavailable ? ` (${deviceState})` : ''}`;
+                return `<label class="checkbox-item${unavailable ? ' muted' : ''}"><input type="checkbox" value="${esc(id)}"${unavailable ? ' disabled' : ''} onchange="syncAutomationWorkspaceSelection()"> <span>${esc(label)}</span></label>`;
             }).join('')
             : '<div class="muted">未发现设备</div>';
+        await applyAutomationWorkspaceContext(atsWorkspaceContext);
     } catch (err) { toast(err.message); }
 }
 
 async function loadTestSuitesForAutomation() {
     try {
         const workerId = selectedWorkerId();
-        const endpoint = workerId === 'worker-local' ? '/api/test/suites'
+        const endpoint = isLocalAutomationWorker(workerId) ? '/api/test/suites'
             : `/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`;
         const resp = await fetch(endpoint, {cache: 'no-store'});
         const data = await resp.json();
@@ -329,6 +450,9 @@ async function loadTestSuitesForAutomation() {
             ? types.map(type => `<option value="${esc(type)}">${esc(type)}</option>`).join('')
             : ['CTS', 'GTS', 'VTS', 'STS'].map(type => `<option value="${type}">${type}</option>`).join('');
         renderSuiteOptions();
+        if (atsWorkspaceContext.suite_path) {
+            setSelectValue('automation-test-suite', atsWorkspaceContext.suite_path);
+        }
     } catch (err) { toast(err.message); }
 }
 
@@ -375,7 +499,7 @@ async function loadRuns() {
                     </div>
                     <div>
                         <div class="field-label">报告</div>
-                        <div class="run-value">${run.report_url ? `<a href="${esc(run.report_url)}" target="_blank" onclick="event.stopPropagation()">查看报告</a>` : '<span class="muted">-</span>'}</div>
+                        <div class="run-value">${run.report_timestamp ? `<button type="button" onclick="openRunReport(event, '${esc(run.id)}')">查看报告</button>` : '<span class="muted">-</span>'}</div>
                     </div>
                     ${(FAILURE_STATUSES.has(run.status) && run.error) ? `
                     <div style="grid-column: 1 / -1">
@@ -387,8 +511,11 @@ async function loadRuns() {
             </div>
             <div class="run-actions">
                 <button type="button" onclick="event.stopPropagation(); loadTrace('${esc(run.id)}')">链路</button>
-                <button type="button" onclick="event.stopPropagation(); retryRun('${esc(run.id)}')">重试</button>
-                <button type="button" class="danger" onclick="event.stopPropagation(); cancelRun('${esc(run.id)}')">取消</button>
+                ${TERMINAL_STATUSES.has(run.status)
+                    ? `<button type="button" onclick="event.stopPropagation(); retryRun('${esc(run.id)}')">重试</button>`
+                    : run.status === 'flashing'
+                    ? '<button type="button" class="danger" disabled title="刷机过程中断电或终止可能损坏设备">刷机中不可取消</button>'
+                    : `<button type="button" class="danger" onclick="event.stopPropagation(); cancelRun('${esc(run.id)}')">取消</button>`}
             </div>
         </article>
     `).join('');
@@ -399,6 +526,17 @@ async function loadRuns() {
 async function loadEvents(runId) {
     selectedRunId = runId;
     const run = atsRuns.find(r => r.id === runId);
+    window.GmsEmbeddedWorkspace?.update({
+        automation_run_id: runId,
+        worker_id: run ? (run.worker_id || selectedWorkerId()) : selectedWorkerId(),
+        cluster_job_id: run?.cluster_job_id || '',
+        attempt_id: run?.attempt_id || '',
+        report_id: run?.report_id || '',
+        report_timestamp: run?.report_timestamp || '',
+        gerrit_change_id: run?.gerrit_change_id || '',
+        gerrit_patchset: run?.gerrit_patchset || '',
+        origin_page: 'automation'
+    });
     qs('events-title').textContent = run ? `事件 / ${run.profile_id || run.id}` : '事件';
     qs('automation-runs').querySelectorAll('.run-card').forEach(el => el.classList.remove('active'));
     const card = qs('automation-runs').querySelector(`.run-card[onclick="loadEvents('${runId}')"]`);
@@ -560,6 +698,9 @@ async function createRun() {
             .filter(Boolean);
         const devices = [...new Set([...typedDevices, ...checkedDevices])];
         const testPlan = collectTestPlan();
+        if (atsWorkspaceContext.redmine_issue_id) {
+            testPlan.redmine_issue_id = atsWorkspaceContext.redmine_issue_id;
+        }
         const buildServerPassword = testPlan.build ? await getBuildPassword(testPlan.build.server_id) : '';
         const payload = {
             profile_id: qs('automation-profile').value,
@@ -569,13 +710,26 @@ async function createRun() {
             devices,
             test_plan: testPlan,
             build_server_password: buildServerPassword,
+            gerrit_change_id: atsWorkspaceContext.gerrit_change_id || '',
+            gerrit_patchset: atsWorkspaceContext.gerrit_patchset || '',
         };
+        const preflight = await api('/api/automation/runs/preflight', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
         const run = await api('/api/automation/runs', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload),
         });
-        toast(`已创建 ${run.id}`);
+        toast(`已创建 ${run.id} / ${preflight.worker_id} / ${preflight.test_type}`);
+        syncAutomationWorkspaceSelection({
+            automation_run_id: run.id,
+            worker_id: preflight.worker_id,
+            suite_path: preflight.test_suite,
+            device_ids: preflight.devices || devices,
+        });
         await loadRuns();
         await loadEvents(run.id);
     } catch (err) {
@@ -586,7 +740,9 @@ async function createRun() {
 async function pollGerrit() {
     try {
         const data = await api('/api/automation/gerrit/poll', {method: 'POST'});
-        toast(`Gerrit poll 创建 ${data.created_count || 0} 条，已存在 ${data.existing_count || 0} 条`);
+        const rejected = data.rejected_count || 0;
+        const suffix = rejected ? `，预检拒绝 ${rejected} 条：${data.rejected?.[0]?.error || '资源未就绪'}` : '';
+        toast(`Gerrit poll 创建 ${data.created_count || 0} 条，已存在 ${data.existing_count || 0} 条${suffix}`);
         await loadRuns();
     } catch (err) { toast(err.message); }
 }
@@ -684,15 +840,30 @@ async function loadTrace(runId) {
             data.build_job_id ? `<div class="trace-key">任务</div><div class="trace-val"><a href="#" onclick="event.preventDefault(); jumpToBuildLog('${esc(data.build_job_id)}')">${esc(data.build_job_id)}</a></div>` : '',
         ].join('') : '<div class="muted">无关联构建任务。</div>';
 
-        qs('trace-artifact').textContent = data.artifact_path || '（无固件产物）';
+        qs('trace-artifact').innerHTML = [
+            traceField('产物路径', data.artifact_path),
+            traceField('产物 ID', data.build_artifact_id),
+            traceField('Worker', data.worker_id),
+            traceField('设备预约', data.device_reservation_id),
+            traceField('烧写暂存', data.flash_stage_id),
+            traceField('烧写命令', data.flash_command_id),
+        ].join('') || '<div class="muted">（无固件产物）</div>';
+
+        qs('trace-test').innerHTML = [
+            traceField('Cluster Job', data.cluster_job_id),
+            traceField('Attempt', data.attempt_id),
+            traceField('任务状态', data.cluster_job?.status),
+            traceField('Worker', data.cluster_job?.assigned_worker_id),
+        ].join('') || '<div class="muted">尚未创建集群测试任务。</div>';
 
         const summary = data.result_summary || {};
         const reportRows = [
             traceField('报告时间', compactTime(data.report_timestamp)),
+            traceField('报告 ID', data.report_id),
             ...Object.entries(summary).slice(0, 8).map(([k, v]) => traceField(k, typeof v === 'object' ? JSON.stringify(v) : v)),
         ].join('');
         qs('trace-report').innerHTML = reportRows
-            + (data.report_url ? `<div class="trace-link-row"><a href="${esc(data.report_url)}" target="_blank">查看完整报告</a></div>` : '')
+            + (data.report_timestamp ? `<div class="trace-link-row"><button type="button" onclick="closeTrace(); openRunReport(event, '${esc(runId)}')">查看完整报告</button></div>` : '')
             || '<div class="muted">尚未生成报告。</div>';
 
         openTrace();
@@ -773,6 +944,7 @@ async function loadAll(silent = false) {
         await loadTestSuitesForAutomation();
         await Promise.all([loadDevices(false), loadProfiles()]);
         await Promise.all([loadRuns(), loadBuildJobs(), loadWorkerStatus()]);
+        await applyAutomationWorkspaceContext(atsWorkspaceContext);
         if (!silent) toast('已刷新');
     } catch (err) { toast(err.message); }
 }
@@ -799,4 +971,7 @@ setInterval(async () => {
     } catch (_) { /* 后台刷新静默失败 */ }
 }, 8000);
 
-document.addEventListener('DOMContentLoaded', () => loadAll(true));
+document.addEventListener('DOMContentLoaded', () => {
+    document.body.dataset.automationReady = 'true';
+    loadAll(true);
+});

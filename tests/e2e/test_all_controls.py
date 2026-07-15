@@ -80,9 +80,11 @@ ALL_PAGES = [
     'security-audit',
     'gms-assistant',
     'automation',
+    'cluster',
     'redmine-agent',
     'gerrit-dashboard',
     'agent',
+    'notes',
 ]
 
 
@@ -240,11 +242,14 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
             inventories = [self.inventory_document(page, 'shell')]
 
             for page_name in ALL_PAGES:
-                page.locator(f'.sidebar-item[data-page="{page_name}"]').click()
+                # Calling the application's navigation entrypoint avoids a flaky
+                # actionability wait when the collapsible sidebar is animating.
+                page.evaluate("name => window.switchPage(name)", page_name)
                 expect(page.locator(f'#page-{page_name}')).to_have_class(re.compile(r'active'))
                 inventories.append(self.inventory_document(page, page_name))
 
             for frame_selector, page_name in [
+                ('#cluster-frame', 'cluster-frame'),
                 ('#redmine-agent-frame', 'redmine-agent-frame'),
                 ('#gerrit-dashboard-frame', 'gerrit-dashboard-frame'),
             ]:
@@ -301,6 +306,7 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                     self.assert_clean_browser(page, captured)
 
             for frame_selector, page_name in [
+                ('#cluster-frame', 'cluster-frame'),
                 ('#redmine-agent-frame', 'redmine-agent-frame'),
                 ('#gerrit-dashboard-frame', 'gerrit-dashboard-frame'),
             ]:

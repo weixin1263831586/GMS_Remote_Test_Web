@@ -18,18 +18,7 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
 fi
 cd "$PROJECT_DIR"
 
-CERT_DIR="${PROJECT_DIR}/.certs"
-CERT_KEY="${CERT_DIR}/gms-local.key"
-CERT_CRT="${CERT_DIR}/gms-local.crt"
-PORT="${GMS_PORT:-5001}"
-SERVER_HOSTNAME="${GMS_SERVER_HOSTNAME:-172.16.14.233}"
-
 ENV_FILE="${PROJECT_DIR}/.env.production"
-SYSTEMD_SERVICE="gms-web-app.service"
-WORKER_SERVICE="gms-worker-agent"
-SYSTEMD_UNIT_FILE="/etc/systemd/system/${SYSTEMD_SERVICE}"
-WORKER_UNIT_FILE="${HOME}/.config/systemd/user/${WORKER_SERVICE}.service"
-
 # 加载生产环境变量（含 worker token 等配置），保证手动启动与 systemd 行为一致
 if [[ -f "${ENV_FILE}" ]]; then
     set -a
@@ -38,6 +27,21 @@ if [[ -f "${ENV_FILE}" ]]; then
     set +a
 fi
 
+CERT_DIR="${PROJECT_DIR}/.certs"
+CERT_KEY="${CERT_DIR}/gms-local.key"
+CERT_CRT="${CERT_DIR}/gms-local.crt"
+PORT="${GMS_PORT:-5001}"
+CONFIGURED_SERVER_HOSTNAME="$(
+    "${PYTHON_BIN}" -c \
+        'import json, sys; print(str(json.load(open(sys.argv[1], encoding="utf-8")).get("ubuntu_host") or ""))' \
+        "${PROJECT_DIR}/configs/config.json" 2>/dev/null || true
+)"
+SERVER_HOSTNAME="${GMS_SERVER_HOSTNAME:-${CONFIGURED_SERVER_HOSTNAME:-127.0.0.1}}"
+
+SYSTEMD_SERVICE="gms-web-app.service"
+WORKER_SERVICE="gms-worker-agent"
+SYSTEMD_UNIT_FILE="/etc/systemd/system/${SYSTEMD_SERVICE}"
+WORKER_UNIT_FILE="${HOME}/.config/systemd/user/${WORKER_SERVICE}.service"
 
 ensure_https_cert() {
     mkdir -p "${CERT_DIR}"
@@ -160,16 +164,17 @@ if [[ "${USE_SYSTEMD}" == "true" ]]; then
 else
     echo -e "${YELLOW}  systemd 服务未安装，使用 nohup 方式启动...${NC}"
 
-    # 手动启动时必须加载环境变量（否则 worker token 缺失导致 503）
+    # 无远程 Worker 时 token 可以为空；首次部署 Worker 后会自动写入环境文件。
     if [[ -z "${GMS_CLUSTER_WORKER_TOKENS:-}" ]]; then
-        echo -e "${RED}  ✗ GMS_CLUSTER_WORKER_TOKENS 未设置！${NC}"
-        echo -e "${RED}    请确保 ${ENV_FILE} 存在且包含 worker token 配置。${NC}"
-        exit 1
+        echo -e "${YELLOW}  ⚠ 尚未配置远程 Worker token，远程 Worker 接口暂不可用${NC}"
     fi
 
     echo -e "  启动 FastAPI (${PORT})..."
     nohup setsid env \
-        GMS_CLUSTER_WORKER_TOKENS="${GMS_CLUSTER_WORKER_TOKENS}" \
+        GMS_ENV="${GMS_ENV:-production}" \
+        GMS_DATA_ROOT="${GMS_DATA_ROOT:-${PROJECT_DIR}/data}" \
+        PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-${PROJECT_DIR}/data/pycache}" \
+        GMS_CLUSTER_WORKER_TOKENS="${GMS_CLUSTER_WORKER_TOKENS:-}" \
         "${PYTHON_BIN}" -m uvicorn app:app \
         --host 0.0.0.0 --port "${PORT}" --log-level info --access-log \
         --ssl-keyfile "${CERT_KEY}" --ssl-certfile "${CERT_CRT}" \

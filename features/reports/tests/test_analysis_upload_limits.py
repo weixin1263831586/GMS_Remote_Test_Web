@@ -1,7 +1,7 @@
 import asyncio
 import io
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from starlette.datastructures import UploadFile
 
@@ -17,6 +17,7 @@ class ReportUploadLimitTests(unittest.TestCase):
         with patch.object(report_uploads, 'MAX_REPORT_UPLOAD_BYTES', 3):
             response = asyncio.run(
                 analysis_api.analyze_reports(
+                    request=MagicMock(),
                     mode=AnalysisMode.UPLOAD,
                     file=upload,
                 )
@@ -33,6 +34,7 @@ class ReportUploadLimitTests(unittest.TestCase):
         with patch.object(report_uploads, 'MAX_REPORT_UPLOAD_BYTES', 3):
             response = asyncio.run(
                 analysis_api.analyze_reports(
+                    request=MagicMock(),
                     mode=AnalysisMode.UPLOAD,
                     file=None,
                     files=uploads,

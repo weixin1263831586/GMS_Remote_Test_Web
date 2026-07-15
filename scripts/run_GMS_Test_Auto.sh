@@ -8,7 +8,7 @@ export SCRIPT_LOG_FILE="/tmp/gms_test_$(date +%Y%m%d_%H%M%S).log"
 # 使用 unbuffered tee 或者直接输出
 LOG_FILE="$SCRIPT_LOG_FILE"
 
-export PATH="$HOME/Software/sdk_tools_new/sdk_tools:$PATH"
+export PATH="$HOME/Software/platform-tools:$PATH"
 
 # 运行状态
 REMOTE_HOST=""

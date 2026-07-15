@@ -101,7 +101,9 @@ class SSHManager:
         logger.error(f"[SSH] Failed to load SSH key from {key_path}: {key_error}")
         return None
 
-    def create_connection(self, config: dict) -> paramiko.SSHClient | None:
+    def create_connection(
+        self, config: dict, *, raise_on_error: bool = False
+    ) -> paramiko.SSHClient | None:
         """
         创建SSH连接
 
@@ -152,6 +154,8 @@ class SSHManager:
 
         except Exception as e:
             logger.error(f"[SSH] Connection error: {e}")
+            if raise_on_error:
+                raise
             return None
 
     def get_connection(self, config: dict) -> paramiko.SSHClient | None:

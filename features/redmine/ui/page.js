@@ -11,7 +11,7 @@ let currentPage = 1;
 const pageSize = 15;
 let currentRunId = '';
 let statsUserInitialized = false;
-let statsConfig = {stale_days: 20, window_days: 60, cache_ttl: 600, freshness_days: 180, redmine: {base_url: 'https://redmine.rock-chips.com'}, dashboard: {profiles: [], defaults: {list_limit: 50, issue_limit: 500}}};
+let statsConfig = {stale_days: 20, window_days: 60, cache_ttl: 600, freshness_days: 180, redmine: {base_url: ''}, dashboard: {profiles: [], defaults: {list_limit: 50, issue_limit: 500}}};
 let departmentProfileId = '';
 let projectProfileId = '';
 // 趋势明细点击上下文：当前看板作用的指派人姓名列表（个人=[name]，部门=全员）
@@ -28,6 +28,8 @@ function updateRedmineTrendNames(selectedName, meta) {
 let pendingDepartmentTargetSelect = '';
 let pendingTrendChartKey = '';
 let projectOpenOnly = false;
+let redmineWorkspaceContext = {};
+let pendingWorkspaceIssueId = '';
 
 function getSelectedStatsAssignee() {
   var input = document.getElementById('syncAssigneeInput');
@@ -79,7 +81,7 @@ function trunc(s, n) {
   return s.length > n ? s.slice(0, n) + '...' : s;
 }
 function redmineBaseUrl() {
-  return String(((statsConfig.redmine || {}).base_url) || 'https://redmine.rock-chips.com').replace(new RegExp('/+$'), '');
+  return String(((statsConfig.redmine || {}).base_url) || '').replace(new RegExp('/+$'), '');
 }
 function redmineIssueUrl(issueId) {
   return redmineBaseUrl() + '/issues/' + encodeURIComponent(String(issueId || '').trim());
@@ -90,7 +92,37 @@ function renderRedmineIssueLink(issueId, options) {
   const opts = options || {};
   const label = opts.label || ('#' + id);
   const stop = opts.stopPropagation === false ? '' : ' onclick="event.stopPropagation()"';
-  return '<a class="redmine-issue-link" href="' + redmineIssueUrl(id) + '" target="_blank" rel="noopener"' + stop + '>' + esc(label) + '</a>';
+  return '<a class="redmine-issue-link" data-redmine-issue-id="' + esc(id) + '" href="' + redmineIssueUrl(id) + '" target="_blank" rel="noopener"' + stop + '>' + esc(label) + '</a>';
+}
+
+function selectRedmineWorkspaceIssue(issueId) {
+  const id = String(issueId || '').replace(/^#/, '').trim();
+  if (!id) return;
+  redmineWorkspaceContext = Object.assign({}, redmineWorkspaceContext, {redmine_issue_id: id});
+  window.GmsEmbeddedWorkspace?.update({redmine_issue_id: id, origin_page: 'redmine'});
+}
+
+function navigateFromRedmineIssue(page, issueId) {
+  const id = String(issueId || '').replace(/^#/, '').trim();
+  selectRedmineWorkspaceIssue(id);
+  window.GmsEmbeddedWorkspace?.navigate(page, {redmine_issue_id: id, origin_page: 'redmine'});
+}
+
+async function applyRedmineWorkspaceContext(next, navigate) {
+  redmineWorkspaceContext = Object.assign({}, redmineWorkspaceContext, next || {});
+  const issueId = String(redmineWorkspaceContext.redmine_issue_id || '').replace(/^#/, '').trim();
+  if (!navigate || !issueId || pendingWorkspaceIssueId === issueId) return;
+  pendingWorkspaceIssueId = issueId;
+  const input = document.getElementById('searchInput');
+  if (input) input.value = issueId;
+  switchTab('issues');
+  try {
+    await smartSearch();
+    const card = document.querySelector(`.issue-card[data-issue-id="${CSS.escape(issueId)}"]`);
+    if (card) card.scrollIntoView({behavior: 'smooth', block: 'start'});
+  } finally {
+    pendingWorkspaceIssueId = '';
+  }
 }
 function renderRedmineIssueLinks(issueIds, options) {
   const ids = (issueIds || []).map(function(id) { return String(id || '').trim(); }).filter(Boolean);
@@ -990,6 +1022,10 @@ function renderIssuesList(issues) {
     return;
   }
   box.innerHTML = issues.map(renderIssueCard).join('');
+  if (pendingWorkspaceIssueId) {
+    const card = box.querySelector(`.issue-card[data-issue-id="${CSS.escape(pendingWorkspaceIssueId)}"]`);
+    if (card) setTimeout(function() { card.scrollIntoView({behavior: 'smooth', block: 'start'}); }, 0);
+  }
 }
 
 function renderIssueCard(item) {
@@ -1065,7 +1101,7 @@ function renderIssueCard(item) {
   else if (['新建','New'].includes(statusName)) statusIcon = '🆕 ';
   var isClosed = ['已关闭','Closed','已解决','Resolved'].includes(statusName);
 
-  return `<div class="issue-card">
+  return `<div class="issue-card" data-issue-id="${esc(item.issue_id)}">
     <h3>
       ${renderRedmineIssueLink(item.issue_id, {stopPropagation: false})}
       <span>${title}</span>
@@ -1130,6 +1166,8 @@ function renderIssueCard(item) {
       <button class="ka-btn" onclick="refreshIssueMetadata(${item.issue_id})" title="只刷新Redmine历史回复和附件元数据，不下载附件">🔄 刷新附件元数据</button>
       <button class="ka-btn" onclick="toggleIssueWorkbench(${item.issue_id})" title="展开相似工单、历史回复和附件解析摘要">🧩 展开依据</button>
       <button class="ka-btn" onclick="saveIssueToWiki(${item.issue_id})" title="把该工单存入 Wiki「Redmine问题沉淀」分类，并建立外链">📥 存为Wiki</button>
+      <button class="ka-btn" onclick="navigateFromRedmineIssue('reports', ${item.issue_id})" title="保留工单上下文并打开测试报告">📊 关联报告</button>
+      <button class="ka-btn" onclick="navigateFromRedmineIssue('automation', ${item.issue_id})" title="保留工单上下文并打开 GMS ATS">⚙️ 关联 ATS</button>
     </div>
     <div id="issue-workbench-${item.issue_id}" class="issue-workbench" style="display:none"></div>
   </div>`;
@@ -1192,6 +1230,7 @@ async function saveIssueToWiki(issueId) {
     title: `Redmine #${issueId} ${item.subject || ''}`.trim(),
     source: 'redmine',
     related_module: module || '',
+    tags: ['Redmine问题沉淀'].concat(module ? [module] : []),
     links: { redmine_issue_ids: [Number(issueId)] }
   };
   try {
@@ -2425,6 +2464,16 @@ function openKnowledgeModal(title, body) {
 function setKnowledgeBody(html) { document.getElementById('knowledgeBody').innerHTML = html; }
 
 // ---- Init ----
+document.addEventListener('click', function(event) {
+  const link = event.target.closest('[data-redmine-issue-id]');
+  if (link) selectRedmineWorkspaceIssue(link.dataset.redmineIssueId);
+});
+window.addEventListener('gms:embedded-workspace', function(event) {
+  applyRedmineWorkspaceContext(
+    event.detail && event.detail.context || {},
+    event.detail && event.detail.type === 'workspace-context-navigate'
+  ).catch(function(error) { notifyUser('打开工单失败', error.message, 'error'); });
+});
 restoreRedmineProfileState();
 var initialTab = new URLSearchParams(window.location.search).get('tab') || (window.sessionStorage.getItem('redmineLastTab') || 'stats');
 if (!document.getElementById('tab-' + initialTab)) initialTab = 'stats';

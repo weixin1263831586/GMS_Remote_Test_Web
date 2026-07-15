@@ -164,7 +164,7 @@
         <div class="field"><label>SSH Host</label><input id="settingSshHost" placeholder="从 config.json 读取"></div>
         <div class="field"><label>SSH User</label><input id="settingSshUser" placeholder="SSH 用户名"></div>
         <div class="field"><label>SSH Port</label><input id="settingSshPort" type="number" placeholder="29418"></div>
-        <div class="field full"><label>SSH 私钥路径</label><input id="settingSshIdentity" placeholder="/home/hcq/.ssh/id_ed25519_gerrit_dashboard"></div>
+        <div class="field full"><label>SSH 私钥路径</label><input id="settingSshIdentity" placeholder="~/.ssh/id_ed25519_gerrit_dashboard"></div>
         <div class="field full"><label>默认 Owner</label><input id="settingDefaultOwner" placeholder="从 config.json 读取"></div>
         <div class="field"><label>单页查询数量（≤2000）</label><input id="settingQueryPageSize" type="number" min="1" max="2000" placeholder="500"></div>
         <div class="field"><label>最大历史提交数（0=不限）</label><input id="settingMaxHistory" type="number" min="0" placeholder="0 表示拉取全部历史"></div>
@@ -228,6 +228,7 @@
     <div class="modal-body" id="trendDetailBody"><div class="muted">加载中…</div></div>
   </div>
 </div>
+<script src="/static/js/embedded-workspace.js?v=20260713-01"></script>
 <script>
 let config = {dashboard_profiles: [], personal_profiles: [], department_profiles: [], default_owner: ''};
 let currentTab = 'personal';
@@ -241,6 +242,8 @@ let trendScope = '';
 let trendProfileId = '';
 let pendingDepartmentTargetSelect = 'departmentProfile';
 let pendingTrendChartKey = '';
+let gerritWorkspaceContext = {};
+let pendingWorkspaceChangeId = '';
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 async function api(url, options) {
   const r = await fetch(url, {credentials: 'same-origin', cache: 'no-store', ...(options || {})});
@@ -983,24 +986,90 @@ function changeUrl(item) {
   const base = String(config.base_url || '').replace(new RegExp('/+$'), '');
   return base && id ? base + '/c/' + encodeURIComponent(id) : '';
 }
+function changePatchset(item) {
+  return String(item.patchset || item.patch_set || item.currentPatchSet?.number || item.current_patch_set || '');
+}
+function selectGerritWorkspaceChange(changeId, patchset) {
+  const id = String(changeId || '').replace(/^#/, '').trim();
+  if (!id || id === '-') return;
+  const ps = String(patchset || '').trim();
+  gerritWorkspaceContext = Object.assign({}, gerritWorkspaceContext, {
+    gerrit_change_id: id,
+    gerrit_patchset: ps
+  });
+  window.GmsEmbeddedWorkspace?.update({
+    gerrit_change_id: id,
+    gerrit_patchset: ps,
+    origin_page: 'gerrit'
+  });
+}
+function navigateFromGerritChange(page, changeId, patchset) {
+  const id = String(changeId || '').replace(/^#/, '').trim();
+  const ps = String(patchset || '').trim();
+  selectGerritWorkspaceChange(id, ps);
+  window.GmsEmbeddedWorkspace?.navigate(page, {
+    gerrit_change_id: id,
+    gerrit_patchset: ps,
+    origin_page: 'gerrit'
+  });
+}
+async function applyGerritWorkspaceContext(next, navigate) {
+  gerritWorkspaceContext = Object.assign({}, gerritWorkspaceContext, next || {});
+  const id = String(gerritWorkspaceContext.gerrit_change_id || '').replace(/^#/, '').trim();
+  if (!navigate || !id || pendingWorkspaceChangeId === id) return;
+  pendingWorkspaceChangeId = id;
+  try {
+    await gerritInitPromise;
+    const query = document.getElementById('query');
+    if (query) query.value = 'change:' + id;
+    switchTab('query');
+    await loadChanges();
+    const row = document.querySelector('[data-gerrit-change-id="' + CSS.escape(id) + '"]');
+    if (row) row.scrollIntoView({behavior:'smooth', block:'center'});
+  } finally {
+    pendingWorkspaceChangeId = '';
+  }
+}
 function renderStatsRow(item) {
   const url = changeUrl(item);
   const id = item.number || item._number || item.id || '-';
+  const patchset = changePatchset(item);
   const subject = item.subject || '-';
-  return '<tr><td><div class="change-title">' + (url ? '<a href="' + esc(url) + '" target="_blank">#' + esc(id) + '</a>' : '#' + esc(id)) + '<span title="' + esc(subject) + '">' + esc(subject) + '</span></div></td><td>' + esc(item.project || '-') + '</td><td>' + esc(item.branch || '-') + '</td><td>' + esc(item.status || '-') + '</td><td>' + esc(item.updated || item.lastUpdated || item.updated_at || '-') + '</td></tr>';
+  return '<tr data-gerrit-change-id="' + esc(id) + '" data-gerrit-patchset="' + esc(patchset) + '"><td><div class="change-title">' + (url ? '<a data-gerrit-select href="' + esc(url) + '" target="_blank">#' + esc(id) + '</a>' : '#' + esc(id)) + '<span title="' + esc(subject) + '">' + esc(subject) + '</span></div></td><td>' + esc(item.project || '-') + '</td><td>' + esc(item.branch || '-') + '</td><td>' + esc(item.status || '-') + '</td><td>' + esc(item.updated || item.lastUpdated || item.updated_at || '-') + '</td></tr>';
 }
 function renderRow(item) {
   const url = changeUrl(item);
   const id = item._number || item.number || item.id || item.changeId || '-';
+  const patchset = changePatchset(item);
   const subject = item.subject || '-';
   // 缓存原始 change，供「存为Wiki」按钮按 change id 取回
   if (id !== '-') {
     window.__changeCache = window.__changeCache || {};
     window.__changeCache[String(id)] = item;
   }
-  return '<tr><td><div class="change-title">' + (url ? '<a href="' + esc(url) + '" target="_blank">#' + esc(id) + '</a>' : '#' + esc(id)) + '<span title="' + esc(subject) + '">' + esc(subject) + '</span>' + '<button class="gerrit-wiki-btn" title="把该补丁存入 Wiki「Gerrit补丁说明」分类，并建立外链" onclick="event.preventDefault();event.stopPropagation();saveChangeToWiki(\'' + esc(String(id)) + '\')">📥Wiki</button>' + '</div></td><td>' + esc(item.project || '-') + '</td><td>' + esc(item.branch || '-') + '</td><td>' + esc(item.status || '-') + '</td><td>' + esc((item.owner || {}).name || (item.owner || {}).email || '-') + '</td><td>' + esc(item.updated || item.lastUpdated || item.createdOn || item.created || '-') + '</td></tr>';
+  return '<tr data-gerrit-change-id="' + esc(id) + '" data-gerrit-patchset="' + esc(patchset) + '"><td><div class="change-title">' + (url ? '<a data-gerrit-select href="' + esc(url) + '" target="_blank">#' + esc(id) + '</a>' : '#' + esc(id)) + '<span title="' + esc(subject) + '">' + esc(subject) + '</span>' + '<button class="gerrit-wiki-btn" title="把该补丁存入 Wiki「Gerrit补丁说明」分类，并建立外链" onclick="event.preventDefault();event.stopPropagation();saveChangeToWiki(\'' + esc(String(id)) + '\')">📥Wiki</button><button class="gerrit-wiki-btn" data-gerrit-nav-page="automation" title="带此 Change 打开 GMS ATS">⚙️ATS</button><button class="gerrit-wiki-btn" data-gerrit-nav-page="reports" title="带此 Change 打开报告页">📊报告</button>' + '</div></td><td>' + esc(item.project || '-') + '</td><td>' + esc(item.branch || '-') + '</td><td>' + esc(item.status || '-') + '</td><td>' + esc((item.owner || {}).name || (item.owner || {}).email || '-') + '</td><td>' + esc(item.updated || item.lastUpdated || item.createdOn || item.created || '-') + '</td></tr>';
 }
-init();
+document.addEventListener('click', function(event) {
+  const row = event.target.closest('[data-gerrit-change-id]');
+  if (!row) return;
+  const pageButton = event.target.closest('[data-gerrit-nav-page]');
+  if (pageButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    navigateFromGerritChange(pageButton.dataset.gerritNavPage, row.dataset.gerritChangeId, row.dataset.gerritPatchset);
+    return;
+  }
+  if (event.target.closest('[data-gerrit-select]')) {
+    selectGerritWorkspaceChange(row.dataset.gerritChangeId, row.dataset.gerritPatchset);
+  }
+});
+window.addEventListener('gms:embedded-workspace', function(event) {
+  applyGerritWorkspaceContext(
+    event.detail && event.detail.context || {},
+    event.detail && event.detail.type === 'workspace-context-navigate'
+  ).catch(function(error) { notifyUser('打开 Gerrit Change 失败', error.message, 'error'); });
+});
+const gerritInitPromise = init();
 async function saveChangeToWiki(changeId) {
   const item = (window.__changeCache || {})[String(changeId)];
   if (!item) {
@@ -1035,6 +1104,7 @@ async function saveChangeToWiki(changeId) {
     title: `Gerrit ${id} ${subject || ''}`.trim(),
     source: 'gerrit',
     related_module: project || '',
+    tags: ['Gerrit补丁说明'].concat(project ? [project] : []),
     links: { gerrit_change_ids: [Number(id)] }
   };
   try {

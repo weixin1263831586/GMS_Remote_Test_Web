@@ -89,6 +89,13 @@ class FrontendIntegrityTests(unittest.TestCase):
                     "features/automation/ui/page.js",
                 ],
             ),
+            (
+                "cluster",
+                [
+                    "features/cluster/ui/page.html",
+                    "features/cluster/ui/page.js",
+                ],
+            ),
         ]:
             with self.subTest(page=label):
                 text = "\n".join(read_text(path) for path in paths)
@@ -96,6 +103,46 @@ class FrontendIntegrityTests(unittest.TestCase):
                 missing = sorted({f"{name}: {body}" for name, body in inline_handler_calls(text) if name not in funcs})
 
                 self.assertEqual(missing, [])
+
+    def test_test_host_uses_one_cluster_worker_selector(self):
+        main_text = read_text("web/shell/shell.html")
+
+        self.assertEqual(len(re.findall(r'id=["\']cluster-worker["\']', main_text)), 1)
+        self.assertNotRegex(main_text, r'id=["\']ubuntu-host["\']')
+        self.assertRegex(
+            main_text,
+            r'<label>测试主机:</label>\s*<select id="cluster-worker"',
+        )
+
+    def test_desktop_async_mount_cannot_replace_another_worker(self):
+        main_text = read_text("web/shell/shell.html")
+
+        self.assertIn(
+            "generation !== hostWorkspace.renderGeneration",
+            main_text,
+        )
+        self.assertIn(
+            "currentPane?.hostId !== expectedHostId",
+            main_text,
+        )
+        self.assertIn(
+            "mountHostWorkspaceDesktop(index, host, body, generation, pane.hostId)",
+            main_text,
+        )
+
+    def test_terminal_pane_refresh_does_not_render_all_panes(self):
+        main_text = read_text("web/shell/shell.html")
+        refresh = re.search(
+            r"function refreshTerminalWorkspacePane\(i\)\{(?P<body>.*?)\n        \}",
+            main_text,
+            re.DOTALL,
+        )
+
+        self.assertIsNotNone(refresh)
+        body = refresh.group("body")
+        self.assertIn("disposeTerminalWorkspaceInstance(i)", body)
+        self.assertIn("mountTerminalWorkspacePane(i,pane", body)
+        self.assertNotIn("renderTerminalWorkspace()", body)
 
     def test_modal_pages_support_escape_close(self):
         for label, paths in [

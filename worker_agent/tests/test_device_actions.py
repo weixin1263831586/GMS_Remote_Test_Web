@@ -1,12 +1,32 @@
 from __future__ import annotations
 
-import subprocess
 import io
+import subprocess
 import zipfile
 from unittest.mock import patch
 
 from worker_agent.config import WorkerConfig
+from worker_agent.android_inspection import _aapt2_path
+from worker_agent.process_inventory import _is_active_invocation
 from worker_agent.inventory import execute_device_action, execute_suite_action, flash_firmware, prepare_suite_export
+
+
+def test_aapt2_path_accepts_configured_worker_binary(tmp_path):
+    binary = tmp_path / "aapt2"
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    binary.chmod(0o755)
+    with patch.dict("os.environ", {"GMS_WORKER_AAPT2_PATH": str(binary)}):
+        assert _aapt2_path() == str(binary)
+
+
+def test_idle_ats_console_is_not_reported_as_running_test():
+    assert not _is_active_invocation([
+        "/bin/bash", "./cts-tradefed", "com.google.devtools.mobileharness.infra.ats.console.AtsConsole"
+    ])
+    assert _is_active_invocation([
+        "java", "com.android.compatibility.common.tradefed.command.CompatibilityConsole",
+        "run", "commandAndExit", "cts", "-s", "SERIAL",
+    ])
 
 
 def test_device_action_strips_worker_namespace_and_uses_argv():

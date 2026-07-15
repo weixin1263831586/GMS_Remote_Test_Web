@@ -67,6 +67,11 @@
               }
             ],
             "title": "Session Id"
+          },
+          "workspace_context": {
+            "additionalProperties": true,
+            "title": "Workspace Context",
+            "type": "object"
           }
         },
         "title": "AgentChatRequest",
@@ -81,6 +86,70 @@
         ],
         "title": "AnalysisMode",
         "type": "string"
+      },
+      "ArtifactUploadComplete": {
+        "properties": {
+          "chunk_count": {
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Chunk Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chunk_count"
+        ],
+        "title": "ArtifactUploadComplete",
+        "type": "object"
+      },
+      "ArtifactUploadInit": {
+        "properties": {
+          "artifact_type": {
+            "default": "file",
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "chunk_count": {
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Chunk Count",
+            "type": "integer"
+          },
+          "chunk_size": {
+            "maximum": 67108864.0,
+            "minimum": 65536.0,
+            "title": "Chunk Size",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "filename",
+          "size_bytes",
+          "sha256",
+          "chunk_size",
+          "chunk_count"
+        ],
+        "title": "ArtifactUploadInit",
+        "type": "object"
       },
       "Body_analyze_reports_api_reports_analyze_post": {
         "properties": {
@@ -220,6 +289,11 @@
       },
       "Body_stage_worker_firmware_api_cluster_firmware_stage_post": {
         "properties": {
+          "automation_run_id": {
+            "default": "",
+            "title": "Automation Run Id",
+            "type": "string"
+          },
           "devices": {
             "title": "Devices",
             "type": "string"
@@ -227,6 +301,11 @@
           "firmware_file": {
             "format": "binary",
             "title": "Firmware File",
+            "type": "string"
+          },
+          "reservation_id": {
+            "default": "",
+            "title": "Reservation Id",
             "type": "string"
           },
           "worker_id": {
@@ -675,7 +754,18 @@
               "screenshot",
               "layout",
               "tap",
-              "scrcpy_start"
+              "scrcpy_start",
+              "packages_with_path",
+              "packages_all",
+              "features",
+              "props",
+              "config_explore",
+              "override_status",
+              "override_apply",
+              "override_revert",
+              "override_disable_verity",
+              "override_enable_verity",
+              "override_reboot"
             ],
             "title": "Action",
             "type": "string"
@@ -689,6 +779,34 @@
             "title": "Devices",
             "type": "array"
           },
+          "effective_limit": {
+            "default": 0,
+            "maximum": 5000.0,
+            "minimum": 0.0,
+            "title": "Effective Limit",
+            "type": "integer"
+          },
+          "entries": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 500,
+            "title": "Entries",
+            "type": "array"
+          },
+          "name_filter": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Name Filter",
+            "type": "string"
+          },
+          "package": {
+            "default": "android",
+            "maxLength": 255,
+            "title": "Package",
+            "type": "string"
+          },
           "password": {
             "default": "",
             "maxLength": 256,
@@ -700,6 +818,23 @@
             "maxLength": 256,
             "title": "Ssid",
             "type": "string"
+          },
+          "target_package": {
+            "default": "android",
+            "maxLength": 255,
+            "title": "Target Package",
+            "type": "string"
+          },
+          "type_filter": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Type Filter",
+            "type": "string"
+          },
+          "with_effective": {
+            "default": false,
+            "title": "With Effective",
+            "type": "boolean"
           },
           "worker_id": {
             "title": "Worker Id",
@@ -1220,6 +1355,17 @@
             "title": "Attempt Id",
             "type": "string"
           },
+          "command": {
+            "default": "",
+            "title": "Command",
+            "type": "string"
+          },
+          "cpu_percent": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cpu Percent",
+            "type": "number"
+          },
           "devices": {
             "items": {
               "type": "string"
@@ -1227,8 +1373,31 @@
             "title": "Devices",
             "type": "array"
           },
+          "elapsed_seconds": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "integer"
+          },
           "job_id": {
             "title": "Job Id",
+            "type": "string"
+          },
+          "last_output_age_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Output Age Seconds"
+          },
+          "log_path": {
+            "default": "",
+            "title": "Log Path",
             "type": "string"
           },
           "pid": {
@@ -1242,8 +1411,44 @@
             ],
             "title": "Pid"
           },
+          "process_count": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Process Count",
+            "type": "integer"
+          },
+          "rss_mb": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Rss Mb",
+            "type": "number"
+          },
+          "source": {
+            "default": "managed",
+            "enum": [
+              "managed",
+              "external"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "started_at": {
+            "default": "",
+            "title": "Started At",
+            "type": "string"
+          },
           "status": {
             "title": "Status",
+            "type": "string"
+          },
+          "suite_type": {
+            "default": "",
+            "title": "Suite Type",
+            "type": "string"
+          },
+          "warning": {
+            "default": "",
+            "title": "Warning",
             "type": "string"
           },
           "worker_job_id": {
@@ -1393,9 +1598,29 @@
       },
       "TestStartRequest": {
         "properties": {
+          "automation_run_id": {
+            "default": "",
+            "title": "Automation Run Id",
+            "type": "string"
+          },
+          "build_artifact_id": {
+            "default": "",
+            "title": "Build Artifact Id",
+            "type": "string"
+          },
+          "build_id": {
+            "default": "",
+            "title": "Build Id",
+            "type": "string"
+          },
           "client_id": {
             "default": "test_client",
             "title": "Client Id",
+            "type": "string"
+          },
+          "device_reservation_id": {
+            "default": "",
+            "title": "Device Reservation Id",
             "type": "string"
           },
           "devices": {
@@ -1405,9 +1630,24 @@
             "title": "Devices",
             "type": "array"
           },
+          "gerrit_change_id": {
+            "default": "",
+            "title": "Gerrit Change Id",
+            "type": "string"
+          },
+          "gerrit_patchset": {
+            "default": "",
+            "title": "Gerrit Patchset",
+            "type": "string"
+          },
           "local_server": {
             "default": "",
             "title": "Local Server",
+            "type": "string"
+          },
+          "redmine_issue_id": {
+            "default": "",
+            "title": "Redmine Issue Id",
             "type": "string"
           },
           "retry_dir": {
@@ -1886,9 +2126,24 @@
             "title": "Disk Free Gb",
             "type": "number"
           },
+          "load_1m": {
+            "default": 0,
+            "title": "Load 1M",
+            "type": "number"
+          },
+          "memory_available_gb": {
+            "default": 0,
+            "title": "Memory Available Gb",
+            "type": "number"
+          },
           "memory_percent": {
             "default": 0,
             "title": "Memory Percent",
+            "type": "number"
+          },
+          "memory_total_gb": {
+            "default": 0,
+            "title": "Memory Total Gb",
             "type": "number"
           },
           "running_jobs": {
@@ -2009,6 +2264,198 @@
           "tools_path"
         ],
         "title": "WorkerSuite",
+        "type": "object"
+      },
+      "WorkspaceContextPatch": {
+        "properties": {
+          "artifact_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Id"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Id"
+          },
+          "automation_run_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automation Run Id"
+          },
+          "cluster_job_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Job Id"
+          },
+          "device_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Ids"
+          },
+          "gerrit_change_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gerrit Change Id"
+          },
+          "gerrit_patchset": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gerrit Patchset"
+          },
+          "origin_page": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Page"
+          },
+          "redmine_issue_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redmine Issue Id"
+          },
+          "report_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Id"
+          },
+          "report_timestamp": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Timestamp"
+          },
+          "scope_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "single",
+                  "cluster"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Mode"
+          },
+          "suite_key": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suite Key"
+          },
+          "suite_path": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suite Path"
+          },
+          "worker_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Id"
+          }
+        },
+        "title": "WorkspaceContextPatch",
         "type": "object"
       }
     }
@@ -2867,6 +3314,18 @@
     },
     "/api/automation/gerrit/webhook": {
       "post": {
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-GMS-Automation-Token",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Gms-Automation-Token",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3152,6 +3611,43 @@
           }
         },
         "summary": "Create Automation Run"
+      }
+    },
+    "/api/automation/runs/preflight": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preflight Automation Run"
       }
     },
     "/api/automation/runs/{run_id}": {
@@ -4135,6 +4631,63 @@
         ]
       }
     },
+    "/api/cluster/devices/export": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Device Export",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/firmware/stage": {
       "post": {
         "requestBody": {
@@ -4418,6 +4971,327 @@
           }
         },
         "summary": "List Artifacts",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/jobs/{job_id}/artifacts/uploads": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-ID",
+            "required": true,
+            "schema": {
+              "title": "X-Gms-Worker-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactUploadInit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Init Artifact Upload",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/jobs/{job_id}/artifacts/uploads/{upload_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-ID",
+            "required": true,
+            "schema": {
+              "title": "X-Gms-Worker-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Artifact Upload",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/jobs/{job_id}/artifacts/uploads/{upload_id}/chunks/{index}": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "title": "Index",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-ID",
+            "required": true,
+            "schema": {
+              "title": "X-Gms-Worker-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Chunk-SHA256",
+            "required": true,
+            "schema": {
+              "title": "X-Chunk-Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Artifact Chunk",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/jobs/{job_id}/artifacts/uploads/{upload_id}/complete": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-ID",
+            "required": true,
+            "schema": {
+              "title": "X-Gms-Worker-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactUploadComplete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Artifact Upload",
         "tags": [
           "cluster"
         ]
@@ -5293,6 +6167,54 @@
         ]
       }
     },
+    "/api/cluster/suites/results": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suite_path",
+            "required": true,
+            "schema": {
+              "title": "Suite Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cluster Suite Results",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/suites/search": {
       "get": {
         "parameters": [
@@ -5397,6 +6319,45 @@
           }
         },
         "summary": "Get Transfer",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/transfers/{transfer_id}/apk-analysis": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "transfer_id",
+            "required": true,
+            "schema": {
+              "title": "Transfer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Transfer For Apk Analysis",
         "tags": [
           "cluster"
         ]
@@ -5583,6 +6544,85 @@
           }
         },
         "summary": "Download Transfer",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/transfers/{transfer_id}/report-analysis": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "transfer_id",
+            "required": true,
+            "schema": {
+              "title": "Transfer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Transferred Log Directory",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/worker-tests": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Worker Tests",
         "tags": [
           "cluster"
         ]
@@ -6004,6 +7044,46 @@
           }
         },
         "summary": "Heartbeat",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/{worker_id}/restart-vnc": {
+      "post": {
+        "description": "Restart x11vnc/websockify on a worker to recover from zombie VNC processes.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restart Worker Vnc",
         "tags": [
           "cluster"
         ]
@@ -9869,6 +10949,144 @@
         "summary": "Upload Attachment"
       }
     },
+    "/api/knowledge/docs/{doc_id}/attachments/{attachment_id}/download": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "title": "Attachment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Attachment"
+      }
+    },
+    "/api/knowledge/docs/{doc_id}/versions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Doc Versions"
+      }
+    },
+    "/api/knowledge/docs/{doc_id}/versions/{version_id}/restore": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Doc Version"
+      }
+    },
     "/api/knowledge/folders": {
       "post": {
         "responses": {
@@ -12701,6 +13919,46 @@
               "title": "Worker Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "cluster_job_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Cluster Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attempt_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "automation_run_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Automation Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "report_timestamp",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Report Timestamp",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -14978,6 +16236,67 @@
           }
         },
         "summary": "Set Client Username"
+      }
+    },
+    "/api/users/workspace-context": {
+      "delete": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reset Workspace Context"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Workspace Context"
+      },
+      "patch": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceContextPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Workspace Context"
       }
     },
     "/api/vnc/start": {

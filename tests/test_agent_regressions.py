@@ -1,9 +1,11 @@
+import asyncio
 import unittest
 from types import SimpleNamespace
+from unittest.mock import ANY, MagicMock, patch
 
 from fastapi.responses import PlainTextResponse
 
-from features.assistant.api import _parse_user_intent
+from features.assistant.api import _missing_required_params, _parse_user_intent
 from features.assistant.executor import ActionExecutor, _json_body
 from features.assistant.intent import resolve
 from features.assistant.tools import registry
@@ -11,6 +13,18 @@ from features.test_execution.api import get_status
 
 
 class AgentRegressionTests(unittest.TestCase):
+    @staticmethod
+    def _request():
+        return SimpleNamespace(
+            headers={},
+            cookies={},
+            client=SimpleNamespace(host="127.0.0.1"),
+            method="POST",
+            state=SimpleNamespace(),
+            url="http://test/agent",
+            query_params={},
+        )
+
     def test_router_call_kwargs_convert_fastapi_help_defaults(self):
         tool = registry.get("test_suites")
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
@@ -52,6 +66,60 @@ class AgentRegressionTests(unittest.TestCase):
 
         self.assertEqual(intent.tool_name, "navigate")
         self.assertEqual(intent.params["page"], "test")
+
+    def test_generic_agent_router_passes_json_body_to_wiki_question(self):
+        service = SimpleNamespace(
+            ask=MagicMock(
+                return_value={
+                    "answer": "使用 gts-tradefed",
+                    "contexts": [],
+                    "mode": "retrieval",
+                }
+            )
+        )
+        with patch("features.knowledge.api._service", service):
+            result = asyncio.run(
+                ActionExecutor().execute(
+                    {},
+                    self._request(),
+                    "knowledge_ask",
+                    {"question": "GTS 怎么跑"},
+                )
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.data["answer"], "使用 gts-tradefed")
+        service.ask.assert_called_once()
+
+    def test_generic_agent_router_materializes_fastapi_query_defaults(self):
+        store = SimpleNamespace(
+            search=MagicMock(return_value=[]),
+        )
+        service = SimpleNamespace(store=store)
+        with patch("features.knowledge.api._service", service):
+            result = asyncio.run(
+                ActionExecutor().execute(
+                    {},
+                    self._request(),
+                    "knowledge_search",
+                    {"q": "CTS"},
+                )
+            )
+
+        self.assertTrue(result.success)
+        store.search.assert_called_once_with(
+            ANY, "CTS", space_id="", tag="", limit=50
+        )
+
+    def test_required_agent_params_treat_false_as_a_supplied_value(self):
+        cluster_mode = registry.get("cluster_set_mode")
+        cancel_run = registry.get("automation_run_cancel")
+
+        self.assertEqual(_missing_required_params(cluster_mode, {"enabled": False}), [])
+        self.assertEqual(
+            [item["name"] for item in _missing_required_params(cancel_run, {})],
+            ["run_id"],
+        )
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,18 +13,23 @@ from features.automation.models import TERMINAL_STATUSES, utc_now_iso
 
 RUN_COLUMNS = [
     "id", "source_type", "source_key", "profile_id", "project", "branch",
-    "gerrit_change_id", "gerrit_patchset", "gerrit_subject", "owner",
+    "gerrit_change_id", "gerrit_patchset", "gerrit_subject", "owner", "created_by",
     "status", "current_stage", "jenkins_job", "jenkins_queue_url", "jenkins_build_number",
-    "jenkins_build_url", "artifact_url", "artifact_path", "devices_json",
-    "test_plan_json", "report_timestamp", "result_json", "error",
-    "created_at", "updated_at", "started_at", "finished_at",
+    "jenkins_build_url", "artifact_url", "artifact_path", "build_artifact_id",
+    "worker_id", "device_reservation_id", "flash_stage_id", "flash_command_id",
+    "cluster_job_id", "attempt_id", "devices_json", "test_plan_json",
+    "report_timestamp", "report_id", "result_json", "error",
+    "created_at", "updated_at", "started_at", "finished_at", "lease_owner",
+    "lease_expires_at",
 ]
 
 RUN_SUMMARY_COLUMNS = [
     "id", "source_type", "source_key", "profile_id", "project", "branch",
-    "gerrit_change_id", "gerrit_patchset", "gerrit_subject", "owner",
+    "gerrit_change_id", "gerrit_patchset", "gerrit_subject", "owner", "created_by",
     "status", "current_stage", "jenkins_build_number", "artifact_url",
-    "artifact_path", "devices_json", "report_timestamp", "error",
+    "artifact_path", "build_artifact_id", "worker_id", "device_reservation_id",
+    "flash_command_id", "cluster_job_id", "attempt_id", "devices_json",
+    "report_timestamp", "report_id", "error",
     "created_at", "updated_at", "started_at", "finished_at",
 ]
 
@@ -53,6 +59,7 @@ class AutomationStore:
                     gerrit_patchset TEXT NOT NULL,
                     gerrit_subject TEXT NOT NULL,
                     owner TEXT NOT NULL,
+                    created_by TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL,
                     current_stage TEXT NOT NULL,
                     jenkins_job TEXT NOT NULL,
@@ -61,19 +68,43 @@ class AutomationStore:
                     jenkins_build_url TEXT NOT NULL,
                     artifact_url TEXT NOT NULL,
                     artifact_path TEXT NOT NULL,
+                    build_artifact_id TEXT NOT NULL DEFAULT '',
+                    worker_id TEXT NOT NULL DEFAULT 'worker-local',
+                    device_reservation_id TEXT NOT NULL DEFAULT '',
+                    flash_stage_id TEXT NOT NULL DEFAULT '',
+                    flash_command_id TEXT NOT NULL DEFAULT '',
+                    cluster_job_id TEXT NOT NULL DEFAULT '',
+                    attempt_id TEXT NOT NULL DEFAULT '',
                     devices_json TEXT NOT NULL,
                     test_plan_json TEXT NOT NULL,
                     report_timestamp TEXT NOT NULL,
+                    report_id TEXT NOT NULL DEFAULT '',
                     result_json TEXT NOT NULL,
                     error TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     started_at TEXT NOT NULL,
-                    finished_at TEXT NOT NULL
+                    finished_at TEXT NOT NULL,
+                    lease_owner TEXT NOT NULL DEFAULT '',
+                    lease_expires_at TEXT NOT NULL DEFAULT ''
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_automation_runs_status ON automation_runs(status, updated_at)")
             self._ensure_column(conn, "automation_runs", "jenkins_queue_url", "TEXT NOT NULL DEFAULT ''")
+            for column, definition in {
+                "created_by": "TEXT NOT NULL DEFAULT ''",
+                "build_artifact_id": "TEXT NOT NULL DEFAULT ''",
+                "worker_id": "TEXT NOT NULL DEFAULT 'worker-local'",
+                "device_reservation_id": "TEXT NOT NULL DEFAULT ''",
+                "flash_stage_id": "TEXT NOT NULL DEFAULT ''",
+                "flash_command_id": "TEXT NOT NULL DEFAULT ''",
+                "cluster_job_id": "TEXT NOT NULL DEFAULT ''",
+                "attempt_id": "TEXT NOT NULL DEFAULT ''",
+                "report_id": "TEXT NOT NULL DEFAULT ''",
+                "lease_owner": "TEXT NOT NULL DEFAULT ''",
+                "lease_expires_at": "TEXT NOT NULL DEFAULT ''",
+            }.items():
+                self._ensure_column(conn, "automation_runs", column, definition)
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_runs_source_key ON automation_runs(source_key) WHERE source_key != ''")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS automation_run_events (
@@ -121,38 +152,48 @@ class AutomationStore:
             row = conn.execute("SELECT * FROM automation_runs WHERE source_key = ?", (source_key,)).fetchone()
         return self._row_to_dict(row)
 
-    def list_runs(self, status: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    def list_runs(
+        self, status: str = "", limit: int = 50, created_by: str = ""
+    ) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit or 50), 500))
+        where = []
+        params: list[Any] = []
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        if created_by:
+            where.append("created_by = ?")
+            params.append(created_by)
+        where_sql = f" WHERE {' AND '.join(where)}" if where else ""
         with self._connect() as conn:
-            if status:
-                rows = conn.execute(
-                    "SELECT * FROM automation_runs WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT ?",
-                    (status, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM automation_runs ORDER BY created_at DESC, id DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
+            rows = conn.execute(
+                f"SELECT * FROM automation_runs{where_sql} "
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
+                [*params, limit],
+            ).fetchall()
         return [dict(row) for row in rows]
 
-    def list_run_summaries(self, status: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    def list_run_summaries(
+        self, status: str = "", limit: int = 50, created_by: str = ""
+    ) -> list[dict[str, Any]]:
         """Return list fields without transferring potentially multi-megabyte result JSON."""
         limit = max(1, min(int(limit or 50), 500))
         columns = ", ".join(RUN_SUMMARY_COLUMNS)
+        where = []
+        params: list[Any] = []
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        if created_by:
+            where.append("created_by = ?")
+            params.append(created_by)
+        where_sql = f" WHERE {' AND '.join(where)}" if where else ""
         with self._connect() as conn:
-            if status:
-                rows = conn.execute(
-                    f"SELECT {columns} FROM automation_runs WHERE status = ? "
-                    "ORDER BY created_at DESC, id DESC LIMIT ?",
-                    (status, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    f"SELECT {columns} FROM automation_runs "
-                    "ORDER BY created_at DESC, id DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
+            rows = conn.execute(
+                f"SELECT {columns} FROM automation_runs{where_sql} "
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
+                [*params, limit],
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def list_active_runs(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -188,6 +229,84 @@ class AutomationStore:
                 [*clean.values(), run_id],
             )
         return self.get_run(run_id)
+
+    def update_run_if_status(
+        self, run_id: str, expected_status: str, **updates: Any
+    ) -> tuple[dict[str, Any], bool]:
+        """Compare-and-swap a transition so cancel and worker races cannot revive a run."""
+        allowed = set(RUN_COLUMNS) - {"id", "created_at"}
+        clean = {key: str(value) for key, value in updates.items() if key in allowed}
+        clean["updated_at"] = utc_now_iso()
+        assignments = ", ".join(f"{key} = ?" for key in clean)
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"UPDATE automation_runs SET {assignments} WHERE id = ? AND status = ?",
+                [*clean.values(), run_id, expected_status],
+            )
+        current = self.get_run(run_id)
+        if current is None:
+            raise ValueError(f"automation run not found: {run_id}")
+        return current, cursor.rowcount == 1
+
+    @staticmethod
+    def _lease_expiry(seconds: int) -> str:
+        return (datetime.now(timezone.utc) + timedelta(seconds=max(10, seconds))).isoformat(
+            timespec="microseconds"
+        ).replace("+00:00", "Z")
+
+    def claim_next_active(self, owner: str, lease_seconds: int = 120) -> dict[str, Any] | None:
+        terminal = sorted(TERMINAL_STATUSES)
+        placeholders = ", ".join("?" for _ in terminal)
+        now = utc_now_iso()
+        expiry = self._lease_expiry(lease_seconds)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                f"""
+                SELECT id FROM automation_runs
+                WHERE status NOT IN ({placeholders})
+                  AND (lease_owner='' OR lease_expires_at='' OR lease_expires_at < ?)
+                ORDER BY updated_at ASC, created_at ASC, id ASC LIMIT 1
+                """,
+                [*terminal, now],
+            ).fetchone()
+            if row is None:
+                return None
+            cursor = conn.execute(
+                """UPDATE automation_runs SET lease_owner=?,lease_expires_at=?
+                   WHERE id=? AND (lease_owner='' OR lease_expires_at='' OR lease_expires_at < ?)""",
+                (owner, expiry, row["id"], now),
+            )
+            if cursor.rowcount != 1:
+                return None
+        return self.get_run(row["id"])
+
+    def claim_run(self, run_id: str, owner: str, lease_seconds: int = 120) -> bool:
+        now = utc_now_iso()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                """UPDATE automation_runs SET lease_owner=?,lease_expires_at=?
+                   WHERE id=? AND (lease_owner='' OR lease_owner=? OR lease_expires_at='' OR lease_expires_at < ?)""",
+                (owner, self._lease_expiry(lease_seconds), run_id, owner, now),
+            )
+        return cursor.rowcount == 1
+
+    def release_claim(self, run_id: str, owner: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE automation_runs SET lease_owner='',lease_expires_at='' WHERE id=? AND lease_owner=?",
+                (run_id, owner),
+            )
+
+    def renew_claim(self, run_id: str, owner: str, lease_seconds: int = 120) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """UPDATE automation_runs SET lease_expires_at=?
+                   WHERE id=? AND lease_owner=?""",
+                (self._lease_expiry(lease_seconds), run_id, owner),
+            )
+        return cursor.rowcount == 1
 
     def append_event(self, run_id: str, stage: str, level: str, message: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         created_at = utc_now_iso()

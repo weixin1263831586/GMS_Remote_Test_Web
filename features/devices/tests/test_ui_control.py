@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from features.devices.ui_control_api import (
     _android_cli_path,
-    _extract_json_object,
     _center_from_bounds,
+    _extract_json_object,
     _looks_like_error,
     _parse_center,
     _simplify_layout,

@@ -256,6 +256,10 @@ async function callDeviceApi(endpoint, additionalData = {}) {
 function selectedClusterWorker() {
     const selected = Array.from(state.selectedDevices);
     if (!selected.length) return '';
+    const workspaceWorker = workspaceWorkerId();
+    if (workspaceWorker && !isLocalWorkspaceWorker(workspaceWorker)) {
+        return workspaceWorker;
+    }
     const workers = new Set(selected.map(deviceId => {
         const device = state.devices.find(item => typeof item !== 'string' &&
             (item.device_id === deviceId || item.serial === deviceId));
@@ -318,9 +322,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🔌 现在初始化WebSocket（需要clientId）
     initWebSocket();
 
-    initializeClusterMode().then(enabled => {
-        if (enabled) loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
-    });
+    await initializeClusterMode();
+    await loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
 
     // 刷新非测试页面时不要启动 ADB、套件和用户列表等全局扫描。各页面会由
     // runPageInitializers() 按需加载自己的数据，避免多个慢请求争抢后端资源。
@@ -742,6 +745,10 @@ function initWebSocket() {
 function initEventListeners() {
     // Test type change
     $('test-type').addEventListener('change', onTestTypeChange);
+    $('test-suite')?.addEventListener('change', event => {
+        const suitePath = String(event.target.value || '');
+        window.GmsWorkspace?.update({suite_path: suitePath, suite_key: suitePath}, {source: 'test'});
+    });
 
     // Test module/case input - 使用防抖优化
     const debouncedInputChange = debounce(onInputChange, 300);
@@ -1015,15 +1022,93 @@ async function loadClusterWorkers() {
     const response = await fetch('/api/cluster/workers');
     if (!response.ok) return;
     const data = await response.json();
-    const workers = (data.workers || []).filter(worker => worker.status !== 'offline');
-    const current = select.value || 'worker-local';
+    const localWorkerId = workspaceLocalWorkerId();
+    const workers = (data.workers || []).filter(worker =>
+        worker.status !== 'offline'
+        && (state.clusterStatus?.enabled || worker.id === localWorkerId)
+    );
+    const context = await (window.GmsWorkspace?.ready || Promise.resolve({}));
+    const current = context.scope_mode === 'cluster' ? (context.worker_id || localWorkerId) : localWorkerId;
     select.innerHTML = workers.map(worker =>
         `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)} (${escapeHtml(worker.hostname || worker.id)})</option>`
     ).join('');
-    if (!workers.some(worker => worker.id === 'worker-local')) {
-        select.insertAdjacentHTML('afterbegin', '<option value="worker-local">本机 worker-local</option>');
+    if (!workers.some(worker => worker.id === localWorkerId)) {
+        select.insertAdjacentHTML('afterbegin', `<option value="${escapeHtml(localWorkerId)}">本机 ${escapeHtml(localWorkerId)}</option>`);
     }
     if (Array.from(select.options).some(option => option.value === current)) select.value = current;
+}
+
+async function resolveClusterHost(workerId) {
+    const response = await fetch('/api/cluster/hosts', {cache: 'no-store'});
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) {
+        throw new Error(payload.error || `Worker ${workerId} 主机信息加载失败`);
+    }
+    const host = (payload.hosts || []).find(item => item.worker_id === workerId);
+    if (!host || !host.address || !host.ssh_user) {
+        throw new Error(`Worker ${workerId} 缺少 SSH 主机信息`);
+    }
+    if (host.status === 'offline') {
+        throw new Error(`Worker ${workerId} 当前离线`);
+    }
+    return host;
+}
+
+function updateTestHostScopedControls(workerId = workspaceWorkerId()) {
+    const remoteSelected = Boolean(workerId && !isLocalWorkspaceWorker(workerId));
+    const controllerOnly = {
+        'usbip-btn': 'USB/IP 设备接入只作用于 Controller 本机',
+        'check-sshd-btn': 'SSHD 检查面向 Controller 连接的设备主机',
+        'check-routing-btn': '路由检查面向 Controller 与浏览器客户端',
+        'vpn-connect-btn': 'VPN 连接由 Controller 测试主机管理',
+    };
+    Object.entries(controllerOnly).forEach(([id, message]) => {
+        const control = document.getElementById(id);
+        if (!control) return;
+        control.disabled = remoteSelected;
+        control.title = remoteSelected ? `${message}；当前已选择远端 Worker` : '';
+    });
+    const adbForward = document.getElementById('adb-forward-btn');
+    if (adbForward) {
+        // ADB forward is intentionally unavailable until its Controller-side
+        // transport is enabled; selecting a Worker must never re-enable it.
+        adbForward.disabled = true;
+        adbForward.title = remoteSelected
+            ? 'ADB forward 只作用于 Controller 本机，不能投递到远端 Worker'
+            : adbForward.title;
+    }
+}
+
+function requireControllerHostAction(actionName) {
+    if (isLocalWorkspaceWorker(workspaceWorkerId())) return true;
+    showToast(`${actionName}只作用于 Controller 本机，请先切换测试主机`, 'warning');
+    return false;
+}
+
+function workspaceLocalWorkerId() {
+    return window.GmsWorkspace?.localWorkerId?.()
+        || state.clusterStatus?.local_worker_id
+        || 'worker-local';
+}
+
+function isLocalWorkspaceWorker(workerId) {
+    return !workerId || workerId === 'worker-local' || workerId === workspaceLocalWorkerId();
+}
+
+function workspaceWorkerId() {
+    const context = window.GmsWorkspace?.get?.() || {};
+    if (!state.clusterStatus?.enabled || context.scope_mode !== 'cluster') return workspaceLocalWorkerId();
+    return context.worker_id || workspaceLocalWorkerId();
+}
+
+function syncWorkspaceWorkerSelectors(workerId) {
+    for (const id of ['cluster-worker', 'suite-worker-select', 'reports-worker-filter']) {
+        const select = document.getElementById(id);
+        if (!select) continue;
+        if (Array.from(select.options).some(option => option.value === workerId)) {
+            select.value = workerId;
+        }
+    }
 }
 
 function updateClusterToggleUI(enabled) {
@@ -1046,8 +1131,13 @@ function applyClusterMode(enabled) {
         // 集群管理页也是启用集群模式和接入 Worker 的入口，单机模式下也必须可见。
         item.style.display = '';
     });
-    const row = document.getElementById('cluster-worker-row');
-    if (row) row.style.display = enabled ? '' : 'none';
+    const testHostSelect = document.getElementById('cluster-worker');
+    if (testHostSelect) {
+        testHostSelect.disabled = !enabled;
+        testHostSelect.title = enabled
+            ? '选择执行测试的 Cluster Worker'
+            : '当前为单机模式；切换到集群模式后可选择远端测试主机';
+    }
     for (const id of ['suite-worker-select', 'reports-worker-filter']) {
         const select = document.getElementById(id);
         if (select?.closest('label')) select.closest('label').style.display = enabled ? '' : 'none';
@@ -1055,9 +1145,11 @@ function applyClusterMode(enabled) {
     const terminalControl = document.getElementById('terminal-worker-control');
     if (terminalControl) terminalControl.style.display = enabled ? 'contents' : 'none';
     if (!enabled) {
-        const workerSelect = document.getElementById('cluster-worker');
-        if (workerSelect) workerSelect.value = 'worker-local';
+        syncWorkspaceWorkerSelectors(workspaceLocalWorkerId());
     }
+    updateTestHostScopedControls(enabled
+        ? (window.GmsWorkspace?.get?.().worker_id || workspaceLocalWorkerId())
+        : workspaceLocalWorkerId());
     updateClusterToggleUI(enabled);
 }
 
@@ -1065,11 +1157,19 @@ async function toggleClusterMode() {
     const row = document.getElementById('cluster-mode-toggle-row');
     if (row) { row.style.pointerEvents = 'none'; row.style.opacity = '0.6'; }
     try {
-        const wasEnabled = Boolean(state.clusterStatus && state.clusterStatus.enabled);
-        const resp = await apiCall('/api/cluster/mode', 'POST', {enabled: !wasEnabled});
-        state.clusterStatus = resp;
-        applyClusterMode(resp.enabled);
-        if (resp.enabled) {
+        const infrastructureEnabled = Boolean(state.clusterStatus?.enabled);
+        const wasEnabled = infrastructureEnabled && window.GmsWorkspace?.get?.().scope_mode === 'cluster';
+        if (!wasEnabled && !infrastructureEnabled) {
+            throw new Error('集群基础设施未启用，请先在服务端 configs/cluster.json 启用集群能力');
+        }
+        const context = window.GmsWorkspace?.update({
+            scope_mode: wasEnabled ? 'single' : 'cluster',
+            worker_id: wasEnabled ? workspaceLocalWorkerId() : (window.GmsWorkspace?.get?.().worker_id || workspaceLocalWorkerId()),
+            device_ids: []
+        }, {source: 'cluster-toggle'});
+        const enabled = context?.scope_mode === 'cluster';
+        applyClusterMode(enabled);
+        if (enabled) {
             await loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
             showToast('已切换到集群模式', 'success');
         } else {
@@ -1080,6 +1180,13 @@ async function toggleClusterMode() {
         }
         // 重新加载设备列表以反映模式变化
         await Promise.all([loadDevices(true), loadTestSuites(true)]);
+        // 模式切换时同步刷新报告列表的 Worker 过滤器
+        if (typeof loadTestReports === 'function') {
+            loadTestReports(currentUserFilter).catch(() => {});
+        }
+        // 刷新各页面 workspace 徽标
+        renderWorkspaceBadge('report-workspace-badge');
+        renderWorkspaceBadge('apk-workspace-badge');
     } catch (error) {
         showToast(`切换模式失败: ${error.message}`, 'error');
     } finally {
@@ -1091,11 +1198,18 @@ window.toggleClusterMode = toggleClusterMode;
 
 async function initializeClusterMode() {
     try {
-        const response = await fetch('/api/cluster/status', {cache: 'no-store'});
+        const [response, context] = await Promise.all([
+            fetch('/api/cluster/status', {cache: 'no-store'}),
+            window.GmsWorkspace?.ready || Promise.resolve({scope_mode: 'single', worker_id: workspaceLocalWorkerId()})
+        ]);
         const status = await response.json();
         state.clusterStatus = status;
-        const enabled = Boolean(response.ok && status.enabled);
+        const enabled = Boolean(response.ok && status.enabled && context.scope_mode === 'cluster');
         applyClusterMode(enabled);
+        if (!enabled && context.scope_mode === 'cluster') {
+            window.GmsWorkspace?.update({scope_mode: 'single', worker_id: workspaceLocalWorkerId(), device_ids: []},
+                {source: 'cluster-unavailable'});
+        }
         return enabled;
     } catch (error) {
         debugLog('[Cluster] Status unavailable, preserving single-host UI:', error);
@@ -1103,53 +1217,34 @@ async function initializeClusterMode() {
     }
 }
 
+window.addEventListener('gms:workspace-context', event => {
+    const context = event.detail?.context || {};
+    const enabled = Boolean(state.clusterStatus?.enabled && context.scope_mode === 'cluster');
+    applyClusterMode(enabled);
+    syncWorkspaceWorkerSelectors(enabled ? (context.worker_id || workspaceLocalWorkerId()) : workspaceLocalWorkerId());
+    // 刷新报告分析和 APK 分析页的 workspace 徽标
+    renderWorkspaceBadge('report-workspace-badge', context);
+    renderWorkspaceBadge('apk-workspace-badge', context);
+});
+
 async function switchTestWorker() {
-    const workerId = document.getElementById('cluster-worker')?.value || 'worker-local';
+    const workerId = document.getElementById('cluster-worker')?.value || workspaceLocalWorkerId();
     state.selectedDevices.clear();
-    const remoteSelected = workerId !== 'worker-local';
-    for (const id of ['adb-forward-btn', 'usbip-btn']) {
-        const control = document.getElementById(id);
-        if (!control) continue;
-        control.disabled = remoteSelected || id === 'adb-forward-btn';
-        control.title = remoteSelected
-            ? 'USB/IP 与 ADB forward 属于浏览器到 Controller 的设备接入，不作用于远端 Worker'
-            : '';
-    }
-    if (workerId === 'worker-local') {
-        await Promise.all([loadDevices(true), loadTestSuites(true)]);
-        showToast('已切换到本机测试主机', 'success');
-        return;
-    }
+    window.GmsWorkspace?.update({
+        scope_mode: isLocalWorkspaceWorker(workerId) ? window.GmsWorkspace.get().scope_mode : 'cluster',
+        worker_id: workerId,
+        device_ids: [],
+        cluster_job_id: ''
+    }, {source: 'test'});
+    syncWorkspaceWorkerSelectors(workerId);
+    updateTestHostScopedControls(workerId);
     try {
-        const [deviceResponse, suiteResponse] = await Promise.all([
-            fetch(`/api/cluster/devices?worker_id=${encodeURIComponent(workerId)}`),
-            fetch(`/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`)
-        ]);
-        if (!deviceResponse.ok || !suiteResponse.ok) throw new Error('集群资源加载失败');
-        const devicesData = await deviceResponse.json();
-        const suitesData = await suiteResponse.json();
-        state.devices = (devicesData.devices || [])
-            .filter(device => device.state !== 'offline' && device.state !== 'unknown')
-            .map(device => ({
-                ...device.properties,
-                device_id: device.id,
-                serial: device.serial,
-                cluster_worker_id: workerId,
-                state: device.state,
-                status: device.state
-            }));
-        testSuitesCache = (suitesData.suites || [])
-            .filter(suite => suite.available)
-            .map(suite => ({
-                tools_path: suite.tools_path,
-                test_type: String(suite.suite_type || '').toLowerCase(),
-                version: suite.suite_version,
-                name: `${suite.suite_type} ${suite.suite_version}`,
-                worker_id: workerId
-            }));
-        renderDevices();
-        renderTestSuitesDropdown();
-        showToast(`已切换到 ${workerId}，发现 ${state.devices.length} 台设备`, 'success');
+        testSuitesCache = [];
+        testSuitesWorkerId = '';
+        await Promise.all([loadDevices(true), loadTestSuites(true)]);
+        showToast(isLocalWorkspaceWorker(workerId)
+            ? '已切换到本机测试主机'
+            : `已切换到 ${workerId}，发现 ${state.devices.length} 台设备`, 'success');
     } catch (error) {
         showToast(`切换 Worker 失败: ${error.message}`, 'error');
     }
@@ -1167,9 +1262,31 @@ async function loadDevices(forceRefresh = false) {
     state.pendingDeviceRefresh = null;
 
     state.deviceRefreshPromise = (async () => {
-        // 添加 force_refresh 参数来强制绕过缓存
-        const url = forceRefresh ? '/api/devices/list?force_refresh=1' : '/api/devices/list';
-        const devices = await apiCall(url);
+        const workerId = workspaceWorkerId();
+        let devices;
+        if (isLocalWorkspaceWorker(workerId)) {
+            const url = forceRefresh ? '/api/devices/list?force_refresh=1' : '/api/devices/list';
+            devices = await apiCall(url);
+        } else {
+            const response = await fetch(`/api/cluster/devices?worker_id=${encodeURIComponent(workerId)}`, {cache: 'no-store'});
+            if (!response.ok) throw new Error(`Worker ${workerId} 设备加载失败 (HTTP ${response.status})`);
+            const payload = await response.json();
+            devices = (payload.devices || [])
+                .filter(device => !['offline', 'unknown'].includes(device.state))
+                .map(device => ({
+                    ...(device.properties || {}),
+                    device_id: device.id,
+                    serial: device.serial,
+                    cluster_worker_id: workerId,
+                    locked: ['allocated', 'leased', 'busy', 'external_busy'].includes(device.state),
+                    locked_by: device.lease_owner || device.state,
+                    locked_by_self: false,
+                    state: device.state,
+                    status: device.state
+                }));
+        }
+        // A late response from a previous Worker must never replace the new selection.
+        if (workspaceWorkerId() !== workerId) return state.devices;
         state.devices = devices;
         // 设备列表更新后，清理选中集合里已消失的设备。否则 USB 抖动导致设备断开时，
         // 它仍残留在 state.selectedDevices 中，会被烧写/重启等批量操作一起送进后端，
@@ -1179,6 +1296,9 @@ async function loadDevices(forceRefresh = false) {
             if (!currentIds.has(id)) {
                 state.selectedDevices.delete(id);
             }
+        }
+        for (const id of window.GmsWorkspace?.get?.().device_ids || []) {
+            if (currentIds.has(id)) state.selectedDevices.add(id);
         }
         // 先用已有数据渲染设备，让 ADB 区立刻显示，不被分组加载阻塞
         renderDevices();
@@ -1230,24 +1350,52 @@ async function loadDevices(forceRefresh = false) {
 // 测试套件管理
 let testSuitesCache = [];
 let _loadSuitesPromise = null;
+let testSuitesWorkerId = '';
 
 async function loadTestSuites(forceRefresh = false) {
+    const requestedWorker = workspaceWorkerId();
     // 如果有正在进行的请求，等待它完成
     if (_loadSuitesPromise) {
-        return _loadSuitesPromise;
+        await _loadSuitesPromise;
+        if (testSuitesWorkerId !== requestedWorker) return loadTestSuites(forceRefresh);
+        return testSuitesCache;
     }
 
-    if (!forceRefresh && testSuitesCache.length > 0) {
+    if (!forceRefresh && testSuitesCache.length > 0 && testSuitesWorkerId === requestedWorker) {
         return testSuitesCache;
     }
 
     _loadSuitesPromise = (async () => {
         try {
-            const url = forceRefresh ? '/api/test/suites?force_refresh=1' : '/api/test/suites';
-            const response = await apiCall(url);
+            let response;
+            if (isLocalWorkspaceWorker(requestedWorker)) {
+                const url = forceRefresh ? '/api/test/suites?force_refresh=1' : '/api/test/suites';
+                response = await apiCall(url);
+            } else {
+                const remoteResponse = await fetch(`/api/cluster/suites?worker_id=${encodeURIComponent(requestedWorker)}`,
+                    {cache: 'no-store'});
+                if (!remoteResponse.ok) {
+                    throw new Error(`Worker ${requestedWorker} 套件加载失败 (HTTP ${remoteResponse.status})`);
+                }
+                const payload = await remoteResponse.json();
+                response = {
+                    success: true,
+                    count: (payload.suites || []).length,
+                    suites: (payload.suites || []).filter(suite => suite.available).map(suite => ({
+                        tools_path: suite.tools_path,
+                        test_type: String(suite.suite_type || '').toLowerCase(),
+                        version: suite.suite_version,
+                        name: `${suite.suite_type} ${suite.suite_version}`,
+                        suite_key: suite.suite_key,
+                        worker_id: requestedWorker
+                    }))
+                };
+            }
 
             if (response.suites) {
+                if (workspaceWorkerId() !== requestedWorker) return testSuitesCache;
                 testSuitesCache = response.suites || [];
+                testSuitesWorkerId = requestedWorker;
                 renderTestSuitesDropdown();
                 if (typeof renderTestSuiteBrowserList === 'function') {
                     renderTestSuiteBrowserList();
@@ -1464,13 +1612,15 @@ async function loadSuiteWorkerSelector() {
     try {
         const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
         const payload = await response.json();
-        const saved = localStorage.getItem('gms_suite_worker') || 'worker-local';
+        const workspace = await (window.GmsWorkspace?.ready || Promise.resolve({}));
+        const localWorkerId = workspaceLocalWorkerId();
+        const saved = workspace.scope_mode === 'cluster' ? (workspace.worker_id || localWorkerId) : localWorkerId;
         const workers = (payload.workers || []).filter(worker => worker.status !== 'offline');
         select.innerHTML = workers.map(worker =>
             `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)}</option>`
         ).join('');
-        if (!workers.some(worker => worker.id === 'worker-local')) {
-            select.insertAdjacentHTML('afterbegin', '<option value="worker-local">本机 worker-local</option>');
+        if (!workers.some(worker => worker.id === localWorkerId)) {
+            select.insertAdjacentHTML('afterbegin', `<option value="${escapeHtml(localWorkerId)}">本机 ${escapeHtml(localWorkerId)}</option>`);
         }
         if (Array.from(select.options).some(option => option.value === saved)) select.value = saved;
         select.dataset.loaded = '1';
@@ -1480,8 +1630,16 @@ async function loadSuiteWorkerSelector() {
 }
 
 async function loadSuitesForBrowserWorker(force = false) {
-    const workerId = $('suite-worker-select')?.value || 'worker-local';
-    if (workerId === 'worker-local') return loadTestSuites(force);
+    const workerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
+    window.GmsWorkspace?.update({
+        scope_mode: isLocalWorkspaceWorker(workerId) ? 'single' : 'cluster',
+        worker_id: workerId
+    }, {source: 'suites'});
+    syncWorkspaceWorkerSelectors(workerId);
+    if (isLocalWorkspaceWorker(workerId)) {
+        testSuitesWorkerId = '';
+        return loadTestSuites(force);
+    }
     const response = await fetch(`/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`, {cache: 'no-store'});
     if (!response.ok) throw new Error('加载 Worker 套件失败');
     const payload = await response.json();
@@ -1490,14 +1648,20 @@ async function loadSuitesForBrowserWorker(force = false) {
         test_type: String(item.suite_type || '').toLowerCase(),
         version: item.suite_version,
         name: `${item.suite_type} ${item.suite_version}`,
+        suite_key: item.suite_key || item.tools_path,
         worker_id: workerId
     }));
+    testSuitesWorkerId = workerId;
     return testSuitesCache;
 }
 
 async function switchSuiteWorker() {
-    const workerId = $('suite-worker-select')?.value || 'worker-local';
-    localStorage.setItem('gms_suite_worker', workerId);
+    const workerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
+    window.GmsWorkspace?.update({
+        scope_mode: isLocalWorkspaceWorker(workerId) ? 'single' : 'cluster',
+        worker_id: workerId, suite_key: '', suite_path: ''
+    }, {source: 'suites'});
+    syncWorkspaceWorkerSelectors(workerId);
     clearSuiteBrowserSelection('正在加载 Worker 套件...');
     try {
         testSuitesCache = [];
@@ -1595,8 +1759,8 @@ window.downloadTestSuite = async function downloadTestSuite() {
     debugLog('[downloadTestSuite] 开始下载：', url);
 
     try {
-        const suiteWorkerId = $('suite-worker-select')?.value || 'worker-local';
-        if (suiteWorkerId !== 'worker-local') {
+        const suiteWorkerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
+        if (!isLocalWorkspaceWorker(suiteWorkerId)) {
             const accepted = await apiCall('/api/cluster/suites/download', 'POST', {
                 worker_id: suiteWorkerId, url
             });
@@ -1871,8 +2035,8 @@ window.showExtractSuiteModal = async function showExtractSuiteModal() {
     select.innerHTML = '<option value="">正在加载压缩包...</option>';
 
     try {
-        const suiteWorkerId = $('suite-worker-select')?.value || 'worker-local';
-        const response = await fetch(suiteWorkerId === 'worker-local'
+        const suiteWorkerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
+        const response = await fetch(isLocalWorkspaceWorker(suiteWorkerId)
             ? '/api/test/suites/archives'
             : `/api/cluster/suites/archives?worker_id=${encodeURIComponent(suiteWorkerId)}`);
         const result = await response.json();
@@ -1969,12 +2133,12 @@ window.submitExtractSuite = async function submitExtractSuite() {
             logDiv.innerHTML += `[${time}] 开始解压：${archivePath}\n`;
         }
 
-        const suiteWorkerId = $('suite-worker-select')?.value || 'worker-local';
-        const response2 = await fetch(suiteWorkerId === 'worker-local'
+        const suiteWorkerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
+        const response2 = await fetch(isLocalWorkspaceWorker(suiteWorkerId)
             ? '/api/test/suites/extract-start' : '/api/cluster/suites/extract', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(suiteWorkerId === 'worker-local' ? {
+            body: JSON.stringify(isLocalWorkspaceWorker(suiteWorkerId) ? {
                 archive_path: archivePath,
                 extract_dir: `/home/${getDefaultUbuntuUser()}/GMS-Suite`,
                 target_dir_name: folderName
@@ -2141,6 +2305,12 @@ async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
 
     state.suiteBrowser.selectedSuitePath = suite.tools_path;
     state.suiteBrowser.currentPath = path || '';
+    window.GmsWorkspace?.update({
+        worker_id: $('suite-worker-select')?.value || workspaceWorkerId(),
+        suite_key: suite.suite_key || suite.tools_path,
+        suite_path: suite.tools_path,
+        origin_page: 'test-suites'
+    }, {source: 'suites'});
     if (!options.preserveHighlight) {
         state.suiteBrowser.highlightPath = '';
     }
@@ -2237,8 +2407,8 @@ async function searchSuiteFilesInSuite(suite, query, limit = 30) {
         query,
         limit: String(limit)
     });
-    if (suite.worker_id && suite.worker_id !== 'worker-local') params.set('worker_id', suite.worker_id);
-    const endpoint = suite.worker_id && suite.worker_id !== 'worker-local'
+    if (suite.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) params.set('worker_id', suite.worker_id);
+    const endpoint = suite.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
         ? '/api/cluster/suites/search' : '/api/test/suites/search';
     const result = await apiCall(`${endpoint}?${params.toString()}`);
     const payload = result.data || {};
@@ -2312,8 +2482,8 @@ async function loadSuiteBrowserDirectory(path = '') {
             path: path || ''
         });
         const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
-        if (suite?.worker_id && suite.worker_id !== 'worker-local') params.set('worker_id', suite.worker_id);
-        const endpoint = suite?.worker_id && suite.worker_id !== 'worker-local'
+        if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) params.set('worker_id', suite.worker_id);
+        const endpoint = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
             ? '/api/cluster/suites/files' : '/api/test/suites/files';
         const result = await apiCall(`${endpoint}?${params.toString()}`);
         const data = result.data || {};
@@ -2387,9 +2557,11 @@ async function loadTestResults(force = false) {
         // 不传 tradefed_bin：让后端 find_tradefed_binary 解析绝对路径。
         // suite.binary 只是裸文件名（如 vts-tradefed），cd 到 tools 后不在
         // PATH 中无法直接执行，会触发系统 "command not found" 建议而失败。
-        const payload = await apiCall('/api/test/suites/result', 'POST', {
-            suite_path: suitePath
-        });
+        const payload = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
+            ? await apiCall(`/api/cluster/suites/results?${new URLSearchParams({
+                worker_id: suite.worker_id, suite_path: suitePath
+            })}`, 'POST')
+            : await apiCall('/api/test/suites/result', 'POST', {suite_path: suitePath});
         if (!payload || !payload.success) {
             const msg = (payload && (payload.error || payload.message)) || '查询失败';
             if (listEl) listEl.innerHTML = `<div style="padding: 20px; color: var(--danger-color, #e53935); text-align: center;">查询失败: ${escapeHtml(msg)}</div>`;
@@ -2550,7 +2722,11 @@ function renderSuiteBreadcrumb(path) {
             const m = String(suitePath).toLowerCase().match(/android-([a-z]+)/);
             const typeMap = { cts: 'CTS', gsi: 'GSI', gts: 'GTS', sts: 'STS', vts: 'VTS', apts: 'APTS' };
             const testType = (m && typeMap[m[1]]) || '';
-            retryReportWithSuite(ts, testType, suitePath);
+            const selectedSuite = testSuitesCache.find(item => item.tools_path === suitePath);
+            retryReportWithSuite(ts, testType, suitePath, {
+                worker_id: selectedSuite?.worker_id || workspaceLocalWorkerId(),
+                source_timestamp: ts
+            });
         });
         breadcrumb.appendChild(retryBtn);
     }
@@ -2646,14 +2822,24 @@ async function analyzeSuiteLogDir(relPath) {
     setTimeout(async () => {
         showToast(`正在分析 ${folderName} ...`, 'info');
         try {
-            const formData = new FormData();
-            formData.append('suite_path', suitePath);
-            formData.append('path', relPath || '');
-            const resp = await fetch('/api/reports/analyze-log-dir', {
-                method: 'POST',
-                body: formData
-            });
-            const data = await resp.json().catch(() => ({ success: false }));
+            const suite = testSuitesCache.find(item => item.tools_path === suitePath);
+            let data;
+            if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) {
+                const transferId = await createRemoteSuiteTransfer(relPath, true, suite);
+                data = await apiCall(
+                    `/api/cluster/transfers/${encodeURIComponent(transferId)}/report-analysis`,
+                    'POST'
+                );
+            } else {
+                const formData = new FormData();
+                formData.append('suite_path', suitePath);
+                formData.append('path', relPath || '');
+                const resp = await fetch('/api/reports/analyze-log-dir', {
+                    method: 'POST',
+                    body: formData
+                });
+                data = await resp.json().catch(() => ({ success: false }));
+            }
             if (!data.success) {
                 notifyOperationResult('报告分析失败', data.message || data.error || '未知错误', 'error', 'report-analysis', { path: relPath });
                 return;
@@ -2872,26 +3058,16 @@ function openSuiteFileInline(path) {
         inline: 'true'
     });
     const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
-    if (suite?.worker_id && suite.worker_id !== 'worker-local') params.set('worker_id', suite.worker_id);
-    const endpoint = suite?.worker_id && suite.worker_id !== 'worker-local'
+    if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) params.set('worker_id', suite.worker_id);
+    const endpoint = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
         ? '/api/cluster/suites/download' : '/api/test/suites/download';
     window.open(`${endpoint}?${params.toString()}`, '_blank');
 }
 
 async function startRemoteSuiteExport(path, directory = false) {
     const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
-    if (!suite?.worker_id || suite.worker_id === 'worker-local') return false;
-    showToast(`正在从 ${suite.worker_id} 准备下载...`, 'info');
-    const params = new URLSearchParams({worker_id: suite.worker_id,
-        suite_path: state.suiteBrowser.selectedSuitePath, path, directory: String(directory)});
-    const created = await apiCall(`/api/cluster/suites/export?${params.toString()}`, 'POST');
-    const transferId = created.transfer.id;
-    while (true) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        const status = await apiCall(`/api/cluster/transfers/${encodeURIComponent(transferId)}`);
-        if (status.transfer.status === 'completed') break;
-        if (status.transfer.status === 'failed') throw new Error(status.transfer.error || '远端导出失败');
-    }
+    if (!suite?.worker_id || isLocalWorkspaceWorker(suite.worker_id)) return false;
+    const transferId = await createRemoteSuiteTransfer(path, directory, suite);
     const frame = document.getElementById('suite-download-frame') || Object.assign(document.createElement('iframe'), {
         id: 'suite-download-frame', name: 'suite-download-frame'
     });
@@ -2899,6 +3075,31 @@ async function startRemoteSuiteExport(path, directory = false) {
     if (!frame.parentNode) document.body.appendChild(frame);
     window.open(`/api/cluster/transfers/${encodeURIComponent(transferId)}/download`, frame.name);
     return true;
+}
+
+async function createRemoteSuiteTransfer(path, directory = false, suite = null) {
+    suite = suite || testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+    if (!suite?.worker_id || isLocalWorkspaceWorker(suite.worker_id)) {
+        throw new Error('未选择远端 Worker 套件');
+    }
+    showToast(`正在从 ${suite.worker_id} 准备下载...`, 'info');
+    const params = new URLSearchParams({worker_id: suite.worker_id,
+        suite_path: suite.tools_path, path, directory: String(directory)});
+    const created = await apiCall(`/api/cluster/suites/export?${params.toString()}`, 'POST');
+    const transferId = created.transfer.id;
+    window.GmsWorkspace?.update({
+        worker_id: suite.worker_id,
+        suite_key: suite.suite_key || suite.tools_path,
+        suite_path: suite.tools_path,
+        artifact_id: transferId
+    }, {source: 'suite-export'});
+    while (true) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const status = await apiCall(`/api/cluster/transfers/${encodeURIComponent(transferId)}`);
+        if (status.transfer.status === 'completed') break;
+        if (status.transfer.status === 'failed') throw new Error(status.transfer.error || '远端导出失败');
+    }
+    return transferId;
 }
 
 async function downloadSuiteFile(path, filename = '') {
@@ -2924,8 +3125,8 @@ async function downloadSuiteFile(path, filename = '') {
 
     const link = document.createElement('a');
     const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
-    if (suite?.worker_id && suite.worker_id !== 'worker-local') params.set('worker_id', suite.worker_id);
-    const endpoint = suite?.worker_id && suite.worker_id !== 'worker-local'
+    if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) params.set('worker_id', suite.worker_id);
+    const endpoint = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
         ? '/api/cluster/suites/download' : '/api/test/suites/download';
     link.href = `${endpoint}?${params.toString()}`;
     link.download = filename || path.split('/').pop() || 'download';
@@ -2994,10 +3195,20 @@ async function analyzeSuiteApk(path, options = {}) {
 
     try {
         showToast('正在准备反编译任务...', 'info');
-        const result = await apiCall('/api/test/suites/apk/analyze', 'POST', {
-            suite_path: state.suiteBrowser.selectedSuitePath,
-            path
-        });
+        const suite = testSuitesCache.find(item =>
+            item.tools_path === state.suiteBrowser.selectedSuitePath);
+        const result = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
+            ? await (async () => {
+                const transferId = await createRemoteSuiteTransfer(path, false, suite);
+                return apiCall(
+                    `/api/cluster/transfers/${encodeURIComponent(transferId)}/apk-analysis`,
+                    'POST'
+                );
+            })()
+            : await apiCall('/api/test/suites/apk/analyze', 'POST', {
+                suite_path: state.suiteBrowser.selectedSuitePath,
+                path
+            });
         const task = result.data || {};
         if (!task.task_id) {
             showToast('创建反编译任务失败', 'error');
@@ -3010,6 +3221,13 @@ async function analyzeSuiteApk(path, options = {}) {
         window.apkNotifiedTaskId = null;
 
         window.apkCurrentTaskId = task.task_id;
+        window.GmsWorkspace?.update({
+            worker_id: suite?.worker_id || workspaceLocalWorkerId(),
+            suite_key: suite?.suite_key || suite?.tools_path || '',
+            suite_path: suite?.tools_path || '',
+            artifact_id: task.transfer_id || '',
+            origin_page: 'apk-analysis'
+        }, {source: 'suite-apk-analysis'});
         setApkUploadEmpty(false);
         const pendingOpenPaths = Array.from(new Set([
             options.openSourcePath,
@@ -3276,6 +3494,7 @@ function toggleDevice(deviceId) {
     } else {
         state.selectedDevices.add(deviceId);
     }
+    window.GmsWorkspace?.update({device_ids: Array.from(state.selectedDevices)}, {source: 'test'});
     renderDevices();
 }
 
@@ -3317,6 +3536,7 @@ function selectAllDevices() {
             addLogEntry(`全选设备：已选择 ${selectedCount} 台，跳过 ${skippedLocked} 台被锁定的设备`, 'warning');
         }
     }
+    window.GmsWorkspace?.update({device_ids: Array.from(state.selectedDevices)}, {source: 'test'});
     renderDevices();
     addLogEntry(`已选择 ${state.selectedDevices.size} 台设备`, 'info');
 }
@@ -3634,10 +3854,38 @@ function firmwareShareSetValidation(message, type = 'info') {
     el.textContent = message || '';
 }
 
+function firmwareShareDefaults() {
+    const config = state.config || {};
+    const share = config.firmware_shares || {};
+    const configuredRemote = String(share.default_remote || '').trim();
+    const match = configuredRemote.match(/^(?:([^@:/]+)@)?([^:]+):(\/.*)$/);
+    if (match) {
+        const user = match[1] || share.default_user || config.ubuntu_user || '';
+        return {user, host: match[2], path: match[3], remote: configuredRemote};
+    }
+    const connection = String(share.default_host || config.local_server || '').trim();
+    const at = connection.lastIndexOf('@');
+    const user = String(
+        share.default_user
+        || (at > 0 ? connection.slice(0, at) : '')
+        || config.ubuntu_user
+        || ''
+    ).trim();
+    const host = String(
+        at > 0 ? connection.slice(at + 1) : (connection || config.ubuntu_host || '')
+    ).trim();
+    const path = String(share.default_path || (user ? `/home/${user}` : '/home')).trim();
+    return {user, host, path, remote: ''};
+}
+
 function shareFirmware() {
     const input = document.getElementById('firmware-share-remote');
-    if (input && !input.value.trim()) {
-        input.value = 'hcq@10.10.10.206:/home/hcq/7_Android17_0622/rockdev/Image-rk3576s_u-userdebug';
+    const defaults = firmwareShareDefaults();
+    if (input) {
+        if (!input.value.trim() && defaults.remote) input.value = defaults.remote;
+        input.placeholder = defaults.host
+            ? `${defaults.user ? `${defaults.user}@` : ''}${defaults.host}:${defaults.path}/firmware.img`
+            : 'user@host:/absolute/path/to/firmware.img';
     }
     firmwareShareSetValidation('');
     ModalManager.open('firmware-share-modal');
@@ -3645,14 +3893,19 @@ function shareFirmware() {
 }
 
 async function browseRemoteFileForFirmwareShare() {
+    const defaults = firmwareShareDefaults();
+    if (!defaults.host || !defaults.user) {
+        showToast('请在 config.json 的 firmware_shares 或 local_server 中配置共享固件主机', 'warning');
+        return;
+    }
     state.fileBrowser.mode = 'firmware-share';
     state.fileBrowser.targetInputId = 'firmware-share-remote';
     state.fileBrowser.selectedFile = null;
-    state.fileBrowser.remoteHost = '10.10.10.206';
-    state.fileBrowser.remoteUser = 'hcq';
+    state.fileBrowser.remoteHost = defaults.host;
+    state.fileBrowser.remoteUser = defaults.user;
     document.getElementById('file-browser-title').textContent = '选择共享固件';
     ModalManager.open('file-browser-modal');
-    await loadFileDirectory('/home/hcq');
+    await loadFileDirectory(defaults.path);
 }
 
 function closeFirmwareShareModal() {
@@ -4403,11 +4656,21 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
 
 async function initAndStartVnc(forceRestart = false) {
     try {
+        const workerId = workspaceWorkerId();
         const logMsg = forceRestart
             ? '🔄 正在重启VNC环境（杀死旧进程并重新启动）...'
             : '🔄 正在启动VNC环境...';
         addLogEntry(logMsg, 'info');
-        const result = await apiCall('/api/desktop/vnc/start', 'POST', { force_restart: forceRestart });
+        const request = {force_restart: forceRestart};
+        if (!isLocalWorkspaceWorker(workerId)) {
+            const host = await resolveClusterHost(workerId);
+            request.host = `${host.ssh_user}@${host.address}`;
+            addLogEntry(`目标测试主机: ${workerId} (${host.address})`, 'info');
+        }
+        const result = await apiCall('/api/desktop/vnc/start', 'POST', request);
+        if (!result.success) {
+            throw new Error(result.error || 'VNC 启动失败');
+        }
         addLogEntry(result.message || 'VNC 服务已就绪', 'info');
         return result;
     } catch (error) {
@@ -4555,6 +4818,7 @@ async function showDeviceScreen() {
 }
 
 async function setupAdbPortForward() {
+    if (!requireControllerHostAction('ADB 端口转发')) return;
     const btn = document.getElementById('adb-forward-btn');
     if (state.adbForwardRunning) {
         try {
@@ -4578,6 +4842,7 @@ async function setupAdbPortForward() {
 }
 
 async function setupUsbipForward() {
+    if (!requireControllerHostAction('USB/IP 设备接入')) return;
     const btn = $('usbip-btn');
     if (!btn) return;
 
@@ -5150,6 +5415,7 @@ async function submitDevicePassword() {
 
 // ==================== VPN Control ====================
 async function checkSshd() {
+    if (!requireControllerHostAction('SSHD 检查')) return;
     try {
         const result = await apiCall('/api/ssh/sshd', 'GET');
 
@@ -5192,6 +5458,7 @@ async function checkSshd() {
 }
 
 async function checkRouting() {
+    if (!requireControllerHostAction('路由检查')) return;
     // 创建弹框
     const dialog = document.createElement('div');
     dialog.id = 'route-check-dialog';
@@ -5299,7 +5566,7 @@ async function checkRouting() {
                 // 生成路由命令
                 // 注意：这些命令应该在测试主机上执行
                 // 需要通过测试主机的网关来访问客户端网段
-                const testGateway = testNetwork.split('.').slice(0, 3).join('.1');  // 测试主机网关 (例如: 172.16.14.1)
+                const testGateway = testNetwork.split('.').slice(0, 3).join('.') + '.1';
 
                 const routeCommands = {
                     windows: [
@@ -5447,6 +5714,7 @@ async function checkRouting() {
 }
 
 async function connectVpn() {
+    if (!requireControllerHostAction('VPN 连接')) return;
     if (state.vpnConnected) {
         await checkVpnStatus();
         return;
@@ -5600,6 +5868,14 @@ async function handleUploadFile() {
         // Create FormData
         const formData = new FormData();
         formData.append('file', file);
+        const workerId = workspaceWorkerId();
+        if (!isLocalWorkspaceWorker(workerId)) {
+            const host = await resolveClusterHost(workerId);
+            formData.append('worker_id', workerId);
+            formData.append('host', host.address);
+            formData.append('user', host.ssh_user);
+            addLogEntry(`上传目标: ${workerId} (${host.ssh_user}@${host.address})`, 'info');
+        }
 
         // Use XMLHttpRequest for upload progress
         const xhr = new XMLHttpRequest();
@@ -5766,6 +6042,8 @@ async function browseRemoteFile(mode) {
     state.fileBrowser.mode = mode;
     state.fileBrowser.targetInputId = targetInputId;
     state.fileBrowser.selectedFile = null;
+    state.fileBrowser.clusterWorkerId = '';
+    state.fileBrowser.clusterSuitePath = '';
 
     // Update modal title
     document.getElementById('file-browser-title').textContent = title;
@@ -5780,10 +6058,23 @@ async function browseRemoteFile(mode) {
     // Get current test suite selection
     const testSuiteSelect = document.getElementById('test-suite');
     const toolsPath = testSuiteSelect?.value || '';
+    const workerId = workspaceWorkerId();
 
     if (!toolsPath) {
+        if (!isLocalWorkspaceWorker(workerId)) {
+            showToast('请先选择当前 Worker 上的测试套件', 'warning');
+            return;
+        }
         addLogEntry(`未选择测试套件，使用默认路径: ${defaultPath}`, 'info');
         await loadFileDirectory(defaultPath);
+        return;
+    }
+
+    if (!isLocalWorkspaceWorker(workerId)) {
+        state.fileBrowser.clusterWorkerId = workerId;
+        state.fileBrowser.clusterSuitePath = toolsPath;
+        addLogEntry(`自动导航到 ${workerId} 测试套件 results 目录`, 'info');
+        await loadFileDirectory('results');
         return;
     }
 
@@ -5804,6 +6095,18 @@ async function loadFileDirectory(path) {
             await loadFirmwareShareRemoteDirectory(path);
             return;
         }
+        if (state.fileBrowser.mode === 'retry' && state.fileBrowser.clusterWorkerId) {
+            const params = new URLSearchParams({
+                worker_id: state.fileBrowser.clusterWorkerId,
+                suite_path: state.fileBrowser.clusterSuitePath,
+                path: path || '',
+            });
+            const result = await apiCall(`/api/cluster/suites/files?${params.toString()}`);
+            const data = result.data || {};
+            state.fileBrowser.currentPath = data.path || '';
+            renderFileList(data.items || []);
+            return;
+        }
         const result = await apiCall('/api/files/list', 'POST', { path });
 
         if (result.success) {
@@ -5818,17 +6121,23 @@ async function loadFileDirectory(path) {
 }
 
 async function loadFirmwareShareRemoteDirectory(path) {
-    const host = state.fileBrowser.remoteHost || '10.10.10.206';
+    const defaults = firmwareShareDefaults();
+    const host = state.fileBrowser.remoteHost || defaults.host;
+    const user = state.fileBrowser.remoteUser || defaults.user;
+    if (!host || !user) {
+        renderFirmwareShareBrowseError('', '未配置共享固件主机');
+        return;
+    }
     try {
         const result = await firmwareShareApiWithAuth('/api/firmware-shares/browse', {
             host,
-            user: state.fileBrowser.remoteUser || 'hcq',
+            user,
             path,
         }, host);
         const data = result.data || {};
         state.fileBrowser.currentPath = data.path || path;
         state.fileBrowser.remoteHost = data.host || state.fileBrowser.remoteHost || host;
-        state.fileBrowser.remoteUser = data.user || state.fileBrowser.remoteUser || 'hcq';
+        state.fileBrowser.remoteUser = data.user || user;
         renderFileList(data.files || []);
     } catch (error) {
         showToast('加载远端固件目录失败: ' + error.message, 'error');
@@ -6040,8 +6349,13 @@ function confirmFileSelection() {
         }
         fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
-            const user = state.fileBrowser.remoteUser || 'hcq';
-            const host = state.fileBrowser.remoteHost || '10.10.10.206';
+            const defaults = firmwareShareDefaults();
+            const user = state.fileBrowser.remoteUser || defaults.user;
+            const host = state.fileBrowser.remoteHost || defaults.host;
+            if (!user || !host) {
+                showToast('共享固件主机配置不完整', 'error');
+                return;
+            }
             targetInput.value = `${user}@${host}:${fullPath}`;
             addLogEntry(`已选择共享固件: ${targetInput.value}`, 'info');
         }
@@ -6108,6 +6422,12 @@ function navigateToParent() {
 function navigateToRoot() {
     if (state.fileBrowser.mode === 'utility-tool') {
         ut_loadToolDir('');
+        return;
+    }
+
+    if (state.fileBrowser.mode === 'retry' && state.fileBrowser.clusterWorkerId) {
+        loadFileDirectory('results');
+        addLogEntry('导航到 Worker 测试报告目录: results', 'info');
         return;
     }
 
@@ -6179,7 +6499,7 @@ async function startTest() {
         state.wsLogStallTicks = 0;
 
         const startResult = await apiCall('/api/test/start', 'POST', {
-            worker_id: document.getElementById('cluster-worker')?.value || 'worker-local',
+            worker_id: workspaceWorkerId(),
             devices: Array.from(state.selectedDevices),
             test_type: testType,
             test_module: testModule,
@@ -6193,6 +6513,15 @@ async function startTest() {
             state.clusterJobId = clusterJobId;
             state.clusterEventSequence = -1;
             sessionStorage.setItem('active_cluster_job', clusterJobId);
+            window.GmsWorkspace?.update({
+                worker_id: workspaceWorkerId(),
+                device_ids: Array.from(state.selectedDevices),
+                suite_key: suitePath,
+                suite_path: suitePath,
+                cluster_job_id: clusterJobId,
+                attempt_id: startResult?.data?.attempt_id || startResult?.attempt_id || '',
+                origin_page: 'test'
+            }, {source: 'test-start'});
             addLogEntry(`分布式任务 ${clusterJobId} 已排队`, 'info');
         }
 
@@ -6201,6 +6530,7 @@ async function startTest() {
         updateTestToggleButton(true);
         addLogEntry('测试已启动', 'success');
         showToast('测试已启动', 'success');
+        switchLogTab('module');
 
         // 刷新设备列表以更新锁定状态
         await refreshDevices();
@@ -6230,6 +6560,7 @@ async function stopTest() {
         state.clusterJobId = '';
         state.clusterEventSequence = -1;
         sessionStorage.removeItem('active_cluster_job');
+        window.GmsWorkspace?.update({cluster_job_id: '', attempt_id: ''}, {source: 'test-stop'});
         updateTestToggleButton(false);
 
         addLogEntry('测试已停止', 'warning');
@@ -6256,6 +6587,7 @@ function updateTestToggleButton(isTesting) {
 
     // 禁用/启用测试相关输入框
     const testInputs = [
+        'cluster-worker', // 测试执行期间不可切换目标主机
         'test-type',      // 测试类型
         'test-module',    // 测试模块
         'test-case',      // 测试用例
@@ -6266,7 +6598,12 @@ function updateTestToggleButton(isTesting) {
     testInputs.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
-            element.disabled = isTesting;
+            element.disabled = id === 'cluster-worker'
+                ? Boolean(isTesting || !(
+                    state.clusterStatus?.enabled
+                    && window.GmsWorkspace?.get?.().scope_mode === 'cluster'
+                ))
+                : isTesting;
         }
     });
 
@@ -6281,7 +6618,9 @@ function updateTestToggleButton(isTesting) {
 
 async function cleanTest() {
     try {
-        await apiCall('/api/test/clean', 'POST');
+        if (isLocalWorkspaceWorker(workspaceWorkerId())) {
+            await apiCall('/api/test/clean', 'POST');
+        }
         const systemOut = getLogContainer('system');
         const moduleOut = getLogContainer('module');
         if (systemOut) systemOut.innerHTML = '';
@@ -6779,6 +7118,11 @@ function startStatusPolling() {
                     apiCall(`/api/cluster/jobs/${jobId}/events?after=${encodeURIComponent(String(state.clusterEventSequence ?? -1))}&limit=1000`)
                 ]);
                 const job = jobResponse.job;
+                window.GmsWorkspace?.update({
+                    worker_id: job.assigned_worker_id || workspaceWorkerId(),
+                    cluster_job_id: job.id || state.clusterJobId,
+                    attempt_id: job.current_attempt_id || ''
+                }, {source: 'test-poll'});
                 const events = eventResponse.events || [];
                 events.forEach(event => addNormalizedLogEntry({message: event.message,
                     type: event.level === 'error' ? 'error' : 'info',
@@ -6794,6 +7138,11 @@ function startStatusPolling() {
                     state.clusterJobId = '';
                     state.clusterEventSequence = -1;
                     sessionStorage.removeItem('active_cluster_job');
+                    window.GmsWorkspace?.update({
+                        report_id: `cluster-${job.id}`,
+                        report_timestamp: `cluster-${job.id}`,
+                        origin_page: 'test'
+                    }, {source: 'test-complete'});
                     loadDevices(true).catch(() => {});
                 }
                 pollInterval = active ? 1000 : 3000;
@@ -6899,7 +7248,8 @@ function startStatusPolling() {
 
 async function checkInitialTestStatus() {
     try {
-        const savedClusterJob = sessionStorage.getItem('active_cluster_job') || '';
+        const workspace = await (window.GmsWorkspace?.ready || Promise.resolve({}));
+        const savedClusterJob = sessionStorage.getItem('active_cluster_job') || workspace.cluster_job_id || '';
         if (savedClusterJob) {
             state.clusterJobId = savedClusterJob;
             state.clusterEventSequence = -1;
@@ -7105,16 +7455,32 @@ async function loadReportWorkers() {
     try {
         const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
         const payload = await response.json();
-        const previous = select.value;
+        const workspace = await (window.GmsWorkspace?.ready || Promise.resolve({}));
+        const previous = workspace.scope_mode === 'cluster' ? (workspace.worker_id || '') : workspaceLocalWorkerId();
         select.innerHTML = '<option value="">全部 Worker</option>' + (payload.workers || []).map(worker =>
             `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)}</option>`
         ).join('');
-        select.value = previous;
+        if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
         reportsWorkersLoaded = true;
     } catch (error) {
         debugLog('[Reports] Worker filter unavailable:', error);
     }
 }
+
+async function switchReportsWorker() {
+    const workerId = document.getElementById('reports-worker-filter')?.value || '';
+    if (workerId) {
+        window.GmsWorkspace?.update({
+            scope_mode: isLocalWorkspaceWorker(workerId) ? window.GmsWorkspace.get().scope_mode : 'cluster',
+            worker_id: workerId,
+            origin_page: 'reports'
+        }, {source: 'reports'});
+        syncWorkspaceWorkerSelectors(workerId);
+    }
+    await loadTestReports(currentUserFilter);
+}
+
+window.switchReportsWorker = switchReportsWorker;
 
 function reportsListUrl(userOnly) {
     const params = new URLSearchParams();
@@ -7251,6 +7617,13 @@ function displayTestReports(reports) {
         tr.dataset.timestamp = report.timestamp;
         tr.dataset.testType = report.test_type || '';
         tr.dataset.suitePath = report.suite_path || '';
+        tr.dataset.workerId = report.worker_id || workspaceLocalWorkerId();
+        tr.dataset.clusterJobId = report.cluster_job_id || '';
+        tr.dataset.attemptId = report.attempt_id || '';
+        tr.dataset.automationRunId = report.automation_run_id || '';
+        tr.dataset.reportId = report.report_id || report.timestamp || '';
+        tr.dataset.artifactId = report.artifact_id || '';
+        tr.dataset.sourceTimestamp = report.source_timestamp || '';
 
         tr.innerHTML = `
             <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${escapeHtml(displayClient)}</td>
@@ -7294,6 +7667,19 @@ function handleReportAction(event) {
     const timestamp = tr.dataset.timestamp;
     const testType = tr.dataset.testType;
     const suitePath = tr.dataset.suitePath;
+    const reportContext = {
+        worker_id: tr.dataset.workerId || workspaceLocalWorkerId(),
+        cluster_job_id: tr.dataset.clusterJobId || '',
+        attempt_id: tr.dataset.attemptId || '',
+        automation_run_id: tr.dataset.automationRunId || '',
+        report_id: tr.dataset.reportId || timestamp,
+        report_timestamp: timestamp,
+        artifact_id: tr.dataset.artifactId || '',
+        source_timestamp: tr.dataset.sourceTimestamp || '',
+        suite_path: suitePath || '',
+        origin_page: 'reports'
+    };
+    window.GmsWorkspace?.update(reportContext, {source: 'reports'});
 
     event.stopPropagation();
 
@@ -7302,16 +7688,16 @@ function handleReportAction(event) {
             analyzeReport(timestamp);
             break;
         case 'retry':
-            retryReportWithSuite(timestamp, testType, suitePath);
+            retryReportWithSuite(timestamp, testType, suitePath, reportContext);
             break;
         case 'download':
             downloadReport(timestamp);
             break;
         case 'results':
-            openReportSuiteDirectory(timestamp, suitePath, testType, 'results');
+            openReportSuiteDirectory(timestamp, suitePath, testType, 'results', reportContext);
             break;
         case 'logs':
-            openReportSuiteDirectory(timestamp, suitePath, testType, 'logs');
+            openReportSuiteDirectory(timestamp, suitePath, testType, 'logs', reportContext);
             break;
         case 'delete':
             deleteReport(timestamp);
@@ -7319,13 +7705,20 @@ function handleReportAction(event) {
     }
 }
 
-async function openReportSuiteDirectory(timestamp, suitePath, testType, kind) {
+async function openReportSuiteDirectory(timestamp, suitePath, testType, kind, reportContext = {}) {
     if (!timestamp || !['results', 'logs'].includes(kind)) {
         showToast('报告目录参数无效', 'error');
         return;
     }
 
-    if (!testSuitesCache.length) {
+    const workerId = reportContext.worker_id || workspaceLocalWorkerId();
+    window.GmsWorkspace?.update({...reportContext, worker_id: workerId}, {source: 'reports'});
+    const suiteWorker = document.getElementById('suite-worker-select');
+    if (suiteWorker) {
+        await loadSuiteWorkerSelector();
+        if (Array.from(suiteWorker.options).some(option => option.value === workerId)) suiteWorker.value = workerId;
+        await loadSuitesForBrowserWorker(false);
+    } else if (!testSuitesCache.length || testSuitesWorkerId !== workerId) {
         await loadTestSuites();
     }
 
@@ -7335,7 +7728,7 @@ async function openReportSuiteDirectory(timestamp, suitePath, testType, kind) {
         return;
     }
 
-    const targetPath = `${kind}/${timestamp}`;
+    const targetPath = `${kind}/${reportContext.source_timestamp || timestamp}`;
     switchPage('test-suites', null);
     await selectTestSuiteForBrowser(resolvedSuitePath, targetPath);
 }
@@ -7447,8 +7840,17 @@ async function retryReport(timestamp, testType) {
     }
 }
 
-async function retryReportWithSuite(timestamp, testType, suitePath) {
+async function retryReportWithSuite(timestamp, testType, suitePath, reportContext = {}) {
     try {
+        const workerId = reportContext.worker_id || workspaceLocalWorkerId();
+        const workerSelect = document.getElementById('cluster-worker');
+        if (workerSelect) {
+            await loadClusterWorkers();
+            if (Array.from(workerSelect.options).some(option => option.value === workerId)) {
+                workerSelect.value = workerId;
+                await switchTestWorker();
+            }
+        }
         // 先切换到测试界面
         switchPage('test');
 
@@ -7616,6 +8018,27 @@ function openReportAnalysis(timestamp) {
 
 async function analyzeReport(timestamp) {
     try {
+        // 从报告列表行中提前回写 Worker 上下文，确保分析结果跳转和后续操作
+        // 能正确继承来源 Worker / Cluster Job 信息。
+        const reportRow = document.querySelector(`tr[data-timestamp="${timestamp}"]`);
+        if (reportRow) {
+            const reportContext = {
+                worker_id: reportRow.dataset.workerId || workspaceWorkerId(),
+                cluster_job_id: reportRow.dataset.clusterJobId || '',
+                attempt_id: reportRow.dataset.attemptId || '',
+                automation_run_id: reportRow.dataset.automationRunId || '',
+                report_id: reportRow.dataset.reportId || timestamp,
+                report_timestamp: timestamp,
+                artifact_id: reportRow.dataset.artifactId || '',
+                suite_path: reportRow.dataset.suitePath || '',
+                origin_page: 'report-analysis'
+            };
+            window.GmsWorkspace?.update(reportContext, {source: 'report-analysis'});
+        } else {
+            window.GmsWorkspace?.update({report_timestamp: timestamp, origin_page: 'report-analysis'},
+                {source: 'report-analysis'});
+        }
+
         // 切换到报告分析页面
         const sidebarItem = document.querySelector('[data-page="report-analysis"]');
         if (sidebarItem) {
@@ -8510,6 +8933,25 @@ function displayReportAnalysis(data) {
     // 保存当前报告名称到全局变量，供失败用例卡片使用（使用一次性状态）
     window.currentReportName = data.report_name || '';
     window.currentReportAnalysisData = data;
+    const provenance = data.provenance || {};
+    if (Object.keys(provenance).length) {
+        window.GmsWorkspace?.update({
+            worker_id: provenance.worker_id || workspaceWorkerId(),
+            cluster_job_id: provenance.cluster_job_id || '',
+            attempt_id: provenance.attempt_id || '',
+            automation_run_id: provenance.automation_run_id || '',
+            report_id: data.report_id || provenance.report_id || '',
+            report_timestamp: data.report_timestamp || provenance.timestamp || '',
+            artifact_id: provenance.artifact_id || '',
+            gerrit_change_id: provenance.gerrit_change_id || '',
+            gerrit_patchset: provenance.gerrit_patchset || '',
+            redmine_issue_id: provenance.redmine_issue_id || '',
+            suite_path: provenance.suite_path || '',
+            origin_page: 'report-analysis'
+        }, {source: 'report-analysis'});
+    }
+    // 渲染报告分析页的 workspace 徽标（无论 provenance 是否存在）
+    renderWorkspaceBadge('report-workspace-badge');
     if (DEBUG) debugLog('[displayReportAnalysis] Current report name:', window.currentReportName);
 
     const resultDiv = ensureReportAnalysisResultStructure();
@@ -8600,8 +9042,25 @@ function displayReportAnalysis(data) {
         console.error('[displayReportAnalysis] Summary not generated. summaryDiv:', summaryDiv, 'data.summary:', data.summary);
     }
 
-    // 详情区保留给后续扩展；当前不额外展示报告级操作栏。
-    if (detailsDiv) detailsDiv.innerHTML = '';
+    if (detailsDiv) {
+        const fields = [
+            ['Worker', provenance.worker_id], ['Job', provenance.cluster_job_id],
+            ['Attempt', provenance.attempt_id], ['ATS Run', provenance.automation_run_id],
+            ['Artifact', provenance.artifact_id], ['Gerrit', provenance.gerrit_change_id],
+            ['Redmine', provenance.redmine_issue_id]
+        ].filter(([, value]) => value);
+        detailsDiv.innerHTML = fields.length ? `
+            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;border-top:1px solid var(--border-color);padding-top:10px;">
+                ${fields.map(([label, value]) => `<span style="padding:3px 7px;border:1px solid var(--border-color);border-radius:10px;"><b>${escapeHtml(label)}</b> ${escapeHtml(value)}</span>`).join('')}
+                ${provenance.cluster_job_id ? '<button class="btn-xs" data-provenance-page="cluster">打开集群任务</button>' : ''}
+                ${provenance.automation_run_id ? '<button class="btn-xs" data-provenance-page="automation">打开 ATS</button>' : ''}
+                ${provenance.gerrit_change_id ? '<button class="btn-xs" data-provenance-page="gerrit-dashboard">打开 Gerrit</button>' : ''}
+                ${provenance.redmine_issue_id ? '<button class="btn-xs" data-provenance-page="redmine-agent">打开 Redmine</button>' : ''}
+            </div>` : '';
+        detailsDiv.querySelectorAll('[data-provenance-page]').forEach(button => {
+            button.addEventListener('click', () => window.GmsWorkspace?.navigate(button.dataset.provenancePage));
+        });
+    }
 
     // 显示失败用例
     if (failuresDiv && failureList && data.failures && data.failures.length > 0) {
@@ -10168,6 +10627,62 @@ let agentInputHistory = JSON.parse(localStorage.getItem('gms_agent_input_history
 let agentHistoryIndex = -1;  // -1 = not browsing history
 const agentHandledAutoOpenMessageIds = new Set();
 
+function getAgentWorkspaceContext() {
+    const context = window.GmsWorkspace?.get?.() || {};
+    return {
+        scope_mode: context.scope_mode || 'single',
+        worker_id: context.worker_id || workspaceLocalWorkerId(),
+        device_ids: Array.isArray(context.device_ids) ? context.device_ids : [],
+        suite_key: context.suite_key || '',
+        suite_path: context.suite_path || '',
+        cluster_job_id: context.cluster_job_id || '',
+        attempt_id: context.attempt_id || '',
+        automation_run_id: context.automation_run_id || '',
+        report_id: context.report_id || '',
+        report_timestamp: context.report_timestamp || '',
+        artifact_id: context.artifact_id || '',
+        gerrit_change_id: context.gerrit_change_id || '',
+        gerrit_patchset: context.gerrit_patchset || '',
+        redmine_issue_id: context.redmine_issue_id || '',
+        origin_page: 'agent'
+    };
+}
+
+function renderAgentWorkspaceContext(context = getAgentWorkspaceContext()) {
+    const el = $('agent-workspace-context');
+    if (!el) return;
+    const fields = [
+        ['模式', context.scope_mode === 'cluster' ? '集群' : '单机'],
+        ['Worker', context.worker_id || workspaceLocalWorkerId()],
+        ['设备', (context.device_ids || []).join(', ')],
+        ['任务', context.cluster_job_id],
+        ['报告', context.report_timestamp || context.report_id],
+        ['Gerrit', context.gerrit_change_id ? `#${context.gerrit_change_id}${context.gerrit_patchset ? `/${context.gerrit_patchset}` : ''}` : ''],
+        ['Redmine', context.redmine_issue_id ? `#${context.redmine_issue_id}` : '']
+    ].filter(([, value], index) => index < 2 || value);
+    el.innerHTML = fields.map(([key, value]) =>
+        `<span style="padding:2px 6px;border:1px solid var(--border-color);border-radius:999px;"><b style="color:var(--text-primary);">${escapeHtml(key)}</b> ${escapeHtml(value || '-')}</span>`
+    ).join('');
+}
+
+function applyAgentSessionWorkspace(session) {
+    const context = session?.workspace_context;
+    if (!context || typeof context !== 'object') return;
+    const current = getAgentWorkspaceContext();
+    // An idle historical session is descriptive, not authoritative. Applying
+    // its old worker-local value here used to undo the Worker selected on the
+    // test/device page as soon as Agent opened.
+    const authoritative = ['planning', 'running', 'monitoring', 'analyzing'].includes(session?.status)
+        || Boolean(context.cluster_job_id || context.automation_run_id);
+    if (authoritative) {
+        const changed = Object.keys(context).some(key => JSON.stringify(current[key]) !== JSON.stringify(context[key]));
+        if (changed) window.GmsWorkspace?.update(context, {source: 'agent'});
+        renderAgentWorkspaceContext({...current, ...context});
+    } else {
+        renderAgentWorkspaceContext(current);
+    }
+}
+
 function getAgentStatusLabel(status) {
     const labels = {
         idle: '空闲',
@@ -10383,6 +10898,7 @@ function renderAgentSession(session) {
     }
     renderAgentMessages(session);
     renderAgentSteps(session);
+    applyAgentSessionWorkspace(session);
 
     if (['running', 'monitoring'].includes(session.status)) {
         startAgentPolling();
@@ -10461,7 +10977,8 @@ async function sendAgentMessage(execute = false, overrideMessage = '') {
             body: JSON.stringify({
                 session_id: agentSessionId || null,
                 message: message || '确认执行',
-                execute
+                execute,
+                workspace_context: getAgentWorkspaceContext()
             })
         });
         if (!response.ok) {
@@ -10518,7 +11035,8 @@ async function sendAgentAction(action, paramsJson = '{}', label = '') {
                 message: display,
                 action,
                 params,
-                execute: false
+                execute: false,
+                workspace_context: getAgentWorkspaceContext()
             })
         });
         const indicator = document.getElementById('agent-typing');
@@ -10555,6 +11073,13 @@ function openAgentPageAction(page, paramsJson = '{}') {
         const frame = document.getElementById('gerrit-dashboard-frame');
         if (frame) frame.src = '/gerrit-dashboard';
     }
+    const contextPatch = {};
+    if (params.worker_id) Object.assign(contextPatch, {scope_mode: isLocalWorkspaceWorker(params.worker_id) ? 'single' : 'cluster', worker_id: params.worker_id});
+    if (params.devices) contextPatch.device_ids = params.devices;
+    if (params.report_timestamp || params.timestamp) contextPatch.report_timestamp = params.report_timestamp || params.timestamp;
+    if (params.issue_id) contextPatch.redmine_issue_id = String(params.issue_id);
+    if (params.change_id) contextPatch.gerrit_change_id = String(params.change_id);
+    if (Object.keys(contextPatch).length) window.GmsWorkspace?.update(contextPatch, {source: 'agent-navigation'});
     switchPage(page, null);
 }
 
@@ -10591,6 +11116,7 @@ async function cancelAgentSession() {
 }
 
 function openAgentReportAnalysis(timestamp) {
+    window.GmsWorkspace?.update({report_timestamp: timestamp || '', origin_page: 'agent'}, {source: 'agent-report'});
     switchPage('report-analysis', null);
     if (typeof analyzeReport === 'function' && timestamp) {
         analyzeReport(timestamp);
@@ -10616,6 +11142,7 @@ function openAgentApkAnalysis(taskId) {
 }
 
 function initAgentPage() {
+    renderAgentWorkspaceContext();
     if (!agentInitialized) {
         agentInitialized = true;
         const input = $('agent-input');
@@ -10672,6 +11199,10 @@ function initAgentPage() {
         renderAgentSession({ status: 'idle', messages: [], steps: [] });
     }
 }
+
+window.addEventListener('gms:workspace-context', event => {
+    renderAgentWorkspaceContext(event.detail?.context || getAgentWorkspaceContext());
+});
 
 // ==================== 全局函数暴露 ====================
 // 将 HTML onclick 需要的函数暴露到 window 对象
@@ -11018,12 +11549,12 @@ async function confirmAndSendRedmineReply(modalId) {
     .then(response => response.json())
     .then(result => {
         if (result.success) {
-            const attachMsg = result.attachments ? `，携带 ${result.attachments} 个附件` : '';
+            const replyData = result.data || result;
+            const attachMsg = replyData.attachments ? `，携带 ${replyData.attachments} 个附件` : '';
             showToast(`✅ 回复已成功发送到 Redmine #${issueId}${attachMsg}`, 'success');
-            // 可选：打开 Redmine 页面查看
-            setTimeout(() => {
-                window.open(`https://redmine.rock-chips.com/issues/${issueId}`, '_blank');
-            }, 800);
+            if (replyData.issue_url) {
+                setTimeout(() => window.open(replyData.issue_url, '_blank', 'noopener'), 800);
+            }
         } else {
             showToast('❌ 发送失败：' + (result.error || result.detail || '未知错误'), 'error');
         }

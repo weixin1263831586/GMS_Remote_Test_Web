@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import getpass
 import os
 import re
 import threading
@@ -115,7 +116,7 @@ def _host_credentials(host: str, user: str | None, config: dict[str, Any]) -> di
         local_server = str(config.get("local_server") or "")
         if "@" in local_server:
             default_user = local_server.rsplit("@", 1)[0]
-    default_user = default_user or config.get("ubuntu_user") or "hcq"
+    default_user = default_user or config.get("ubuntu_user") or getpass.getuser()
 
     key_filename = host_config.get("key_filename") or share_config.get("key_filename") or config.get("firmware_share_key")
     password = (
@@ -385,11 +386,45 @@ async def browse_firmware_share_remote(request: Request):
         if remote:
             host, user, path = _parse_remote_spec(remote)
         else:
-            host = str(payload.get("host") or "10.10.10.206").strip()
-            user = str(payload.get("user") or "hcq").strip() or None
-            path = str(PurePosixPath(str(payload.get("path") or "/home/hcq")))
+            config = runtime.config_manager.load_config()
+            share_config = config.get("firmware_shares") or {}
+            default_remote = str(share_config.get("default_remote") or "").strip()
+            remote_host = ""
+            remote_user = None
+            remote_path = ""
+            if default_remote:
+                remote_host, remote_user, remote_path = _parse_remote_spec(default_remote)
+            local_server = str(config.get("local_server") or "").strip()
+            local_user, _, local_host = local_server.rpartition("@")
+            if not local_user:
+                local_host = local_server
+            host = str(
+                payload.get("host")
+                or share_config.get("default_host")
+                or remote_host
+                or local_host
+                or config.get("ubuntu_host")
+                or ""
+            ).strip()
+            user = str(
+                payload.get("user")
+                or share_config.get("default_user")
+                or remote_user
+                or local_user
+                or config.get("ubuntu_user")
+                or getpass.getuser()
+            ).strip() or None
+            path = str(PurePosixPath(str(
+                payload.get("path")
+                or share_config.get("default_path")
+                or remote_path
+                or (f"/home/{user}" if user else "/home")
+            )))
+            if not host:
+                raise ValueError("未配置共享固件主机")
         password = payload.get("password") or None
-        config = runtime.config_manager.load_config()
+        if remote:
+            config = runtime.config_manager.load_config()
         info = _list_remote_dir(host, user, path, config, password=password)
         return success_response(data=info)
     except _AuthError as exc:

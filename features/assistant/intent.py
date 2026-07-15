@@ -62,6 +62,12 @@ _EXACT_COMMANDS: list[tuple] = [
     (r"^(APK任务|apk任务|反编译任务)$", "apk_tasks", {}),
     (r"^(重启设备?)", "devices_reboot", {}),
     (r"^(用户|用户列表|在线用户)", "users_list", {}),
+    (r"^(ATS状态|ATS总览|自动化状态)$", "automation_dashboard", {}),
+    (r"^(ATS任务|ATS运行记录|自动化任务)$", "automation_runs", {}),
+    (r"^(集群状态|cluster\s*status)$", "cluster_status", {}),
+    (r"^(集群主机|Worker列表|集群Worker)$", "cluster_workers", {}),
+    (r"^(集群任务|Cluster\s*Jobs?)$", "cluster_jobs", {}),
+    (r"^(构建任务|编译任务|Build\s*Jobs?)$", "build_jobs", {}),
 ]
 
 # Navigation aliases
@@ -83,8 +89,10 @@ _NAV_ALIASES: dict[str, str] = {
     "gms助手": "gms-assistant",
     "gms ats": "automation", "ats": "automation", "自动化": "automation", "自动化测试": "automation",
     "gms自动化": "automation", "自动化链路": "automation",
+    "主机集群": "cluster", "集群": "cluster", "cluster": "cluster", "worker": "cluster",
     "redmine": "redmine-agent", "redmine看板": "redmine-agent", "部门看板": "redmine-agent",
     "gerrit": "gerrit-dashboard", "gerrit看板": "gerrit-dashboard", "代码评审": "gerrit-dashboard",
+    "个人知识库": "notes", "知识库": "notes", "wiki": "notes", "笔记": "notes",
     "agent": "agent", "对话agent": "agent",
 }
 
@@ -222,6 +230,15 @@ def _extract_profile_id(text: str) -> str:
 def _extract_query_text(text: str) -> str:
     m = re.search(r"(?:query|查询条件)\s*[:：=]\s*(.+)$", text, re.IGNORECASE)
     return m.group(1).strip() if m else ""
+
+
+def _extract_knowledge_text(text: str) -> str:
+    match = re.search(
+        r"(?:知识库|wiki)?\s*(?:搜索|查找|查询|问答|提问|问)\s*[:：]?\s*(.+)$",
+        text,
+        re.IGNORECASE,
+    )
+    return match.group(1).strip() if match else _extract_query_text(text)
 
 
 def _extract_suite_module_query(text: str) -> str:
@@ -375,6 +392,24 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
                 stage="rule",
             )
 
+    if re.search(r"知识库|wiki", lowered_text, re.IGNORECASE):
+        asks = bool(re.search(r"问答|提问|基于.*回答|问(?:知识库|wiki)", text, re.IGNORECASE))
+        tool_name = "knowledge_ask" if asks else "knowledge_search"
+        tool = registry.get(tool_name)
+        query = _extract_knowledge_text(text)
+        if tool and query:
+            key = "question" if asks else "q"
+            return ResolvedIntent(
+                tool_name=tool_name,
+                tool=tool,
+                confidence=0.9,
+                params={key: query},
+                needs_confirm=False,
+                is_run_test=False,
+                context_entities={},
+                stage="rule",
+            )
+
     if re.search(r"testcases?|测试项|测试模块|模块", lowered_text) and re.search(r"哪些|列表|列出|查询|查看|相关|module", lowered_text):
         tool = registry.get("suite_modules")
         if tool:
@@ -502,7 +537,7 @@ def _extract_params_for_tool(text: str, tool: AgentTool) -> dict[str, Any]:
             tid = _extract_task_id(text)
             if tid:
                 params["task_id"] = tid
-        elif pname in ("ssid", "vpn_name", "username", "ip", "device_host", "url", "path", "archive_path", "suite_path", "sn_code", "serial_no"):
+        elif pname in ("ssid", "vpn_name", "username", "ip", "device_host", "url", "path", "archive_path", "suite_path", "sn_code", "serial_no", "worker_id", "space_id"):
             value = _extract_quoted_value(text, [pname, pdef.get("desc", ""), "名称", "地址", "路径", "序列号"])
             if value:
                 params[pname] = value
@@ -528,6 +563,34 @@ def _extract_params_for_tool(text: str, tool: AgentTool) -> dict[str, Any]:
                 query = _extract_suite_module_query(text)
             if query:
                 params["query"] = query
+        elif pname in ("q", "question"):
+            query = _extract_knowledge_text(text)
+            if query:
+                params[pname] = query
+        elif pname in ("run_id", "job_id"):
+            prefix = r"(?:run|ats)" if pname == "run_id" else r"(?:job|cluster|build)"
+            match = re.search(
+                rf"(?:{pname}|{prefix}(?:任务|运行)?)\s*[:：#]?\s*([A-Za-z0-9][A-Za-z0-9_.-]{{3,}})",
+                text,
+                re.IGNORECASE,
+            )
+            if not match:
+                match = re.search(r"\b((?:run|job|build)[_-][A-Za-z0-9_.-]+)\b", text, re.IGNORECASE)
+            if match:
+                params[pname] = match.group(1)
+        elif pname == "enabled":
+            if re.search(r"关闭|禁用|停用|单机", text):
+                params[pname] = False
+            elif re.search(r"开启|启用|打开|集群模式", text):
+                params[pname] = True
+        elif pname == "title":
+            value = _extract_quoted_value(text, ["title", "标题"])
+            if value:
+                params[pname] = value
+        elif pname == "content":
+            match = re.search(r"(?:content|内容|正文)\s*[:：=]\s*(.+)$", text, re.IGNORECASE)
+            if match:
+                params[pname] = match.group(1).strip()
         elif pname == "suite_types":
             suite_types = _extract_suite_types(text)
             if suite_types:

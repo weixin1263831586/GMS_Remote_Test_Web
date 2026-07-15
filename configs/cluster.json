@@ -4,6 +4,7 @@
   "local_worker_id": "worker-local",
   "heartbeat_interval_seconds": 15,
   "worker_offline_seconds": 45,
+  "worker_registration_timeout_seconds": 45,
   "lease_ttl_seconds": 90,
   "remote_dispatch_enabled": true,
   "global_device_pool_enabled": true,

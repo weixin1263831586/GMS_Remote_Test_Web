@@ -46,7 +46,9 @@ TERMINAL_STATUSES = {
 
 
 def utc_now_iso() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    # Sub-second precision keeps least-recently-advanced scheduling fair when
+    # several runs transition during the same worker tick.
+    return datetime.utcnow().isoformat(timespec="microseconds") + "Z"
 
 
 def normalize_devices(devices: list[Any]) -> list[dict[str, Any]]:
@@ -73,6 +75,7 @@ class AutomationRunCreateRequest(BaseModel):
     gerrit_patchset: str = ""
     gerrit_subject: str = ""
     owner: str = ""
+    jenkins_job: str = ""
     artifact_url: str = ""
     artifact_path: str = ""
     devices: list[Any] = Field(default_factory=list)
@@ -91,23 +94,34 @@ class AutomationRunCreateRequest(BaseModel):
             "gerrit_patchset": self.gerrit_patchset,
             "gerrit_subject": self.gerrit_subject,
             "owner": self.owner,
+            "created_by": "",
             "status": RUN_STATUS_QUEUED,
             "current_stage": RUN_STATUS_QUEUED,
-            "jenkins_job": "",
+            "jenkins_job": self.jenkins_job,
             "jenkins_queue_url": "",
             "jenkins_build_number": "",
             "jenkins_build_url": "",
             "artifact_url": self.artifact_url,
             "artifact_path": self.artifact_path,
+            "build_artifact_id": "",
+            "worker_id": str((self.test_plan or {}).get("worker_id") or "worker-local"),
+            "device_reservation_id": "",
+            "flash_stage_id": "",
+            "flash_command_id": "",
+            "cluster_job_id": "",
+            "attempt_id": "",
             "devices_json": json.dumps(normalize_devices(self.devices), ensure_ascii=False, separators=(",", ":")),
             "test_plan_json": json.dumps(self.test_plan or {}, ensure_ascii=False, separators=(",", ":")),
             "report_timestamp": "",
+            "report_id": "",
             "result_json": "{}",
             "error": "",
             "created_at": now,
             "updated_at": now,
             "started_at": "",
             "finished_at": "",
+            "lease_owner": "",
+            "lease_expires_at": "",
         }
 
 

@@ -8,6 +8,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
 
 
 def _iso(dt: datetime) -> str:
@@ -52,6 +53,9 @@ class _FakeBuildService:
         self.polled.append(job_id)
         return self.store.get_job(job_id)
 
+    def start_queued_jobs(self):
+        return 0
+
 
 class _FakeAutomationService:
     def __init__(self, store, executor_name="http"):
@@ -67,6 +71,9 @@ class _FakeAutomationService:
         from features.automation.orchestrator import AutomationOrchestrator
 
         return AutomationOrchestrator(self.store, StubAutomationExecutor())
+
+    def list_events(self, run_id):
+        return self.store.list_events(run_id)
 
     def worker_tick(self, executor_name="stub"):
         # Advance exactly one run per tick, like the real advance_next.
@@ -139,6 +146,11 @@ class StaleSweepTests(unittest.TestCase):
 
             build_svc = _FakeBuildService(build_store)
             auto_svc = _FakeAutomationService(auto_store)
+            real_orchestrator = auto_svc.orchestrator()
+            real_orchestrator.cancel_run = MagicMock(
+                wraps=real_orchestrator.cancel_run
+            )
+            auto_svc.orchestrator = MagicMock(return_value=real_orchestrator)
 
             result = stale_sweep_once(cfg, automation_service=auto_svc, build_service=build_svc)
 
@@ -146,6 +158,9 @@ class StaleSweepTests(unittest.TestCase):
             self.assertEqual(build_store.get_job("j_old")["status"], JOB_FAILED)
             self.assertEqual(build_store.get_job("j_new")["status"], "running")
             self.assertEqual(auto_store.get_run("r_old")["status"], RUN_STATUS_CANCELLED)
+            real_orchestrator.cancel_run.assert_called_once_with(
+                "r_old", reason="stale before worker start", cleanup=True
+            )
 
 
 class PollRunningBuildsTests(unittest.TestCase):
@@ -204,6 +219,60 @@ class WaitingDeviceTimeoutTests(unittest.TestCase):
             self.assertEqual(cancelled, 1)
             self.assertEqual(store.get_run("r_old")["status"], RUN_STATUS_CANCELLED)
             self.assertEqual(store.get_run("r_new")["status"], RUN_STATUS_WAITING_DEVICE)
+
+
+class ActiveStageTimeoutTests(unittest.TestCase):
+    def test_stage_entry_time_survives_poll_updates_and_cancels_safe_stages(self):
+        from features.automation.models import (
+            RUN_STATUS_CANCELLED,
+            RUN_STATUS_REPORT_COLLECTING,
+            RUN_STATUS_TEST_RUNNING,
+            AutomationRunCreateRequest,
+        )
+        from features.automation.repository import AutomationStore
+        from features.automation.worker import sweep_active_stage_timeouts
+
+        cfg = {
+            "executor": "stub",
+            "test_timeout_seconds": 3600,
+            "report_collection_timeout_seconds": 600,
+        }
+        long_ago = _iso(datetime.now(timezone.utc) - timedelta(hours=2))
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            request = AutomationRunCreateRequest(
+                profile_id="p",
+                artifact_path="/tmp/x",
+                devices=["S1"],
+                test_plan={"test_type": "CTS"},
+            )
+
+            for run_id, stage in (
+                ("r_test_old", RUN_STATUS_TEST_RUNNING),
+                ("r_report_old", RUN_STATUS_REPORT_COLLECTING),
+                ("r_test_new", RUN_STATUS_TEST_RUNNING),
+            ):
+                store.create_run(request.to_run_dict(run_id))
+                store.update_run(run_id, status=stage, current_stage=stage)
+                event = store.append_event(run_id, stage, "info", "entered stage")
+                if run_id.endswith("_old"):
+                    with store._connect() as conn:
+                        conn.execute(
+                            "UPDATE automation_run_events SET created_at = ? WHERE id = ?",
+                            (long_ago, event["id"]),
+                        )
+                    # Polling refreshes updated_at; timeout must still use the
+                    # first stage event instead of this recent heartbeat.
+                    store.update_run(run_id, current_stage=stage)
+
+            service = _FakeAutomationService(store)
+            counts = sweep_active_stage_timeouts(cfg, automation_service=service)
+
+            self.assertEqual(counts, {"test_running": 1, "report_collecting": 1})
+            self.assertEqual(store.get_run("r_test_old")["status"], RUN_STATUS_CANCELLED)
+            self.assertEqual(store.get_run("r_report_old")["status"], RUN_STATUS_CANCELLED)
+            self.assertEqual(store.get_run("r_test_new")["status"], RUN_STATUS_TEST_RUNNING)
 
 
 class DeviceSelectorTests(unittest.TestCase):
@@ -294,6 +363,73 @@ class RunTickSyncTests(unittest.TestCase):
             self.assertGreaterEqual(result["advanced_runs"], 1)
             self.assertEqual(auto_store.get_run("r1")["status"], RUN_STATUS_COMPLETED)
             self.assertEqual(build_svc.polled, ["j1"])
+
+    def test_tick_honors_build_poll_interval(self):
+        from features.automation import worker
+        from features.automation.repository import AutomationStore
+        from features.build import BuildStore
+
+        cfg = {
+            "build_poll_interval_seconds": 60,
+            "stale_build_seconds": 7200,
+            "stale_run_seconds": 86400,
+            "waiting_device_timeout_seconds": 1800,
+            "executor": "stub",
+        }
+        previous_poll = worker._last_build_poll_at
+        previous_swept = worker._stale_swept
+        try:
+            worker._last_build_poll_at = 0.0
+            worker._stale_swept = True
+            with TemporaryDirectory() as tmp:
+                build_store = BuildStore(Path(tmp) / "build.sqlite3")
+                now = _iso(datetime.now(timezone.utc))
+                _make_build_job(
+                    build_store, job_id="j1", status="running", started_at=now
+                )
+                build_svc = _FakeBuildService(build_store)
+                auto_svc = _FakeAutomationService(
+                    AutomationStore(Path(tmp) / "automation.sqlite3")
+                )
+
+                first = worker.run_tick_sync(
+                    cfg, automation_service=auto_svc, build_service=build_svc
+                )
+                second = worker.run_tick_sync(
+                    cfg, automation_service=auto_svc, build_service=build_svc
+                )
+
+            self.assertEqual(first["polled_builds"], 1)
+            self.assertEqual(second["polled_builds"], 0)
+            self.assertEqual(build_svc.polled, ["j1"])
+        finally:
+            worker._last_build_poll_at = previous_poll
+            worker._stale_swept = previous_swept
+
+
+class WorkerLifecycleTests(unittest.TestCase):
+    def test_start_resets_stale_sweep_guard(self):
+        from features.automation import worker
+
+        previous_task = worker._task
+        previous_swept = worker._stale_swept
+        previous_poll = worker._last_build_poll_at
+        worker._task = None
+        worker._stale_swept = True
+        worker._last_build_poll_at = 42.0
+        task = MagicMock()
+        try:
+            with patch.object(
+                worker, "_load_worker_config", return_value={"enabled": True}
+            ), patch.object(worker.asyncio, "create_task", return_value=task) as create:
+                self.assertIs(worker.start_automation_worker(), task)
+            create.call_args.args[0].close()
+            self.assertFalse(worker._stale_swept)
+            self.assertEqual(worker._last_build_poll_at, 0.0)
+        finally:
+            worker._task = previous_task
+            worker._stale_swept = previous_swept
+            worker._last_build_poll_at = previous_poll
 
 
 if __name__ == "__main__":

@@ -264,6 +264,66 @@ async def list_users():
 
         users = list(temp_users.values())
 
+    # Durable Worker jobs live outside the process-local user_states map. Merge
+    # their owners and leases so the Users page remains truthful after a
+    # Controller restart and for tests running on remote hosts.
+    try:
+        from features.cluster import get_cluster_service
+
+        jobs = get_cluster_service().repository.list_jobs(limit=500)
+    except (RuntimeError, AttributeError):
+        jobs = []
+    active_statuses = {
+        "created", "queued", "leasing", "assigned", "dispatching", "running",
+        "stopping", "collecting", "worker_lost",
+    }
+    jobs_by_owner: dict[str, list[dict]] = {}
+    for job in jobs:
+        owner_id = str(job.get("owner_id") or "").strip()
+        if owner_id:
+            jobs_by_owner.setdefault(owner_id, []).append(job)
+    for owner_id, owner_jobs in jobs_by_owner.items():
+        active_jobs = [job for job in owner_jobs if job.get("status") in active_statuses]
+        leased_devices = [
+            lease.get("device_id")
+            for job in active_jobs
+            for lease in (job.get("leases") or [])
+            if lease.get("status") in {"active", "orphaned"} and lease.get("device_id")
+        ]
+        user_info = next((item for item in users if owner_id in {
+            str(item.get("user_id") or ""), str(item.get("client_id") or ""),
+            str(item.get("username") or ""),
+        }), None)
+        if user_info is None:
+            user_info = {
+                "client_id": owner_id,
+                "user_id": owner_id,
+                "username": owner_id,
+                "ip": "",
+                "source": "cluster",
+                "source_label": "集群",
+                "running": False,
+                "devices": [],
+                "last_seen": owner_jobs[0].get("updated_at", ""),
+                "created_at": owner_jobs[-1].get("created_at", ""),
+                "configured": False,
+            }
+            users.append(user_info)
+        user_info["cluster_running"] = bool(active_jobs)
+        user_info["running"] = bool(user_info.get("running") or active_jobs)
+        user_info["devices"] = list(dict.fromkeys([*(user_info.get("devices") or []), *leased_devices]))
+        user_info["worker_ids"] = sorted({
+            str(job.get("assigned_worker_id") or "") for job in active_jobs
+            if job.get("assigned_worker_id")
+        })
+        user_info["cluster_jobs"] = [{
+            "id": job.get("id", ""),
+            "attempt_id": job.get("current_attempt_id", ""),
+            "worker_id": job.get("assigned_worker_id", ""),
+            "status": job.get("status", ""),
+            "suite_key": job.get("suite_key", ""),
+        } for job in owner_jobs[:20]]
+
     return JSONResponse(content={
         'total': len(users),
         'users': users

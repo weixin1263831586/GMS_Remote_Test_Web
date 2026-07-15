@@ -246,15 +246,25 @@ def _build_devices_management_payload(
         auto_assign_new_devices,
         build_device_group_map,
     )
-    # 持续自动补全：把新接入且匹配 auto 分组规则的设备补进对应组（只增不减，不互斥）
-    groups = auto_assign_new_devices(username, device_data)
-    group_map = build_device_group_map(groups)
-
     all_usbip_sources = _prune_inactive_usbip_sources(
         device_ids,
         _known_usbip_sources(),
         config,
     )
+    # 为 worker 维度的自动分组补全提供 source_host 属性。
+    # 值必须与 auto_group_devices 使用的 worker 友好名称一致：
+    # 本地设备 = "user@host"，USB/IP 设备 = 原始 source 字符串。
+    for device_id in device_ids:
+        if device_id in all_usbip_sources:
+            device_data.setdefault(device_id, {})["source_host"] = (
+                all_usbip_sources.get(device_id, {}).get("source", "Unknown")
+            )
+        else:
+            device_data.setdefault(device_id, {})["source_host"] = f"{ubuntu_user}@{ubuntu_host}"
+    # 持续自动补全：把新接入且匹配 auto 分组规则的设备补进对应组（只增不减，不互斥）
+    groups = auto_assign_new_devices(username, device_data)
+    group_map = build_device_group_map(groups)
+
     for device_id in device_ids:
         props = device_data.get(device_id, {})
         lock_info = locks.get(device_id, {})

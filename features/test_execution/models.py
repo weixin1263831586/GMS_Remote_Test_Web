@@ -13,6 +13,13 @@ class TestStartRequest(BaseModel):
     local_server: str = ""
     devices: list[str] = Field(default_factory=list)
     client_id: str = "test_client"
+    automation_run_id: str = ""
+    device_reservation_id: str = ""
+    build_id: str = ""
+    build_artifact_id: str = ""
+    gerrit_change_id: str = ""
+    gerrit_patchset: str = ""
+    redmine_issue_id: str = ""
 
 
 class TestParseArgsRequest(BaseModel):

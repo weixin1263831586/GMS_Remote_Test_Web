@@ -6,6 +6,7 @@ import signal
 import sqlite3
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -52,12 +53,55 @@ class WorkerRuntime:
                 updated_at=CURRENT_TIMESTAMP""",
                 (command_id, status, json.dumps(result or {}, separators=(",", ":")), error))
 
+    def fail_interrupted_commands(self) -> list[dict[str, Any]]:
+        """Fail non-recoverable background commands left running by a restart.
+
+        Managed Tradefed commands are recovered through the jobs table. A
+        firmware/suite/export thread cannot be resumed safely, so acknowledge
+        it as failed instead of leaving the Controller and its reservation
+        stuck forever.
+        """
+        error = (
+            "Worker Agent restarted while the command was running; "
+            "the operation was not resumed and device state must be verified"
+        )
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM commands WHERE status='running'
+                   AND id NOT IN (
+                       SELECT command_id FROM jobs
+                       WHERE status='running' AND command_id!=''
+                   )"""
+            ).fetchall()
+            conn.executemany(
+                """UPDATE commands SET status='failed',error=?,
+                   updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'""",
+                [(error, row["id"]) for row in rows],
+            )
+        return [
+            {"id": row["id"], "status": "failed", "result": {}, "error": error}
+            for row in rows
+        ]
+
     def running_jobs(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM jobs WHERE status='running'").fetchall()
-        return [{"worker_job_id": row["worker_job_id"], "job_id": row["job_id"],
-                 "attempt_id": row["attempt_id"], "pid": row["pid"],
-                 "status": row["status"], "devices": json.loads(row["devices_json"])} for row in rows]
+        result = []
+        now = time.time()
+        for row in rows:
+            work_dir = Path(row["work_dir"])
+            log_mtimes = [path.stat().st_mtime for path in
+                          (work_dir / "stdout.log", work_dir / "stderr.log") if path.exists()]
+            log_age = int(max(0, now - max(log_mtimes))) if log_mtimes else None
+            stall_seconds = int(os.getenv("GMS_TF_STALL_SECONDS", "3600"))
+            warning = (f"Worker log has not changed for {log_age} seconds"
+                       if log_age is not None and log_age >= stall_seconds else "")
+            result.append({"worker_job_id": row["worker_job_id"], "job_id": row["job_id"],
+                           "attempt_id": row["attempt_id"], "pid": row["pid"],
+                           "status": row["status"], "devices": json.loads(row["devices_json"]),
+                           "source": "managed", "log_path": str(work_dir / "stdout.log"),
+                           "last_output_age_seconds": log_age, "warning": warning})
+        return result
 
     def start_process(self, command: dict[str, Any]) -> dict[str, Any]:
         payload = command.get("payload", {})
@@ -69,20 +113,32 @@ class WorkerRuntime:
                       for root in self.config.suite_roots)
         if not allowed:
             raise ValueError("test executable is outside configured suite roots")
+        if not executable.is_file():
+            configured = ", ".join(str(r) for r in self.config.suite_roots)
+            raise ValueError(
+                f"test executable not found: {executable}. "
+                f"Ensure run_GMS_Test_Auto.sh is deployed to a suite root ({configured})."
+            )
         worker_job_id = payload.get("worker_job_id") or f"wj-{command['id']}"
         work_dir = self.config.data_root / "jobs" / (command.get("job_id") or command["id"]) / (command.get("attempt_id") or "1")
         work_dir.mkdir(parents=True, exist_ok=True)
-        stdout_file = open(work_dir / "stdout.log", "ab", buffering=0)
-        stderr_file = open(work_dir / "stderr.log", "ab", buffering=0)
         env = os.environ.copy()
         env.update({str(k): str(v) for k, v in (payload.get("env") or {}).items()})
         exit_code_path = work_dir / "exit_code"
         wrapper = '"$@"; rc=$?; printf "%s" "$rc" > "$GMS_EXIT_CODE_FILE"; exit "$rc"'
         env["GMS_EXIT_CODE_FILE"] = str(exit_code_path)
-        process = subprocess.Popen(["/bin/bash", "-c", wrapper, "gms-worker-job", *argv],
-                                   cwd=payload.get("cwd") or str(executable.parent),
-                                   env=env, stdout=stdout_file, stderr=stderr_file,
-                                   start_new_session=True)
+        # Popen duplicates these descriptors for the child.  Closing the
+        # parent's copies immediately prevents one FD leak per log per job.
+        with (work_dir / "stdout.log").open("ab", buffering=0) as stdout_file, \
+                (work_dir / "stderr.log").open("ab", buffering=0) as stderr_file:
+            process = subprocess.Popen(
+                ["/bin/bash", "-c", wrapper, "gms-worker-job", *argv],
+                cwd=payload.get("cwd") or str(executable.parent),
+                env=env,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                start_new_session=True,
+            )
         with self._lock:
             self._processes[worker_job_id] = process
         with self.connect() as conn:

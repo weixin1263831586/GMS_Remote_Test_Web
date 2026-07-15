@@ -45,6 +45,10 @@ _TOOL_PAGES = {
     "assets": "websites",
     "redmine": "redmine-agent",
     "gerrit": "gerrit-dashboard",
+    "automation": "automation",
+    "cluster": "cluster",
+    "build": "automation",
+    "knowledge": "notes",
 }
 
 _CATEGORY_LABELS = {
@@ -67,6 +71,10 @@ _CATEGORY_LABELS = {
     "agent": "Agent",
     "redmine": "Redmine",
     "gerrit": "Gerrit",
+    "automation": "GMS ATS",
+    "cluster": "主机集群",
+    "build": "构建",
+    "knowledge": "知识库",
 }
 
 _UNSUPPORTED_DIRECT_TOOLS = {
@@ -1174,7 +1182,7 @@ class ActionExecutor:
             if asyncio.iscoroutinefunction(func):
                 response = await func(**call_kwargs)
             else:
-                response = func(**call_kwargs)
+                response = await asyncio.to_thread(func, **call_kwargs)
 
             # 解析 JSONResponse
             payload = _json_body(response) if hasattr(response, "body") else {"success": True, "data": response}
@@ -1203,11 +1211,16 @@ class ActionExecutor:
         model_by_tool = _get_model_by_tool()
 
         query_params = self._query_params_for_tool(tool, params)
-        shim = AgentRequestShim(request, query_params=query_params) if request else None
+        body_params = self._body_params_for_tool(tool, params)
+        shim = AgentRequestShim(
+            request,
+            query_params=query_params,
+            json_body=body_params,
+        ) if request else None
         sig = _cached_signature(func)
         kwargs: dict[str, Any] = {}
 
-        for name in sig.parameters:
+        for name, parameter in sig.parameters.items():
             if name == "request":
                 kwargs[name] = shim
             elif name == "help":
@@ -1217,13 +1230,19 @@ class ActionExecutor:
             elif name in ("req", "body"):
                 model = model_by_tool.get(tool.name)
                 if model:
-                    kwargs[name] = model(**self._body_params_for_tool(tool, params))
+                    kwargs[name] = model(**body_params)
                 else:
-                    kwargs[name] = self._body_params_for_tool(tool, params)
+                    kwargs[name] = body_params
             elif name in params:
                 kwargs[name] = params[name]
             elif name in query_params:
                 kwargs[name] = query_params[name]
+            elif parameter.default is not inspect.Parameter.empty:
+                default = parameter.default
+                if default.__class__.__module__.startswith("fastapi.params"):
+                    value = getattr(default, "default", inspect.Parameter.empty)
+                    if value is not inspect.Parameter.empty and value.__class__.__name__ != "PydanticUndefinedType":
+                        kwargs[name] = value
 
         return kwargs
 
@@ -1312,6 +1331,9 @@ def _format_payload(tool: AgentTool, payload: dict[str, Any]) -> str:
         devices = _first_list("devices")
         if devices:
             return f"查询到 {len(devices)} 台设备。"
+        items = _first_list("items", "jobs", "workers", "docs")
+        if items:
+            return f"{tool.display_name}：查询到 {len(items)} 条记录。"
     return f"{tool.display_name}已完成。"
 
 
