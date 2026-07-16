@@ -54,13 +54,15 @@ class SidebarNavigationConfigTests(unittest.TestCase):
 
     def test_sidebar_visibility_modal_is_wired_in_template(self):
         template = Path("web/shell/shell.html").read_text(encoding="utf-8")
-
         self.assertIn('onclick="openSidebarVisibilityModal()"', template)
         self.assertIn('id="sidebar-visibility-modal"', template)
-        self.assertIn("function applySidebarVisibility", template)
-        self.assertIn("function saveSidebarVisibilityFromModal", template)
-        self.assertIn("visible_pages", template)
-
+        for marker in ('id="sidebar-settings-panel-guide"', "function switchSidebarSettingsTab", "function openGuideImageLightbox", 'id="guide-image-modal"'):
+            self.assertIn(marker, template)
+        for image_name in "test-parameters.png device-screen.png usbip-local-device.png report-management.png report-analysis.png apk-analysis.png test-suites.png ats-create-run.png device-flashing.png".split():
+            self.assertIn(f'/static/images/guide/{image_name}', template)
+            self.assertTrue(Path(f"web/static/images/guide/{image_name}").is_file())
+        for marker in ("function applySidebarVisibility", "function saveSidebarVisibilityFromModal", "visible_pages"):
+            self.assertIn(marker, template)
 
 class RedmineDashboardConfigTests(unittest.TestCase):
     def test_save_redmine_stats_config_writes_runtime_override(self):
@@ -445,9 +447,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 manager.invalidate_cache()
 
     def test_gerrit_dashboard_config_has_runtime_safe_defaults(self):
-        normalize_gerrit_dashboard_config = import_module(
-            "features.gerrit.config"
-        ).normalize_gerrit_dashboard_config
+        normalize_gerrit_dashboard_config = import_module("features.gerrit.config").normalize_gerrit_dashboard_config
 
         cfg = normalize_gerrit_dashboard_config({
             "base_url": "https://gerrit.example.com/r/",

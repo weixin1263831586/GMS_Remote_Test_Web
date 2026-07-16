@@ -5,6 +5,7 @@ from unittest.mock import ANY, MagicMock, patch
 
 from fastapi.responses import PlainTextResponse
 
+from features.assistant import api as assistant_api
 from features.assistant.api import _missing_required_params, _parse_user_intent
 from features.assistant.executor import ActionExecutor, _json_body
 from features.assistant.intent import resolve
@@ -120,6 +121,134 @@ class AgentRegressionTests(unittest.TestCase):
             [item["name"] for item in _missing_required_params(cancel_run, {})],
             ["run_id"],
         )
+
+    def test_agent_monitors_every_active_cluster_job_stage_before_completion(self):
+        active_statuses = [
+            "created",
+            "queued",
+            "leasing",
+            "assigned",
+            "dispatching",
+            "running",
+            "stopping",
+            "collecting",
+            "worker_lost",
+        ]
+        jobs = iter([
+            *(
+                {
+                    "id": "job-1",
+                    "status": status,
+                    "assigned_worker_id": "worker-1",
+                    "current_attempt_id": "attempt-1",
+                }
+                for status in active_statuses
+            ),
+            {
+                "id": "job-1",
+                "status": "completed",
+                "assigned_worker_id": "worker-1",
+                "current_attempt_id": "attempt-1",
+            },
+        ])
+        repository = SimpleNamespace(
+            get_job=MagicMock(side_effect=lambda _job_id: next(jobs))
+        )
+        cluster = SimpleNamespace(repository=repository)
+        session = {
+            "session_id": "agent-cluster-monitor",
+            "client_id": "alice",
+            "status": "monitoring",
+            "pending_plan": {"policy": {}},
+            "active_run": {
+                "cluster_job_id": "job-1",
+                "attempt_id": "attempt-1",
+            },
+            "workspace_context": {},
+            "messages": [],
+            "steps": [],
+        }
+        report = {
+            "timestamp": "cluster-job-1",
+            "report_id": "cluster:job-1:attempt-1",
+            "status": "completed",
+            "fail": 0,
+            "total": 1,
+        }
+
+        async def no_wait(_seconds):
+            return None
+
+        assistant_api._agent_sessions[session["session_id"]] = session
+        try:
+            with (
+                patch("features.cluster.get_cluster_service", return_value=cluster),
+                patch.object(
+                    assistant_api, "_report_for_cluster_job", return_value=report
+                ),
+                patch.object(assistant_api.asyncio, "sleep", side_effect=no_wait),
+            ):
+                asyncio.run(
+                    assistant_api._monitor_agent_run(
+                        session["session_id"], SimpleNamespace()
+                    )
+                )
+        finally:
+            assistant_api._agent_sessions.pop(session["session_id"], None)
+            assistant_api._agent_monitor_tasks.pop(session["session_id"], None)
+
+        self.assertEqual(repository.get_job.call_count, len(active_statuses) + 1)
+        self.assertEqual(session["status"], "done")
+        self.assertIsNone(session["active_run"])
+        self.assertEqual(
+            session["workspace_context"]["report_timestamp"], "cluster-job-1"
+        )
+        self.assertTrue(
+            any(
+                "集群测试完成" in item.get("content", "")
+                for item in session["messages"]
+            )
+        )
+
+    def test_local_durable_job_keeps_agent_workspace_in_single_host_mode(self):
+        session = {
+            "session_id": "agent-local-durable",
+            "active_run": {},
+            "workspace_context": {},
+            "steps": [],
+        }
+        plan = {
+            "request": {
+                "worker_id": "worker-local",
+                "devices": ["SERIAL-1"],
+                "test_type": "CTS",
+                "test_suite": "/suite/tools",
+            }
+        }
+
+        async def start_local_durable(_request, help=False, req=None):
+            self.assertFalse(help)
+            self.assertEqual(req.worker_id, "worker-local")
+            return {
+                "success": True,
+                "data": {
+                    "cluster_job_id": "job-local",
+                    "attempt_id": "attempt-local",
+                    "worker_id": "worker-local",
+                },
+            }
+
+        with patch("features.test_execution.start_test", side_effect=start_local_durable):
+            result = asyncio.run(
+                assistant_api._start_test_with_plan(
+                    session, SimpleNamespace(), plan
+                )
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(session["workspace_context"]["scope_mode"], "single")
+        self.assertEqual(session["workspace_context"]["worker_id"], "worker-local")
+        self.assertEqual(session["active_run"]["cluster_job_id"], "job-local")
 
 
 if __name__ == "__main__":

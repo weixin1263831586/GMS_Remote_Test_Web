@@ -6,6 +6,10 @@
   "worker_offline_seconds": 45,
   "worker_registration_timeout_seconds": 45,
   "lease_ttl_seconds": 90,
+  "artifact_max_bytes": 21474836480,
+  "firmware_max_bytes": 21474836480,
+  "transfer_max_bytes": 21474836480,
+  "log_analysis_max_bytes": 5368709120,
   "remote_dispatch_enabled": true,
   "global_device_pool_enabled": true,
   "lease_enforcement_enabled": true

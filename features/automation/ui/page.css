@@ -122,14 +122,26 @@ button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
     height: 100%;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(220px, .75fr) minmax(360px, 1.2fr) minmax(360px, 1.15fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto minmax(0, 1fr);
     gap: 10px;
     overflow: hidden;
 }
+.profile-panel {
+    grid-column: 1 / -1;
+    height: auto;
+}
+.profile-body {
+    grid-template-columns: minmax(220px, 300px) minmax(280px, 1fr) minmax(240px, 320px);
+    align-items: start;
+    overflow: visible;
+}
 .profile-strip {
     display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
     gap: 8px;
     min-height: 0;
+    max-height: 92px;
     overflow: auto;
     align-content: start;
 }
@@ -158,6 +170,25 @@ button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
     border-bottom: 1px solid var(--line);
     font-weight: 700;
 }
+.guided-header { justify-content: flex-start; }
+.step-index {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgb(59 130 246 / 16%);
+    border: 1px solid rgb(59 130 246 / 55%);
+    color: var(--primary-hover);
+    font-size: 12px;
+}
+.panel-description {
+    margin-top: 2px;
+    color: var(--subtle);
+    font-size: 11px;
+    font-weight: 400;
+}
 .panel-body { padding: 12px; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .compact-stack {
     display: grid;
@@ -176,6 +207,31 @@ input, select, textarea {
     padding: 8px;
     font-size: 12px;
 }
+input:disabled, select:disabled, button:disabled {
+    cursor: not-allowed;
+    opacity: .58;
+}
+.field-hint,
+.field-status {
+    color: var(--subtle);
+    font-size: 11px;
+    line-height: 1.35;
+}
+.field-status.loading { color: var(--primary-hover); }
+.field-status.ready { color: var(--ok); }
+.field-status.error { color: var(--danger); }
+.build-toggle {
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--panel-2);
+}
+.build-config-fields {
+    display: grid;
+    gap: 10px;
+    transition: opacity .16s ease;
+}
+.build-config-fields.is-disabled { opacity: .48; }
 .inline-field {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -621,7 +677,9 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
     .ats-shell { height: auto; overflow: visible; }
     .workflow-surface { overflow: visible; }
     .workflow-pane { height: auto; }
-    .create-layout { grid-template-columns: 1fr; height: auto; overflow: visible; }
+    .create-layout { grid-template-columns: 1fr; grid-template-rows: none; height: auto; overflow: visible; }
+    .profile-panel { grid-column: auto; }
+    .profile-body { grid-template-columns: 1fr; overflow: visible; }
     .panel { height: auto; }
     .panel-body, .compact-stack { overflow: visible; }
     .stage-panel { min-height: 0; }

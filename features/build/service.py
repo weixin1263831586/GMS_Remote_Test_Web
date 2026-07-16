@@ -310,8 +310,33 @@ class BuildService:
         server = self._with_runtime_password(self._get_server(server_id), server_password)
         workspace = validate_workspace(workspace, str(server.get("workspace_root") or ""))
         backend = self._backend(server)
-        # 不调用交互式 rkbuild_lunch：无 stdin 时它可能选择默认项并把完整
-        # lunch banner/环境信息输出到错误提示。直接读取当前源码树由 envsetup
+        # Rockchip 的 rkbuild_lunch 会在 COMMON_LUNCH_CHOICES 之上再按当前
+        # SDK/板级配置生成菜单。优先解析该菜单，避免把源码树中的通用产品
+        # 全部展示成可用于当前 SDK 的选项。命令运行在独立 shell 中，即使
+        # stdin EOF 触发了默认项，也不会污染后续构建环境。
+        rkbuild_command = (
+            f"cd {workspace!r} && "
+            "timeout 35s bash --noprofile --norc -c '"
+            "if [ -f build/envsetup.sh ]; then source build/envsetup.sh >/dev/null 2>&1; "
+            "elif [ -f build/make/envsetup.sh ]; then source build/make/envsetup.sh >/dev/null 2>&1; "
+            "else exit 3; fi; "
+            "printf \"__GMS_LUNCH_BEGIN__\\n\"; "
+            "if declare -F rkbuild_lunch >/dev/null 2>&1; then "
+            "rkbuild_lunch </dev/null 2>&1 || true; fi; "
+            "printf \"__GMS_LUNCH_END__\\n\""
+            "'"
+        )
+        rkbuild_code, rkbuild_out, _rkbuild_err = backend._run(
+            server,
+            rkbuild_command,
+            timeout=45,
+        )
+        if rkbuild_code == 0:
+            options = self._parse_scoped_lunch_options(rkbuild_out)
+            if options:
+                return options
+
+        # 标准 Android 源码没有 rkbuild_lunch，回退到 envsetup 为当前源码树
         # 计算出的 COMMON_LUNCH_CHOICES，并用哨兵隔离 shell/profile 噪声。
         discover_command = (
             f"cd {workspace!r} && "
