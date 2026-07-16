@@ -19,6 +19,7 @@ from features.auth import get_authenticated_user
 from features.users import get_client_id_from_request
 
 from .api import _authenticate, _require_cluster_enabled, service
+from .config import configured_max_bytes
 from .models import TransferComplete
 from .repository import utc_now
 
@@ -119,7 +120,9 @@ async def stage_worker_firmware(
     target = directory / filename
     digest = hashlib.sha256()
     total = 0
-    limit = int(os.getenv("GMS_CLUSTER_FIRMWARE_MAX_BYTES", str(20 * 1024**3)))
+    limit = configured_max_bytes(
+        "GMS_CLUSTER_FIRMWARE_MAX_BYTES", service().config.firmware_max_bytes
+    )
     try:
         with target.open("wb") as output:
             while chunk := await firmware_file.read(4 * 1024 * 1024):
@@ -186,7 +189,9 @@ async def stage_worker_gsi(
     directory.mkdir(parents=True, exist_ok=False)
     files = []
     combined_size = 0
-    limit = int(os.getenv("GMS_CLUSTER_FIRMWARE_MAX_BYTES", str(20 * 1024**3)))
+    limit = configured_max_bytes(
+        "GMS_CLUSTER_FIRMWARE_MAX_BYTES", service().config.firmware_max_bytes
+    )
     try:
         for kind, upload in (("system", system_file), ("vendor", vendor_file)):
             if upload is None:
@@ -342,8 +347,8 @@ def complete_transfer(
         raise HTTPException(404, "transfer not found for worker")
     if transfer["status"] not in {"created", "uploading"}:
         raise HTTPException(409, "transfer cannot be completed from its current state")
-    max_bytes = int(
-        os.getenv("GMS_CLUSTER_TRANSFER_MAX_BYTES", str(20 * 1024**3))
+    max_bytes = configured_max_bytes(
+        "GMS_CLUSTER_TRANSFER_MAX_BYTES", service().config.transfer_max_bytes
     )
     if body.size_bytes > max_bytes:
         raise HTTPException(413, "transfer is too large")
@@ -502,7 +507,10 @@ async def analyze_transferred_log_directory(transfer_id: str, request: Request):
                 if len(members) > 100_000:
                     raise ValueError("log archive contains too many files")
                 total = sum(max(0, item.file_size) for item in members)
-                max_bytes = int(os.getenv("GMS_CLUSTER_LOG_ANALYSIS_MAX_BYTES", str(5 * 1024**3)))
+                max_bytes = configured_max_bytes(
+                    "GMS_CLUSTER_LOG_ANALYSIS_MAX_BYTES",
+                    service().config.log_analysis_max_bytes,
+                )
                 if total > max_bytes or any(
                     not (destination / item.filename).resolve().is_relative_to(destination)
                     for item in members

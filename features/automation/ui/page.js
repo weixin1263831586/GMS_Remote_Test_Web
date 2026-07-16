@@ -14,6 +14,11 @@ let toastTimer = null;
 let atsWorkspaceContext = {};
 let applyingWorkspaceContext = false;
 let atsLocalWorkerId = 'worker-local';
+let pendingBuildWorkspace = '';
+let pendingBuildLunchTarget = '';
+let workspaceDiscoveryRequest = 0;
+let lunchDiscoveryRequest = 0;
+let lunchOptionsContext = '';
 
 function isLocalAutomationWorker(workerId) {
     return !workerId || workerId === 'worker-local' || workerId === atsLocalWorkerId;
@@ -37,7 +42,6 @@ function syncAutomationWorkspaceSelection(extra = {}) {
     const suitePath = qs('automation-test-suite')?.value || '';
     const suite = testSuites.find(item => (item.tools_path || item.full_path) === suitePath);
     window.GmsEmbeddedWorkspace?.update({
-        scope_mode: isLocalAutomationWorker(workerId) ? 'single' : 'cluster',
         worker_id: workerId,
         device_ids: [...new Set([...typed, ...checked])].map(value =>
             isLocalAutomationWorker(workerId) || value.startsWith(`${workerId}:`)
@@ -204,7 +208,6 @@ function openRunReport(event, runId) {
     const run = atsRuns.find(item => item.id === runId);
     if (!run?.report_timestamp) return;
     window.GmsEmbeddedWorkspace?.navigate('reports', {
-        scope_mode: isLocalAutomationWorker(run.worker_id) ? 'single' : 'cluster',
         worker_id: run.worker_id || atsLocalWorkerId,
         cluster_job_id: run.cluster_job_id || '',
         attempt_id: run.attempt_id || '',
@@ -267,12 +270,17 @@ function applySelectedProfile() {
     const profile = selectedProfile();
     const build = profile.build || {};
     const parameters = build.parameters || {};
+    pendingBuildWorkspace = String(parameters.workspace || '');
+    pendingBuildLunchTarget = String(parameters.lunch_target || '');
     qs('automation-enable-build').checked = Boolean(build.server_id || build.template_id || build.provider);
     setSelectValue('build-server', build.server_id);
     setSelectValue('build-template', build.template_id);
-    setSelectValue('build-workspace', parameters.workspace);
-    setSelectValue('build-lunch-target', parameters.lunch_target);
+    setSelectValue('build-workspace', pendingBuildWorkspace);
+    invalidateLunchOptions(pendingBuildLunchTarget
+        ? `请读取源码目录，确认 Profile 中的 ${pendingBuildLunchTarget} 是否可用`
+        : '选择源码目录后自动读取该目录的 Lunch Target');
     setSelectValue('build-command', parameters.build_command);
+    syncBuildSectionState();
 
     const testPlan = profile.test_plan || {};
     setSelectValue('automation-test-type', testPlan.test_type);
@@ -288,11 +296,11 @@ async function loadBuildConfig() {
     buildTemplates = templates.items || [];
     qs('build-server').innerHTML = buildServers.map(s => `<option value="${esc(s.id)}">${esc(s.name || s.id)}</option>`).join('');
     qs('build-template').innerHTML = buildTemplates.map(t => `<option value="${esc(t.id)}">${esc(t.name || t.id)}</option>`).join('');
-    qs('build-server').onchange = () => {
-        renderBuildWorkspaces([]);
-        renderLunchOptions([]);
-    };
-    qs('build-workspace').onchange = () => renderLunchOptions([]);
+    renderBuildWorkspaces([]);
+    invalidateLunchOptions('选择源码目录后自动读取该目录的 Lunch Target');
+    qs('build-server').onchange = handleBuildServerChange;
+    qs('build-workspace').onchange = handleBuildWorkspaceChange;
+    syncBuildSectionState();
 }
 
 function collectBuildPlan() {
@@ -302,7 +310,12 @@ function collectBuildPlan() {
     const workspace = qs('build-workspace').value;
     const lunchTarget = qs('build-lunch-target').value;
     const buildCommand = qs('build-command').value;
-    if (!serverId || !templateId || !workspace || !lunchTarget) return null;
+    if (!serverId || !templateId || !workspace) {
+        throw new Error('请先选择编译服务器、模板和源码目录');
+    }
+    if (!lunchTarget || lunchOptionsContext !== buildSelectionContext(serverId, workspace)) {
+        throw new Error('请先读取当前源码目录的 Lunch Target');
+    }
     return {
         provider: 'ssh',
         server_id: serverId,
@@ -356,52 +369,188 @@ function selectedBuildServer() {
     return buildServers.find(s => s.id === qs('build-server').value) || {};
 }
 
-function renderBuildWorkspaces(items) {
+function buildSelectionContext(serverId = qs('build-server')?.value, workspace = qs('build-workspace')?.value) {
+    return `${String(serverId || '')}\n${String(workspace || '')}`;
+}
+
+function setBuildFieldStatus(id, message, state = '') {
+    const element = qs(id);
+    if (!element) return;
+    element.textContent = message;
+    element.className = `field-status${state ? ` ${state}` : ''}`;
+}
+
+function setBuildControlBusy(id, busy) {
+    const element = qs(id);
+    if (!element) return;
+    element.dataset.loading = busy ? 'true' : 'false';
+}
+
+function syncBuildSectionState() {
+    const enabled = Boolean(qs('automation-enable-build')?.checked);
+    qs('automation-build-fields')?.classList.toggle('is-disabled', !enabled);
+    const server = qs('build-server');
+    const template = qs('build-template');
+    const workspace = qs('build-workspace');
+    const command = qs('build-command');
+    const lunch = qs('build-lunch-target');
+    if (server) server.disabled = !enabled || !Array.from(server.options).some(option => option.value);
+    if (template) template.disabled = !enabled || !Array.from(template.options).some(option => option.value);
+    if (workspace) workspace.disabled = !enabled || !Array.from(workspace.options).some(option => option.value);
+    if (command) command.disabled = !enabled;
+    if (lunch) {
+        const scoped = lunchOptionsContext === buildSelectionContext();
+        lunch.disabled = !enabled || !scoped || !Array.from(lunch.options).some(option => option.value);
+    }
+    const workspaceRefresh = qs('build-workspace-refresh');
+    if (workspaceRefresh) {
+        workspaceRefresh.disabled = !enabled || !server?.value || workspaceRefresh.dataset.loading === 'true';
+    }
+    const lunchRefresh = qs('build-lunch-refresh');
+    if (lunchRefresh) {
+        lunchRefresh.disabled = !enabled || !workspace?.value || lunchRefresh.dataset.loading === 'true';
+    }
+    if (qs('automation-build-only')) qs('automation-build-only').disabled = !enabled;
+}
+
+function renderBuildWorkspaces(items, preferredWorkspace = '') {
     const server = selectedBuildServer();
     const root = String(server.workspace_root || '').replace(/\/$/, '');
     const options = (items || []).map(name => {
         const value = name.startsWith('/') ? name : `${root}/${name}`;
         return `<option value="${esc(value)}">${esc(name)}</option>`;
     });
-    qs('build-workspace').innerHTML = options.length ? options.join('') : '<option value="">请选择 SDK 目录</option>';
+    const select = qs('build-workspace');
+    select.innerHTML = options.length ? options.join('') : '<option value="">请先扫描源码目录</option>';
+    const preferred = String(preferredWorkspace || pendingBuildWorkspace || '');
+    if (preferred && Array.from(select.options).some(option => option.value === preferred)) {
+        select.value = preferred;
+    }
+    syncBuildSectionState();
 }
 
-function renderLunchOptions(items) {
-    qs('build-lunch-target').innerHTML = (items || []).length
+function renderLunchOptions(items, preferredTarget = '') {
+    const select = qs('build-lunch-target');
+    select.innerHTML = (items || []).length
         ? items.map(item => `<option value="${esc(item)}">${esc(item)}</option>`).join('')
-        : '<option value="">请选择 lunch target</option>';
+        : '<option value="">尚未读取 Lunch Target</option>';
+    const preferred = String(preferredTarget || '');
+    if (preferred && Array.from(select.options).some(option => option.value === preferred)) {
+        select.value = preferred;
+    }
+    syncBuildSectionState();
+}
+
+function invalidateLunchOptions(message = '选择源码目录后自动读取该目录的 Lunch Target') {
+    lunchDiscoveryRequest += 1;
+    lunchOptionsContext = '';
+    setBuildControlBusy('build-lunch-refresh', false);
+    renderLunchOptions([]);
+    setBuildFieldStatus('build-lunch-status', message);
+}
+
+async function handleBuildServerChange() {
+    workspaceDiscoveryRequest += 1;
+    renderBuildWorkspaces([]);
+    invalidateLunchOptions();
+    setBuildFieldStatus('build-workspace-status', '正在扫描所选服务器的源码目录…', 'loading');
+    await refreshBuildWorkspaces();
+}
+
+async function handleBuildWorkspaceChange() {
+    invalidateLunchOptions('正在读取所选源码目录的 Lunch Target…');
+    if (qs('build-workspace').value) await refreshLunchOptions({silent: true});
 }
 
 async function refreshBuildWorkspaces() {
+    const serverId = qs('build-server').value;
+    if (!serverId) {
+        toast('请先选择编译服务器');
+        return;
+    }
+    const requestId = ++workspaceDiscoveryRequest;
+    const preferredWorkspace = qs('build-workspace').value || pendingBuildWorkspace;
+    setBuildControlBusy('build-workspace-refresh', true);
+    setBuildFieldStatus('build-workspace-status', '正在扫描源码目录…', 'loading');
+    syncBuildSectionState();
     try {
-        const serverId = qs('build-server').value;
         const password = await getBuildPassword(serverId);
         const data = await api('/api/build/discover/workspaces', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({server_id: serverId, server_password: password}),
         });
-        renderBuildWorkspaces(data.items || []);
-        renderLunchOptions([]);
-        toast(`发现 ${(data.items || []).length} 个 SDK 目录`);
-    } catch (err) { toast(err.message); }
+        if (requestId !== workspaceDiscoveryRequest || serverId !== qs('build-server').value) return;
+        const items = data.items || [];
+        renderBuildWorkspaces(items, preferredWorkspace);
+        invalidateLunchOptions();
+        setBuildFieldStatus(
+            'build-workspace-status',
+            items.length ? `已在当前服务器发现 ${items.length} 个源码目录` : '当前服务器未发现源码目录',
+            items.length ? 'ready' : 'error',
+        );
+        if (qs('build-workspace').value) {
+            await refreshLunchOptions({silent: true, preferredTarget: pendingBuildLunchTarget});
+        }
+        toast(`已刷新 ${items.length} 个源码目录`);
+    } catch (err) {
+        if (requestId !== workspaceDiscoveryRequest) return;
+        setBuildFieldStatus('build-workspace-status', err.message, 'error');
+        toast(err.message);
+    } finally {
+        if (requestId === workspaceDiscoveryRequest) {
+            setBuildControlBusy('build-workspace-refresh', false);
+            syncBuildSectionState();
+        }
+    }
 }
 
-async function refreshLunchOptions() {
+async function refreshLunchOptions({silent = false, preferredTarget = ''} = {}) {
+    const serverId = qs('build-server').value;
+    const workspace = qs('build-workspace').value;
+    if (!workspace) {
+        toast('请先选择源码目录');
+        return;
+    }
+    const context = buildSelectionContext(serverId, workspace);
+    const previousTarget = qs('build-lunch-target').value;
+    const requestId = ++lunchDiscoveryRequest;
+    lunchOptionsContext = '';
+    setBuildControlBusy('build-lunch-refresh', true);
+    renderLunchOptions([]);
+    setBuildFieldStatus('build-lunch-status', `正在从 ${workspace} 读取…`, 'loading');
+    syncBuildSectionState();
     try {
-        const serverId = qs('build-server').value;
-        const workspace = qs('build-workspace').value;
-        if (!workspace) throw new Error('请先选择 SDK 目录');
         const password = await getBuildPassword(serverId);
         const data = await api('/api/build/discover/lunch-options', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({server_id: serverId, workspace, server_password: password}),
         });
+        if (requestId !== lunchDiscoveryRequest || context !== buildSelectionContext()) return;
         const items = data.items || [];
-        renderLunchOptions(items);
-        toast(`已从 ${workspace} 读取 ${items.length} 个 lunch 选项`);
-    } catch (err) { toast(err.message); }
+        lunchOptionsContext = context;
+        renderLunchOptions(items, preferredTarget || previousTarget || pendingBuildLunchTarget);
+        setBuildFieldStatus(
+            'build-lunch-status',
+            items.length
+                ? `仅显示 ${workspace} 中发现的 ${items.length} 个 Lunch Target`
+                : `${workspace} 中未发现 Lunch Target`,
+            items.length ? 'ready' : 'error',
+        );
+        if (!silent) toast(`已从 ${workspace} 读取 ${items.length} 个 Lunch Target`);
+    } catch (err) {
+        if (requestId !== lunchDiscoveryRequest) return;
+        lunchOptionsContext = '';
+        renderLunchOptions([]);
+        setBuildFieldStatus('build-lunch-status', err.message, 'error');
+        toast(err.message);
+    } finally {
+        if (requestId === lunchDiscoveryRequest) {
+            setBuildControlBusy('build-lunch-refresh', false);
+            syncBuildSectionState();
+        }
+    }
 }
 
 async function loadDevices(forceRefresh = false) {

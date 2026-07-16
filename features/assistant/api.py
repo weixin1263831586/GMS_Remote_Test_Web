@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, Field
 
+from features.assistant.cluster_runtime import ACTIVE_CLUSTER_JOB_STATUSES as _ACTIVE_CLUSTER_JOB_STATUSES
 from features.assistant.context import _parse_chinese_number, record_user_message, update_context
 from features.assistant.executor import _json_body, executor
 from features.assistant.intent import (
@@ -96,7 +97,6 @@ _AGENT_WORKSPACE_FIELDS = {
     "report_timestamp", "artifact_id", "gerrit_change_id", "gerrit_patchset",
     "redmine_issue_id", "origin_page",
 }
-
 
 def _local_worker_id() -> str:
     try:
@@ -874,15 +874,16 @@ async def _start_test_with_plan(session: dict[str, Any], request_shim: AgentRequ
         )
         if correlation.get("cluster_job_id"):
             active_run = session.setdefault("active_run", {})
+            resolved_worker_id = correlation.get("worker_id") or req.worker_id
             active_run.update({
                 "cluster_job_id": correlation["cluster_job_id"],
                 "attempt_id": correlation.get("attempt_id", ""),
-                "worker_id": correlation.get("worker_id") or req.worker_id,
+                "worker_id": resolved_worker_id,
             })
             workspace = session.setdefault("workspace_context", {})
             workspace.update({
-                "scope_mode": "cluster",
-                "worker_id": correlation.get("worker_id") or req.worker_id,
+                "scope_mode": "single" if _is_local_worker_id(resolved_worker_id) else "cluster",
+                "worker_id": resolved_worker_id,
                 "device_ids": list(req.devices),
                 "suite_path": req.test_suite,
                 "cluster_job_id": correlation["cluster_job_id"],
@@ -970,9 +971,7 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
 
                 repository = get_cluster_service().repository
                 job = repository.get_job(cluster_job_id)
-                while job and job.get("status") in {
-                    "assigned", "dispatching", "running", "stopping"
-                }:
+                while job and job.get("status") in _ACTIVE_CLUSTER_JOB_STATUSES:
                     await asyncio.sleep(3)
                     job = repository.get_job(cluster_job_id)
                 if not job:
@@ -1002,9 +1001,10 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                 )
 
                 workspace = session.setdefault("workspace_context", {})
+                assigned_worker_id = job.get("assigned_worker_id", "")
                 workspace.update({
-                    "scope_mode": "cluster",
-                    "worker_id": job.get("assigned_worker_id", ""),
+                    "scope_mode": "single" if _is_local_worker_id(assigned_worker_id) else "cluster",
+                    "worker_id": assigned_worker_id,
                     "cluster_job_id": cluster_job_id,
                     "attempt_id": attempt_id,
                     "report_timestamp": latest_report_timestamp or "",

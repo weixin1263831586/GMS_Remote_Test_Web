@@ -1027,8 +1027,9 @@ async function loadClusterWorkers() {
         worker.status !== 'offline'
         && (state.clusterStatus?.enabled || worker.id === localWorkerId)
     );
-    const context = await (window.GmsWorkspace?.ready || Promise.resolve({}));
-    const current = context.scope_mode === 'cluster' ? (context.worker_id || localWorkerId) : localWorkerId;
+    await (window.GmsWorkspace?.ready || Promise.resolve());
+    const context = window.GmsWorkspace?.get?.() || {};
+    const current = context.worker_id || localWorkerId;
     select.innerHTML = workers.map(worker =>
         `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)} (${escapeHtml(worker.hostname || worker.id)})</option>`
     ).join('');
@@ -1184,9 +1185,7 @@ async function toggleClusterMode() {
         if (typeof loadTestReports === 'function') {
             loadTestReports(currentUserFilter).catch(() => {});
         }
-        // 刷新各页面 workspace 徽标
-        renderWorkspaceBadge('report-workspace-badge');
-        renderWorkspaceBadge('apk-workspace-badge');
+
     } catch (error) {
         showToast(`切换模式失败: ${error.message}`, 'error');
     } finally {
@@ -1222,9 +1221,7 @@ window.addEventListener('gms:workspace-context', event => {
     const enabled = Boolean(state.clusterStatus?.enabled && context.scope_mode === 'cluster');
     applyClusterMode(enabled);
     syncWorkspaceWorkerSelectors(enabled ? (context.worker_id || workspaceLocalWorkerId()) : workspaceLocalWorkerId());
-    // 刷新报告分析和 APK 分析页的 workspace 徽标
-    renderWorkspaceBadge('report-workspace-badge', context);
-    renderWorkspaceBadge('apk-workspace-badge', context);
+
 });
 
 async function switchTestWorker() {
@@ -1612,9 +1609,10 @@ async function loadSuiteWorkerSelector() {
     try {
         const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
         const payload = await response.json();
-        const workspace = await (window.GmsWorkspace?.ready || Promise.resolve({}));
+        await (window.GmsWorkspace?.ready || Promise.resolve());
+        const workspace = window.GmsWorkspace?.get?.() || {};
         const localWorkerId = workspaceLocalWorkerId();
-        const saved = workspace.scope_mode === 'cluster' ? (workspace.worker_id || localWorkerId) : localWorkerId;
+        const saved = workspace.worker_id || localWorkerId;
         const workers = (payload.workers || []).filter(worker => worker.status !== 'offline');
         select.innerHTML = workers.map(worker =>
             `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)}</option>`
@@ -1632,7 +1630,6 @@ async function loadSuiteWorkerSelector() {
 async function loadSuitesForBrowserWorker(force = false) {
     const workerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
     window.GmsWorkspace?.update({
-        scope_mode: isLocalWorkspaceWorker(workerId) ? 'single' : 'cluster',
         worker_id: workerId
     }, {source: 'suites'});
     syncWorkspaceWorkerSelectors(workerId);
@@ -1658,7 +1655,7 @@ async function loadSuitesForBrowserWorker(force = false) {
 async function switchSuiteWorker() {
     const workerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
     window.GmsWorkspace?.update({
-        scope_mode: isLocalWorkspaceWorker(workerId) ? 'single' : 'cluster',
+        scope_mode: isLocalWorkspaceWorker(workerId) ? window.GmsWorkspace.get().scope_mode : 'cluster',
         worker_id: workerId, suite_key: '', suite_path: ''
     }, {source: 'suites'});
     syncWorkspaceWorkerSelectors(workerId);
@@ -7056,6 +7053,16 @@ function switchLogTab(tabName) {
     if (out) out.scrollTop = out.scrollHeight;
 }
 
+// 用户主动发起设备、烧写、VNC、VPN 或上传操作时显示系统日志。
+// 只绑定操作按钮点击，避免后台系统消息在测试运行时抢走“测试日志”页签。
+document.addEventListener('click', (event) => {
+    const button = event.target?.closest?.(
+        '#page-test [data-operation-log-tab="system"] button'
+    );
+    if (!button || button.disabled) return;
+    switchLogTab('system');
+});
+
 // 更新进度条 - 使用固件上传的进度条
 function updateProgressBar(percentage, message = '', title = '进度') {
     debugLog('[Progress] updateProgressBar called:', percentage, message, title);
@@ -7455,8 +7462,9 @@ async function loadReportWorkers() {
     try {
         const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
         const payload = await response.json();
-        const workspace = await (window.GmsWorkspace?.ready || Promise.resolve({}));
-        const previous = workspace.scope_mode === 'cluster' ? (workspace.worker_id || '') : workspaceLocalWorkerId();
+        await (window.GmsWorkspace?.ready || Promise.resolve());
+        const workspace = window.GmsWorkspace?.get?.() || {};
+        const previous = workspace.worker_id || '';
         select.innerHTML = '<option value="">全部 Worker</option>' + (payload.workers || []).map(worker =>
             `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)}</option>`
         ).join('');
@@ -8950,8 +8958,7 @@ function displayReportAnalysis(data) {
             origin_page: 'report-analysis'
         }, {source: 'report-analysis'});
     }
-    // 渲染报告分析页的 workspace 徽标（无论 provenance 是否存在）
-    renderWorkspaceBadge('report-workspace-badge');
+
     if (DEBUG) debugLog('[displayReportAnalysis] Current report name:', window.currentReportName);
 
     const resultDiv = ensureReportAnalysisResultStructure();
@@ -10648,23 +10655,6 @@ function getAgentWorkspaceContext() {
     };
 }
 
-function renderAgentWorkspaceContext(context = getAgentWorkspaceContext()) {
-    const el = $('agent-workspace-context');
-    if (!el) return;
-    const fields = [
-        ['模式', context.scope_mode === 'cluster' ? '集群' : '单机'],
-        ['Worker', context.worker_id || workspaceLocalWorkerId()],
-        ['设备', (context.device_ids || []).join(', ')],
-        ['任务', context.cluster_job_id],
-        ['报告', context.report_timestamp || context.report_id],
-        ['Gerrit', context.gerrit_change_id ? `#${context.gerrit_change_id}${context.gerrit_patchset ? `/${context.gerrit_patchset}` : ''}` : ''],
-        ['Redmine', context.redmine_issue_id ? `#${context.redmine_issue_id}` : '']
-    ].filter(([, value], index) => index < 2 || value);
-    el.innerHTML = fields.map(([key, value]) =>
-        `<span style="padding:2px 6px;border:1px solid var(--border-color);border-radius:999px;"><b style="color:var(--text-primary);">${escapeHtml(key)}</b> ${escapeHtml(value || '-')}</span>`
-    ).join('');
-}
-
 function applyAgentSessionWorkspace(session) {
     const context = session?.workspace_context;
     if (!context || typeof context !== 'object') return;
@@ -10677,9 +10667,6 @@ function applyAgentSessionWorkspace(session) {
     if (authoritative) {
         const changed = Object.keys(context).some(key => JSON.stringify(current[key]) !== JSON.stringify(context[key]));
         if (changed) window.GmsWorkspace?.update(context, {source: 'agent'});
-        renderAgentWorkspaceContext({...current, ...context});
-    } else {
-        renderAgentWorkspaceContext(current);
     }
 }
 
@@ -11074,7 +11061,7 @@ function openAgentPageAction(page, paramsJson = '{}') {
         if (frame) frame.src = '/gerrit-dashboard';
     }
     const contextPatch = {};
-    if (params.worker_id) Object.assign(contextPatch, {scope_mode: isLocalWorkspaceWorker(params.worker_id) ? 'single' : 'cluster', worker_id: params.worker_id});
+    if (params.worker_id) Object.assign(contextPatch, {worker_id: params.worker_id});
     if (params.devices) contextPatch.device_ids = params.devices;
     if (params.report_timestamp || params.timestamp) contextPatch.report_timestamp = params.report_timestamp || params.timestamp;
     if (params.issue_id) contextPatch.redmine_issue_id = String(params.issue_id);
@@ -11142,7 +11129,6 @@ function openAgentApkAnalysis(taskId) {
 }
 
 function initAgentPage() {
-    renderAgentWorkspaceContext();
     if (!agentInitialized) {
         agentInitialized = true;
         const input = $('agent-input');
@@ -11200,9 +11186,6 @@ function initAgentPage() {
     }
 }
 
-window.addEventListener('gms:workspace-context', event => {
-    renderAgentWorkspaceContext(event.detail?.context || getAgentWorkspaceContext());
-});
 
 // ==================== 全局函数暴露 ====================
 // 将 HTML onclick 需要的函数暴露到 window 对象

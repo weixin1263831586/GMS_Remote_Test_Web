@@ -60,8 +60,14 @@
     <section id="workflow-pane-create" class="workflow-pane">
         <div class="create-layout">
             <section class="panel profile-panel">
-                <div class="panel-header">Profile</div>
-                <div class="panel-body compact-stack">
+                <div class="panel-header guided-header">
+                    <span class="step-index">1</span>
+                    <div>
+                        <div>运行配置</div>
+                        <div class="panel-description">选择自动化 Profile，并确认本次运行的默认参数</div>
+                    </div>
+                </div>
+                <div class="panel-body compact-stack profile-body">
                     <label>运行配置
                         <select id="automation-profile"></select>
                     </label>
@@ -79,49 +85,66 @@
                     </details>
                 </div>
             </section>
-            <section class="panel">
-                <div class="panel-header">固件与构建</div>
+            <section class="panel build-panel">
+                <div class="panel-header guided-header">
+                    <span class="step-index">2</span>
+                    <div>
+                        <div>固件与构建</div>
+                        <div class="panel-description">源码目录决定可选的 Lunch Target</div>
+                    </div>
+                </div>
                 <div class="panel-body compact-stack">
-                    <label class="checkbox-item"><input id="automation-enable-build" type="checkbox" checked> 执行编译（关闭后使用已有固件）</label>
                     <label>固件路径或 URL
                         <input id="automation-artifact" placeholder="/path/to/update.img 或 http://...">
+                        <span class="field-hint">执行编译时可留空；关闭编译后请填写已有固件</span>
                     </label>
-                    <div class="form-row">
-                        <label>编译服务器
-                            <select id="build-server"></select>
+                    <label class="checkbox-item build-toggle"><input id="automation-enable-build" type="checkbox" checked onchange="syncBuildSectionState()"> 为本次运行执行编译</label>
+                    <div id="automation-build-fields" class="build-config-fields">
+                        <div class="form-row">
+                            <label>编译服务器
+                                <select id="build-server"></select>
+                            </label>
+                            <label>编译模板
+                                <select id="build-template"></select>
+                            </label>
+                        </div>
+                        <label>源码目录
+                            <div class="inline-field">
+                                <select id="build-workspace"></select>
+                                <button id="build-workspace-refresh" type="button" onclick="refreshBuildWorkspaces()">重新扫描</button>
+                            </div>
+                            <span id="build-workspace-status" class="field-status">请选择编译服务器并扫描源码目录</span>
                         </label>
-                        <label>编译模板
-                            <select id="build-template"></select>
+                        <label>Lunch Target
+                            <div class="inline-field">
+                                <select id="build-lunch-target" disabled></select>
+                                <button id="build-lunch-refresh" type="button" onclick="refreshLunchOptions()" disabled>重新扫描</button>
+                            </div>
+                            <span id="build-lunch-status" class="field-status">选择源码目录后自动读取该目录的 Lunch Target</span>
+                        </label>
+                        <label>编译命令
+                            <select id="build-command">
+                                <option value="./build.sh -UCKApu -J 8">./build.sh -UCKApu -J 8</option>
+                                <option value="./build.sh -UACKu -J 8">./build.sh -UACKu -J 8</option>
+                                <option value="./build.sh -UCKApu">./build.sh -UCKApu</option>
+                                <option value="./build.sh -UACKu">./build.sh -UACKu</option>
+                            </select>
                         </label>
                     </div>
-                    <label>源码目录
-                        <div class="inline-field">
-                            <select id="build-workspace"></select>
-                            <button type="button" onclick="refreshBuildWorkspaces()">刷新</button>
-                        </div>
-                    </label>
-                    <label>Lunch Target
-                        <div class="inline-field">
-                            <select id="build-lunch-target"></select>
-                            <button type="button" onclick="refreshLunchOptions()">刷新</button>
-                        </div>
-                    </label>
-                    <label>编译命令
-                        <select id="build-command">
-                            <option value="./build.sh -UCKApu -J 8">./build.sh -UCKApu -J 8</option>
-                            <option value="./build.sh -UACKu -J 8">./build.sh -UACKu -J 8</option>
-                            <option value="./build.sh -UCKApu">./build.sh -UCKApu</option>
-                            <option value="./build.sh -UACKu">./build.sh -UACKu</option>
-                        </select>
-                    </label>
                     <div class="split-actions">
-                        <button type="button" onclick="createBuildJob()">只编译</button>
+                        <button id="automation-build-only" type="button" onclick="createBuildJob()">只编译</button>
                         <button type="button" onclick="loadBuildJobs(); switchWorkflowPane('build')">查看构建日志</button>
                     </div>
                 </div>
             </section>
-            <section class="panel">
-                <div class="panel-header">设备与测试</div>
+            <section class="panel test-panel">
+                <div class="panel-header guided-header">
+                    <span class="step-index">3</span>
+                    <div>
+                        <div>设备与测试</div>
+                        <div class="panel-description">选择执行主机、设备和 GMS 测试范围</div>
+                    </div>
+                </div>
                 <div class="panel-body compact-stack">
                     <label>测试主机
                         <select id="automation-worker" onchange="syncAutomationWorkspaceSelection(); loadDevices(true); loadTestSuitesForAutomation()">

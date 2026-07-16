@@ -24,7 +24,7 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260601-01" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260714-autoswitch-module-log" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260715-system-log-actions" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -185,12 +185,70 @@
         .cluster-mode-toggle.active .mode-switch { background: var(--primary-color); }
         .cluster-mode-toggle.active .mode-switch::after { transform: translateX(18px); }
         .cluster-mode-toggle .mode-text { font-size: 11px; font-weight: 600; }
-        #sidebar-visibility-modal .modal-body { overflow: hidden; display: flex; flex-direction: column; }
-        .sidebar-visibility-list { display: grid; gap: 8px; min-height: 0; overflow-y: auto; padding-right: 4px; }
+        #sidebar-visibility-modal .modal-content { width: 96vw; max-width: 1500px; height: 92vh; max-height: 92vh; }
+        #sidebar-visibility-modal .modal-body { overflow: hidden; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+        .sidebar-settings-tabs { display: flex; gap: 6px; padding: 4px; border-radius: 8px; background: var(--darker-bg); flex-shrink: 0; }
+        .sidebar-settings-tab { flex: 1; padding: 9px 14px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary); font-weight: 600; cursor: pointer; }
+        .sidebar-settings-tab:hover { color: var(--text-primary); border-color: var(--border-color); }
+        .sidebar-settings-tab.active { color: white; background: var(--primary-color); }
+        .sidebar-settings-panel { min-height: 0; flex: 1; }
+        .sidebar-settings-panel[hidden] { display: none !important; }
+        #sidebar-settings-panel-visibility { display: flex; flex-direction: column; min-height: 0; }
+        .sidebar-visibility-list { display: grid; gap: 8px; min-height: 0; overflow-y: auto; padding-right: 4px; flex: 1; }
         .sidebar-visibility-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); cursor: pointer; }
         .sidebar-visibility-option input { margin: 0; }
         .sidebar-visibility-option .sidebar-icon { width: 22px; display: inline-flex; justify-content: center; }
         .sidebar-visibility-option .sidebar-text { flex: 1; }
+        .project-guide { overflow-y: auto; padding: 0 4px 4px 0; color: var(--text-primary); }
+        .project-guide-hero { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; border: 1px solid rgba(102,126,234,0.45); border-radius: 10px; background: linear-gradient(135deg, rgba(102,126,234,0.18), rgba(118,75,162,0.10)); }
+        .project-guide-hero h3 { margin: 0 0 5px; font-size: 18px; }
+        .project-guide-hero p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+        .project-guide-url { display: inline-flex; align-items: center; white-space: nowrap; padding: 8px 12px; border: 1px solid var(--primary-color); border-radius: 6px; color: var(--primary-color); text-decoration: none; font-family: monospace; font-size: 12px; }
+        .project-guide-url:hover { background: rgba(102,126,234,0.12); }
+        .project-guide-section { margin-top: 16px; }
+        .project-guide-section h4 { margin: 0 0 9px; font-size: 14px; }
+        .project-guide-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; counter-reset: guide-step; }
+        .project-guide-steps li { position: relative; min-height: 72px; padding: 10px 10px 10px 38px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); font-size: 11px; line-height: 1.55; color: var(--text-secondary); counter-increment: guide-step; }
+        .project-guide-steps li::before { content: counter(guide-step); position: absolute; top: 10px; left: 10px; width: 20px; height: 20px; border-radius: 50%; background: var(--primary-color); color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+        .project-guide-steps strong { display: block; color: var(--text-primary); font-size: 12px; margin-bottom: 2px; }
+        .project-guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .project-guide-card { padding: 12px 14px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); }
+        .project-guide-card h5 { margin: 0 0 7px; font-size: 13px; }
+        .project-guide-card p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.7; }
+        .project-guide-flow { color: var(--text-primary); font-weight: 600; }
+        .project-guide-map { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .project-guide-map th, .project-guide-map td { padding: 8px 10px; border: 1px solid var(--border-color); text-align: left; vertical-align: top; }
+        .project-guide-map th { width: 25%; color: var(--text-primary); background: var(--darker-bg); }
+        .project-guide-map td { color: var(--text-secondary); }
+        .project-guide-notice { margin-top: 10px; padding: 10px 12px; border-left: 3px solid #f59e0b; border-radius: 4px; background: rgba(245,158,11,0.10); color: var(--text-secondary); font-size: 11px; line-height: 1.65; }
+        .project-guide-gallery { display: grid; grid-template-columns: 1fr; gap: 12px; }
+        .project-guide-example { min-width: 0; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--darker-bg); display: flex; flex-direction: column; gap: 6px; }
+        .project-guide-example-header { order: 1; display: flex; align-items: baseline; gap: 8px; margin: 3px 2px 4px; min-width: 0; }
+        .project-guide-example h5 { margin: 0; font-size: 13px; flex-shrink: 0; }
+        .project-guide-example p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+        .project-guide-example .project-guide-image-button { order: 2; }        .project-guide-image-button { position: relative; width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--border-color); border-radius: 6px; background: #050508; cursor: zoom-in; }
+        .project-guide-image-button:hover { border-color: var(--primary-color); }
+        .project-guide-image-button img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; object-position: top center; }
+        .project-guide-zoom-hint { position: absolute; right: 7px; bottom: 7px; padding: 4px 7px; border-radius: 4px; color: #fff; background: rgba(0,0,0,0.78); font-size: 10px; pointer-events: none; }
+        #guide-image-modal { z-index: 10050; }
+        #guide-image-modal .modal-content { width: min(1580px, 97vw); max-width: 1580px; height: 94vh; max-height: 94vh; }
+        #guide-image-modal .modal-header { gap: 12px; }
+        .guide-image-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+        #guide-image-modal .modal-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; overflow: hidden; }
+        .guide-image-viewport { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-color); border-radius: 6px; background: #050508; }
+        .guide-image-viewport.actual-size { align-items: flex-start; justify-content: flex-start; }
+        #guide-image-preview { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; cursor: zoom-in; }
+        #guide-image-preview.actual-size { max-width: none; max-height: none; align-self: flex-start; cursor: zoom-out; }
+        #guide-image-caption { color: var(--text-secondary); font-size: 11px; line-height: 1.5; text-align: center; flex-shrink: 0; }
+        @media (max-width: 760px) {
+            #sidebar-visibility-modal .modal-content { width: calc(100vw - 20px); height: calc(100vh - 20px); max-height: none; }
+            .project-guide-hero { align-items: flex-start; flex-direction: column; }
+            .project-guide-url { white-space: normal; }
+            .project-guide-steps, .project-guide-grid, .project-guide-gallery { grid-template-columns: 1fr; }
+            .project-guide-example h5 { margin-top: 0; }
+            #guide-image-modal .modal-content { width: calc(100vw - 12px); height: calc(100vh - 12px); max-height: none; }
+            #guide-image-modal .modal-header { padding: 10px 12px; }
+        }
         #terminal { width: 100%; height: 100%; }
         .host-input-group { display: flex; gap: 8px; align-items: center; }
         .host-input { flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg); color: var(--text-primary); font-size: 15px; font-family: monospace; }
@@ -320,7 +378,7 @@
         <!-- 左侧导航栏 -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <div class="sidebar-brand" role="button" tabindex="0" title="导航显示设置" onclick="openSidebarVisibilityModal()" onkeydown="handleSidebarBrandKeydown(event)">GMS远程测试</div>
+                <div class="sidebar-brand" role="button" tabindex="0" title="导航设置 / 项目操作指导" onclick="openSidebarVisibilityModal()" onkeydown="handleSidebarBrandKeydown(event)">GMS远程测试</div>
             </div>
             <nav class="sidebar-nav" id="sidebar-nav">
                 <a href="#" class="sidebar-item" data-page="test" data-page-order="0" onclick="switchPage('test', event)">
@@ -446,23 +504,198 @@
         </aside>
 
         <div id="sidebar-visibility-modal" class="modal" style="display: none;">
-            <div class="modal-content" style="max-width: 520px; width: min(520px, 100%);">
+            <div class="modal-content">
                 <div class="modal-header">
-                    <span class="modal-title">导航显示设置</span>
+                    <span class="modal-title">导航设置与使用帮助</span>
                     <span class="modal-close" onclick="closeSidebarVisibilityModal()">&times;</span>
                 </div>
                 <div class="modal-body">
-                    <div id="cluster-mode-toggle-row" class="cluster-mode-toggle" style="margin: 0 0 12px;" onclick="toggleClusterMode()">
-                        <span id="cluster-mode-label" class="mode-label">单机模式</span>
-                        <span id="cluster-mode-btn" class="mode-switch"></span>
+                    <div class="sidebar-settings-tabs" role="tablist" aria-label="导航设置与项目帮助">
+                        <button type="button" class="sidebar-settings-tab active" data-sidebar-settings-tab="visibility" role="tab" aria-selected="true" aria-controls="sidebar-settings-panel-visibility" onclick="switchSidebarSettingsTab('visibility')">导航显示设置</button>
+                        <button type="button" class="sidebar-settings-tab" data-sidebar-settings-tab="guide" role="tab" aria-selected="false" aria-controls="sidebar-settings-panel-guide" onclick="switchSidebarSettingsTab('guide')">📘 项目操作指导</button>
                     </div>
-                    <div id="sidebar-visibility-list" class="sidebar-visibility-list"></div>
-                    <div class="modal-info-text" style="margin-top: 12px;">至少保留一个页面可见。</div>
-                    <div class="modal-buttons">
-                        <button type="button" class="btn-xxs" onclick="selectAllSidebarVisibility()">全选</button>
-                        <button type="button" class="btn-xxs" onclick="closeSidebarVisibilityModal()">取消</button>
-                        <button type="button" class="btn-xxs btn-primary" onclick="saveSidebarVisibilityFromModal()">保存</button>
+                    <section id="sidebar-settings-panel-visibility" class="sidebar-settings-panel" data-sidebar-settings-panel="visibility" role="tabpanel">
+                        <div id="cluster-mode-toggle-row" class="cluster-mode-toggle" style="margin: 0 0 12px;" onclick="toggleClusterMode()">
+                            <span id="cluster-mode-label" class="mode-label">单机模式</span>
+                            <span id="cluster-mode-btn" class="mode-switch"></span>
+                        </div>
+                        <div id="sidebar-visibility-list" class="sidebar-visibility-list"></div>
+                        <div class="modal-info-text" style="margin-top: 12px;">至少保留一个页面可见；左侧导航可拖拽调整顺序。</div>
+                        <div class="modal-buttons">
+                            <button type="button" class="btn-xxs" onclick="selectAllSidebarVisibility()">全选</button>
+                            <button type="button" class="btn-xxs" onclick="closeSidebarVisibilityModal()">取消</button>
+                            <button type="button" class="btn-xxs btn-primary" onclick="saveSidebarVisibilityFromModal()">保存</button>
+                        </div>
+                    </section>
+                    <section id="sidebar-settings-panel-guide" class="sidebar-settings-panel project-guide" data-sidebar-settings-panel="guide" role="tabpanel" hidden>
+                        <div class="project-guide-hero">
+                            <div>
+                                <h3>GMS Remote Test 快速操作指南</h3>
+                                <p>先确定测试主机和设备，再执行测试或固件烧写；运行过程分别在测试日志和系统日志中查看。</p>
+                            </div>
+                            <a id="project-guide-url" class="project-guide-url" href="/" target="_blank" rel="noopener noreferrer">当前访问地址 ↗</a>
+                        </div>
+
+                        <div class="project-guide-section">
+                            <h4>5 步快速开始测试</h4>
+                            <ol class="project-guide-steps">
+                                <li><strong>登录并选模式</strong>单机模式用当前主机；集群模式用于远端 Worker。</li>
+                                <li><strong>选择执行环境</strong>在“测试界面”先选 Worker、测试套件和可用设备。</li>
+                                <li><strong>设置测试范围</strong>按需选择测试模块、测试用例或retry报告等任务；留空则执行套件默认范围。</li>
+                                <li><strong>开始测试</strong>确认参数后点击“开始测试”，页面自动切到“测试日志”。</li>
+                                <li><strong>处理本次报告</strong>完成后进入“报告管理”，按 Worker、用户和时间戳确认报告，可分析、Retry、下载或查看 results/logs。</li>
+                            </ol>
+                        </div>
+
+                        <div class="project-guide-section">
+                            <h4>常用操作流程</h4>
+                            <div class="project-guide-grid">
+                                <article class="project-guide-card">
+                                    <h5>🤖 手动测试</h5>
+                                    <p><span class="project-guide-flow">测试类型 → 套件 → Worker → 可用设备 → 测试模块/测试用例 → 开始测试</span><br>设备显示“占用/锁定”时不可选择；结束后在报告页按 Worker、设备或套件筛选。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>📱 设备与烧写</h5>
+                                    <p><span class="project-guide-flow">选设备 → 设备信息 / 系统操作 / 烧写固件 / 烧写 GSI</span><br>设备操作开始后自动切到“系统日志”。烧写前必须复核设备和镜像路径，过程中不要断电或拔线。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>⚙️ GMS ATS 自动化</h5>
+                                    <p><span class="project-guide-flow">Profile → 构建参数 → Worker → 设备 → 套件 → 创建运行</span><br>启用构建时依次选择编译服务器、模板、源码目录；Lunch Target 只显示当前源码目录扫描结果。运行详情可追踪构建、烧写、测试和报告。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>🖥️ 远程主机与集群</h5>
+                                    <p><span class="project-guide-flow">主机集群 → 确认 Worker 在线 → 返回业务页选择 Worker</span><br>主机桌面、主机终端、设备与套件会跟随当前工作区 Worker；切换 Worker 后先确认目标设备再执行操作。</p>
+                                </article>
+                            </div>
+                        </div>
+
+                        <div class="project-guide-section">
+                            <h4>功能入口速查</h4>
+                            <table class="project-guide-map">
+                                <tbody>
+                                    <tr><th>测试界面</th><td>配置并执行 CTS / GTS / VTS / STS；查看系统日志与测试日志。</td><th>设备管理</th><td>查看设备状态、占用关系和远端设备操作入口。</td></tr>
+                                    <tr><th>主机桌面 / 终端</th><td>通过 noVNC 或终端操作当前 Worker 主机。</td><th>测试套件</th><td>下载、添加、解压并检查不同 Worker 上的套件。</td></tr>
+                                    <tr><th>报告管理 / 分析</th><td>检索、下载测试报告，并汇总失败项和趋势。</td><th>GMS ATS</th><td>编排构建、设备预留、烧写、测试与报告全流程。</td></tr>
+                                    <tr><th>主机集群</th><td>查看 Worker 在线状态、能力和任务分配。</td><th>其他工具</th><td>GMS 助手、Gerrit、Redmine、知识库和 Agent 用于查询与协作。</td></tr>
+                                </tbody>
+                            </table>
+                            <div class="project-guide-notice"><strong>日志规则：</strong>“开始测试”进入测试日志；烧写固件、烧写 GSI、设备信息和其他设备操作进入系统日志。烧写阶段不可强制停止，异常时先保留日志并联系管理员。</div>
+                        </div>
+
+                        <div class="project-guide-section">
+                            <h4>图片操作实例 <span style="font-weight: normal; color: var(--text-secondary); font-size: 10px;">点击图片可放大，放大后可切换 1:1 原图</span></h4>
+                            <div class="project-guide-gallery">
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="测试实例：类型、套件、模块与用例" data-guide-caption="先确认测试主机并选择测试类型，系统会自动匹配该 Worker 最新同类套件；确认套件后再填写模块和用例。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/test-parameters.png" alt="测试实例标注：测试类型自动匹配套件、测试模块、测试用例、重试报告和测试主机" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>① 测试实例</h5>
+                                        <p>标注测试类型自动匹配套件，以及测试模块、测试用例、Retry 报告和执行 Worker 的填写规则。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="设备投屏：在主机桌面查看" data-guide-caption="选择 Available 设备并点击“设备投屏”；成功后页面自动进入主机桌面，scrcpy 窗口显示在远程桌面中。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/device-screen.png" alt="设备投屏标注：选择设备、设备投屏按钮、主机桌面入口和系统日志" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>② 设备投屏</h5>
+                                        <p>选择设备后启动 scrcpy，并说明投屏画面入口和 VNC/scrcpy 日志排查位置。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="本地设备：USB/IP 接入" data-guide-caption="本地设备接入仅作用于 Controller：确认设备主机，检查 SSHD，再连接 USB/IP 并刷新设备，直到设备显示 Available。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/usbip-local-device.png" alt="本地设备 USB/IP 标注：设备主机、检查 SSHD、本地设备、刷新设备和 Available 状态" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>③ 本地设备 USB/IP</h5>
+                                        <p>依次确认设备主机、检查 SSHD、连接本地设备、刷新 ADB，并确认 Available。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="测试完成后：报告管理" data-guide-caption="测试完成后进入报告管理，先按 Worker、用户、类型、套件和时间戳确认本次报告，再选择分析、Retry、下载、删除、results 或 logs。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/report-management.png" alt="报告管理标注：报告筛选、分析、Retry、下载、删除、results 和 logs" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>④ 报告管理</h5>
+                                        <p>说明测试结束后的完整处理链路；删除不可恢复，results 与 logs 分别打开对应时间戳目录。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="报告分析：失败定位与复现" data-guide-caption="从报告管理点击“分析”自动加载报告；核对统计后查看失败用例，可回填单测或进入报错诊断。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/report-analysis.png" alt="报告分析标注：上传报告、统计、失败用例、单测用例、报错诊断和发送邮件" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑤ 报告分析</h5>
+                                        <p>从总体通过率定位到具体失败模块和用例，并继续单测复现、诊断或分享分析结果。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="APK 分析：Manifest、权限与源码" data-guide-caption="上传 APK/JAR 并等待分析完成；核对 Manifest 与权限后，使用搜索和源码浏览定位实现。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/apk-analysis.png" alt="APK 分析标注：上传、下载源码、Manifest、权限、源码浏览和文件搜索" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑥ APK 分析</h5>
+                                        <p>覆盖文件上传、反编译源码下载、Manifest/权限/源码视图切换和文件检索。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="测试套件：准备与结果目录" data-guide-caption="管理不同 Worker 上的测试套件；下载或添加套件后，可通过结果列表及 results/logs 目录核对运行产物。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/test-suites.png" alt="测试套件标注：Worker、下载解压、套件列表、测试结果、本地路径和 results logs" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑦ 测试套件</h5>
+                                        <p>明确 Worker、套件、测试任务必须一致，并说明结果列表以及 results/logs 目录关系。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="GMS ATS：创建自动化运行" data-guide-caption="按 Profile、源码目录、Lunch Target、Worker、设备和套件顺序确认参数，再创建运行并跟踪各阶段。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/ats-create-run.png" alt="GMS ATS 标注：Profile、源码目录、Lunch Target、Worker 设备和创建运行" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑧ GMS ATS</h5>
+                                        <p>重点标出源码目录与 Lunch Target 的绑定关系，以及运行创建后的监控入口。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="设备烧写：高风险操作检查" data-guide-caption="烧写前复核唯一目标设备和镜像路径；过程在系统日志中跟踪，不要断电、拔线或刷新页面。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/device-flashing.png" alt="设备烧写标注：目标设备、固件、GSI、系统日志和设备信息" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑨ 设备烧写</h5>
+                                        <p>高风险操作单独说明设备核对、固件/GSI 入口、设备信息和系统日志注意事项。</p>
+                                    </div>
+                                </article>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+
+        <div id="guide-image-modal" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="guide-image-title" onclick="closeGuideImageLightboxFromBackdrop(event)">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span id="guide-image-title" class="modal-title">图片操作实例</span>
+                    <div class="guide-image-actions">
+                        <button id="guide-image-zoom-btn" type="button" class="btn-xxs" onclick="toggleGuideImageZoom()">1:1 原图</button>
+                        <span class="modal-close" onclick="closeGuideImageLightbox()">&times;</span>
                     </div>
+                </div>
+                <div class="modal-body">
+                    <div id="guide-image-viewport" class="guide-image-viewport">
+                        <img id="guide-image-preview" alt="" onclick="toggleGuideImageZoom()">
+                    </div>
+                    <div id="guide-image-caption"></div>
                 </div>
             </div>
         </div>
@@ -567,7 +800,7 @@
                         </div>
                     </div>
                     <!-- ADB 控制按钮 -->
-                    <div class="adb-button-frame">
+                    <div class="adb-button-frame" data-operation-log-tab="system">
                         <button class="btn-xxs" onclick="refreshDevices()">🔄 刷新设备</button>
                         <button class="btn-xxs" onclick="selectAllDevices()">✅ 全选设备</button>
                         <button class="btn-xxs" onclick="rebootDevices()">⏻ 重启设备</button>
@@ -579,7 +812,7 @@
                         <button id="btn-device-info" class="btn-xxs" onclick="collectDeviceInfo()">📋 设备信息</button>
                     </div>
                     <!-- VNC 控制按钮 -->
-                    <div class="vnc-button-frame">
+                    <div class="vnc-button-frame" data-operation-log-tab="system">
                         <button id="btn-burn-firmware" class="btn-xxs" onclick="burnFirmware()">🔥 烧写固件</button>
                         <button id="btn-burn-gsi" class="btn-xxs" onclick="burnGsiImage()">🔥 烧写GSI</button>
                         <button class="btn-xxs" onclick="burnSerialNumber()" disabled>🔥 烧写SN</button>
@@ -594,7 +827,7 @@
                 <div class="control-frame">
                     <div class="section-title">操作控制</div>
                     <!-- VPN 控制按钮 -->
-                    <div class="vpn-btn-frame">
+                    <div class="vpn-btn-frame" data-operation-log-tab="system">
                         <button class="btn-xxs" onclick="copyDeployCommand()">📦 部署脚本</button>
                         <button class="btn-xxs" onclick="showTailscaleInfoModal()">🌐 Tailscale组网</button>
                         <button class="btn-xxs" id="check-sshd-btn" onclick="checkSshd()">📡 检查SSHD</button>
@@ -604,7 +837,7 @@
 
                     </div>
                     <!-- 文件上传区 -->
-                    <div class="upload-frame">
+                    <div class="upload-frame" data-operation-log-tab="system">
                         <div class="form-row">
                             <label>📁 本地文件:</label>
                             <div id="drop-zone" class="drop-zone">
@@ -946,7 +1179,6 @@
         <!-- 报告分析页面 -->
         <div class="container page-content" id="page-report-analysis">
             <div class="section-title">📈 报告分析</div>
-            <div id="report-workspace-badge" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
 
             <!-- 拖拽上传区域 -->
             <div style="margin-bottom: 10px;">
@@ -1087,7 +1319,6 @@
                 <img src="/static/icons/jadx-icon.webp" alt="" class="section-title-icon" aria-hidden="true">
                 <span>APK分析</span>
             </div>
-            <div id="apk-workspace-badge" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
 
             <!-- 上传区域 -->
             <div style="margin-bottom: 20px;">
@@ -1404,9 +1635,7 @@
                     <button class="btn-xs" onclick="cancelAgentSession()" style="padding: 2px 6px; font-size: 10px; min-height: 22px;">取消Agent</button>
                 </div>
             </div>
-            <div id="agent-workspace-context" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px;padding:7px 10px;border:1px solid var(--border-color);border-radius:7px;background:var(--darker-bg);font-size:11px;color:var(--text-secondary);">
-                <span>当前工作区：加载中…</span>
-            </div>
+
             <div style="display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 10px; height: calc(100vh - 80px);">
                 <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
                     <div id="agent-chat-messages" style="flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: rgba(0, 0, 0, 0.08);">
@@ -2595,7 +2824,10 @@
         let currentHost = null;
         let pendingHostConnection = null;
         const DEFAULT_VNC_HOST = {{ config.ubuntu_host | tojson }};
-        const DEFAULT_VNC_PASSWORD = {{ config.vnc_password | default("", true) | tojson }};
+        // Never serialize the configured VNC secret into the public shell.
+        // Local/controller noVNC is proxied on the same origin; additional
+        // password-protected hosts collect their password in the host dialog.
+        const DEFAULT_VNC_PASSWORD = '';
         const EXTERNAL_SERVICES = {{ config.get('external_services', {}) | tojson }};
         const OPENGROK_BASE_URL = {{ config.get('opengrok', {}).get('base_url', '') | tojson }};
         const NOVNC_WEB_PORT = 6080;
@@ -2611,7 +2843,6 @@
             if (!host) return;
             const workerId = host.worker_id || workspaceLocalWorkerId();
             window.GmsWorkspace?.update({
-                scope_mode: isLocalWorkspaceWorker(workerId) ? 'single' : 'cluster',
                 worker_id: workerId,
                 origin_page: originPage
             }, {source: `${originPage}-host`});
@@ -3653,6 +3884,10 @@
                     if (!d.worker_id) d.worker_id = localWorkerId;
                 });
                 const hostsData = hostsResp && hostsResp.ok ? await hostsResp.json() : {};
+                const hostDirectory = new Map((hostsData.hosts || []).map(host => [
+                    host.worker_id,
+                    host
+                ]));
                 const hostNames = new Map((hostsData.hosts || []).map(host => [
                     host.worker_id,
                     host.name || host.ssh_connection || host.worker_id
@@ -3661,25 +3896,33 @@
                     const clusterData = await clusterResp.json();
                     const remoteDevices = (clusterData.devices || [])
                         .filter(device => device.worker_id !== localWorkerId)
-                        .map(device => ({
-                            device_id: device.id,
-                            serial_no: device.serial,
-                            worker_id: device.worker_id,
-                            source_host: hostNames.get(device.worker_id) || device.worker_id,
-                            source_type: 'cluster',
-                            status: ['offline', 'unknown'].includes(device.state) ? 'offline' : 'online',
-                            cluster_state: device.state || 'unknown',
-                            model: device.properties && (device.properties.model || device.properties.product),
-                            android_version: device.properties && device.properties.android_version,
-                            battery_level: device.properties && device.properties.battery_level,
-                            soc_model: device.properties && device.properties.soc_model,
-                            locked_by: ({
-                                allocated: 'Cluster 租约',
-                                reserved: 'ATS 预留',
-                                external_busy: '外部 Tradefed'
-                            })[device.state] || '',
-                            cluster_readonly: true
-                        }));
+                        .map(device => {
+                            const host = hostDirectory.get(device.worker_id) || {};
+                            const capabilities = host.capabilities || {};
+                            return {
+                                device_id: device.id,
+                                serial_no: device.serial,
+                                worker_id: device.worker_id,
+                                source_host: hostNames.get(device.worker_id) || device.worker_id,
+                                source_type: 'cluster',
+                                status: ['offline', 'unknown'].includes(device.state) ? 'offline' : 'online',
+                                cluster_state: device.state || 'unknown',
+                                cluster_shell_available: Boolean(
+                                    host.status !== 'offline' && host.address && host.ssh_user
+                                ),
+                                cluster_device_inspection: Boolean(capabilities.device_inspection),
+                                model: device.properties && (device.properties.model || device.properties.product),
+                                android_version: device.properties && device.properties.android_version,
+                                battery_level: device.properties && device.properties.battery_level,
+                                soc_model: device.properties && device.properties.soc_model,
+                                locked_by: ({
+                                    allocated: 'Cluster 租约',
+                                    reserved: 'ATS 预留',
+                                    external_busy: '外部 Tradefed'
+                                })[device.state] || '',
+                                cluster_readonly: true
+                            };
+                        });
                     allDevices = allDevices.concat(remoteDevices);
                 }
 
@@ -3832,18 +4075,29 @@
                 const clusterFullIdAttr = escapeIconAttr(`${device.worker_id || ''}:${serialNo}`);
                 const clusterInspectable = !['offline', 'unknown', 'unauthorized', 'fastboot'].includes(device.cluster_state);
                 const clusterMutable = device.cluster_state === 'available';
-                const mutationDisabled = isClusterRemote && !clusterMutable ? ' disabled' : '';
-                const inspectionDisabled = isClusterRemote && !clusterInspectable ? ' disabled' : '';
-                const mutationStyle = mutationDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
-                const inspectionStyle = inspectionDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
+                const shellDisabled = isClusterRemote && !(clusterMutable && device.cluster_shell_available)
+                    ? ' disabled' : '';
+                const remoteInspectionDisabled = isClusterRemote
+                    && !(clusterInspectable && device.cluster_device_inspection) ? ' disabled' : '';
+                const remoteControlDisabled = isClusterRemote
+                    && !(clusterMutable && device.cluster_device_inspection) ? ' disabled' : '';
+                const shellStyle = shellDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
+                const remoteInspectionStyle = remoteInspectionDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
+                const remoteControlStyle = remoteControlDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
+                const inspectionTitle = device.cluster_device_inspection
+                    ? '查看远程设备信息：packages / features / props'
+                    : 'Worker Agent 版本过旧或未上报 device_inspection 能力';
+                const controlTitle = device.cluster_device_inspection
+                    ? '仅可操控当前可用的集群设备'
+                    : 'Worker Agent 版本过旧或未上报 device_inspection 能力';
                 const shellButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceShell(this.dataset.serial,this.dataset.worker)" title="仅可对可用设备打开远程 adb shell" style="background: var(--primary-color); ${actionButtonStyle}${mutationStyle}"${mutationDisabled}>🐧 adb shell</button>`
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceShell(this.dataset.serial,this.dataset.worker)" title="仅可对具备 SSH 元数据的可用 Worker 设备打开 adb shell" style="background: var(--primary-color); ${actionButtonStyle}${shellStyle}"${shellDisabled}>🐧 adb shell</button>`
                     : `<button class="btn-xxs" data-serial="${serialAttr}" onclick="openDeviceShell(this.dataset.serial)" style="background: var(--primary-color); ${actionButtonStyle}">🐧 adb shell</button>`;
                 const deviceInfoButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceInfo(this.dataset.serial,this.dataset.worker)" title="查看远程设备信息：packages / features / props" style="background: var(--success-color); color: white; ${actionButtonStyle}${inspectionStyle}"${inspectionDisabled}>ℹ️ device info</button>`
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceInfo(this.dataset.serial,this.dataset.worker)" title="${inspectionTitle}" style="background: var(--success-color); color: white; ${actionButtonStyle}${remoteInspectionStyle}"${remoteInspectionDisabled}>ℹ️ device info</button>`
                     : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" onclick="openDeviceConfigExplorer(this.dataset.serial)" title="查看设备信息：configs 配置资源 / packages 已装包 / features 特性" style="background: var(--success-color); color: white; ${actionButtonStyle}">ℹ️ device info</button>`;
                 const uiControlButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceUiControl(this.dataset.serial,this.dataset.worker)" title="仅可操控当前可用的集群设备" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}${mutationStyle}"${mutationDisabled}>🎯 UI 操控</button>`
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceUiControl(this.dataset.serial,this.dataset.worker)" title="${controlTitle}" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}${remoteControlStyle}"${remoteControlDisabled}>🎯 UI 操控</button>`
                     : `<button class="btn-xxs" data-serial="${serialAttr}" onclick="openUiControl(this.dataset.serial)" title="智能 UI 操控：截图 + 布局元素 + 点按" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}">🎯 UI 操控</button>`;
 
                 return `
@@ -4237,9 +4491,11 @@
                 let targetHost = isLocalWorkspaceWorker(workerId)
                     ? desktopHosts.find(h => h.id === 'default')
                     : desktopHosts.find(h => h.worker_id === workerId);
+                if (!isLocalWorkspaceWorker(workerId) && (!targetHost || targetHost.offline)) {
+                    throw new Error(`Worker ${workerId} 缺少可用的 SSH 主机信息`);
+                }
                 if (targetHost) {
                     window.GmsWorkspace?.update({
-                        scope_mode: isLocalWorkspaceWorker(workerId) ? 'single' : 'cluster',
                         worker_id: workerId,
                         origin_page: 'terminal'
                     }, {source: 'device-shell'});
@@ -4295,7 +4551,7 @@
         async function openClusterDeviceShell(fullSerial, workerId) {
             // Delegate to the existing openDeviceShell which already handles
             // worker_id:serial format and terminal host switching.
-            openDeviceShell(fullSerial);
+            await openDeviceShell(fullSerial);
         }
         window.openClusterDeviceShell = openClusterDeviceShell;
 
@@ -4335,21 +4591,32 @@
                 showToast('远程设备操控需要有效的 Worker 信息', 'error');
                 return;
             }
+            try {
+                const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
+                const payload = await response.json();
+                const worker = (payload.workers || []).find(item => item.id === workerId);
+                if (!response.ok || !worker?.capabilities?.device_inspection) {
+                    showToast(`${workerId} 的 Worker Agent 版本过旧，请在主机集群页重新部署后再使用 UI 操控`, 'warning');
+                    return;
+                }
+            } catch (error) {
+                showToast(`无法确认 ${workerId} 的 UI 操控能力: ${error.message}`, 'error');
+                return;
+            }
             const fullSerial = serial.startsWith(`${workerId}:`)
                 ? serial
                 : `${workerId}:${serial}`;
-            // Navigate to the test page with the cluster worker selected, then open UI control
-            window.GmsWorkspace?.navigate('test', {
+            // Device UI control is an overlay. Keep remote devices on the same
+            // Device Management page, matching the established local-device flow.
+            window.GmsWorkspace?.update({
                 scope_mode: 'cluster',
                 worker_id: workerId,
                 device_ids: [fullSerial],
                 origin_page: 'devices'
-            });
-            setTimeout(() => {
-                state.selectedDevices.clear();
-                state.selectedDevices.add(fullSerial);
-                openUiControl(fullSerial);
-            }, 400);
+            }, {source: 'device-ui-control'});
+            state.selectedDevices.clear();
+            state.selectedDevices.add(fullSerial);
+            await openUiControl(fullSerial);
         }
         window.openClusterDeviceUiControl = openClusterDeviceUiControl;
 
@@ -4506,7 +4773,6 @@
             document.getElementById('device-config-serial').textContent =
                 isLocalWorkspaceWorker(dcfgWorkerId) ? dcfgDeviceSerial : `${dcfgWorkerId} · ${dcfgDeviceSerial}`;
             window.GmsWorkspace?.update({
-                scope_mode: isLocalWorkspaceWorker(dcfgWorkerId) ? 'single' : 'cluster',
                 worker_id: dcfgWorkerId,
                 device_ids: [dcfgStorageDeviceId()],
                 origin_page: 'devices'
@@ -5424,10 +5690,82 @@
             }
         }
 
+        function switchSidebarSettingsTab(tabName) {
+            const target = tabName === 'guide' ? 'guide' : 'visibility';
+            document.querySelectorAll('[data-sidebar-settings-tab]').forEach(button => {
+                const active = button.dataset.sidebarSettingsTab === target;
+                button.classList.toggle('active', active);
+                button.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+            document.querySelectorAll('[data-sidebar-settings-panel]').forEach(panel => {
+                panel.hidden = panel.dataset.sidebarSettingsPanel !== target;
+            });
+        }
+
+        function setGuideImageZoom(actualSize) {
+            const image = document.getElementById('guide-image-preview');
+            const button = document.getElementById('guide-image-zoom-btn');
+            const viewport = document.getElementById('guide-image-viewport');
+            if (!image || !button || !viewport) return;
+            image.classList.toggle('actual-size', actualSize);
+            viewport.classList.toggle('actual-size', actualSize);
+            button.textContent = actualSize ? '适合窗口' : '1:1 原图';
+            viewport.scrollTop = 0;
+            viewport.scrollLeft = 0;
+        }
+
+        function openGuideImageLightbox(trigger) {
+            const sourceImage = trigger?.querySelector('img');
+            if (!sourceImage) return;
+            const preview = document.getElementById('guide-image-preview');
+            const title = document.getElementById('guide-image-title');
+            const caption = document.getElementById('guide-image-caption');
+            if (!preview || !title || !caption) return;
+            preview.src = sourceImage.currentSrc || sourceImage.src;
+            preview.alt = sourceImage.alt || '';
+            title.textContent = trigger.dataset.guideTitle || sourceImage.alt || '图片操作实例';
+            caption.textContent = trigger.dataset.guideCaption || '';
+            setGuideImageZoom(false);
+            if (typeof ModalManager !== 'undefined') {
+                ModalManager.open('guide-image-modal');
+            } else {
+                const modal = document.getElementById('guide-image-modal');
+                modal.style.display = 'flex';
+                modal.classList.add('show');
+            }
+        }
+
+        function toggleGuideImageZoom() {
+            const image = document.getElementById('guide-image-preview');
+            if (!image) return;
+            setGuideImageZoom(!image.classList.contains('actual-size'));
+        }
+
+        function closeGuideImageLightbox() {
+            if (typeof ModalManager !== 'undefined') {
+                ModalManager.close('guide-image-modal');
+            } else {
+                const modal = document.getElementById('guide-image-modal');
+                modal.classList.remove('show');
+                modal.style.display = 'none';
+            }
+        }
+
+        function closeGuideImageLightboxFromBackdrop(event) {
+            if (event.target?.id === 'guide-image-modal') closeGuideImageLightbox();
+        }
+
         function openSidebarVisibilityModal() {
             const modal = document.getElementById('sidebar-visibility-modal');
             const list = document.getElementById('sidebar-visibility-list');
             if (!modal || !list) return;
+
+            const guideUrl = document.getElementById('project-guide-url');
+            if (guideUrl) {
+                const currentOrigin = `${window.location.origin}/`;
+                guideUrl.href = currentOrigin;
+                guideUrl.textContent = `${currentOrigin} ↗`;
+            }
 
             const visibleSet = new Set(getCurrentVisibleSidebarPages());
             list.innerHTML = getSidebarItems().map(item => {
@@ -5440,6 +5778,8 @@
                     <span class="sidebar-text">${text}</span>
                 </label>`;
             }).join('');
+
+            switchSidebarSettingsTab('visibility');
 
             if (typeof ModalManager !== 'undefined') {
                 ModalManager.open('sidebar-visibility-modal');
@@ -5579,7 +5919,7 @@
         function runPageInitializers(pageName) {
             // Keep switchPage() and F5 restoration on the same page-specific path.
             if (pageName === 'test') {
-                if (typeof loadClusterWorkers === 'function' && window.GmsWorkspace?.get?.().scope_mode === 'cluster') {
+                if (typeof loadClusterWorkers === 'function') {
                     loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
                 }
                 if (typeof loadDevices === 'function') loadDevices(false).catch(() => {});
@@ -5734,36 +6074,7 @@
         // 将 switchPage 导出到全局作用域，供外部脚本调用
         window.switchPage = switchPage;
 
-        // ==================== 公共 Workspace 徽标 ====================
-        /**
-         * 将当前 workspace context 渲染为 pill 徽标条，插入到目标容器。
-         * 供报告分析、APK 分析等页面复用，保持与 Agent 页一致的视觉风格。
-         */
-        function renderWorkspaceBadge(containerId, contextOverride) {
-            const el = document.getElementById(containerId);
-            if (!el) return;
-            const context = contextOverride || window.GmsWorkspace?.get?.() || {};
-            const showSuite = containerId !== 'apk-workspace-badge';
-            const fields = [
-                ['模式', context.scope_mode === 'cluster' ? '集群' : '单机'],
-                ['Worker', context.worker_id || workspaceLocalWorkerId()],
-                ['套件', showSuite ? (context.suite_key || context.suite_path || '') : ''],
-                ['任务', context.cluster_job_id || ''],
-                ['报告', context.report_timestamp || context.report_id || ''],
-                ['Gerrit', context.gerrit_change_id ? `#${context.gerrit_change_id}${context.gerrit_patchset ? `/${context.gerrit_patchset}` : ''}` : ''],
-                ['Redmine', context.redmine_issue_id ? `#${context.redmine_issue_id}` : '']
-            ].filter(([, value], index) => index < 2 || value);
-            if (fields.length <= 2 && !context.cluster_job_id && !context.report_timestamp) {
-                el.innerHTML = '';
-                el.style.display = 'none';
-                return;
-            }
-            el.style.display = 'flex';
-            el.innerHTML = fields.map(([key, value]) =>
-                `<span style="padding:2px 6px;border:1px solid var(--border-color);border-radius:999px;font-size:11px;"><b style="color:var(--text-primary);">${escapeHtml(key)}</b> ${escapeHtml(value || '-')}</span>`
-            ).join('');
-        }
-        window.renderWorkspaceBadge = renderWorkspaceBadge;
+
 
         // ==================== 个人知识库 ====================
         const kbState = {
@@ -9111,7 +9422,6 @@
             terminalConfig.ssh_user = host.ssh_user;
             localStorage.setItem('gms_terminal_worker', host.worker_id);
             window.GmsWorkspace?.update({
-                scope_mode: isLocalWorkspaceWorker(host.worker_id) ? 'single' : 'cluster',
                 worker_id: host.worker_id,
                 origin_page: 'terminal'
             }, {source: 'terminal-host'});

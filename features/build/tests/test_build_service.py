@@ -97,6 +97,50 @@ post noise rk3588-userdebug
     ]
 
 
+def test_discover_lunch_options_prefers_rkbuild_menu(tmp_path: Path):
+    config_path = tmp_path / "build_servers.json"
+    config_path.write_text(
+        json.dumps({
+            "servers": [{
+                "id": "local",
+                "backend": "local",
+                "workspace_root": str(tmp_path),
+            }],
+            "templates": [],
+        }),
+        encoding="utf-8",
+    )
+    service = BuildService(
+        store=BuildStore(tmp_path / "build.sqlite3"),
+        config_path=config_path,
+    )
+
+    class RkbuildBackend:
+        calls = 0
+
+        def _run(self, _server, command, timeout=30):
+            self.calls += 1
+            assert "rkbuild_lunch" in command
+            assert timeout == 45
+            return 0, """__GMS_LUNCH_BEGIN__
+Lunch menu... pick a combo:
+  1. rk3576_u-userdebug
+  2. rk3576_u-user
+Which would you like? [Default 1]
+TARGET_PRODUCT=rk3576_u
+__GMS_LUNCH_END__
+""", ""
+
+    backend = RkbuildBackend()
+    service.backends["local"] = backend
+
+    assert service.discover_lunch_options("local", str(tmp_path)) == [
+        "rk3576_u-userdebug",
+        "rk3576_u-user",
+    ]
+    assert backend.calls == 1
+
+
 def test_delete_build_history_only_allows_terminal_jobs(tmp_path: Path):
     store = BuildStore(tmp_path / "build.sqlite3")
     config_path = tmp_path / "build_servers.json"

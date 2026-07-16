@@ -114,6 +114,12 @@ class FrontendIntegrityTests(unittest.TestCase):
             r'<label>测试主机:</label>\s*<select id="cluster-worker"',
         )
 
+    def test_public_shell_never_embeds_configured_vnc_password(self):
+        main_text = read_text("web/shell/shell.html")
+
+        self.assertNotIn("config.vnc_password", main_text)
+        self.assertIn("const DEFAULT_VNC_PASSWORD = '';", main_text)
+
     def test_desktop_async_mount_cannot_replace_another_worker(self):
         main_text = read_text("web/shell/shell.html")
 

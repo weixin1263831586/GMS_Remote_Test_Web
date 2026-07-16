@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def configured_max_bytes(env_name: str, configured: int) -> int:
+    """Resolve a positive capacity limit from product config, then env."""
+    return max(1, int(os.getenv(env_name, str(configured))))
+
+
 @dataclass(frozen=True)
 class ClusterConfig:
     enabled: bool = False
@@ -16,6 +21,10 @@ class ClusterConfig:
     worker_offline_seconds: int = 45
     lease_ttl_seconds: int = 90
     worker_registration_timeout_seconds: int = 45
+    artifact_max_bytes: int = 20 * 1024**3
+    firmware_max_bytes: int = 20 * 1024**3
+    transfer_max_bytes: int = 20 * 1024**3
+    log_analysis_max_bytes: int = 5 * 1024**3
 
     @classmethod
     def load(cls) -> ClusterConfig:
@@ -37,5 +46,17 @@ class ClusterConfig:
             lease_ttl_seconds=max(30, int(raw.get("lease_ttl_seconds", 90))),
             worker_registration_timeout_seconds=max(
                 15, int(raw.get("worker_registration_timeout_seconds", 45))
+            ),
+            artifact_max_bytes=max(
+                1, int(raw.get("artifact_max_bytes", 20 * 1024**3))
+            ),
+            firmware_max_bytes=max(
+                1, int(raw.get("firmware_max_bytes", 20 * 1024**3))
+            ),
+            transfer_max_bytes=max(
+                1, int(raw.get("transfer_max_bytes", 20 * 1024**3))
+            ),
+            log_analysis_max_bytes=max(
+                1, int(raw.get("log_analysis_max_bytes", 5 * 1024**3))
             ),
         )

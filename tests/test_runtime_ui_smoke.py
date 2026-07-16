@@ -243,6 +243,30 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_test_workspace_operation_switches_to_system_log(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof switchLogTab === 'function'")
+            page.evaluate("switchLogTab('module')")
+            expect(page.locator('.log-tab-btn[data-log-tab="module"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+
+            page.evaluate("document.querySelector('#btn-device-info').click()")
+
+            expect(page.locator('.log-tab-btn[data-log-tab="system"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            expect(page.locator('.log-tab-btn[data-log-tab="module"]')).not_to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
     def test_saved_users_page_restores_auto_refresh_on_load(self):
         page = self.new_page()
         page_errors = []
@@ -456,6 +480,128 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_remote_device_controls_follow_worker_capabilities(self):
+        page = self.new_page()
+        worker_ready = {"value": False}
+
+        def json_response(route, payload):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(payload),
+            )
+
+        page.route(
+            "**/api/devices/management",
+            lambda route: json_response(route, {"success": True, "devices": []}),
+        )
+        page.route(
+            "**/api/cluster/status",
+            lambda route: json_response(
+                route,
+                {
+                    "success": True,
+                    "enabled": True,
+                    "local_worker_id": "worker-local",
+                },
+            ),
+        )
+        page.route(
+            "**/api/cluster/devices",
+            lambda route: json_response(
+                route,
+                {
+                    "success": True,
+                    "devices": [
+                        {
+                            "id": "worker-1:REMOTE-1",
+                            "serial": "REMOTE-1",
+                            "worker_id": "worker-1",
+                            "state": "available",
+                            "properties": {},
+                        }
+                    ],
+                },
+            ),
+        )
+
+        def cluster_hosts(route):
+            ready = worker_ready["value"]
+            json_response(
+                route,
+                {
+                    "success": True,
+                    "hosts": [
+                        {
+                            "worker_id": "worker-1",
+                            "name": "Worker 1",
+                            "status": "online",
+                            "address": "192.0.2.10" if ready else "",
+                            "ssh_user": "tester" if ready else "",
+                            "capabilities": {"device_inspection": ready},
+                        }
+                    ],
+                },
+            )
+
+        page.route("**/api/cluster/hosts", cluster_hosts)
+        page.route(
+            "**/api/cluster/workers",
+            lambda route: json_response(
+                route,
+                {
+                    "success": True,
+                    "workers": [
+                        {
+                            "id": "worker-1",
+                            "status": "online",
+                            "capabilities": {
+                                "device_inspection": worker_ready["value"]
+                            },
+                        }
+                    ],
+                },
+            ),
+        )
+
+        def cluster_device_action(route):
+            body = route.request.post_data_json
+            if body.get("action") == "screenshot":
+                payload = {"success": True, "image": "data:image/png;base64,iVBORw0KGgo="}
+            else:
+                payload = {"success": True, "elements": [], "source": "android_cli"}
+            json_response(route, payload)
+
+        page.route("**/api/cluster/devices/actions", cluster_device_action)
+        page.route(
+            "**/api/device-groups",
+            lambda route: json_response(
+                route, {"success": True, "data": {"groups": []}}
+            ),
+        )
+
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('devices')")
+            page.evaluate("loadDevicesManagement()")
+            row = page.locator('#devices-table-body tr').filter(has_text="REMOTE-1")
+            expect(row).to_have_count(1)
+            expect(row.locator("button", has_text="adb shell")).to_be_disabled()
+            expect(row.locator("button", has_text="device info")).to_be_disabled()
+            expect(row.locator("button", has_text="UI 操控")).to_be_disabled()
+
+            worker_ready["value"] = True
+            page.evaluate("loadDevicesManagement()")
+            row = page.locator('#devices-table-body tr').filter(has_text="REMOTE-1")
+            expect(row.locator("button", has_text="adb shell")).to_be_enabled()
+            expect(row.locator("button", has_text="device info")).to_be_enabled()
+            expect(row.locator("button", has_text="UI 操控")).to_be_enabled()
+            row.locator("button", has_text="UI 操控").click()
+            expect(page.locator("#page-devices")).to_be_visible()
+            expect(page.locator("#ui-control-modal")).to_have_class(re.compile(r"\bshow\b"))
+        finally:
+            page.close()
+
     def test_firmware_and_apk_actions_send_expected_requests(self):
         page = self.new_page()
         requests = []
@@ -522,6 +668,47 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(modal).to_have_class(re.compile(r"show"))
             page.keyboard.press("Escape")
             expect(modal).not_to_have_class(re.compile(r"show"))
+        finally:
+            page.close()
+
+    def test_sidebar_settings_project_guide_is_accessible(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.locator(".sidebar-brand").click()
+            page.locator('[data-sidebar-settings-tab="guide"]').click()
+
+            guide = page.locator("#sidebar-settings-panel-guide")
+            expect(guide).to_be_visible()
+            expect(guide).to_contain_text("5 步快速开始测试")
+            expect(page.locator("#project-guide-url")).to_have_attribute(
+                "href", f"{self.base_url}/"
+            )
+            expect(page.locator("#project-guide-url")).to_contain_text(
+                f"{self.base_url}/"
+            )
+            guide_images = page.locator("#sidebar-settings-panel-guide .project-guide-image-button img")
+            expect(guide_images).to_have_count(9)
+            for image_index in range(guide_images.count()):
+                guide_images.nth(image_index).scroll_into_view_if_needed()
+                expect(guide_images.nth(image_index)).to_have_js_property("naturalWidth", 1600)
+
+            page.locator(".project-guide-image-button").first.click()
+            image_modal = page.locator("#guide-image-modal")
+            expect(image_modal).to_have_class(re.compile(r"\bshow\b"))
+            expect(page.locator("#guide-image-title")).to_have_text("测试实例：类型、套件、模块与用例")
+            page.locator("#guide-image-zoom-btn").click()
+            expect(page.locator("#guide-image-preview")).to_have_class(re.compile(r"\bactual-size\b"))
+            page.keyboard.press("Escape")
+            expect(image_modal).not_to_have_class(re.compile(r"\bshow\b"))
+            expect(guide).to_be_visible()
+
+            page.locator('[data-sidebar-settings-tab="visibility"]').click()
+            expect(page.locator("#sidebar-settings-panel-visibility")).to_be_visible()
+            expect(guide).to_be_hidden()
+            self.assert_no_page_errors(page_errors)
         finally:
             page.close()
 
@@ -707,6 +894,119 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
             page.evaluate("document.querySelector('button[data-status=\"queued\"]').click()")
             expect(page.locator('button[data-status="queued"]')).to_have_class(re.compile(r"active"))
+        finally:
+            page.close()
+
+    def test_automation_lunch_targets_follow_selected_workspace(self):
+        page = self.new_page()
+
+        def fulfill_automation(route):
+            path = route.request.url.split("?", 1)[0]
+            if path.endswith("/api/automation/dashboard"):
+                data = {"run_total": 0, "run_by_status": {}, "run_by_profile": {}}
+            elif path.endswith("/api/automation/profiles"):
+                data = {"items": [{
+                    "id": "manual",
+                    "name": "Manual",
+                    "build": {},
+                    "test_plan": {},
+                }]}
+            elif path.endswith("/api/automation/runs"):
+                data = {"items": []}
+            elif path.endswith("/api/automation/worker/status"):
+                data = {"running": False, "interval_seconds": 5, "last_tick_seconds_ago": None}
+            else:
+                data = {"items": []}
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": data}),
+            )
+
+        def fulfill_build(route):
+            path = route.request.url.split("?", 1)[0]
+            if path.endswith("/api/build/servers"):
+                data = {"items": [{
+                    "id": "mock-build",
+                    "name": "Mock Build",
+                    "workspace_root": "/src",
+                }]}
+            elif path.endswith("/api/build/templates"):
+                data = {"items": [{"id": "mock-template", "name": "Mock Template"}]}
+            elif path.endswith("/api/build/discover/workspaces"):
+                data = {"items": ["6_Android16_0623", "other_Android16"]}
+            elif path.endswith("/api/build/discover/lunch-options"):
+                request = json.loads(route.request.post_data or "{}")
+                workspace = request.get("workspace", "")
+                data = {"items": (
+                    ["rk3576_u-userdebug", "rk3576_u-user"]
+                    if workspace.endswith("6_Android16_0623")
+                    else ["rk3566_rgo-userdebug"]
+                )}
+            elif path.endswith("/api/build/jobs"):
+                data = {"items": []}
+            else:
+                data = {}
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": data}),
+            )
+
+        page.route("**/api/automation/**", fulfill_automation)
+        page.route("**/api/build/**", fulfill_build)
+        page.route(
+            "**/api/cluster/**",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"enabled":false,"local_worker_id":"worker-local","workers":[]}',
+            ),
+        )
+        page.route(
+            "**/api/test/suites",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"suites":[]}',
+            ),
+        )
+        page.route(
+            "**/api/devices/list*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body="[]",
+            ),
+        )
+        try:
+            page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
+            page.wait_for_function("document.body.dataset.automationReady === 'true'")
+            page.evaluate("document.querySelector('button[data-workflow=\"create\"]').click()")
+            expect(page.locator("#automation-profile")).to_have_value("manual")
+            expect(page.locator("#build-server")).to_have_value("mock-build")
+            page.check("#automation-enable-build", force=True)
+            page.wait_for_function("!document.querySelector('#build-workspace-refresh').disabled")
+            page.evaluate("document.querySelector('#build-workspace-refresh').click()")
+            page.fill("#build-password-input", "test-password")
+            page.evaluate("document.querySelector('#build-password-ok').click()")
+
+            expect(page.locator("#build-lunch-status")).to_have_class(re.compile(r"\bready\b"))
+            self.assertEqual(
+                page.locator("#build-lunch-target option").all_text_contents(),
+                ["rk3576_u-userdebug", "rk3576_u-user"],
+            )
+            expect(page.locator("#build-lunch-status")).to_contain_text("/src/6_Android16_0623")
+
+            page.select_option("#build-workspace", "/src/other_Android16")
+            page.wait_for_function(
+                "document.querySelector('#build-lunch-target').value === 'rk3566_rgo-userdebug'"
+            )
+            self.assertEqual(
+                page.locator("#build-lunch-target option").all_text_contents(),
+                ["rk3566_rgo-userdebug"],
+            )
+            expect(page.locator("#build-lunch-status")).to_contain_text("/src/other_Android16")
         finally:
             page.close()
 

@@ -16,6 +16,7 @@ from features.auth import get_authenticated_user
 from features.users import owner_id_from_request
 
 from .api import _authenticate, _require_cluster_enabled, service
+from .config import configured_max_bytes
 from .models import ArtifactUploadComplete, ArtifactUploadInit, ClusterJobCreate, JobEventBatch
 from .repository import utc_now
 
@@ -273,7 +274,9 @@ def init_artifact_upload(
     _authenticate(worker_id, authorization)
     _artifact_job(job_id, body.attempt_id, worker_id)
     safe_name = _safe_artifact_name(body.filename)
-    max_bytes = int(os.getenv("GMS_CLUSTER_ARTIFACT_MAX_BYTES", str(20 * 1024**3)))
+    max_bytes = configured_max_bytes(
+        "GMS_CLUSTER_ARTIFACT_MAX_BYTES", service().config.artifact_max_bytes
+    )
     if body.size_bytes > max_bytes:
         raise HTTPException(413, "artifact is too large")
     expected_count = max(1, (body.size_bytes + body.chunk_size - 1) // body.chunk_size)
@@ -453,8 +456,8 @@ async def upload_artifact(
     safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(filename).name)
     if not safe_name:
         raise HTTPException(400, "invalid filename")
-    max_bytes = int(
-        os.getenv("GMS_CLUSTER_ARTIFACT_MAX_BYTES", str(20 * 1024**3))
+    max_bytes = configured_max_bytes(
+        "GMS_CLUSTER_ARTIFACT_MAX_BYTES", service().config.artifact_max_bytes
     )
     destination_dir = _artifact_root() / job_id / attempt_id
     destination_dir.mkdir(parents=True, exist_ok=True)
